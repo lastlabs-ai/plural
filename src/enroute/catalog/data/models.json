@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-17T22:29:22Z",
+  "updated_at": "2026-08-24T13:43:51Z",
   "models": [
     {
       "id": "anthropic/claude-fable-5",
@@ -373,6 +373,10 @@
       "id": "deepseek/deepseek-v4-flash",
       "name": "DeepSeek: V4 Flash",
       "context_length": 1000000,
+      "pricing": {
+        "prompt": "0.00000021",
+        "completion": "0.00000056"
+      },
       "architecture": {
         "modality": "text->text",
         "input_modalities": [
@@ -533,8 +537,8 @@
       "name": "Google: Gemini 3.7 Flash",
       "context_length": 1048576,
       "pricing": {
-        "prompt": "0.00000075",
-        "completion": "0.00000375"
+        "prompt": "0.0000015",
+        "completion": "0.0000075"
       },
       "architecture": {
         "modality": "text+image->text",
@@ -559,8 +563,8 @@
           "region": "us",
           "upstream_id": "gemini-3.7-flash",
           "pricing": {
-            "prompt": "0.00000075",
-            "completion": "0.00000375"
+            "prompt": "0.0000015",
+            "completion": "0.0000075"
           }
         },
         {
@@ -568,8 +572,8 @@
           "region": "global",
           "upstream_id": "gemini-3.7-flash-20260813",
           "pricing": {
-            "prompt": "0.00000075",
-            "completion": "0.00000375"
+            "prompt": "0.0000015",
+            "completion": "0.0000075"
           }
         }
       ]
@@ -880,13 +884,13 @@
       "name": "OpenAI: GPT-5.6",
       "context_length": 1050000,
       "pricing": {
-        "prompt": "0.000005",
-        "completion": "0.00003",
+        "prompt": "0.000004",
+        "completion": "0.00002",
         "tiers": [
           {
             "min_prompt_tokens": 272000,
-            "prompt": "0.00001",
-            "completion": "0.000045"
+            "prompt": "0.000008",
+            "completion": "0.00003"
           }
         ]
       },
@@ -916,13 +920,13 @@
           "region": "us",
           "upstream_id": "gpt-5.6",
           "pricing": {
-            "prompt": "0.000005",
-            "completion": "0.00003",
+            "prompt": "0.000004",
+            "completion": "0.00002",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.00001",
-                "completion": "0.000045"
+                "prompt": "0.000008",
+                "completion": "0.00003"
               }
             ]
           }
@@ -1084,13 +1088,13 @@
       "name": "OpenAI: GPT-5.6 Sol",
       "context_length": 1050000,
       "pricing": {
-        "prompt": "0.000005",
-        "completion": "0.00003",
+        "prompt": "0.000004",
+        "completion": "0.00002",
         "tiers": [
           {
             "min_prompt_tokens": 272000,
-            "prompt": "0.00001",
-            "completion": "0.000045"
+            "prompt": "0.000008",
+            "completion": "0.00003"
           }
         ]
       },
@@ -1120,13 +1124,13 @@
           "region": "us",
           "upstream_id": "gpt-5.6-sol",
           "pricing": {
-            "prompt": "0.000005",
-            "completion": "0.00003",
+            "prompt": "0.000004",
+            "completion": "0.00002",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.00001",
-                "completion": "0.000045"
+                "prompt": "0.000008",
+                "completion": "0.00003"
               }
             ]
           }
