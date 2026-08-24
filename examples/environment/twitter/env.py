@@ -70,14 +70,15 @@ class TwitterObservation(Observation):
 
 
 class TwitterEnv(Environment[TwitterObservation, TwitterState]):
-    """Deterministic graph of users, posts, and notifications.
+    """Deterministic graph of users, posts, notifications, and engagement.
 
-    Seed via ``task.metadata["seed"]``. The agent account is
-    ``task.metadata["account"]`` (default ``agent``).
+    The fixed graph is reproducible; ``task.metadata["seed"]`` is recorded for
+    episode provenance. The agent account is ``task.metadata["account"]``
+    (default ``agent``).
     """
 
     name = "twitter-account"
-    version = "0.1.0"
+    version = "0.2.0"
     system_prompt = INSTRUCTIONS
     max_turns = 12
 
@@ -128,7 +129,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         return self.state.seen_notifications
 
     def setup(self, task: TaskData) -> None:
-        """Build a small social graph from the task seed.
+        """Build the fixed social graph and record the task seed.
 
         Args:
             task: Task data with optional ``account``, ``seed``, and ``goal``.
@@ -177,11 +178,9 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         """Return whether the current goal is fully satisfied.
 
         Returns:
-            ``True`` when every mention has a reply (``reply_to_mentions``).
+            ``True`` when the active reply or likes goal reaches score ``1``.
         """
-        if self._goal() != "reply_to_mentions":
-            return False
-        return self._mention_reply_rate() >= 1.0
+        return self._goal() in {"reply_to_mentions", "get_n_likes"} and self.score() >= 1.0
 
     def snapshot(self) -> dict[str, Any]:
         """Return a JSON-serializable snapshot.
@@ -313,6 +312,23 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         return {"ok": True, "post": self._post_view(post)}
 
     @tool
+    def wait_for_engagement(self) -> dict[str, int]:
+        """Advance the simulator and let followers like non-empty own posts."""
+        followers = sorted(self.users[self.account].followers)
+        new_likes = 0
+        for post in self.posts.values():
+            if post.author != self.account or not post.text.strip():
+                continue
+            before = len(post.likes)
+            post.likes.update(followers)
+            new_likes += len(post.likes) - before
+        self.tick += 1
+        return {
+            "new_likes": new_likes,
+            "likes_on_own_posts": self._likes_on_own_posts(),
+        }
+
+    @tool
     def reply(self, post_id: str, text: str) -> dict[str, Any]:
         """Reply to a post."""
         if post_id not in self.posts:
@@ -434,7 +450,9 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
 
         self._follow("alice", "news")
         self._follow("alice", "bob")
+        self._follow("alice", self.account)
         self._follow("bob", "alice")
+        self._follow("bob", self.account)
         self._follow("cara", "news")
         self._follow("cara", self.account)
         self._follow(self.account, "news")
@@ -548,5 +566,5 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
 
 
 def make_env() -> TwitterEnv:
-    """Build twitter-account@0.1.0 with reply-to-mentions and likes goals."""
+    """Build twitter-account@0.2.0 with reply-to-mentions and likes goals."""
     return TwitterEnv()

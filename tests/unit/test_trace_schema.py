@@ -1,0 +1,117 @@
+import hashlib
+import json
+import subprocess
+import sys
+from importlib.resources import files
+from pathlib import Path
+
+import jsonschema
+import pytest
+
+from enroute.tracing import (
+    Event,
+    Outcome,
+    ParsedAction,
+    RewardEvent,
+    ToolCallStep,
+    Trace,
+    trace_json_schema,
+)
+
+ROOT = Path(__file__).resolve().parents[2]
+SCHEMA_PATHS = (
+    ROOT / "src/enroute/schemas/trace.v1.json",
+    ROOT / "schemas/trace.v1.json",
+    ROOT / "docs/schemas/trace.v1.json",
+)
+
+
+def test_generated_trace_schema_is_current_and_packaged() -> None:
+    subprocess.run(
+        [sys.executable, "scripts/generate_trace_schema.py", "--check"],
+        cwd=ROOT,
+        check=True,
+    )
+
+    contents = [path.read_text(encoding="utf-8") for path in SCHEMA_PATHS]
+    assert contents[0] == contents[1] == contents[2]
+    packaged = files("enroute.schemas").joinpath("trace.v1.json")
+    assert packaged.is_file()
+    assert trace_json_schema() == json.loads(contents[0])
+
+
+def test_trace_schema_contains_variants_and_lineage_fields() -> None:
+    schema = trace_json_schema()
+    jsonschema.Draft202012Validator.check_schema(schema)
+
+    step_schema = schema["properties"]["steps"]["items"]
+    step_refs = {variant["$ref"].rsplit("/", maxsplit=1)[-1] for variant in step_schema["oneOf"]}
+    assert step_refs == {"Decision", "Event", "LLMCall", "ToolCallStep"}
+    assert set(step_schema["discriminator"]["mapping"]) == {"decision", "event", "llm", "tool"}
+    assert {"trace_kind", "parent_trace_id", "episode_trace_id", "stop_reason"} <= set(
+        schema["properties"]
+    )
+    assert {"decision_id", "index"} <= set(schema["$defs"]["Decision"]["properties"])
+    assert schema["properties"]["schema_version"]["const"] == "1.0.0"
+
+
+def test_production_and_episode_dumps_validate_against_trace_schema() -> None:
+    validator = jsonschema.Draft202012Validator(trace_json_schema())
+
+    production = Trace(
+        trace_kind="production",
+        parent_trace_id="request-parent",
+        episode_trace_id="episode-1",
+        stop_reason="complete",
+    )
+    production.add_llm(request=None, response=None)
+    production.add_tool("lookup", {"query": "enroute"}, result={"found": True})
+    production.steps.append(Event(name="routed", data={"provider": "test"}))
+
+    episode = Trace(
+        trace_kind="episode",
+        episode_trace_id="episode-1",
+        environment="test",
+        initial_state={"turn": 0},
+        final_state={"turn": 1},
+        outcome=Outcome(reward=1.0),
+        terminated=True,
+    )
+    episode.add_decision(
+        index=0,
+        observation={"turn": 0},
+        parsed_action=[ParsedAction(name="lookup", arguments={"query": "enroute"})],
+        tool_calls=[ToolCallStep(name="lookup", result={"found": True})],
+        reward_events=[RewardEvent(name="lookup", value=1.0)],
+    )
+
+    validator.validate(production.model_dump(mode="json"))
+    validator.validate(episode.model_dump(mode="json"))
+
+    invalid = production.model_dump(mode="json")
+    invalid["schema_version"] = "2.0.0"
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(invalid)
+
+
+def test_legacy_trace_fixture_migrates_episode_lineage_and_decisions() -> None:
+    raw = (ROOT / "tests/fixtures/legacy_trace_v0_4.json").read_text(encoding="utf-8")
+    first = Trace.model_validate_json(raw)
+    second = Trace.model_validate_json(raw)
+
+    assert first.trace_kind == "episode"
+    assert first.episode_trace_id == first.trace_id
+    assert first.schema_version == "1.0.0"
+    assert [decision.index for decision in first.decisions()] == [0, 1]
+    expected_ids = [
+        hashlib.sha256(f"{first.trace_id}:decision:{index}".encode()).hexdigest()[:32]
+        for index in range(2)
+    ]
+    assert [decision.decision_id for decision in first.decisions()] == expected_ids
+    assert [decision.decision_id for decision in second.decisions()] == expected_ids
+
+    current_a = Trace(trace_kind="episode")
+    current_b = Trace(trace_kind="episode")
+    current_a.add_decision()
+    current_b.add_decision()
+    assert current_a.decisions()[0].decision_id != current_b.decisions()[0].decision_id

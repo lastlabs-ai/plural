@@ -9,13 +9,16 @@ Examples:
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from enroute.types import ChatRequest, ChatResponse, Usage
+
+TraceKind = Literal["production", "episode", "llm_call"]
 
 
 def new_trace_id() -> str:
@@ -29,6 +32,13 @@ def new_trace_id() -> str:
         True
     """
     return uuid.uuid4().hex
+
+
+class TraceContext(BaseModel):
+    """Lineage supplied by a caller when creating a child trace."""
+
+    parent_trace_id: str | None = None
+    episode_trace_id: str | None = None
 
 
 class Attempt(BaseModel):
@@ -161,6 +171,8 @@ class Decision(BaseModel):
     """
 
     type: Literal["decision"] = "decision"
+    decision_id: str = Field(default_factory=new_trace_id)
+    index: int | None = None
     observation: Any = None
     model_context: ChatRequest | dict[str, Any] | None = None
     model_output: ChatResponse | dict[str, Any] | None = None
@@ -192,7 +204,10 @@ class Transition(BaseModel):
     truncated: bool = False
 
 
-Step = LLMCall | ToolCallStep | Event | Decision
+Step = Annotated[
+    LLMCall | ToolCallStep | Event | Decision,
+    Field(discriminator="type"),
+]
 
 
 class Outcome(BaseModel):
@@ -243,6 +258,10 @@ class Trace(BaseModel):
     """
 
     trace_id: str = Field(default_factory=new_trace_id)
+    trace_kind: TraceKind = "production"
+    parent_trace_id: str | None = None
+    episode_trace_id: str | None = None
+    stop_reason: str | None = None
     environment: str | None = None
     environment_version: str | None = None
     environment_fingerprint: str | None = None
@@ -255,10 +274,60 @@ class Trace(BaseModel):
     metrics: dict[str, Any] = Field(default_factory=dict)
     terminated: bool | None = None
     truncated: bool | None = None
+    failed: bool = False
     tags: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = "1.0.0"
+    schema_version: Literal["1.0.0"] = "1.0.0"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_trace(cls, value: Any) -> Any:
+        """Migrate pre-1.0 raw traces without changing new-trace defaults.
+
+        Returns:
+            The migrated raw payload, or the original non-legacy value.
+        """
+        if not isinstance(value, dict) or "trace_kind" in value:
+            return value
+
+        data = dict(value)
+        raw_steps = data.get("steps")
+        steps = list(raw_steps) if isinstance(raw_steps, list) else []
+        has_decisions = any(
+            isinstance(step, dict) and step.get("type") == "decision" for step in steps
+        )
+        has_environment = any(
+            data.get(field) is not None
+            for field in ("environment", "environment_version", "environment_fingerprint")
+        )
+        is_episode = has_environment or has_decisions
+        data["trace_kind"] = "episode" if is_episode else "production"
+        data["schema_version"] = "1.0.0"
+
+        trace_id = data.get("trace_id")
+        if is_episode and isinstance(trace_id, str):
+            data.setdefault("episode_trace_id", trace_id)
+
+        if isinstance(trace_id, str) and has_decisions:
+            migrated_steps: list[Any] = []
+            decision_position = 0
+            for step in steps:
+                if not isinstance(step, dict) or step.get("type") != "decision":
+                    migrated_steps.append(step)
+                    continue
+                migrated = dict(step)
+                migrated.setdefault("index", decision_position)
+                migrated.setdefault(
+                    "decision_id",
+                    hashlib.sha256(f"{trace_id}:decision:{decision_position}".encode()).hexdigest()[
+                        :32
+                    ],
+                )
+                migrated_steps.append(migrated)
+                decision_position += 1
+            data["steps"] = migrated_steps
+        return data
 
     def add_llm(
         self,
@@ -338,6 +407,7 @@ class Trace(BaseModel):
         parsed_action: list[ParsedAction] | None = None,
         tool_calls: list[ToolCallStep] | None = None,
         reward_events: list[RewardEvent] | None = None,
+        index: int | None = None,
     ) -> Decision:
         """Append a decision step for one model turn.
 
@@ -348,11 +418,13 @@ class Trace(BaseModel):
             parsed_action: Structured actions.
             tool_calls: Tool invocations with results.
             reward_events: Per-tool step rewards.
+            index: Optional zero-based episode turn.
 
         Returns:
             The appended :class:`Decision`.
         """
         step = Decision(
+            index=index,
             observation=observation,
             model_context=model_context,
             model_output=model_output,
@@ -363,19 +435,26 @@ class Trace(BaseModel):
         self.steps.append(step)
         return step
 
-    def transitions(self) -> list[Transition]:
+    def transitions(
+        self,
+        *,
+        source: Literal["outcome", "events", "both"] = "outcome",
+    ) -> list[Transition]:
         """Flatten this episode into Gymnasium-style transitions.
 
         Prefers :class:`Decision` steps. Falls back to grouping flat
         ``llm`` / ``tool`` steps so production traces still export.
+
+        Args:
+            source: Reward source, matching :meth:`decision_rewards`.
 
         Returns:
             One :class:`Transition` per decision.
         """
         decisions = self.decisions()
         if decisions:
-            return self._transitions_from_decisions(decisions)
-        return self._transitions_from_flat_steps()
+            return self._transitions_from_decisions(decisions, source=source)
+        return self._transitions_from_flat_steps(source=source)
 
     def decisions(self) -> list[Decision]:
         """Return decision steps in order.
@@ -495,17 +574,22 @@ class Trace(BaseModel):
             out[i] = running
         return out
 
-    def _transitions_from_decisions(self, decisions: list[Decision]) -> list[Transition]:
+    def _transitions_from_decisions(
+        self,
+        decisions: list[Decision],
+        *,
+        source: Literal["outcome", "events", "both"],
+    ) -> list[Transition]:
         out: list[Transition] = []
+        rewards = self.decision_rewards(source=source)
         for i, decision in enumerate(decisions):
             is_last = i == len(decisions) - 1
             next_obs = decisions[i + 1].observation if not is_last else self.final_state
-            reward = sum(event.value for event in decision.reward_events)
             out.append(
                 Transition(
                     observation=decision.observation,
                     action=list(decision.parsed_action),
-                    reward=reward,
+                    reward=rewards[i],
                     next_observation=next_obs,
                     terminated=bool(self.terminated) if is_last else False,
                     truncated=bool(self.truncated) if is_last else False,
@@ -513,7 +597,11 @@ class Trace(BaseModel):
             )
         return out
 
-    def _transitions_from_flat_steps(self) -> list[Transition]:
+    def _transitions_from_flat_steps(
+        self,
+        *,
+        source: Literal["outcome", "events", "both"],
+    ) -> list[Transition]:
         groups: list[tuple[Any, list[ParsedAction]]] = []
         current_obs: Any = self.initial_state
         pending_actions: list[ParsedAction] = []
@@ -547,7 +635,12 @@ class Trace(BaseModel):
             is_last = i == len(groups) - 1
             next_obs = groups[i + 1][0] if not is_last else self.final_state
             reward = 0.0
-            if is_last and self.outcome and self.outcome.reward is not None:
+            if (
+                source in {"outcome", "both"}
+                and is_last
+                and self.outcome
+                and self.outcome.reward is not None
+            ):
                 reward = float(self.outcome.reward)
             out.append(
                 Transition(

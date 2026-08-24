@@ -1,9 +1,9 @@
 """Gym-shaped :class:`Environment`: reset, step, and scored episodes.
 
 Subclass this class to write a game or work env — name, version, tools,
-observations, and rewards live on that class. The default
-:meth:`Environment.step` dispatches ``@tool`` methods and records a
-decision. Override ``step`` when the action is not a tool call.
+observations, and rewards live on that class. :meth:`Environment.step` owns
+lifecycle and trace orchestration; override :meth:`Environment.apply_action`
+for non-tool action semantics.
 
 ``TaskData``, ``StepResult``, ``Rollout``, and ``tool`` live in sibling
 modules. They are re-exported here so older imports still resolve.
@@ -22,17 +22,26 @@ Examples:
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
+import math
 import time
 from collections.abc import Callable, Iterator
-from typing import Any, Generic, get_args, get_origin
+from functools import partial
+from typing import Any, Generic, cast, final, get_args, get_origin
 
 from enroute.client import Enroute
-from enroute.environments.action import normalize_action
+from enroute.environments.action import ActionResult, is_tool_action, normalize_action
 from enroute.environments.episode import Episode, episode_metrics
+from enroute.environments.fingerprint import (
+    callable_implementation_digest,
+    stable_fingerprint_value,
+)
+from enroute.environments.policy import EnroutePolicy, Policy
 from enroute.environments.rollout import Rollout, ScorerFn
 from enroute.environments.runtime import LocalRuntime, Runtime
 from enroute.environments.step import StepResult
+from enroute.environments.stop import EpisodeError, EpisodeState, StopReason, is_stopped
 from enroute.environments.task import TaskData, TaskFn
 from enroute.environments.tool import (
     instrument_tool,
@@ -51,10 +60,122 @@ from enroute.environments.types import (
     is_empty_observation,
     serialize_observation,
 )
-from enroute.tracing.schema import Outcome, ParsedAction, RewardEvent, ToolCallStep, Trace
+from enroute.tracing.schema import (
+    Outcome,
+    ParsedAction,
+    RewardEvent,
+    ToolCallStep,
+    Trace,
+    TraceContext,
+)
 from enroute.types import ChatRequest, ChatResponse, Message, Tool
 
 __all__ = ["Environment", "Rollout", "StepResult", "TaskData", "tool"]
+
+
+def _references_instance(value: Any, instance: Any, seen: set[int] | None = None) -> bool:
+    """Recursively detect a captured environment through closures and containers.
+
+    Returns:
+        Whether ``value`` references ``instance``.
+    """
+    if value is instance:
+        return True
+    if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
+        return False
+    if inspect.isclass(value) or inspect.ismodule(value):
+        return False
+    visited = seen if seen is not None else set()
+    value_id = id(value)
+    if value_id in visited:
+        return False
+    visited.add(value_id)
+
+    try:
+        bound_self = inspect.getattr_static(value, "__self__")
+    except (AttributeError, TypeError):
+        bound_self = None
+    if bound_self is instance or (
+        bound_self is not None and _references_instance(bound_self, instance, visited)
+    ):
+        return True
+    try:
+        target = inspect.unwrap(value) if callable(value) else value
+    except (ValueError, TypeError):
+        target = value
+    closure = getattr(target, "__closure__", None) or ()
+    for cell in closure:
+        try:
+            if _references_instance(cell.cell_contents, instance, visited):
+                return True
+        except ValueError:
+            continue
+    defaults = getattr(target, "__defaults__", None)
+    if defaults is not None and _references_instance(defaults, instance, visited):
+        return True
+    kwdefaults = getattr(target, "__kwdefaults__", None)
+    if kwdefaults is not None and _references_instance(kwdefaults, instance, visited):
+        return True
+    if isinstance(value, partial) and (
+        _references_instance(value.func, instance, visited)
+        or _references_instance(value.args, instance, visited)
+        or _references_instance(value.keywords, instance, visited)
+    ):
+        return True
+    if isinstance(value, dict):
+        return any(
+            _references_instance(key, instance, visited)
+            or _references_instance(item, instance, visited)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_references_instance(item, instance, visited) for item in value)
+    try:
+        namespace = object.__getattribute__(value, "__dict__")
+    except (AttributeError, TypeError):
+        namespace = None
+    if isinstance(namespace, dict) and any(
+        _references_instance(item, instance, visited) for item in namespace.values()
+    ):
+        return True
+    for owner in type(value).__mro__:
+        slots = owner.__dict__.get("__slots__", ())
+        if isinstance(slots, str):
+            slot_names = (slots,)
+        elif isinstance(slots, dict):
+            slot_names = tuple(slots)
+        else:
+            try:
+                slot_names = tuple(slots)
+            except TypeError:
+                continue
+        for declared_name in slot_names:
+            if not isinstance(declared_name, str) or declared_name in {"__dict__", "__weakref__"}:
+                continue
+            name = declared_name
+            if name.startswith("__") and not name.endswith("__"):
+                name = f"_{owner.__name__.lstrip('_')}{name}"
+            descriptor = owner.__dict__.get(name)
+            if descriptor is None or not (
+                inspect.ismemberdescriptor(descriptor) or inspect.isgetsetdescriptor(descriptor)
+            ):
+                continue
+            try:
+                item = descriptor.__get__(value, type(value))
+            except (AttributeError, TypeError):
+                continue
+            if _references_instance(item, instance, visited):
+                return True
+    if callable(value) and not inspect.isroutine(target):
+        try:
+            call_implementation = inspect.getattr_static(type(value), "__call__")
+        except (AttributeError, TypeError):
+            call_implementation = None
+        if call_implementation is not None and _references_instance(
+            call_implementation, instance, visited
+        ):
+            return True
+    return False
 
 
 class Environment(Generic[ObsT, StateT]):
@@ -65,9 +186,9 @@ class Environment(Generic[ObsT, StateT]):
     agent with :meth:`reset` / :meth:`step` or :meth:`rollout` — not
     :meth:`observe`.
 
-    The model is not part of the environment. The default :meth:`step` runs
-    ``@tool`` methods on ``self`` and records a decision. Override
-    :meth:`step` when the action is not a tool call.
+    The model is not part of the environment. :meth:`step` is framework-owned:
+    it records the decision and advances the lifecycle. Override
+    :meth:`apply_action` when actions are not tool calls.
 
     Class attributes ``name``, ``version``, ``system_prompt``, and
     ``max_turns`` are the defaults; constructor kwargs override them.
@@ -117,6 +238,13 @@ class Environment(Generic[ObsT, StateT]):
     system_prompt: str | None = None
     max_turns: int = 8
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if "step" in cls.__dict__:
+            raise TypeError(
+                "Environment.step() is framework-owned; override apply_action() instead"
+            )
+
     def __init__(
         self,
         name: str | None = None,
@@ -153,6 +281,28 @@ class Environment(Generic[ObsT, StateT]):
         self._state = value
         if value.seed is not None:
             self.seed = value.seed
+
+    @property
+    def episode_state(self) -> EpisodeState:
+        """Current lifecycle state for this environment instance."""
+        if self._episode is None:
+            return EpisodeState.IDLE
+        if self._episode.closed:
+            return EpisodeState.CLOSED
+        if is_stopped(self._episode.stop_reason):
+            return EpisodeState.STOPPED
+        return EpisodeState.OPEN
+
+    @property
+    def episode_trace(self) -> Trace | None:
+        """A read-only snapshot of the current or last episode trace.
+
+        The snapshot remains available after the episode closes. Mutating it
+        does not alter environment bookkeeping.
+        """
+        if self._episode is None:
+            return None
+        return self._episode.trace.model_copy(deep=True)
 
     @property
     def observation(self) -> ObsT:
@@ -202,17 +352,13 @@ class Environment(Generic[ObsT, StateT]):
         return False
 
     def snapshot(self) -> dict[str, Any] | None:
-        """Return a JSON snapshot of :attr:`state` for traces.
+        """Return an explicitly trace-safe snapshot of :attr:`state`.
 
         Returns:
-            ``state.model_dump()``, or ``None`` when state is empty.
+            ``None``. Environment authors must override this hook to persist
+            state in traces.
         """
-        data = self.state.model_dump()
-        if not data.get("metadata"):
-            data.pop("metadata", None)
-        if data == {"seed": None} or data == {}:
-            return None
-        return data
+        return None
 
     def step_reward(self, tool_name: str, result: Any) -> float | None:
         """Optional dense reward after one tool call.
@@ -233,18 +379,69 @@ class Environment(Generic[ObsT, StateT]):
         :meth:`reset` on the result. One instance is one episode; Benchmark
         uses this so worker threads do not share ``self``.
         """
-        other = type(self)(
-            name=self.name,
-            version=self.version,
-            system_prompt=self.system_prompt,
-            max_turns=self.max_turns,
-            metadata=dict(self.metadata),
-        )
+        try:
+            other = type(self)(
+                name=self.name,
+                version=self.version,
+                system_prompt=self.system_prompt,
+                max_turns=self.max_turns,
+                metadata=dict(self.metadata),
+            )
+        except TypeError as exc:
+            raise RuntimeError(
+                f"{type(self).__name__}.spawn() could not construct a fresh environment; "
+                "override spawn() or pass Benchmark(environment_factory=...)"
+            ) from exc
         for tool_name, func in self.tool_functions.items():
             if tool_name not in other.tool_functions:
+                if _references_instance(func, self):
+                    raise RuntimeError(
+                        f"dynamic tool {tool_name!r} references the original environment and "
+                        "cannot be isolated by spawn(); use Benchmark(environment_factory=...)"
+                    )
                 other._add_tool(tool_name, func)
-        other.scorers = list(self.scorers)
-        other._tasks_fn = self._tasks_fn
+
+        fresh_scorers = list(other.scorers)
+        rebuilt_scorers: list[tuple[str, ScorerFn, float]] = []
+        for index, (scorer_name, scorer_fn, weight) in enumerate(self.scorers):
+            fresh_fn: ScorerFn | None = None
+            if index < len(fresh_scorers):
+                fresh_name, candidate, fresh_weight = fresh_scorers[index]
+                if (
+                    fresh_name == scorer_name
+                    and fresh_weight == weight
+                    and callable_implementation_digest(candidate)
+                    == callable_implementation_digest(scorer_fn)
+                ):
+                    fresh_fn = candidate
+            if getattr(scorer_fn, "__self__", None) is self:
+                method = cast(Any, scorer_fn)
+                scorer_fn = method.__func__.__get__(other, type(other))
+            elif _references_instance(scorer_fn, self):
+                if fresh_fn is None:
+                    raise RuntimeError(
+                        f"scorer {scorer_name!r} references the original environment and "
+                        "cannot be isolated by spawn(); use Benchmark(environment_factory=...)"
+                    )
+                scorer_fn = fresh_fn
+            rebuilt_scorers.append((scorer_name, scorer_fn, weight))
+        other.scorers = rebuilt_scorers
+
+        tasks_fn = self._tasks_fn
+        if tasks_fn is not None and getattr(tasks_fn, "__self__", None) is self:
+            method = cast(Any, tasks_fn)
+            tasks_fn = method.__func__.__get__(other, type(other))
+        elif tasks_fn is not None and _references_instance(tasks_fn, self):
+            fresh_tasks_fn = other._tasks_fn
+            if fresh_tasks_fn is None or callable_implementation_digest(
+                fresh_tasks_fn
+            ) != callable_implementation_digest(tasks_fn):
+                raise RuntimeError(
+                    "tasks provider references the original environment and cannot be isolated "
+                    "by spawn(); use Benchmark(environment_factory=...)"
+                )
+            tasks_fn = fresh_tasks_fn
+        other._tasks_fn = tasks_fn
         return other
 
     def tool(self, fn: Callable[..., Any] | None = None, *, name: str | None = None) -> Any:
@@ -317,6 +514,15 @@ class Environment(Generic[ObsT, StateT]):
             raise RuntimeError(f"environment '{self.name}' has no tasks provider")
         yield from self._tasks_fn()
 
+    def fingerprint_payload(self) -> Any:
+        """Return stable constructor or external configuration for fingerprinting.
+
+        Override this when behavior depends on configuration not otherwise
+        represented by tools, scorers, hooks, or standard environment fields.
+        Returned values must be deterministic and free of secrets.
+        """
+        return {}
+
     def fingerprint(self) -> str:
         """Hash the action surface and scoring contract.
 
@@ -327,16 +533,47 @@ class Environment(Generic[ObsT, StateT]):
             Hex SHA256 digest.
         """
         obs_name, state_name = self._contract_names()
+        tool_schemas = {
+            definition.function.name: definition.model_dump(mode="json")
+            for definition in self.tool_defs
+        }
         payload = {
             "name": self.name,
             "version": self.version,
+            "max_turns": self.max_turns,
             "instructions": self.system_prompt,
             "observation": obs_name,
             "state": state_name,
-            "tools": [t.model_dump(mode="json") for t in self.tool_defs],
-            "scorers": [(name, weight) for name, _fn, weight in self.scorers],
+            "configuration": stable_fingerprint_value(self.fingerprint_payload()),
+            "tools": [
+                {
+                    "name": name,
+                    "schema": tool_schemas.get(name),
+                    "implementation": callable_implementation_digest(fn),
+                }
+                for name, fn in sorted(self.tool_functions.items())
+            ],
+            "scorers": [
+                {
+                    "name": name,
+                    "weight": weight,
+                    "implementation": callable_implementation_digest(fn),
+                }
+                for name, fn, weight in sorted(self.scorers, key=lambda item: item[0])
+            ],
+            "hooks": {
+                hook: callable_implementation_digest(getattr(self, hook))
+                for hook in (
+                    "setup",
+                    "observe",
+                    "apply_action",
+                    "done",
+                    "snapshot",
+                    "step_reward",
+                )
+            },
         }
-        raw = json.dumps(payload, sort_keys=True, default=str)
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def reset(
@@ -353,7 +590,15 @@ class Environment(Generic[ObsT, StateT]):
 
         Returns:
             ``(observation, info)``.
+
+        Raises:
+            EpisodeError: If the current episode is still open.
         """
+        if self.episode_state in {EpisodeState.OPEN, EpisodeState.STOPPED}:
+            raise EpisodeError(
+                "cannot reset before closing the current episode",
+                self.episode_state,
+            )
         self.setup(task)
         observation = self._initial_observation(task)
         self._observation = observation if isinstance(observation, Observation) else None
@@ -363,15 +608,17 @@ class Environment(Generic[ObsT, StateT]):
         messages.append(Message(role="user", content=as_text(observation)))
 
         trace = Trace(
+            trace_kind="episode",
             environment=self.name,
             environment_version=self.version,
             environment_fingerprint=self.fingerprint(),
             task_id=task.task_id,
             model=model,
             initial_state=self._safe_snapshot(),
-            metadata={"task": task.model_dump(), **self.metadata},
+            metadata={**self.metadata, "task": task.trace_payload()},
             tags={"environment": self.name},
         )
+        trace.episode_trace_id = trace.trace_id
         self._episode = Episode(
             task=task,
             trace=trace,
@@ -400,49 +647,65 @@ class Environment(Generic[ObsT, StateT]):
         Raises:
             RuntimeError: If :meth:`reset` has not been called.
         """
-        return list(self._require_episode().messages)
+        return list(self._require_episode(allow_stopped=True).messages)
 
-    def step(
-        self,
-        action: Any = None,
-        *,
-        request: ChatRequest | dict[str, Any] | None = None,
-        response: ChatResponse | None = None,
-        runtime: Runtime | None = None,
-    ) -> StepResult:
-        """Apply one policy decision. Unpack as Gymnasium's 5-tuple.
+    def trace_context(self) -> TraceContext:
+        """Return lineage for a model call made inside the current episode."""
+        trace = self._require_episode().trace
+        return TraceContext(parent_trace_id=trace.trace_id, episode_trace_id=trace.trace_id)
 
-        The default implementation treats ``action`` as tool calls on
-        ``self``, records a :class:`~enroute.tracing.schema.Decision`, and
-        returns the next observation / :meth:`done`. Override this method
-        when the action is not a tool call. Call :meth:`record_decision`
-        and :meth:`finish_turn` to keep tracing.
+    def record_response(self, response: ChatResponse) -> None:
+        """Append one policy response to the open episode conversation.
 
-        Args:
-            action: Parsed actions, tool calls, a :class:`ChatResponse`, or
-                ``None`` to take tool calls from ``response``.
-            request: Chat request the policy saw (stored on the decision).
-            response: Chat response for this turn.
-            runtime: Tool runtime; defaults to :class:`LocalRuntime`.
-
-        Returns:
-            :class:`~enroute.environments.step.StepResult`.
-
-        Raises:
-            RuntimeError: If :meth:`reset` has not been called.
+        :meth:`step` calls this automatically when a response is supplied.
+        Manual advanced integrations may call it when recording a response
+        without stepping.
         """
         episode = self._require_episode()
-        runtime = runtime or LocalRuntime(self.tool_functions)
-        self._append_assistant(response)
-        parsed, tool_calls_in = normalize_action(action, response)
-        observation = episode.observation
+        assistant = response.message
+        last = episode.messages[-1] if episode.messages else None
+        already = (
+            last is not None
+            and last.role == "assistant"
+            and last.tool_calls == assistant.tool_calls
+            and last.content == assistant.content
+        )
+        if not already:
+            episode.messages.append(assistant)
+        episode.last_response = response
 
+    def apply_action(
+        self,
+        action: Any,
+        *,
+        runtime: Runtime,
+        response: ChatResponse | None = None,
+    ) -> ActionResult:
+        """Apply author-defined semantics for one policy action.
+
+        The base implementation normalizes model tool calls, dispatches them
+        through ``runtime``, and returns trace data for :meth:`step` to record.
+        Tool-based environments normally do not override this hook. Scalar or
+        custom text environments can mutate state here and return their own
+        :class:`~enroute.environments.action.ActionResult`.
+
+        This hook must not call :meth:`record_decision` or :meth:`finish_turn`;
+        framework-owned :meth:`step` performs that bookkeeping.
+
+        Args:
+            action: Raw policy action.
+            runtime: Runtime used to execute normalized tool calls.
+            response: Optional policy response associated with the action.
+
+        Returns:
+            Applied action, tool, reward, stop, and diagnostic fields.
+        """
+        parsed, tool_calls_in = normalize_action(action, response)
         tool_steps: list[ToolCallStep] = []
         reward_events: list[RewardEvent] = []
-        episode.tool_errors = []
 
         for parsed_action, tool_call_id in zip(parsed, tool_calls_in, strict=False):
-            if not parsed_action.name or parsed_action.name == "respond":
+            if not is_tool_action(parsed_action):
                 continue
             with tool_root_scope():
                 result, latency_ms, error = self._invoke_tool(
@@ -460,32 +723,118 @@ class Environment(Generic[ObsT, StateT]):
                 )
             tool_step.tool_call_id = tool_call_id
             tool_steps.append(tool_step)
-            if error:
-                episode.tool_errors.append(error)
-            episode.messages.append(
-                Message(
-                    role="tool",
-                    tool_call_id=tool_call_id,
-                    name=parsed_action.name,
-                    content=json.dumps(result) if not isinstance(result, str) else result,
-                )
-            )
             value = self.step_reward(parsed_action.name, result)
             if value is not None:
                 reward_events.append(RewardEvent(name=parsed_action.name, value=float(value)))
 
+        stop_reason = None
+        if not parsed or all(not is_tool_action(item) for item in parsed):
+            stop_reason = StopReason.POLICY_STOP
+        return ActionResult(
+            parsed_actions=parsed,
+            tool_calls=tool_steps,
+            reward_events=reward_events,
+            stop_reason=stop_reason,
+        )
+
+    @final
+    def step(
+        self,
+        action: Any = None,
+        *,
+        request: ChatRequest | dict[str, Any] | None = None,
+        response: ChatResponse | None = None,
+        runtime: Runtime | None = None,
+    ) -> StepResult:
+        """Apply one policy decision. Unpack as Gymnasium's 5-tuple.
+
+        This method is framework-owned and cannot be overridden. It records
+        the policy response, delegates action semantics to :meth:`apply_action`
+        exactly once, records a :class:`~enroute.tracing.schema.Decision`, and
+        advances the lifecycle. Override :meth:`apply_action` for scalar or
+        custom text actions.
+
+        Args:
+            action: Parsed actions, tool calls, a :class:`ChatResponse`, or
+                ``None`` to take tool calls from ``response``.
+            request: Chat request the policy saw (stored on the decision).
+            response: Chat response for this turn.
+            runtime: Tool runtime; defaults to :class:`LocalRuntime`.
+
+        Returns:
+            :class:`~enroute.environments.step.StepResult`.
+
+        Raises:
+            RuntimeError: If :meth:`reset` has not been called.
+        """
+        self._require_episode()
+        try:
+            return self._step_once(
+                action,
+                request=request,
+                response=response,
+                runtime=runtime,
+            )
+        except Exception as exc:
+            self._abort_episode(exc)
+            raise
+
+    def _step_once(
+        self,
+        action: Any,
+        *,
+        request: ChatRequest | dict[str, Any] | None,
+        response: ChatResponse | None,
+        runtime: Runtime | None,
+    ) -> StepResult:
+        """Orchestrate one action on an active episode.
+
+        Returns:
+            The completed step result.
+        """
+        episode = self._require_episode()
+        policy_response = (
+            action if response is None and isinstance(action, ChatResponse) else response
+        )
+        if policy_response is not None:
+            self.record_response(policy_response)
+        observation = episode.observation
+        if runtime is None:
+            runtime = LocalRuntime(self.tool_functions)
+
+        action_result = self.apply_action(action, runtime=runtime, response=policy_response)
+        if not isinstance(action_result, ActionResult):
+            raise TypeError("Environment.apply_action() must return ActionResult")
+
+        episode.tool_errors = self._tool_errors(action_result.tool_calls)
+        for tool_step in action_result.tool_calls:
+            episode.messages.append(
+                Message(
+                    role="tool",
+                    tool_call_id=tool_step.tool_call_id,
+                    name=tool_step.name,
+                    content=(
+                        json.dumps(tool_step.result)
+                        if not isinstance(tool_step.result, str)
+                        else tool_step.result
+                    ),
+                )
+            )
+
         self.record_decision(
             observation=observation,
             model_context=request,
-            model_output=response,
-            parsed_action=parsed,
-            tool_calls=tool_steps,
-            reward_events=reward_events,
+            model_output=policy_response,
+            parsed_action=action_result.parsed_actions,
+            tool_calls=action_result.tool_calls,
+            reward_events=action_result.reward_events,
         )
-        stop_reason = None
-        if not parsed or all(a.name in {"", "respond"} for a in parsed):
-            stop_reason = "no_tool_calls"
-        return self.finish_turn(reward_events, stop_reason=stop_reason)
+        step_result = self.finish_turn(
+            action_result.reward_events,
+            stop_reason=action_result.stop_reason,
+        )
+        step_result.info = {**action_result.info, **step_result.info}
+        return step_result
 
     def record_decision(
         self,
@@ -499,8 +848,9 @@ class Environment(Generic[ObsT, StateT]):
     ) -> None:
         """Append a decision to the open episode trace.
 
-        Used by the default :meth:`step`. Call this from a custom ``step``
-        so the episode still looks like every other environment.
+        :meth:`step` calls this automatically from the
+        :class:`~enroute.environments.action.ActionResult` returned by
+        :meth:`apply_action`. It remains public for advanced manual use.
 
         Args:
             observation: Observation the policy saw this turn.
@@ -512,6 +862,7 @@ class Environment(Generic[ObsT, StateT]):
         """
         episode = self._require_episode()
         episode.trace.add_decision(
+            index=episode.turn,
             observation=serialize_observation(observation),
             model_context=model_context,
             model_output=model_output,
@@ -526,16 +877,19 @@ class Environment(Generic[ObsT, StateT]):
         self,
         reward_events: list[RewardEvent] | None = None,
         *,
-        stop_reason: str | None = None,
+        stop_reason: StopReason | str | None = None,
     ) -> StepResult:
         """Advance the episode after an action and return a Gym 5-tuple.
 
         Increments the turn, rebuilds the observation, reads :meth:`done`,
-        and marks truncation at ``max_turns``.
+        and marks truncation at ``max_turns``. It remains public for advanced
+        manual use; :meth:`apply_action` should normally return an
+        :class:`~enroute.environments.action.ActionResult` instead of calling
+        this method.
 
         Args:
             reward_events: Events whose values sum to this step's reward.
-            stop_reason: Override (``no_tool_calls``, ``terminated``, …).
+            stop_reason: Explicit stop reason, if the policy or execution stopped.
 
         Returns:
             :class:`~enroute.environments.step.StepResult`.
@@ -551,18 +905,15 @@ class Environment(Generic[ObsT, StateT]):
         self._append_observation(next_obs)
         terminated = self.done()
         truncated = episode.turn >= self.max_turns and not terminated
-        if stop_reason is None:
+        normalized_stop = StopReason(stop_reason) if stop_reason is not None else None
+        if normalized_stop is not StopReason.FAILURE:
             if terminated:
-                stop_reason = "terminated"
+                normalized_stop = StopReason.TERMINATED
             elif truncated:
-                stop_reason = "truncated"
-        elif terminated:
-            stop_reason = "terminated"
-        elif truncated and stop_reason != "no_tool_calls":
-            stop_reason = "truncated"
+                normalized_stop = StopReason.TRUNCATED
         episode.terminated = terminated
         episode.truncated = truncated
-        episode.stop_reason = stop_reason
+        episode.stop_reason = normalized_stop
         return StepResult(
             observation=next_obs,
             reward=sum(event.value for event in events),
@@ -570,7 +921,7 @@ class Environment(Generic[ObsT, StateT]):
             truncated=truncated,
             info={
                 "turn": episode.turn,
-                "stop_reason": stop_reason,
+                "stop_reason": normalized_stop.value if normalized_stop is not None else None,
                 "tool_errors": list(episode.tool_errors),
             },
         )
@@ -593,7 +944,7 @@ class Environment(Generic[ObsT, StateT]):
         Raises:
             RuntimeError: If :meth:`reset` has not been called.
         """
-        episode = self._require_episode()
+        episode = self._require_episode(allow_stopped=True)
         final_response = response or episode.last_response
         rollout = Rollout(
             task=episode.task,
@@ -602,16 +953,89 @@ class Environment(Generic[ObsT, StateT]):
             response=final_response,
             env=self,
         )
-        scores, reward = self._score(rollout)
+        try:
+            scores, reward = self._score(rollout)
+        except Exception as exc:
+            self._abort_episode(exc, client=client)
+            raise
         episode.trace.outcome = Outcome(scores=scores, reward=reward if self.scorers else None)
         episode.trace.final_state = self._safe_snapshot()
         episode.trace.terminated = episode.terminated
         episode.trace.truncated = episode.truncated
+        episode.trace.stop_reason = (
+            episode.stop_reason.value if episode.stop_reason is not None else None
+        )
+        episode.trace.failed = episode.stop_reason is StopReason.FAILURE
+        if episode.trace.failed:
+            episode.trace.metadata.setdefault(
+                "failure",
+                {"type": "StopReason", "message": "episode stopped with failure"},
+            )
         episode.trace.metrics = episode_metrics(episode)
         episode.closed = True
         if client is not None:
             client.writer.record(episode.trace)
         return rollout
+
+    def run_episode(
+        self,
+        task: TaskData,
+        policy: Policy,
+        *,
+        model: str | None = None,
+        runtime: Runtime | None = None,
+        persist_with: Enroute | None = None,
+    ) -> Rollout:
+        """Run one complete episode with a synchronous policy.
+
+        Args:
+            task: Task to run.
+            policy: Policy used to choose each action.
+            model: Optional policy id recorded on requests and the trace.
+            runtime: Tool runtime; defaults to an in-process runtime.
+            persist_with: Optional Enroute client used only for the final trace.
+
+        Returns:
+            The closed, scored rollout.
+        """
+        if runtime is None:
+            runtime = LocalRuntime(self.tool_functions)
+        self.reset(task, model=model)
+        trace_context = self.trace_context()
+        final_response: ChatResponse | None = None
+
+        try:
+            for _ in range(self.max_turns):
+                request = ChatRequest(
+                    model=model or "policy",
+                    messages=self.messages(),
+                    tools=self.tool_defs or None,
+                )
+                policy_output = policy.act(request, trace_context=trace_context)
+                response = policy_output if isinstance(policy_output, ChatResponse) else None
+                if not isinstance(policy_output, (ChatResponse, ParsedAction, list)):
+                    raise TypeError(
+                        "Policy.act() must return ChatResponse, ParsedAction, or list[ParsedAction]"
+                    )
+                if isinstance(policy_output, list) and not all(
+                    isinstance(item, ParsedAction) for item in policy_output
+                ):
+                    raise TypeError("Policy.act() returned a list containing a non-ParsedAction")
+                if response is not None:
+                    final_response = response
+                result = self.step(
+                    policy_output,
+                    request=request,
+                    response=response,
+                    runtime=runtime,
+                )
+                if is_stopped(result.info.get("stop_reason")):
+                    break
+        except Exception as exc:
+            self._abort_episode(exc, client=persist_with)
+            raise
+
+        return self.close_episode(response=final_response, client=persist_with)
 
     def rollout(
         self,
@@ -622,6 +1046,7 @@ class Environment(Generic[ObsT, StateT]):
         models: list[str] | None = None,
         runtime: Runtime | None = None,
         temperature: float | None = None,
+        record_llm_traces: bool = False,
     ) -> Rollout:
         """Convenience: reset, LLM policy loop, :meth:`step` until done, score.
 
@@ -635,50 +1060,66 @@ class Environment(Generic[ObsT, StateT]):
             models: Optional fallback chain.
             runtime: Tool runtime; defaults to an in-process :class:`LocalRuntime`.
             temperature: Optional sampling temperature.
+            record_llm_traces: Persist linked per-call traces in addition to
+                the episode trace.
 
         Returns:
             A :class:`~enroute.environments.rollout.Rollout` containing a scored
             :class:`~enroute.tracing.schema.Trace`.
         """
-        runtime = runtime or LocalRuntime(self.tool_functions)
-        self.reset(task, model=model)
-        episode = self._require_episode()
-        final_response: ChatResponse | None = None
+        policy = EnroutePolicy(
+            client,
+            model,
+            fallbacks=models,
+            temperature=temperature,
+            tags={"environment": self.name, "task_id": task.task_id},
+            record_llm_traces=record_llm_traces,
+        )
+        return self.run_episode(
+            task,
+            policy,
+            model=model,
+            runtime=runtime,
+            persist_with=client,
+        )
 
-        for _ in range(self.max_turns):
-            request = ChatRequest(
-                model=model,
-                messages=list(episode.messages),
-                models=models,
-                tools=self.tool_defs or None,
-                temperature=temperature,
-            )
-            response = client.chat(
-                model=model,
-                messages=episode.messages,
-                models=models,
-                tools=self.tool_defs or None,
-                temperature=temperature,
-                tags={"environment": self.name, "task_id": task.task_id},
-            )
-            final_response = response
-            result = self.step(
-                response.message.tool_calls,
-                request=request,
-                response=response,
-                runtime=runtime,
-            )
-            stop = result.info.get("stop_reason")
-            if result.terminated or result.truncated or stop == "no_tool_calls":
-                break
-
-        return self.close_episode(response=final_response, client=client)
-
-    def _require_episode(self) -> Episode:
+    def _require_episode(self, *, allow_stopped: bool = False) -> Episode:
         episode = self._episode
         if episode is None or episode.closed:
-            raise RuntimeError("no episode in progress; call Environment.reset() first")
+            raise EpisodeError(
+                "operation requires an open episode; call Environment.reset() first",
+                self.episode_state,
+            )
+        if not allow_stopped and is_stopped(episode.stop_reason):
+            raise EpisodeError(
+                "episode has stopped; only messages() and close_episode() remain available",
+                self.episode_state,
+            )
         return episode
+
+    def _abort_episode(self, exc: Exception, *, client: Enroute | None = None) -> None:
+        """Close the current episode as a persisted failure when possible."""
+        episode = self._episode
+        if episode is None:
+            return
+        message = " ".join(str(exc).split())[:300] or type(exc).__name__
+        failure = {"type": type(exc).__name__, "message": message}
+        episode.stop_reason = StopReason.FAILURE
+        episode.trace.stop_reason = StopReason.FAILURE.value
+        episode.trace.failed = True
+        episode.trace.metadata["failure"] = failure
+        outcome = episode.trace.outcome or Outcome()
+        outcome.feedback = f"{failure['type']}: {failure['message']}"
+        episode.trace.outcome = outcome
+        if not episode.closed:
+            episode.trace.final_state = self._safe_snapshot()
+            episode.trace.terminated = episode.terminated
+            episode.trace.truncated = episode.truncated
+            episode.trace.metrics = episode_metrics(episode)
+            episode.closed = True
+        if client is not None and not episode.failure_persisted:
+            client.writer.record(episode.trace)
+            episode.failure_persisted = True
 
     def _append_observation(self, observation: Any) -> None:
         """Put the latest observation on the conversation the policy will see.
@@ -695,34 +1136,45 @@ class Environment(Generic[ObsT, StateT]):
             return
         episode.messages.append(Message(role="user", content=text))
 
+    @staticmethod
+    def _tool_errors(tool_calls: list[ToolCallStep]) -> list[str]:
+        errors: list[str] = []
+
+        def collect(tool_step: ToolCallStep) -> None:
+            if tool_step.error:
+                errors.append(tool_step.error)
+            for child in tool_step.children:
+                collect(child)
+
+        for tool_step in tool_calls:
+            collect(tool_step)
+        return errors
+
     def _append_assistant(self, response: ChatResponse | None) -> None:
         if response is None:
             return
-        episode = self._require_episode()
-        assistant = response.message
-        if episode.messages and episode.messages[-1] is assistant:
-            return
-        last = episode.messages[-1] if episode.messages else None
-        already = (
-            last is not None
-            and last.role == "assistant"
-            and last.tool_calls == assistant.tool_calls
-            and last.content == assistant.content
-        )
-        if not already:
-            episode.messages.append(assistant)
+        self.record_response(response)
 
     def _score(self, rollout: Rollout) -> tuple[dict[str, float], float]:
         scores: dict[str, float] = {}
         reward = 0.0
         total_weight = 0.0
         for scorer_name, fn, weight in self.scorers:
+            weight = float(weight)
+            if not math.isfinite(weight):
+                raise ValueError(f"scorer {scorer_name!r} has a non-finite weight")
             value = float(fn(rollout))
+            if not math.isfinite(value):
+                raise ValueError(f"scorer {scorer_name!r} returned a non-finite value")
             scores[scorer_name] = value
             reward += value * weight
             total_weight += weight
+            if not math.isfinite(reward) or not math.isfinite(total_weight):
+                raise ValueError("scorer aggregate produced a non-finite reward")
         if total_weight > 0:
             reward /= total_weight
+        if not math.isfinite(reward):
+            raise ValueError("scorer aggregate produced a non-finite reward")
         return scores, reward
 
     def _register_class_tools(self) -> None:

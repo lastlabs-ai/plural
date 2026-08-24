@@ -1,28 +1,19 @@
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 import pytest
 
-from enroute import Enroute, TaskData
-from enroute.tracing import JSONLSink
-from enroute.types import (
-    ChatRequest,
-    ChatResponse,
-    Choice,
-    FunctionCall,
-    Message,
-    ToolCall,
-    Usage,
-)
+from enroute import TaskData
+from enroute.environments import verify_replay
+from enroute.tracing import ParsedAction
 
 _WORDLE = Path(__file__).resolve().parents[2] / "examples" / "environment" / "wordle"
 sys.path.insert(0, str(_WORDLE))
 for _name in ("env", "words"):
     sys.modules.pop(_name, None)
-from env import WordleEnv, make_env  # noqa: E402
+from env import MAX_GUESSES, make_env  # noqa: E402
 from words import is_allowed, pattern, pick_answer  # noqa: E402
 
 sys.modules.pop("env", None)
@@ -30,190 +21,90 @@ sys.modules.pop("words", None)
 sys.path.remove(str(_WORDLE))
 
 
-def _env(secret: str = "crane") -> WordleEnv:
-    env = WordleEnv()
-    env.setup(TaskData(task_id="t", input="play", expected=secret, metadata={"seed": 0}))
-    return env
+def _task(secret: str = "crane") -> TaskData:
+    return TaskData(task_id=secret, input="play", expected=secret, metadata={"seed": 0})
 
 
-def test_pattern_duplicate_letters() -> None:
+def test_pattern_duplicate_letters_and_seed() -> None:
     assert pattern("crane", "crane") == "GGGGG"
     assert pattern("abide", "speed") == "...YY"
     assert pattern("erase", "speed") == "Y..YY"
+    assert is_allowed(pick_answer(42))
 
 
-def test_invalid_guess_does_not_consume_turn() -> None:
-    env = _env()
-    out = env.guess("xyzzy")
-    assert "error" in out
+def test_valid_step_records_reward_result_and_decision() -> None:
+    env = make_env()
+    env.reset(_task())
+
+    result = env.step(ParsedAction(name="guess", arguments={"word": "slate"}))
+
+    assert result.reward == pytest.approx(0.2)
+    assert result.observation.guesses_left == 5
+    decision = env.episode_trace.decisions()[0]
+    assert decision.parsed_action[0].name == "guess"
+    assert decision.tool_calls[0].result["pattern"] == "..G.G"
+    assert "SLATE" in decision.tool_calls[0].result["board"]
+
+
+def test_invalid_step_preserves_guess_slot_but_uses_episode_turn() -> None:
+    env = make_env()
+    env.reset(_task())
+
+    result = env.step(ParsedAction(name="guess", arguments={"word": "hi"}))
+
+    assert result.reward == pytest.approx(-0.05)
+    assert result.info["turn"] == 1
+    assert result.observation.guesses_left == MAX_GUESSES
     assert env.rows == []
-    assert env.guesses_left == 6
-    env.guess("hi")
-    assert env.guesses_left == 6
+    assert "error" in env.episode_trace.decisions()[0].tool_calls[0].result
 
 
-def test_guess_result_includes_board() -> None:
-    env = _env("crane")
-    out = env.guess("slate")
-    assert out["pattern"] == "..G.G"
-    assert "SLATE" in out["board"]
-    assert out["letters"]["a"] == "G"
-    assert out["guesses_left"] == 5
-    bad = env.guess("cram")
-    assert "error" in bad
-    assert "SLATE" in bad["board"]
+def test_missing_word_is_recorded_as_tool_error() -> None:
+    env = make_env()
+    env.reset(_task())
+
+    result = env.step(ParsedAction(name="guess", arguments={}))
+
+    tool_call = env.episode_trace.decisions()[0].tool_calls[0]
+    assert result.info["tool_errors"]
+    assert result.reward == pytest.approx(-0.05)
+    assert tool_call.error is not None
+    assert env.guesses_left == MAX_GUESSES
 
 
-def test_reset_seed_is_deterministic() -> None:
-    a = WordleEnv()
-    b = WordleEnv()
-    task = TaskData(task_id="s", input="play", metadata={"seed": 42})
-    a.setup(task)
-    b.setup(task)
-    assert a.secret == b.secret
-    assert a.secret == pick_answer(42)
-    assert is_allowed(a.secret)
+def test_loss_after_six_valid_misses() -> None:
+    env = make_env()
+    env.reset(_task())
+    misses = ["audio", "wordy", "aback", "abase", "abate", "abbey"]
 
+    for word in misses:
+        result = env.step(ParsedAction(name="guess", arguments={"word": word}))
 
-def test_solve_sets_done_and_score() -> None:
-    env = _env("crane")
-    env.guess("slate")
-    assert env.done() is False
+    assert result.terminated is True
+    assert result.truncated is False
+    assert env.solved is False
+    assert env.guesses_left == 0
     assert env.score() == 0.0
-    env.guess("crane")
-    assert env.solved is True
-    assert env.done() is True
-    assert env.score() == pytest.approx((7 - 2) / 6)
 
 
-def test_make_env_only_guess() -> None:
+def test_solved_trace_replays() -> None:
+    task = _task()
     env = make_env()
-    assert env.name == "wordle"
-    assert env.version == "0.2.0"
-    names = {t.function.name for t in env.tool_defs}
-    assert names == {"guess"}
+    env.reset(task)
+    env.step(ParsedAction(name="guess", arguments={"word": "slate"}))
+    env.step(ParsedAction(name="guess", arguments={"word": "crane"}))
+    rollout = env.close_episode()
 
+    replay = verify_replay(make_env(), rollout.trace, task=task)
 
-def test_rollout_solver(tmp_path: Path) -> None:
-    class Provider:
-        name = "openai"
-        calls = 0
-
-        def chat(self, request: ChatRequest) -> ChatResponse:
-            self.calls += 1
-            word = "crane" if self.calls > 1 else "slate"
-            return ChatResponse(
-                id=f"id-{self.calls}",
-                model=request.model,
-                choices=[
-                    Choice(
-                        message=Message(
-                            role="assistant",
-                            tool_calls=[
-                                ToolCall(
-                                    id=f"c{self.calls}",
-                                    function=FunctionCall(
-                                        name="guess",
-                                        arguments=json.dumps({"word": word}),
-                                    ),
-                                )
-                            ],
-                        )
-                    )
-                ],
-                usage=Usage.from_counts(4, 2, cost=0.0),
-                provider=self.name,
-                latency_ms=1.0,
-            )
-
-        def close(self) -> None:
-            return None
-
-        async def aclose(self) -> None:
-            return None
-
-    env = make_env()
-    client = Enroute(
-        providers={"openai": Provider()},
-        sink=JSONLSink(tmp_path / "t.jsonl"),
-        capture_content=True,
-    )
-    task = TaskData(task_id="crane", input="play", expected="crane", metadata={"seed": 0})
-    rollout = env.rollout(task, client, model="openai/gpt-4o-mini")
+    assert replay.ok, replay.mismatches
+    assert rollout.trace.terminated is True
     assert rollout.trace.outcome is not None
-    assert rollout.trace.outcome.reward == pytest.approx((7 - 2) / 6)
-    assert rollout.env.solved is True
-    client.close()
+    assert rollout.trace.outcome.reward == pytest.approx(5 / 6)
 
 
-def test_play_via_reset_and_step(tmp_path: Path) -> None:
-    from enroute.types import ChatRequest as Req
-
-    class Provider:
-        name = "openai"
-        calls = 0
-
-        def chat(self, request: ChatRequest) -> ChatResponse:
-            self.calls += 1
-            word = "crane"
-            return ChatResponse(
-                id=f"id-{self.calls}",
-                model=request.model,
-                choices=[
-                    Choice(
-                        message=Message(
-                            role="assistant",
-                            tool_calls=[
-                                ToolCall(
-                                    id=f"c{self.calls}",
-                                    function=FunctionCall(
-                                        name="guess",
-                                        arguments=json.dumps({"word": word}),
-                                    ),
-                                )
-                            ],
-                        )
-                    )
-                ],
-                usage=Usage.from_counts(4, 2, cost=0.0),
-                provider=self.name,
-                latency_ms=1.0,
-            )
-
-        def close(self) -> None:
-            return None
-
-        async def aclose(self) -> None:
-            return None
-
+def test_make_env_is_tool_only_and_versioned() -> None:
     env = make_env()
-    client = Enroute(
-        providers={"openai": Provider()},
-        sink=JSONLSink(tmp_path / "t.jsonl"),
-        capture_content=True,
-    )
-    task = TaskData(task_id="crane", input="play", expected="crane")
-    obs, info = env.reset(task, model="openai/gpt-4o-mini")
-    assert "Guesses left: 6" in str(obs)
-    assert "environment" in info
-    assert env.observation.guesses_left == 6
-    while True:
-        msgs = env.messages()
-        request = Req(model="openai/gpt-4o-mini", messages=msgs, tools=env.tool_defs)
-        response = client.chat(
-            model="openai/gpt-4o-mini",
-            messages=msgs,
-            tools=env.tool_defs,
-        )
-        obs, _reward, terminated, truncated, extra = env.step(
-            response.message.tool_calls,
-            request=request,
-            response=response,
-        )
-        if terminated or truncated:
-            break
-    rollout = env.close_episode(client=client)
-    assert rollout.env.solved is True
-    assert rollout.trace.outcome is not None
-    assert rollout.trace.outcome.reward == pytest.approx(1.0)
-    client.close()
+    assert env.version == "0.3.0"
+    assert env.max_turns == MAX_GUESSES * 4
+    assert {item.function.name for item in env.tool_defs} == {"guess"}

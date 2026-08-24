@@ -23,6 +23,8 @@ from typing import Any
 
 from enroute.tracing.schema import Trace
 
+_CONTENT_OMITTED = None
+
 
 class Redactor:
     """Redact sensitive fields and patterns from traces.
@@ -61,7 +63,12 @@ class Redactor:
         """
         data = trace.model_dump(mode="python")
         for path in self.fields:
-            _set_path(data, path.split("."), self.replacement)
+            replacement = None if path in {"initial_state", "final_state"} else self.replacement
+            _set_path(data, path.split("."), replacement)
+        if self.fields:
+            metadata = data.setdefault("metadata", {})
+            existing = set(metadata.get("redacted_fields") or [])
+            metadata["redacted_fields"] = sorted(existing | self.fields)
         if self.patterns:
             data = _apply_patterns(data, self.patterns, self.replacement)
         if self.drop_content:
@@ -69,6 +76,15 @@ class Redactor:
         result = Trace.model_validate(data)
         for fn in self.callables:
             result = fn(result)
+        redaction = dict(result.metadata.get("redaction") or {})
+        if self.fields:
+            redaction["fields"] = sorted(self.fields)
+        if self.patterns:
+            redaction["pattern_count"] = len(self.patterns)
+        if self.callables:
+            redaction["callable_count"] = len(self.callables)
+        if redaction:
+            result.metadata["redaction"] = redaction
         return result
 
 
@@ -134,31 +150,77 @@ def _apply_patterns(obj: Any, patterns: list[re.Pattern[str]], replacement: str)
     return obj
 
 
-def _omit_request_messages(req: Any) -> None:
+def _omit_request_messages(req: Any, path: str, redacted_fields: set[str]) -> None:
     if isinstance(req, dict) and "messages" in req:
-        for msg in req["messages"]:
+        for index, msg in enumerate(req["messages"]):
             if isinstance(msg, dict) and "content" in msg:
-                msg["content"] = "[CONTENT_OMITTED]"
+                if msg["content"] is not None:
+                    redacted_fields.add(f"{path}.messages[{index}].content")
+                msg["content"] = _CONTENT_OMITTED
 
 
-def _omit_response_content(resp: Any) -> None:
+def _omit_response_content(resp: Any, path: str, redacted_fields: set[str]) -> None:
     if isinstance(resp, dict):
-        for choice in resp.get("choices") or []:
+        for index, choice in enumerate(resp.get("choices") or []):
             message = choice.get("message")
             if isinstance(message, dict) and "content" in message:
-                message["content"] = "[CONTENT_OMITTED]"
+                if message["content"] is not None:
+                    redacted_fields.add(f"{path}.choices[{index}].message.content")
+                message["content"] = _CONTENT_OMITTED
 
 
 def _drop_content(data: dict[str, Any]) -> dict[str, Any]:
     data = copy.deepcopy(data)
-    for step in data.get("steps") or []:
+    metadata = data.setdefault("metadata", {})
+    redacted_fields = set(metadata.get("redacted_fields") or [])
+    metadata["redaction"] = {"drop_content": True}
+    task = metadata.get("task")
+    if isinstance(task, dict) and "input" in task:
+        if task["input"] is not None:
+            redacted_fields.add("metadata.task.input")
+        task["input"] = _CONTENT_OMITTED
+    for state_key in ("initial_state", "final_state"):
+        if state_key in data and data[state_key] is not None:
+            redacted_fields.add(state_key)
+            data[state_key] = _CONTENT_OMITTED
+    for step_index, step in enumerate(data.get("steps") or []):
         step_type = step.get("type")
         if step_type == "llm":
-            _omit_request_messages(step.get("request"))
-            _omit_response_content(step.get("response"))
+            _omit_request_messages(
+                step.get("request"),
+                f"steps[{step_index}].request",
+                redacted_fields,
+            )
+            _omit_response_content(
+                step.get("response"),
+                f"steps[{step_index}].response",
+                redacted_fields,
+            )
         elif step_type == "decision":
-            _omit_request_messages(step.get("model_context"))
-            _omit_response_content(step.get("model_output"))
+            _omit_request_messages(
+                step.get("model_context"),
+                f"steps[{step_index}].model_context",
+                redacted_fields,
+            )
+            _omit_response_content(
+                step.get("model_output"),
+                f"steps[{step_index}].model_output",
+                redacted_fields,
+            )
             if "observation" in step and step["observation"] is not None:
-                step["observation"] = "[CONTENT_OMITTED]"
+                redacted_fields.add(f"steps[{step_index}].observation")
+                step["observation"] = _CONTENT_OMITTED
+            for action_index, action in enumerate(step.get("parsed_action") or []):
+                if (
+                    isinstance(action, dict)
+                    and action.get("name") == "respond"
+                    and isinstance(action.get("arguments"), dict)
+                    and "text" in action["arguments"]
+                ):
+                    if action["arguments"]["text"] is not None:
+                        redacted_fields.add(
+                            f"steps[{step_index}].parsed_action[{action_index}].arguments.text"
+                        )
+                    action["arguments"]["text"] = _CONTENT_OMITTED
+    metadata["redacted_fields"] = sorted(redacted_fields)
     return data

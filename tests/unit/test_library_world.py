@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from enroute import Enroute, TaskData
+from enroute import Enroute, ScriptedPolicy, TaskData
 from enroute.tracing import JSONLSink
 from enroute.tracing.schema import ParsedAction
 from enroute.types import (
@@ -42,6 +42,7 @@ def _env() -> LibraryEnv:
 
 def test_search_read_answer_score() -> None:
     env = _env()
+    assert "expected" not in env.state.model_dump()
     hits = env.search("voting")
     assert hits["hits"][0]["doc_id"] == "d1"
     body = env.read("d1")
@@ -103,6 +104,7 @@ def test_make_env_and_rollout(tmp_path: Path) -> None:
 
     env = make_env()
     assert env.name == "library"
+    assert env.version == "0.2.0"
     names = {t.function.name for t in env.tool_defs}
     assert "research" in names
     client = Enroute(
@@ -116,6 +118,10 @@ def test_make_env_and_rollout(tmp_path: Path) -> None:
     names = [a.name for d in rollout.trace.decisions() for a in d.parsed_action]
     assert names == ["search", "read", "answer"]
     assert rollout.trace.returns(gamma=0.9) == pytest.approx([0.81, 0.9, 1.0])
+    assert rollout.trace.initial_state is not None
+    assert "expected" not in rollout.trace.initial_state
+    assert "docs" not in rollout.trace.initial_state
+    assert "expected" not in rollout.trace.metadata["task"]
     client.close()
 
 
@@ -133,3 +139,23 @@ def test_research_records_nested_tools() -> None:
     assert decision.tool_calls[0].name == "research"
     assert [child.name for child in decision.tool_calls[0].children] == ["search", "read"]
     assert decision.tool_calls[0].children[0].parent == "research"
+
+
+def test_run_episode_with_scripted_policy() -> None:
+    env = make_env()
+    task = next(env.iter_tasks())
+    rollout = env.run_episode(
+        task,
+        ScriptedPolicy(
+            [
+                ParsedAction(name="search", arguments={"query": "voting"}),
+                ParsedAction(name="read", arguments={"doc_id": "d1"}),
+                ParsedAction(name="answer", arguments={"text": "the river path"}),
+            ]
+        ),
+    )
+
+    assert rollout.trace.terminated is True
+    assert rollout.trace.outcome is not None
+    assert rollout.trace.outcome.reward == 1.0
+    assert "expected" not in rollout.trace.initial_state

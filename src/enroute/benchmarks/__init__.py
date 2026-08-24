@@ -8,6 +8,26 @@ Examples:
 
 from __future__ import annotations
 
-from enroute.benchmarks.runner import Benchmark, Report
+from enroute.benchmarks.runner import (
+    Benchmark,
+    CaseKey,
+    CaseResult,
+    ModelStats,
+    Report,
+    RunManifest,
+    TaskDatasetMetadata,
+    TaskSetMetadata,
+    WinRatePair,
+)
 
-__all__ = ["Benchmark", "Report"]
+__all__ = [
+    "Benchmark",
+    "CaseKey",
+    "CaseResult",
+    "ModelStats",
+    "Report",
+    "RunManifest",
+    "TaskDatasetMetadata",
+    "TaskSetMetadata",
+    "WinRatePair",
+]

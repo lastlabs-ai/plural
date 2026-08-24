@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
-from enroute import TaskData
+from enroute import ScriptedPolicy, TaskData
+from enroute.environments import verify_replay
+from enroute.tracing import ParsedAction
+from enroute.types import ChatRequest
 
 _TWITTER = Path(__file__).resolve().parents[2] / "examples" / "environment" / "twitter"
 sys.path.insert(0, str(_TWITTER))
@@ -79,17 +83,21 @@ def test_goal_scores() -> None:
     assert env.done() is True
 
     likes_env = _env(goal="get_n_likes")
-    likes_env.task.metadata["target_likes"] = 2
-    post = likes_env.tweet("please like")["post"]["post_id"]
-    likes_env.posts[post].likes.add("alice")
-    likes_env.posts[post].likes.add("bob")
+    likes_env.tweet("please like")
+    result = likes_env.wait_for_engagement()
+    assert result == {"new_likes": 3, "likes_on_own_posts": 3}
     assert likes_env.score("get_n_likes") == 1.0
+    assert likes_env.done() is True
+
+    empty_env = _env(goal="get_n_likes")
+    empty_env.tweet("   ")
+    assert empty_env.wait_for_engagement()["new_likes"] == 0
 
 
 def test_make_env_registers_tools() -> None:
     env = make_env()
     assert env.name == "twitter-account"
-    assert env.version == "0.1.0"
+    assert env.version == "0.2.0"
     names = {t.function.name for t in env.tool_defs}
     for required in {
         "view_timeline",
@@ -99,6 +107,7 @@ def test_make_env_registers_tools() -> None:
         "follow",
         "unfollow",
         "tweet",
+        "wait_for_engagement",
         "reply",
         "like",
         "unlike",
@@ -111,3 +120,74 @@ def test_make_env_registers_tools() -> None:
         assert required in names
     tasks = list(env.iter_tasks())
     assert tasks[0].metadata["goal"] == "reply_to_mentions"
+
+
+class _ReplyPolicy:
+    def __init__(self) -> None:
+        self.ids: list[str] | None = None
+        self.index = 0
+
+    def act(self, request: ChatRequest, **_: object) -> ParsedAction:
+        if self.ids is None:
+            for message in reversed(request.messages):
+                if message.name == "view_notifications" and message.content:
+                    payload = json.loads(message.content)
+                    self.ids = [str(item["post_id"]) for item in payload["mentions"]]
+                    break
+            if self.ids is None:
+                return ParsedAction(name="view_notifications")
+        post_id = self.ids[self.index]
+        self.index += 1
+        return ParsedAction(name="reply", arguments={"post_id": post_id, "text": "Thanks!"})
+
+
+def test_reply_goal_run_episode_records_actions() -> None:
+    env = make_env()
+    task = list(env.iter_tasks())[0]
+    rollout = env.run_episode(task, _ReplyPolicy())
+
+    actions = [
+        action.name for decision in rollout.trace.decisions() for action in decision.parsed_action
+    ]
+    assert actions == ["view_notifications", "reply", "reply"]
+    assert rollout.trace.terminated is True
+    assert rollout.trace.outcome is not None
+    assert rollout.trace.outcome.reward == 1.0
+
+
+def test_likes_goal_step_and_replay() -> None:
+    env = make_env()
+    task = list(env.iter_tasks())[1]
+    env.reset(task)
+    first = env.step(ParsedAction(name="tweet", arguments={"text": "A useful update"}))
+    second = env.step(ParsedAction(name="wait_for_engagement"))
+    rollout = env.close_episode()
+
+    assert first.terminated is False
+    assert second.terminated is True
+    assert second.observation.followers == 3
+    assert env.score() == 1.0
+    actions = [
+        action.name for decision in rollout.trace.decisions() for action in decision.parsed_action
+    ]
+    assert actions == ["tweet", "wait_for_engagement"]
+    replay = verify_replay(make_env(), rollout.trace)
+    assert replay.ok, replay.mismatches
+
+
+def test_likes_goal_run_episode() -> None:
+    env = make_env()
+    task = list(env.iter_tasks())[1]
+    rollout = env.run_episode(
+        task,
+        ScriptedPolicy(
+            [
+                ParsedAction(name="tweet", arguments={"text": "A useful update"}),
+                ParsedAction(name="wait_for_engagement"),
+            ]
+        ),
+    )
+
+    assert rollout.trace.terminated is True
+    assert rollout.trace.outcome is not None
+    assert rollout.trace.outcome.reward == 1.0

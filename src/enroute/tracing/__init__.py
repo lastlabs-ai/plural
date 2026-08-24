@@ -9,6 +9,7 @@ Examples:
 from __future__ import annotations
 
 from enroute.tracing.redaction import Redactor, Sampler
+from enroute.tracing.resources import trace_json_schema
 from enroute.tracing.schema import (
     Decision,
     Event,
@@ -19,6 +20,8 @@ from enroute.tracing.schema import (
     Step,
     ToolCallStep,
     Trace,
+    TraceContext,
+    TraceKind,
     Transition,
 )
 from enroute.tracing.sinks import JSONLSink, MultiSink, OTelSink, Sink, SQLiteSink
@@ -41,6 +44,9 @@ __all__ = [
     "Step",
     "ToolCallStep",
     "Trace",
+    "TraceContext",
+    "TraceKind",
     "TraceWriter",
     "Transition",
+    "trace_json_schema",
 ]

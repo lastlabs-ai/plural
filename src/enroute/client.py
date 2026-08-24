@@ -43,7 +43,7 @@ from enroute.providers.openai_compatible import (
 from enroute.routing.policies import RoutingPolicy
 from enroute.routing.router import AttemptRecord, Router
 from enroute.tracing.redaction import Redactor, Sampler
-from enroute.tracing.schema import Attempt, Trace, new_trace_id
+from enroute.tracing.schema import Attempt, Trace, TraceContext, new_trace_id
 from enroute.tracing.sinks import JSONLSink, Sink
 from enroute.tracing.writer import TraceWriter
 from enroute.types import ChatRequest, ChatResponse, Message, StreamChunk, Tool
@@ -311,6 +311,8 @@ class Enroute:
         max_tokens: int | None = None,
         metadata: dict[str, Any] | None = None,
         tags: dict[str, str] | None = None,
+        write_trace: bool = True,
+        trace_context: TraceContext | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Create a chat completion.
@@ -324,6 +326,8 @@ class Enroute:
             max_tokens: Max tokens to generate.
             metadata: Request metadata stored on the trace.
             tags: Extra trace tags.
+            write_trace: Whether to persist this model-call trace.
+            trace_context: Optional parent and episode lineage.
             **kwargs: Additional :class:`~enroute.types.ChatRequest` fields.
 
         Returns:
@@ -339,15 +343,19 @@ class Enroute:
             metadata=metadata,
             **kwargs,
         )
-        trace = Trace(tags={**self.tags, **(tags or {})}, metadata=dict(request.metadata))
+        trace = self._call_trace(request, tags=tags, trace_context=trace_context)
         try:
             response, attempts = self.router.chat(request)
-            self._record_success(trace, request, response, attempts)
-            response.raw = {**(response.raw or {}), "enroute_trace_id": trace.trace_id}
+            self._record_success(trace, request, response, attempts, write_trace=write_trace)
+            response.raw = {
+                **(response.raw or {}),
+                "enroute_trace_id": self._response_trace_id(trace, trace_context),
+            }
             return response
         except Exception as exc:
             trace.add_llm(request=request, response=None, error=str(exc))
-            self.writer.record(trace)
+            if write_trace:
+                self.writer.record(trace)
             raise
 
     async def achat(
@@ -361,6 +369,8 @@ class Enroute:
         max_tokens: int | None = None,
         metadata: dict[str, Any] | None = None,
         tags: dict[str, str] | None = None,
+        write_trace: bool = True,
+        trace_context: TraceContext | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Async chat completion.
@@ -374,6 +384,8 @@ class Enroute:
             max_tokens: Max tokens.
             metadata: Request metadata.
             tags: Extra trace tags.
+            write_trace: Whether to persist this model-call trace.
+            trace_context: Optional parent and episode lineage.
             **kwargs: Additional request fields.
 
         Returns:
@@ -389,15 +401,19 @@ class Enroute:
             metadata=metadata,
             **kwargs,
         )
-        trace = Trace(tags={**self.tags, **(tags or {})}, metadata=dict(request.metadata))
+        trace = self._call_trace(request, tags=tags, trace_context=trace_context)
         try:
             response, attempts = await self.router.achat(request)
-            self._record_success(trace, request, response, attempts)
-            response.raw = {**(response.raw or {}), "enroute_trace_id": trace.trace_id}
+            self._record_success(trace, request, response, attempts, write_trace=write_trace)
+            response.raw = {
+                **(response.raw or {}),
+                "enroute_trace_id": self._response_trace_id(trace, trace_context),
+            }
             return response
         except Exception as exc:
             trace.add_llm(request=request, response=None, error=str(exc))
-            self.writer.record(trace)
+            if write_trace:
+                self.writer.record(trace)
             raise
 
     def stream(
@@ -407,6 +423,8 @@ class Enroute:
         messages: Sequence[Message | dict[str, Any]],
         models: list[str] | None = None,
         tags: dict[str, str] | None = None,
+        write_trace: bool = True,
+        trace_context: TraceContext | None = None,
         **kwargs: Any,
     ) -> Iterator[StreamChunk]:
         """Stream a chat completion and record a trace on completion.
@@ -416,6 +434,8 @@ class Enroute:
             messages: Conversation messages.
             models: Optional fallback chain.
             tags: Extra trace tags.
+            write_trace: Whether to persist this model-call trace.
+            trace_context: Optional parent and episode lineage.
             **kwargs: Additional request fields.
 
         Yields:
@@ -424,12 +444,27 @@ class Enroute:
         request = self._make_request(
             model=model, messages=messages, models=models, stream=True, **kwargs
         )
-        trace = Trace(tags={**self.tags, **(tags or {})}, metadata=dict(request.metadata))
+        trace = self._call_trace(request, tags=tags, trace_context=trace_context)
+        response_trace_id = self._response_trace_id(trace, trace_context)
 
         def on_complete(response: ChatResponse, attempts: list[AttemptRecord]) -> None:
-            self._record_success(trace, request, response, attempts)
+            self._record_success(
+                trace,
+                request,
+                response,
+                attempts,
+                write_trace=write_trace,
+            )
 
-        yield from self.router.stream(request, on_complete=on_complete)
+        for chunk in self.router.stream(request, on_complete=on_complete):
+            yield chunk.model_copy(
+                update={
+                    "raw": {
+                        **(chunk.raw or {}),
+                        "enroute_trace_id": response_trace_id,
+                    }
+                }
+            )
 
     async def astream(
         self,
@@ -438,6 +473,8 @@ class Enroute:
         messages: Sequence[Message | dict[str, Any]],
         models: list[str] | None = None,
         tags: dict[str, str] | None = None,
+        write_trace: bool = True,
+        trace_context: TraceContext | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         """Async streaming chat completion.
@@ -447,6 +484,8 @@ class Enroute:
             messages: Conversation messages.
             models: Optional fallback chain.
             tags: Extra trace tags.
+            write_trace: Whether to persist this model-call trace.
+            trace_context: Optional parent and episode lineage.
             **kwargs: Additional request fields.
 
         Yields:
@@ -455,13 +494,27 @@ class Enroute:
         request = self._make_request(
             model=model, messages=messages, models=models, stream=True, **kwargs
         )
-        trace = Trace(tags={**self.tags, **(tags or {})}, metadata=dict(request.metadata))
+        trace = self._call_trace(request, tags=tags, trace_context=trace_context)
+        response_trace_id = self._response_trace_id(trace, trace_context)
 
         def on_complete(response: ChatResponse, attempts: list[AttemptRecord]) -> None:
-            self._record_success(trace, request, response, attempts)
+            self._record_success(
+                trace,
+                request,
+                response,
+                attempts,
+                write_trace=write_trace,
+            )
 
         async for chunk in self.router.astream(request, on_complete=on_complete):
-            yield chunk
+            yield chunk.model_copy(
+                update={
+                    "raw": {
+                        **(chunk.raw or {}),
+                        "enroute_trace_id": response_trace_id,
+                    }
+                }
+            )
 
     def label(
         self,
@@ -554,6 +607,8 @@ class Enroute:
         request: ChatRequest,
         response: ChatResponse,
         attempts: list[AttemptRecord],
+        *,
+        write_trace: bool = True,
     ) -> None:
         req_for_trace: ChatRequest | dict[str, Any]
         resp_for_trace: ChatResponse | None
@@ -577,7 +632,32 @@ class Enroute:
             response=resp_for_trace,
             attempts=[Attempt(**a.to_dict()) for a in attempts],
         )
-        self.writer.record(trace)
+        if response.choices:
+            trace.stop_reason = response.choices[0].finish_reason
+        if write_trace:
+            self.writer.record(trace)
+
+    def _call_trace(
+        self,
+        request: ChatRequest,
+        *,
+        tags: dict[str, str] | None,
+        trace_context: TraceContext | None,
+    ) -> Trace:
+        return Trace(
+            trace_kind="llm_call" if trace_context is not None else "production",
+            parent_trace_id=trace_context.parent_trace_id if trace_context else None,
+            episode_trace_id=trace_context.episode_trace_id if trace_context else None,
+            model=request.model,
+            tags={**self.tags, **(tags or {})},
+            metadata=dict(request.metadata),
+        )
+
+    @staticmethod
+    def _response_trace_id(trace: Trace, trace_context: TraceContext | None) -> str:
+        if trace_context is not None and trace_context.episode_trace_id:
+            return trace_context.episode_trace_id
+        return trace.trace_id
 
 
 def start_trace(**kwargs: Any) -> Trace:

@@ -40,8 +40,26 @@ client.close()
 | Folder | What it covers |
 | --- | --- |
 | [`tracing/`](tracing/) | Redaction, sinks, late labels |
-| [`environment/`](environment/) | Tasks, tools, scorers → datasets |
+| [`environment/`](environment/) | Tasks, tools, scorers → episode traces |
 | [`environment/library/`](environment/library/) | Basic RL: search / read / answer, then `returns(γ)` |
-| [`environment/wordle/`](environment/wordle/) | Wordle: `uv run python examples/wordle/run.py --secret crane` |
+| [`environment/wordle/`](environment/wordle/) | Wordle: `uv run python examples/environment/wordle/run.py --secret crane` |
 | [`environment/twitter/`](environment/twitter/) | `TwitterEnv`: run a simulated Twitter account |
-| [`benchmarking/`](benchmarking/) | Compare models on an environment |
+| [`benchmarking/`](benchmarking/) | Compare models or arbitrary policies |
+
+Each environment folder includes a short `walkthrough.ipynb` covering its
+tools, scored traces, versioned tasks, and policy benchmarking.
+
+Environment demos are offline:
+
+```bash
+uv run python examples/environment/library/run.py
+uv run python examples/environment/wordle/run.py --secret crane
+uv run python examples/environment/twitter/run.py
+```
+
+The two [benchmarking flows](benchmarking/README.md) are also offline:
+
+```bash
+uv run python examples/benchmarking/01_compare_models.py
+uv run python examples/benchmarking/02_compare_policies.py
+```

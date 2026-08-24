@@ -2,60 +2,47 @@
 
 Canonical schema version: **1.0.0**
 
+The source of truth is the serialization schema generated from the Python Pydantic model `enroute.tracing.schema.Trace`. Do not hand-edit any `trace.v1.json` file.
+
+Generate all mirrors:
+
+```bash
+uv run python scripts/generate_trace_schema.py
+```
+
+Check them without writing:
+
+```bash
+uv run python scripts/generate_trace_schema.py --check
+```
+
+The generator writes identical content to three locations:
+
+- `src/enroute/schemas/trace.v1.json` — packaged runtime resource.
+- `schemas/trace.v1.json` — repository integration mirror.
+- [`docs/schemas/trace.v1.json`](../schemas/trace.v1.json) — documentation mirror.
+
+Load the installed package's canonical generated artifact without relying on a repository path:
+
+```python
+from enroute.tracing import trace_json_schema
+
+schema = trace_json_schema()
+```
+
+## Identity, lineage, and stop fields
+
+- `trace_kind` is `production`, `episode`, or `llm_call`.
+- `parent_trace_id` links a child call to its direct episode parent.
+- `episode_trace_id` groups the episode and its optional child calls.
+- `stop_reason` records an environment stop (`terminated`, `truncated`, `policy_stop`, or `failure`) or an LLM finish reason where applicable.
+
+An episode trace sets `episode_trace_id == trace_id`. Linked child LLM traces set both lineage fields to that episode id.
+
+A `Decision` includes `decision_id` and zero-based `index` in addition to observation, model context/output, parsed actions, tool calls, reward events, and timestamp. Valid step variants remain `decision`, `llm`, `tool`, and `event`.
+
 Stability policy:
 
-- Additive fields may appear in `1.x` without bumping the major version.
-- Removing or renaming fields requires a major bump (`2.0.0`).
-- Partners should ignore unknown fields.
-
-The live schema artifact ships in the package and is mirrored here:
-
-See [`schemas/trace.v1.json`](../schemas/trace.v1.json).
-
-```json
-{
-  "trace_id": "string",
-  "environment": "string|null",
-  "environment_version": "string|null",
-  "environment_fingerprint": "string|null",
-  "task_id": "string|null",
-  "model": "string|null",
-  "initial_state": {},
-  "steps": [
-    {
-      "type": "decision|llm|tool|event"
-    }
-  ],
-  "final_state": {},
-  "outcome": {
-    "scores": {"scorer_name": 0.0},
-    "reward": 0.0,
-    "labels": {},
-    "feedback": "string|null"
-  },
-  "metrics": {},
-  "terminated": "boolean|null",
-  "truncated": "boolean|null",
-  "tags": {},
-  "metadata": {},
-  "created_at": "ISO-8601",
-  "schema_version": "1.0.0"
-}
-```
-
-A `decision` step is one model turn:
-
-```json
-{
-  "type": "decision",
-  "observation": "string|object|null",
-  "model_context": {},
-  "model_output": {},
-  "parsed_action": [{"name": "tweet", "arguments": {}}],
-  "tool_calls": [{"type": "tool", "name": "tweet", "arguments": {}, "result": {}}],
-  "reward_events": [{"name": "tweet", "value": 0.05, "reason": null}],
-  "timestamp": "ISO-8601"
-}
-```
-
-`llm`, `tool`, and `event` remain valid for production traces.
+- Additive fields may appear in `1.x` without a major bump.
+- Removing or renaming fields requires a major version.
+- Consumers should ignore unknown fields.

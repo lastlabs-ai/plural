@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from enroute.environments.stop import StopReason
 from enroute.environments.task import TaskData
 from enroute.tracing.schema import Decision, Trace
 from enroute.types import ChatResponse, Message
@@ -30,10 +31,11 @@ class Episode:
     observation: Any = None
     last_response: ChatResponse | None = None
     closed: bool = False
-    stop_reason: str | None = None
+    stop_reason: StopReason | None = None
     terminated: bool = False
     truncated: bool = False
     tool_errors: list[str] = field(default_factory=list)
+    failure_persisted: bool = False
 
 
 def episode_metrics(episode: Episode) -> dict[str, Any]:
@@ -68,5 +70,5 @@ def episode_metrics(episode: Episode) -> dict[str, Any]:
         "tool_calls": tool_count,
         "cost": cost,
         "latency_ms": latency,
-        "stop_reason": episode.stop_reason,
+        "stop_reason": episode.stop_reason.value if episode.stop_reason is not None else None,
     }

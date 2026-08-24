@@ -1,179 +1,145 @@
 # Environment
 
-**Scenario:** You want to know which model handles refund tickets best — not on a public leaderboard, but on *your* tools, *your* policies, and *your* definition of success. Or you want an agent that *runs a Twitter account* and you need a repeatable environment to train and benchmark against.
+An `Environment[Observation, State]` is a versioned, Gymnasium-shaped harness for tasks, tools, observations, stop conditions, and scorers. The policy is separate from the environment, and every completed run produces one scored episode [Trace](trace.md).
 
-An **Environment** is that test bed.
+## Environment and policy
 
-## One sentence
+Implement environment behavior by overriding author hooks such as `setup`, `observe`, `done`, and—when actions are not tool calls—`apply_action`. Drive it through `reset` / `step`, `run_episode`, or `rollout`; do not call `observe` as the agent loop.
 
-An Environment is a versioned RL-style harness: `class WordleEnv(Environment[WordleObservation, WordleState])` with instructions, tools, and scorers. Its output is a scored [Trace](trace.md) — one document per episode.
-
-You do not need a machine-learning background. Think of it as a repeatable rehearsal of your product:
-
-- **Tasks** — the tickets / prompts / cases to run (they seed `state`)
-- **State** — internal episode data, including hidden fields (the Wordle secret)
-- **Observation** — what the agent is allowed to see (the board, not the secret)
-- **Tools** — `@tool` methods on the env, the same APIs your agent can call in production
-- **Scorers** — functions that return how well the run went (0–1, or any float)
-
-The **model is not part of the environment**. Drive an agent with `reset` / `step` or `rollout`. `observe` is an author hook that those methods call — do not call it to test an agent.
-
-## Gymnasium-shaped loop
-
-`step` is the action. Same contract as Gymnasium and Hugging Face OpenEnv: `reset`, then `step` until the env says stop. `rollout()` is sugar that runs an LLM through that loop (used by Benchmark).
+Policies use the synchronous `Policy` protocol:
 
 ```python
-obs, info = env.reset(task)
-while True:
-    action = policy(obs)          # client.chat → tool calls — not the env
-    obs, reward, terminated, truncated, info = env.step(action)
-    if terminated or truncated:
-        break
-rollout = env.close_episode(client=client)
+class MyPolicy:
+    def act(self, request, *, trace_context=None):
+        return ParsedAction(name="lookup", arguments={"query": "refund"})
+
+rollout = env.run_episode(task, MyPolicy(), model="my-policy")
 ```
 
-| Gymnasium | enroute |
-| --- | --- |
-| `reset(seed)` | `reset(task)` — calls `setup(task)`, opens an episode trace |
-| `step(action)` | Same 5-tuple. Default: dispatch `@tool` methods. Override if needed. |
-| `action_space` | `env.tool_defs` |
-| `observation_space` | `Observation` (returned by `reset` / `step`) |
-| `terminated` | `env.done()` |
-| `truncated` | `max_turns` hit |
-| Episode return | `trace.outcome.reward` |
+`Policy.act()` receives the exact `ChatRequest` built by the environment and returns a `ChatResponse`, one `ParsedAction`, or a list of `ParsedAction` values. Built-in adapters are:
 
-A **rollout is an episode**. The code keeps the `rollout` name.
+- `EnroutePolicy(client, model, ...)` for Enroute model calls.
+- `ScriptedPolicy(actions)` for deterministic tests and offline examples.
 
-## Write an environment
+`rollout(task, client, model=...)` is convenience around `EnroutePolicy` plus `run_episode`.
 
-The environment *is* the simulator. Subclass `Environment[Obs, State]`, put episode data on `self.state`, decorate actions with `@tool`. Name and version come with the class.
+## Lifecycle guards
 
-```python
-from enroute import Environment
-from enroute.environments import Observation, State, tool
+An environment instance has an explicit `episode_state`:
 
-class CounterState(State):
-    n: int = 0
-
-class CounterObservation(Observation):
-    n: int = 0
-    def render(self) -> str:
-        return f"count={self.n}"
-
-class CounterEnv(Environment[CounterObservation, CounterState]):
-    name = "counter"
-    version = "0.1.0"
-
-    def setup(self, task):
-        super().setup(task)
-        self.state = CounterState(seed=self.seed, n=0)
-
-    def observe(self) -> CounterObservation:
-        return CounterObservation(n=self.state.n)
-
-    @tool
-    def inc(self, by: int = 1) -> dict:
-        """Increment the counter."""
-        self.state.n += by
-        return {"n": self.state.n}
-
-env = CounterEnv()
-obs, info = env.reset(task)
-obs, reward, terminated, truncated, info = env.step(action)
-```
-
-`observe` defines the observation type. `reset` and `step` call it. Tools read `self.state` and the cached `self.observation`.
-
-The default `step` runs those tools and records a decision. Override `step` when the action is not a tool call; use `record_decision` and `finish_turn` so the trace still matches. A `@tool` may call other `@tool` methods; those inner calls are recorded as children on the `ToolCallStep` (still one Decision).
-
-Stateless tools still work: `@env.tool` on a plain `Environment()` (the support-triage path).
-
-## Minimal example (no subclass)
-
-```python
-from enroute import Environment, TaskData
-
-env = Environment(name="support-triage", version="0.1.0")
-
-@env.tool
-def lookup_order(order_id: str) -> dict:
-    """Look up an order by id."""
-    return {"order_id": order_id, "status": "shipped"}
-
-@env.scorer(weight=1.0)
-def resolved_correctly(rollout) -> float:
-    text = (rollout.response.text or "").lower()
-    return 1.0 if "shipped" in text else 0.0
-
-@env.tasks
-def tasks():
-    yield TaskData(task_id="t1", input="Where is order A123?")
-
-trace = env.rollout(next(env.iter_tasks()), client, model="openai/gpt-4o-mini").trace
-```
-
-## Traces from any environment
-
-Every environment is different (library, Twitter, your CRM). The trace is not. `rollout()` always writes **one [Trace](trace.md) per episode**:
-
-1. `reset` snapshots `initial_state` and the first observation
-2. Each `step` appends a **decision** (observation, `model_context`, action, tool results) and puts the next observation on `env.messages()` so the next `chat` sees the same board the decision recorded
-3. `close_episode` runs scorers → `outcome.reward`, plus `final_state` and `metrics`
-
-That is the only shape observability and a future trainer need. Environments vary in their **state and tools**; they do not invent a new log format.
-
-```python
-rollout = env.rollout(task, client, model="openai/gpt-4o-mini")
-trace = rollout.trace
-trace.decisions()          # what happened
-trace.transitions()        # (obs, action, reward, next_obs, done)
-trace.returns(gamma=0.9)   # G_t for each decision — the RL training signal
-```
-
-## Reward is injected, not assumed per decision
-
-Most real work is **sparse or delayed**. Researching, then posting, then getting likes tomorrow is one trajectory with one outcome — not three independently scored turns.
-
-Three injection points, none of them environment-specific:
-
-| When | Where | Use |
+| State | Meaning | Valid next operation |
 | --- | --- | --- |
-| During a step (optional) | `env.step_reward` → `Decision.reward_events` | Shaping, costs |
-| End of episode | scorers → `outcome.reward` | The usual return (correct answer, goal hit) |
-| Later (hours, humans, KPIs) | `trace.credit(value, decision_index=…)` or `client.label(trace_id, reward=…)` | Likes, reviews, downstream success |
+| `idle` | No episode has started | `reset(task)` |
+| `open` | An episode is active | `messages`, `step`, `close_episode` |
+| `stopped` | A `StopReason` has been set | `messages`, `close_episode` |
+| `closed` | The prior episode was scored and closed | `reset(task)` |
 
-**Do not** have the environment assign credit backward onto `search` because a later `answer` was good. Persist the episode; the trainer walks it:
+Calling an operation outside its valid state raises `EpisodeError` with the current `EpisodeState`. Every defined `StopReason` enters `stopped`, even when both Gym flags are false. After that, only `messages()` and `close_episode()` are allowed; close before resetting. `Environment.step()` is framework-owned and cannot be overridden, which guarantees these lifecycle checks for every action.
 
-`G_t = r_t + γ G_{t+1}` via `trace.returns(gamma=…)`.
+## Actions and stopping
 
-- `source="outcome"` (default) — zeros, then the scorer on the last decision. Research-then-answer.
-- `source="events"` — only `reward_events` (including late `credit` on a specific decision, e.g. likes on the tweet).
-- `source="both"` — events plus the terminal scorer.
+`step` records one `Decision` and advances the lifecycle. Its default `apply_action` hook dispatches tool actions to `@tool` methods, so tool-based environments need no action override. A model response without tool calls is normalized to the text action `ParsedAction(name="respond", arguments={"text": ...})` and defaults to `policy_stop`.
 
-The start-to-finish example is the [library environment](../guides/write-environment.md#basic-rl-library): search / read / answer, no step rewards, `returns(γ=0.9)` credits the research.
+For scalar or custom text workflows, override `apply_action(action, *, runtime, response=None)` and return an `ActionResult`. The hook receives the raw action, may mutate environment state, and describes the turn with `parsed_actions`, `tool_calls`, `reward_events`, `stop_reason`, and `info`. Return `stop_reason=None` to continue after a text action:
 
-## Versioning
+```python
+from enroute import ActionResult, Environment
+from enroute.tracing import ParsedAction
 
-`version` is a **compatibility key**, not a label. Traces from `twitter-account@0.2.0` are not comparable to `0.1.0` if tools, observations, or reward semantics changed.
+class RatingEnv(Environment):
+    def apply_action(self, action, *, runtime, response=None):
+        self.state.rating = int(action)
+        return ActionResult(
+            parsed_actions=[
+                ParsedAction(name="rate", arguments={"value": self.state.rating})
+            ],
+            stop_reason=None,
+            info={"accepted": True},
+        )
+```
 
-Each episode also stores `environment_fingerprint` — a hash of name, version, observation/state type names, tool JSON schemas, instructions, and scorer names + weights. Two episodes with the same fingerprint saw the same action surface and scoring contract.
+Do not call `record_decision()` or `finish_turn()` from `apply_action`; `step` records the returned result and advances exactly once. Those methods remain public only for advanced manual integrations. Custom `ActionResult.info` is merged into `StepResult.info`, but cannot replace canonical `turn`, `stop_reason`, or `tool_errors` values.
 
-Bump rules:
+`step` returns `(observation, reward, terminated, truncated, info)`. `info["stop_reason"]` and the final trace distinguish why the episode stopped:
 
-- **patch** — bugfix, docs, deterministic seed fix; traces stay comparable
-- **minor** — add tools or tasks; old traces still valid
-- **major** — remove/rename tools, change `observe()` shape, or change what a scorer means
+| `stop_reason` | `terminated` | `truncated` | Meaning |
+| --- | ---: | ---: | --- |
+| `terminated` | true | false | `done()` reached a natural terminal state |
+| `truncated` | false | true | `max_turns` was reached before termination |
+| `policy_stop` | false | false | The policy emitted no tool action, usually a text response |
+| `failure` | false | false | A custom loop explicitly stopped because execution failed |
 
-Datasets record fingerprints in metadata. Benchmark reports include the fingerprint.
+Natural termination takes precedence over truncation; truncation takes precedence over an explicit policy stop on the same turn.
 
-## How this differs from an "eval script"
+Exceptions from a policy, `apply_action`, `step`, or a scorer close the episode trace, set `failed=true` and `stop_reason="failure"`, and re-raise. `run_episode(..., persist_with=client)` persists that failed trace before re-raising.
 
-Eval scripts usually hard-code a prompt list and a string match. Environments:
+## State, observations, and snapshots
 
-1. Expose the **same tool surface** the agent had when deciding
-2. Emit the **same Trace** as production (one episode, steps are decisions)
-3. Are **versioned**, so benchmark numbers stay comparable over time
+State can contain hidden values; observations are what the policy may see. Snapshots are independently controlled for persistence:
 
-## How this connects
+```python
+class WordleEnv(Environment[WordleObservation, WordleState]):
+    def snapshot(self) -> dict:
+        # Include only fields approved for trace storage.
+        return {"guesses": list(self.state.guesses)}
+```
 
-Rollouts fill a [Dataset](dataset.md). Running the environment across models is a [Benchmark](benchmark.md).
+The default `snapshot()` returns `None`. This safe-by-default behavior prevents `self.state`—including secrets—from being serialized accidentally. Override it only with an explicitly trace-safe representation; it supplies both `initial_state` and `final_state`.
+
+`TaskData.expected` is scorer-only and is never copied into episode trace metadata. The trace includes `task_id`, task `input`, and task `metadata`.
+
+## Runtime boundary
+
+`Runtime` is the small extension boundary for tool execution:
+
+```python
+class Runtime(Protocol):
+    def call(self, name: str, arguments: dict[str, Any]) -> Any: ...
+```
+
+`LocalRuntime` executes registered Python callables in-process. Supply another synchronous implementation to `step`, `run_episode`, or `rollout` when tool invocation needs a sandbox, remote executor, or another boundary. The runtime interface is a synchronous public-alpha extension point; enroute does not provide a sandbox or remote execution service.
+
+For benchmarks, `runtime_factory` creates a fresh runtime per job. Custom runtimes may expose `fingerprint()` or `fingerprint_payload()`; benchmark manifests record the resulting `runtime_fingerprints`.
+
+## Fresh benchmark workers
+
+`Benchmark` calls `env.spawn()` for each job. The default implementation reconstructs the environment with standard constructor fields and copies or rebinds tools, scorers, and the task provider. It cannot safely recreate subclasses with required constructor arguments or stateful dynamic closures that capture the original environment.
+
+Override `spawn()` when the subclass owns a reliable reconstruction strategy, or pass `Benchmark(..., environment_factory=lambda: MyEnv(...))`. The factory must return a fresh, fully configured environment per job.
+
+## Tracing and persistence
+
+`run_episode(..., persist_with=client)` and `rollout(...)` persist exactly one `trace_kind="episode"` trace by default. Each decision stores its stable `decision_id`, zero-based `index`, observation, policy request/output, parsed actions, tool results, and reward events.
+
+`rollout(..., record_llm_traces=True)` opts into additional `trace_kind="llm_call"` child traces. Each child has `parent_trace_id` and `episode_trace_id` set to the episode trace id. With the default `False`, model calls are embedded in decisions but are not persisted as duplicate top-level traces.
+
+## Deterministic replay
+
+Replay applies recorded actions without calling a policy:
+
+```python
+result = verify_replay(WordleEnv(), rollout.trace, task=task)
+assert result.ok, result.mismatches
+```
+
+Replay checks the environment fingerprint, decision observations, step rewards and stop flags, final safe snapshot, and final stop state. A trace normally reconstructs `TaskData` from `metadata["task"]`. Because `expected` is intentionally excluded, pass the original `task=` when setup or scoring needs that hidden value.
+
+Replay rejects traces marked as redacted because their actions, observations, state, or task input may no longer be complete enough for deterministic execution.
+
+## Compatibility fingerprint
+
+`environment_fingerprint` hashes the environment name/version, `max_turns`, system instructions, observation/state type names, tool schemas, scorer names and weights, and implementation bodies for tools, scorers, and the `setup`, `observe`, `apply_action`, `done`, `snapshot`, and `step_reward` hooks. It also includes stable configured state for callable objects and closures. Callable-object configuration includes private instance fields and slots; define `fingerprint_payload()` on the callable when a smaller authoritative stable configuration is appropriate.
+
+Override `fingerprint_payload()` when behavior depends on constructor arguments or external configuration not already represented—for example, a ruleset id or endpoint version. Return only deterministic, non-secret values. Never include credentials, tokens, or other secrets in environment or callable fingerprint configuration.
+
+Use the declared `version` as the human compatibility key and the fingerprint as a local execution-contract compatibility key. Benchmark manifests record both, but a matching fingerprint cannot guarantee identical results from changing external services, nondeterministic dependencies, or mutable remote data.
+
+## Rewards and transitions
+
+Step rewards become `Decision.reward_events`; end-of-episode scorers become `trace.outcome.reward`. Late labels can be attached with `trace.credit(...)`. Select the intended source explicitly when flattening:
+
+- `trace.transitions(source="outcome")` puts the episode outcome on the final decision.
+- `source="events"` uses decision reward events.
+- `source="both"` combines them.
+
+Task inputs belong in a [TaskDataset](dataset.md); completed episode traces belong in a `Dataset` / `TraceDataset`. See [Benchmark](benchmark.md) for repeated comparisons.

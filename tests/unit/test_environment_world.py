@@ -4,11 +4,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from enroute import Dataset, Enroute, Environment, TaskData, Trace
+import pytest
+
+from enroute import ActionResult, Dataset, Enroute, Environment, TaskData, Trace
 from enroute.environments import Observation, State, StepResult, tool
 from enroute.environments.env import TaskData as TaskDataFromEnv
 from enroute.environments.export.hf import to_huggingface_records
 from enroute.environments.export.verifiers import to_verifiers_trace
+from enroute.environments.runtime import Runtime
 from enroute.environments.task import TaskData as TaskDataFromTask
 from enroute.tracing import JSONLSink
 from enroute.tracing.schema import Decision, Outcome, ParsedAction
@@ -92,6 +95,9 @@ class CounterEnv(Environment[CounterObservation, CounterState]):
 
     def done(self) -> bool:
         return self.state.finished
+
+    def snapshot(self) -> dict[str, Any]:
+        return self.state.model_dump(exclude={"metadata"})
 
     def step_reward(self, tool_name: str, result: Any) -> float | None:
         if tool_name == "inc":
@@ -192,7 +198,13 @@ def test_rollout_records_request_on_decision(tmp_path: Path) -> None:
     )
     client = _client(provider, tmp_path)
     task = TaskData(task_id="t1", input="go", metadata={"seed": 3})
-    rollout = env.rollout(task, client, model="openai/gpt-4o-mini")
+    rollout = env.rollout(
+        task,
+        client,
+        model="openai/gpt-4o-mini",
+        models=["openai/gpt-4o"],
+        temperature=0.25,
+    )
     assert rollout.trace.outcome is not None
     assert rollout.trace.outcome.reward == 1.0
     assert rollout.trace.model == "openai/gpt-4o-mini"
@@ -203,7 +215,9 @@ def test_rollout_records_request_on_decision(tmp_path: Path) -> None:
     assert isinstance(request, ChatRequest)
     assert request.messages[0].role == "system"
     assert request.tools
-    trans = rollout.trace.transitions()
+    assert request.models == ["openai/gpt-4o"]
+    assert request.temperature == 0.25
+    trans = rollout.trace.transitions(source="events")
     assert trans[0].reward == 0.25
     assert trans[-1].terminated is True
     exported = to_verifiers_trace(rollout.trace)
@@ -215,7 +229,7 @@ def test_rollout_records_request_on_decision(tmp_path: Path) -> None:
     client.close()
 
 
-def test_custom_step_override() -> None:
+def test_custom_scalar_apply_action_receives_raw_action() -> None:
     class ManualEnv(Environment):
         name = "manual"
         version = "0.1.0"
@@ -230,12 +244,18 @@ def test_custom_step_override() -> None:
         def done(self) -> bool:
             return self.state.n >= 1
 
-        def step(self, action: Any = None, **kwargs: Any) -> StepResult:
+        def apply_action(
+            self,
+            action: Any,
+            *,
+            runtime: Runtime,
+            response: ChatResponse | None = None,
+        ) -> ActionResult:
+            del runtime, response
             self.state.n = int(action)
-            self.record_decision(
-                parsed_action=[ParsedAction(name="set", arguments={"n": self.state.n})],
+            return ActionResult(
+                parsed_actions=[ParsedAction(name="set", arguments={"n": self.state.n})],
             )
-            return self.finish_turn()
 
     env = ManualEnv()
     env.reset(TaskData(task_id="t", input="go"))
@@ -320,6 +340,31 @@ def test_spawn_isolation_under_concurrency() -> None:
     assert values == [1] * 8
 
 
+@pytest.mark.parametrize(
+    ("value", "weight", "message"),
+    [
+        (float("nan"), 1.0, "returned a non-finite value"),
+        (1.0, float("inf"), "has a non-finite weight"),
+        (1e308, 1e308, "aggregate produced a non-finite reward"),
+    ],
+)
+def test_environment_score_rejects_nonfinite_values(
+    value: float,
+    weight: float,
+    message: str,
+) -> None:
+    env = Environment(name="finite-scores")
+
+    @env.scorer(weight=weight)
+    def score(rollout: Any) -> float:
+        del rollout
+        return value
+
+    env.reset(TaskData(task_id="one", input="x"))
+    with pytest.raises(ValueError, match=message):
+        env.close_episode()
+
+
 def test_decision_round_trip() -> None:
     trace = Trace(
         trace_id="e1",
@@ -336,9 +381,12 @@ def test_decision_round_trip() -> None:
     trace.add_decision(
         observation="count=0",
         parsed_action=[ParsedAction(name="inc", arguments={"by": 1})],
+        index=0,
     )
     loaded = Trace.model_validate_json(trace.model_dump_json())
     assert loaded.steps[0].type == "decision"
+    assert loaded.decisions()[0].decision_id == trace.decisions()[0].decision_id
+    assert loaded.decisions()[0].index == 0
     assert loaded.environment_fingerprint == "abc"
     assert loaded.transitions()[0].action[0].name == "inc"
 
@@ -358,3 +406,5 @@ def test_flat_trace_transitions_fallback() -> None:
     assert len(trans) == 1
     assert trans[0].action[0].name == "lookup"
     assert trans[0].reward == 0.5
+    assert trace.transitions(source="events")[0].reward == 0.0
+    assert trace.transitions(source="both")[0].reward == 0.5

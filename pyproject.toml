@@ -59,6 +59,7 @@ dev = [
   "respx>=0.21",
   "ruff>=0.9",
   "mypy>=1.14",
+  "jsonschema>=4.26.0",
 ]
 docs = [
   "mkdocs-material>=9.5",

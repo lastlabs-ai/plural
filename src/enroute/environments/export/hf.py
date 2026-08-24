@@ -40,8 +40,10 @@ def to_huggingface_records(dataset: Dataset) -> list[dict[str, Any]]:
                 "labels": trace.outcome.labels if trace.outcome else {},
                 "tags": trace.tags,
                 "steps": [s.model_dump(mode="json") for s in trace.steps],
-                "transitions": [t.model_dump(mode="json") for t in trace.transitions()],
-                "returns": trace.returns(),
+                "transitions": [
+                    t.model_dump(mode="json") for t in trace.transitions(source="both")
+                ],
+                "returns": trace.returns(source="both"),
                 "initial_state": trace.initial_state,
                 "final_state": trace.final_state,
                 "metrics": trace.metrics,

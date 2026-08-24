@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import Field
+
 from enroute import Environment, TaskData
 from enroute.environments import Observation, State, tool
 
@@ -43,12 +45,11 @@ INSTRUCTIONS = (
 
 
 class LibraryState(State):
-    """Question, hidden expected phrase, corpus, and submitted answer."""
+    """Question, corpus, and submitted answer."""
 
     question: str = ""
-    expected: str = ""
     submitted: str | None = None
-    docs: list[dict[str, str]] = []
+    docs: list[dict[str, str]] = Field(default_factory=list)
 
 
 class LibraryObservation(Observation):
@@ -68,7 +69,7 @@ class LibraryEnv(Environment[LibraryObservation, LibraryState]):
     """Tiny document store the agent can search and read."""
 
     name = "library"
-    version = "0.1.0"
+    version = "0.2.0"
     system_prompt = INSTRUCTIONS
     max_turns = 8
 
@@ -88,7 +89,6 @@ class LibraryEnv(Environment[LibraryObservation, LibraryState]):
         self.state = LibraryState(
             seed=self.seed,
             question=str(getattr(task, "input", "") or ""),
-            expected=str(getattr(task, "expected", "") or "").lower(),
             submitted=None,
             docs=list(CORPUS),
         )
@@ -104,19 +104,19 @@ class LibraryEnv(Environment[LibraryObservation, LibraryState]):
         return self.state.submitted is not None
 
     def snapshot(self) -> dict[str, Any]:
-        """Return question, answer, and whether it matches."""
+        """Return trace-safe state without the answer key or corpus."""
         return {
             "question": self.state.question,
-            "expected": self.state.expected,
             "answer": self.state.submitted,
             "correct": self.score(),
         }
 
     def score(self) -> float:
         """Terminal correctness in ``{0, 1}``."""
-        if not self.state.submitted or not self.state.expected:
+        expected = str(getattr(self.task, "expected", "") or "").lower()
+        if not self.state.submitted or not expected:
             return 0.0
-        return 1.0 if self.state.expected in self.state.submitted.lower() else 0.0
+        return 1.0 if expected in self.state.submitted.lower() else 0.0
 
     def step_reward(self, tool_name: str, result: Any) -> float | None:
         """No dense reward — research is credited by the trainer."""

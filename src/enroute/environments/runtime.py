@@ -9,9 +9,17 @@ Examples:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
+
+from enroute.environments.fingerprint import (
+    callable_implementation_digest,
+    public_configuration,
+    stable_fingerprint_value,
+)
 
 
 @runtime_checkable
@@ -80,3 +88,42 @@ class LocalRuntime:
         started = time.perf_counter()
         result = self.call(name, arguments)
         return result, (time.perf_counter() - started) * 1000
+
+
+def runtime_fingerprint(runtime: Runtime) -> str:
+    """Return stable pre-execution identity for a tool runtime.
+
+    Custom runtimes may expose ``fingerprint()`` or ``fingerprint_payload()``.
+    Otherwise their stable configuration and ``call()`` implementation are hashed.
+    """
+    fingerprint = getattr(runtime, "fingerprint", None)
+    if callable(fingerprint):
+        value = fingerprint()
+        if not isinstance(value, str) or not value:
+            raise TypeError("runtime fingerprint() must return a non-empty string")
+        return value
+    payload_hook = getattr(runtime, "fingerprint_payload", None)
+    payload: Any
+    if isinstance(runtime, LocalRuntime):
+        payload = {
+            "tools": {
+                name: callable_implementation_digest(fn)
+                for name, fn in sorted(runtime.tools.items())
+            }
+        }
+    elif callable(payload_hook):
+        payload = stable_fingerprint_value(payload_hook())
+    else:
+        payload = public_configuration(runtime)
+    runtime_type = type(runtime)
+    canonical = json.dumps(
+        {
+            "type": f"{runtime_type.__module__}.{runtime_type.__qualname__}",
+            "configuration": payload,
+            "call_implementation": callable_implementation_digest(runtime.call),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()

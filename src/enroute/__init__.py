@@ -10,10 +10,32 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-from enroute.benchmarks import Benchmark, Report
+from enroute.benchmarks import (
+    Benchmark,
+    CaseKey,
+    CaseResult,
+    ModelStats,
+    Report,
+    RunManifest,
+    TaskDatasetMetadata,
+    TaskSetMetadata,
+    WinRatePair,
+)
 from enroute.catalog import ModelCatalog, ModelSpec, estimate_cost
 from enroute.client import Enroute
-from enroute.environments import Dataset, Environment, TaskData
+from enroute.environments import (
+    ActionResult,
+    Dataset,
+    EnroutePolicy,
+    Environment,
+    Policy,
+    ScriptedPolicy,
+    StopReason,
+    TaskData,
+    TaskDataset,
+    TraceDataset,
+    TraceFilter,
+)
 from enroute.errors import (
     AuthenticationError,
     BudgetExceededError,
@@ -35,6 +57,8 @@ from enroute.tracing import (
     Sampler,
     SQLiteSink,
     Trace,
+    TraceContext,
+    TraceKind,
     TraceWriter,
 )
 from enroute.types import ChatRequest, ChatResponse, Message, Tool, Usage
@@ -45,9 +69,12 @@ except PackageNotFoundError:  # pragma: no cover
     __version__ = "0.0.0"
 
 __all__ = [
+    "ActionResult",
     "AuthenticationError",
     "Benchmark",
     "BudgetExceededError",
+    "CaseKey",
+    "CaseResult",
     "ChatRequest",
     "ChatResponse",
     "ConfigurationError",
@@ -55,27 +82,41 @@ __all__ = [
     "ContextLengthError",
     "Dataset",
     "Enroute",
+    "EnroutePolicy",
     "EnrouteError",
     "Environment",
     "InvalidRequestError",
     "JSONLSink",
     "Message",
+    "ModelStats",
     "ModelCatalog",
     "ModelSpec",
     "NotFoundError",
     "Outcome",
+    "Policy",
     "ProviderUnavailable",
     "RateLimitError",
     "Redactor",
     "Report",
+    "RunManifest",
     "SQLiteSink",
     "Sampler",
+    "ScriptedPolicy",
+    "StopReason",
     "TaskData",
+    "TaskDataset",
+    "TaskDatasetMetadata",
+    "TaskSetMetadata",
     "TimeoutError",
     "Tool",
     "Trace",
+    "TraceContext",
+    "TraceDataset",
+    "TraceFilter",
+    "TraceKind",
     "TraceWriter",
     "Usage",
+    "WinRatePair",
     "__version__",
     "estimate_cost",
     "is_retryable",

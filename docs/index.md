@@ -15,8 +15,10 @@ flowchart LR
   Env[Environment] --> Client
   Client --> Router[Router]
   Router --> Trace[Trace]
-  Trace --> Dataset[Dataset]
-  Dataset --> Bench[Benchmark]
+  Trace --> TraceDataset[TraceDataset / Dataset]
+  TraceDataset --> Training[Training / export]
+  TaskDataset[TaskDataset] --> Bench[Benchmark]
+  Env --> Bench
 ```
 
 ## Why a unified Trace?

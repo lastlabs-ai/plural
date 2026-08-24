@@ -53,6 +53,6 @@ pricing.rates_for_prompt(300_000)   # tier rate, applied to every token
 `usage.cost` accounts for this on both `chat` and `stream`, using the real prompt
 token count reported by the host.
 
-## The autorouter seat
+## Custom routing policies
 
-`RoutingPolicy.select(request, candidates, catalog) -> list[ModelRoute]` is intentionally tiny. A future learned policy implements the same protocol — no client rewrite.
+`RoutingPolicy.select(request, candidates, catalog) -> list[ModelRoute]` is intentionally small. Custom routing policies implement the same protocol without changing client call sites.

@@ -10,7 +10,7 @@ import pytest
 from enroute import Enroute
 from enroute.catalog import ModelCatalog
 from enroute.errors import ProviderUnavailable
-from enroute.tracing import JSONLSink
+from enroute.tracing import JSONLSink, TraceContext
 from enroute.types import (
     ChatRequest,
     ChatResponse,
@@ -110,6 +110,35 @@ async def test_astream_matches_sync(tmp_path: Path) -> None:
         )
     ]
     assert "".join(c.delta.content or "" for c in chunks) == "Hello"
+    await enroute.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stream_trace_controls_match_chat(tmp_path: Path) -> None:
+    sink = JSONLSink(tmp_path / "traces.jsonl")
+    enroute = Enroute(providers={"openai": StreamingProvider()}, sink=sink, capture_content=True)
+    context = TraceContext(parent_trace_id="episode", episode_trace_id="episode")
+    sync_chunks = list(
+        enroute.stream(
+            model=MODEL,
+            messages=[Message(role="user", content="hi")],
+            write_trace=False,
+            trace_context=context,
+        )
+    )
+    async_chunks = [
+        chunk
+        async for chunk in enroute.astream(
+            model=MODEL,
+            messages=[Message(role="user", content="hi")],
+            write_trace=False,
+            trace_context=context,
+        )
+    ]
+    enroute.flush()
+    assert sink.read_all() == []
+    assert all(chunk.raw and chunk.raw["enroute_trace_id"] == "episode" for chunk in sync_chunks)
+    assert all(chunk.raw and chunk.raw["enroute_trace_id"] == "episode" for chunk in async_chunks)
     await enroute.aclose()
 
 

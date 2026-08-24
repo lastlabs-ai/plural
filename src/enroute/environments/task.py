@@ -20,7 +20,8 @@ class TaskData(BaseModel):
     Attributes:
         task_id: Stable task identifier.
         input: Primary input payload (often a user message or structured case).
-        expected: Optional expected output / label used by scorers.
+        expected: Optional evaluator-only output or label used by scorers. It
+            may be sensitive and is never included in episode trace metadata.
         metadata: Arbitrary task metadata (include ``seed`` for determinism).
     """
 
@@ -28,6 +29,19 @@ class TaskData(BaseModel):
     input: Any
     expected: Any = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    def trace_payload(self) -> dict[str, Any]:
+        """Return task fields safe for episode trace metadata.
+
+        Returns:
+            Task id, input, and metadata. The scorer-only ``expected`` value
+            is intentionally excluded.
+        """
+        return {
+            "task_id": self.task_id,
+            "input": self.input,
+            "metadata": self.metadata,
+        }
 
 
 TaskFn = Callable[[], Iterable[TaskData]]

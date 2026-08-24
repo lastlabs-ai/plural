@@ -15,8 +15,9 @@
 | **Task** | One case an environment can run (`TaskData`). Seeds the env via `setup`; may carry a goal. |
 | **Rollout** | One execution of a task through an environment. Synonym: **episode**. |
 | **Episode** | Gymnasium name for a rollout. One episode emits one Trace. |
-| **Fingerprint** | Hash of an environment's tools, instructions, and scorers. Compatibility key stored on the trace. |
-| **Dataset** | Named, content-hashed collection of traces for benchmarks/training. |
+| **Fingerprint** | Hash of an environment's configured behavior, including callable implementations and explicit `fingerprint_payload()`. Compatibility key stored on traces and benchmark manifests. |
+| **TaskDataset** | Ordered, content-hashed snapshot of `TaskData` records supplied to a benchmark. |
+| **Dataset / TraceDataset** | Named, content-hashed snapshot of rollout or production traces for analysis, training, and export. It is not a benchmark task input. |
 | **Benchmark** | Matrix run of an environment across models producing a `Report`. |
 | **Routing policy** | Object that orders model/provider routes for a request. |
 | **Provider** | Adapter that speaks a vendor API and returns normalized types. |

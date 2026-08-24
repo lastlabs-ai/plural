@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from enroute import Benchmark, Dataset, Enroute, Environment, TaskData, Trace
+from enroute.environments import TraceFilter
+from enroute.tracing import TraceContext
 from enroute.types import (
     ChatRequest,
     ChatResponse,
@@ -137,3 +143,219 @@ def test_dataset_from_sink(tmp_path: Path) -> None:
     sink.close()
     ds = Dataset.from_sink(tmp_path / "t.jsonl", "prod", where=lambda t: t.environment == "a")
     assert len(ds) == 1
+
+
+def test_standalone_and_episode_trace_persistence(tmp_path: Path) -> None:
+    from enroute.tracing import JSONLSink
+
+    sink = JSONLSink(tmp_path / "traces.jsonl")
+    client = Enroute(providers={"openai": FakeProvider("done")}, sink=sink, capture_content=True)
+
+    standalone = client.chat(model="openai/model", messages=[{"role": "user", "content": "hi"}])
+    client.flush()
+    first = sink.read_all()
+    assert len(first) == 1
+    assert first[0].trace_kind == "production"
+    assert standalone.raw is not None
+    assert standalone.raw["enroute_trace_id"] == first[0].trace_id
+
+    env = Environment(name="safe", version="1.0.0")
+    rollout = env.rollout(
+        TaskData(task_id="t", input="secret", expected="label"),
+        client,
+        model="openai/gpt-4o-mini",
+    )
+    client.flush()
+    traces = sink.read_all()
+    episode = traces[-1]
+    assert len(traces) == 2
+    assert episode.trace_id == rollout.trace.trace_id
+    assert episode.trace_kind == "episode"
+    assert episode.episode_trace_id == episode.trace_id
+    assert episode.metadata["task"] == {
+        "task_id": "t",
+        "input": "secret",
+        "metadata": {},
+    }
+    assert "expected" not in episode.metadata["task"]
+    assert episode.initial_state is None
+    assert episode.final_state is None
+    assert rollout.response is not None and rollout.response.raw is not None
+    assert rollout.response.raw["enroute_trace_id"] == episode.trace_id
+    client.close()
+
+
+def test_text_only_episode_persistence_redacts_all_copied_content(tmp_path: Path) -> None:
+    from enroute.tracing import JSONLSink
+
+    sink = JSONLSink(tmp_path / "redacted.jsonl")
+    client = Enroute(providers={"openai": FakeProvider("private answer")}, sink=sink)
+    env = Environment(name="redacted", version="1.0.0")
+
+    env.rollout(
+        TaskData(task_id="private", input="private prompt"),
+        client,
+        model="openai/model",
+    )
+    client.flush()
+    persisted = sink.read_all()
+
+    assert len(persisted) == 1
+    trace = persisted[0]
+    assert trace.initial_state is None
+    assert trace.final_state is None
+    assert trace.decisions()[0].parsed_action[0].arguments["text"] is None
+    assert trace.metadata["redaction"] == {"drop_content": True}
+    serialized = trace.model_dump_json()
+    assert "private answer" not in serialized
+    assert "private prompt" not in serialized
+    client.close()
+
+
+def test_rollout_child_traces_are_opt_in_and_linked(tmp_path: Path) -> None:
+    from enroute.tracing import JSONLSink
+
+    sink = JSONLSink(tmp_path / "traces.jsonl")
+    client = Enroute(providers={"openai": FakeProvider("done")}, sink=sink, capture_content=True)
+    env = Environment(name="linked", version="1.0.0")
+    rollout = env.rollout(
+        TaskData(task_id="t", input="go"),
+        client,
+        model="openai/gpt-4o-mini",
+        record_llm_traces=True,
+    )
+    client.flush()
+    traces = sink.read_all()
+    assert len(traces) == 2
+    child = next(trace for trace in traces if trace.trace_kind == "llm_call")
+    episode = next(trace for trace in traces if trace.trace_kind == "episode")
+    assert episode.trace_id == rollout.trace.trace_id
+    assert child.parent_trace_id == episode.trace_id
+    assert child.episode_trace_id == episode.trace_id
+    assert episode.decisions()[0].index == 0
+    client.close()
+
+
+def test_write_trace_false_uses_episode_trace_id(tmp_path: Path) -> None:
+    from enroute.tracing import JSONLSink
+
+    sink = JSONLSink(tmp_path / "traces.jsonl")
+    client = Enroute(providers={"openai": FakeProvider()}, sink=sink)
+    context = TraceContext(parent_trace_id="parent", episode_trace_id="episode")
+    response = client.chat(
+        model="openai/gpt-4o-mini",
+        messages=[{"role": "user", "content": "hi"}],
+        write_trace=False,
+        trace_context=context,
+    )
+    client.flush()
+    assert sink.read_all() == []
+    assert response.raw is not None
+    assert response.raw["enroute_trace_id"] == "episode"
+    client.close()
+
+
+@pytest.mark.asyncio
+async def test_achat_trace_controls(tmp_path: Path) -> None:
+    from enroute.tracing import JSONLSink
+
+    sink = JSONLSink(tmp_path / "traces.jsonl")
+    client = Enroute(providers={"openai": FakeProvider()}, sink=sink)
+    response = await client.achat(
+        model="openai/gpt-4o-mini",
+        messages=[{"role": "user", "content": "hi"}],
+        write_trace=False,
+        trace_context=TraceContext(parent_trace_id="episode", episode_trace_id="episode"),
+    )
+    client.flush()
+    assert sink.read_all() == []
+    assert response.raw is not None
+    assert response.raw["enroute_trace_id"] == "episode"
+    await client.aclose()
+
+
+def test_dataset_hash_filter_and_corruption_detection(tmp_path: Path) -> None:
+    first = Trace(trace_id="1", trace_kind="episode", environment="a", model="m")
+    first.add_decision(observation="before")
+    second = first.model_copy(deep=True)
+    second.steps[0].observation = "after"
+    assert (
+        Dataset.from_traces("a", [first]).content_hash
+        != Dataset.from_traces("b", [second]).content_hash
+    )
+
+    sink_path = tmp_path / "source.jsonl"
+    sink_path.write_text(
+        "\n".join(
+            [
+                first.model_dump_json(),
+                Trace(trace_id="2", trace_kind="production", environment="b").model_dump_json(),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    filtered = Dataset.from_sink(
+        sink_path,
+        "episodes",
+        filter=TraceFilter(trace_kind="episode", environment="a", model="m"),
+    )
+    assert [trace.trace_id for trace in filtered.traces] == ["1"]
+
+    dataset_path = tmp_path / "dataset.jsonl"
+    filtered.save(dataset_path)
+    manifest = json.loads(
+        dataset_path.with_suffix(".jsonl.manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["schema_version"] == "1.0.0"
+    assert manifest["hash_algorithm"] == "sha256"
+    dataset_path.write_text(
+        dataset_path.read_text(encoding="utf-8").replace('"before"', '"tampered"'),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="content hash mismatch"):
+        Dataset.load(dataset_path)
+
+
+def test_dataset_loads_legacy_manifest(tmp_path: Path) -> None:
+    trace = Trace(trace_id="legacy", environment="old")
+    dataset_path = tmp_path / "legacy.jsonl"
+    dataset_path.write_text(trace.model_dump_json() + "\n", encoding="utf-8")
+    legacy_payload = {
+        "trace_id": trace.trace_id,
+        "outcome": None,
+        "task_id": None,
+        "environment": "old",
+    }
+    legacy_hash = hashlib.sha256(
+        json.dumps(legacy_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    dataset_path.with_suffix(".jsonl.manifest.json").write_text(
+        json.dumps(
+            {
+                "name": "legacy",
+                "version": "0.1.0",
+                "content_hash": legacy_hash,
+                "count": 1,
+                "metadata": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = Dataset.load(dataset_path)
+    assert loaded.content_hash == legacy_hash
+
+
+def test_legacy_jsonl_migration_has_stable_dataset_hash(tmp_path: Path) -> None:
+    fixture = Path(__file__).resolve().parents[1] / "fixtures/legacy_traces_v0_4.jsonl"
+    first = Dataset.from_sink(fixture, "legacy")
+    second = Dataset.from_sink(fixture, "legacy")
+
+    assert first.content_hash == second.content_hash
+    assert [trace.trace_kind for trace in first.traces] == ["episode", "production"]
+    assert first.traces[0].decisions()[0].decision_id == second.traces[0].decisions()[0].decision_id
+
+    saved = tmp_path / "migrated.jsonl"
+    first.save(saved)
+    loaded = Dataset.load(saved)
+    assert loaded.content_hash == first.content_hash

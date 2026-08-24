@@ -52,8 +52,8 @@ def to_verifiers_trace(trace: Trace) -> dict[str, Any]:
         "messages": messages,
         "reward": trace.outcome.reward if trace.outcome else None,
         "scores": trace.outcome.scores if trace.outcome else {},
-        "transitions": [t.model_dump(mode="json") for t in trace.transitions()],
-        "returns": trace.returns(),
+        "transitions": [t.model_dump(mode="json") for t in trace.transitions(source="both")],
+        "returns": trace.returns(source="both"),
         "extra": {
             "tags": trace.tags,
             "metadata": trace.metadata,

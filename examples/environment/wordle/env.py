@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from enroute import Environment, TaskData
 from enroute.environments import Observation, State, tool
@@ -23,7 +23,7 @@ INSTRUCTIONS = (
     "Read the board after every result: G is correct place, Y is wrong place, "
     ". is absent. Never reuse a letter marked absent. Keep every G fixed. "
     "Use the Letters keyboard. You have six valid guesses; invalid words do "
-    "not use a guess. Do not reveal that you are an LLM."
+    "not consume a guess slot. Do not reveal that you are an LLM."
 )
 
 
@@ -38,9 +38,9 @@ class WordleState(State):
     """Hidden puzzle plus the board. ``secret`` is not in the observation."""
 
     secret: str = ""
-    rows: list[WordleRow] = []
+    rows: list[WordleRow] = Field(default_factory=list)
     solved: bool = False
-    seen_marks: dict[str, str] = {}
+    seen_marks: dict[str, str] = Field(default_factory=dict)
     last_new_greens: int = 0
     last_new_yellows: int = 0
     last_invalid: bool = False
@@ -51,7 +51,7 @@ class WordleObservation(Observation):
 
     board: str = ""
     guesses_left: int = MAX_GUESSES
-    letters: dict[str, str] = {}
+    letters: dict[str, str] = Field(default_factory=dict)
 
     def render(self) -> str:
         return self.board
@@ -61,9 +61,10 @@ class WordleEnv(Environment[WordleObservation, WordleState]):
     """A single Wordle puzzle. The policy only calls :meth:`guess`."""
 
     name = "wordle"
-    version = "0.2.0"
+    version = "0.3.0"
     system_prompt = INSTRUCTIONS
-    max_turns = 12
+    # Episode safety budget; the game still allows only six valid guesses.
+    max_turns = MAX_GUESSES * 4
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -84,6 +85,10 @@ class WordleEnv(Environment[WordleObservation, WordleState]):
 
     def observe(self) -> WordleObservation:
         """Build the board the policy may see. Called by reset/step."""
+        return WordleObservation(**self._visible_fields())
+
+    def _visible_fields(self) -> dict[str, Any]:
+        """Build the board and other policy-visible fields."""
         lines = ["Wordle. Guess a valid 5-letter word.", "Board:"]
         if not self.state.rows:
             lines.append("  (empty)")
@@ -95,15 +100,19 @@ class WordleEnv(Environment[WordleObservation, WordleState]):
         if letters:
             keys = " ".join(f"{letter.upper()}:{mark}" for letter, mark in sorted(letters.items()))
             lines.append(f"Letters: {keys}")
-        return WordleObservation(
-            board="\n".join(lines),
-            guesses_left=self.guesses_left,
-            letters=letters,
-        )
+        return {
+            "board": "\n".join(lines),
+            "guesses_left": self.guesses_left,
+            "letters": letters,
+        }
 
     def done(self) -> bool:
         """Return whether the puzzle is over."""
         return self.state.solved or len(self.state.rows) >= MAX_GUESSES
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return trace-safe game state without the hidden answer."""
+        return self.state.model_dump(exclude={"secret"})
 
     def score(self) -> float:
         """Terminal return: ``0`` if unsolved, else fewer guesses score higher."""
@@ -115,7 +124,7 @@ class WordleEnv(Environment[WordleObservation, WordleState]):
         """Dense guide: new greens/yellows, small penalty for invalid guesses."""
         if tool_name != "guess":
             return None
-        if self.state.last_invalid:
+        if self.state.last_invalid or not isinstance(result, dict) or bool(result.get("error")):
             return -0.05
         return 0.1 * self.state.last_new_greens + 0.03 * self.state.last_new_yellows
 
@@ -141,7 +150,7 @@ class WordleEnv(Environment[WordleObservation, WordleState]):
 
     @tool
     def guess(self, word: str) -> dict[str, Any]:
-        """Submit a 5-letter guess. Invalid words do not consume a turn."""
+        """Submit a 5-letter guess. Invalid words do not consume a guess slot."""
         self.state.last_new_greens = 0
         self.state.last_new_yellows = 0
         self.state.last_invalid = False
@@ -169,10 +178,7 @@ class WordleEnv(Environment[WordleObservation, WordleState]):
 
     def _visible(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Attach the board the policy is allowed to see."""
-        obs = self.observe()
-        payload["board"] = obs.board
-        payload["letters"] = obs.letters
-        payload["guesses_left"] = obs.guesses_left
+        payload.update(self._visible_fields())
         return payload
 
     def _record_new_marks(self, word: str, marks: str) -> None:

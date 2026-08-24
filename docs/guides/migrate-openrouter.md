@@ -30,8 +30,7 @@ client = Enroute(providers={"openai": "...", "anthropic": "..."})
 - **Environments** and **benchmarks**
 - Offline **model catalog** + cost estimation
 
-## Not in v1
+## Current package scope
 
-- Hosted multi-provider billing behind one key (API shape is ready; service TBD)
-- CLI
-- Learned autorouter (policy protocol is ready)
+The package documented here does not include hosted multi-provider billing,
+a CLI, or a learned routing service.

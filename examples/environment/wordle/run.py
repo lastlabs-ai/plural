@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from _shared import ensure_out_dir
 from enroute import Dataset, Enroute, Environment, TaskData
-from enroute.environments import Rollout
+from enroute.environments import Rollout, is_stopped
 from enroute.providers import OpenAICompatible
 from enroute.tracing import JSONLSink, Trace
 from enroute.types import (
@@ -100,6 +100,7 @@ def play(
 ) -> Rollout:
     """One episode: reset, policy, step until the env says stop."""
     obs, _info = env.reset(task, model=model)
+    trace_context = env.trace_context()
     while True:
         request = ChatRequest(
             model=model,
@@ -108,9 +109,11 @@ def play(
         )
         response = client.chat(
             model=model,
-            messages=env.messages(),
-            tools=env.tool_defs or None,
+            messages=request.messages,
+            tools=request.tools,
             tags={"environment": env.name, "task_id": task.task_id},
+            write_trace=False,
+            trace_context=trace_context,
         )
         action = response.message.tool_calls
         obs, _reward, terminated, truncated, info = env.step(
@@ -118,7 +121,7 @@ def play(
             request=request,
             response=response,
         )
-        if terminated or truncated or info.get("stop_reason") == "no_tool_calls":
+        if terminated or truncated or is_stopped(info.get("stop_reason")):
             break
     return env.close_episode(client=client)
 
@@ -354,7 +357,7 @@ def main() -> None:
         traces = [rollout.trace]
         _report_model_run(args.model, env, rollout, out)
 
-    ds = Dataset.from_traces("wordle", traces, version="0.1.0")
+    ds = Dataset.from_traces("wordle", traces, version=env.version)
     ds.save(out / "wordle-dataset.jsonl")
     print(f"\ndataset={ds.content_hash[:12]}…")
 

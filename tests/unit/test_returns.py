@@ -42,6 +42,10 @@ def test_credit_negative_index_and_both() -> None:
     trace.credit(0.4, name="reviewer", decision_index=-1)
     assert trace.decision_rewards(source="both") == pytest.approx([0.0, 1.4])
     assert trace.returns(gamma=1.0, source="both") == pytest.approx([1.4, 1.4])
+    for source in ("outcome", "events", "both"):
+        assert [transition.reward for transition in trace.transitions(source=source)] == (
+            trace.decision_rewards(source=source)
+        )
 
 
 def test_credit_out_of_range() -> None:

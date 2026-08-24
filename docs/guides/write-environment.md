@@ -1,186 +1,220 @@
 # Write your first environment
 
-1. Subclass `Environment[MyObservation, MyState]` — name, version, and `max_turns` live on the class.
-2. Seed `self.state` in `setup(task)`. Implement `observe()` so reset/step know what the agent can see.
-3. Decorate actions with `@tool` (or use `@env.tool` on a plain `Environment()`). A tool may call other tools; those nests are recorded.
-4. Write scorers that match your definition of done. Read `rollout.env`.
-5. Provide tasks (synthetic or sampled from production). Tasks carry the **goal** and a **seed**.
+Use this checklist:
 
-Drive an agent with `reset` / `step` / `rollout`. Do not call `observe` in that loop.
+1. Subclass `Environment[MyObservation, MyState]`; set `name`, `version`, and `max_turns`.
+2. Seed `self.state` in `setup(task)` and expose only policy-visible data from `observe()`.
+3. Decorate actions with `@tool`, or register functions with `@env.tool`.
+4. For scalar or custom text actions, override `apply_action()` and return `ActionResult`; tool-only environments need no override.
+5. Implement `done()` for natural termination and scorers for the final outcome.
+6. If state should be persisted, override `snapshot()` with an explicitly trace-safe dictionary. The default is `None`.
+7. Give every `TaskData` a stable `task_id`; put deterministic seeds in task metadata.
+8. Override `fingerprint_payload()` for behavior-affecting constructor or external configuration not represented by your hooks and callables.
+9. Run the environment through `run_episode`, `rollout`, or guarded `reset` / `step` / `close_episode`.
 
-## Stateless eval (support triage)
+## A small stateful environment
 
 ```python
 from enroute import Environment, TaskData
-
-env = Environment(
-    name="support-triage",
-    version="0.2.0",
-    system_prompt="You are a support agent. Use tools before guessing.",
-)
-
-@env.tool
-def lookup_order(order_id: str) -> dict:
-    """Return order status."""
-    return db.get_order(order_id)
-
-@env.scorer(weight=1.0)
-def used_tool(rollout) -> float:
-    return 1.0 if any(s.type == "decision" and s.tool_calls for s in rollout.trace.steps) else 0.0
-
-@env.tasks
-def tasks():
-    for row in load_cases("cases.jsonl"):
-        yield TaskData(task_id=row["id"], input=row["message"], expected=row.get("label"))
-```
-
-Run one task:
-
-```python
-rollout = env.rollout(task, client, model="openai/gpt-4o-mini")
-print(rollout.trace.outcome.scores)
-```
-
-## Basic RL (library)
-
-The smallest sequential environment we train against: a closed corpus, tools `search`, `read`, `answer`, and hierarchical `research` (calls search then read). Research has **no** per-decision reward. The scorer is 1 if the submitted answer contains the hidden fact.
-
-```python
-from enroute import Environment
 from enroute.environments import Observation, State, tool
 
-class LibraryState(State):
-    submitted: str | None = None
+class CounterState(State):
+    count: int = 0
+    target: int = 2
 
-class LibraryObservation(Observation):
-    question: str = ""
+class CounterObservation(Observation):
+    count: int
 
-class LibraryEnv(Environment[LibraryObservation, LibraryState]):
-    name = "library"
-    version = "0.1.0"
+    def render(self) -> str:
+        return f"count={self.count}"
+
+class CounterEnv(Environment[CounterObservation, CounterState]):
+    name = "counter"
+    version = "1.0.0"
+    max_turns = 4
+
+    def setup(self, task: TaskData) -> None:
+        super().setup(task)
+        self.state = CounterState(
+            seed=self.seed,
+            target=int(task.metadata.get("target", 2)),
+        )
+
+    def observe(self) -> CounterObservation:
+        return CounterObservation(count=self.state.count)
+
+    def done(self) -> bool:
+        return self.state.count >= self.state.target
+
+    def snapshot(self) -> dict:
+        return {"count": self.state.count, "target": self.state.target}
 
     @tool
-    def search(self, query: str) -> dict: ...
-
-    @tool
-    def read(self, doc_id: str) -> dict: ...
-
-    @tool
-    def research(self, query: str) -> dict:
-        """Search, then read the first hit."""
-        found = self.search(query)
-        return {"doc": self.read(found["hits"][0]["doc_id"])}
-
-    @tool
-    def answer(self, text: str) -> dict:
-        """Submit the final answer and end the episode."""
-        self.state.submitted = text
-        return {"ok": True}
+    def increment(self, by: int = 1) -> int:
+        """Increment the counter."""
+        self.state.count += by
+        return self.state.count
 ```
 
-```bash
-uv run python examples/environment/library/run.py
-```
+`snapshot` is not a general serializer. Include only fields approved for trace persistence; omit credentials, hidden labels, and unnecessary simulator state.
 
-That script rolls out a researcher and a guesser, then shows `trace.returns(gamma=0.9)` so search/read inherit credit from the later correct answer. It also late-credits a reviewer score onto the answer decision — the same API you would use when a tweet's likes arrive tomorrow.
+## Custom scalar and text actions
 
-Full code: [`examples/environment/library/`](https://github.com/enroute-ai/enroute/tree/main/examples/environment/library).
+`Environment.step()` is final and framework-owned so every turn receives the same lifecycle checks, policy-message handling, trace decision, and observation update. Tool authors do not override action handling: the base `apply_action()` normalizes and dispatches their `@tool` calls.
 
-## Game (Wordle)
-
-The environment *is* the game: word lists, board, `guess`, observations, and rewards. You play it with `step`. The LLM is only the policy that picks a word.
+Override `apply_action()` when the policy emits another action type. The hook receives the raw action and returns trace-safe turn data:
 
 ```python
-obs, info = env.reset(task)
+from enroute import ActionResult
+from enroute.tracing import ParsedAction
+
+class RatingEnv(Environment[RatingObservation, RatingState]):
+    def apply_action(self, action, *, runtime, response=None):
+        self.state.rating = int(action)
+        return ActionResult(
+            parsed_actions=[
+                ParsedAction(name="rate", arguments={"value": self.state.rating})
+            ],
+            reward_events=[],
+            stop_reason=None,
+            info={"accepted": True},
+        )
+```
+
+For a multi-turn text workflow, parse or represent the response in `parsed_actions` and return `stop_reason=None`; the base text behavior uses `policy_stop`. `step` records the `ActionResult` and calls `finish_turn()` once. Normal author hooks should not call `record_decision()` or `finish_turn()` directly; those methods remain available for advanced manual integrations.
+
+## Tasks and hidden expected values
+
+```python
+task = TaskData(
+    task_id="count-to-two",
+    input="Reach the target count.",
+    expected=2,
+    metadata={"target": 2, "seed": 7},
+)
+
+@env.scorer
+def reached_expected(rollout) -> float:
+    return float(rollout.env.state.count == rollout.task.expected)
+```
+
+`expected` is evaluator-only data for scorers. It participates in a `TaskDataset` content hash, but is never sent to the policy and is never copied into episode trace metadata. The trace-safe task payload contains only `task_id`, `input`, and `metadata`.
+
+## Run with a scripted policy
+
+`ScriptedPolicy` is useful for deterministic tests and examples:
+
+```python
+from enroute import ScriptedPolicy
+from enroute.tracing import ParsedAction
+
+policy = ScriptedPolicy([
+    ParsedAction(name="increment", arguments={"by": 1}),
+    ParsedAction(name="increment", arguments={"by": 1}),
+])
+rollout = CounterEnv().run_episode(task, policy, model="scripted")
+assert rollout.trace.stop_reason == "terminated"
+```
+
+## Run with a custom policy
+
+A custom synchronous policy receives the environment's exact `ChatRequest` and episode lineage:
+
+```python
+class IncrementPolicy:
+    def act(self, request, *, trace_context=None):
+        return ParsedAction(name="increment", arguments={"by": 1})
+
+rollout = CounterEnv().run_episode(
+    task,
+    IncrementPolicy(),
+    model="increment-policy",
+)
+```
+
+For Enroute-backed model calls, use the built-in convenience:
+
+```python
+rollout = CounterEnv().rollout(
+    task,
+    client,
+    model="openai/gpt-4o-mini",
+)
+```
+
+This writes one episode trace by default. Set `record_llm_traces=True` only when you also want linked per-call child traces.
+
+## Verify deterministic replay
+
+Replay invokes no policy or model. Use a fresh environment:
+
+```python
+from enroute.environments import verify_replay
+
+result = verify_replay(CounterEnv(), rollout.trace, task=task)
+assert result.ok, result.mismatches
+```
+
+Pass `task=` whenever replay setup or scoring requires hidden `expected` data. If the trace's safe task payload is sufficient, it can be reconstructed automatically. Fingerprint verification is enabled by default.
+
+Replay rejects redacted traces because their task input, observations, state, or action text may be incomplete.
+
+## Manual client loop
+
+Prefer `run_episode` or `rollout`; they preserve policy inputs, lineage, stops, and one-trace persistence. If you need a manual loop, disable the standalone `client.chat` trace so `close_episode(client=client)` does not create duplicate top-level records:
+
+```python
+from enroute.types import ChatRequest
+
+obs, info = env.reset(task, model=model)
 while True:
-    response = client.chat(model=model, messages=env.messages(), tools=env.tool_defs)
-    obs, reward, terminated, truncated, info = env.step(
-        response.message.tool_calls, request=..., response=response
+    request = ChatRequest(model=model, messages=env.messages(), tools=env.tool_defs)
+    response = client.chat(
+        model=model,
+        messages=request.messages,
+        tools=request.tools,
+        write_trace=False,
     )
-    if terminated or truncated:
+    obs, reward, terminated, truncated, info = env.step(
+        response,
+        request=request,
+        response=response,
+    )
+    if terminated or truncated or info["stop_reason"] == "policy_stop":
         break
 rollout = env.close_episode(client=client)
 ```
 
-```bash
-uv run python examples/wordle/run.py --secret crane
-```
+If a custom `Policy.act` calls `client.chat`, pass through its `trace_context`. Use `write_trace=False` for the one-episode-trace default, or opt in to `write_trace=True` to persist a correctly linked child LLM trace.
 
-Secrets come from [`data/answers.txt`](https://github.com/enroute-ai/enroute/tree/main/examples/environment/wordle/data/answers.txt); legal guesses from [`data/allowed.txt`](https://github.com/enroute-ai/enroute/tree/main/examples/environment/wordle/data/allowed.txt). Full code: [`examples/environment/wordle/`](https://github.com/enroute-ai/enroute/tree/main/examples/environment/wordle).
+## Examples
 
-## Work environment (Twitter)
-
-A work environment *is* the simulator the tools act on. The model is passed at rollout time so you can swap it.
-
-```python
-from enroute import Environment, TaskData
-from enroute.environments import Observation, State, tool
-
-class TwitterState(State):
-    account: str = "agent"
-
-class TwitterObservation(Observation):
-    briefing: str = ""
-    def render(self) -> str:
-        return self.briefing
-
-class TwitterEnv(Environment[TwitterObservation, TwitterState]):
-    name = "twitter-account"
-    version = "0.1.0"
-    system_prompt = "You operate this account. Use tools to look around and act."
-    max_turns = 12
-
-    def setup(self, task):
-        super().setup(task)
-        self.state = TwitterState(seed=self.seed, account=task.metadata.get("account", "agent"))
-
-    def observe(self) -> TwitterObservation:
-        return TwitterObservation(briefing=self.briefing())
-
-    @tool
-    def tweet(self, text: str) -> dict:
-        """Publish a tweet from this account."""
-        return self.publish(text)
-
-    @tool
-    def reply(self, post_id: str, text: str) -> dict:
-        """Reply to a post."""
-        return self.publish_reply(post_id, text)
-
-env = TwitterEnv()
-
-@env.scorer(weight=1.0)
-def goal_progress(rollout) -> float:
-    return rollout.env.score(rollout.task.metadata.get("goal"))
-
-@env.tasks
-def tasks():
-    yield TaskData(
-        task_id="reply-mentions-1",
-        input="Reply to every mention.",
-        metadata={"seed": 42, "account": "agent", "goal": "reply_to_mentions"},
-    )
-```
-
-A full simulated Twitter account (timeline, follow, like, quote, media placeholders, two example goals) lives in [`examples/environment/twitter/`](https://github.com/enroute-ai/enroute/tree/main/examples/environment/twitter).
+Run the library and Wordle examples from the repository root:
 
 ```bash
-uv run python examples/environment/twitter/run.py
+uv run python examples/environment/library/run.py
+uv run python examples/environment/wordle/run.py --secret crane
 ```
 
-## Gym loop
+- [Library environment](https://github.com/enroute-ai/enroute/tree/main/examples/environment/library)
+- [Wordle environment](https://github.com/enroute-ai/enroute/tree/main/examples/environment/wordle)
 
-`rollout()` is enough for most callers. A future trainer (or you) can drive the episode with `reset` / `step`. Do not call `observe` here:
+## Version and fingerprint
+
+Bump `version` when the public environment contract changes. The fingerprint covers `max_turns`, tool schemas, callable implementation bodies/configured state, scorer weights, author hooks, and `fingerprint_payload()`, so replay and benchmark reports can detect many forms of execution-contract drift.
 
 ```python
-obs, info = env.reset(task, model="openai/gpt-4o-mini")
-# ... policy calls client.chat, then:
-obs, reward, terminated, truncated, info = env.step(response.message.tool_calls, request=req, response=resp)
-rollout = env.close_episode(client=client)
+class CounterEnv(Environment[CounterObservation, CounterState]):
+    def __init__(self, *, ruleset: str, **kwargs):
+        self.ruleset = ruleset
+        super().__init__(**kwargs)
+
+    def fingerprint_payload(self):
+        return {"ruleset": self.ruleset}
 ```
 
-Each `step` appends one **decision** to the episode [Trace](../concepts/trace.md).
+Include stable ids or versions for behavior-affecting constructor and external configuration. Never include API keys, credentials, tokens, or other secrets. A matching fingerprint is a compatibility signal, not a guarantee that mutable external services will return identical results.
 
-## When to bump the version
+## Benchmark construction
 
-See [Environment versioning](../concepts/environment.md#versioning). Short version: patch for bugfixes, minor when you add tools, major when observation shape or scorer meaning changes.
+The default `spawn()` works for environments reconstructible from the standard `Environment` constructor and safely copied/rebound registrations. If your subclass requires constructor arguments, or a dynamic tool/scorer/task closure captures mutable environment state, override `spawn()` or pass a fresh `environment_factory` to `Benchmark`. Use `runtime_factory` when each benchmark job needs its own synchronous sandbox, remote, or custom runtime.

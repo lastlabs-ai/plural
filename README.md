@@ -9,8 +9,10 @@ flowchart LR
   App[Your app] --> Client[Enroute]
   Env[Environment] --> Client
   Client --> Trace[Trace]
-  Trace --> Dataset[Dataset]
-  Dataset --> Bench[Benchmark]
+  Trace --> TraceDataset[TraceDataset / Dataset]
+  TraceDataset --> Training[Training / export]
+  TaskDataset[TaskDataset] --> Bench[Benchmark]
+  Env --> Bench
 ```
 
 ## Install
@@ -84,6 +86,10 @@ def tasks():
 rollout = env.rollout(next(env.iter_tasks()), client, model="openai/gpt-4o-mini")
 print(rollout.trace.outcome)
 ```
+
+Tool environments use the built-in action dispatch. For scalar or custom text
+actions, override `apply_action()` and return `ActionResult`; `step()` remains
+framework-owned so lifecycle and trace invariants are always recorded.
 
 ## Docs
 

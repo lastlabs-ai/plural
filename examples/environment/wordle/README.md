@@ -7,14 +7,14 @@ The environment *is* the game: secret, board, `guess`, observations, and rewards
 From the repo root:
 
 ```bash
-uv run python examples/wordle/run.py --secret crane
+uv run python examples/environment/wordle/run.py --secret crane
 ```
 
-That is a shortcut for [`examples/environment/wordle/run.py`](run.py). `--secret` is the hidden 5-letter answer. It must be in the Wordle word list (`data/allowed.txt` / `data/answers.txt`). If you omit it, the secret is `crane`.
+`--secret` is the hidden 5-letter answer. It must be in the Wordle word list (`data/allowed.txt` / `data/answers.txt`). If you omit it, the secret is `crane`.
 
 ```bash
-uv run python examples/wordle/run.py
-uv run python examples/wordle/run.py --secret slate
+uv run python examples/environment/wordle/run.py
+uv run python examples/environment/wordle/run.py --secret slate
 ```
 
 Without `--model`, the script runs two offline policies (no API key):
@@ -22,7 +22,12 @@ Without `--model`, the script runs two offline policies (no API key):
 - **solver** — guesses `slate`, then the secret
 - **misses** — six valid words that are not the secret
 
-Each episode prints the board, per-step rewards, and discounted returns. Traces land in the example output directory as a small dataset.
+Each episode prints the board, per-step rewards, and discounted returns. The offline default deliberately runs two episodes and saves their two traces as a small dataset.
+
+`WordleEnv` allows six **valid** guesses. An invalid tool call does not consume a
+guess slot, but every `env.step(...)` still consumes one episode turn. The
+larger `max_turns` value is only a safety budget for malformed or repeated
+invalid calls.
 
 ## Local model (laptop)
 
@@ -40,7 +45,7 @@ mlx_lm.server --model mlx-community/Qwen2.5-7B-Instruct-4bit --port 8080
 Then:
 
 ```bash
-uv run python examples/wordle/run.py --secret crane \
+uv run python examples/environment/wordle/run.py --secret crane \
   --mlx --model mlx-community/Qwen2.5-7B-Instruct-4bit
 ```
 
@@ -50,43 +55,57 @@ uv run python examples/wordle/run.py --secret crane \
 
 ```bash
 # Ollama
-uv run python examples/wordle/run.py --secret crane --host ollama --model llama3.2
+uv run python examples/environment/wordle/run.py --secret crane --host ollama --model llama3.2
 
 # LM Studio
-uv run python examples/wordle/run.py --secret crane --host lmstudio --model local-model
+uv run python examples/environment/wordle/run.py --secret crane --host lmstudio --model local-model
 
 # vLLM
-uv run python examples/wordle/run.py --secret crane \
+uv run python examples/environment/wordle/run.py --secret crane \
   --host vllm --model meta-llama/Llama-3.1-8B-Instruct
 ```
 
 Or pass `--base-url` yourself. `--api-key` defaults to `EMPTY`.
 
-A live run prints the **harness** (every message the policy was sent) and each **decision** (observation, tool result, step reward), then writes `.enroute/examples/wordle-summary.json` and `wordle-trace.json`.
+A live model run executes one episode and persists one episode trace: per-turn client calls use `write_trace=False`, then `close_episode(client=client)` writes the completed trace. It prints the **harness** (every message the policy was sent) and each **decision** (observation, tool result, step reward), then writes `.enroute/examples/wordle-summary.json` and `wordle-trace.json`.
 
 ## Hosted model
 
 If the model is already configured on your Enroute client (env keys, etc.):
 
 ```bash
-uv run python examples/wordle/run.py --secret crane --model openai/gpt-4o-mini
+uv run python examples/environment/wordle/run.py --secret crane --model openai/gpt-4o-mini
 ```
 
 ## Play loop
 
 ```python
+from enroute.environments import is_stopped
+
 obs, info = env.reset(task)
 while True:
-    response = client.chat(model=model, messages=env.messages(), tools=env.tool_defs)
+    response = client.chat(
+        model=model,
+        messages=env.messages(),
+        tools=env.tool_defs,
+        write_trace=False,
+    )
     obs, reward, terminated, truncated, info = env.step(
         response.message.tool_calls, request=..., response=response
     )
-    if terminated or truncated:
+    if is_stopped(info["stop_reason"]):
         break
 rollout = env.close_episode(client=client)
 ```
 
-Do not call `observe` to drive the agent. `reset` and `step` already return the observation.
+Prefer `env.rollout(...)` or `env.run_episode(...)` for policy-driven runs. In a manual loop, `write_trace=False` avoids a standalone LLM trace for every turn; `close_episode(client=client)` persists the single episode trace. Do not call `observe` to drive the agent: `reset` and `step` already return the observation.
+
+Wordle is a tool-only environment: it defines `guess` and inherits the base
+`apply_action` tool dispatcher. Framework-owned final `step()` records the
+decision, advances the turn, rebuilds the observation, and checks termination.
+
+To compare policies or model IDs over environment tasks, see the
+[benchmarking examples](../../benchmarking/README.md).
 
 ## Files
 
@@ -97,3 +116,4 @@ Do not call `observe` to drive the agent. `reset` and `step` already return the 
 | [`data/answers.txt`](data/answers.txt) | Official secrets |
 | [`data/allowed.txt`](data/allowed.txt) | Legal guesses |
 | [`run.py`](run.py) | CLI + scripted `reset` / `step` loop |
+| [`walkthrough.ipynb`](walkthrough.ipynb) | Brief environment, trace, and benchmark tutorial |
