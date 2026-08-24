@@ -18,7 +18,9 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from enroute.client import Enroute
-from enroute.environments.env import Environment, Rollout, TaskData
+from enroute.environments.env import Environment
+from enroute.environments.rollout import Rollout
+from enroute.environments.task import TaskData
 
 
 class ModelStats(BaseModel):

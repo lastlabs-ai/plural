@@ -1,12 +1,16 @@
-"""Environment definitions, Gym-shaped episodes, and scoring.
+"""Gym-shaped :class:`Environment`: reset, step, and scored episodes.
 
-Subclass :class:`Environment` to write a game or work env — name, version,
-tools, observations, and rewards live on that class. The default
+Subclass this class to write a game or work env — name, version, tools,
+observations, and rewards live on that class. The default
 :meth:`Environment.step` dispatches ``@tool`` methods and records a
 decision. Override ``step`` when the action is not a tool call.
 
+``TaskData``, ``StepResult``, ``Rollout``, and ``tool`` live in sibling
+modules. They are re-exported here so older imports still resolve.
+
 Examples:
-    >>> from enroute.environments.env import Environment, TaskData
+    >>> from enroute.environments.env import Environment
+    >>> from enroute.environments.task import TaskData
     >>> env = Environment(name="support-triage", version="0.1.0")
     >>> @env.scorer(weight=1.0)
     ... def always_one(rollout):
@@ -17,162 +21,40 @@ Examples:
 
 from __future__ import annotations
 
-import functools
 import hashlib
-import inspect
 import json
 import time
-from collections.abc import Callable, Iterable, Iterator
-from contextvars import ContextVar
-from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar, get_args, get_origin
-
-from pydantic import BaseModel, ConfigDict, Field
+from collections.abc import Callable, Iterator
+from typing import Any, Generic, get_args, get_origin
 
 from enroute.client import Enroute
+from enroute.environments.action import normalize_action
+from enroute.environments.episode import Episode, episode_metrics
+from enroute.environments.rollout import Rollout, ScorerFn
 from enroute.environments.runtime import LocalRuntime, Runtime
-from enroute.environments.types import Observation, State
-from enroute.tracing.schema import (
-    Decision,
-    Outcome,
-    ParsedAction,
-    RewardEvent,
-    ToolCallStep,
-    Trace,
+from enroute.environments.step import StepResult
+from enroute.environments.task import TaskData, TaskFn
+from enroute.environments.tool import (
+    instrument_tool,
+    iter_env_tools,
+    make_tool_def,
+    root_tool_steps,
+    tool,
+    tool_root_scope,
 )
-from enroute.types import (
-    ChatRequest,
-    ChatResponse,
-    FunctionDefinition,
-    Message,
-    Tool,
-    ToolCall,
+from enroute.environments.types import (
+    Observation,
+    ObsT,
+    State,
+    StateT,
+    as_text,
+    is_empty_observation,
+    serialize_observation,
 )
+from enroute.tracing.schema import Outcome, ParsedAction, RewardEvent, ToolCallStep, Trace
+from enroute.types import ChatRequest, ChatResponse, Message, Tool
 
-_TOOL_ATTR = "__enroute_tool__"
-_INSTRUMENTED = "_enroute_instrumented"
-_tool_stack: ContextVar[list[ToolCallStep] | None] = ContextVar("enroute_tool_stack", default=None)
-_tool_roots: ContextVar[list[ToolCallStep] | None] = ContextVar("enroute_tool_roots", default=None)
-
-ObsT = TypeVar("ObsT", bound=Observation)
-StateT = TypeVar("StateT", bound=State)
-
-
-def tool(fn: Callable[..., Any] | None = None, *, name: str | None = None) -> Any:
-    """Mark an :class:`Environment` method as a tool.
-
-    Args:
-        fn: Method to register (decorator usage).
-        name: Optional explicit tool name. Defaults to the method name.
-
-    Returns:
-        The original method (decorator) or a decorator.
-    """
-
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        setattr(func, _TOOL_ATTR, name or func.__name__)
-        return func
-
-    if fn is not None:
-        return decorator(fn)
-    return decorator
-
-
-def _is_env_tool(fn: Callable[..., Any]) -> bool:
-    return hasattr(fn, _TOOL_ATTR)
-
-
-def _iter_env_tools(env_cls: type) -> Iterable[tuple[str, Callable[..., Any]]]:
-    seen: set[str] = set()
-    for cls in env_cls.__mro__:
-        for attr, value in cls.__dict__.items():
-            if attr in seen or not callable(value) or not _is_env_tool(value):
-                continue
-            seen.add(attr)
-            yield str(getattr(value, _TOOL_ATTR, attr)), value
-
-
-class StepResult(BaseModel):
-    """Gymnasium-shaped result of :meth:`Environment.step`.
-
-    Unpack as ``obs, reward, terminated, truncated, info``.
-
-    Attributes:
-        observation: Next observation from the environment.
-        reward: Sum of this decision's step rewards (0 if none).
-        terminated: ``True`` when :meth:`Environment.done` reports a natural end.
-        truncated: ``True`` when ``max_turns`` was hit.
-        info: Extra diagnostics (stop reason, tool errors, …).
-    """
-
-    observation: Any = None
-    reward: float = 0.0
-    terminated: bool = False
-    truncated: bool = False
-    info: dict[str, Any] = Field(default_factory=dict)
-
-    def __iter__(self) -> Any:
-        """Yield Gymnasium tuple fields in order."""
-        yield self.observation
-        yield self.reward
-        yield self.terminated
-        yield self.truncated
-        yield self.info
-
-
-class TaskData(BaseModel):
-    """Seed data for a single task instance.
-
-    Attributes:
-        task_id: Stable task identifier.
-        input: Primary input payload (often a user message or structured case).
-        expected: Optional expected output / label used by scorers.
-        metadata: Arbitrary task metadata (include ``seed`` for determinism).
-    """
-
-    task_id: str
-    input: Any
-    expected: Any = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class Rollout(BaseModel):
-    """Result of running one task through an environment.
-
-    Attributes:
-        task: The task that was run.
-        trace: Scored episode trace produced by the rollout.
-        messages: Final conversation messages.
-        response: Final model response, if any.
-        env: Environment instance after the episode.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    task: TaskData
-    trace: Trace
-    messages: list[Message] = Field(default_factory=list)
-    response: ChatResponse | None = None
-    env: Any = None
-
-
-ScorerFn = Callable[[Rollout], float]
-TaskFn = Callable[[], Iterable[TaskData]]
-
-
-@dataclass
-class _Episode:
-    task: TaskData
-    trace: Trace
-    messages: list[Message]
-    turn: int = 0
-    observation: Any = None
-    last_response: ChatResponse | None = None
-    closed: bool = False
-    stop_reason: str | None = None
-    terminated: bool = False
-    truncated: bool = False
-    tool_errors: list[str] = field(default_factory=list)
+__all__ = ["Environment", "Rollout", "StepResult", "TaskData", "tool"]
 
 
 class Environment(Generic[ObsT, StateT]):
@@ -199,7 +81,8 @@ class Environment(Generic[ObsT, StateT]):
         metadata: Arbitrary environment metadata.
 
     Examples:
-        >>> from enroute.environments.env import Environment, tool
+        >>> from enroute.environments.env import Environment
+        >>> from enroute.environments.tool import tool
         >>> from enroute.environments.types import Observation, State
         >>> class CounterState(State):
         ...     n: int = 0
@@ -257,7 +140,7 @@ class Environment(Generic[ObsT, StateT]):
         self.seed: int | None = None
         self._state: State = State()
         self._observation: Observation | None = None
-        self._episode: _Episode | None = None
+        self._episode: Episode | None = None
         self._register_class_tools()
 
     @property
@@ -413,7 +296,7 @@ class Environment(Generic[ObsT, StateT]):
         """Register a tasks provider.
 
         Args:
-            fn: Callable returning an iterable of :class:`TaskData`.
+            fn: Callable returning an iterable of :class:`~enroute.environments.task.TaskData`.
 
         Returns:
             The original function.
@@ -477,7 +360,7 @@ class Environment(Generic[ObsT, StateT]):
         messages: list[Message] = []
         if self.system_prompt:
             messages.append(Message(role="system", content=self.system_prompt))
-        messages.append(Message(role="user", content=_as_text(observation)))
+        messages.append(Message(role="user", content=as_text(observation)))
 
         trace = Trace(
             environment=self.name,
@@ -489,7 +372,7 @@ class Environment(Generic[ObsT, StateT]):
             metadata={"task": task.model_dump(), **self.metadata},
             tags={"environment": self.name},
         )
-        self._episode = _Episode(
+        self._episode = Episode(
             task=task,
             trace=trace,
             messages=messages,
@@ -507,8 +390,9 @@ class Environment(Generic[ObsT, StateT]):
         """Return the current episode conversation for the policy.
 
         After :meth:`reset`, this is instructions plus the first observation.
-        After :meth:`step`, tool results are appended so the next ``chat``
-        sees the latest observation.
+        After :meth:`step`, tool results and the next observation are
+        appended so the next ``chat`` sees the same board the decision
+        recorded.
 
         Returns:
             A copy of the open episode's messages.
@@ -542,7 +426,7 @@ class Environment(Generic[ObsT, StateT]):
             runtime: Tool runtime; defaults to :class:`LocalRuntime`.
 
         Returns:
-            :class:`StepResult`.
+            :class:`~enroute.environments.step.StepResult`.
 
         Raises:
             RuntimeError: If :meth:`reset` has not been called.
@@ -550,7 +434,7 @@ class Environment(Generic[ObsT, StateT]):
         episode = self._require_episode()
         runtime = runtime or LocalRuntime(self.tool_functions)
         self._append_assistant(response)
-        parsed, tool_calls_in = _normalize_action(action, response)
+        parsed, tool_calls_in = normalize_action(action, response)
         observation = episode.observation
 
         tool_steps: list[ToolCallStep] = []
@@ -560,14 +444,11 @@ class Environment(Generic[ObsT, StateT]):
         for parsed_action, tool_call_id in zip(parsed, tool_calls_in, strict=False):
             if not parsed_action.name or parsed_action.name == "respond":
                 continue
-            roots_token = _tool_roots.set([])
-            try:
+            with tool_root_scope():
                 result, latency_ms, error = self._invoke_tool(
                     runtime, parsed_action.name, parsed_action.arguments
                 )
-                roots = list(_tool_roots.get() or [])
-            finally:
-                _tool_roots.reset(roots_token)
+                roots = root_tool_steps()
             tool_step = roots[0] if roots else None
             if tool_step is None:
                 tool_step = ToolCallStep(
@@ -631,7 +512,7 @@ class Environment(Generic[ObsT, StateT]):
         """
         episode = self._require_episode()
         episode.trace.add_decision(
-            observation=_serialize_observation(observation),
+            observation=serialize_observation(observation),
             model_context=model_context,
             model_output=model_output,
             parsed_action=parsed_action or [],
@@ -657,16 +538,17 @@ class Environment(Generic[ObsT, StateT]):
             stop_reason: Override (``no_tool_calls``, ``terminated``, …).
 
         Returns:
-            :class:`StepResult`.
+            :class:`~enroute.environments.step.StepResult`.
         """
         episode = self._require_episode()
         events = reward_events or []
         episode.turn += 1
         next_obs = self.observe()
-        if _is_empty_observation(next_obs):
+        if is_empty_observation(next_obs):
             next_obs = episode.observation
         self._observation = next_obs if isinstance(next_obs, Observation) else None
         episode.observation = next_obs
+        self._append_observation(next_obs)
         terminated = self.done()
         truncated = episode.turn >= self.max_turns and not terminated
         if stop_reason is None:
@@ -706,7 +588,7 @@ class Environment(Generic[ObsT, StateT]):
             client: If given, persist the episode trace on its writer.
 
         Returns:
-            A scored :class:`Rollout`.
+            A scored :class:`~enroute.environments.rollout.Rollout`.
 
         Raises:
             RuntimeError: If :meth:`reset` has not been called.
@@ -725,7 +607,7 @@ class Environment(Generic[ObsT, StateT]):
         episode.trace.final_state = self._safe_snapshot()
         episode.trace.terminated = episode.terminated
         episode.trace.truncated = episode.truncated
-        episode.trace.metrics = _episode_metrics(episode)
+        episode.trace.metrics = episode_metrics(episode)
         episode.closed = True
         if client is not None:
             client.writer.record(episode.trace)
@@ -755,7 +637,8 @@ class Environment(Generic[ObsT, StateT]):
             temperature: Optional sampling temperature.
 
         Returns:
-            A :class:`Rollout` containing a scored :class:`~enroute.tracing.schema.Trace`.
+            A :class:`~enroute.environments.rollout.Rollout` containing a scored
+            :class:`~enroute.tracing.schema.Trace`.
         """
         runtime = runtime or LocalRuntime(self.tool_functions)
         self.reset(task, model=model)
@@ -791,11 +674,26 @@ class Environment(Generic[ObsT, StateT]):
 
         return self.close_episode(response=final_response, client=client)
 
-    def _require_episode(self) -> _Episode:
+    def _require_episode(self) -> Episode:
         episode = self._episode
         if episode is None or episode.closed:
             raise RuntimeError("no episode in progress; call Environment.reset() first")
         return episode
+
+    def _append_observation(self, observation: Any) -> None:
+        """Put the latest observation on the conversation the policy will see.
+
+        Tool JSON is not enough: Wordle's board and letter key live on the
+        observation. Skip empty or duplicate consecutive user turns.
+        """
+        text = as_text(observation)
+        if not text:
+            return
+        episode = self._require_episode()
+        last = episode.messages[-1] if episode.messages else None
+        if last is not None and last.role == "user" and last.content == text:
+            return
+        episode.messages.append(Message(role="user", content=text))
 
     def _append_assistant(self, response: ChatResponse | None) -> None:
         if response is None:
@@ -828,7 +726,7 @@ class Environment(Generic[ObsT, StateT]):
         return scores, reward
 
     def _register_class_tools(self) -> None:
-        for tool_name, func in _iter_env_tools(type(self)):
+        for tool_name, func in iter_env_tools(type(self)):
             bound = getattr(self, func.__name__)
             self._add_tool(tool_name, bound, schema_from=func, bind_method=func.__name__)
 
@@ -841,54 +739,11 @@ class Environment(Generic[ObsT, StateT]):
         bind_method: str | None = None,
     ) -> None:
         source = schema_from or func
-        wrapped = self._instrument_tool(tool_name, func)
+        wrapped = instrument_tool(tool_name, func)
         self.tool_functions[tool_name] = wrapped
         if bind_method:
             setattr(self, bind_method, wrapped)
-        self.tool_defs.append(
-            Tool(
-                function=FunctionDefinition(
-                    name=tool_name,
-                    description=(inspect.getdoc(source) or "").strip() or None,
-                    parameters=_function_schema(source),
-                )
-            )
-        )
-
-    def _instrument_tool(self, tool_name: str, func: Callable[..., Any]) -> Callable[..., Any]:
-        if getattr(func, _INSTRUMENTED, False):
-            return func
-
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            recorded = _call_arguments(func, args, kwargs)
-            step = ToolCallStep(name=tool_name, arguments=recorded)
-            stack = list(_tool_stack.get() or [])
-            if stack:
-                step.parent = stack[-1].name
-                stack[-1].children.append(step)
-            else:
-                roots = list(_tool_roots.get() or [])
-                roots.append(step)
-                _tool_roots.set(roots)
-            stack.append(step)
-            token = _tool_stack.set(stack)
-            started = time.perf_counter()
-            try:
-                result = func(*args, **kwargs)
-                step.result = result
-                step.latency_ms = (time.perf_counter() - started) * 1000
-                return result
-            except Exception as exc:
-                step.error = str(exc)
-                step.result = {"error": str(exc)}
-                step.latency_ms = (time.perf_counter() - started) * 1000
-                raise
-            finally:
-                _tool_stack.reset(token)
-
-        setattr(wrapper, _INSTRUMENTED, True)
-        return wrapper
+        self.tool_defs.append(make_tool_def(tool_name, source))
 
     def _contract_names(self) -> tuple[str, str]:
         for base in getattr(type(self), "__orig_bases__", ()):
@@ -900,8 +755,8 @@ class Environment(Generic[ObsT, StateT]):
 
     def _initial_observation(self, task: TaskData) -> Any:
         observed: Any = self.observe()
-        if _is_empty_observation(observed):
-            observed = Observation(text=_as_text(task.input))
+        if is_empty_observation(observed):
+            observed = Observation(text=as_text(task.input))
         if isinstance(observed, Observation):
             self._observation = observed
         return observed
@@ -931,167 +786,3 @@ class Environment(Generic[ObsT, StateT]):
             return result, latency_ms, None
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}, (time.perf_counter() - started) * 1000, str(exc)
-
-
-def _normalize_action(
-    action: Any,
-    response: ChatResponse | None,
-) -> tuple[list[ParsedAction], list[str | None]]:
-    if action is None and response is not None:
-        action = response.message.tool_calls
-    if isinstance(action, ChatResponse):
-        action = action.message.tool_calls
-    if not action:
-        return [ParsedAction(name="respond", arguments={})], [None]
-    parsed: list[ParsedAction] = []
-    ids: list[str | None] = []
-    if isinstance(action, ParsedAction):
-        return [action], [None]
-    if isinstance(action, ToolCall):
-        parsed_one = ParsedAction(
-            name=action.function.name,
-            arguments=_parse_args(action.function.arguments),
-        )
-        return [parsed_one], [action.id]
-    for item in action:
-        if isinstance(item, ParsedAction):
-            parsed.append(item)
-            ids.append(None)
-        elif isinstance(item, ToolCall):
-            parsed.append(
-                ParsedAction(
-                    name=item.function.name,
-                    arguments=_parse_args(item.function.arguments),
-                )
-            )
-            ids.append(item.id)
-        elif isinstance(item, dict):
-            parsed.append(
-                ParsedAction(
-                    name=str(item.get("name") or "respond"),
-                    arguments=dict(item.get("arguments") or {}),
-                )
-            )
-            ids.append(item.get("id"))
-        else:
-            parsed.append(ParsedAction(name=str(item), arguments={}))
-            ids.append(None)
-    return parsed, ids
-
-
-def _episode_metrics(episode: _Episode) -> dict[str, Any]:
-    decisions = [s for s in episode.trace.steps if isinstance(s, Decision)]
-    tool_count = sum(len(d.tool_calls) for d in decisions)
-    cost = 0.0
-    latency = 0.0
-    for decision in decisions:
-        output = decision.model_output
-        if isinstance(output, ChatResponse):
-            if output.usage and output.usage.cost is not None:
-                cost += output.usage.cost
-            if output.latency_ms is not None:
-                latency += output.latency_ms
-        elif isinstance(output, dict):
-            usage = output.get("usage") or {}
-            if usage.get("cost") is not None:
-                cost += float(usage["cost"])
-            if output.get("latency_ms") is not None:
-                latency += float(output["latency_ms"])
-    return {
-        "turns": episode.turn,
-        "decisions": len(decisions),
-        "tool_calls": tool_count,
-        "cost": cost,
-        "latency_ms": latency,
-        "stop_reason": episode.stop_reason,
-    }
-
-
-def _call_arguments(
-    func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> dict[str, Any]:
-    recorded = dict(kwargs)
-    if not args:
-        return recorded
-    try:
-        sig = inspect.signature(func)
-    except (TypeError, ValueError):
-        return recorded
-    names = [p.name for p in sig.parameters.values() if p.name not in {"self", "cls"}]
-    for name, value in zip(names, args, strict=False):
-        recorded.setdefault(name, value)
-    return recorded
-
-
-def _is_empty_observation(value: Any) -> bool:
-    if value is None or value == "":
-        return True
-    if isinstance(value, Observation):
-        return not value.render()
-    return False
-
-
-def _serialize_observation(value: Any) -> Any:
-    if isinstance(value, Observation):
-        return value.model_dump()
-    return value
-
-
-def _as_text(value: Any) -> str:
-    if isinstance(value, Observation):
-        return value.render()
-    if isinstance(value, str):
-        return value
-    render = getattr(value, "render", None)
-    if callable(render):
-        return str(render())
-    if hasattr(value, "model_dump"):
-        return json.dumps(value.model_dump())
-    return json.dumps(value)
-
-
-def _parse_args(raw: str) -> dict[str, Any]:
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        return {"raw": raw}
-    if isinstance(value, dict):
-        return value
-    return {"value": value}
-
-
-def _function_schema(fn: Callable[..., Any]) -> dict[str, Any]:
-    sig = inspect.signature(fn)
-    properties: dict[str, Any] = {}
-    required: list[str] = []
-    hints = getattr(fn, "__annotations__", {})
-    for param in sig.parameters.values():
-        if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
-            continue
-        if param.name in {"self", "cls"}:
-            continue
-        ann = hints.get(param.name, str)
-        properties[param.name] = _annotation_to_json_schema(ann)
-        if param.default is inspect.Parameter.empty:
-            required.append(param.name)
-    schema: dict[str, Any] = {"type": "object", "properties": properties}
-    if required:
-        schema["required"] = required
-    return schema
-
-
-def _annotation_to_json_schema(ann: Any) -> dict[str, Any]:
-    if ann is int:
-        return {"type": "integer"}
-    if ann is float:
-        return {"type": "number"}
-    if ann is bool:
-        return {"type": "boolean"}
-    if ann is str:
-        return {"type": "string"}
-    origin = getattr(ann, "__origin__", None)
-    if origin is list:
-        return {"type": "array"}
-    if origin is dict:
-        return {"type": "object"}
-    return {"type": "string"}

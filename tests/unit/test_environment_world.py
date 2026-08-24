@@ -6,8 +6,10 @@ from typing import Any
 
 from enroute import Dataset, Enroute, Environment, TaskData, Trace
 from enroute.environments import Observation, State, StepResult, tool
+from enroute.environments.env import TaskData as TaskDataFromEnv
 from enroute.environments.export.hf import to_huggingface_records
 from enroute.environments.export.verifiers import to_verifiers_trace
+from enroute.environments.task import TaskData as TaskDataFromTask
 from enroute.tracing import JSONLSink
 from enroute.tracing.schema import Decision, Outcome, ParsedAction
 from enroute.types import (
@@ -113,6 +115,11 @@ def _client(provider: SequentialProvider, tmp_path: Path) -> Enroute:
     )
 
 
+def test_taskdata_import_paths_are_the_same_class() -> None:
+    assert TaskData is TaskDataFromTask
+    assert TaskData is TaskDataFromEnv
+
+
 def test_reset_step_gym_tuple() -> None:
     env = CounterEnv(max_turns=4)
     task = TaskData(task_id="t1", input="go", metadata={"seed": 7})
@@ -139,6 +146,17 @@ def test_reset_step_gym_tuple() -> None:
     assert all(isinstance(s, Decision) for s in rollout.trace.steps)
     assert rollout.trace.steps[0].model_context is None
     assert rollout.trace.steps[0].parsed_action[0].name == "inc"
+
+
+def test_step_appends_next_observation_to_messages() -> None:
+    env = CounterEnv(max_turns=4)
+    env.reset(TaskData(task_id="t1", input="go", metadata={"seed": 7}))
+    first = [m.content for m in env.messages() if m.role == "user"]
+    assert first[-1] == "count=0 seed=7"
+    env.step([ParsedAction(name="inc", arguments={"by": 1})])
+    users = [m for m in env.messages() if m.role == "user"]
+    assert users[-1].content == "count=1 seed=7"
+    assert any(m.role == "tool" for m in env.messages())
 
 
 def test_truncated_at_max_turns() -> None:

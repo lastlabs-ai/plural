@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Wordle `--host mlx` / `--mlx` talks to `mlx_lm.server` on
+  `http://127.0.0.1:8080/v1`. Live runs print the harness the policy saw
+  and write `wordle-summary.json` plus the full episode trace.
+
+### Changed
+
+- After each `step`, the next observation is appended to `env.messages()`
+  so the policy sees the same board the decision recorded, not only the
+  last tool JSON.
+- Environment types live in their own modules (`task`, `step`, `rollout`,
+  `episode`, `tool`, `action`). `from enroute.environments.env import
+  TaskData` still works.
+
 ## [0.4.0] - 2026-08-21
 
 ### Added

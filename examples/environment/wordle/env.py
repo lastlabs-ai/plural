@@ -19,9 +19,11 @@ _MARK_RANK = {".": 0, "Y": 1, "G": 2}
 
 INSTRUCTIONS = (
     "You are playing Wordle. The only action is the guess tool. "
-    "Submit a valid 5-letter English word each turn. Read the board: "
-    "G is correct place, Y is wrong place, . is absent. "
-    "You have six valid guesses. Do not reveal that you are an LLM."
+    "Call it with exactly one 5-letter English word. "
+    "Read the board after every result: G is correct place, Y is wrong place, "
+    ". is absent. Never reuse a letter marked absent. Keep every G fixed. "
+    "Use the Letters keyboard. You have six valid guesses; invalid words do "
+    "not use a guess. Do not reveal that you are an LLM."
 )
 
 
@@ -59,9 +61,9 @@ class WordleEnv(Environment[WordleObservation, WordleState]):
     """A single Wordle puzzle. The policy only calls :meth:`guess`."""
 
     name = "wordle"
-    version = "0.1.0"
+    version = "0.2.0"
     system_prompt = INSTRUCTIONS
-    max_turns = 8
+    max_turns = 12
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -146,23 +148,32 @@ class WordleEnv(Environment[WordleObservation, WordleState]):
         cleaned = word.strip().lower()
         if len(cleaned) != 5:
             self.state.last_invalid = True
-            return {"error": "guess must be 5 letters", "guess": cleaned}
+            return self._visible({"error": "guess must be 5 letters", "guess": cleaned})
         if not is_allowed(cleaned):
             self.state.last_invalid = True
-            return {"error": "not in the word list", "guess": cleaned}
+            return self._visible({"error": "not in the word list", "guess": cleaned})
         if self.done():
-            return {"error": "puzzle is over", "guess": cleaned}
+            return self._visible({"error": "puzzle is over", "guess": cleaned})
 
         marks = pattern(cleaned, self.state.secret)
         self.state.rows.append(WordleRow(guess=cleaned, pattern=marks))
         self.state.solved = marks == "GGGGG"
         self._record_new_marks(cleaned, marks)
-        return {
-            "guess": cleaned,
-            "pattern": marks,
-            "solved": self.state.solved,
-            "guesses_left": self.guesses_left,
-        }
+        return self._visible(
+            {
+                "guess": cleaned,
+                "pattern": marks,
+                "solved": self.state.solved,
+            }
+        )
+
+    def _visible(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Attach the board the policy is allowed to see."""
+        obs = self.observe()
+        payload["board"] = obs.board
+        payload["letters"] = obs.letters
+        payload["guesses_left"] = obs.guesses_left
+        return payload
 
     def _record_new_marks(self, word: str, marks: str) -> None:
         for letter, mark in zip(word, marks, strict=True):

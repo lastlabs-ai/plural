@@ -117,7 +117,7 @@ trace = env.rollout(next(env.iter_tasks()), client, model="openai/gpt-4o-mini").
 Every environment is different (library, Twitter, your CRM). The trace is not. `rollout()` always writes **one [Trace](trace.md) per episode**:
 
 1. `reset` snapshots `initial_state` and the first observation
-2. Each `step` appends a **decision** (observation, `model_context`, action, tool results)
+2. Each `step` appends a **decision** (observation, `model_context`, action, tool results) and puts the next observation on `env.messages()` so the next `chat` sees the same board the decision recorded
 3. `close_episode` runs scorers → `outcome.reward`, plus `final_state` and `metrics`
 
 That is the only shape observability and a future trainer need. Environments vary in their **state and tools**; they do not invent a new log format.

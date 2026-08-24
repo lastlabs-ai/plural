@@ -8,9 +8,13 @@
 
 ::: enroute.environments.env.Environment
 
-::: enroute.environments.env.StepResult
+::: enroute.environments.task.TaskData
 
-::: enroute.environments.env.tool
+::: enroute.environments.step.StepResult
+
+::: enroute.environments.rollout.Rollout
+
+::: enroute.environments.tool.tool
 
 ::: enroute.environments.types.Observation
 

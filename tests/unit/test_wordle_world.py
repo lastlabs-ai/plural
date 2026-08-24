@@ -52,6 +52,18 @@ def test_invalid_guess_does_not_consume_turn() -> None:
     assert env.guesses_left == 6
 
 
+def test_guess_result_includes_board() -> None:
+    env = _env("crane")
+    out = env.guess("slate")
+    assert out["pattern"] == "..G.G"
+    assert "SLATE" in out["board"]
+    assert out["letters"]["a"] == "G"
+    assert out["guesses_left"] == 5
+    bad = env.guess("cram")
+    assert "error" in bad
+    assert "SLATE" in bad["board"]
+
+
 def test_reset_seed_is_deterministic() -> None:
     a = WordleEnv()
     b = WordleEnv()
@@ -77,7 +89,7 @@ def test_solve_sets_done_and_score() -> None:
 def test_make_env_only_guess() -> None:
     env = make_env()
     assert env.name == "wordle"
-    assert env.version == "0.1.0"
+    assert env.version == "0.2.0"
     names = {t.function.name for t in env.tool_defs}
     assert names == {"guess"}
 
