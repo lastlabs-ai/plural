@@ -8,17 +8,17 @@ uv run python examples/routing/custom/with_tracing.py
 import os
 from pathlib import Path
 
-from enroute import Enroute, Message
-from enroute.providers import OpenAICompatible
-from enroute.tracing import JSONLSink
+from plural import Message, Plural
+from plural.providers import OpenAICompatible
+from plural.tracing import JSONLSink
 
 base_url = os.environ.get("CUSTOM_BASE_URL", "http://127.0.0.1:8000/v1")
 api_key = os.environ.get("CUSTOM_API_KEY", "EMPTY")
 server_model = os.environ.get("CUSTOM_MODEL", "my-model")
 
-Path(".enroute/examples").mkdir(parents=True, exist_ok=True)
+Path(".plural/examples").mkdir(parents=True, exist_ok=True)
 
-with Enroute(
+with Plural(
     providers={
         "custom": OpenAICompatible(
             api_key=api_key,
@@ -26,7 +26,7 @@ with Enroute(
             name="custom",
         )
     },
-    sink=JSONLSink(".enroute/examples/routing-custom.jsonl"),
+    sink=JSONLSink(".plural/examples/routing-custom.jsonl"),
     capture_content=True,
 ) as client:
     response = client.chat(
@@ -36,4 +36,4 @@ with Enroute(
         max_tokens=128,
     )
     print(response.text)
-    print("trace_id:", (response.raw or {}).get("enroute_trace_id"))
+    print("trace_id:", (response.raw or {}).get("plural_trace_id"))

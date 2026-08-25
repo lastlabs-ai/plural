@@ -6,16 +6,16 @@ from typing import Any
 
 import pytest
 
-from enroute import ActionResult, Dataset, Enroute, Environment, TaskData, Trace
-from enroute.environments import Observation, State, StepResult, tool
-from enroute.environments.env import TaskData as TaskDataFromEnv
-from enroute.environments.export.hf import to_huggingface_records
-from enroute.environments.export.verifiers import to_verifiers_trace
-from enroute.environments.runtime import Runtime
-from enroute.environments.task import TaskData as TaskDataFromTask
-from enroute.tracing import JSONLSink
-from enroute.tracing.schema import Decision, Outcome, ParsedAction
-from enroute.types import (
+from plural import ActionResult, Dataset, Environment, Plural, TaskData, Trace
+from plural.environments import Observation, State, StepResult, tool
+from plural.environments.env import TaskData as TaskDataFromEnv
+from plural.environments.export.hf import to_huggingface_records
+from plural.environments.export.verifiers import to_verifiers_trace
+from plural.environments.runtime import Runtime
+from plural.environments.task import TaskData as TaskDataFromTask
+from plural.tracing import JSONLSink
+from plural.tracing.schema import Decision, Outcome, ParsedAction
+from plural.types import (
     ChatRequest,
     ChatResponse,
     Choice,
@@ -113,8 +113,8 @@ class CounterEnv(Environment[CounterObservation, CounterState]):
         return {"n": self.state.n}
 
 
-def _client(provider: SequentialProvider, tmp_path: Path) -> Enroute:
-    return Enroute(
+def _client(provider: SequentialProvider, tmp_path: Path) -> Plural:
+    return Plural(
         providers={"openai": provider},
         sink=JSONLSink(tmp_path / "t.jsonl"),
         capture_content=True,
@@ -392,7 +392,7 @@ def test_decision_round_trip() -> None:
 
 
 def test_flat_trace_transitions_fallback() -> None:
-    from enroute.tracing.schema import LLMCall, ToolCallStep
+    from plural.tracing.schema import LLMCall, ToolCallStep
 
     trace = Trace(trace_id="p", outcome=Outcome(reward=0.5), terminated=True)
     trace.steps.append(

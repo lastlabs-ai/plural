@@ -1,6 +1,6 @@
 # Streaming, tool calling, structured output, and reasoning
 
-Every host expresses these four features differently. enroute normalizes them so
+Every host expresses these four features differently. plural normalizes them so
 one piece of client code works across all of them, and the normalized shape is
 always OpenAI's.
 

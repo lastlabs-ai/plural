@@ -8,13 +8,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from enroute.tracing import Trace
+from plural.tracing import Trace
 
-SCHEMA_ID = "https://enroute.dev/schemas/trace.v1.json"
-SCHEMA_TITLE = "enroute Trace"
+SCHEMA_ID = "https://pluralintel.com/schemas/trace.v1.json"
+SCHEMA_TITLE = "Plural Trace"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_PATHS = (
-    REPOSITORY_ROOT / "src/enroute/schemas/trace.v1.json",
+    REPOSITORY_ROOT / "src/plural/schemas/trace.v1.json",
     REPOSITORY_ROOT / "schemas/trace.v1.json",
     REPOSITORY_ROOT / "docs/schemas/trace.v1.json",
 )

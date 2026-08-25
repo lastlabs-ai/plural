@@ -14,15 +14,15 @@ from typing import Any
 import httpx
 import respx
 
-from enroute.providers import (
+from plural.providers import (
     AnthropicProvider,
     BedrockProvider,
     GoogleProvider,
     OpenAIProvider,
 )
-from enroute.providers.bedrock import encode_event_frame
-from enroute.providers.structured import STRUCTURED_TOOL_NAME, gemini_schema
-from enroute.types import (
+from plural.providers.bedrock import encode_event_frame
+from plural.providers.structured import STRUCTURED_TOOL_NAME, gemini_schema
+from plural.types import (
     ChatRequest,
     FunctionDefinition,
     Message,

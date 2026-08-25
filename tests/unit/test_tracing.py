@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from enroute.tracing import (
+from plural.tracing import (
     JSONLSink,
     ParsedAction,
     Redactor,
@@ -9,7 +9,7 @@ from enroute.tracing import (
     Trace,
     TraceWriter,
 )
-from enroute.tracing.schema import Outcome
+from plural.tracing.schema import Outcome
 
 
 def test_jsonl_sink(tmp_path: Path) -> None:

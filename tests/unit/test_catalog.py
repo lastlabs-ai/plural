@@ -1,8 +1,8 @@
 import json
 
-from enroute.catalog import ModelCatalog, estimate_cost
-from enroute.catalog.models import ModelPricing, ModelSpec, PriceTier
-from enroute.types import Usage
+from plural.catalog import ModelCatalog, estimate_cost
+from plural.catalog.models import ModelPricing, ModelSpec, PriceTier
+from plural.types import Usage
 
 LONG_CONTEXT = ModelPricing(
     prompt=5e-6,

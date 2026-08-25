@@ -1,4 +1,4 @@
-from enroute.types import (
+from plural.types import (
     ChatRequest,
     ChatResponse,
     Choice,

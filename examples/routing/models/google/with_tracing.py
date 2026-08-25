@@ -1,20 +1,20 @@
-"""Google Gemini model via enroute, with local tracing.
+"""Google Gemini model via plural, with local tracing.
 
-Requires ``ENROUTE_API_KEY`` in your environment::
+Requires ``PLURAL_API_KEY`` in your environment::
 
-    export ENROUTE_API_KEY=enroute-...
+    export PLURAL_API_KEY=plural-...
     uv run python examples/routing/models/google/with_tracing.py
 """
 
 from pathlib import Path
 
-from enroute import Enroute, Message
-from enroute.tracing import JSONLSink
+from plural import Message, Plural
+from plural.tracing import JSONLSink
 
-Path(".enroute/examples").mkdir(parents=True, exist_ok=True)
+Path(".plural/examples").mkdir(parents=True, exist_ok=True)
 
-with Enroute(
-    sink=JSONLSink(".enroute/examples/routing-google.jsonl"),
+with Plural(
+    sink=JSONLSink(".plural/examples/routing-google.jsonl"),
     capture_content=True,
 ) as client:
     response = client.chat(
@@ -24,4 +24,4 @@ with Enroute(
         max_tokens=128,
     )
     print(response.text)
-    print("trace_id:", (response.raw or {}).get("enroute_trace_id"))
+    print("trace_id:", (response.raw or {}).get("plural_trace_id"))

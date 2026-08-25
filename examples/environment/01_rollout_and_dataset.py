@@ -8,13 +8,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _shared import ScriptedProvider, ensure_out_dir
-from enroute import Dataset, Enroute, Environment, TaskData
-from enroute.tracing import JSONLSink
+from plural import Dataset, Environment, Plural, TaskData
+from plural.tracing import JSONLSink
 
 
 def main() -> None:
     out = ensure_out_dir()
-    client = Enroute(
+    client = Plural(
         providers={"openai": ScriptedProvider("openai", "Order shipped")},
         sink=JSONLSink(out / "env.jsonl"),
         capture_content=True,

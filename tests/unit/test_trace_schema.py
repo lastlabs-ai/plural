@@ -8,7 +8,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from enroute.tracing import (
+from plural.tracing import (
     Event,
     Outcome,
     ParsedAction,
@@ -20,7 +20,7 @@ from enroute.tracing import (
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATHS = (
-    ROOT / "src/enroute/schemas/trace.v1.json",
+    ROOT / "src/plural/schemas/trace.v1.json",
     ROOT / "schemas/trace.v1.json",
     ROOT / "docs/schemas/trace.v1.json",
 )
@@ -35,7 +35,7 @@ def test_generated_trace_schema_is_current_and_packaged() -> None:
 
     contents = [path.read_text(encoding="utf-8") for path in SCHEMA_PATHS]
     assert contents[0] == contents[1] == contents[2]
-    packaged = files("enroute.schemas").joinpath("trace.v1.json")
+    packaged = files("plural.schemas").joinpath("trace.v1.json")
     assert packaged.is_file()
     assert trace_json_schema() == json.loads(contents[0])
 
@@ -65,7 +65,7 @@ def test_production_and_episode_dumps_validate_against_trace_schema() -> None:
         stop_reason="complete",
     )
     production.add_llm(request=None, response=None)
-    production.add_tool("lookup", {"query": "enroute"}, result={"found": True})
+    production.add_tool("lookup", {"query": "plural"}, result={"found": True})
     production.steps.append(Event(name="routed", data={"provider": "test"}))
 
     episode = Trace(
@@ -80,7 +80,7 @@ def test_production_and_episode_dumps_validate_against_trace_schema() -> None:
     episode.add_decision(
         index=0,
         observation={"turn": 0},
-        parsed_action=[ParsedAction(name="lookup", arguments={"query": "enroute"})],
+        parsed_action=[ParsedAction(name="lookup", arguments={"query": "plural"})],
         tool_calls=[ToolCallStep(name="lookup", result={"found": True})],
         reward_events=[RewardEvent(name="lookup", value=1.0)],
     )

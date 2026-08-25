@@ -10,10 +10,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from _shared import ensure_out_dir
-from enroute import JSONLSink, TraceWriter
-from enroute.tracing import ParsedAction
-from enroute.types import ChatRequest
 from examples.environment.twitter.env import make_env
+from plural import JSONLSink, TraceWriter
+from plural.tracing import ParsedAction
+from plural.types import ChatRequest
 
 
 class ReplyPolicy:

@@ -3,13 +3,13 @@ requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
-name = "enroute"
+name = "plural"
 dynamic = ["version"]
 description = "Unified LLM routing with first-class traces, environments, and benchmarks."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
-authors = [{ name = "enroute" }]
+authors = [{ name = "Plural" }]
 keywords = [
   "llm",
   "routing",
@@ -42,15 +42,15 @@ otel = [
   "opentelemetry-sdk>=1.27,<2",
 ]
 all = [
-  "enroute[otel]",
+  "plural[otel]",
 ]
 
 [project.urls]
-Homepage = "https://github.com/enroute-ai/enroute"
-Documentation = "https://enroute-ai.github.io/enroute/"
-Repository = "https://github.com/enroute-ai/enroute"
-Issues = "https://github.com/enroute-ai/enroute/issues"
-Changelog = "https://github.com/enroute-ai/enroute/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/taylorlast/plural"
+Documentation = "https://taylorlast.github.io/plural/"
+Repository = "https://github.com/taylorlast/plural"
+Issues = "https://github.com/taylorlast/plural/issues"
+Changelog = "https://github.com/taylorlast/plural/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
@@ -72,7 +72,7 @@ docs = [
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/enroute"]
+packages = ["src/plural"]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -129,7 +129,7 @@ python_version = "3.10"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-packages = ["enroute"]
+packages = ["plural"]
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
@@ -156,5 +156,5 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["enroute"]
+source = ["plural"]
 branch = true

@@ -1,5 +1,5 @@
-from enroute.errors import AuthenticationError, RateLimitError, TimeoutError, is_retryable
-from enroute.providers.base import classify_http_error
+from plural.errors import AuthenticationError, RateLimitError, TimeoutError, is_retryable
+from plural.providers.base import classify_http_error
 
 
 def test_is_retryable() -> None:

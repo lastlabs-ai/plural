@@ -3,7 +3,7 @@
 Set your key once:
 
 ```bash
-export ENROUTE_API_KEY=enroute-...
+export PLURAL_API_KEY=plural-...
 ```
 
 ## Layout
@@ -17,7 +17,7 @@ routing/
   byok/           # bring-your-own upstream keys (secondary)
 ```
 
-Each topic has a **basic** script (`Enroute()` + `client.chat`) and, where useful, a **with_tracing** variant (`with Enroute(...) as client` + local sink).
+Each topic has a **basic** script (`Plural()` + `client.chat`) and, where useful, a **with_tracing** variant (`with Plural(...) as client` + local sink).
 
 ## Walkthrough
 
@@ -26,11 +26,11 @@ Each topic has a **basic** script (`Enroute()` + `client.chat`) and, where usefu
 uv run python examples/routing/quickstart/basic.py
 uv run python examples/routing/quickstart/with_tracing.py
 
-# 2. See which models enroute knows about
+# 2. See which models plural knows about
 uv run python examples/routing/catalog/list_models.py
 uv run python examples/routing/catalog/list_models.py --provider openai
 
-# 3. Provider models (via your enroute key)
+# 3. Provider models (via your plural key)
 uv run python examples/routing/models/openai/basic.py
 uv run python examples/routing/models/anthropic/basic.py
 uv run python examples/routing/models/google/basic.py
@@ -49,9 +49,9 @@ uv run python examples/routing/byok/openai.py
 ## Shape
 
 ```python
-from enroute import Enroute, Message
+from plural import Plural, Message
 
-client = Enroute()
+client = Plural()
 response = client.chat(
     model="openai/gpt-4o-mini",
     messages=[Message(role="user", content="Hello")],

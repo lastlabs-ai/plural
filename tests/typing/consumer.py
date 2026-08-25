@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from enroute import (
+from plural import (
     Benchmark,
     Dataset,
-    Enroute,
     Environment,
     Message,
     ModelCatalog,
+    Plural,
     TaskData,
     Trace,
     Usage,
@@ -29,7 +29,7 @@ def main() -> None:
     assert env.name == "x"
     assert task.task_id == "1"
     assert len(ds) == 1
-    _ = Enroute
+    _ = Plural
     _ = Benchmark
 
 

@@ -13,7 +13,7 @@ uv run python examples/environment/library/run.py
 
 The offline script compares a researcher with an immediate wrong guess, prints
 their returns, adds late credit, and saves a Trace Dataset under
-`.enroute/examples`.
+`.plural/examples`.
 
 ## Tool-only environment
 
@@ -22,8 +22,8 @@ base dispatcher, while the framework-owned final `step()` records decisions,
 advances turns, and checks termination.
 
 ```python
-from enroute import ScriptedPolicy
-from enroute.tracing import ParsedAction
+from plural import ScriptedPolicy
+from plural.tracing import ParsedAction
 
 rollout = env.run_episode(
     task,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from enroute.tracing.schema import Outcome, ParsedAction, Trace
+from plural.tracing.schema import Outcome, ParsedAction, Trace
 
 
 def _episode(*actions: str, reward: float | None = 1.0) -> Trace:

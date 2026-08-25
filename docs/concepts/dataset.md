@@ -1,13 +1,13 @@
 # Dataset
 
-Enroute has two dataset roles with intentionally different payloads.
+Plural has two dataset roles with intentionally different payloads.
 
 ## TaskDataset: benchmark inputs
 
 `TaskDataset` is a named, versioned collection of `TaskData`:
 
 ```python
-from enroute import TaskData, TaskDataset
+from plural import TaskData, TaskDataset
 
 tasks = TaskDataset(
     name="refund-suite",
@@ -33,7 +33,7 @@ Task ids must be unique. `TaskDataset.load(...)` requires the sidecar manifest a
 `Dataset` is a named, versioned collection of complete `Trace` records from rollouts or production. `TraceDataset` is an alias for `Dataset`.
 
 ```python
-from enroute import Dataset, TraceFilter
+from plural import Dataset, TraceFilter
 
 rollouts = Dataset.from_traces(
     "refund-rollouts",
@@ -42,7 +42,7 @@ rollouts = Dataset.from_traces(
 )
 
 production = Dataset.from_sink(
-    ".enroute/traces.jsonl",
+    ".plural/traces.jsonl",
     "production-refunds",
     filter=TraceFilter(
         trace_kind="production",

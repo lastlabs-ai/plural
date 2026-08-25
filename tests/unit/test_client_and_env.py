@@ -8,10 +8,10 @@ from typing import Any
 
 import pytest
 
-from enroute import Benchmark, Dataset, Enroute, Environment, TaskData, Trace
-from enroute.environments import TraceFilter
-from enroute.tracing import TraceContext
-from enroute.types import (
+from plural import Benchmark, Dataset, Environment, Plural, TaskData, Trace
+from plural.environments import TraceFilter
+from plural.tracing import TraceContext
+from plural.types import (
     ChatRequest,
     ChatResponse,
     Choice,
@@ -68,18 +68,18 @@ class FakeProvider:
 
 def test_client_chat_records_trace(tmp_path: Path) -> None:
     provider = FakeProvider("hello")
-    client = Enroute(
+    client = Plural(
         providers={"openai": provider},
         sink=None,
         trace_dir=tmp_path,
         capture_content=True,
     )
     # Replace default sink path created inside — recreate with explicit sink
-    from enroute.tracing import JSONLSink
+    from plural.tracing import JSONLSink
 
     client.close()
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Enroute(
+    client = Plural(
         providers={"openai": provider},
         sink=sink,
         capture_content=True,
@@ -97,10 +97,10 @@ def test_client_chat_records_trace(tmp_path: Path) -> None:
 
 
 def test_environment_rollout_and_benchmark(tmp_path: Path) -> None:
-    from enroute.tracing import JSONLSink
+    from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Enroute(providers={"openai": FakeProvider("refund")}, sink=sink, capture_content=True)
+    client = Plural(providers={"openai": FakeProvider("refund")}, sink=sink, capture_content=True)
 
     env = Environment(name="support-triage", version="0.1.0", system_prompt="Triage tickets.")
 
@@ -135,7 +135,7 @@ def test_environment_rollout_and_benchmark(tmp_path: Path) -> None:
 
 
 def test_dataset_from_sink(tmp_path: Path) -> None:
-    from enroute.tracing import JSONLSink
+    from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "t.jsonl")
     sink.write(Trace(trace_id="1", environment="a"))
@@ -146,10 +146,10 @@ def test_dataset_from_sink(tmp_path: Path) -> None:
 
 
 def test_standalone_and_episode_trace_persistence(tmp_path: Path) -> None:
-    from enroute.tracing import JSONLSink
+    from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Enroute(providers={"openai": FakeProvider("done")}, sink=sink, capture_content=True)
+    client = Plural(providers={"openai": FakeProvider("done")}, sink=sink, capture_content=True)
 
     standalone = client.chat(model="openai/model", messages=[{"role": "user", "content": "hi"}])
     client.flush()
@@ -157,7 +157,7 @@ def test_standalone_and_episode_trace_persistence(tmp_path: Path) -> None:
     assert len(first) == 1
     assert first[0].trace_kind == "production"
     assert standalone.raw is not None
-    assert standalone.raw["enroute_trace_id"] == first[0].trace_id
+    assert standalone.raw["plural_trace_id"] == first[0].trace_id
 
     env = Environment(name="safe", version="1.0.0")
     rollout = env.rollout(
@@ -181,15 +181,15 @@ def test_standalone_and_episode_trace_persistence(tmp_path: Path) -> None:
     assert episode.initial_state is None
     assert episode.final_state is None
     assert rollout.response is not None and rollout.response.raw is not None
-    assert rollout.response.raw["enroute_trace_id"] == episode.trace_id
+    assert rollout.response.raw["plural_trace_id"] == episode.trace_id
     client.close()
 
 
 def test_text_only_episode_persistence_redacts_all_copied_content(tmp_path: Path) -> None:
-    from enroute.tracing import JSONLSink
+    from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "redacted.jsonl")
-    client = Enroute(providers={"openai": FakeProvider("private answer")}, sink=sink)
+    client = Plural(providers={"openai": FakeProvider("private answer")}, sink=sink)
     env = Environment(name="redacted", version="1.0.0")
 
     env.rollout(
@@ -213,10 +213,10 @@ def test_text_only_episode_persistence_redacts_all_copied_content(tmp_path: Path
 
 
 def test_rollout_child_traces_are_opt_in_and_linked(tmp_path: Path) -> None:
-    from enroute.tracing import JSONLSink
+    from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Enroute(providers={"openai": FakeProvider("done")}, sink=sink, capture_content=True)
+    client = Plural(providers={"openai": FakeProvider("done")}, sink=sink, capture_content=True)
     env = Environment(name="linked", version="1.0.0")
     rollout = env.rollout(
         TaskData(task_id="t", input="go"),
@@ -237,10 +237,10 @@ def test_rollout_child_traces_are_opt_in_and_linked(tmp_path: Path) -> None:
 
 
 def test_write_trace_false_uses_episode_trace_id(tmp_path: Path) -> None:
-    from enroute.tracing import JSONLSink
+    from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Enroute(providers={"openai": FakeProvider()}, sink=sink)
+    client = Plural(providers={"openai": FakeProvider()}, sink=sink)
     context = TraceContext(parent_trace_id="parent", episode_trace_id="episode")
     response = client.chat(
         model="openai/gpt-4o-mini",
@@ -251,16 +251,16 @@ def test_write_trace_false_uses_episode_trace_id(tmp_path: Path) -> None:
     client.flush()
     assert sink.read_all() == []
     assert response.raw is not None
-    assert response.raw["enroute_trace_id"] == "episode"
+    assert response.raw["plural_trace_id"] == "episode"
     client.close()
 
 
 @pytest.mark.asyncio
 async def test_achat_trace_controls(tmp_path: Path) -> None:
-    from enroute.tracing import JSONLSink
+    from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Enroute(providers={"openai": FakeProvider()}, sink=sink)
+    client = Plural(providers={"openai": FakeProvider()}, sink=sink)
     response = await client.achat(
         model="openai/gpt-4o-mini",
         messages=[{"role": "user", "content": "hi"}],
@@ -270,7 +270,7 @@ async def test_achat_trace_controls(tmp_path: Path) -> None:
     client.flush()
     assert sink.read_all() == []
     assert response.raw is not None
-    assert response.raw["enroute_trace_id"] == "episode"
+    assert response.raw["plural_trace_id"] == "episode"
     await client.aclose()
 
 

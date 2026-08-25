@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from enroute import TaskData
-from enroute.environments import verify_replay
-from enroute.tracing import ParsedAction
+from plural import TaskData
+from plural.environments import verify_replay
+from plural.tracing import ParsedAction
 
 _WORDLE = Path(__file__).resolve().parents[2] / "examples" / "environment" / "wordle"
 sys.path.insert(0, str(_WORDLE))

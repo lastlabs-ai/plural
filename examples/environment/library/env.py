@@ -16,8 +16,8 @@ from typing import Any
 
 from pydantic import Field
 
-from enroute import Environment, TaskData
-from enroute.environments import Observation, State, tool
+from plural import Environment, TaskData
+from plural.environments import Observation, State, tool
 
 CORPUS: list[dict[str, str]] = [
     {

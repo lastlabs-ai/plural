@@ -2,21 +2,21 @@
 
 ## Client and request types
 
-::: enroute.client.Enroute
+::: plural.client.Plural
 
-::: enroute.types
+::: plural.types
 
 ## Tracing
 
-::: enroute.tracing.schema.Trace
+::: plural.tracing.schema.Trace
 
-::: enroute.tracing.schema.TraceContext
+::: plural.tracing.schema.TraceContext
 
-::: enroute.tracing.schema.Decision
+::: plural.tracing.schema.Decision
 
-::: enroute.tracing.schema.Transition
+::: plural.tracing.schema.Transition
 
-::: enroute.tracing.resources.trace_json_schema
+::: plural.tracing.resources.trace_json_schema
 
 ## Environments
 
@@ -26,57 +26,57 @@ default dispatch behavior; scalar and custom text environments override
 `finish_turn()` remain public for advanced manual integrations, but normal
 `apply_action()` hooks should not call them.
 
-::: enroute.environments.env.Environment
+::: plural.environments.env.Environment
 
-::: enroute.environments.action.ActionResult
+::: plural.environments.action.ActionResult
 
-::: enroute.environments.task.TaskData
+::: plural.environments.task.TaskData
 
-::: enroute.environments.dataset.TaskDataset
+::: plural.environments.dataset.TaskDataset
 
-::: enroute.environments.dataset.Dataset
+::: plural.environments.dataset.Dataset
 
-::: enroute.environments.dataset.TraceFilter
+::: plural.environments.dataset.TraceFilter
 
-::: enroute.environments.step.StepResult
+::: plural.environments.step.StepResult
 
-::: enroute.environments.rollout.Rollout
+::: plural.environments.rollout.Rollout
 
-::: enroute.environments.tool.tool
+::: plural.environments.tool.tool
 
-::: enroute.environments.types.Observation
+::: plural.environments.types.Observation
 
-::: enroute.environments.types.State
+::: plural.environments.types.State
 
 ## Policies and runtime
 
-::: enroute.environments.policy.Policy
+::: plural.environments.policy.Policy
 
-::: enroute.environments.policy.EnroutePolicy
+::: plural.environments.policy.PluralPolicy
 
-::: enroute.environments.policy.ScriptedPolicy
+::: plural.environments.policy.ScriptedPolicy
 
-::: enroute.environments.runtime.Runtime
+::: plural.environments.runtime.Runtime
 
-::: enroute.environments.runtime.LocalRuntime
+::: plural.environments.runtime.LocalRuntime
 
-::: enroute.environments.runtime.runtime_fingerprint
+::: plural.environments.runtime.runtime_fingerprint
 
 ## Lifecycle and replay
 
-::: enroute.environments.stop.EpisodeState
+::: plural.environments.stop.EpisodeState
 
-::: enroute.environments.stop.StopReason
+::: plural.environments.stop.StopReason
 
-::: enroute.environments.stop.EpisodeError
+::: plural.environments.stop.EpisodeError
 
-::: enroute.environments.replay.replay_actions
+::: plural.environments.replay.replay_actions
 
-::: enroute.environments.replay.verify_replay
+::: plural.environments.replay.verify_replay
 
-::: enroute.environments.replay.ReplayResult
+::: plural.environments.replay.ReplayResult
 
-::: enroute.environments.replay.ReplayMismatch
+::: plural.environments.replay.ReplayMismatch
 
 ## Benchmarks
 
@@ -84,24 +84,24 @@ default dispatch behavior; scalar and custom text environments override
 episode traces when a writer is supplied. The caller owns and closes the
 writer.
 
-::: enroute.benchmarks.runner.Benchmark
+::: plural.benchmarks.runner.Benchmark
 
-::: enroute.benchmarks.runner.Report
+::: plural.benchmarks.runner.Report
 
-::: enroute.benchmarks.runner.ModelStats
+::: plural.benchmarks.runner.ModelStats
 
-::: enroute.benchmarks.runner.CaseKey
+::: plural.benchmarks.runner.CaseKey
 
-::: enroute.benchmarks.runner.CaseResult
+::: plural.benchmarks.runner.CaseResult
 
-::: enroute.benchmarks.runner.WinRatePair
+::: plural.benchmarks.runner.WinRatePair
 
-::: enroute.benchmarks.runner.RunManifest
+::: plural.benchmarks.runner.RunManifest
 
-::: enroute.benchmarks.runner.TaskDatasetMetadata
+::: plural.benchmarks.runner.TaskDatasetMetadata
 
-::: enroute.benchmarks.runner.TaskSetMetadata
+::: plural.benchmarks.runner.TaskSetMetadata
 
 ## Routing
 
-::: enroute.routing.policies
+::: plural.routing.policies

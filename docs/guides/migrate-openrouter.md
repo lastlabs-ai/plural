@@ -7,24 +7,24 @@
 from openai import OpenAI
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key="...")
 
-# After — primary: set ENROUTE_API_KEY, then
-from enroute import Enroute
-client = Enroute()
+# After — primary: set PLURAL_API_KEY, then
+from plural import Plural
+client = Plural()
 
 # After — secondary: bring-your-own upstream keys
-client = Enroute(providers={"openai": "...", "anthropic": "..."})
+client = Plural(providers={"openai": "...", "anthropic": "..."})
 ```
 
 ## What maps cleanly
 
-| OpenRouter | enroute |
+| OpenRouter | plural |
 | --- | --- |
 | `model` | `model` (`author/slug`) |
 | `models` fallback list | `models=` |
 | `provider` preferences | `provider=ProviderPreferences(...)` |
 | chat completions body | `ChatRequest` / `client.chat(...)` |
 
-## What enroute adds
+## What plural adds
 
 - Local/OTel **traces** with attempts
 - **Environments** and **benchmarks**

@@ -8,7 +8,7 @@ A **Sink** is where traces go.
 | --- | --- |
 | `JSONLSink` | Default; append-only, easy to ship |
 | `SQLiteSink` | Query by environment / id; supports late labels |
-| `OTelSink` | Export `gen_ai.*` spans (`pip install enroute[otel]`) |
+| `OTelSink` | Export `gen_ai.*` spans (`pip install plural[otel]`) |
 | `MultiSink` | Fan out to several sinks |
 
 Redaction and sampling run **before** the sink, so PII never reaches disk when configured correctly. Writes are queued on a background thread so tracing does not block requests — call `client.flush()` or `client.close()` on shutdown.

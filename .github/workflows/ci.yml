@@ -27,7 +27,7 @@ jobs:
       - name: Ruff format
         run: uv run ruff format --check .
       - name: Mypy
-        run: uv run mypy src/enroute
+        run: uv run mypy src/plural
 
   test:
     runs-on: ubuntu-latest
@@ -72,8 +72,8 @@ jobs:
               -type f \( -name 'run.py' -o -name '[0-9]*.py' \) | sort
             echo examples/routing/catalog/list_models.py
           )
-          # Cookbook routing examples need ENROUTE_API_KEY (skipped in CI)
-          if [[ -n "${ENROUTE_API_KEY:-}" ]]; then
+          # Cookbook routing examples need PLURAL_API_KEY (skipped in CI)
+          if [[ -n "${PLURAL_API_KEY:-}" ]]; then
             while IFS= read -r f; do
               echo "==> $f"
               uv run python "$f"
@@ -82,7 +82,7 @@ jobs:
                 ! -path 'examples/routing/catalog/*' | sort
             )
           else
-            echo "SKIP examples/routing/* (set ENROUTE_API_KEY to run cookbook examples)"
+            echo "SKIP examples/routing/* (set PLURAL_API_KEY to run cookbook examples)"
           fi
 
   docs:

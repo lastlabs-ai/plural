@@ -1,9 +1,9 @@
 # Routing examples walkthrough
 
-Cookbook-style scripts under [`examples/routing/`](https://github.com/enroute-ai/enroute/tree/main/examples/routing).
+Cookbook-style scripts under [`examples/routing/`](https://github.com/taylorlast/plural/tree/main/examples/routing).
 
 ```bash
-export ENROUTE_API_KEY=enroute-...
+export PLURAL_API_KEY=plural-...
 ```
 
 ## Layout
@@ -19,9 +19,9 @@ export ENROUTE_API_KEY=enroute-...
 ## Simple (default)
 
 ```python
-from enroute import Enroute, Message
+from plural import Plural, Message
 
-client = Enroute()
+client = Plural()
 
 response = client.chat(
     model="openai/gpt-4o-mini",
@@ -34,10 +34,10 @@ client.close()
 ## Tracing
 
 ```python
-from enroute.tracing import JSONLSink
+from plural.tracing import JSONLSink
 
-with Enroute(
-    sink=JSONLSink(".enroute/examples/traces.jsonl"),
+with Plural(
+    sink=JSONLSink(".plural/examples/traces.jsonl"),
     capture_content=True,
 ) as client:
     response = client.chat(...)
@@ -46,7 +46,7 @@ with Enroute(
 ## Walkthrough
 
 ```bash
-export ENROUTE_API_KEY=enroute-...
+export PLURAL_API_KEY=plural-...
 
 uv run python examples/routing/quickstart/basic.py
 uv run python examples/routing/quickstart/with_tracing.py

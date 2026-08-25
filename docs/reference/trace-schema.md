@@ -2,7 +2,7 @@
 
 Canonical schema version: **1.0.0**
 
-The source of truth is the serialization schema generated from the Python Pydantic model `enroute.tracing.schema.Trace`. Do not hand-edit any `trace.v1.json` file.
+The source of truth is the serialization schema generated from the Python Pydantic model `plural.tracing.schema.Trace`. Do not hand-edit any `trace.v1.json` file.
 
 Generate all mirrors:
 
@@ -18,14 +18,14 @@ uv run python scripts/generate_trace_schema.py --check
 
 The generator writes identical content to three locations:
 
-- `src/enroute/schemas/trace.v1.json` — packaged runtime resource.
+- `src/plural/schemas/trace.v1.json` — packaged runtime resource.
 - `schemas/trace.v1.json` — repository integration mirror.
 - [`docs/schemas/trace.v1.json`](../schemas/trace.v1.json) — documentation mirror.
 
 Load the installed package's canonical generated artifact without relying on a repository path:
 
 ```python
-from enroute.tracing import trace_json_schema
+from plural.tracing import trace_json_schema
 
 schema = trace_json_schema()
 ```

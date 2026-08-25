@@ -1,8 +1,8 @@
 import httpx
 import respx
 
-from enroute.providers import AnthropicProvider
-from enroute.types import ChatRequest, Message
+from plural.providers import AnthropicProvider
+from plural.types import ChatRequest, Message
 
 
 def _provider() -> AnthropicProvider:

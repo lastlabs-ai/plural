@@ -9,10 +9,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from _shared import ensure_out_dir
-from enroute import Dataset, ScriptedPolicy
-from enroute.environments.export.verifiers import to_verifiers_trace
-from enroute.tracing import ParsedAction, Trace
 from examples.environment.library.env import make_env
+from plural import Dataset, ScriptedPolicy
+from plural.environments.export.verifiers import to_verifiers_trace
+from plural.tracing import ParsedAction, Trace
 
 
 def _print_episode(title: str, trace: Trace) -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from enroute import Dataset, TaskData, TaskDataset, Trace, TraceDataset
+from plural import Dataset, TaskData, TaskDataset, Trace, TraceDataset
 
 
 def test_task_dataset_roundtrip_preserves_complete_tasks(tmp_path: Path) -> None:

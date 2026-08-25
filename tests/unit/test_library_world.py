@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from enroute import Enroute, ScriptedPolicy, TaskData
-from enroute.tracing import JSONLSink
-from enroute.tracing.schema import ParsedAction
-from enroute.types import (
+from plural import Plural, ScriptedPolicy, TaskData
+from plural.tracing import JSONLSink
+from plural.tracing.schema import ParsedAction
+from plural.types import (
     ChatRequest,
     ChatResponse,
     Choice,
@@ -107,7 +107,7 @@ def test_make_env_and_rollout(tmp_path: Path) -> None:
     assert env.version == "0.2.0"
     names = {t.function.name for t in env.tool_defs}
     assert "research" in names
-    client = Enroute(
+    client = Plural(
         providers={"openai": Provider()},
         sink=JSONLSink(tmp_path / "t.jsonl"),
         capture_content=True,

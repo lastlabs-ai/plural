@@ -28,10 +28,10 @@ route it would have to bill at another region's rate.
 For Microsoft Entra ID instead of an API key, pass the token yourself:
 
 ```python
-from enroute import Enroute
-from enroute.providers import AzureOpenAIProvider
+from plural import Plural
+from plural.providers import AzureOpenAIProvider
 
-client = Enroute(
+client = Plural(
     providers={
         "azure": AzureOpenAIProvider(
             entra_token,
@@ -91,7 +91,7 @@ Hosted gateways must serialize with `chunk.to_openai()`, never `chunk.raw`.
 `raw` is the vendor event (SSE, Gemini, or Bedrock) and is not a client
 contract. The OpenAI Chat Completions SSE object is.
 
-Usage on a Bedrock stream arrives only in the trailing `metadata` event. Enroute
+Usage on a Bedrock stream arrives only in the trailing `metadata` event. Plural
 waits for it before costing the request, so a stream is billed on real token
 counts rather than an estimate.
 

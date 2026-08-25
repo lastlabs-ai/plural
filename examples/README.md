@@ -1,11 +1,11 @@
-# enroute examples
+# Plural examples
 
 ## Routing (start here)
 
 See [`routing/README.md`](routing/README.md) for the full walkthrough.
 
 ```bash
-export ENROUTE_API_KEY=enroute-...
+export PLURAL_API_KEY=plural-...
 
 uv run python examples/routing/quickstart/basic.py
 uv run python examples/routing/catalog/list_models.py
@@ -16,9 +16,9 @@ uv run python examples/routing/models/fireworks/basic.py
 ```
 
 ```python
-from enroute import Enroute, Message
+from plural import Plural, Message
 
-client = Enroute()
+client = Plural()
 response = client.chat(
     model="openai/gpt-4o-mini",
     messages=[Message(role="user", content="Hello")],

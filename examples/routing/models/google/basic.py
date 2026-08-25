@@ -1,14 +1,14 @@
-"""Chat with a Google Gemini model via your enroute API key.
+"""Chat with a Google Gemini model via your plural API key.
 
-Requires ``ENROUTE_API_KEY`` in your environment::
+Requires ``PLURAL_API_KEY`` in your environment::
 
-    export ENROUTE_API_KEY=enroute-...
+    export PLURAL_API_KEY=plural-...
     uv run python examples/routing/models/google/basic.py
 """
 
-from enroute import Enroute, Message
+from plural import Message, Plural
 
-client = Enroute()
+client = Plural()
 
 response = client.chat(
     model="google/gemini-2.5-flash",

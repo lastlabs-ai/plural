@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pytest
 
-from enroute.benchmarks import (
+from plural.benchmarks import (
     Benchmark,
     CaseKey,
     ModelStats,
@@ -17,9 +17,9 @@ from enroute.benchmarks import (
     RunManifest,
     TaskSetMetadata,
 )
-from enroute.environments import Environment, Rollout, TaskData, TaskDataset, tool
-from enroute.environments.runtime import LocalRuntime, runtime_fingerprint
-from enroute.tracing import JSONLSink, Outcome, ParsedAction, Trace, TraceWriter
+from plural.environments import Environment, Rollout, TaskData, TaskDataset, tool
+from plural.environments.runtime import LocalRuntime, runtime_fingerprint
+from plural.tracing import JSONLSink, Outcome, ParsedAction, Trace, TraceWriter
 
 
 @dataclass(frozen=True)

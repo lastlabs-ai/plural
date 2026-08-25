@@ -67,11 +67,11 @@ uv run python examples/environment/wordle/run.py --secret crane \
 
 Or pass `--base-url` yourself. `--api-key` defaults to `EMPTY`.
 
-A live model run executes one episode and persists one episode trace: per-turn client calls use `write_trace=False`, then `close_episode(client=client)` writes the completed trace. It prints the **harness** (every message the policy was sent) and each **decision** (observation, tool result, step reward), then writes `.enroute/examples/wordle-summary.json` and `wordle-trace.json`.
+A live model run executes one episode and persists one episode trace: per-turn client calls use `write_trace=False`, then `close_episode(client=client)` writes the completed trace. It prints the **harness** (every message the policy was sent) and each **decision** (observation, tool result, step reward), then writes `.plural/examples/wordle-summary.json` and `wordle-trace.json`.
 
 ## Hosted model
 
-If the model is already configured on your Enroute client (env keys, etc.):
+If the model is already configured on your Plural client (env keys, etc.):
 
 ```bash
 uv run python examples/environment/wordle/run.py --secret crane --model openai/gpt-4o-mini
@@ -80,7 +80,7 @@ uv run python examples/environment/wordle/run.py --secret crane --model openai/g
 ## Play loop
 
 ```python
-from enroute.environments import is_stopped
+from plural.environments import is_stopped
 
 obs, info = env.reset(task)
 while True:
