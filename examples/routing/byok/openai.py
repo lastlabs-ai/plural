@@ -1,6 +1,6 @@
 """Bring-your-own-key: call an upstream provider with your own credentials.
 
-Prefer ``ENROUTE_API_KEY`` for product traffic. Use BYOK when you must talk to
+Prefer ``PLURAL_API_KEY`` for product traffic. Use BYOK when you must talk to
 an upstream directly.
 
     export OPENAI_API_KEY=sk-...
@@ -9,9 +9,9 @@ an upstream directly.
 
 import os
 
-from enroute import Enroute, Message
+from plural import Message, Plural
 
-client = Enroute(providers={"openai": os.environ["OPENAI_API_KEY"]})
+client = Plural(providers={"openai": os.environ["OPENAI_API_KEY"]})
 
 response = client.chat(
     model="openai/gpt-4o-mini",

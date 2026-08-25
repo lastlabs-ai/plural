@@ -63,7 +63,7 @@ The same `source` values apply to `decision_rewards()` and `returns()`. The defa
 
 ## Content capture and redaction
 
-`Enroute(capture_content=False)` is the default. Its drop-content redactor covers:
+`Plural(capture_content=False)` is the default. Its drop-content redactor covers:
 
 - LLM request messages and response message content.
 - Environment task `input` in `metadata["task"]`.
@@ -81,6 +81,6 @@ Redaction metadata is also a replay boundary: deterministic replay rejects a tra
 
 ## Canonical schema
 
-The Python `Trace` Pydantic model is the source of truth. The generated Draft 2020-12 JSON Schema is packaged with enroute and available through `trace_json_schema()`. See the [schema reference](../reference/trace-schema.md); do not hand-edit generated schema mirrors.
+The Python `Trace` Pydantic model is the source of truth. The generated Draft 2020-12 JSON Schema is packaged with plural and available through `trace_json_schema()`. See the [schema reference](../reference/trace-schema.md); do not hand-edit generated schema mirrors.
 
 Traces land in a [Sink](sink.md). Collections of rollout or production traces become a [Dataset / TraceDataset](dataset.md); benchmark inputs are `TaskDataset` values.

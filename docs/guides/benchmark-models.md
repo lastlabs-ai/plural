@@ -7,14 +7,14 @@ uv run python examples/benchmarking/01_compare_models.py
 uv run python examples/benchmarking/02_compare_policies.py
 ```
 
-- [Compare model IDs](https://github.com/enroute-ai/enroute/blob/main/examples/benchmarking/01_compare_models.py)
-- [Compare arbitrary policies](https://github.com/enroute-ai/enroute/blob/main/examples/benchmarking/02_compare_policies.py)
-- [Benchmarking example guide](https://github.com/enroute-ai/enroute/tree/main/examples/benchmarking)
+- [Compare model IDs](https://github.com/taylorlast/plural/blob/main/examples/benchmarking/01_compare_models.py)
+- [Compare arbitrary policies](https://github.com/taylorlast/plural/blob/main/examples/benchmarking/02_compare_policies.py)
+- [Benchmarking example guide](https://github.com/taylorlast/plural/tree/main/examples/benchmarking)
 
 Create and save a versioned task input first. Its hash includes hidden `expected` labels and metadata:
 
 ```python
-from enroute import TaskData, TaskDataset
+from plural import TaskData, TaskDataset
 
 dataset = TaskDataset(
     name="support-suite",
@@ -37,7 +37,7 @@ Run each model on the same `(task_id, repeat)` slots:
 
 ```python
 from pathlib import Path
-from enroute import Benchmark
+from plural import Benchmark
 
 report = Benchmark(
     env,
@@ -64,7 +64,7 @@ Win rates compare only matching `(task_id, repeat)` cases. A failed or unscored 
 `Benchmark.from_policies` accepts target names mapped to factories:
 
 ```python
-from enroute import ScriptedPolicy
+from plural import ScriptedPolicy
 
 benchmark = Benchmark.from_policies(
     env,
@@ -85,7 +85,7 @@ The factory is invoked once per job. Return a fresh synchronous policy every tim
 `Benchmark.from_policies()` does not own a client writer. Without `trace_writer=`, case trace ids refer only to in-memory results. To make successful and failed episode traces durable, pass a caller-owned `TraceWriter`, then flush or close it yourself:
 
 ```python
-from enroute import JSONLSink, TraceWriter
+from plural import JSONLSink, TraceWriter
 
 writer = TraceWriter(JSONLSink("policy-episodes.jsonl"))
 try:
@@ -101,7 +101,7 @@ finally:
 ## CI regression tolerance
 
 ```python
-from enroute import Report
+from plural import Report
 
 baseline = Report.model_validate_json(Path("baseline.json").read_text())
 comparison = report.compare(baseline, tolerance=0.02)

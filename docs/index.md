@@ -1,8 +1,8 @@
-# enroute
+# Plural
 
 **One router. One trace. Environments and benchmarks that speak the same language.**
 
-enroute is a Python package for builders putting AI into products. It gives you:
+Plural is a Python package for builders putting AI into products. It gives you:
 
 1. **Unified routing** across model providers (OpenAI, Anthropic, Google, and OpenAI-compatible vendors)
 2. **First-class traces** — the same record for production traffic and eval rollouts
@@ -11,7 +11,7 @@ enroute is a Python package for builders putting AI into products. It gives you:
 
 ```mermaid
 flowchart LR
-  App[Your app] --> Client[Enroute client]
+  App[Your app] --> Client[Plural client]
   Env[Environment] --> Client
   Client --> Router[Router]
   Router --> Trace[Trace]
@@ -23,7 +23,7 @@ flowchart LR
 
 ## Why a unified Trace?
 
-If production traffic and eval harnesses emit different shapes, every downstream promise breaks. enroute makes them the same object so you can:
+If production traffic and eval harnesses emit different shapes, every downstream promise breaks. Plural makes them the same object so you can:
 
 - Understand which prompts succeed
 - Build datasets from real traffic
@@ -33,31 +33,31 @@ If production traffic and eval harnesses emit different shapes, every downstream
 ## Install
 
 ```bash
-pip install enroute
+pip install plural
 # or
-uv add enroute
+uv add plural
 ```
 
 ## 60-second taste
 
 ```bash
-export ENROUTE_API_KEY=enroute-...
+export PLURAL_API_KEY=plural-...
 ```
 
 ```python
-from enroute import Enroute, Message
+from plural import Plural, Message
 
-client = Enroute()
+client = Plural()
 response = client.chat(
     model="openai/gpt-4o-mini",
     messages=[Message(role="user", content="Hello")],
 )
 print(response.text)
 client.close()
-# Traces land in .enroute/traces.jsonl by default
+# Traces land in .plural/traces.jsonl by default
 ```
 
-Optional bring-your-own-key: `Enroute(providers={"openai": "sk-..."})`.
+Optional bring-your-own-key: `Plural(providers={"openai": "sk-..."})`.
 
 ## Next
 

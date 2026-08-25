@@ -1,10 +1,10 @@
 # Turn production traffic into a dataset
 
 ```python
-from enroute import Dataset
+from plural import Dataset
 
 ds = Dataset.from_sink(
-    ".enroute/traces.jsonl",
+    ".plural/traces.jsonl",
     name="prod-refunds-2026-w32",
     version="2026.08.12",
     where=lambda t: t.tags.get("intent") == "refund" and t.outcome is not None,

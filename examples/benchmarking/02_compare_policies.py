@@ -11,9 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from examples.environment.library.env import make_env
 
 from _shared import ensure_out_dir
-from enroute import Benchmark, JSONLSink, TaskDataset, TraceWriter
-from enroute.tracing import ParsedAction
-from enroute.types import ChatRequest
+from plural import Benchmark, JSONLSink, TaskDataset, TraceWriter
+from plural.tracing import ParsedAction
+from plural.types import ChatRequest
 
 
 class ResearchPolicy:

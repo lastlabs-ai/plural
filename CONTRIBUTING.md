@@ -1,4 +1,4 @@
-# Contributing to enroute
+# Contributing to Plural
 
 Thanks for helping. Documentation quality is part of the definition of done.
 
@@ -13,7 +13,7 @@ uv sync --group dev --group docs
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy src/enroute
+uv run mypy src/plural
 uv run pytest -m "not live"
 uv run mkdocs build --strict
 ```
@@ -35,7 +35,7 @@ A change that adds a public symbol is incomplete until:
 
 ## Model catalog
 
-`src/enroute/catalog/data/models.json` is the source of truth for model ids,
+`src/plural/catalog/data/models.json` is the source of truth for model ids,
 context windows, and pass-through pricing. It is static so every rate change is
 reviewable in git history.
 
@@ -47,10 +47,10 @@ to the deployments that consume the library.
 Run it yourself with:
 
 ```bash
-uv run python -m enroute.catalog.sync --check   # report drift, exit 1 if stale
-uv run python -m enroute.catalog.sync --write   # apply price changes
-uv run python -m enroute.catalog.sync --write --add openai/gpt-5.6-luna
-uv run python -m enroute.catalog.sync --write --add-host azure
+uv run python -m plural.catalog.sync --check   # report drift, exit 1 if stale
+uv run python -m plural.catalog.sync --write   # apply price changes
+uv run python -m plural.catalog.sync --write --add openai/gpt-5.6-luna
+uv run python -m plural.catalog.sync --write --add-host azure
 ```
 
 Four rules keep the file trustworthy:

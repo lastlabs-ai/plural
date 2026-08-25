@@ -8,9 +8,9 @@ import json
 import httpx
 import pytest
 
-from enroute.errors import ConfigurationError
-from enroute.providers.azure import AzureOpenAIProvider, normalize_azure_base_url
-from enroute.providers.bedrock import (
+from plural.errors import ConfigurationError
+from plural.providers.azure import AzureOpenAIProvider, normalize_azure_base_url
+from plural.providers.bedrock import (
     BedrockProvider,
     EventStreamDecoder,
     bedrock_endpoint,
@@ -18,7 +18,7 @@ from enroute.providers.bedrock import (
     parse_event_headers,
     sigv4_headers,
 )
-from enroute.types import ChatRequest, FunctionDefinition, Message, Tool
+from plural.types import ChatRequest, FunctionDefinition, Message, Tool
 
 PROMPT = [Message(role="user", content="hi")]
 
@@ -162,10 +162,10 @@ def test_decoder_skips_non_string_headers_without_losing_alignment() -> None:
 
 
 def test_decoder_rejects_an_implausible_frame_length() -> None:
-    from enroute.errors import EnrouteError
+    from plural.errors import PluralError
 
     bogus = (99_999_999).to_bytes(4, "big") + (0).to_bytes(4, "big") + b"\x00" * 4
-    with pytest.raises(EnrouteError):
+    with pytest.raises(PluralError):
         list(EventStreamDecoder().feed(bogus))
 
 

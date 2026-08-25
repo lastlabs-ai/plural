@@ -1,7 +1,7 @@
 # Benchmarking examples
 
 Both scripts run offline, use a versioned `TaskDataset`, write Markdown and JSON
-reports under `.enroute/examples`, and persist episode traces.
+reports under `.plural/examples`, and persist episode traces.
 
 ## 1. Compare models
 
@@ -10,11 +10,11 @@ uv run python examples/benchmarking/01_compare_models.py
 ```
 
 [`01_compare_models.py`](01_compare_models.py) compares two scripted provider
-stand-ins through one `Enroute` client. For a live benchmark, replace the
+stand-ins through one `Plural` client. For a live benchmark, replace the
 provider/client setup and keep the model IDs, dataset, and benchmark:
 
 ```python
-client = Enroute()
+client = Plural()
 report = Benchmark(
     env,
     models=["openai/gpt-4o-mini", "anthropic/claude-sonnet-4"],

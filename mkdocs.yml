@@ -1,8 +1,8 @@
-site_name: enroute
+site_name: Plural
 site_description: Unified LLM routing with first-class traces, environments, and benchmarks.
-site_url: https://enroute-ai.github.io/enroute/
-repo_url: https://github.com/enroute-ai/enroute
-repo_name: enroute-ai/enroute
+site_url: https://taylorlast.github.io/plural/
+repo_url: https://github.com/taylorlast/plural
+repo_name: taylorlast/plural
 
 theme:
   name: material

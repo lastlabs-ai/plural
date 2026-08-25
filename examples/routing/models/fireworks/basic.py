@@ -1,14 +1,14 @@
-"""Chat with a Fireworks model via your enroute API key.
+"""Chat with a Fireworks model via your plural API key.
 
-Requires ``ENROUTE_API_KEY`` in your environment::
+Requires ``PLURAL_API_KEY`` in your environment::
 
-    export ENROUTE_API_KEY=enroute-...
+    export PLURAL_API_KEY=plural-...
     uv run python examples/routing/models/fireworks/basic.py
 """
 
-from enroute import Enroute, Message
+from plural import Message, Plural
 
-client = Enroute()
+client = Plural()
 
 response = client.chat(
     model="fireworks/accounts/fireworks/models/llama-v3p3-70b-instruct",

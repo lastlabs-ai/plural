@@ -2,7 +2,7 @@
 
 OpenAI rejects function tools on ``/chat/completions`` for every current model,
 so tool calling and reasoning ride the Responses API instead. These tests pin
-the translation in both directions: what enroute sends, and that what comes back
+the translation in both directions: what plural sends, and that what comes back
 is indistinguishable from any other provider's stream.
 """
 
@@ -12,9 +12,9 @@ import httpx
 import pytest
 import respx
 
-from enroute.errors import ProviderUnavailable
-from enroute.providers import OpenAIProvider, OpenAIResponsesProvider
-from enroute.types import (
+from plural.errors import ProviderUnavailable
+from plural.providers import OpenAIProvider, OpenAIResponsesProvider
+from plural.types import (
     ChatRequest,
     FinishReason,
     FunctionCall,

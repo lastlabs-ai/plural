@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 
-from enroute import ActionResult, EnroutePolicy, Policy, Redactor, ScriptedPolicy, StopReason
-from enroute.environments import (
+from plural import ActionResult, PluralPolicy, Policy, Redactor, ScriptedPolicy, StopReason
+from plural.environments import (
     Environment,
     EpisodeError,
     EpisodeState,
@@ -21,9 +21,9 @@ from enroute.environments import (
     tool,
     verify_replay,
 )
-from enroute.environments.runtime import Runtime
-from enroute.tracing.schema import ParsedAction, RewardEvent, ToolCallStep
-from enroute.types import ChatResponse, Choice, Message
+from plural.environments.runtime import Runtime
+from plural.tracing.schema import ParsedAction, RewardEvent, ToolCallStep
+from plural.types import ChatResponse, Choice, Message
 
 
 class AlphaState(State):
@@ -254,7 +254,7 @@ def test_text_only_policy_output_is_policy_stop() -> None:
     assert rollout.response.text == "done"
 
 
-def test_enroute_policy_uses_configured_model_when_trace_model_is_alias() -> None:
+def test_plural_policy_uses_configured_model_when_trace_model_is_alias() -> None:
     class FakeClient:
         def __init__(self) -> None:
             self.models: list[str] = []
@@ -264,7 +264,7 @@ def test_enroute_policy_uses_configured_model_when_trace_model_is_alias() -> Non
             return _response("done")
 
     client = FakeClient()
-    policy = EnroutePolicy(client, "provider/actual")  # type: ignore[arg-type]
+    policy = PluralPolicy(client, "provider/actual")  # type: ignore[arg-type]
     rollout = AlphaEnv().run_episode(_task(), policy, model="benchmark-alias")
 
     assert client.models == ["provider/actual"]
@@ -875,16 +875,16 @@ def test_scorer_failure_closes_and_persists_before_reraising() -> None:
 
 
 def test_public_imports() -> None:
-    from enroute import ActionResult as TopActionResult
-    from enroute import EnroutePolicy as TopEnroutePolicy
-    from enroute import Policy as TopPolicy
-    from enroute import ScriptedPolicy as TopScriptedPolicy
-    from enroute import StopReason as TopStopReason
-    from enroute.environments import ActionResult as EnvironmentActionResult
-    from enroute.environments import EnroutePolicy as EnvironmentEnroutePolicy
+    from plural import ActionResult as TopActionResult
+    from plural import PluralPolicy as TopPluralPolicy
+    from plural import Policy as TopPolicy
+    from plural import ScriptedPolicy as TopScriptedPolicy
+    from plural import StopReason as TopStopReason
+    from plural.environments import ActionResult as EnvironmentActionResult
+    from plural.environments import PluralPolicy as EnvironmentPluralPolicy
 
     assert TopActionResult is EnvironmentActionResult is ActionResult
-    assert TopEnroutePolicy is EnvironmentEnroutePolicy is EnroutePolicy
+    assert TopPluralPolicy is EnvironmentPluralPolicy is PluralPolicy
     assert TopPolicy is Policy
     assert TopScriptedPolicy is ScriptedPolicy
     assert TopStopReason is StopReason

@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from functools import cache
 
-from enroute.catalog.models import ModelCatalog
+from plural.catalog.models import ModelCatalog
 
 HOST_ENV_KEYS = {
     "openai": "OPENAI_API_KEY",

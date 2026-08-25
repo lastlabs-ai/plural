@@ -1,14 +1,14 @@
-"""Chat with an Anthropic model via your enroute API key.
+"""Chat with an Anthropic model via your plural API key.
 
-Requires ``ENROUTE_API_KEY`` in your environment::
+Requires ``PLURAL_API_KEY`` in your environment::
 
-    export ENROUTE_API_KEY=enroute-...
+    export PLURAL_API_KEY=plural-...
     uv run python examples/routing/models/anthropic/basic.py
 """
 
-from enroute import Enroute, Message
+from plural import Message, Plural
 
-client = Enroute()
+client = Plural()
 
 response = client.chat(
     model="anthropic/claude-sonnet-4",

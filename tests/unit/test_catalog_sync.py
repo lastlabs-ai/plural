@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from enroute.catalog.sync import (
+from plural.catalog.sync import (
     OPENROUTER_MODELS_URL,
     UpstreamEndpoint,
     UpstreamModel,
@@ -529,7 +529,7 @@ def test_collect_served_slugs_handles_non_openai_shapes(slug: str) -> None:
 
 
 def test_bundled_catalog_round_trips() -> None:
-    from enroute.catalog.sync import load_catalog
+    from plural.catalog.sync import load_catalog
 
     document = load_catalog()
     assert document["models"]

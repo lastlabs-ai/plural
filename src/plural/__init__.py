@@ -1,73 +1,72 @@
-"""Plural: unified LLM routing with first-class traces, environments, and benchmarks."""
+"""Plural: unified LLM routing with first-class traces, environments, and benchmarks.
+
+Examples:
+    >>> from plural import __version__
+    >>> isinstance(__version__, str)
+    True
+"""
 
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-from enroute import (
-    ActionResult,
-    AuthenticationError,
+from plural.benchmarks import (
     Benchmark,
-    BudgetExceededError,
     CaseKey,
     CaseResult,
-    ChatRequest,
-    ChatResponse,
-    ConfigurationError,
-    ContentFilterError,
-    ContextLengthError,
-    Dataset,
-    Enroute,
-    EnrouteError,
-    EnroutePolicy,
-    Environment,
-    InvalidRequestError,
-    JSONLSink,
-    Message,
-    ModelCatalog,
-    ModelSpec,
     ModelStats,
-    NotFoundError,
-    Outcome,
-    Policy,
-    ProviderUnavailable,
-    RateLimitError,
-    Redactor,
     Report,
     RunManifest,
-    SQLiteSink,
-    Sampler,
+    TaskDatasetMetadata,
+    TaskSetMetadata,
+    WinRatePair,
+)
+from plural.catalog import ModelCatalog, ModelSpec, estimate_cost
+from plural.client import Plural
+from plural.environments import (
+    ActionResult,
+    Dataset,
+    Environment,
+    PluralPolicy,
+    Policy,
     ScriptedPolicy,
     StopReason,
     TaskData,
     TaskDataset,
-    TaskDatasetMetadata,
-    TaskSetMetadata,
-    TimeoutError,
-    Tool,
-    Trace,
-    TraceContext,
     TraceDataset,
     TraceFilter,
-    TraceKind,
-    TraceWriter,
-    Usage,
-    WinRatePair,
-    estimate_cost,
+)
+from plural.errors import (
+    AuthenticationError,
+    BudgetExceededError,
+    ConfigurationError,
+    ContentFilterError,
+    ContextLengthError,
+    InvalidRequestError,
+    NotFoundError,
+    PluralError,
+    ProviderUnavailable,
+    RateLimitError,
+    TimeoutError,
     is_retryable,
 )
-
-Plural = Enroute
-PluralError = EnrouteError
-PluralPolicy = EnroutePolicy
+from plural.tracing import (
+    JSONLSink,
+    Outcome,
+    Redactor,
+    Sampler,
+    SQLiteSink,
+    Trace,
+    TraceContext,
+    TraceKind,
+    TraceWriter,
+)
+from plural.types import ChatRequest, ChatResponse, Message, Tool, Usage
 
 try:
     __version__ = version("plural")
 except PackageNotFoundError:  # pragma: no cover
-    try:
-        __version__ = version("enroute")
-    except PackageNotFoundError:  # pragma: no cover
-        __version__ = "0.0.0"
+    __version__ = "0.0.0"
 
 __all__ = [
     "ActionResult",
@@ -82,9 +81,6 @@ __all__ = [
     "ContentFilterError",
     "ContextLengthError",
     "Dataset",
-    "Enroute",
-    "EnrouteError",
-    "EnroutePolicy",
     "Environment",
     "InvalidRequestError",
     "JSONLSink",

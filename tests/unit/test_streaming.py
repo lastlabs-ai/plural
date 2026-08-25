@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from enroute import Enroute
-from enroute.catalog import ModelCatalog
-from enroute.errors import ProviderUnavailable
-from enroute.tracing import JSONLSink, TraceContext
-from enroute.types import (
+from plural import Plural
+from plural.catalog import ModelCatalog
+from plural.errors import ProviderUnavailable
+from plural.tracing import JSONLSink, TraceContext
+from plural.types import (
     ChatRequest,
     ChatResponse,
     Choice,
@@ -74,8 +74,8 @@ class StreamingProvider:
         return None
 
 
-def client(provider: StreamingProvider, tmp_path: Path) -> Enroute:
-    return Enroute(
+def client(provider: StreamingProvider, tmp_path: Path) -> Plural:
+    return Plural(
         providers={"openai": provider},
         sink=JSONLSink(tmp_path / "traces.jsonl"),
         capture_content=True,
@@ -84,8 +84,8 @@ def client(provider: StreamingProvider, tmp_path: Path) -> Enroute:
 
 def test_stream_yields_deltas_and_traces_once(tmp_path: Path) -> None:
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    enroute = Enroute(providers={"openai": StreamingProvider()}, sink=sink, capture_content=True)
-    chunks = list(enroute.stream(model=MODEL, messages=[Message(role="user", content="hi")]))
+    plural = Plural(providers={"openai": StreamingProvider()}, sink=sink, capture_content=True)
+    chunks = list(plural.stream(model=MODEL, messages=[Message(role="user", content="hi")]))
 
     assert "".join(c.delta.content or "" for c in chunks) == "Hello"
     assert chunks[-1].finish_reason == "stop"
@@ -93,33 +93,33 @@ def test_stream_yields_deltas_and_traces_once(tmp_path: Path) -> None:
     assert {c.provider for c in chunks} == {"openai"}
     assert {c.region for c in chunks} == {"us"}
 
-    enroute.flush()
+    plural.flush()
     traces = sink.read_all()
     assert len(traces) == 1
     assert traces[0].steps[0].response.usage.completion_tokens == 5
-    enroute.close()
+    plural.close()
 
 
 @pytest.mark.asyncio
 async def test_astream_matches_sync(tmp_path: Path) -> None:
-    enroute = client(StreamingProvider(), tmp_path)
+    plural = client(StreamingProvider(), tmp_path)
     chunks = [
         chunk
-        async for chunk in enroute.astream(
+        async for chunk in plural.astream(
             model=MODEL, messages=[Message(role="user", content="hi")]
         )
     ]
     assert "".join(c.delta.content or "" for c in chunks) == "Hello"
-    await enroute.aclose()
+    await plural.aclose()
 
 
 @pytest.mark.asyncio
 async def test_stream_trace_controls_match_chat(tmp_path: Path) -> None:
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    enroute = Enroute(providers={"openai": StreamingProvider()}, sink=sink, capture_content=True)
+    plural = Plural(providers={"openai": StreamingProvider()}, sink=sink, capture_content=True)
     context = TraceContext(parent_trace_id="episode", episode_trace_id="episode")
     sync_chunks = list(
-        enroute.stream(
+        plural.stream(
             model=MODEL,
             messages=[Message(role="user", content="hi")],
             write_trace=False,
@@ -128,31 +128,31 @@ async def test_stream_trace_controls_match_chat(tmp_path: Path) -> None:
     )
     async_chunks = [
         chunk
-        async for chunk in enroute.astream(
+        async for chunk in plural.astream(
             model=MODEL,
             messages=[Message(role="user", content="hi")],
             write_trace=False,
             trace_context=context,
         )
     ]
-    enroute.flush()
+    plural.flush()
     assert sink.read_all() == []
-    assert all(chunk.raw and chunk.raw["enroute_trace_id"] == "episode" for chunk in sync_chunks)
-    assert all(chunk.raw and chunk.raw["enroute_trace_id"] == "episode" for chunk in async_chunks)
-    await enroute.aclose()
+    assert all(chunk.raw and chunk.raw["plural_trace_id"] == "episode" for chunk in sync_chunks)
+    assert all(chunk.raw and chunk.raw["plural_trace_id"] == "episode" for chunk in async_chunks)
+    await plural.aclose()
 
 
 def test_streams_are_billed_from_the_usage_chunk(tmp_path: Path) -> None:
     provider = StreamingProvider()
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    enroute = Enroute(providers={"openai": provider}, sink=sink, capture_content=True)
-    list(enroute.stream(model=MODEL, messages=[Message(role="user", content="hi")]))
-    enroute.flush()
+    plural = Plural(providers={"openai": provider}, sink=sink, capture_content=True)
+    list(plural.stream(model=MODEL, messages=[Message(role="user", content="hi")]))
+    plural.flush()
 
     spec = ModelCatalog().require(MODEL)
     cost = sink.read_all()[0].steps[0].response.usage.cost
     assert cost == pytest.approx(10 * spec.pricing.prompt + 5 * spec.pricing.completion)
-    enroute.close()
+    plural.close()
 
 
 def test_a_long_streamed_prompt_is_billed_at_the_tier_rate(tmp_path: Path) -> None:
@@ -162,35 +162,35 @@ def test_a_long_streamed_prompt_is_billed_at_the_tier_rate(tmp_path: Path) -> No
     assert tier.min_prompt_tokens < LONG_PROMPT_TOKENS
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    enroute = Enroute(
+    plural = Plural(
         providers={"openai": StreamingProvider(prompt_tokens=LONG_PROMPT_TOKENS)},
         sink=sink,
         capture_content=True,
     )
-    list(enroute.stream(model=MODEL, messages=[Message(role="user", content="hi")]))
-    enroute.flush()
+    list(plural.stream(model=MODEL, messages=[Message(role="user", content="hi")]))
+    plural.flush()
 
     cost = sink.read_all()[0].steps[0].response.usage.cost
     assert cost == pytest.approx(LONG_PROMPT_TOKENS * tier.prompt + 5 * tier.completion)
     # Billing the base rate here is the leak this guards against.
     base = LONG_PROMPT_TOKENS * spec.pricing.prompt + 5 * spec.pricing.completion
     assert cost > base
-    enroute.close()
+    plural.close()
 
 
 def test_stream_falls_back_to_the_next_host(tmp_path: Path) -> None:
     broken = StreamingProvider(fail=True)
     healthy = StreamingProvider()
     healthy.name = "azure"
-    enroute = Enroute(
+    plural = Plural(
         providers={"openai": broken, "azure": healthy},
         sink=JSONLSink(tmp_path / "traces.jsonl"),
         capture_content=True,
     )
-    chunks = list(enroute.stream(model=MODEL, messages=[Message(role="user", content="hi")]))
+    chunks = list(plural.stream(model=MODEL, messages=[Message(role="user", content="hi")]))
 
     assert broken.streams == 1
     assert healthy.streams == 1
     assert "".join(c.delta.content or "" for c in chunks) == "Hello"
     assert {c.provider for c in chunks} == {"azure"}
-    enroute.close()
+    plural.close()

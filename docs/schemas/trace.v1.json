@@ -1286,7 +1286,7 @@
       "type": "object"
     }
   },
-  "$id": "https://enroute.dev/schemas/trace.v1.json",
+  "$id": "https://pluralintel.com/schemas/trace.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "A complete record of an LLM interaction or environment rollout.\n\nProduction traffic and environment rollouts emit the same shape so that\ndatasets, benchmarks, and a future autorouter can consume either source.\n\nAttributes:\n    trace_id: Opaque unique id.\n    environment: Environment name when produced by a rollout.\n    environment_version: Environment version string.\n    environment_fingerprint: Hash of tools, instructions, and scorers.\n    task_id: Task id within an environment.\n    model: Policy / model id used for this episode.\n    initial_state: Environment snapshot at reset.\n    steps: Ordered steps (decisions, LLM calls, tool calls, events).\n    final_state: Environment snapshot at episode close.\n    outcome: Optional labeled outcome. ``outcome.reward`` is the return.\n    metrics: Episode aggregates (turns, cost, latency, tool counts).\n    terminated: Natural end (``env.done()``).\n    truncated: Cut off by ``max_turns``.\n    tags: Free-form tags for filtering.\n    metadata: Arbitrary metadata.\n    created_at: Creation timestamp (UTC).\n    schema_version: Trace schema version for stability.\n\nExamples:\n    >>> t = Trace(trace_id=\"t1\", tags={\"env\": \"prod\"})\n    >>> t.schema_version\n    '1.0.0'",
   "properties": {
@@ -1524,6 +1524,6 @@
       "title": "Truncated"
     }
   },
-  "title": "enroute Trace",
+  "title": "Plural Trace",
   "type": "object"
 }

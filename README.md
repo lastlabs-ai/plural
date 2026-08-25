@@ -1,12 +1,12 @@
-# enroute
+# Plural
 
 **Unified LLM routing with first-class traces, environments, and benchmarks.**
 
-enroute is for builders putting AI into products. Start with an OpenRouter-style multi-provider router. Keep going with the thing OpenRouter does not give you: a single `Trace` object shared by production traffic and RL-style environments — so you can understand prompts, build datasets, run benchmarks, and eventually autoroute to the best model for *your* data.
+Plural is for builders putting AI into products. Start with an OpenRouter-style multi-provider router. Keep going with the thing OpenRouter does not give you: a single `Trace` object shared by production traffic and RL-style environments — so you can understand prompts, build datasets, run benchmarks, and eventually autoroute to the best model for *your* data.
 
 ```mermaid
 flowchart LR
-  App[Your app] --> Client[Enroute]
+  App[Your app] --> Client[Plural]
   Env[Environment] --> Client
   Client --> Trace[Trace]
   Trace --> TraceDataset[TraceDataset / Dataset]
@@ -18,40 +18,40 @@ flowchart LR
 ## Install
 
 ```bash
-pip install enroute
+pip install plural
 # optional OpenTelemetry exporter
-pip install "enroute[otel]"
+pip install "plural[otel]"
 ```
 
 ## Quickstart
 
-Set `ENROUTE_API_KEY`, then use the client like the OpenAI SDK:
+Set `PLURAL_API_KEY`, then use the client like the OpenAI SDK:
 
 ```bash
-export ENROUTE_API_KEY=enroute-...
+export PLURAL_API_KEY=plural-...
 ```
 
 ```python
-from enroute import Enroute, Message
+from plural import Plural, Message
 
-client = Enroute()
+client = Plural()
 response = client.chat(
     model="openai/gpt-4o-mini",
-    messages=[Message(role="user", content="Hello from enroute")],
+    messages=[Message(role="user", content="Hello from plural")],
     models=["anthropic/claude-sonnet-4"],  # optional fallbacks
 )
 print(response.text)
 client.close()
-# Traces → .enroute/traces.jsonl
+# Traces → .plural/traces.jsonl
 ```
 
 Optional BYOK (pass your own upstream keys explicitly):
 
 ```python
 import os
-from enroute import Enroute
+from plural import Plural
 
-client = Enroute(providers={"openai": os.environ["OPENAI_API_KEY"]})
+client = Plural(providers={"openai": os.environ["OPENAI_API_KEY"]})
 ```
 
 ## Four pillars
@@ -66,7 +66,7 @@ client = Enroute(providers={"openai": os.environ["OPENAI_API_KEY"]})
 ## Environments in 30 seconds
 
 ```python
-from enroute import Environment, TaskData
+from plural import Environment, TaskData
 
 env = Environment(name="support-triage", version="0.1.0")
 
@@ -104,7 +104,7 @@ Full documentation: concept pages, guides, and generated API reference.
 uv sync --group dev --group docs
 uv run pytest -m "not live"
 uv run ruff check .
-uv run mypy src/enroute
+uv run mypy src/plural
 uv run mkdocs build --strict
 ```
 

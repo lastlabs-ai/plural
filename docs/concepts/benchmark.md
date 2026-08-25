@@ -3,7 +3,7 @@
 A `Benchmark` runs the same environment tasks across model or policy targets and returns aggregate statistics plus reproducible per-case provenance.
 
 ```python
-from enroute import Benchmark, TaskDataset
+from plural import Benchmark, TaskDataset
 
 dataset = TaskDataset.load("data/refund-tasks.jsonl")
 report = Benchmark(
@@ -47,7 +47,7 @@ If either aligned case failed or has no reward, that slot is excluded. `WinRateP
 
 ## Arbitrary synchronous policies
 
-Use factories when targets are not Enroute model ids:
+Use factories when targets are not Plural model ids:
 
 ```python
 report = Benchmark.from_policies(
@@ -83,7 +83,7 @@ Both factories run once per job. Use `runtime_factory` for a fresh sandbox, remo
 `Benchmark.from_policies()` has no client writer. Its case trace ids identify in-memory results but are durable only when you supply `trace_writer=`:
 
 ```python
-from enroute import JSONLSink, TraceWriter
+from plural import JSONLSink, TraceWriter
 
 writer = TraceWriter(JSONLSink("policy-episodes.jsonl"))
 try:

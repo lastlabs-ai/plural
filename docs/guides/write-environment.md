@@ -15,8 +15,8 @@ Use this checklist:
 ## A small stateful environment
 
 ```python
-from enroute import Environment, TaskData
-from enroute.environments import Observation, State, tool
+from plural import Environment, TaskData
+from plural.environments import Observation, State, tool
 
 class CounterState(State):
     count: int = 0
@@ -65,8 +65,8 @@ class CounterEnv(Environment[CounterObservation, CounterState]):
 Override `apply_action()` when the policy emits another action type. The hook receives the raw action and returns trace-safe turn data:
 
 ```python
-from enroute import ActionResult
-from enroute.tracing import ParsedAction
+from plural import ActionResult
+from plural.tracing import ParsedAction
 
 class RatingEnv(Environment[RatingObservation, RatingState]):
     def apply_action(self, action, *, runtime, response=None):
@@ -105,8 +105,8 @@ def reached_expected(rollout) -> float:
 `ScriptedPolicy` is useful for deterministic tests and examples:
 
 ```python
-from enroute import ScriptedPolicy
-from enroute.tracing import ParsedAction
+from plural import ScriptedPolicy
+from plural.tracing import ParsedAction
 
 policy = ScriptedPolicy([
     ParsedAction(name="increment", arguments={"by": 1}),
@@ -132,7 +132,7 @@ rollout = CounterEnv().run_episode(
 )
 ```
 
-For Enroute-backed model calls, use the built-in convenience:
+For Plural-backed model calls, use the built-in convenience:
 
 ```python
 rollout = CounterEnv().rollout(
@@ -149,7 +149,7 @@ This writes one episode trace by default. Set `record_llm_traces=True` only when
 Replay invokes no policy or model. Use a fresh environment:
 
 ```python
-from enroute.environments import verify_replay
+from plural.environments import verify_replay
 
 result = verify_replay(CounterEnv(), rollout.trace, task=task)
 assert result.ok, result.mismatches
@@ -164,7 +164,7 @@ Replay rejects redacted traces because their task input, observations, state, or
 Prefer `run_episode` or `rollout`; they preserve policy inputs, lineage, stops, and one-trace persistence. If you need a manual loop, disable the standalone `client.chat` trace so `close_episode(client=client)` does not create duplicate top-level records:
 
 ```python
-from enroute.types import ChatRequest
+from plural.types import ChatRequest
 
 obs, info = env.reset(task, model=model)
 while True:
@@ -196,8 +196,8 @@ uv run python examples/environment/library/run.py
 uv run python examples/environment/wordle/run.py --secret crane
 ```
 
-- [Library environment](https://github.com/enroute-ai/enroute/tree/main/examples/environment/library)
-- [Wordle environment](https://github.com/enroute-ai/enroute/tree/main/examples/environment/wordle)
+- [Library environment](https://github.com/taylorlast/plural/tree/main/examples/environment/library)
+- [Wordle environment](https://github.com/taylorlast/plural/tree/main/examples/environment/wordle)
 
 ## Version and fingerprint
 

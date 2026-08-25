@@ -1,14 +1,14 @@
-"""Quickstart: one enroute API key, one chat call.
+"""Quickstart: one plural API key, one chat call.
 
-Requires ``ENROUTE_API_KEY`` in your environment::
+Requires ``PLURAL_API_KEY`` in your environment::
 
-    export ENROUTE_API_KEY=enroute-...
+    export PLURAL_API_KEY=plural-...
     uv run python examples/routing/quickstart/basic.py
 """
 
-from enroute import Enroute, Message
+from plural import Message, Plural
 
-client = Enroute()
+client = Plural()
 
 response = client.chat(
     model="openai/gpt-4o-mini",

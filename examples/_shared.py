@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
-from enroute.types import (
+from plural.types import (
     ChatRequest,
     ChatResponse,
     Choice,
@@ -15,7 +15,7 @@ from enroute.types import (
     Usage,
 )
 
-EXAMPLES_DIR = Path(".enroute/examples")
+EXAMPLES_DIR = Path(".plural/examples")
 
 
 class ScriptedProvider:

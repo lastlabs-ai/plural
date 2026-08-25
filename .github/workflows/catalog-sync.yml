@@ -41,7 +41,7 @@ jobs:
           for model in ${{ inputs.add }}; do
             add_args="$add_args --add $model"
           done
-          uv run python -m enroute.catalog.sync \
+          uv run python -m plural.catalog.sync \
             --write --report catalog-report.md $add_args
 
       - name: Verify the catalog still loads

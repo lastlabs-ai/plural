@@ -4,10 +4,10 @@ import json
 import sys
 from pathlib import Path
 
-from enroute import ScriptedPolicy, TaskData
-from enroute.environments import verify_replay
-from enroute.tracing import ParsedAction
-from enroute.types import ChatRequest
+from plural import ScriptedPolicy, TaskData
+from plural.environments import verify_replay
+from plural.tracing import ParsedAction
+from plural.types import ChatRequest
 
 _TWITTER = Path(__file__).resolve().parents[2] / "examples" / "environment" / "twitter"
 sys.path.insert(0, str(_TWITTER))

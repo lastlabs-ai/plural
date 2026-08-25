@@ -4,8 +4,8 @@ import httpx
 import pytest
 import respx
 
-from enroute.providers import OpenAIProvider
-from enroute.types import ChatRequest, Message
+from plural.providers import OpenAIProvider
+from plural.types import ChatRequest, Message
 
 
 @pytest.fixture
@@ -54,7 +54,7 @@ def test_openai_rate_limit(provider: OpenAIProvider) -> None:
     respx.post("https://api.openai.com/v1/chat/completions").mock(
         return_value=httpx.Response(429, json={"error": {"message": "rate limited"}})
     )
-    from enroute.errors import RateLimitError
+    from plural.errors import RateLimitError
 
     with pytest.raises(RateLimitError):
         provider.chat(
@@ -129,7 +129,7 @@ def test_openai_stream_retries_without_stream_options(provider: OpenAIProvider) 
 
 @respx.mock
 def test_openai_retries_with_max_completion_tokens(provider: OpenAIProvider) -> None:
-    """Newer OpenAI models 400 on max_tokens, which is enroute's normalized name."""
+    """Newer OpenAI models 400 on max_tokens, which is plural's normalized name."""
     ok = {
         "id": "chatcmpl-1",
         "model": "gpt-5.6-luna",

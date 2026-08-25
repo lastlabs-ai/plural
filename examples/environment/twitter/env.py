@@ -7,8 +7,8 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
-from enroute import Environment, TaskData
-from enroute.environments import Observation, State, tool
+from plural import Environment, TaskData
+from plural.environments import Observation, State, tool
 
 INSTRUCTIONS = (
     "You operate this Twitter account. Use tools to look around and act the "

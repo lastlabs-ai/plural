@@ -21,11 +21,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from _shared import ensure_out_dir
-from enroute import Dataset, Enroute, Environment, TaskData
-from enroute.environments import Rollout, is_stopped
-from enroute.providers import OpenAICompatible
-from enroute.tracing import JSONLSink, Trace
-from enroute.types import (
+from examples.environment.wordle.env import make_env
+from examples.environment.wordle.words import is_allowed
+from plural import Dataset, Environment, Plural, TaskData
+from plural.environments import Rollout, is_stopped
+from plural.providers import OpenAICompatible
+from plural.tracing import JSONLSink, Trace
+from plural.types import (
     ChatRequest,
     ChatResponse,
     Choice,
@@ -34,8 +36,6 @@ from enroute.types import (
     ToolCall,
     Usage,
 )
-from examples.environment.wordle.env import make_env
-from examples.environment.wordle.words import is_allowed
 
 LOCAL_HOSTS = {
     "mlx": "http://127.0.0.1:8080/v1",
@@ -94,7 +94,7 @@ class ScriptedWordleProvider:
 def play(
     env: Environment,
     task: TaskData,
-    client: Enroute,
+    client: Plural,
     *,
     model: str,
 ) -> Rollout:
@@ -228,7 +228,7 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Policy model id. With --host / --base-url this is the name your local "
             "server exposes (e.g. mlx-community/Qwen2.5-7B-Instruct-4bit). Without "
-            "a local host it is an enroute model id (e.g. openai/gpt-4o-mini). "
+            "a local host it is an plural model id (e.g. openai/gpt-4o-mini). "
             "Omit to run the offline scripted demo."
         ),
     )
@@ -281,12 +281,12 @@ def _task(secret: str) -> TaskData:
     )
 
 
-def _local_client(model: str, base_url: str, api_key: str, sink: Path) -> tuple[Enroute, str]:
+def _local_client(model: str, base_url: str, api_key: str, sink: Path) -> tuple[Plural, str]:
     provider = "local"
     server_model = model
     if "/" in model:
         provider, server_model = model.split("/", 1)
-    client = Enroute(
+    client = Plural(
         providers={
             provider: OpenAICompatible(
                 api_key=api_key,
@@ -307,7 +307,7 @@ def _run_scripted(env: Environment, task: TaskData, secret: str, out: Path) -> l
         ("misses", ScriptedWordleProvider(["audio", "wordy", "aback", "abase", "abate", "abbey"])),
     )
     for name, provider in policies:
-        client = Enroute(
+        client = Plural(
             providers={"openai": provider},
             sink=JSONLSink(out / f"wordle-{name}.jsonl"),
             capture_content=True,
@@ -349,7 +349,7 @@ def main() -> None:
         traces = [rollout.trace]
         _report_model_run(model, env, rollout, out)
     else:
-        client = Enroute(sink=JSONLSink(out / "wordle-model.jsonl"), capture_content=True)
+        client = Plural(sink=JSONLSink(out / "wordle-model.jsonl"), capture_content=True)
         try:
             rollout = play(env, task, client, model=args.model)
         finally:

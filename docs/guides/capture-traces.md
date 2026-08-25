@@ -1,11 +1,11 @@
 # Capture traces from an existing app
 
-Swap your provider client for enroute — about ten lines.
+Swap your provider client for plural — about ten lines.
 
 ```python
-from enroute import Enroute, Message
+from plural import Plural, Message
 
-client = Enroute(
+client = Plural(
     providers={"openai": os.environ["OPENAI_API_KEY"]},
     capture_content=True,
     tags={"service": "checkout-bot"},
@@ -25,4 +25,4 @@ Later, when a human rates the answer:
 client.label(trace_id, reward=1.0, feedback="helpful")
 ```
 
-`trace_id` is on `response.raw["enroute_trace_id"]`.
+`trace_id` is on `response.raw["plural_trace_id"]`.

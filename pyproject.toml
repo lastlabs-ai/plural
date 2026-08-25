@@ -46,11 +46,11 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/enroute-ai/enroute"
-Documentation = "https://enroute-ai.github.io/enroute/"
-Repository = "https://github.com/enroute-ai/enroute"
-Issues = "https://github.com/enroute-ai/enroute/issues"
-Changelog = "https://github.com/enroute-ai/enroute/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/taylorlast/plural"
+Documentation = "https://taylorlast.github.io/plural/"
+Repository = "https://github.com/taylorlast/plural"
+Issues = "https://github.com/taylorlast/plural/issues"
+Changelog = "https://github.com/taylorlast/plural/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
@@ -72,7 +72,7 @@ docs = [
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/enroute", "src/plural"]
+packages = ["src/plural"]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -129,7 +129,7 @@ python_version = "3.10"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-packages = ["enroute", "plural"]
+packages = ["plural"]
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
@@ -156,5 +156,5 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["enroute"]
+source = ["plural"]
 branch = true

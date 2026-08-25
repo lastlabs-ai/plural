@@ -5,28 +5,28 @@ Get a multi-provider chat call in under a minute.
 ## Install
 
 ```bash
-pip install enroute
+pip install plural
 ```
 
 ## Set your API key
 
 ```bash
-export ENROUTE_API_KEY=enroute-...
+export PLURAL_API_KEY=plural-...
 ```
 
-## Primary: one enroute API key
+## Primary: one plural API key
 
 Looks like the OpenAI SDK — construct a client, call `chat`, close when done.
-`Enroute()` reads `ENROUTE_API_KEY` from the environment automatically:
+`Plural()` reads `PLURAL_API_KEY` from the environment automatically:
 
 ```python
-from enroute import Enroute, Message
+from plural import Plural, Message
 
-client = Enroute()
+client = Plural()
 
 response = client.chat(
     model="openai/gpt-4o-mini",
-    messages=[Message(role="user", content="Summarize enroute in one sentence.")],
+    messages=[Message(role="user", content="Summarize plural in one sentence.")],
     models=["anthropic/claude-sonnet-4"],  # optional fallback chain
 )
 print(response.text)
@@ -34,17 +34,17 @@ print(response.usage.cost)
 client.close()
 ```
 
-Traces append to `.enroute/traces.jsonl` by default.
+Traces append to `.plural/traces.jsonl` by default.
 
 ## Tracing style
 
 Use a context manager when you want explicit lifecycle + content capture:
 
 ```python
-from enroute import Enroute, Message
-from enroute.tracing import JSONLSink
+from plural import Plural, Message
+from plural.tracing import JSONLSink
 
-with Enroute(sink=JSONLSink(".enroute/traces.jsonl"), capture_content=True) as client:
+with Plural(sink=JSONLSink(".plural/traces.jsonl"), capture_content=True) as client:
     response = client.chat(
         model="anthropic/claude-sonnet-4",
         messages=[Message(role="user", content="Hello")],
@@ -58,9 +58,9 @@ Pass upstream keys explicitly — they are not loaded unless you ask:
 
 ```python
 import os
-from enroute import Enroute
+from plural import Plural
 
-client = Enroute(
+client = Plural(
     providers={
         "openai": os.environ["OPENAI_API_KEY"],
         "anthropic": os.environ["ANTHROPIC_API_KEY"],
@@ -68,15 +68,15 @@ client = Enroute(
 )
 ```
 
-Prefer the enroute API key for product traffic. See [Routing examples](guides/routing-examples.md).
+Prefer the plural API key for product traffic. See [Routing examples](guides/routing-examples.md).
 
 ## Fallback and cost-aware routing
 
 ```python
-from enroute import Enroute
-from enroute.routing import LeastCost
+from plural import Plural
+from plural.routing import LeastCost
 
-client = Enroute(policy=LeastCost())
+client = Plural(policy=LeastCost())
 ```
 
 ## Next concepts

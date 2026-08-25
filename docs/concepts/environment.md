@@ -18,10 +18,10 @@ rollout = env.run_episode(task, MyPolicy(), model="my-policy")
 
 `Policy.act()` receives the exact `ChatRequest` built by the environment and returns a `ChatResponse`, one `ParsedAction`, or a list of `ParsedAction` values. Built-in adapters are:
 
-- `EnroutePolicy(client, model, ...)` for Enroute model calls.
+- `PluralPolicy(client, model, ...)` for Plural model calls.
 - `ScriptedPolicy(actions)` for deterministic tests and offline examples.
 
-`rollout(task, client, model=...)` is convenience around `EnroutePolicy` plus `run_episode`.
+`rollout(task, client, model=...)` is convenience around `PluralPolicy` plus `run_episode`.
 
 ## Lifecycle guards
 
@@ -43,8 +43,8 @@ Calling an operation outside its valid state raises `EpisodeError` with the curr
 For scalar or custom text workflows, override `apply_action(action, *, runtime, response=None)` and return an `ActionResult`. The hook receives the raw action, may mutate environment state, and describes the turn with `parsed_actions`, `tool_calls`, `reward_events`, `stop_reason`, and `info`. Return `stop_reason=None` to continue after a text action:
 
 ```python
-from enroute import ActionResult, Environment
-from enroute.tracing import ParsedAction
+from plural import ActionResult, Environment
+from plural.tracing import ParsedAction
 
 class RatingEnv(Environment):
     def apply_action(self, action, *, runtime, response=None):
@@ -97,7 +97,7 @@ class Runtime(Protocol):
     def call(self, name: str, arguments: dict[str, Any]) -> Any: ...
 ```
 
-`LocalRuntime` executes registered Python callables in-process. Supply another synchronous implementation to `step`, `run_episode`, or `rollout` when tool invocation needs a sandbox, remote executor, or another boundary. The runtime interface is a synchronous public-alpha extension point; enroute does not provide a sandbox or remote execution service.
+`LocalRuntime` executes registered Python callables in-process. Supply another synchronous implementation to `step`, `run_episode`, or `rollout` when tool invocation needs a sandbox, remote executor, or another boundary. The runtime interface is a synchronous public-alpha extension point; plural does not provide a sandbox or remote execution service.
 
 For benchmarks, `runtime_factory` creates a fresh runtime per job. Custom runtimes may expose `fingerprint()` or `fingerprint_payload()`; benchmark manifests record the resulting `runtime_fingerprints`.
 

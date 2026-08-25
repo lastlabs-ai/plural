@@ -1,4 +1,4 @@
-"""List model ids available in the enroute catalog.
+"""List model ids available in the plural catalog.
 
 uv run python examples/routing/catalog/list_models.py
 uv run python examples/routing/catalog/list_models.py --provider openai
@@ -6,7 +6,7 @@ uv run python examples/routing/catalog/list_models.py --provider openai
 
 import argparse
 
-from enroute import ModelCatalog
+from plural import ModelCatalog
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--provider", help="Filter by provider, e.g. openai")

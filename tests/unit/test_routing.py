@@ -1,10 +1,10 @@
 import pytest
 
-from enroute.catalog import ModelCatalog
-from enroute.errors import ConfigurationError
-from enroute.routing import Explicit, LeastCost, LowestLatency
-from enroute.routing.router import Router
-from enroute.types import ChatRequest, ChatResponse, Choice, Message, ProviderPreferences, Usage
+from plural.catalog import ModelCatalog
+from plural.errors import ConfigurationError
+from plural.routing import Explicit, LeastCost, LowestLatency
+from plural.routing.router import Router
+from plural.types import ChatRequest, ChatResponse, Choice, Message, ProviderPreferences, Usage
 
 
 class _StubProvider:
@@ -170,17 +170,17 @@ def test_a_regional_provider_is_not_offered_other_regions() -> None:
     assert [r.region for r in Router({"azure": us_only}, catalog=catalog)._routes(req)] == ["us"]
 
 
-def test_gateway_mode_routes_all_models_through_enroute() -> None:
+def test_gateway_mode_routes_all_models_through_plural() -> None:
     gateway = _StubProvider()
-    gateway.name = "enroute"
-    router = Router({"enroute": gateway})
+    gateway.name = "plural"
+    router = Router({"plural": gateway})
     req = ChatRequest(
         model="openai/gpt-5.6-luna",
         messages=[Message(role="user", content="hi")],
         models=["anthropic/claude-sonnet-5"],
     )
     routes = router._routes(req)
-    assert all(route.provider == "enroute" for route in routes)
+    assert all(route.provider == "plural" for route in routes)
     response, attempts = router.chat(req)
     assert response.text == "ok"
-    assert attempts[0].provider == "enroute"
+    assert attempts[0].provider == "plural"
