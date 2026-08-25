@@ -231,7 +231,7 @@ class Enroute:
             DEFAULT_SETTINGS.capture_content if capture_content is None else capture_content
         )
         if api_key is None and providers is None:
-            api_key = os.environ.get("ENROUTE_API_KEY")
+            api_key = os.environ.get("PLURAL_API_KEY") or os.environ.get("ENROUTE_API_KEY")
         provider_map = self._build_providers(
             api_key=api_key,
             providers=providers,

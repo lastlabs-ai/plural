@@ -4,7 +4,7 @@ Examples:
     >>> from enroute.config import Settings
     >>> s = Settings()
     >>> s.gateway_base_url
-    'https://api.enroute.dev/v1'
+    'https://api.pluralintel.com/v1'
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ class Settings(BaseModel):
             Disabled by default to reduce PII exposure risk.
     """
 
-    gateway_base_url: str = "https://api.enroute.dev/v1"
+    gateway_base_url: str = "https://api.pluralintel.com/v1"
     default_timeout_s: float = 60.0
     max_retries: int = 2
     trace_dir: Path = Field(default_factory=lambda: Path(".enroute"))
