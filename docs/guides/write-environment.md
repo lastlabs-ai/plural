@@ -196,8 +196,8 @@ uv run python examples/environment/library/run.py
 uv run python examples/environment/wordle/run.py --secret crane
 ```
 
-- [Library environment](https://github.com/taylorlast/plural/tree/main/examples/environment/library)
-- [Wordle environment](https://github.com/taylorlast/plural/tree/main/examples/environment/wordle)
+- [Library environment](https://github.com/lastlabs-ai/plural/tree/main/examples/environment/library)
+- [Wordle environment](https://github.com/lastlabs-ai/plural/tree/main/examples/environment/wordle)
 
 ## Version and fingerprint
 

@@ -10,9 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Rename the library, GitHub repository, and PyPI project from `enroute` to
-  `plural`. The client is `Plural`, errors are `PluralError`, environment
-  policies are `PluralPolicy`, and the default env var / trace directory are
-  `PLURAL_API_KEY` and `.plural`. `ENROUTE_API_KEY` is still read as a fallback.
+  `plural`. The project now lives at `lastlabs-ai/plural`. The client is
+  `Plural`, errors are `PluralError`, environment policies are `PluralPolicy`,
+  and the default env var / trace directory are `PLURAL_API_KEY` and `.plural`.
+  `ENROUTE_API_KEY` is still read as a fallback.
 
 ## [0.5.1] - 2026-08-24
 
@@ -249,11 +250,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/taylorlast/plural/compare/v0.5.1...HEAD
-[0.5.1]: https://github.com/taylorlast/plural/releases/tag/v0.5.1
-[0.5.0]: https://github.com/taylorlast/plural/releases/tag/v0.5.0
-[0.4.0]: https://github.com/taylorlast/plural/releases/tag/v0.4.0
-[0.3.4]: https://github.com/taylorlast/plural/releases/tag/v0.3.4
-[0.3.3]: https://github.com/taylorlast/plural/releases/tag/v0.3.3
-[0.3.1]: https://github.com/taylorlast/plural/releases/tag/v0.3.1
-[0.1.0]: https://github.com/taylorlast/plural/releases/tag/v0.1.0
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/lastlabs-ai/plural/releases/tag/v0.5.1
+[0.5.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.5.0
+[0.4.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.4.0
+[0.3.4]: https://github.com/lastlabs-ai/plural/releases/tag/v0.3.4
+[0.3.3]: https://github.com/lastlabs-ai/plural/releases/tag/v0.3.3
+[0.3.1]: https://github.com/lastlabs-ai/plural/releases/tag/v0.3.1
+[0.1.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.1.0

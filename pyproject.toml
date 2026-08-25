@@ -46,11 +46,11 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/taylorlast/plural"
-Documentation = "https://taylorlast.github.io/plural/"
-Repository = "https://github.com/taylorlast/plural"
-Issues = "https://github.com/taylorlast/plural/issues"
-Changelog = "https://github.com/taylorlast/plural/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/lastlabs-ai/plural"
+Documentation = "https://lastlabs-ai.github.io/plural/"
+Repository = "https://github.com/lastlabs-ai/plural"
+Issues = "https://github.com/lastlabs-ai/plural/issues"
+Changelog = "https://github.com/lastlabs-ai/plural/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [

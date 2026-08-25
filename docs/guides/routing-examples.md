@@ -1,6 +1,6 @@
 # Routing examples walkthrough
 
-Cookbook-style scripts under [`examples/routing/`](https://github.com/taylorlast/plural/tree/main/examples/routing).
+Cookbook-style scripts under [`examples/routing/`](https://github.com/lastlabs-ai/plural/tree/main/examples/routing).
 
 ```bash
 export PLURAL_API_KEY=plural-...

@@ -7,9 +7,9 @@ uv run python examples/benchmarking/01_compare_models.py
 uv run python examples/benchmarking/02_compare_policies.py
 ```
 
-- [Compare model IDs](https://github.com/taylorlast/plural/blob/main/examples/benchmarking/01_compare_models.py)
-- [Compare arbitrary policies](https://github.com/taylorlast/plural/blob/main/examples/benchmarking/02_compare_policies.py)
-- [Benchmarking example guide](https://github.com/taylorlast/plural/tree/main/examples/benchmarking)
+- [Compare model IDs](https://github.com/lastlabs-ai/plural/blob/main/examples/benchmarking/01_compare_models.py)
+- [Compare arbitrary policies](https://github.com/lastlabs-ai/plural/blob/main/examples/benchmarking/02_compare_policies.py)
+- [Benchmarking example guide](https://github.com/lastlabs-ai/plural/tree/main/examples/benchmarking)
 
 Create and save a versioned task input first. Its hash includes hidden `expected` labels and metadata:
 
