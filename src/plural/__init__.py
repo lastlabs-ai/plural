@@ -22,7 +22,7 @@ from plural.benchmarks import (
     WinRatePair,
 )
 from plural.catalog import ModelCatalog, ModelSpec, estimate_cost
-from plural.client import Plural
+from plural.client import Client, Plural
 from plural.environments import (
     ActionResult,
     Dataset,
@@ -77,6 +77,7 @@ __all__ = [
     "CaseResult",
     "ChatRequest",
     "ChatResponse",
+    "Client",
     "ConfigurationError",
     "ContentFilterError",
     "ContextLengthError",

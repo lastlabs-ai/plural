@@ -6,9 +6,9 @@ Requires ``PLURAL_API_KEY`` in your environment::
     uv run python examples/routing/quickstart/basic.py
 """
 
-from plural import Message, Plural
+from plural import Client, Message
 
-client = Plural()
+client = Client()
 
 response = client.chat(
     model="openai/gpt-4o-mini",

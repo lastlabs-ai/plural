@@ -1,6 +1,6 @@
 # Redact PII before anything hits disk
 
-`Plural(capture_content=False)` is the default. When no custom redactor is supplied, the client installs `Redactor(drop_content=True)` before its sink.
+`Client(capture_content=False)` is the default. When no custom redactor is supplied, the client installs `Redactor(drop_content=True)` before its sink.
 
 For environment episode traces, that default content drop covers:
 
@@ -18,7 +18,7 @@ Tool arguments, tool results, arbitrary metadata, tags, and other custom nested 
 To retain content while scrubbing known patterns:
 
 ```python
-from plural import Plural, Redactor
+from plural import Client, Redactor
 from plural.tracing import JSONLSink
 
 redactor = Redactor(
@@ -30,7 +30,7 @@ redactor = Redactor(
     drop_content=False,  # keep content but scrub patterns
 )
 
-client = Plural(
+client = Client(
     providers={"openai": "..."},
     sink=JSONLSink(".plural/traces.jsonl"),
     redactor=redactor,
@@ -46,7 +46,7 @@ redactor = Redactor(
     fields={"metadata.customer_id"},
     patterns=[r"\b[\w.-]+@[\w.-]+\.\w+\b"],
 )
-client = Plural(redactor=redactor, capture_content=False)
+client = Client(redactor=redactor, capture_content=False)
 ```
 
 Redaction is defense in depth, not permission to serialize arbitrary state. `Environment.snapshot()` defaults to `None`; if you override it, return an explicitly trace-safe representation that excludes secrets and unnecessary personal data. Test the final redacted `Trace` shape before enabling persistence in production.

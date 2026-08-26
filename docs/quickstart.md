@@ -17,12 +17,13 @@ export PLURAL_API_KEY=plural-...
 ## Primary: one plural API key
 
 Looks like the OpenAI SDK — construct a client, call `chat`, close when done.
-`Plural()` reads `PLURAL_API_KEY` from the environment automatically:
+`Client()` reads `PLURAL_API_KEY` from the environment automatically:
 
 ```python
-from plural import Plural, Message
+from plural import Client, Message
 
-client = Plural()
+client = Client()
+assert client.is_authenticated()
 
 response = client.chat(
     model="openai/gpt-4o-mini",
@@ -41,10 +42,10 @@ Traces append to `.plural/traces.jsonl` by default.
 Use a context manager when you want explicit lifecycle + content capture:
 
 ```python
-from plural import Plural, Message
+from plural import Client, Message
 from plural.tracing import JSONLSink
 
-with Plural(sink=JSONLSink(".plural/traces.jsonl"), capture_content=True) as client:
+with Client(sink=JSONLSink(".plural/traces.jsonl"), capture_content=True) as client:
     response = client.chat(
         model="anthropic/claude-sonnet-4",
         messages=[Message(role="user", content="Hello")],
@@ -58,9 +59,9 @@ Pass upstream keys explicitly — they are not loaded unless you ask:
 
 ```python
 import os
-from plural import Plural
+from plural import Client
 
-client = Plural(
+client = Client(
     providers={
         "openai": os.environ["OPENAI_API_KEY"],
         "anthropic": os.environ["ANTHROPIC_API_KEY"],
@@ -73,10 +74,10 @@ Prefer the plural API key for product traffic. See [Routing examples](guides/rou
 ## Fallback and cost-aware routing
 
 ```python
-from plural import Plural
+from plural import Client
 from plural.routing import LeastCost
 
-client = Plural(policy=LeastCost())
+client = Client(policy=LeastCost())
 ```
 
 ## Next concepts

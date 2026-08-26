@@ -9,9 +9,9 @@ an upstream directly.
 
 import os
 
-from plural import Message, Plural
+from plural import Client, Message
 
-client = Plural(providers={"openai": os.environ["OPENAI_API_KEY"]})
+client = Client(providers={"openai": os.environ["OPENAI_API_KEY"]})
 
 response = client.chat(
     model="openai/gpt-4o-mini",

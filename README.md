@@ -32,9 +32,10 @@ export PLURAL_API_KEY=plural-...
 ```
 
 ```python
-from plural import Plural, Message
+from plural import Client, Message
 
-client = Plural()
+client = Client()
+assert client.is_authenticated()
 response = client.chat(
     model="openai/gpt-4o-mini",
     messages=[Message(role="user", content="Hello from plural")],
@@ -49,9 +50,9 @@ Optional BYOK (pass your own upstream keys explicitly):
 
 ```python
 import os
-from plural import Plural
+from plural import Client
 
-client = Plural(providers={"openai": os.environ["OPENAI_API_KEY"]})
+client = Client(providers={"openai": os.environ["OPENAI_API_KEY"]})
 ```
 
 ## Four pillars

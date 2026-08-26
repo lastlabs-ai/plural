@@ -8,14 +8,14 @@ uv run python examples/routing/custom/basic.py
 
 import os
 
-from plural import Message, Plural
+from plural import Client, Message
 from plural.providers import OpenAICompatible
 
 base_url = os.environ.get("CUSTOM_BASE_URL", "http://127.0.0.1:8000/v1")
 api_key = os.environ.get("CUSTOM_API_KEY", "EMPTY")
 server_model = os.environ.get("CUSTOM_MODEL", "my-model")
 
-client = Plural(
+client = Client(
     providers={
         "custom": OpenAICompatible(
             api_key=api_key,

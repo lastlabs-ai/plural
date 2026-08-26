@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from plural import ActionResult, Dataset, Environment, Plural, TaskData, Trace
+from plural import ActionResult, Client, Dataset, Environment, TaskData, Trace
 from plural.environments import Observation, State, StepResult, tool
 from plural.environments.env import TaskData as TaskDataFromEnv
 from plural.environments.export.hf import to_huggingface_records
@@ -113,8 +113,8 @@ class CounterEnv(Environment[CounterObservation, CounterState]):
         return {"n": self.state.n}
 
 
-def _client(provider: SequentialProvider, tmp_path: Path) -> Plural:
-    return Plural(
+def _client(provider: SequentialProvider, tmp_path: Path) -> Client:
+    return Client(
         providers={"openai": provider},
         sink=JSONLSink(tmp_path / "t.jsonl"),
         capture_content=True,

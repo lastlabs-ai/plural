@@ -13,7 +13,7 @@ import time
 import pytest
 from hosts import cheapest_model, live_cases
 
-from plural import Message, Plural
+from plural import Client, Message
 
 pytestmark = pytest.mark.live
 
@@ -40,7 +40,7 @@ for _host, _available in (("azure", _has_azure()), ("bedrock", _has_bedrock())):
 
 @pytest.mark.parametrize(("host", "model"), CASES)
 def test_live_stream_is_openai_shaped(host: str, model: str) -> None:
-    with Plural() as client:
+    with Client() as client:
         chunks = list(
             client.stream(
                 model=model,
@@ -75,7 +75,7 @@ def test_live_stream_arrives_incrementally(host: str, model: str) -> None:
     """
     started = time.perf_counter()
     arrivals: list[float] = []
-    with Plural() as client:
+    with Client() as client:
         for chunk in client.stream(
             model=model,
             messages=[

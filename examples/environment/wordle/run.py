@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _shared import ensure_out_dir
 from examples.environment.wordle.env import make_env
 from examples.environment.wordle.words import is_allowed
-from plural import Dataset, Environment, Plural, TaskData
+from plural import Client, Dataset, Environment, TaskData
 from plural.environments import Rollout, is_stopped
 from plural.providers import OpenAICompatible
 from plural.tracing import JSONLSink, Trace
@@ -94,7 +94,7 @@ class ScriptedWordleProvider:
 def play(
     env: Environment,
     task: TaskData,
-    client: Plural,
+    client: Client,
     *,
     model: str,
 ) -> Rollout:
@@ -281,12 +281,12 @@ def _task(secret: str) -> TaskData:
     )
 
 
-def _local_client(model: str, base_url: str, api_key: str, sink: Path) -> tuple[Plural, str]:
+def _local_client(model: str, base_url: str, api_key: str, sink: Path) -> tuple[Client, str]:
     provider = "local"
     server_model = model
     if "/" in model:
         provider, server_model = model.split("/", 1)
-    client = Plural(
+    client = Client(
         providers={
             provider: OpenAICompatible(
                 api_key=api_key,
@@ -307,7 +307,7 @@ def _run_scripted(env: Environment, task: TaskData, secret: str, out: Path) -> l
         ("misses", ScriptedWordleProvider(["audio", "wordy", "aback", "abase", "abate", "abbey"])),
     )
     for name, provider in policies:
-        client = Plural(
+        client = Client(
             providers={"openai": provider},
             sink=JSONLSink(out / f"wordle-{name}.jsonl"),
             capture_content=True,
@@ -349,7 +349,7 @@ def main() -> None:
         traces = [rollout.trace]
         _report_model_run(model, env, rollout, out)
     else:
-        client = Plural(sink=JSONLSink(out / "wordle-model.jsonl"), capture_content=True)
+        client = Client(sink=JSONLSink(out / "wordle-model.jsonl"), capture_content=True)
         try:
             rollout = play(env, task, client, model=args.model)
         finally:

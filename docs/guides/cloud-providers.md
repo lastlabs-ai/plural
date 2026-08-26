@@ -28,10 +28,10 @@ route it would have to bill at another region's rate.
 For Microsoft Entra ID instead of an API key, pass the token yourself:
 
 ```python
-from plural import Plural
+from plural import Client
 from plural.providers import AzureOpenAIProvider
 
-client = Plural(
+client = Client(
     providers={
         "azure": AzureOpenAIProvider(
             entra_token,

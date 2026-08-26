@@ -8,12 +8,12 @@ Requires ``PLURAL_API_KEY`` in your environment::
 
 from pathlib import Path
 
-from plural import Message, Plural
+from plural import Client, Message
 from plural.tracing import JSONLSink
 
 Path(".plural/examples").mkdir(parents=True, exist_ok=True)
 
-with Plural(
+with Client(
     sink=JSONLSink(".plural/examples/routing-anthropic.jsonl"),
     capture_content=True,
 ) as client:

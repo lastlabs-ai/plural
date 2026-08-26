@@ -1,12 +1,12 @@
 """High-level plural client.
 
-``Plural(api_key=...)`` talks to the hosted gateway. ``Plural(providers={...})``
+``Client(api_key=...)`` talks to the hosted gateway. ``Client(providers={...})``
 calls providers directly with your own keys. Same request types and same traces.
 
 Examples:
-    >>> from plural.client import Plural
-    >>> Plural.__name__
-    'Plural'
+    >>> from plural.client import Client
+    >>> Client.__name__
+    'Client'
 """
 
 from __future__ import annotations
@@ -17,12 +17,14 @@ from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from plural.catalog.models import ModelCatalog
 from plural.config import DEFAULT_SETTINGS
 from plural.errors import ConfigurationError
 from plural.providers.anthropic import AnthropicProvider
 from plural.providers.azure import AzureOpenAIProvider
-from plural.providers.base import Provider
+from plural.providers.base import Provider, map_transport_error
 from plural.providers.bedrock import BedrockProvider
 from plural.providers.google import GoogleProvider
 from plural.providers.openai_compatible import (
@@ -178,7 +180,7 @@ def build_provider(slug: str, api_key: str) -> Provider:
     return built
 
 
-class Plural:
+class Client:
     """Unified client for routing, tracing, and (via other modules) environments.
 
     Args:
@@ -200,11 +202,11 @@ class Plural:
     Examples:
         Hosted gateway (reads ``PLURAL_API_KEY``)::
 
-            client = Plural()
+            client = Client()
 
         Bring-your-own upstream keys::
 
-            client = Plural(providers={"openai": "sk-..."})
+            client = Client(providers={"openai": "sk-..."})
     """
 
     def __init__(
@@ -256,6 +258,22 @@ class Plural:
         if redactor is None and not self.capture_content:
             redactor = Redactor(drop_content=True)
         self.writer = TraceWriter(sink, redactor=redactor, sampler=sampler)
+
+    def is_authenticated(self) -> bool:
+        """Return whether configured credentials are accepted.
+
+        Sends a lightweight authenticated request to each HTTP provider.
+        In-process providers (no HTTP client) are treated as authenticated.
+
+        Returns:
+            ``True`` when every provider accepts the credentials or has no
+            HTTP client to probe.
+
+        Raises:
+            TimeoutError: If a provider cannot be reached.
+            PluralError: If a transport error occurs while probing.
+        """
+        return all(_provider_is_authenticated(provider) for provider in self._providers.values())
 
     def _build_providers(
         self,
@@ -558,7 +576,7 @@ class Plural:
         for provider in self._providers.values():
             await provider.aclose()
 
-    def __enter__(self) -> Plural:
+    def __enter__(self) -> Client:
         """Enter context manager.
 
         Returns:
@@ -658,6 +676,69 @@ class Plural:
         if trace_context is not None and trace_context.episode_trace_id:
             return trace_context.episode_trace_id
         return trace.trace_id
+
+
+Plural = Client
+
+
+def _provider_is_authenticated(provider: Provider) -> bool:
+    """Probe one provider and report whether credentials were accepted.
+
+    Args:
+        provider: Configured provider adapter.
+
+    Returns:
+        ``True`` when the provider accepts the credentials or has no HTTP client.
+
+    Raises:
+        PluralError: If a transport error occurs while probing.
+    """
+    http = getattr(provider, "_client", None)
+    if not isinstance(http, httpx.Client):
+        return True
+    name = getattr(provider, "name", "") or "unknown"
+    path, headers = _auth_probe(provider, name)
+    try:
+        response = http.get(path, headers=headers)
+    except Exception as exc:
+        raise map_transport_error(exc, provider=name) from exc
+    return response.status_code not in {401, 403}
+
+
+def _auth_probe(provider: Provider, name: str) -> tuple[str, dict[str, str] | None]:
+    """Return the path and optional headers for an auth probe.
+
+    Args:
+        provider: Configured provider adapter.
+        name: Provider slug.
+
+    Returns:
+        A ``(path, headers)`` pair. ``headers`` is ``None`` when the provider
+        client's default headers already carry credentials.
+    """
+    if name == "anthropic":
+        return "/v1/models", None
+    if name == "bedrock":
+        path = "/foundation-models"
+        signing = getattr(provider, "_signing", None)
+        config = getattr(provider, "config", None)
+        if signing:
+            from plural.providers.bedrock import sigv4_headers
+
+            access_key_id, secret_access_key, session_token = signing
+            base_url = getattr(config, "base_url", "") if config is not None else ""
+            return path, sigv4_headers(
+                method="GET",
+                url=f"{base_url}{path}",
+                region=getattr(provider, "aws_region", "us-east-1"),
+                payload=b"",
+                access_key_id=access_key_id,
+                secret_access_key=secret_access_key,
+                session_token=session_token,
+            )
+        api_key = getattr(config, "api_key", "") if config is not None else ""
+        return path, {"Authorization": f"Bearer {api_key}"}
+    return "/models", None
 
 
 def start_trace(**kwargs: Any) -> Trace:

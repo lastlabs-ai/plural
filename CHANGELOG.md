@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-26
+
+### Added
+
+- `Client.is_authenticated()` probes each configured provider and reports
+  whether credentials are accepted.
+
+### Changed
+
+- The high-level client is now `Client`. Import it with
+  `from plural import Client`. `Plural` remains as a backward-compatible alias.
+
 ## [0.6.0] - 2026-08-25
 
 ### Changed
@@ -252,7 +264,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/lastlabs-ai/plural/releases/tag/v0.6.1
 [0.6.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.6.0
 [0.5.1]: https://github.com/lastlabs-ai/plural/releases/tag/v0.5.1
 [0.5.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.5.0

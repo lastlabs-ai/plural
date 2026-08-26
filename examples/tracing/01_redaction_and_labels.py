@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _shared import ScriptedProvider, ensure_out_dir
-from plural import Message, Plural, Redactor
+from plural import Client, Message, Redactor
 from plural.tracing import SQLiteSink
 
 
@@ -16,7 +16,7 @@ def main() -> None:
     out = ensure_out_dir()
     sqlite = SQLiteSink(out / "traces.sqlite")
     redactor = Redactor(fields={"metadata.email"}, patterns=[r"\b\d{3}-\d{2}-\d{4}\b"])
-    with Plural(
+    with Client(
         providers={"openai": ScriptedProvider("openai", "done")},
         sink=sqlite,
         redactor=redactor,

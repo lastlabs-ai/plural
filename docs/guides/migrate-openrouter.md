@@ -8,11 +8,11 @@ from openai import OpenAI
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key="...")
 
 # After — primary: set PLURAL_API_KEY, then
-from plural import Plural
-client = Plural()
+from plural import Client
+client = Client()
 
 # After — secondary: bring-your-own upstream keys
-client = Plural(providers={"openai": "...", "anthropic": "..."})
+client = Client(providers={"openai": "...", "anthropic": "..."})
 ```
 
 ## What maps cleanly

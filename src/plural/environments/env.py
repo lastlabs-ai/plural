@@ -30,7 +30,7 @@ from collections.abc import Callable, Iterator
 from functools import partial
 from typing import Any, Generic, cast, final, get_args, get_origin
 
-from plural.client import Plural
+from plural.client import Client
 from plural.environments.action import ActionResult, is_tool_action, normalize_action
 from plural.environments.episode import Episode, episode_metrics
 from plural.environments.fingerprint import (
@@ -930,7 +930,7 @@ class Environment(Generic[ObsT, StateT]):
         self,
         *,
         response: ChatResponse | None = None,
-        client: Plural | None = None,
+        client: Client | None = None,
     ) -> Rollout:
         """Score the open episode.
 
@@ -984,7 +984,7 @@ class Environment(Generic[ObsT, StateT]):
         *,
         model: str | None = None,
         runtime: Runtime | None = None,
-        persist_with: Plural | None = None,
+        persist_with: Client | None = None,
     ) -> Rollout:
         """Run one complete episode with a synchronous policy.
 
@@ -993,7 +993,7 @@ class Environment(Generic[ObsT, StateT]):
             policy: Policy used to choose each action.
             model: Optional policy id recorded on requests and the trace.
             runtime: Tool runtime; defaults to an in-process runtime.
-            persist_with: Optional Plural client used only for the final trace.
+            persist_with: Optional client used only for the final trace.
 
         Returns:
             The closed, scored rollout.
@@ -1040,7 +1040,7 @@ class Environment(Generic[ObsT, StateT]):
     def rollout(
         self,
         task: TaskData,
-        client: Plural,
+        client: Client,
         *,
         model: str,
         models: list[str] | None = None,
@@ -1055,7 +1055,7 @@ class Environment(Generic[ObsT, StateT]):
 
         Args:
             task: Task to run.
-            client: Plural client used for model calls.
+            client: Client used for model calls.
             model: Primary model id.
             models: Optional fallback chain.
             runtime: Tool runtime; defaults to an in-process :class:`LocalRuntime`.
@@ -1097,7 +1097,7 @@ class Environment(Generic[ObsT, StateT]):
             )
         return episode
 
-    def _abort_episode(self, exc: Exception, *, client: Plural | None = None) -> None:
+    def _abort_episode(self, exc: Exception, *, client: Client | None = None) -> None:
         """Close the current episode as a persisted failure when possible."""
         episode = self._episode
         if episode is None:

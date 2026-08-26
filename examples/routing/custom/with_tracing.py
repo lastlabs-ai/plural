@@ -8,7 +8,7 @@ uv run python examples/routing/custom/with_tracing.py
 import os
 from pathlib import Path
 
-from plural import Message, Plural
+from plural import Client, Message
 from plural.providers import OpenAICompatible
 from plural.tracing import JSONLSink
 
@@ -18,7 +18,7 @@ server_model = os.environ.get("CUSTOM_MODEL", "my-model")
 
 Path(".plural/examples").mkdir(parents=True, exist_ok=True)
 
-with Plural(
+with Client(
     providers={
         "custom": OpenAICompatible(
             api_key=api_key,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
-from plural.client import Plural
+from plural.client import Client
 from plural.tracing.schema import ParsedAction, TraceContext
 from plural.types import ChatRequest, ChatResponse
 
@@ -27,10 +27,10 @@ class Policy(Protocol):
 
 
 class PluralPolicy:
-    """Policy adapter backed by :class:`~plural.client.Plural`.
+    """Policy adapter backed by :class:`~plural.client.Client`.
 
     Args:
-        client: Plural client used for model calls.
+        client: Client used for model calls.
         model: Primary model id.
         fallbacks: Optional fallback model chain.
         temperature: Optional sampling temperature.
@@ -40,7 +40,7 @@ class PluralPolicy:
 
     def __init__(
         self,
-        client: Plural,
+        client: Client,
         model: str,
         *,
         fallbacks: list[str] | None = None,
@@ -61,7 +61,7 @@ class PluralPolicy:
         *,
         trace_context: TraceContext | None = None,
     ) -> ChatResponse:
-        """Call Plural without dropping any normalized request fields.
+        """Call the client without dropping any normalized request fields.
 
         Returns:
             The normalized chat response.

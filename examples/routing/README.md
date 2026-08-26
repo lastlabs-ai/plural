@@ -17,7 +17,7 @@ routing/
   byok/           # bring-your-own upstream keys (secondary)
 ```
 
-Each topic has a **basic** script (`Plural()` + `client.chat`) and, where useful, a **with_tracing** variant (`with Plural(...) as client` + local sink).
+Each topic has a **basic** script (`Client()` + `client.chat`) and, where useful, a **with_tracing** variant (`with Client(...) as client` + local sink).
 
 ## Walkthrough
 
@@ -49,9 +49,9 @@ uv run python examples/routing/byok/openai.py
 ## Shape
 
 ```python
-from plural import Plural, Message
+from plural import Client, Message
 
-client = Plural()
+client = Client()
 response = client.chat(
     model="openai/gpt-4o-mini",
     messages=[Message(role="user", content="Hello")],

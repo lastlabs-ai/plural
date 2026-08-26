@@ -19,9 +19,9 @@ export PLURAL_API_KEY=plural-...
 ## Simple (default)
 
 ```python
-from plural import Plural, Message
+from plural import Client, Message
 
-client = Plural()
+client = Client()
 
 response = client.chat(
     model="openai/gpt-4o-mini",
@@ -36,7 +36,7 @@ client.close()
 ```python
 from plural.tracing import JSONLSink
 
-with Plural(
+with Client(
     sink=JSONLSink(".plural/examples/traces.jsonl"),
     capture_content=True,
 ) as client:

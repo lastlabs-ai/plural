@@ -63,7 +63,7 @@ The same `source` values apply to `decision_rewards()` and `returns()`. The defa
 
 ## Content capture and redaction
 
-`Plural(capture_content=False)` is the default. Its drop-content redactor covers:
+`Client(capture_content=False)` is the default. Its drop-content redactor covers:
 
 - LLM request messages and response message content.
 - Environment task `input` in `metadata["task"]`.

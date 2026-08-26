@@ -12,7 +12,7 @@ import json
 import pytest
 from hosts import live_cases
 
-from plural import Message, Plural
+from plural import Client, Message
 from plural.types import FunctionDefinition, ResponseFormat, Tool
 
 pytestmark = pytest.mark.live
@@ -44,7 +44,7 @@ CITY_SCHEMA = {
 
 @pytest.mark.parametrize(("host", "model"), TOOL_CASES)
 def test_live_streamed_tool_call_reassembles(host: str, model: str) -> None:
-    with Plural() as client:
+    with Client() as client:
         chunks = list(
             client.stream(
                 model=model,
@@ -86,7 +86,7 @@ def test_live_reasoning_arrives_before_any_content(host: str, model: str) -> Non
         "Find every integer triple (x, y, z) with 0 < x, y, z < 20 satisfying "
         "x^3 + y^3 = z^3 + 1. Show your working, then list them."
     )
-    with Plural() as client:
+    with Client() as client:
         chunks = list(
             client.stream(
                 model=model,
@@ -110,7 +110,7 @@ def test_live_reasoning_arrives_before_any_content(host: str, model: str) -> Non
 
 @pytest.mark.parametrize(("host", "model"), SCHEMA_CASES)
 def test_live_structured_output_returns_json_content(host: str, model: str) -> None:
-    with Plural() as client:
+    with Client() as client:
         resp = client.chat(
             model=model,
             messages=[Message(role="user", content="Population of Oslo, Norway.")],
@@ -130,7 +130,7 @@ def test_live_structured_output_returns_json_content(host: str, model: str) -> N
 
 @pytest.mark.parametrize(("host", "model"), SCHEMA_CASES)
 def test_live_structured_output_streams_as_content(host: str, model: str) -> None:
-    with Plural() as client:
+    with Client() as client:
         chunks = list(
             client.stream(
                 model=model,

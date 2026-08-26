@@ -5,11 +5,11 @@ pip install "plural[otel]"
 ```
 
 ```python
-from plural import Plural
+from plural import Client
 from plural.tracing import MultiSink, JSONLSink, OTelSink
 
 # Configure your TracerProvider elsewhere (ODLP, Datadog, Honeycomb, ...).
-client = Plural(
+client = Client(
     providers={"openai": "..."},
     sink=MultiSink([JSONLSink(".plural/traces.jsonl"), OTelSink()]),
 )

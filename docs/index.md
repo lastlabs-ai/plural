@@ -45,9 +45,9 @@ export PLURAL_API_KEY=plural-...
 ```
 
 ```python
-from plural import Plural, Message
+from plural import Client, Message
 
-client = Plural()
+client = Client()
 response = client.chat(
     model="openai/gpt-4o-mini",
     messages=[Message(role="user", content="Hello")],
@@ -57,7 +57,7 @@ client.close()
 # Traces land in .plural/traces.jsonl by default
 ```
 
-Optional bring-your-own-key: `Plural(providers={"openai": "sk-..."})`.
+Optional bring-your-own-key: `Client(providers={"openai": "sk-..."})`.
 
 ## Next
 

@@ -20,9 +20,9 @@ class MyProvider:
 Wire it in:
 
 ```python
-from plural import Plural
+from plural import Client
 
-client = Plural(providers={"myvendor": MyProvider(...)})
+client = Client(providers={"myvendor": MyProvider(...)})
 ```
 
 Prefer subclassing :class:`~plural.providers.openai_compatible.OpenAICompatible` when the vendor speaks the OpenAI Chat Completions shape — you usually only need a different `base_url` and `name`.

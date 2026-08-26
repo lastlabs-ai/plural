@@ -6,11 +6,15 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+import respx
 
-from plural import Benchmark, Dataset, Environment, Plural, TaskData, Trace
+from plural import Benchmark, Client, Dataset, Environment, TaskData, Trace
+from plural.client import Plural
 from plural.environments import TraceFilter
-from plural.tracing import TraceContext
+from plural.providers.openai_compatible import OpenAICompatible
+from plural.tracing import JSONLSink, TraceContext
 from plural.types import (
     ChatRequest,
     ChatResponse,
@@ -68,7 +72,7 @@ class FakeProvider:
 
 def test_client_chat_records_trace(tmp_path: Path) -> None:
     provider = FakeProvider("hello")
-    client = Plural(
+    client = Client(
         providers={"openai": provider},
         sink=None,
         trace_dir=tmp_path,
@@ -79,7 +83,7 @@ def test_client_chat_records_trace(tmp_path: Path) -> None:
 
     client.close()
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Plural(
+    client = Client(
         providers={"openai": provider},
         sink=sink,
         capture_content=True,
@@ -100,7 +104,7 @@ def test_environment_rollout_and_benchmark(tmp_path: Path) -> None:
     from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Plural(providers={"openai": FakeProvider("refund")}, sink=sink, capture_content=True)
+    client = Client(providers={"openai": FakeProvider("refund")}, sink=sink, capture_content=True)
 
     env = Environment(name="support-triage", version="0.1.0", system_prompt="Triage tickets.")
 
@@ -149,7 +153,7 @@ def test_standalone_and_episode_trace_persistence(tmp_path: Path) -> None:
     from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Plural(providers={"openai": FakeProvider("done")}, sink=sink, capture_content=True)
+    client = Client(providers={"openai": FakeProvider("done")}, sink=sink, capture_content=True)
 
     standalone = client.chat(model="openai/model", messages=[{"role": "user", "content": "hi"}])
     client.flush()
@@ -189,7 +193,7 @@ def test_text_only_episode_persistence_redacts_all_copied_content(tmp_path: Path
     from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "redacted.jsonl")
-    client = Plural(providers={"openai": FakeProvider("private answer")}, sink=sink)
+    client = Client(providers={"openai": FakeProvider("private answer")}, sink=sink)
     env = Environment(name="redacted", version="1.0.0")
 
     env.rollout(
@@ -216,7 +220,7 @@ def test_rollout_child_traces_are_opt_in_and_linked(tmp_path: Path) -> None:
     from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Plural(providers={"openai": FakeProvider("done")}, sink=sink, capture_content=True)
+    client = Client(providers={"openai": FakeProvider("done")}, sink=sink, capture_content=True)
     env = Environment(name="linked", version="1.0.0")
     rollout = env.rollout(
         TaskData(task_id="t", input="go"),
@@ -240,7 +244,7 @@ def test_write_trace_false_uses_episode_trace_id(tmp_path: Path) -> None:
     from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Plural(providers={"openai": FakeProvider()}, sink=sink)
+    client = Client(providers={"openai": FakeProvider()}, sink=sink)
     context = TraceContext(parent_trace_id="parent", episode_trace_id="episode")
     response = client.chat(
         model="openai/gpt-4o-mini",
@@ -260,7 +264,7 @@ async def test_achat_trace_controls(tmp_path: Path) -> None:
     from plural.tracing import JSONLSink
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    client = Plural(providers={"openai": FakeProvider()}, sink=sink)
+    client = Client(providers={"openai": FakeProvider()}, sink=sink)
     response = await client.achat(
         model="openai/gpt-4o-mini",
         messages=[{"role": "user", "content": "hi"}],
@@ -359,3 +363,71 @@ def test_legacy_jsonl_migration_has_stable_dataset_hash(tmp_path: Path) -> None:
     first.save(saved)
     loaded = Dataset.load(saved)
     assert loaded.content_hash == first.content_hash
+
+
+def test_plural_is_client_alias() -> None:
+    assert Plural is Client
+
+
+def test_is_authenticated_in_process_provider(tmp_path: Path) -> None:
+    client = Client(
+        providers={"openai": FakeProvider()},
+        sink=JSONLSink(tmp_path / "traces.jsonl"),
+    )
+    assert client.is_authenticated() is True
+    client.close()
+
+
+@respx.mock
+def test_is_authenticated_accepts_valid_credentials(tmp_path: Path) -> None:
+    respx.get("https://api.example.test/v1/models").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    client = Client(
+        providers={
+            "custom": OpenAICompatible(
+                api_key="sk-test",
+                base_url="https://api.example.test/v1",
+                name="custom",
+            )
+        },
+        sink=JSONLSink(tmp_path / "traces.jsonl"),
+    )
+    assert client.is_authenticated() is True
+    client.close()
+
+
+@respx.mock
+def test_is_authenticated_rejects_unauthorized(tmp_path: Path) -> None:
+    respx.get("https://api.example.test/v1/models").mock(
+        return_value=httpx.Response(401, json={"error": {"message": "invalid api key"}})
+    )
+    client = Client(
+        providers={
+            "custom": OpenAICompatible(
+                api_key="sk-bad",
+                base_url="https://api.example.test/v1",
+                name="custom",
+            )
+        },
+        sink=JSONLSink(tmp_path / "traces.jsonl"),
+    )
+    assert client.is_authenticated() is False
+    client.close()
+
+
+@respx.mock
+def test_is_authenticated_rejects_forbidden(tmp_path: Path) -> None:
+    respx.get("https://api.example.test/v1/models").mock(return_value=httpx.Response(403))
+    client = Client(
+        providers={
+            "custom": OpenAICompatible(
+                api_key="sk-bad",
+                base_url="https://api.example.test/v1",
+                name="custom",
+            )
+        },
+        sink=JSONLSink(tmp_path / "traces.jsonl"),
+    )
+    assert client.is_authenticated() is False
+    client.close()

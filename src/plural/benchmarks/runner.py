@@ -22,7 +22,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from plural.client import Plural
+from plural.client import Client
 from plural.environments.dataset import TaskDataset, task_content_hash
 from plural.environments.env import Environment
 from plural.environments.policy import Policy
@@ -287,7 +287,7 @@ class Benchmark:
         env: Environment[Any, Any],
         models: list[str],
         *,
-        client: Plural,
+        client: Client,
         repeats: int = 1,
         concurrency: int = 4,
         environment_factory: Callable[[], Environment[Any, Any]] | None = None,
@@ -307,7 +307,7 @@ class Benchmark:
             raise TypeError("runtime_factory must be callable")
         self.env = env
         self.models = list(models)
-        self.client: Plural | None = client
+        self.client: Client | None = client
         self._policy_factories: dict[str, Callable[[], Policy]] | None = None
         self._environment_factory = environment_factory
         self._runtime_factory = runtime_factory
@@ -343,7 +343,7 @@ class Benchmark:
             trace_writer: Optional caller-owned writer for successful episode traces.
 
         Returns:
-            A benchmark configured without an Plural client.
+            A benchmark configured without a client.
         """
         if not policies:
             raise ValueError("policies must not be empty")
@@ -496,7 +496,7 @@ class Benchmark:
                         runtime_fingerprint=runtime_identity,
                     )
                 if self.client is None:  # pragma: no cover - constructor invariant
-                    raise RuntimeError("model benchmark requires an Plural client")
+                    raise RuntimeError("model benchmark requires a client")
                 if runtime is None:
                     rollout = worker.rollout(task, self.client, model=key.model)
                 else:

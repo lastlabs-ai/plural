@@ -14,7 +14,7 @@ stand-ins through one `Plural` client. For a live benchmark, replace the
 provider/client setup and keep the model IDs, dataset, and benchmark:
 
 ```python
-client = Plural()
+client = Client()
 report = Benchmark(
     env,
     models=["openai/gpt-4o-mini", "anthropic/claude-sonnet-4"],

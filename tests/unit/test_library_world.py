@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from plural import Plural, ScriptedPolicy, TaskData
+from plural import Client, ScriptedPolicy, TaskData
 from plural.tracing import JSONLSink
 from plural.tracing.schema import ParsedAction
 from plural.types import (
@@ -107,7 +107,7 @@ def test_make_env_and_rollout(tmp_path: Path) -> None:
     assert env.version == "0.2.0"
     names = {t.function.name for t in env.tool_defs}
     assert "research" in names
-    client = Plural(
+    client = Client(
         providers={"openai": Provider()},
         sink=JSONLSink(tmp_path / "t.jsonl"),
         capture_content=True,

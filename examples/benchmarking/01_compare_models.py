@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _shared import ScriptedProvider, ensure_out_dir
-from plural import Benchmark, Environment, JSONLSink, Plural, TaskData, TaskDataset
+from plural import Benchmark, Client, Environment, JSONLSink, TaskData, TaskDataset
 
 
 def make_env() -> Environment:
@@ -39,7 +39,7 @@ def main() -> None:
             TaskData(task_id="refund-2", input="Please reverse this purchase."),
         ],
     )
-    client = Plural(
+    client = Client(
         providers={
             "helpful": ScriptedProvider("helpful", "Your refund is approved."),
             "unhelpful": ScriptedProvider("unhelpful", "Please wait."),

@@ -13,11 +13,11 @@ A **RoutingPolicy** decides the ordered list of model routes to try.
 | `LowestLatency` | Heuristic provider latency ranking |
 
 ```python
-from plural import Plural
+from plural import Client
 from plural.routing import LeastCost
 from plural.types import ProviderPreferences
 
-client = Plural(providers={...}, policy=LeastCost())
+client = Client(providers={...}, policy=LeastCost())
 client.chat(
     model="openai/gpt-4o",
     messages=[...],

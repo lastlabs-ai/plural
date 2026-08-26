@@ -3,9 +3,9 @@
 Swap your provider client for plural — about ten lines.
 
 ```python
-from plural import Plural, Message
+from plural import Client, Message
 
-client = Plural(
+client = Client(
     providers={"openai": os.environ["OPENAI_API_KEY"]},
     capture_content=True,
     tags={"service": "checkout-bot"},

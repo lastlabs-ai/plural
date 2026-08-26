@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from plural import Plural
+from plural import Client
 from plural.catalog import ModelCatalog
 from plural.errors import ProviderUnavailable
 from plural.tracing import JSONLSink, TraceContext
@@ -74,8 +74,8 @@ class StreamingProvider:
         return None
 
 
-def client(provider: StreamingProvider, tmp_path: Path) -> Plural:
-    return Plural(
+def client(provider: StreamingProvider, tmp_path: Path) -> Client:
+    return Client(
         providers={"openai": provider},
         sink=JSONLSink(tmp_path / "traces.jsonl"),
         capture_content=True,
@@ -84,7 +84,7 @@ def client(provider: StreamingProvider, tmp_path: Path) -> Plural:
 
 def test_stream_yields_deltas_and_traces_once(tmp_path: Path) -> None:
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    plural = Plural(providers={"openai": StreamingProvider()}, sink=sink, capture_content=True)
+    plural = Client(providers={"openai": StreamingProvider()}, sink=sink, capture_content=True)
     chunks = list(plural.stream(model=MODEL, messages=[Message(role="user", content="hi")]))
 
     assert "".join(c.delta.content or "" for c in chunks) == "Hello"
@@ -116,7 +116,7 @@ async def test_astream_matches_sync(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_stream_trace_controls_match_chat(tmp_path: Path) -> None:
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    plural = Plural(providers={"openai": StreamingProvider()}, sink=sink, capture_content=True)
+    plural = Client(providers={"openai": StreamingProvider()}, sink=sink, capture_content=True)
     context = TraceContext(parent_trace_id="episode", episode_trace_id="episode")
     sync_chunks = list(
         plural.stream(
@@ -145,7 +145,7 @@ async def test_stream_trace_controls_match_chat(tmp_path: Path) -> None:
 def test_streams_are_billed_from_the_usage_chunk(tmp_path: Path) -> None:
     provider = StreamingProvider()
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    plural = Plural(providers={"openai": provider}, sink=sink, capture_content=True)
+    plural = Client(providers={"openai": provider}, sink=sink, capture_content=True)
     list(plural.stream(model=MODEL, messages=[Message(role="user", content="hi")]))
     plural.flush()
 
@@ -162,7 +162,7 @@ def test_a_long_streamed_prompt_is_billed_at_the_tier_rate(tmp_path: Path) -> No
     assert tier.min_prompt_tokens < LONG_PROMPT_TOKENS
 
     sink = JSONLSink(tmp_path / "traces.jsonl")
-    plural = Plural(
+    plural = Client(
         providers={"openai": StreamingProvider(prompt_tokens=LONG_PROMPT_TOKENS)},
         sink=sink,
         capture_content=True,
@@ -182,7 +182,7 @@ def test_stream_falls_back_to_the_next_host(tmp_path: Path) -> None:
     broken = StreamingProvider(fail=True)
     healthy = StreamingProvider()
     healthy.name = "azure"
-    plural = Plural(
+    plural = Client(
         providers={"openai": broken, "azure": healthy},
         sink=JSONLSink(tmp_path / "traces.jsonl"),
         capture_content=True,

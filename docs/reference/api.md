@@ -2,7 +2,7 @@
 
 ## Client and request types
 
-::: plural.client.Plural
+::: plural.client.Client
 
 ::: plural.types
 

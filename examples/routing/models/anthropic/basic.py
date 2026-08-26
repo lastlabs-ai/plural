@@ -6,9 +6,9 @@ Requires ``PLURAL_API_KEY`` in your environment::
     uv run python examples/routing/models/anthropic/basic.py
 """
 
-from plural import Message, Plural
+from plural import Client, Message
 
-client = Plural()
+client = Client()
 
 response = client.chat(
     model="anthropic/claude-sonnet-4",

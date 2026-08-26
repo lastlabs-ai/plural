@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from plural import (
     Benchmark,
+    Client,
     Dataset,
     Environment,
     Message,
     ModelCatalog,
-    Plural,
     TaskData,
     Trace,
     Usage,
@@ -29,7 +29,7 @@ def main() -> None:
     assert env.name == "x"
     assert task.task_id == "1"
     assert len(ds) == 1
-    _ = Plural
+    _ = Client
     _ = Benchmark
 
 
