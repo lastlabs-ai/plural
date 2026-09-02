@@ -50,6 +50,8 @@ from plural.errors import (
     TimeoutError,
     is_retryable,
 )
+from plural.studio import RemoteAgent as Agent
+from plural.studio import Studio
 from plural.tracing import (
     JSONLSink,
     Outcome,
@@ -70,6 +72,7 @@ except PackageNotFoundError:  # pragma: no cover
 
 __all__ = [
     "ActionResult",
+    "Agent",
     "AuthenticationError",
     "Benchmark",
     "BudgetExceededError",
@@ -102,6 +105,7 @@ __all__ = [
     "RunManifest",
     "SQLiteSink",
     "Sampler",
+    "Studio",
     "ScriptedPolicy",
     "StopReason",
     "TaskData",

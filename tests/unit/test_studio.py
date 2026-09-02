@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import httpx
+import respx
+
+from plural import Client, Environment
+from plural.studio import studio_base_url
+
+
+def test_studio_base_url_strips_gateway_prefix() -> None:
+    assert studio_base_url("https://api.example.com/v1") == "https://api.example.com/api/v1"
+    assert studio_base_url("https://api.example.com/v1/") == "https://api.example.com/api/v1"
+    assert studio_base_url("https://api.example.com") == "https://api.example.com/api/v1"
+
+
+def test_client_reads_project_and_exposes_studio(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PLURAL_PROJECT", "proj_from_env")
+    client = Client(
+        api_key="plural_test",
+        base_url="https://api.example.com/v1",
+        trace_dir=tmp_path,
+    )
+    assert client.project == "proj_from_env"
+    assert client.environments is client.studio.environments
+    assert client.agents is client.studio.agents
+    explicit = Client(
+        api_key="plural_test",
+        base_url="https://api.example.com/v1",
+        project="proj_explicit",
+        trace_dir=tmp_path,
+    )
+    assert explicit.project == "proj_explicit"
+
+
+@respx.mock
+def test_studio_sends_project_header_for_account_keys(tmp_path: Path) -> None:
+    route = respx.get("https://api.example.com/api/v1/environments").mock(
+        return_value=httpx.Response(200, json={"items": [{"id": "env_1"}]})
+    )
+    client = Client(
+        api_key="plural_account",
+        base_url="https://api.example.com/v1",
+        project="proj_1",
+        trace_dir=tmp_path,
+    )
+    items = client.environments.list()
+    assert items[0]["id"] == "env_1"
+    assert route.called
+    assert route.calls.last.request.headers["x-project-id"] == "proj_1"
+    assert route.calls.last.request.headers["authorization"] == "Bearer plural_account"
+
+
+@respx.mock
+def test_environment_push_creates_then_ingests_revision(tmp_path: Path) -> None:
+    respx.post("https://api.example.com/api/v1/environments").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "env_remote", "name": "refund-support", "version": "0.1.0"},
+        )
+    )
+    respx.post("https://api.example.com/api/v1/environments/env_remote/revisions").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "rev_1", "version": "0.1.0", "fingerprint": "abc"},
+        )
+    )
+    client = Client(
+        api_key="plural_project",
+        base_url="https://api.example.com/v1",
+        trace_dir=tmp_path,
+    )
+    env = Environment(name="refund-support", version="0.1.0", system_prompt="Be brief.")
+    pushed = env.push(client)
+    assert env.remote_id == "env_remote"
+    assert pushed["environment_id"] == "env_remote"
+
+
+@respx.mock
+def test_agent_invoke_posts_to_gateway(tmp_path: Path) -> None:
+    respx.post("https://api.example.com/v1/agents/ag_1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "chat_1",
+                "model": "openai/gpt-5.6-luna",
+                "choices": [{"message": {"role": "assistant", "content": "done"}}],
+            },
+        )
+    )
+    client = Client(
+        api_key="plural_account",
+        base_url="https://api.example.com/v1",
+        project="proj_1",
+        trace_dir=tmp_path,
+    )
+    response = client.agents.invoke("ag_1", "Refund this ticket")
+    assert response.choices[0].message.content == "done"
+    request = respx.calls.last.request
+    assert request.headers["x-project-id"] == "proj_1"
+    assert b"Refund this ticket" in request.content

@@ -260,6 +260,7 @@ class Environment(Generic[ObsT, StateT]):
         self.system_prompt = cls.system_prompt if system_prompt is None else system_prompt
         self.max_turns = cls.max_turns if max_turns is None else max_turns
         self.metadata = metadata or {}
+        self.remote_id: str | None = None
         self.tool_functions: dict[str, Callable[..., Any]] = {}
         self.tool_defs: list[Tool] = []
         self.scorers: list[tuple[str, ScorerFn, float]] = []
@@ -575,6 +576,20 @@ class Environment(Generic[ObsT, StateT]):
         }
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def push(self, client: Client, **kwargs: Any) -> dict[str, Any]:
+        """Create or update this environment on a Plural project.
+
+        Args:
+            client: Authenticated Plural client.
+            **kwargs: Optional ``environment_id``, ``name``, or ``description``.
+
+        Returns:
+            Created revision plus ``environment_id``.
+        """
+        from plural.studio import push_environment
+
+        return push_environment(client, self, **kwargs)
 
     def reset(
         self,

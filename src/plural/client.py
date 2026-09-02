@@ -198,6 +198,9 @@ class Client:
         max_cost_usd: Optional per-request budget.
         default_headers: Extra headers for the gateway client.
         tags: Default tags applied to every trace.
+        project: Project id required when ``api_key`` is account-scoped.
+            Project-scoped keys already know the project. Also reads
+            ``PLURAL_PROJECT``.
 
     Examples:
         Hosted gateway (reads ``PLURAL_API_KEY``)::
@@ -207,6 +210,12 @@ class Client:
         Bring-your-own upstream keys::
 
             client = Client(providers={"openai": "sk-..."})
+
+        Account key (project required)::
+
+            client = Client(api_key="plural_...", project="<project_id>")
+            env = Environment(name="refund-support", version="0.1.0")
+            env.push(client)
     """
 
     def __init__(
@@ -226,9 +235,11 @@ class Client:
         default_headers: dict[str, str] | None = None,
         tags: dict[str, str] | None = None,
         trace_dir: str | Path | None = None,
+        project: str | None = None,
     ) -> None:
         self.catalog = catalog or ModelCatalog()
         self.tags = tags or {}
+        self.project = project or os.environ.get("PLURAL_PROJECT")
         self.capture_content = (
             DEFAULT_SETTINGS.capture_content if capture_content is None else capture_content
         )
@@ -245,6 +256,15 @@ class Client:
                 "no providers configured; pass api_key=... / PLURAL_API_KEY or providers={...}"
             )
         self._providers = provider_map
+        self.api_key = api_key
+        self.base_url = base_url or DEFAULT_SETTINGS.gateway_base_url
+        from plural.studio import Studio
+
+        self.studio = Studio(self)
+        self.environments = self.studio.environments
+        self.agents = self.studio.agents
+        self.benchmarks = self.studio.benchmarks
+        self.traces = self.studio.traces
         self.router = Router(
             provider_map,
             catalog=self.catalog,
