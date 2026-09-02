@@ -80,8 +80,26 @@ from plural.routing import LeastCost
 client = Client(policy=LeastCost())
 ```
 
+## Push local work to a hosted project
+
+`client.push(x)` syncs an environment, trace, or benchmark report. Agents are
+created on the host instead (`client.agents.create(...)`) because they need a
+model and environment binding.
+
+```python
+from plural import Environment
+
+env = Environment(name="refund-support", version="0.1.0")
+client.push(env)          # primary
+env.push(client)          # alias
+```
+
+A project-scoped API key already knows the project. An account-scoped key
+must pass `project=` or `PLURAL_PROJECT`. See [Push to Plural](guides/push-to-plural.md).
+
 ## Next concepts
 
 1. [Trace](concepts/trace.md) — what got recorded
 2. [Environment](concepts/environment.md) — turn tasks into scored traces
 3. [Benchmark](concepts/benchmark.md) — compare models on your environment
+4. [Push to Plural](guides/push-to-plural.md) — sync env, trace, and report

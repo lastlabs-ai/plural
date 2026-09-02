@@ -314,6 +314,7 @@ class Benchmark:
         self._trace_writer: TraceWriter | None = None
         self.repeats = repeats
         self.concurrency = concurrency
+        self.report: Report | None = None
 
     @classmethod
     def from_policies(
@@ -375,6 +376,7 @@ class Benchmark:
         benchmark._trace_writer = trace_writer
         benchmark.repeats = repeats
         benchmark.concurrency = concurrency
+        benchmark.report = None
         return benchmark
 
     def run(
@@ -603,7 +605,7 @@ class Benchmark:
         if dataset_metadata is not None:
             metadata["task_dataset"] = dataset_metadata.model_dump(mode="json")
         metadata["task_set"] = task_set_metadata.model_dump(mode="json")
-        return Report(
+        self.report = Report(
             environment=environment_identity.name,
             environment_version=environment_identity.version,
             models=model_stats,
@@ -627,6 +629,7 @@ class Benchmark:
             ),
             metadata=metadata,
         )
+        return self.report
 
 
 def _environment_identity(environment: Any) -> _EnvironmentIdentity:

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-02
+
+### Added
+
+- `Client.push(x)` syncs a local `Environment`, `Trace`, `Benchmark` (after
+  `run()`), or `Report` to the hosted project. Agents are created with
+  `client.agents.create(...)` and are not pushable.
+- `env.push(client)` remains as an alias for `client.push(env)`.
+
 ## [0.7.1] - 2026-09-02
 
 ### Added
@@ -276,7 +285,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/lastlabs-ai/plural/releases/tag/v0.7.2
 [0.7.1]: https://github.com/lastlabs-ai/plural/releases/tag/v0.7.1
 [0.6.1]: https://github.com/lastlabs-ai/plural/releases/tag/v0.6.1
 [0.6.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.6.0

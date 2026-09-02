@@ -639,3 +639,109 @@ def push_environment(
     env.remote_id = remote_id
     payload = revision if isinstance(revision, dict) else {}
     return {**payload, "environment_id": remote_id}
+
+
+def push_trace(
+    client: Client,
+    trace: Any,
+    *,
+    environment_id: str | None = None,
+    environment_revision_id: str | None = None,
+    agent_id: str | None = None,
+    run_group_id: str | None = None,
+) -> JsonObject:
+    """Ingest a local trace on the hosted project.
+
+    Args:
+        client: Authenticated Plural client.
+        trace: Local :class:`~plural.tracing.schema.Trace`.
+        environment_id: Optional environment to attach.
+        environment_revision_id: Optional pinned revision.
+        agent_id: Optional agent to attach.
+        run_group_id: Optional run grouping id.
+
+    Returns:
+        Stored trace detail.
+    """
+    payload = trace.model_dump(mode="json") if hasattr(trace, "model_dump") else dict(trace)
+    return Studio(client).traces.create(
+        payload,
+        environment_id=environment_id,
+        environment_revision_id=environment_revision_id,
+        agent_id=agent_id,
+        run_group_id=run_group_id,
+    )
+
+
+def push_report(
+    client: Client,
+    report: Any,
+    *,
+    name: str | None = None,
+    notes: str = "",
+    environment_id: str | None = None,
+    environment_revision_id: str | None = None,
+    agent_id: str | None = None,
+) -> JsonObject:
+    """Store a benchmark report on the hosted project.
+
+    Args:
+        client: Authenticated Plural client.
+        report: Local :class:`~plural.benchmarks.runner.Report`.
+        name: Optional display name.
+        notes: Optional notes.
+        environment_id: Optional environment to attach.
+        environment_revision_id: Optional pinned revision.
+        agent_id: Optional agent to attach.
+
+    Returns:
+        Created benchmark detail.
+    """
+    payload = report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
+    env_name = payload.get("environment") or "benchmark"
+    env_version = payload.get("environment_version") or ""
+    label = name or f"{env_name} {env_version}".strip()
+    return Studio(client).benchmarks.create(
+        name=label,
+        notes=notes,
+        report=payload,
+        environment_id=environment_id,
+        environment_revision_id=environment_revision_id,
+        agent_id=agent_id,
+    )
+
+
+def push_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
+    """Dispatch ``client.push`` to the matching studio sync.
+
+    Agents are not accepted. Create them with ``client.agents.create(...)``.
+
+    Args:
+        client: Authenticated Plural client.
+        obj: Environment, Trace, Benchmark, or Report.
+        **kwargs: Forwarded to the typed push helper.
+
+    Returns:
+        Hosted record created or updated by the studio API.
+    """
+    from plural.benchmarks.runner import Benchmark, Report
+    from plural.environments.env import Environment
+    from plural.tracing.schema import Trace
+
+    if isinstance(obj, Environment):
+        return push_environment(client, obj, **kwargs)
+    if isinstance(obj, Trace):
+        return push_trace(client, obj, **kwargs)
+    if isinstance(obj, Report):
+        return push_report(client, obj, **kwargs)
+    if isinstance(obj, Benchmark):
+        if obj.report is None:
+            raise InvalidRequestError("run the benchmark before pushing it")
+        kwargs.setdefault("environment_id", getattr(obj.env, "remote_id", None))
+        if not kwargs.get("name"):
+            kwargs["name"] = f"{obj.env.name} {obj.env.version}".strip()
+        return push_report(client, obj.report, **kwargs)
+    raise InvalidRequestError(
+        "client.push accepts Environment, Trace, Benchmark, or Report; "
+        "create agents with client.agents.create(...)"
+    )

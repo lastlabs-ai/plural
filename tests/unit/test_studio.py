@@ -3,10 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 
 from plural import Client, Environment
+from plural.benchmarks.runner import Benchmark, Report
+from plural.errors import InvalidRequestError
 from plural.studio import studio_base_url
+from plural.tracing.schema import Trace
 
 
 def test_studio_base_url_strips_gateway_prefix() -> None:
@@ -72,9 +76,47 @@ def test_environment_push_creates_then_ingests_revision(tmp_path: Path) -> None:
         trace_dir=tmp_path,
     )
     env = Environment(name="refund-support", version="0.1.0", system_prompt="Be brief.")
-    pushed = env.push(client)
+    pushed = client.push(env)
     assert env.remote_id == "env_remote"
     assert pushed["environment_id"] == "env_remote"
+    again = env.push(client)
+    assert again["environment_id"] == "env_remote"
+
+
+@respx.mock
+def test_client_push_trace_and_report(tmp_path: Path) -> None:
+    respx.post("https://api.example.com/api/v1/traces").mock(
+        return_value=httpx.Response(200, json={"id": "tr_1", "trace_id": "abc"})
+    )
+    respx.post("https://api.example.com/api/v1/benchmarks").mock(
+        return_value=httpx.Response(200, json={"id": "bm_1", "name": "refund-support 0.1.0"})
+    )
+    client = Client(
+        api_key="plural_project",
+        base_url="https://api.example.com/v1",
+        trace_dir=tmp_path,
+    )
+    stored = client.push(Trace(trace_id="abc", trace_kind="episode"))
+    assert stored["id"] == "tr_1"
+    stored_report = client.push(Report(environment="refund-support", environment_version="0.1.0"))
+    assert stored_report["id"] == "bm_1"
+
+
+def test_client_push_rejects_unrun_benchmark_and_agents(tmp_path: Path) -> None:
+    client = Client(
+        api_key="plural_project",
+        base_url="https://api.example.com/v1",
+        trace_dir=tmp_path,
+    )
+    bench = Benchmark(
+        Environment(name="x"),
+        models=["openai/gpt-4o-mini"],
+        client=client,
+    )
+    with pytest.raises(InvalidRequestError, match="run the benchmark"):
+        client.push(bench)
+    with pytest.raises(InvalidRequestError, match="agents"):
+        client.push(object())
 
 
 @respx.mock

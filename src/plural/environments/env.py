@@ -578,7 +578,7 @@ class Environment(Generic[ObsT, StateT]):
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def push(self, client: Client, **kwargs: Any) -> dict[str, Any]:
-        """Create or update this environment on a Plural project.
+        """Alias for ``client.push(self)``.
 
         Args:
             client: Authenticated Plural client.
@@ -587,9 +587,7 @@ class Environment(Generic[ObsT, StateT]):
         Returns:
             Created revision plus ``environment_id``.
         """
-        from plural.studio import push_environment
-
-        return push_environment(client, self, **kwargs)
+        return client.push(self, **kwargs)
 
     def reset(
         self,

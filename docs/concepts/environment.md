@@ -143,3 +143,8 @@ Step rewards become `Decision.reward_events`; end-of-episode scorers become `tra
 - `source="both"` combines them.
 
 Task inputs belong in a [TaskDataset](dataset.md); completed episode traces belong in a `Dataset` / `TraceDataset`. See [Benchmark](benchmark.md) for repeated comparisons.
+
+## Hosted sync
+
+`client.push(env)` uploads the local environment to a Plural project.
+`env.push(client)` is an alias. See [Push to Plural](../guides/push-to-plural.md).

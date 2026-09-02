@@ -8,6 +8,9 @@ A `Trace` is the canonical record for production LLM traffic and environment epi
 | `episode` | One complete environment episode |
 | `llm_call` | An optionally persisted model call linked to an episode |
 
+`client.push(trace)` ingests a local `Trace` into the hosted project. Agents
+are not pushed; they are created on the host. See [Push to Plural](../guides/push-to-plural.md).
+
 ## One episode trace by default
 
 `Environment.rollout(...)` persists exactly one `episode` trace by default. Model requests and outputs live inside its `Decision` steps. Set `record_llm_traces=True` only when separate model-call records are needed; those additional traces use `trace_kind="llm_call"`.

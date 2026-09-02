@@ -215,7 +215,7 @@ class Client:
 
             client = Client(api_key="plural_...", project="<project_id>")
             env = Environment(name="refund-support", version="0.1.0")
-            env.push(client)
+            client.push(env)
     """
 
     def __init__(
@@ -294,6 +294,29 @@ class Client:
             PluralError: If a transport error occurs while probing.
         """
         return all(_provider_is_authenticated(provider) for provider in self._providers.values())
+
+    def push(self, obj: Any, **kwargs: Any) -> dict[str, Any]:
+        """Sync a local environment, trace, or benchmark to the hosted project.
+
+        Agents are not pushed. Create them with :meth:`Client.agents.create`
+        so they are bound to a model and environment on the host.
+
+        ``env.push(client)`` remains as an alias for ``client.push(env)``.
+
+        Args:
+            obj: An :class:`~plural.environments.env.Environment`,
+                :class:`~plural.tracing.schema.Trace`,
+                :class:`~plural.benchmarks.runner.Benchmark` (after ``run()``),
+                or :class:`~plural.benchmarks.runner.Report`.
+            **kwargs: Optional ids and labels such as ``environment_id``,
+                ``name``, ``notes``, or ``agent_id``.
+
+        Returns:
+            The hosted record created or updated by the studio API.
+        """
+        from plural.studio import push_object
+
+        return push_object(self, obj, **kwargs)
 
     def _build_providers(
         self,

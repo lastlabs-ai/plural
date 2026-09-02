@@ -59,6 +59,11 @@ client.close()
 
 Optional bring-your-own-key: `Client(providers={"openai": "sk-..."})`.
 
+Sync a local environment, trace, or benchmark report with `client.push(x)`.
+`env.push(client)` is an alias. Agents are created on the host with
+`client.agents.create(...)` because they need a model and environment.
+See [Push to Plural](guides/push-to-plural.md).
+
 ## Next
 
 - [Quickstart](quickstart.md)

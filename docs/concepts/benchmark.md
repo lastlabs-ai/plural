@@ -103,3 +103,8 @@ The writer records successful episode traces and failed episode traces produced 
 `report.compare(baseline, tolerance=0.02)` compares mean rewards by matching target name. By default it first validates available environment fingerprints, runtime fingerprints, task-set hashes, ordered task ids, and repeats. Pass `allow_incompatible=True` only when that provenance mismatch is intentional. If either legacy report has no manifest, comparison proceeds using the reward data that is available.
 
 A target is a regression only when its decrease is greater than the non-negative absolute `tolerance`. The result contains per-target deltas and a `regressions` list.
+
+## Hosted sync
+
+After `run()`, `client.push(benchmark)` or `client.push(report)` stores the
+report on the project. Agents are not pushed. See [Push to Plural](../guides/push-to-plural.md).

@@ -199,6 +199,20 @@ uv run python examples/environment/wordle/run.py --secret crane
 - [Library environment](https://github.com/lastlabs-ai/plural/tree/main/examples/environment/library)
 - [Wordle environment](https://github.com/lastlabs-ai/plural/tree/main/examples/environment/wordle)
 
+## Push the environment to Plural
+
+Once the harness exists in code, sync it to the hosted project:
+
+```python
+client.push(env)
+# env.push(client) is an alias
+```
+
+That creates the environment if needed and uploads a revision (fingerprint,
+instructions, tools). Agents are not pushed this way; create them with
+`client.agents.create(name=..., model=..., environment_id=env.remote_id)`.
+See [Push to Plural](push-to-plural.md).
+
 ## Version and fingerprint
 
 Bump `version` when the public environment contract changes. The fingerprint covers `max_turns`, tool schemas, callable implementation bodies/configured state, scorer weights, author hooks, and `fingerprint_payload()`, so replay and benchmark reports can detect many forms of execution-contract drift.
