@@ -1,6 +1,22 @@
 # Environment
 
-An `Environment[Observation, State]` is a versioned, Gymnasium-shaped harness for tasks, tools, observations, stop conditions, and scorers. The policy is separate from the environment, and every completed run produces one scored episode [Trace](trace.md).
+An `Environment[Observation, State]` is a versioned, Gymnasium-shaped harness for tasks, actions, observations, stop conditions, and scorers. The policy is separate from the environment, and every completed run produces one scored episode [Trace](trace.md).
+
+The environment is everything except the model: instructions, tools (actions), observation and state schemas, guardrails, tasks, runtime, and how a turn becomes a `ChatRequest`. A working env can be a name, a version, one `@tool`, and `observe()`. Extra fields stay optional.
+
+```python
+class RefundEnv(Environment[RefundObservation, RefundState]):
+    name = "refund-support"
+    version = "1.0.0"
+    description = "Resolve refund tickets against order eligibility."
+    readme = "Check eligibility, then refund only when the order is allowed."
+    guardrails = [
+        "Never refund before checking eligibility.",
+        "Do not expose hidden expected values or secrets.",
+    ]
+```
+
+`Observation` is the typed view the policy may see. `State` is writable memory and other data structures the agent and tools update as they go — including hidden fields. Both schemas are derived from the Pydantic models and uploaded with the hosted revision.
 
 ## Environment and policy
 
@@ -128,7 +144,7 @@ Replay rejects traces marked as redacted because their actions, observations, st
 
 ## Compatibility fingerprint
 
-`environment_fingerprint` hashes the environment name/version, `max_turns`, system instructions, observation/state type names, tool schemas, scorer names and weights, and implementation bodies for tools, scorers, and the `setup`, `observe`, `apply_action`, `done`, `snapshot`, and `step_reward` hooks. It also includes stable configured state for callable objects and closures. Callable-object configuration includes private instance fields and slots; define `fingerprint_payload()` on the callable when a smaller authoritative stable configuration is appropriate.
+`environment_fingerprint` hashes the environment name/version, `max_turns`, system instructions, observation/state type names and JSON schemas, guardrails, skills, tool schemas, scorer names and weights, and implementation bodies for tools, scorers, and the `setup`, `observe`, `apply_action`, `done`, `snapshot`, and `step_reward` hooks. It also includes stable configured state for callable objects and closures. Callable-object configuration includes private instance fields and slots; define `fingerprint_payload()` on the callable when a smaller authoritative stable configuration is appropriate.
 
 Override `fingerprint_payload()` when behavior depends on constructor arguments or external configuration not already represented—for example, a ruleset id or endpoint version. Return only deterministic, non-secret values. Never include credentials, tokens, or other secrets in environment or callable fingerprint configuration.
 

@@ -179,20 +179,69 @@ def _references_instance(value: Any, instance: Any, seen: set[int] | None = None
     return False
 
 
-class Environment(Generic[ObsT, StateT]):
-    """Versioned simulator: instructions, tools, observations, and scorers.
+def _model_schema(model: type[Any]) -> dict[str, Any]:
+    """Return a JSON Schema for a Pydantic observation or state model."""
+    schema_fn = getattr(model, "model_json_schema", None)
+    if not callable(schema_fn):
+        return {}
+    try:
+        schema = schema_fn()
+    except Exception:  # noqa: BLE001
+        return {}
+    return schema if isinstance(schema, dict) else {}
 
-    Subclass this as ``Environment[MyObservation, MyState]``. Put episode
-    state on ``self.state`` and decorate actions with :func:`tool`. Drive an
-    agent with :meth:`reset` / :meth:`step` or :meth:`rollout` — not
-    :meth:`observe`.
+
+def _normalize_records(
+    values: list[Any] | None,
+    *,
+    name_key: str,
+    text_keys: tuple[str, ...],
+) -> list[dict[str, str]]:
+    """Turn strings or dicts into stable ``{name, rule}``-shaped records.
+
+    Returns:
+        Normalized guardrail records.
+    """
+    records: list[dict[str, str]] = []
+    for raw in values or []:
+        if isinstance(raw, str):
+            text = raw.strip()
+            if text:
+                record = {name_key: text} if name_key == "rule" else {name_key: "", "rule": text}
+                records.append(record)
+            continue
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get(name_key) or raw.get("name") or "").strip()
+        text = ""
+        for key in text_keys:
+            candidate = raw.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                text = candidate.strip()
+                break
+        if not text:
+            text = name
+        if name or text:
+            records.append({"name": name, "rule": text})
+    return records
+
+
+class Environment(Generic[ObsT, StateT]):
+    """Versioned world: instructions, actions, observation/state, and guardrails.
+
+    Subclass this as ``Environment[MyObservation, MyState]``. Put writable
+    memory and hidden data on ``self.state``, expose a typed observation,
+    and decorate actions with :func:`tool`. Drive an agent with
+    :meth:`reset` / :meth:`step` or :meth:`rollout` — not :meth:`observe`.
 
     The model is not part of the environment. :meth:`step` is framework-owned:
     it records the decision and advances the lifecycle. Override
     :meth:`apply_action` when actions are not tool calls.
 
-    Class attributes ``name``, ``version``, ``system_prompt``, and
-    ``max_turns`` are the defaults; constructor kwargs override them.
+    Class attributes ``name``, ``version``, ``description``, ``readme``,
+    ``system_prompt``, ``max_turns``, ``guardrails``, and ``skills`` are
+    the defaults; constructor kwargs override them. Only ``name`` and
+    ``version`` are required for a working env.
 
     Args:
         name: Environment name.
@@ -200,6 +249,10 @@ class Environment(Generic[ObsT, StateT]):
             reward semantics change.
         system_prompt: Optional instructions prepended to every episode.
         max_turns: Maximum model↔tool turns per episode.
+        description: One-line summary of what this world does.
+        readme: Markdown overview shown on the hosted environment.
+        guardrails: Rules that constrain the agent and the world.
+        skills: Optional named groupings of actions.
         metadata: Arbitrary environment metadata.
 
     Examples:
@@ -236,8 +289,12 @@ class Environment(Generic[ObsT, StateT]):
 
     name: str = "environment"
     version: str = "0.1.0"
+    description: str = ""
+    readme: str = ""
     system_prompt: str | None = None
     max_turns: int = 8
+    guardrails: list[Any] = []
+    skills: list[Any] = []
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -253,13 +310,21 @@ class Environment(Generic[ObsT, StateT]):
         *,
         system_prompt: str | None = None,
         max_turns: int | None = None,
+        description: str | None = None,
+        readme: str | None = None,
+        guardrails: list[Any] | None = None,
+        skills: list[Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
         cls = type(self)
         self.name = cls.name if name is None else name
         self.version = cls.version if version is None else version
+        self.description = cls.description if description is None else description
+        self.readme = cls.readme if readme is None else readme
         self.system_prompt = cls.system_prompt if system_prompt is None else system_prompt
         self.max_turns = cls.max_turns if max_turns is None else max_turns
+        self.guardrails = list(cls.guardrails if guardrails is None else guardrails)
+        self.skills = list(cls.skills if skills is None else skills)
         self.metadata = metadata or {}
         self.remote_id: str | None = None
         self.tool_functions: dict[str, Callable[..., Any]] = {}
@@ -278,6 +343,105 @@ class Environment(Generic[ObsT, StateT]):
         """Project-unique slug derived from :attr:`name`."""
         value = re.sub(r"[^a-z0-9]+", "-", (self.name or "").lower()).strip("-")
         return value[:80] or "environment"
+
+    def observation_schema(self) -> dict[str, Any]:
+        """JSON Schema for the observation the policy is allowed to see.
+
+        Returns:
+            A JSON Schema object for the observation model.
+        """
+        return _model_schema(self._contract_types()[0])
+
+    def state_schema(self) -> dict[str, Any]:
+        """JSON Schema for writable memory and other episode state.
+
+        Returns:
+            A JSON Schema object for the state model.
+        """
+        return _model_schema(self._contract_types()[1])
+
+    def context_policy(self) -> dict[str, Any]:
+        """How a turn is assembled into the policy's ``ChatRequest``.
+
+        Override when the conversation should not be instructions plus the
+        rendered observation plus history.
+
+        Returns:
+            Context assembly defaults such as roles and ``max_turns``.
+        """
+        return {
+            "instructions_role": "system",
+            "observation_role": "user",
+            "include_history": True,
+            "max_turns": self.max_turns,
+        }
+
+    def normalized_guardrails(self) -> list[dict[str, str]]:
+        """Return guardrails as ``{name, rule}`` records.
+
+        Returns:
+            Normalized guardrail records.
+        """
+        return _normalize_records(
+            self.guardrails,
+            name_key="name",
+            text_keys=("rule", "text", "description"),
+        )
+
+    def normalized_skills(self) -> list[dict[str, Any]]:
+        """Return skills as hosted manifest records."""
+        records: list[dict[str, Any]] = []
+        for raw in self.skills or []:
+            if isinstance(raw, str):
+                name = raw.strip()
+                if name:
+                    records.append(
+                        {
+                            "name": name,
+                            "description": "",
+                            "instructions": "",
+                            "tool_names": [],
+                        }
+                    )
+                continue
+            if not isinstance(raw, dict):
+                continue
+            name = str(raw.get("name") or "").strip()
+            if not name:
+                continue
+            tool_names = raw.get("tool_names") or raw.get("tools") or []
+            records.append(
+                {
+                    "name": name,
+                    "description": str(raw.get("description") or ""),
+                    "instructions": str(raw.get("instructions") or ""),
+                    "tool_names": (
+                        [str(item) for item in tool_names] if isinstance(tool_names, list) else []
+                    ),
+                }
+            )
+        return records
+
+    def overridden_hooks(self) -> list[str]:
+        """Author hooks this subclass implements beyond the defaults.
+
+        Returns:
+            Hook names implemented on the subclass.
+        """
+        names: list[str] = []
+        for hook in (
+            "setup",
+            "observe",
+            "apply_action",
+            "done",
+            "snapshot",
+            "step_reward",
+        ):
+            current = getattr(type(self), hook, None)
+            base = getattr(Environment, hook, None)
+            if current is not None and current is not base:
+                names.append(hook)
+        return names
 
     @property
     def state(self) -> StateT:
@@ -450,6 +614,10 @@ class Environment(Generic[ObsT, StateT]):
                 )
             tasks_fn = fresh_tasks_fn
         other._tasks_fn = tasks_fn
+        other.description = self.description
+        other.readme = self.readme
+        other.guardrails = list(self.guardrails)
+        other.skills = list(self.skills)
         return other
 
     def tool(self, fn: Callable[..., Any] | None = None, *, name: str | None = None) -> Any:
@@ -552,6 +720,10 @@ class Environment(Generic[ObsT, StateT]):
             "instructions": self.system_prompt,
             "observation": obs_name,
             "state": state_name,
+            "observation_schema": self.observation_schema(),
+            "state_schema": self.state_schema(),
+            "guardrails": self.normalized_guardrails(),
+            "skills": self.normalized_skills(),
             "configuration": stable_fingerprint_value(self.fingerprint_payload()),
             "tools": [
                 {
@@ -1243,13 +1415,18 @@ class Environment(Generic[ObsT, StateT]):
             setattr(self, bind_method, wrapped)
         self.tool_defs.append(make_tool_def(tool_name, source))
 
+    def _contract_types(self) -> tuple[type[Any], type[Any]]:
+        for cls in type(self).__mro__:
+            for base in getattr(cls, "__orig_bases__", ()):
+                if get_origin(base) is Environment:
+                    args = get_args(base)
+                    if len(args) >= 2 and isinstance(args[0], type) and isinstance(args[1], type):
+                        return args[0], args[1]
+        return Observation, State
+
     def _contract_names(self) -> tuple[str, str]:
-        for base in getattr(type(self), "__orig_bases__", ()):
-            if get_origin(base) is Environment:
-                args = get_args(base)
-                if len(args) >= 2:
-                    return args[0].__name__, args[1].__name__
-        return Observation.__name__, State.__name__
+        observation, state = self._contract_types()
+        return observation.__name__, state.__name__
 
     def _initial_observation(self, task: TaskData) -> Any:
         observed: Any = self.observe()

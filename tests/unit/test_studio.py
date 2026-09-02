@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
@@ -58,7 +59,7 @@ def test_studio_sends_project_header_for_account_keys(tmp_path: Path) -> None:
 
 @respx.mock
 def test_environment_create_and_update_use_slug(tmp_path: Path) -> None:
-    respx.post("https://api.example.com/api/v1/environments").mock(
+    create_route = respx.post("https://api.example.com/api/v1/environments").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -79,6 +80,16 @@ def test_environment_create_and_update_use_slug(tmp_path: Path) -> None:
             },
         )
     )
+    respx.patch("https://api.example.com/api/v1/environments/refund-support").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "env_remote",
+                "name": "refund-support",
+                "slug": "refund-support",
+            },
+        )
+    )
     respx.post("https://api.example.com/api/v1/environments/refund-support/revisions").mock(
         return_value=httpx.Response(
             200,
@@ -90,9 +101,18 @@ def test_environment_create_and_update_use_slug(tmp_path: Path) -> None:
         base_url="https://api.example.com/v1",
         trace_dir=tmp_path,
     )
-    env = Environment(name="refund-support", version="0.1.0", system_prompt="Be brief.")
+    env = Environment(
+        name="refund-support",
+        version="0.1.0",
+        system_prompt="Be brief.",
+        description="Help with refunds.",
+        readme="# Refunds",
+    )
     assert env.slug == "refund-support"
     created = client.create(env)
+    posted = json.loads(create_route.calls[0].request.content)
+    assert posted["description"] == "Help with refunds."
+    assert posted["readme_md"] == "# Refunds"
     assert env.remote_id == "env_remote"
     assert created["slug"] == "refund-support"
     updated = client.update(env)
@@ -143,6 +163,12 @@ def test_environment_push_creates_then_updates_by_slug(tmp_path: Path) -> None:
         return_value=httpx.Response(
             200,
             json={"id": "rev_1", "version": "0.1.0", "fingerprint": "abc"},
+        )
+    )
+    respx.patch("https://api.example.com/api/v1/environments/refund-support").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "env_remote", "slug": "refund-support", "name": "refund-support"},
         )
     )
     client = Client(

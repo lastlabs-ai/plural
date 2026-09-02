@@ -15,9 +15,11 @@ from pydantic import BaseModel, Field
 class Observation(BaseModel):
     """What the agent is allowed to see.
 
-    Authors subclass this and implement :meth:`render` when the prompt
-    should not be a raw dump of the fields. :meth:`~plural.environments.env.Environment.reset`
-    and :meth:`~plural.environments.env.Environment.step` call
+    Subclass this with typed fields. The JSON Schema of the subclass is
+    the observation contract hosted with the environment. Implement
+    :meth:`render` when the prompt should not be a raw dump of the
+    fields. :meth:`~plural.environments.env.Environment.reset` and
+    :meth:`~plural.environments.env.Environment.step` call
     :meth:`~plural.environments.env.Environment.observe` internally —
     do not call ``observe`` to drive an agent.
 
@@ -43,7 +45,11 @@ class Observation(BaseModel):
 
 
 class State(BaseModel):
-    """Internal episode state. May include hidden fields (secrets, labels).
+    """Writable episode memory and other internal data structures.
+
+    Put notes, buffers, inventories, and hidden labels on a subclass.
+    The JSON Schema of that subclass is the state contract. Fields may
+    be hidden from the policy; only :class:`Observation` is visible.
 
     Attributes:
         seed: Optional RNG seed from the task.

@@ -112,6 +112,7 @@ class EnvironmentsAPI:
         version: str = "0.1.0",
         description: str = "",
         instructions: str = "",
+        readme_md: str = "",
         tasks: JsonList | None = None,
     ) -> JsonObject:
         """Create an environment.
@@ -121,6 +122,7 @@ class EnvironmentsAPI:
             version: Starting version string.
             description: Optional description.
             instructions: System prompt / instructions.
+            readme_md: Optional markdown overview.
             tasks: Optional initial tasks.
 
         Returns:
@@ -136,6 +138,7 @@ class EnvironmentsAPI:
                     "version": version,
                     "description": description,
                     "instructions": instructions,
+                    "readme_md": readme_md,
                     "tasks": tasks or [],
                 },
             ),
@@ -563,7 +566,7 @@ def environment_manifest(env: Environment[Any, Any]) -> JsonObject:
         env: Local environment instance.
 
     Returns:
-        Manifest with tools, scorers, skills, and hooks.
+        Manifest with actions, schemas, guardrails, skills, and context.
     """
     tools = []
     for definition in env.tool_defs:
@@ -577,8 +580,27 @@ def environment_manifest(env: Environment[Any, Any]) -> JsonObject:
                     "parameters": function.get("parameters") or {},
                 }
             )
-    scorers = [{"name": name, "weight": weight} for name, _fn, weight in env.scorers]
-    return {"tools": tools, "scorers": scorers, "skills": [], "hooks": []}
+    observation_type, state_type = env._contract_names()
+    scorers = [
+        {
+            "name": name,
+            "weight": weight,
+            "description": (getattr(fn, "__doc__", None) or "").strip(),
+        }
+        for name, fn, weight in env.scorers
+    ]
+    return {
+        "tools": tools,
+        "scorers": scorers,
+        "skills": env.normalized_skills(),
+        "hooks": env.overridden_hooks(),
+        "observation_type": observation_type,
+        "state_type": state_type,
+        "observation_schema": env.observation_schema(),
+        "state_schema": env.state_schema(),
+        "guardrails": env.normalized_guardrails(),
+        "context": env.context_policy(),
+    }
 
 
 def _environment_ref(
@@ -619,7 +641,8 @@ def create_environment(
     env: Environment[Any, Any],
     *,
     name: str | None = None,
-    description: str = "",
+    description: str | None = None,
+    readme: str | None = None,
 ) -> JsonObject:
     """Create a hosted environment from ``env``. Fails if the slug exists.
 
@@ -627,7 +650,8 @@ def create_environment(
         client: Authenticated Plural client.
         env: Local environment instance.
         name: Optional name override.
-        description: Optional description.
+        description: Optional description override.
+        readme: Optional markdown overview override.
 
     Returns:
         Created revision plus ``environment_id`` and ``slug``.
@@ -637,8 +661,9 @@ def create_environment(
     created = studio.environments.create(
         name=label,
         version=env.version,
-        description=description,
+        description=env.description if description is None else description,
         instructions=env.system_prompt or "",
+        readme_md=env.readme if readme is None else readme,
     )
     ref = str(created.get("slug") or created["id"])
     env.remote_id = created["id"]
@@ -653,6 +678,7 @@ def update_environment(
     environment_id: str | None = None,
     name: str | None = None,
     description: str | None = None,
+    readme: str | None = None,
 ) -> JsonObject:
     """Update a hosted environment found by slug or id.
 
@@ -661,7 +687,8 @@ def update_environment(
         env: Local environment instance.
         environment_id: Optional slug or id override.
         name: Optional display-name patch.
-        description: Optional description patch.
+        description: Optional description override.
+        readme: Optional markdown overview override.
 
     Returns:
         Created revision plus ``environment_id`` and ``slug``.
@@ -670,13 +697,13 @@ def update_environment(
     ref = _environment_ref(env, environment_id=environment_id, name=name)
     existing = studio.environments.get(ref)
     env.remote_id = existing["id"]
-    fields: dict[str, Any] = {}
+    fields: dict[str, Any] = {
+        "description": env.description if description is None else description,
+        "readme_md": env.readme if readme is None else readme,
+    }
     if name is not None:
         fields["name"] = name
-    if description is not None:
-        fields["description"] = description
-    if fields:
-        studio.environments.update(ref, **fields)
+    studio.environments.update(ref, **fields)
     payload = _ingest_environment_revision(studio, env, ref)
     return {
         **payload,
@@ -691,7 +718,8 @@ def push_environment(
     *,
     environment_id: str | None = None,
     name: str | None = None,
-    description: str = "",
+    description: str | None = None,
+    readme: str | None = None,
 ) -> JsonObject:
     """Create or update ``env`` using its slug.
 
@@ -704,6 +732,7 @@ def push_environment(
         environment_id: Optional slug or id override.
         name: Optional name override when creating.
         description: Optional description when creating.
+        readme: Optional markdown overview when creating.
 
     Returns:
         Created revision plus ``environment_id`` and ``slug``.
@@ -713,14 +742,15 @@ def push_environment(
     try:
         existing = studio.environments.get(ref)
     except NotFoundError:
-        return create_environment(client, env, name=name, description=description)
+        return create_environment(client, env, name=name, description=description, readme=readme)
     env.remote_id = existing["id"]
     return update_environment(
         client,
         env,
         environment_id=ref,
         name=name,
-        description=description or None,
+        description=description,
+        readme=readme,
     )
 
 
@@ -872,9 +902,7 @@ def update_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
         else:
             fields = dict(kwargs)
         slug = fields.pop("slug", None) or _report_slug(report, name=fields.get("name"))
-        dumped = (
-            report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
-        )
+        dumped = report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
         body = {
             "notes": fields.get("notes", ""),
             "report": dumped,
