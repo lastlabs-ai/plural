@@ -1,31 +1,39 @@
-# Push environments, traces, and benchmarks
+# Create and update hosted objects
 
-`client.push(x)` syncs a local object to the hosted Plural project. Use it for
-environments, traces, and benchmark reports. Agents are not pushed: they have
-to be created on the host with a model and environment.
+Environments, agents, and benchmarks are addressed by a **slug** that is unique
+inside the project. You do not need the hosted UUID to read, create, or update
+them. Traces stay id-based because there are many of them.
 
 ```python
 from plural import Client, Environment
 
 client = Client()  # project key, or Client(project="...") for an account key
 env = Environment(name="refund-support", version="0.1.0", system_prompt="Be brief.")
-client.push(env)
+client.create(env)   # 409 if refund-support already exists
+client.update(env)   # finds it by env.slug
 ```
 
-`env.push(client)` is kept as an alias for `client.push(env)`.
+`env.create(client)` and `env.update(client)` are aliases.
+`client.push(env)` / `env.push(client)` still upsert by slug.
 
-## What you can push
+## Identity
 
-| Object | What happens |
-| --- | --- |
-| `Environment` | Creates the environment if needed, then uploads a revision |
-| `Trace` | Ingests the trace into the project |
-| `Benchmark` | Uploads `benchmark.report` after `run()` |
-| `Report` | Uploads the report directly |
+| Object | Lookup | Create if the slug exists |
+| --- | --- | --- |
+| Environment | slug (or id) | `409` |
+| Agent | slug (or id) | `409` |
+| Benchmark | slug (or id) | `409` |
+| Trace | row id or `trace_id` | upserts that `trace_id` |
 
-Agents stay on `client.agents.create(...)` and `client.agents.get(id).invoke(...)`.
-They need hosted client context (model, environment binding, invoke URL) and
-are not local-first objects.
+The slug is derived from the name (`Refund Support` → `refund-support`). Pass
+that string to `get`, `update`, `delete`, and to attach an environment or agent
+on another object.
+
+```python
+client.environments.get("refund-support")
+client.agents.get("support").invoke("Refund this ticket")
+client.benchmarks.update("smoke", notes="nightly")
+```
 
 ## Account keys need a project
 
@@ -44,23 +52,36 @@ Without a project, studio calls return an error.
 from plural import Environment
 
 env = Environment(name="refund-support", version="0.1.0")
-client.push(env)
-print(env.remote_id)
+client.create(env)
+client.update(env)
+print(env.slug, env.remote_id)
 ```
 
-Optional kwargs: `environment_id` (update an existing remote env), `name`,
-`description`. After the first push, later calls upload a new revision for the
-same `env.remote_id`.
+`create` fails if the slug is taken. `update` uploads a new revision when the
+fingerprint changed.
+
+## Agent
+
+Agents are created on the host with a model and environment slug:
+
+```python
+agent = client.agents.create(
+    name="support",
+    model="openai/gpt-5.6-luna",
+    environment_id="refund-support",
+)
+agent.invoke("Refund this ticket")
+```
 
 ## Trace
 
 ```python
 rollout = env.rollout(task, client, model="openai/gpt-5.6-luna")
-client.push(rollout.trace, environment_id=env.remote_id)
+client.create(rollout.trace, environment_id=env.slug)
 ```
 
-Optional kwargs: `environment_id`, `environment_revision_id`, `agent_id`,
-`run_group_id`.
+Traces are stored by `trace_id`. Optional kwargs: `environment_id` (slug or
+id), `environment_revision_id`, `agent_id` (slug or id), `run_group_id`.
 
 ## Benchmark
 
@@ -73,9 +94,9 @@ benchmark = Benchmark(
     client=client,
 )
 report = benchmark.run(dataset=TaskDataset.load("data/refund-support.jsonl"))
-client.push(benchmark)
-# or client.push(report, environment_id=env.remote_id)
+client.create(benchmark)          # slug from env.name unless you pass name=
+client.update(benchmark)          # replace that slug's report
 ```
 
-`client.push(benchmark)` fails until `run()` has produced `benchmark.report`.
+`create` / `update` fail until `run()` has produced `benchmark.report`.
 Optional kwargs: `name`, `notes`, `environment_id`, `agent_id`.

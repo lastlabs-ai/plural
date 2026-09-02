@@ -94,6 +94,10 @@ class NotFoundError(PluralError):
     """Raised when a requested resource (model, trace, dataset) cannot be found."""
 
 
+class ConflictError(PluralError):
+    """Raised when a unique slug or name already exists (typically HTTP 409)."""
+
+
 RETRYABLE_ERRORS: tuple[type[PluralError], ...] = (
     RateLimitError,
     ProviderUnavailable,

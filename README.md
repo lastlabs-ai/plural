@@ -46,10 +46,12 @@ client.close()
 # Traces → .plural/traces.jsonl
 ```
 
-Sync a local environment, trace, or benchmark report with `client.push(x)`.
-`env.push(client)` is an alias. Create hosted agents with
-`client.agents.create(...)` — they are not pushable. A project API key already
-knows the project; an account key needs `project=` or `PLURAL_PROJECT`.
+Create or update a hosted environment, trace, or benchmark with
+`client.create(x)` and `client.update(x)`. Environments, agents, and
+benchmarks are addressed by project-unique slug, so you do not need the
+hosted id. Create agents with `client.agents.create(...)`. A project API
+key already knows the project; an account key needs `project=` or
+`PLURAL_PROJECT`.
 
 Optional BYOK (pass your own upstream keys explicitly):
 

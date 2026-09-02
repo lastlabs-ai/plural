@@ -199,19 +199,19 @@ uv run python examples/environment/wordle/run.py --secret crane
 - [Library environment](https://github.com/lastlabs-ai/plural/tree/main/examples/environment/library)
 - [Wordle environment](https://github.com/lastlabs-ai/plural/tree/main/examples/environment/wordle)
 
-## Push the environment to Plural
+## Create the environment on Plural
 
 Once the harness exists in code, sync it to the hosted project:
 
 ```python
-client.push(env)
-# env.push(client) is an alias
+client.create(env)
+client.update(env)
 ```
 
-That creates the environment if needed and uploads a revision (fingerprint,
-instructions, tools). Agents are not pushed this way; create them with
-`client.agents.create(name=..., model=..., environment_id=env.remote_id)`.
-See [Push to Plural](push-to-plural.md).
+`create` fails if the slug already exists. `update` uploads a new revision
+when the fingerprint changed. Agents are created with
+`client.agents.create(name=..., model=..., environment_id=env.slug)`.
+See [Create and update hosted objects](push-to-plural.md).
 
 ## Version and fingerprint
 

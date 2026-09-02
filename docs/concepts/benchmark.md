@@ -106,5 +106,5 @@ A target is a regression only when its decrease is greater than the non-negative
 
 ## Hosted sync
 
-After `run()`, `client.push(benchmark)` or `client.push(report)` stores the
-report on the project. Agents are not pushed. See [Push to Plural](../guides/push-to-plural.md).
+After `run()`, `client.create(benchmark)` or `client.update(benchmark)` stores
+the report on the project by slug. See [Create and update hosted objects](../guides/push-to-plural.md).

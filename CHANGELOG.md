@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-02
+
+### Added
+
+- `Client.create(x)` and `Client.update(x)` for environments, traces, and
+  benchmarks. Environments, agents, and benchmarks are addressed by
+  project-unique slug; traces stay id-based.
+- `env.create(client)` and `env.update(client)` aliases.
+
+### Changed
+
+- Duplicate environment, agent, or benchmark slugs now conflict instead of
+  being uniquified with a suffix.
+- `client.push` / `env.push` upsert by slug instead of creating a new row
+  when the name already exists.
+
 ## [0.7.2] - 2026-09-02
 
 ### Added

@@ -6,6 +6,7 @@ Project API keys already know the project.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
@@ -14,6 +15,7 @@ import httpx
 from plural.errors import (
     AuthenticationError,
     ConfigurationError,
+    ConflictError,
     InvalidRequestError,
     NotFoundError,
     PluralError,
@@ -26,6 +28,20 @@ if TYPE_CHECKING:
 
 JsonObject = dict[str, Any]
 JsonList = list[dict[str, Any]]
+
+
+def slugify(name: str, *, fallback: str = "item") -> str:
+    """Turn a display name into the hosted slug.
+
+    Args:
+        name: Human-readable name.
+        fallback: Used when the name has no slug characters.
+
+    Returns:
+        A lowercase hyphenated slug.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+    return slug[:80] or fallback
 
 
 def studio_base_url(gateway_base: str) -> str:
@@ -56,6 +72,8 @@ def _raise_http(response: httpx.Response) -> None:
         raise AuthenticationError(message, status_code=response.status_code)
     if response.status_code == 404:
         raise NotFoundError(message, status_code=response.status_code)
+    if response.status_code == 409:
+        raise ConflictError(message, status_code=response.status_code)
     if response.status_code == 400:
         raise InvalidRequestError(message, status_code=response.status_code)
     raise PluralError(message, status_code=response.status_code)
@@ -76,16 +94,16 @@ class EnvironmentsAPI:
         items = self._studio.request("GET", "/environments").get("items", [])
         return cast(JsonList, items)
 
-    def get(self, environment_id: str) -> JsonObject:
+    def get(self, slug: str) -> JsonObject:
         """Fetch one environment.
 
         Args:
-            environment_id: Hosted environment id.
+            slug: Project-unique slug, or the hosted id.
 
         Returns:
             Environment detail.
         """
-        return cast(JsonObject, self._studio.request("GET", f"/environments/{environment_id}"))
+        return cast(JsonObject, self._studio.request("GET", f"/environments/{slug}"))
 
     def create(
         self,
@@ -123,11 +141,11 @@ class EnvironmentsAPI:
             ),
         )
 
-    def update(self, environment_id: str, **fields: Any) -> JsonObject:
+    def update(self, slug: str, **fields: Any) -> JsonObject:
         """Patch an environment.
 
         Args:
-            environment_id: Hosted environment id.
+            slug: Project-unique slug, or the hosted id.
             **fields: Fields accepted by the studio PATCH route.
 
         Returns:
@@ -135,43 +153,16 @@ class EnvironmentsAPI:
         """
         return cast(
             JsonObject,
-            self._studio.request("PATCH", f"/environments/{environment_id}", json=fields),
+            self._studio.request("PATCH", f"/environments/{slug}", json=fields),
         )
 
-    def delete(self, environment_id: str) -> None:
+    def delete(self, slug: str) -> None:
         """Delete an environment.
 
         Args:
-            environment_id: Hosted environment id.
+            slug: Project-unique slug, or the hosted id.
         """
-        self._studio.request("DELETE", f"/environments/{environment_id}")
-
-    def push(
-        self,
-        env: Environment[Any, Any],
-        *,
-        environment_id: str | None = None,
-        name: str | None = None,
-        description: str = "",
-    ) -> JsonObject:
-        """Create or update ``env`` on the hosted project.
-
-        Args:
-            env: Local environment instance.
-            environment_id: Existing remote id, if already known.
-            name: Optional name override when creating.
-            description: Optional description when creating.
-
-        Returns:
-            Created revision plus ``environment_id``.
-        """
-        return push_environment(
-            self._studio.client,
-            env,
-            environment_id=environment_id,
-            name=name,
-            description=description,
-        )
+        self._studio.request("DELETE", f"/environments/{slug}")
 
 
 class RemoteAgent:
@@ -202,7 +193,7 @@ class RemoteAgent:
         Returns:
             Gateway chat response.
         """
-        return self._studio.agents.invoke(self.id, prompt, **kwargs)
+        return self._studio.agents.invoke(self.slug or self.id, prompt, **kwargs)
 
 
 class AgentsAPI:
@@ -219,18 +210,18 @@ class AgentsAPI:
         """
         return cast(JsonList, self._studio.request("GET", "/agents").get("items", []))
 
-    def get(self, agent_id: str) -> RemoteAgent:
+    def get(self, slug: str) -> RemoteAgent:
         """Fetch one agent.
 
         Args:
-            agent_id: Hosted agent id.
+            slug: Project-unique slug, or the hosted id.
 
         Returns:
             Agent handle.
         """
         return RemoteAgent(
             self._studio,
-            cast(JsonObject, self._studio.request("GET", f"/agents/{agent_id}")),
+            cast(JsonObject, self._studio.request("GET", f"/agents/{slug}")),
         )
 
     def create(
@@ -267,11 +258,11 @@ class AgentsAPI:
         )
         return RemoteAgent(self._studio, cast(JsonObject, payload))
 
-    def update(self, agent_id: str, **fields: Any) -> RemoteAgent:
+    def update(self, slug: str, **fields: Any) -> RemoteAgent:
         """Patch an agent.
 
         Args:
-            agent_id: Hosted agent id.
+            slug: Project-unique slug, or the hosted id.
             **fields: Fields accepted by the studio PATCH route.
 
         Returns:
@@ -279,27 +270,27 @@ class AgentsAPI:
         """
         return RemoteAgent(
             self._studio,
-            cast(JsonObject, self._studio.request("PATCH", f"/agents/{agent_id}", json=fields)),
+            cast(JsonObject, self._studio.request("PATCH", f"/agents/{slug}", json=fields)),
         )
 
-    def delete(self, agent_id: str) -> None:
+    def delete(self, slug: str) -> None:
         """Delete an agent.
 
         Args:
-            agent_id: Hosted agent id.
+            slug: Project-unique slug, or the hosted id.
         """
-        self._studio.request("DELETE", f"/agents/{agent_id}")
+        self._studio.request("DELETE", f"/agents/{slug}")
 
     def invoke(
         self,
-        agent_id: str,
+        slug: str,
         prompt: str | Sequence[Message | dict[str, Any]],
         **kwargs: Any,
     ) -> ChatResponse:
         """Invoke an agent through the gateway.
 
         Args:
-            agent_id: Hosted agent id.
+            slug: Project-unique slug, or the hosted id.
             prompt: User text or a full message list.
             **kwargs: Extra chat-completion fields.
 
@@ -321,7 +312,7 @@ class AgentsAPI:
         if project:
             headers["X-Project-Id"] = project
         response = httpx.post(
-            f"{client.base_url.rstrip('/')}/agents/{agent_id}/chat/completions",
+            f"{client.base_url.rstrip('/')}/agents/{slug}/chat/completions",
             headers=headers,
             json={
                 "model": str(kwargs.pop("model", None) or "plural/agent"),
@@ -347,7 +338,7 @@ class AgentsAPI:
         if not choices:
             choices = [Choice(message=Message(role="assistant", content=""))]
         return ChatResponse(
-            id=str(data.get("id") or agent_id),
+            id=str(data.get("id") or slug),
             model=str(data.get("model") or ""),
             choices=choices,
             raw=data,
@@ -368,16 +359,16 @@ class BenchmarksAPI:
         """
         return cast(JsonList, self._studio.request("GET", "/benchmarks").get("items", []))
 
-    def get(self, benchmark_id: str) -> JsonObject:
+    def get(self, slug: str) -> JsonObject:
         """Fetch one benchmark.
 
         Args:
-            benchmark_id: Hosted benchmark id.
+            slug: Project-unique slug, or the hosted id.
 
         Returns:
             Benchmark detail.
         """
-        return cast(JsonObject, self._studio.request("GET", f"/benchmarks/{benchmark_id}"))
+        return cast(JsonObject, self._studio.request("GET", f"/benchmarks/{slug}"))
 
     def create(
         self,
@@ -418,11 +409,11 @@ class BenchmarksAPI:
             ),
         )
 
-    def update(self, benchmark_id: str, **fields: Any) -> JsonObject:
+    def update(self, slug: str, **fields: Any) -> JsonObject:
         """Patch a benchmark.
 
         Args:
-            benchmark_id: Hosted benchmark id.
+            slug: Project-unique slug, or the hosted id.
             **fields: Fields accepted by the studio PATCH route.
 
         Returns:
@@ -430,16 +421,16 @@ class BenchmarksAPI:
         """
         return cast(
             JsonObject,
-            self._studio.request("PATCH", f"/benchmarks/{benchmark_id}", json=fields),
+            self._studio.request("PATCH", f"/benchmarks/{slug}", json=fields),
         )
 
-    def delete(self, benchmark_id: str) -> None:
+    def delete(self, slug: str) -> None:
         """Delete a benchmark.
 
         Args:
-            benchmark_id: Hosted benchmark id.
+            slug: Project-unique slug, or the hosted id.
         """
-        self._studio.request("DELETE", f"/benchmarks/{benchmark_id}")
+        self._studio.request("DELETE", f"/benchmarks/{slug}")
 
 
 class TracesAPI:
@@ -590,42 +581,25 @@ def environment_manifest(env: Environment[Any, Any]) -> JsonObject:
     return {"tools": tools, "scorers": scorers, "skills": [], "hooks": []}
 
 
-def push_environment(
-    client: Client,
+def _environment_ref(
     env: Environment[Any, Any],
     *,
     environment_id: str | None = None,
     name: str | None = None,
-    description: str = "",
+) -> str:
+    return environment_id or slugify(name or env.name, fallback="environment")
+
+
+def _ingest_environment_revision(
+    studio: Studio,
+    env: Environment[Any, Any],
+    ref: str,
 ) -> JsonObject:
-    """Create the environment if needed, then ingest a revision.
-
-    Args:
-        client: Authenticated Plural client.
-        env: Local environment instance.
-        environment_id: Existing remote id, if already known.
-        name: Optional name override when creating.
-        description: Optional description when creating.
-
-    Returns:
-        Created revision plus ``environment_id``.
-    """
-    studio = Studio(client)
-    remote_id = environment_id or getattr(env, "remote_id", None)
-    if not remote_id:
-        created = studio.environments.create(
-            name=name or env.name,
-            version=env.version,
-            description=description,
-            instructions=env.system_prompt or "",
-        )
-        remote_id = created["id"]
-        env.remote_id = remote_id
     from plural import __version__
 
     revision = studio.request(
         "POST",
-        f"/environments/{remote_id}/revisions",
+        f"/environments/{ref}/revisions",
         json={
             "version": env.version,
             "instructions": env.system_prompt or "",
@@ -636,9 +610,118 @@ def push_environment(
             "source": "sdk_sync",
         },
     )
-    env.remote_id = remote_id
     payload = revision if isinstance(revision, dict) else {}
-    return {**payload, "environment_id": remote_id}
+    return payload
+
+
+def create_environment(
+    client: Client,
+    env: Environment[Any, Any],
+    *,
+    name: str | None = None,
+    description: str = "",
+) -> JsonObject:
+    """Create a hosted environment from ``env``. Fails if the slug exists.
+
+    Args:
+        client: Authenticated Plural client.
+        env: Local environment instance.
+        name: Optional name override.
+        description: Optional description.
+
+    Returns:
+        Created revision plus ``environment_id`` and ``slug``.
+    """
+    studio = Studio(client)
+    label = name or env.name
+    created = studio.environments.create(
+        name=label,
+        version=env.version,
+        description=description,
+        instructions=env.system_prompt or "",
+    )
+    ref = str(created.get("slug") or created["id"])
+    env.remote_id = created["id"]
+    payload = _ingest_environment_revision(studio, env, ref)
+    return {**payload, "environment_id": created["id"], "slug": ref}
+
+
+def update_environment(
+    client: Client,
+    env: Environment[Any, Any],
+    *,
+    environment_id: str | None = None,
+    name: str | None = None,
+    description: str | None = None,
+) -> JsonObject:
+    """Update a hosted environment found by slug or id.
+
+    Args:
+        client: Authenticated Plural client.
+        env: Local environment instance.
+        environment_id: Optional slug or id override.
+        name: Optional display-name patch.
+        description: Optional description patch.
+
+    Returns:
+        Created revision plus ``environment_id`` and ``slug``.
+    """
+    studio = Studio(client)
+    ref = _environment_ref(env, environment_id=environment_id, name=name)
+    existing = studio.environments.get(ref)
+    env.remote_id = existing["id"]
+    fields: dict[str, Any] = {}
+    if name is not None:
+        fields["name"] = name
+    if description is not None:
+        fields["description"] = description
+    if fields:
+        studio.environments.update(ref, **fields)
+    payload = _ingest_environment_revision(studio, env, ref)
+    return {
+        **payload,
+        "environment_id": existing["id"],
+        "slug": existing.get("slug") or ref,
+    }
+
+
+def push_environment(
+    client: Client,
+    env: Environment[Any, Any],
+    *,
+    environment_id: str | None = None,
+    name: str | None = None,
+    description: str = "",
+) -> JsonObject:
+    """Create or update ``env`` using its slug.
+
+    Prefer :func:`create_environment` or :func:`update_environment` when the
+    intent is explicit. This helper updates the existing slug or creates it.
+
+    Args:
+        client: Authenticated Plural client.
+        env: Local environment instance.
+        environment_id: Optional slug or id override.
+        name: Optional name override when creating.
+        description: Optional description when creating.
+
+    Returns:
+        Created revision plus ``environment_id`` and ``slug``.
+    """
+    studio = Studio(client)
+    ref = _environment_ref(env, environment_id=environment_id, name=name)
+    try:
+        existing = studio.environments.get(ref)
+    except NotFoundError:
+        return create_environment(client, env, name=name, description=description)
+    env.remote_id = existing["id"]
+    return update_environment(
+        client,
+        env,
+        environment_id=ref,
+        name=name,
+        description=description or None,
+    )
 
 
 def push_trace(
@@ -699,8 +782,7 @@ def push_report(
     """
     payload = report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
     env_name = payload.get("environment") or "benchmark"
-    env_version = payload.get("environment_version") or ""
-    label = name or f"{env_name} {env_version}".strip()
+    label = name or str(env_name)
     return Studio(client).benchmarks.create(
         name=label,
         notes=notes,
@@ -711,15 +793,115 @@ def push_report(
     )
 
 
-def push_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
-    """Dispatch ``client.push`` to the matching studio sync.
+def _benchmark_kwargs(obj: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+    from plural.benchmarks.runner import Benchmark
 
-    Agents are not accepted. Create them with ``client.agents.create(...)``.
+    if isinstance(obj, Benchmark):
+        if obj.report is None:
+            raise InvalidRequestError("run the benchmark before creating or updating it")
+        kwargs.setdefault(
+            "environment_id",
+            getattr(obj.env, "remote_id", None) or getattr(obj.env, "name", None),
+        )
+        kwargs.setdefault("name", obj.env.name)
+        return kwargs
+    return kwargs
+
+
+def _report_slug(report: Any, *, name: str | None = None) -> str:
+    payload = report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
+    return slugify(name or str(payload.get("environment") or "benchmark"), fallback="benchmark")
+
+
+def create_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
+    """Create a hosted environment, trace, or benchmark.
+
+    Agents are created with ``client.agents.create(...)``.
 
     Args:
         client: Authenticated Plural client.
         obj: Environment, Trace, Benchmark, or Report.
-        **kwargs: Forwarded to the typed push helper.
+        **kwargs: Forwarded to the typed helper.
+
+    Returns:
+        Hosted record created by the studio API.
+    """
+    from plural.benchmarks.runner import Benchmark, Report
+    from plural.environments.env import Environment
+    from plural.tracing.schema import Trace
+
+    if isinstance(obj, Environment):
+        return create_environment(client, obj, **kwargs)
+    if isinstance(obj, Trace):
+        return push_trace(client, obj, **kwargs)
+    if isinstance(obj, Report):
+        return push_report(client, obj, **kwargs)
+    if isinstance(obj, Benchmark):
+        return push_report(client, obj.report, **_benchmark_kwargs(obj, kwargs))
+    raise InvalidRequestError(
+        "client.create accepts Environment, Trace, Benchmark, or Report; "
+        "create agents with client.agents.create(...)"
+    )
+
+
+def update_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
+    """Update a hosted environment or benchmark by slug. Traces update by id.
+
+    Args:
+        client: Authenticated Plural client.
+        obj: Environment, Trace, Benchmark, or Report.
+        **kwargs: Forwarded to the typed helper.
+
+    Returns:
+        Hosted record updated by the studio API.
+    """
+    from plural.benchmarks.runner import Benchmark, Report
+    from plural.environments.env import Environment
+    from plural.tracing.schema import Trace
+
+    if isinstance(obj, Environment):
+        return update_environment(client, obj, **kwargs)
+    if isinstance(obj, Trace):
+        return push_trace(client, obj, **kwargs)
+    if isinstance(obj, (Report, Benchmark)):
+        report = obj.report if isinstance(obj, Benchmark) else obj
+        if report is None:
+            raise InvalidRequestError("run the benchmark before updating it")
+        if isinstance(obj, Benchmark):
+            fields = _benchmark_kwargs(obj, dict(kwargs))
+        else:
+            fields = dict(kwargs)
+        slug = fields.pop("slug", None) or _report_slug(report, name=fields.get("name"))
+        dumped = (
+            report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
+        )
+        body = {
+            "notes": fields.get("notes", ""),
+            "report": dumped,
+        }
+        if fields.get("name"):
+            body["name"] = fields["name"]
+        if fields.get("environment_id"):
+            body["environment_id"] = fields["environment_id"]
+        if fields.get("agent_id"):
+            body["agent_id"] = fields["agent_id"]
+        return Studio(client).benchmarks.update(slug, **body)
+    raise InvalidRequestError(
+        "client.update accepts Environment, Trace, Benchmark, or Report; "
+        "update agents with client.agents.update(...)"
+    )
+
+
+def push_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
+    """Create or update a hosted environment, trace, or benchmark.
+
+    Prefer :func:`create_object` or :func:`update_object` when the intent is
+    explicit. Agents are not accepted.
+
+    Args:
+        client: Authenticated Plural client.
+        obj: Environment, Trace, Benchmark, or Report.
+        **kwargs: Forwarded to the typed helper.
 
     Returns:
         Hosted record created or updated by the studio API.
@@ -733,14 +915,22 @@ def push_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
     if isinstance(obj, Trace):
         return push_trace(client, obj, **kwargs)
     if isinstance(obj, Report):
-        return push_report(client, obj, **kwargs)
+        slug = kwargs.get("slug") or _report_slug(obj, name=kwargs.get("name"))
+        try:
+            Studio(client).benchmarks.get(slug)
+        except NotFoundError:
+            return push_report(client, obj, **kwargs)
+        return update_object(client, obj, **kwargs)
     if isinstance(obj, Benchmark):
-        if obj.report is None:
-            raise InvalidRequestError("run the benchmark before pushing it")
-        kwargs.setdefault("environment_id", getattr(obj.env, "remote_id", None))
-        if not kwargs.get("name"):
-            kwargs["name"] = f"{obj.env.name} {obj.env.version}".strip()
-        return push_report(client, obj.report, **kwargs)
+        fields = _benchmark_kwargs(obj, dict(kwargs))
+        slug = fields.get("slug") or slugify(
+            fields.get("name") or obj.env.name, fallback="benchmark"
+        )
+        try:
+            Studio(client).benchmarks.get(slug)
+        except NotFoundError:
+            return push_report(client, obj.report, **fields)
+        return update_object(client, obj, **fields)
     raise InvalidRequestError(
         "client.push accepts Environment, Trace, Benchmark, or Report; "
         "create agents with client.agents.create(...)"

@@ -30,7 +30,7 @@ client.label(trace_id, reward=1.0, feedback="helpful")
 To store a local episode or production `Trace` on the hosted project:
 
 ```python
-client.push(trace)
+client.create(trace)
 ```
 
-See [Push to Plural](push-to-plural.md).
+See [Create and update hosted objects](push-to-plural.md).

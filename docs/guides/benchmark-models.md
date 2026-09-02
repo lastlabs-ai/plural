@@ -53,7 +53,7 @@ report = Benchmark(
 
 Path("report.md").write_text(report.to_markdown())
 Path("report.json").write_text(report.to_json())
-client.push(report)
+client.create(report)
 ```
 
 Inspect `report.cases` for per-case trace ids, stop state, rewards, episode-total cost/latency, and failures. New reports have a manifest containing actual worker environment identity, runtime fingerprints, and an order-sensitive task-set hash for `TaskDataset`, explicit-task, or environment-task sources. `Report.manifest` remains optional when loading legacy reports. `report.models` includes failure buckets and reward uncertainty fields; `report.win_rate_pairs` includes paired comparison and exclusion counts.

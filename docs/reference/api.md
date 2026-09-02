@@ -2,9 +2,9 @@
 
 ## Client and request types
 
-`Client.push(x)` syncs an `Environment`, `Trace`, `Benchmark` (after `run()`),
-or `Report`. Agents are created with `client.agents.create(...)`.
-`env.push(client)` is an alias for `client.push(env)`.
+`Client.create(x)` and `Client.update(x)` sync an `Environment`, `Trace`,
+`Benchmark` (after `run()`), or `Report` by slug. Agents are created with
+`client.agents.create(...)`.
 
 ::: plural.client.Client
 

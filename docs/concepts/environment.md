@@ -146,5 +146,5 @@ Task inputs belong in a [TaskDataset](dataset.md); completed episode traces belo
 
 ## Hosted sync
 
-`client.push(env)` uploads the local environment to a Plural project.
-`env.push(client)` is an alias. See [Push to Plural](../guides/push-to-plural.md).
+`client.create(env)` and `client.update(env)` upload the local environment
+by slug. See [Create and update hosted objects](../guides/push-to-plural.md).

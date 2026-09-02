@@ -8,7 +8,7 @@ import respx
 
 from plural import Client, Environment
 from plural.benchmarks.runner import Benchmark, Report
-from plural.errors import InvalidRequestError
+from plural.errors import ConflictError, InvalidRequestError
 from plural.studio import studio_base_url
 from plural.tracing.schema import Trace
 
@@ -57,14 +57,89 @@ def test_studio_sends_project_header_for_account_keys(tmp_path: Path) -> None:
 
 
 @respx.mock
-def test_environment_push_creates_then_ingests_revision(tmp_path: Path) -> None:
+def test_environment_create_and_update_use_slug(tmp_path: Path) -> None:
     respx.post("https://api.example.com/api/v1/environments").mock(
         return_value=httpx.Response(
             200,
-            json={"id": "env_remote", "name": "refund-support", "version": "0.1.0"},
+            json={
+                "id": "env_remote",
+                "name": "refund-support",
+                "slug": "refund-support",
+                "version": "0.1.0",
+            },
         )
     )
-    respx.post("https://api.example.com/api/v1/environments/env_remote/revisions").mock(
+    respx.get("https://api.example.com/api/v1/environments/refund-support").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "env_remote",
+                "name": "refund-support",
+                "slug": "refund-support",
+            },
+        )
+    )
+    respx.post("https://api.example.com/api/v1/environments/refund-support/revisions").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "rev_1", "version": "0.1.0", "fingerprint": "abc"},
+        )
+    )
+    client = Client(
+        api_key="plural_project",
+        base_url="https://api.example.com/v1",
+        trace_dir=tmp_path,
+    )
+    env = Environment(name="refund-support", version="0.1.0", system_prompt="Be brief.")
+    assert env.slug == "refund-support"
+    created = client.create(env)
+    assert env.remote_id == "env_remote"
+    assert created["slug"] == "refund-support"
+    updated = client.update(env)
+    assert updated["environment_id"] == "env_remote"
+    again = env.update(client)
+    assert again["environment_id"] == "env_remote"
+
+
+@respx.mock
+def test_environment_create_conflict(tmp_path: Path) -> None:
+    respx.post("https://api.example.com/api/v1/environments").mock(
+        return_value=httpx.Response(
+            409, json={"detail": "A environment with slug 'refund-support' already exists"}
+        )
+    )
+    client = Client(
+        api_key="plural_project",
+        base_url="https://api.example.com/v1",
+        trace_dir=tmp_path,
+    )
+    env = Environment(name="refund-support")
+    with pytest.raises(ConflictError):
+        client.create(env)
+
+
+@respx.mock
+def test_environment_push_creates_then_updates_by_slug(tmp_path: Path) -> None:
+    respx.get("https://api.example.com/api/v1/environments/refund-support").mock(
+        side_effect=[
+            httpx.Response(404, json={"detail": "Not found"}),
+            httpx.Response(
+                200,
+                json={"id": "env_remote", "slug": "refund-support", "name": "refund-support"},
+            ),
+            httpx.Response(
+                200,
+                json={"id": "env_remote", "slug": "refund-support", "name": "refund-support"},
+            ),
+        ]
+    )
+    respx.post("https://api.example.com/api/v1/environments").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "env_remote", "slug": "refund-support", "name": "refund-support"},
+        )
+    )
+    respx.post("https://api.example.com/api/v1/environments/refund-support/revisions").mock(
         return_value=httpx.Response(
             200,
             json={"id": "rev_1", "version": "0.1.0", "fingerprint": "abc"},
@@ -88,8 +163,11 @@ def test_client_push_trace_and_report(tmp_path: Path) -> None:
     respx.post("https://api.example.com/api/v1/traces").mock(
         return_value=httpx.Response(200, json={"id": "tr_1", "trace_id": "abc"})
     )
+    respx.get("https://api.example.com/api/v1/benchmarks/refund-support").mock(
+        return_value=httpx.Response(404, json={"detail": "Not found"})
+    )
     respx.post("https://api.example.com/api/v1/benchmarks").mock(
-        return_value=httpx.Response(200, json={"id": "bm_1", "name": "refund-support 0.1.0"})
+        return_value=httpx.Response(200, json={"id": "bm_1", "name": "refund-support"})
     )
     client = Client(
         api_key="plural_project",
@@ -114,9 +192,9 @@ def test_client_push_rejects_unrun_benchmark_and_agents(tmp_path: Path) -> None:
         client=client,
     )
     with pytest.raises(InvalidRequestError, match="run the benchmark"):
-        client.push(bench)
+        client.create(bench)
     with pytest.raises(InvalidRequestError, match="agents"):
-        client.push(object())
+        client.create(object())
 
 
 @respx.mock

@@ -25,6 +25,7 @@ import hashlib
 import inspect
 import json
 import math
+import re
 import time
 from collections.abc import Callable, Iterator
 from functools import partial
@@ -271,6 +272,12 @@ class Environment(Generic[ObsT, StateT]):
         self._observation: Observation | None = None
         self._episode: Episode | None = None
         self._register_class_tools()
+
+    @property
+    def slug(self) -> str:
+        """Project-unique slug derived from :attr:`name`."""
+        value = re.sub(r"[^a-z0-9]+", "-", (self.name or "").lower()).strip("-")
+        return value[:80] or "environment"
 
     @property
     def state(self) -> StateT:
@@ -577,15 +584,41 @@ class Environment(Generic[ObsT, StateT]):
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-    def push(self, client: Client, **kwargs: Any) -> dict[str, Any]:
-        """Alias for ``client.push(self)``.
+    def create(self, client: Client, **kwargs: Any) -> dict[str, Any]:
+        """Alias for ``client.create(self)``.
+
+        Args:
+            client: Authenticated Plural client.
+            **kwargs: Optional ``name`` or ``description``.
+
+        Returns:
+            Created revision plus ``environment_id`` and ``slug``.
+        """
+        return client.create(self, **kwargs)
+
+    def update(self, client: Client, **kwargs: Any) -> dict[str, Any]:
+        """Alias for ``client.update(self)``.
 
         Args:
             client: Authenticated Plural client.
             **kwargs: Optional ``environment_id``, ``name``, or ``description``.
 
         Returns:
-            Created revision plus ``environment_id``.
+            Updated revision plus ``environment_id`` and ``slug``.
+        """
+        return client.update(self, **kwargs)
+
+    def push(self, client: Client, **kwargs: Any) -> dict[str, Any]:
+        """Create or update this environment by slug.
+
+        Prefer :meth:`create` or :meth:`update` when the intent is explicit.
+
+        Args:
+            client: Authenticated Plural client.
+            **kwargs: Optional ``environment_id``, ``name``, or ``description``.
+
+        Returns:
+            Created revision plus ``environment_id`` and ``slug``.
         """
         return client.push(self, **kwargs)
 

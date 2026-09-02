@@ -215,7 +215,7 @@ class Client:
 
             client = Client(api_key="plural_...", project="<project_id>")
             env = Environment(name="refund-support", version="0.1.0")
-            client.push(env)
+            client.create(env)
     """
 
     def __init__(
@@ -295,21 +295,62 @@ class Client:
         """
         return all(_provider_is_authenticated(provider) for provider in self._providers.values())
 
-    def push(self, obj: Any, **kwargs: Any) -> dict[str, Any]:
-        """Sync a local environment, trace, or benchmark to the hosted project.
+    def create(self, obj: Any, **kwargs: Any) -> dict[str, Any]:
+        """Create a hosted environment, trace, or benchmark.
 
-        Agents are not pushed. Create them with :meth:`Client.agents.create`
-        so they are bound to a model and environment on the host.
-
-        ``env.push(client)`` remains as an alias for ``client.push(env)``.
+        Environments, agents, and benchmarks are addressed by project-unique
+        slug. Creating a duplicate slug raises
+        :class:`~plural.errors.ConflictError`. Traces are stored by
+        ``trace_id``. Agents are created with :meth:`Client.agents.create`.
 
         Args:
             obj: An :class:`~plural.environments.env.Environment`,
                 :class:`~plural.tracing.schema.Trace`,
                 :class:`~plural.benchmarks.runner.Benchmark` (after ``run()``),
                 or :class:`~plural.benchmarks.runner.Report`.
-            **kwargs: Optional ids and labels such as ``environment_id``,
-                ``name``, ``notes``, or ``agent_id``.
+            **kwargs: Optional labels such as ``name``, ``notes``, or
+                ``environment_id`` (slug or id).
+
+        Returns:
+            The hosted record created by the studio API.
+        """
+        from plural.studio import create_object
+
+        return create_object(self, obj, **kwargs)
+
+    def update(self, obj: Any, **kwargs: Any) -> dict[str, Any]:
+        """Update a hosted environment or benchmark by slug.
+
+        Traces update by ``trace_id``. Agents use :meth:`Client.agents.update`.
+
+        Args:
+            obj: An :class:`~plural.environments.env.Environment`,
+                :class:`~plural.tracing.schema.Trace`,
+                :class:`~plural.benchmarks.runner.Benchmark` (after ``run()``),
+                or :class:`~plural.benchmarks.runner.Report`.
+            **kwargs: Optional labels such as ``name``, ``notes``, or
+                ``environment_id`` (slug or id).
+
+        Returns:
+            The hosted record updated by the studio API.
+        """
+        from plural.studio import update_object
+
+        return update_object(self, obj, **kwargs)
+
+    def push(self, obj: Any, **kwargs: Any) -> dict[str, Any]:
+        """Create or update a local environment, trace, or benchmark.
+
+        Prefer :meth:`create` or :meth:`update` when the intent is explicit.
+        ``env.push(client)`` remains as an alias for this upsert.
+
+        Args:
+            obj: An :class:`~plural.environments.env.Environment`,
+                :class:`~plural.tracing.schema.Trace`,
+                :class:`~plural.benchmarks.runner.Benchmark` (after ``run()``),
+                or :class:`~plural.benchmarks.runner.Report`.
+            **kwargs: Optional labels such as ``name``, ``notes``, or
+                ``environment_id`` (slug or id).
 
         Returns:
             The hosted record created or updated by the studio API.
