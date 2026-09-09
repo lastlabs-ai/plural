@@ -65,7 +65,7 @@ class DockerProvider(SandboxProvider):
                 if timeout is not None
                 else await communication
             )
-        except TimeoutError:
+        except asyncio.TimeoutError:
             process.kill()
             await process.wait()
             raise
@@ -295,7 +295,7 @@ class DockerProvider(SandboxProvider):
                 if request.timeout_seconds is not None
                 else await communication
             )
-        except TimeoutError:
+        except asyncio.TimeoutError:
             timed_out = True
             await self.cancel(handle)
             stdout, stderr = await process.communicate()

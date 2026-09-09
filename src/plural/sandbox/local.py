@@ -143,7 +143,7 @@ class LocalProvider(SandboxProvider):
                 if request.timeout_seconds is not None
                 else await communicate
             )
-        except TimeoutError:
+        except asyncio.TimeoutError:
             timed_out = True
             await _terminate_process_tree(process)
             stdout, stderr = await process.communicate()
