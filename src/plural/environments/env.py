@@ -345,7 +345,7 @@ class Environment(Generic[ObsT, StateT]):
         return value[:80] or "environment"
 
     def observation_schema(self) -> dict[str, Any]:
-        """JSON Schema for the observation the policy is allowed to see.
+        """JSON Schema for the per-action observation the agent can see.
 
         Returns:
             A JSON Schema object for the observation model.
@@ -353,7 +353,7 @@ class Environment(Generic[ObsT, StateT]):
         return _model_schema(self._contract_types()[0])
 
     def state_schema(self) -> dict[str, Any]:
-        """JSON Schema for writable memory and other episode state.
+        """JSON Schema for persistent environment state, including hidden fields.
 
         Returns:
             A JSON Schema object for the state model.

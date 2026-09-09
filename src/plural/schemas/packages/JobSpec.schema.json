@@ -1,0 +1,1110 @@
+{
+  "$defs": {
+    "AgentSpec": {
+      "additionalProperties": false,
+      "description": "Model, routing, environment identity, and exactly one harness binding.",
+      "properties": {
+        "auth_mode": {
+          "default": "environment",
+          "enum": [
+            "environment",
+            "api_key",
+            "oauth",
+            "none"
+          ],
+          "title": "Auth Mode",
+          "type": "string"
+        },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentIdentity"
+        },
+        "harness": {
+          "$ref": "#/$defs/HarnessBinding"
+        },
+        "harness_package": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HarnessPackage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model": {
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "routing": {
+          "$ref": "#/$defs/RoutingSpec"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "secret_names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Secret Names",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "model",
+        "environment",
+        "harness"
+      ],
+      "title": "AgentSpec",
+      "type": "object"
+    },
+    "BenchmarkDefinition": {
+      "additionalProperties": false,
+      "description": "Ordered task selection tied to one exact environment revision.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentIdentity"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "primary_metric": {
+          "default": "reward",
+          "title": "Primary Metric",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "task_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Task Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "environment",
+        "task_ids"
+      ],
+      "title": "BenchmarkDefinition",
+      "type": "object"
+    },
+    "DeclarativeImage": {
+      "additionalProperties": false,
+      "description": "Portable subset of Daytona's declarative image builder.",
+      "properties": {
+        "base": {
+          "minLength": 1,
+          "title": "Base",
+          "type": "string"
+        },
+        "environment": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Environment",
+          "type": "object"
+        },
+        "pip_packages": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Pip Packages",
+          "type": "array"
+        },
+        "workdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workdir"
+        }
+      },
+      "required": [
+        "base"
+      ],
+      "title": "DeclarativeImage",
+      "type": "object"
+    },
+    "EnvironmentCommand": {
+      "additionalProperties": false,
+      "description": "Declared argv-only command exposed to bounded harness tool loops.",
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Command",
+          "type": "array"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "timeout_seconds": {
+          "default": 30,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "command"
+      ],
+      "title": "EnvironmentCommand",
+      "type": "object"
+    },
+    "EnvironmentIdentity": {
+      "additionalProperties": false,
+      "description": "Exact identity and revision for a packaged environment.",
+      "properties": {
+        "digest": {
+          "title": "Digest",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "revision": {
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "revision",
+        "digest"
+      ],
+      "title": "EnvironmentIdentity",
+      "type": "object"
+    },
+    "EnvironmentManifest": {
+      "additionalProperties": false,
+      "description": "Environment package metadata, tasks, and allowed harnesses.",
+      "properties": {
+        "allowed_harnesses": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HarnessBinding"
+          },
+          "title": "Allowed Harnesses",
+          "type": "array"
+        },
+        "commands": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EnvironmentCommand"
+          },
+          "title": "Commands",
+          "type": "array"
+        },
+        "context": {
+          "default": null,
+          "title": "Context"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "instructions": {
+          "default": "",
+          "title": "Instructions",
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/ExecutionLimits"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "policy": {
+          "additionalProperties": true,
+          "title": "Policy",
+          "type": "object"
+        },
+        "revision": {
+          "default": "0.1.0",
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        },
+        "runtime_capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Runtime Capabilities",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackageSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tasks": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskDefinition"
+          },
+          "title": "Tasks",
+          "type": "array"
+        },
+        "verifier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VerifierManifest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "EnvironmentManifest",
+      "type": "object"
+    },
+    "ErrorCode": {
+      "description": "Stable execution error codes used by retry policies and receipts.",
+      "enum": [
+        "authentication",
+        "configuration",
+        "invalid_request",
+        "rate_limited",
+        "provider_unavailable",
+        "timeout",
+        "runtime_unavailable",
+        "harness_failed",
+        "protocol_failed",
+        "environment_failed",
+        "verifier_failed",
+        "evidence_missing",
+        "artifact_failed",
+        "lock_incompatible",
+        "cancelled",
+        "internal"
+      ],
+      "title": "ErrorCode",
+      "type": "string"
+    },
+    "ExecutionLimits": {
+      "additionalProperties": false,
+      "description": "Externally supplied limits enforced by built-in harnesses and provider timeout.",
+      "properties": {
+        "max_cost_usd": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cost Usd"
+        },
+        "max_seconds": {
+          "default": 120,
+          "exclusiveMinimum": 0,
+          "title": "Max Seconds",
+          "type": "number"
+        },
+        "max_turns": {
+          "default": 8,
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Max Turns",
+          "type": "integer"
+        }
+      },
+      "title": "ExecutionLimits",
+      "type": "object"
+    },
+    "FileDeclaration": {
+      "additionalProperties": false,
+      "description": "One exact file a harness or verifier may emit or consume.",
+      "properties": {
+        "media_type": {
+          "default": "application/octet-stream",
+          "title": "Media Type",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "FileDeclaration",
+      "type": "object"
+    },
+    "HarnessBinding": {
+      "additionalProperties": false,
+      "description": "Exact harness binding used by one agent and every resulting trial.",
+      "properties": {
+        "digest": {
+          "title": "Digest",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "revision": {
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "revision",
+        "digest"
+      ],
+      "title": "HarnessBinding",
+      "type": "object"
+    },
+    "HarnessManifest": {
+      "additionalProperties": false,
+      "description": "Public manifest for a single-agent harness package.",
+      "properties": {
+        "artifacts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FileDeclaration"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "auth_modes": {
+          "default": [
+            "environment"
+          ],
+          "items": {
+            "enum": [
+              "environment",
+              "api_key",
+              "oauth",
+              "none"
+            ],
+            "type": "string"
+          },
+          "title": "Auth Modes",
+          "type": "array"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Command",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "entrypoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entrypoint"
+        },
+        "environment_names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Environment Names",
+          "type": "array"
+        },
+        "healthcheck": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Healthcheck"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FileDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "protocol": {
+          "default": "plural-harness-v1",
+          "enum": [
+            "plural-harness-v1",
+            "acp"
+          ],
+          "title": "Protocol",
+          "type": "string"
+        },
+        "protocol_adapter": {
+          "anyOf": [
+            {
+              "const": "acp-client-v1",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Protocol Adapter"
+        },
+        "requirements": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "secret_names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Secret Names",
+          "type": "array"
+        },
+        "supported_models": {
+          "default": [
+            "*"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported Models",
+          "type": "array"
+        },
+        "trajectory_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trajectory Path"
+        },
+        "version": {
+          "default": "0.1.0",
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "command"
+      ],
+      "title": "HarnessManifest",
+      "type": "object"
+    },
+    "HarnessPackage": {
+      "additionalProperties": false,
+      "description": "Content-addressed harness manifest and source.",
+      "properties": {
+        "manifest": {
+          "$ref": "#/$defs/HarnessManifest"
+        },
+        "source": {
+          "$ref": "#/$defs/PackageSource"
+        }
+      },
+      "required": [
+        "manifest",
+        "source"
+      ],
+      "title": "HarnessPackage",
+      "type": "object"
+    },
+    "NetworkMode": {
+      "description": "Requested sandbox network policy.",
+      "enum": [
+        "none",
+        "restricted",
+        "full"
+      ],
+      "title": "NetworkMode",
+      "type": "string"
+    },
+    "PackageSource": {
+      "additionalProperties": false,
+      "description": "Immutable source for a harness package.\n\nPublished and remote sources require a digest. An unsigned local source is\naccepted only when explicitly marked unsafe. ``trusted`` is retained only\nfor manifest migration and never bypasses digest or unsafe checks.",
+      "properties": {
+        "digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        },
+        "kind": {
+          "enum": [
+            "local",
+            "oci",
+            "archive"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "trusted": {
+          "default": false,
+          "title": "Trusted",
+          "type": "boolean"
+        },
+        "unsafe_local": {
+          "default": false,
+          "title": "Unsafe Local",
+          "type": "boolean"
+        },
+        "uri": {
+          "minLength": 1,
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "uri"
+      ],
+      "title": "PackageSource",
+      "type": "object"
+    },
+    "ResourceRequirements": {
+      "additionalProperties": false,
+      "description": "Optional compute limits.",
+      "properties": {
+        "cpu": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu"
+        },
+        "disk_mb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Mb"
+        },
+        "memory_mb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Mb"
+        },
+        "pids": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pids"
+        }
+      },
+      "title": "ResourceRequirements",
+      "type": "object"
+    },
+    "RetryPolicy": {
+      "additionalProperties": false,
+      "description": "Execution retries, separate from independent benchmark attempts.",
+      "properties": {
+        "initial_backoff_seconds": {
+          "default": 0.25,
+          "minimum": 0,
+          "title": "Initial Backoff Seconds",
+          "type": "number"
+        },
+        "max_backoff_seconds": {
+          "default": 10,
+          "minimum": 0,
+          "title": "Max Backoff Seconds",
+          "type": "number"
+        },
+        "max_retries": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Max Retries",
+          "type": "integer"
+        },
+        "multiplier": {
+          "default": 2,
+          "minimum": 1,
+          "title": "Multiplier",
+          "type": "number"
+        },
+        "retryable_codes": {
+          "default": [
+            "rate_limited",
+            "provider_unavailable",
+            "timeout",
+            "runtime_unavailable"
+          ],
+          "items": {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          "title": "Retryable Codes",
+          "type": "array"
+        }
+      },
+      "title": "RetryPolicy",
+      "type": "object"
+    },
+    "RoutingSpec": {
+      "additionalProperties": false,
+      "description": "Portable model routing configuration for an agent.",
+      "properties": {
+        "fallback_models": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Fallback Models",
+          "type": "array"
+        },
+        "max_tokens": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        }
+      },
+      "title": "RoutingSpec",
+      "type": "object"
+    },
+    "RuntimeSpec": {
+      "additionalProperties": false,
+      "description": "Requested runtime provider and capability constraints.",
+      "properties": {
+        "build_context": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Build Context"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "declarative_image": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeclarativeImage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dockerfile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dockerfile"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkMode",
+          "default": "full"
+        },
+        "network_allowlist": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Network Allowlist",
+          "type": "array"
+        },
+        "provider": {
+          "default": "local",
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "read_only_root": {
+          "default": false,
+          "title": "Read Only Root",
+          "type": "boolean"
+        },
+        "resources": {
+          "$ref": "#/$defs/ResourceRequirements"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshot"
+        },
+        "timeout_seconds": {
+          "default": 300,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        },
+        "unsafe_local": {
+          "default": false,
+          "title": "Unsafe Local",
+          "type": "boolean"
+        }
+      },
+      "title": "RuntimeSpec",
+      "type": "object"
+    },
+    "TaskDefinition": {
+      "additionalProperties": false,
+      "description": "Task owned by an environment package.",
+      "properties": {
+        "expected": {
+          "default": null,
+          "title": "Expected"
+        },
+        "input": {
+          "title": "Input"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "task_id": {
+          "minLength": 1,
+          "title": "Task Id",
+          "type": "string"
+        },
+        "verifier_input": {
+          "default": null,
+          "title": "Verifier Input"
+        }
+      },
+      "required": [
+        "task_id",
+        "input"
+      ],
+      "title": "TaskDefinition",
+      "type": "object"
+    },
+    "VerifierManifest": {
+      "additionalProperties": false,
+      "description": "Isolated verifier command and required evidence contract.",
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Command",
+          "type": "array"
+        },
+        "evidence_required": {
+          "default": true,
+          "title": "Evidence Required",
+          "type": "boolean"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "required_artifacts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Artifacts",
+          "type": "array"
+        },
+        "result_path": {
+          "default": "verifier-result.json",
+          "title": "Result Path",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "default": 60,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "VerifierManifest",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Complete deterministic benchmark planning input.",
+  "properties": {
+    "agents": {
+      "items": {
+        "$ref": "#/$defs/AgentSpec"
+      },
+      "minItems": 1,
+      "title": "Agents",
+      "type": "array"
+    },
+    "benchmark": {
+      "$ref": "#/$defs/BenchmarkDefinition"
+    },
+    "concurrency": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Concurrency",
+      "type": "integer"
+    },
+    "environment": {
+      "$ref": "#/$defs/EnvironmentManifest"
+    },
+    "n_attempts": {
+      "default": 1,
+      "minimum": 1,
+      "title": "N Attempts",
+      "type": "integer"
+    },
+    "per_agent_concurrency": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Per Agent Concurrency",
+      "type": "integer"
+    },
+    "retry": {
+      "$ref": "#/$defs/RetryPolicy"
+    },
+    "runtime": {
+      "$ref": "#/$defs/RuntimeSpec"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "environment",
+    "benchmark",
+    "agents"
+  ],
+  "title": "JobSpec",
+  "type": "object"
+}

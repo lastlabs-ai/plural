@@ -21,6 +21,8 @@ flowchart LR
 pip install plural
 # optional OpenTelemetry exporter
 pip install "plural[otel]"
+# optional OS keyring / Daytona sandbox provider
+pip install "plural[keyring]" "plural[daytona]"
 ```
 
 ## Quickstart
@@ -71,6 +73,41 @@ client = Client(providers={"openai": os.environ["OPENAI_API_KEY"]})
 | **Environments** | Versioned `Environment` subclass + tools + scorers → one episode Trace |
 | **Benchmarks** | Environment × models → markdown/JSON report with win rates |
 
+## v1 package execution foundation (Alpha)
+
+Plural now includes a local-first CLI and immutable execution domain for
+external agent harnesses:
+
+```bash
+plural env init environment --name support
+plural harness init harness --name support-loop
+plural harness add harness --environment environment
+plural benchmark init benchmark.yaml --environment environment
+plural agent init agent.yaml --model openai/gpt-4o-mini \
+  --environment environment --harness harness
+plural job init job.yaml --environment environment \
+  --benchmark benchmark.yaml --agent agent.yaml
+plural run job.yaml --dry-run
+```
+
+An Environment owns tasks, instructions, commands/tools, code/source, policy,
+limits, and verification. An Agent binds one model to exactly one immutable
+HarnessPackage. A Job expands Agents × selected task IDs × `n_attempts` into
+stable Trials; retries keep the same Trial identity. Locks, logs, artifacts,
+receipts, and results persist under `.plural/jobs`.
+
+Execution providers are unsafe local subprocesses (explicit opt-in), hardened
+Docker containers, optional Daytona sandboxes, and entry-point plugins.
+Receipts are currently `self_reported` and package signatures are not verified.
+Local runs make no hosted writes unless `--sync` is passed; completed results
+can be replayed with `plural job upload`. Studio observes uploaded Jobs and
+can mark synced records cancelled; it does not launch hosted execution. The
+existing SDK Studio APIs continue to support their legacy
+Environment/Agent/Benchmark/Trace shapes. See the
+[CLI docs](https://lastlabs-ai.github.io/plural/cli/), [security
+boundaries](https://lastlabs-ai.github.io/plural/operations/security/), and
+[known limitations](https://lastlabs-ai.github.io/plural/reference/limitations/).
+
 ## Environments in 30 seconds
 
 ```python
@@ -104,12 +141,17 @@ framework-owned so lifecycle and trace invariants are always recorded.
 Full documentation: concept pages, guides, and generated API reference.
 
 - Trace schema stability: `schemas/trace.v1.json`
+- Package schemas: `src/plural/schemas/packages/`
+- Generated CLI command reference: `docs/reference/cli-commands.md`
 - Routing walkthrough: [`examples/routing/`](examples/routing) (also under docs → Guides)
 
 ## Development
 
 ```bash
 uv sync --group dev --group docs
+uv run python scripts/generate_trace_schema.py --check
+uv run python scripts/generate_package_schemas.py --check
+uv run python scripts/generate_cli_reference.py --check
 uv run pytest -m "not live"
 uv run ruff check .
 uv run mypy src/plural

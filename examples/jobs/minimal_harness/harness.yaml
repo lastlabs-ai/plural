@@ -1,0 +1,18 @@
+manifest:
+  schema_version: "1"
+  name: example-harness
+  version: 0.1.0
+  description: Offline protocol example.
+  protocol: plural-harness-v1
+  command: [python, harness.py]
+  auth_modes: [none]
+  outputs:
+    - {path: result.json, required: true, media_type: application/json}
+  artifacts:
+    - {path: evidence.txt, required: true, media_type: text/plain}
+    - {path: trajectory.jsonl, required: true, media_type: application/jsonl}
+  trajectory_path: trajectory.jsonl
+source:
+  kind: local
+  uri: .
+  trusted: true

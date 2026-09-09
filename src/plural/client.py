@@ -262,9 +262,12 @@ class Client:
 
         self.studio = Studio(self)
         self.environments = self.studio.environments
+        self.harnesses = self.studio.harnesses
         self.agents = self.studio.agents
         self.benchmarks = self.studio.benchmarks
         self.traces = self.studio.traces
+        self.jobs = self.studio.jobs
+        self.trials = self.studio.trials
         self.router = Router(
             provider_map,
             catalog=self.catalog,

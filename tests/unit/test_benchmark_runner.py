@@ -140,6 +140,8 @@ def _benchmark(
     *,
     repeats: int = 1,
     concurrency: int = 4,
+    primary_metric: str = "reward",
+    name: str = "",
 ) -> Benchmark:
     return Benchmark(
         cast(Any, env),
@@ -147,6 +149,8 @@ def _benchmark(
         client=cast(Any, object()),
         repeats=repeats,
         concurrency=concurrency,
+        primary_metric=primary_metric,
+        name=name,
     )
 
 
@@ -178,6 +182,28 @@ def test_win_rates_align_by_task_instead_of_completion_order() -> None:
     assert report.win_rates == {"a": {"b": 1.0}, "b": {"a": 0.0}}
     pair = report.win_rate_pairs[0]
     assert (pair.wins, pair.losses, pair.ties, pair.compared, pair.excluded) == (2, 0, 0, 2, 0)
+
+
+def test_win_rates_use_primary_metric() -> None:
+    tasks = [TaskData(task_id="t1", input="one")]
+    env = _ScriptedEnvironment(
+        {
+            ("fast", "t1"): _CaseSpec(
+                reward=0.5, scores={"solved": 1.0}, metrics={"latency_ms": 10}
+            ),
+            ("slow", "t1"): _CaseSpec(
+                reward=1.0, scores={"solved": 0.0}, metrics={"latency_ms": 100}
+            ),
+        }
+    )
+    by_score = _benchmark(env, ["fast", "slow"], primary_metric="scores.solved", name="solve").run(
+        tasks
+    )
+    assert by_score.primary_metric == "scores.solved"
+    assert by_score.name == "solve"
+    assert by_score.win_rates["fast"]["slow"] == 1.0
+    by_latency = _benchmark(env, ["fast", "slow"], primary_metric="latency_ms").run(tasks)
+    assert by_latency.win_rates["fast"]["slow"] == 1.0
 
 
 def test_aligned_failures_are_excluded_and_recorded() -> None:

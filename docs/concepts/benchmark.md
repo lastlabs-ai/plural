@@ -1,19 +1,24 @@
 # Benchmark
 
-A `Benchmark` runs the same environment tasks across model or policy targets and returns aggregate statistics plus reproducible per-case provenance.
+A `Benchmark` is a reusable eval definition: a task set, an environment, and a primary metric. `.run()` executes that definition across model or policy targets and returns a `Report`. Hosted studio stores the definition plus each run.
 
 ```python
 from plural import Benchmark, TaskDataset
 
-dataset = TaskDataset.load("data/refund-tasks.jsonl")
+easy = TaskDataset.load("data/wordle-easy.jsonl")
 report = Benchmark(
     env,
     models=["openai/gpt-4o-mini", "anthropic/claude-sonnet-4"],
     client=client,
-    repeats=3,
-    concurrency=8,
-).run(dataset=dataset)
+    name="wordle-easy",
+    description="Common Wordle answers.",
+    primary_metric="scores.solved",
+).run(dataset=easy)
+client.create(report)  # first push creates the definition
+client.create(report)  # later pushes append a run
 ```
+
+Win rates and the leaderboard sort by `primary_metric` (`reward`, `scores.<name>`, `latency_ms`, or `cost`). Each case is one episode trace. A 10-word × 3-model run is 30 traces grouped by `run_group_id`.
 
 `dataset=` accepts `TaskDataset`, not a trace `Dataset`. You can alternatively pass `tasks=[...]`, or omit both to use `env.iter_tasks()`.
 
@@ -104,7 +109,21 @@ The writer records successful episode traces and failed episode traces produced 
 
 A target is a regression only when its decrease is greater than the non-negative absolute `tolerance`. The result contains per-target deltas and a `regressions` list.
 
+## v1 immutable definition
+
+`BenchmarkDefinition` (also exported as `BenchmarkSpec`) is the new package
+domain type. It contains a name, description, primary metric, exact Environment
+identity, and an ordered unique `task_ids` selection. It owns no task payloads
+and cannot silently follow a changed Environment revision.
+
+The compatible legacy `Benchmark.repeats` remains available. In v1 Jobs the
+same independent-repetition concept is `JobSpec.n_attempts`; execution retries
+are separately controlled by `RetryPolicy` and do not create new Trial IDs.
+`Job.report()` maps one-based attempts back to zero-based `CaseKey.repeat`.
+
 ## Hosted sync
 
 After `run()`, `client.create(benchmark)` or `client.update(benchmark)` stores
-the report on the project by slug. See [Create and update hosted objects](../guides/push-to-plural.md).
+the legacy report on the project by slug. Client-orchestrated v1 Jobs can
+opt into hosted registration/result upload or replay stored results later. See
+[Studio sync](../guides/studio-sync.md).

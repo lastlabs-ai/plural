@@ -8,6 +8,8 @@ Plural is a Python package for builders putting AI into products. It gives you:
 2. **First-class traces** — the same record for production traffic and eval rollouts
 3. **Environments** — RL-style harnesses (tasks + tools + scorers) that *generate* those traces
 4. **Benchmarks** — run an environment across models and get a scored report
+5. **Package execution (Alpha)** — bind one Harness per Agent, lock Jobs, and
+   execute stable Trials with local, Docker, or Daytona providers
 
 ```mermaid
 flowchart LR
@@ -67,6 +69,11 @@ environments, agents, and benchmarks. Agents are created on the host with
 ## Next
 
 - [Quickstart](quickstart.md)
+- [CLI overview and configuration](cli/index.md)
+- [Packages, agents, jobs, and trials](concepts/execution.md)
+- [Build and run a job](guides/jobs.md)
+- [Security and trust](operations/security.md)
+- [Known limitations](reference/limitations.md)
 - [Routing examples walkthrough](guides/routing-examples.md)
 - [What is a Trace?](concepts/trace.md)
 - [What is an Environment?](concepts/environment.md)

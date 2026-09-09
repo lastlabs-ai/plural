@@ -14,7 +14,13 @@ uv sync --group dev --group docs
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy src/plural
+uv run mypy --strict tests/typing/consumer.py
 uv run pytest -m "not live"
+uv run python scripts/generate_trace_schema.py --check
+uv run python scripts/generate_package_schemas.py --check
+uv run python scripts/generate_cli_reference.py --check
+uv run python scripts/check_docs.py
+uv run python scripts/run_offline_job_examples.py
 uv run mkdocs build --strict
 ```
 
@@ -26,6 +32,12 @@ A change that adds a public symbol is incomplete until:
 2. Doctests pass (`pytest --doctest-modules`)
 3. Concept or guide page updated when behavior changes
 4. Example under `examples/` still runs
+5. Public CLI help and checked-in reference regenerated when commands change
+6. Pydantic manifests and checked-in package schemas regenerated together
+
+Package/execution changes must also document provider enforcement, secret and
+verifier boundaries, receipt trust, migration impact, and unsupported backend
+or external-service behavior. Do not describe a placeholder as live.
 
 ## Tests
 
@@ -95,6 +107,19 @@ rate and the other at the base rate would match neither.
 ## Release
 
 Tags matching `v*` publish to PyPI via Trusted Publishing.
+
+Before tagging:
+
+1. Run every command in **Checks (same as CI)** from a clean checkout.
+2. Confirm generated Trace/package schemas and CLI reference have no drift.
+3. Run offline examples and verify Docker/Daytona tests are either successful
+   or explicitly reported as credential/daemon-gated.
+4. Review `CHANGELOG.md`, migration notes, security boundaries, and known
+   limitations against the actual implementation.
+5. Build wheel/sdist and inspect that docs, examples, and packaged schemas are
+   present.
+6. Keep the PyPI classifier Alpha until compatibility, backend, plugin, trust,
+   and hosted execution contracts justify promotion.
 
 Downstream deployments pin a tag, so after merging a catalog PR cut a release
 and bump the pinned ref where it is consumed.

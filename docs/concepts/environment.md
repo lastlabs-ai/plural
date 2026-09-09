@@ -16,7 +16,7 @@ class RefundEnv(Environment[RefundObservation, RefundState]):
     ]
 ```
 
-`Observation` is the typed view the policy may see. `State` is writable memory and other data structures the agent and tools update as they go — including hidden fields. Both schemas are derived from the Pydantic models and uploaded with the hosted revision.
+`Observation` is what the agent can observe after an action — the value `reset` and `step` return. `State` is the persistent environment object for the episode. Put boards, buffers, and other durable structures on `State`, mark secrets with `hidden()`, and copy only the visible slice into the observation in `observe()`. Both schemas are derived from the Pydantic models and uploaded with the hosted revision.
 
 ## Environment and policy
 
@@ -91,7 +91,7 @@ Exceptions from a policy, `apply_action`, `step`, or a scorer close the episode 
 
 ## State, observations, and snapshots
 
-State can contain hidden values; observations are what the policy may see. Snapshots are independently controlled for persistence:
+State is persistent and may contain hidden values; the observation is the per-action view the agent may see. Snapshots are independently controlled for persistence:
 
 ```python
 class WordleEnv(Environment[WordleObservation, WordleState]):
@@ -106,14 +106,19 @@ The default `snapshot()` returns `None`. This safe-by-default behavior prevents 
 
 ## Runtime boundary
 
-`Runtime` is the small extension boundary for tool execution:
+The legacy `Environment` episode API uses `Runtime` as the small synchronous
+extension boundary for tool execution:
 
 ```python
 class Runtime(Protocol):
     def call(self, name: str, arguments: dict[str, Any]) -> Any: ...
 ```
 
-`LocalRuntime` executes registered Python callables in-process. Supply another synchronous implementation to `step`, `run_episode`, or `rollout` when tool invocation needs a sandbox, remote executor, or another boundary. The runtime interface is a synchronous public-alpha extension point; plural does not provide a sandbox or remote execution service.
+`LocalRuntime` executes registered Python callables in-process. Supply another
+synchronous implementation to `step`, `run_episode`, or `rollout` when tool
+invocation needs another boundary. This is distinct from the v1
+`SandboxProvider`, which executes complete external Harness and verifier
+processes through local, Docker, or Daytona providers.
 
 For benchmarks, `runtime_factory` creates a fresh runtime per job. Custom runtimes may expose `fingerprint()` or `fingerprint_payload()`; benchmark manifests record the resulting `runtime_fingerprints`.
 
@@ -163,4 +168,16 @@ Task inputs belong in a [TaskDataset](dataset.md); completed episode traces belo
 ## Hosted sync
 
 `client.create(env)` and `client.update(env)` upload the local environment
-by slug. See [Create and update hosted objects](../guides/push-to-plural.md).
+by slug using the existing Studio revision shape. `plural env push` publishes
+the exact `EnvironmentManifest` revision used by v1 Job sync. See [Studio
+sync](../guides/studio-sync.md).
+
+## v1 package ownership
+
+`EnvironmentManifest` is the immutable execution-package representation. It
+owns instructions, context, tasks and evaluator-only values, declared
+commands/tools, source/code, limits, policy, allowed Harness bindings,
+capability requirements, and the isolated verifier. A
+`BenchmarkDefinition` selects task IDs from one exact Environment identity;
+Agents cannot replace Environment-owned behavior. See
+[Packages, agents, jobs, and trials](execution.md).

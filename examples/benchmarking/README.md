@@ -23,6 +23,10 @@ report = Benchmark(
 ).run(dataset=dataset)
 ```
 
+The same environment can host several named benchmarks. Wordle Easy / Hard /
+Efficiency are the reference shape: one `WordleEnv`, three task sets or primary
+metrics. See the [Wordle environment README](../environment/wordle/README.md).
+
 ## 2. Compare arbitrary policies
 
 ```bash

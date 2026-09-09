@@ -1,0 +1,271 @@
+{
+  "$defs": {
+    "FileDeclaration": {
+      "additionalProperties": false,
+      "description": "One exact file a harness or verifier may emit or consume.",
+      "properties": {
+        "media_type": {
+          "default": "application/octet-stream",
+          "title": "Media Type",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "FileDeclaration",
+      "type": "object"
+    },
+    "HarnessManifest": {
+      "additionalProperties": false,
+      "description": "Public manifest for a single-agent harness package.",
+      "properties": {
+        "artifacts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FileDeclaration"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "auth_modes": {
+          "default": [
+            "environment"
+          ],
+          "items": {
+            "enum": [
+              "environment",
+              "api_key",
+              "oauth",
+              "none"
+            ],
+            "type": "string"
+          },
+          "title": "Auth Modes",
+          "type": "array"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Command",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "entrypoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entrypoint"
+        },
+        "environment_names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Environment Names",
+          "type": "array"
+        },
+        "healthcheck": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Healthcheck"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FileDeclaration"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "protocol": {
+          "default": "plural-harness-v1",
+          "enum": [
+            "plural-harness-v1",
+            "acp"
+          ],
+          "title": "Protocol",
+          "type": "string"
+        },
+        "protocol_adapter": {
+          "anyOf": [
+            {
+              "const": "acp-client-v1",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Protocol Adapter"
+        },
+        "requirements": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "secret_names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Secret Names",
+          "type": "array"
+        },
+        "supported_models": {
+          "default": [
+            "*"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported Models",
+          "type": "array"
+        },
+        "trajectory_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trajectory Path"
+        },
+        "version": {
+          "default": "0.1.0",
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "command"
+      ],
+      "title": "HarnessManifest",
+      "type": "object"
+    },
+    "PackageSource": {
+      "additionalProperties": false,
+      "description": "Immutable source for a harness package.\n\nPublished and remote sources require a digest. An unsigned local source is\naccepted only when explicitly marked unsafe. ``trusted`` is retained only\nfor manifest migration and never bypasses digest or unsafe checks.",
+      "properties": {
+        "digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        },
+        "kind": {
+          "enum": [
+            "local",
+            "oci",
+            "archive"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "trusted": {
+          "default": false,
+          "title": "Trusted",
+          "type": "boolean"
+        },
+        "unsafe_local": {
+          "default": false,
+          "title": "Unsafe Local",
+          "type": "boolean"
+        },
+        "uri": {
+          "minLength": 1,
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "uri"
+      ],
+      "title": "PackageSource",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Content-addressed harness manifest and source.",
+  "properties": {
+    "manifest": {
+      "$ref": "#/$defs/HarnessManifest"
+    },
+    "source": {
+      "$ref": "#/$defs/PackageSource"
+    }
+  },
+  "required": [
+    "manifest",
+    "source"
+  ],
+  "title": "HarnessPackage",
+  "type": "object"
+}

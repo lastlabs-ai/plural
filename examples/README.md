@@ -45,6 +45,7 @@ client.close()
 | [`environment/wordle/`](environment/wordle/) | Wordle: `uv run python examples/environment/wordle/run.py --secret crane` |
 | [`environment/twitter/`](environment/twitter/) | `TwitterEnv`: run a simulated Twitter account |
 | [`benchmarking/`](benchmarking/) | Compare models or arbitrary policies |
+| [`jobs/`](jobs/) | v1 packages, local/Docker/Daytona Jobs, attempts, resume/regrade, Studio payload |
 
 Each environment folder includes a short `walkthrough.ipynb` covering its
 tools, scored traces, versioned tasks, and policy benchmarking.
@@ -63,3 +64,7 @@ The two [benchmarking flows](benchmarking/README.md) are also offline:
 uv run python examples/benchmarking/01_compare_models.py
 uv run python examples/benchmarking/02_compare_policies.py
 ```
+
+The [package execution examples](jobs/README.md) are offline by default.
+Docker, Daytona, and hosted Studio writes require explicit opt-in environment
+variables so CI never calls external services accidentally.

@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "EnvironmentIdentity": {
+      "additionalProperties": false,
+      "description": "Exact identity and revision for a packaged environment.",
+      "properties": {
+        "digest": {
+          "title": "Digest",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "revision": {
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "revision",
+        "digest"
+      ],
+      "title": "EnvironmentIdentity",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Ordered task selection tied to one exact environment revision.",
+  "properties": {
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "environment": {
+      "$ref": "#/$defs/EnvironmentIdentity"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "primary_metric": {
+      "default": "reward",
+      "title": "Primary Metric",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "task_ids": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Task Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "environment",
+    "task_ids"
+  ],
+  "title": "BenchmarkDefinition",
+  "type": "object"
+}

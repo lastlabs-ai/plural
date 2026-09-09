@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-09
+
+### Added
+
+- `hidden()` marks a `State` field as agent-invisible. The flag is stored on
+  the JSON Schema as `x-plural-hidden` so studio can show visibility.
+- Alpha v1 package domain for immutable Environment, Harness, Agent, Benchmark,
+  Job, Trial, lock, receipt, verifier, artifact, retry, and runtime contracts.
+- `plural` Typer CLI for device auth/context, package scaffolding and
+  validation, deterministic dry runs, local job persistence/control, and
+  runtime inspection. Job registration and result upload are opt-in
+  (`--sync` / `plural job upload`). Organization and project listing are
+  not implemented yet.
+- Provider-neutral Harness JSONL protocol, built-in chat/tool/code profiles,
+  narrow ACP v1 and separately installed Claude Code/Codex/Hermes adapters,
+  deterministic archive retrieval, and exact artifact contracts.
+- Local development, Docker, Daytona, and entry-point sandbox providers with
+  capability preflight, cancellation, cleanup, isolated verifier regrade, and
+  self-reported execution receipts.
+- Generated package/CLI JSON Schemas, generated CLI command reference, drift
+  checks, security/operations/migration documentation, and offline execution
+  examples.
+
+### Changed
+
+- `Observation` is the per-action view returned by `reset` / `step`.
+  `State` is the persistent environment object; durable structures live there.
+- `Benchmark` is a reusable definition (`name`, `primary_metric`). Each
+  `.run()` is a report attached as a hosted run. Win rates compare the
+  chosen metric. Pushing a report uploads episode traces with `run_group_id`.
+- Legacy `Benchmark.repeats` and `TaskDataset` remain compatible. New
+  `JobSpec.n_attempts` names independent Trial repetitions; execution retries
+  are tracked separately without changing Trial identity.
+
 ## [0.7.4] - 2026-09-02
 
 ### Added
@@ -310,7 +344,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.8.0
 [0.7.4]: https://github.com/lastlabs-ai/plural/releases/tag/v0.7.4
 [0.7.3]: https://github.com/lastlabs-ai/plural/releases/tag/v0.7.3
 [0.7.2]: https://github.com/lastlabs-ai/plural/releases/tag/v0.7.2

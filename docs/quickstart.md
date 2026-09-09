@@ -104,3 +104,30 @@ must pass `project=` or `PLURAL_PROJECT`. See [Create and update hosted objects]
 2. [Environment](concepts/environment.md) — turn tasks into scored traces
 3. [Benchmark](concepts/benchmark.md) — compare models on your environment
 4. [Create and update hosted objects](guides/push-to-plural.md) — sync env, trace, and report
+
+## Package execution quickstart (Alpha)
+
+The CLI is included in the base install. This offline sequence creates every v1
+package edge and validates the deterministic plan:
+
+```bash
+plural env init environment --name demo
+plural harness init harness --name demo-loop
+plural harness add harness --environment environment
+plural benchmark init benchmark.yaml --environment environment
+plural agent init agent.yaml --name demo-agent --model openai/gpt-4o-mini \
+  --environment environment --harness harness
+plural job init job.yaml --environment environment \
+  --benchmark benchmark.yaml --agent agent.yaml
+plural run job.yaml --dry-run --format json
+```
+
+Run trusted development code with `--runtime local --unsafe-local`, or use
+Docker after `plural runtime doctor docker`. A live model call also needs the
+secret named by the Agent/Harness. Local execution makes no external writes by
+default. Use `--sync` for
+best-effort hosted registration/upload or `plural job upload` to replay a
+completed local result.
+
+Continue with [CLI configuration](cli/index.md), [job
+execution](guides/jobs.md), and [security boundaries](operations/security.md).

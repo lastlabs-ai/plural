@@ -1,5 +1,11 @@
 # Create and update hosted objects
 
+!!! warning "Legacy Studio object surface"
+    This page covers the existing SDK `Environment`, hosted `RemoteAgent`,
+    legacy `Benchmark`/`Report`, and `Trace` shapes. The v1 CLI also supports
+    `plural env push`, opt-in `plural run --sync`, and replay with
+    `plural job upload`; see [Studio sync](studio-sync.md).
+
 Environments, agents, and benchmarks are addressed by a **slug** that is unique
 inside the project. You do not need the hosted UUID to read, create, or update
 them. Traces stay id-based because there are many of them.

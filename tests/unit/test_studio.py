@@ -9,7 +9,15 @@ import respx
 
 from plural import Client, Environment
 from plural.benchmarks.runner import Benchmark, Report
-from plural.errors import ConflictError, InvalidRequestError
+from plural.domain import (
+    AgentSpec,
+    EnvironmentManifest,
+    HarnessBinding,
+    HarnessManifest,
+    HarnessPackage,
+    PackageSource,
+)
+from plural.errors import ConflictError, InvalidRequestError, PluralError
 from plural.studio import studio_base_url
 from plural.tracing.schema import Trace
 
@@ -246,3 +254,250 @@ def test_agent_invoke_posts_to_gateway(tmp_path: Path) -> None:
     request = respx.calls.last.request
     assert request.headers["x-project-id"] == "proj_1"
     assert b"Refund this ticket" in request.content
+
+
+@respx.mock
+def test_control_plane_clients_register_batch_finalize_and_sanitize(
+    tmp_path: Path,
+) -> None:
+    respx.post("https://api.example.com/api/v1/jobs/preflight").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "valid": True,
+                "spec_hash": "sha256:server",
+                "environment_revision_id": "env_rev",
+                "trial_count": 1,
+            },
+        )
+    )
+    create_route = respx.post("https://api.example.com/api/v1/jobs").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "job_remote", "status": "registered"},
+        )
+    )
+    respx.get("https://api.example.com/api/v1/jobs/job_remote/trials").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "trial_remote",
+                    "trial_key": "trl_remote",
+                    "task_id": "t1",
+                    "attempt": 1,
+                }
+            ],
+        )
+    )
+    batch_route = respx.post("https://api.example.com/api/v1/jobs/job_remote/trials/batch").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "trial_key": "trl_remote",
+                        "trial_id": "trial_remote",
+                        "execution_id": "execution_1",
+                        "sequence": 1,
+                    }
+                ]
+            },
+        )
+    )
+    finalize_route = respx.post("https://api.example.com/api/v1/jobs/job_remote/finalize").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "job_remote",
+                "status": "finalized",
+                "benchmark_run_id": "run_1",
+            },
+        )
+    )
+    client = Client(
+        api_key="plural_project",
+        base_url="https://api.example.com/v1",
+        trace_dir=tmp_path,
+    )
+    preflight = client.jobs.preflight(
+        benchmark_revision_id="bench_rev",
+        agent_revision_ids=["agent_rev"],
+        job_spec={"schema_version": "1"},
+    )
+    assert preflight["trial_count"] == 1
+    created = client.jobs.create(
+        benchmark_revision_id="bench_rev",
+        agent_revision_ids=["agent_rev"],
+        idempotency_key="local-job",
+        job_spec={"schema_version": "1"},
+    )
+    assert created["id"] == "job_remote"
+    assert json.loads(create_route.calls.last.request.content)["idempotency_key"] == "local-job"
+    assert client.jobs.trials("job_remote")[0]["trial_key"] == "trl_remote"
+    client.jobs.batch(
+        "job_remote",
+        [
+            {
+                "trial_key": "trl_remote",
+                "result": {
+                    "status": "succeeded",
+                    "receipt": {
+                        "trial_id": "local",
+                        "trust": "self_reported",
+                        "authorization": "Bearer secret",
+                    },
+                    "reward": 1.0,
+                },
+            }
+        ],
+    )
+    batch = json.loads(batch_route.calls.last.request.content)
+    assert batch["executions"][0]["result"]["receipt"]["trust"] == "self_reported"
+    assert batch["executions"][0]["result"]["receipt"]["authorization"] == "[redacted]"
+    finalized = client.jobs.finalize("job_remote", Report(environment="demo", models={}))
+    assert finalized["benchmark_run_id"] == "run_1"
+    assert finalize_route.called
+
+
+@respx.mock
+def test_publish_environment_and_agent_exact_package_identity(
+    tmp_path: Path,
+) -> None:
+    package = EnvironmentManifest(name="World", revision="1.0.0")
+    respx.get("https://api.example.com/api/v1/environments/world").mock(
+        return_value=httpx.Response(200, json={"id": "env_1", "name": "World"})
+    )
+    revision_route = respx.post("https://api.example.com/api/v1/environments/env_1/revisions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "env_rev_1",
+                "package_content_hash": package.content_hash,
+            },
+        )
+    )
+    agent_route = respx.post("https://api.example.com/api/v1/agents").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "agent_1", "name": "Agent", "slug": "agent"},
+        )
+    )
+    client = Client(
+        api_key="plural_project",
+        base_url="https://api.example.com/v1",
+        trace_dir=tmp_path,
+    )
+    published = client.environments.publish_manifest(package)
+    assert published["package_content_hash"] == package.content_hash
+    sent_environment = json.loads(revision_route.calls.last.request.content)
+    assert sent_environment["package_manifest"]["name"] == "World"
+    binding = HarnessBinding(
+        name="runner",
+        revision="1.0.0",
+        digest=f"sha256:{'a' * 64}",
+    )
+    agent = AgentSpec(
+        name="Agent",
+        model="test/model",
+        environment=package.identity,
+        harness=binding,
+    )
+    client.agents.create(
+        name=agent.name,
+        model=agent.model,
+        environment_revision_id="env_rev_1",
+        harness_revision_id="harness_rev_1",
+        routing=agent.routing.model_dump(mode="json"),
+        package_spec=agent,
+    )
+    sent_agent = json.loads(agent_route.calls.last.request.content)
+    assert sent_agent["package_spec"]["environment"]["digest"] == package.content_hash
+    assert sent_agent["harness_revision_id"] == "harness_rev_1"
+
+
+@respx.mock
+def test_harness_revision_client_uses_v1_contract_without_local_path(
+    tmp_path: Path,
+) -> None:
+    route = respx.post("https://api.example.com/api/v1/harnesses/runner/revisions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "hrev_1",
+                "package_id": "harness_1",
+                "version": "1.0.0",
+                "content_hash": f"sha256:{'b' * 64}",
+                "source_digest": f"sha256:{'a' * 64}",
+                "manifest": {},
+                "source": {},
+                "created_at": "2026-09-09T00:00:00Z",
+            },
+        )
+    )
+    client = Client(
+        api_key="plural_project",
+        base_url="https://api.example.com/v1",
+        trace_dir=tmp_path,
+    )
+    package = HarnessPackage(
+        manifest=HarnessManifest(
+            name="runner",
+            version="1.0.0",
+            command=("python", "run.py"),
+        ),
+        source=PackageSource(
+            kind="local",
+            uri="/Users/dev/private/source",
+            digest=f"sha256:{'a' * 64}",
+        ),
+    )
+    created = client.harnesses.create_revision("runner", package)
+    assert created["id"] == "hrev_1"
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["source"]["uri"] == "local"
+    assert "/Users/dev" not in route.calls.last.request.content.decode()
+
+
+@respx.mock
+def test_job_upload_results_recovers_by_idempotent_replay(
+    tmp_path: Path,
+) -> None:
+    route = respx.post("https://api.example.com/api/v1/jobs/job_1/trials/batch").mock(
+        side_effect=[
+            httpx.Response(200, json={"items": []}),
+            httpx.Response(503, json={"detail": "temporary"}),
+            httpx.Response(200, json={"items": [{"duplicate": True}]}),
+            httpx.Response(200, json={"items": []}),
+        ]
+    )
+    client = Client(
+        api_key="plural_project",
+        base_url="https://api.example.com/v1",
+        trace_dir=tmp_path,
+    )
+    results = [
+        {
+            "status": "succeeded",
+            "receipt": {"trial_id": f"local_{index}"},
+            "reward": 1.0,
+        }
+        for index in range(2)
+    ]
+    with pytest.raises(PluralError, match="temporary"):
+        client.jobs.upload_results(
+            "job_1",
+            trial_keys=["remote_0", "remote_1"],
+            results=results,
+            batch_size=1,
+        )
+    assert (
+        client.jobs.upload_results(
+            "job_1",
+            trial_keys=["remote_0", "remote_1"],
+            results=results,
+            batch_size=1,
+        )
+        == 2
+    )
+    assert route.call_count == 4

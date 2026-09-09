@@ -1,0 +1,59 @@
+{
+  "$defs": {
+    "CLIProfile": {
+      "additionalProperties": false,
+      "description": "One named CLI context.",
+      "properties": {
+        "api_url": {
+          "default": "https://api.pluralintel.com",
+          "title": "Api Url",
+          "type": "string"
+        },
+        "organization": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Organization"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Project"
+        }
+      },
+      "title": "CLIProfile",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Persistent, non-secret CLI configuration.",
+  "properties": {
+    "active_profile": {
+      "default": "default",
+      "title": "Active Profile",
+      "type": "string"
+    },
+    "profiles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/CLIProfile"
+      },
+      "title": "Profiles",
+      "type": "object"
+    }
+  },
+  "title": "CLIConfig",
+  "type": "object"
+}

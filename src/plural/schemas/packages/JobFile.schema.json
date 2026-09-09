@@ -1,0 +1,356 @@
+{
+  "$defs": {
+    "DeclarativeImage": {
+      "additionalProperties": false,
+      "description": "Portable subset of Daytona's declarative image builder.",
+      "properties": {
+        "base": {
+          "minLength": 1,
+          "title": "Base",
+          "type": "string"
+        },
+        "environment": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Environment",
+          "type": "object"
+        },
+        "pip_packages": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Pip Packages",
+          "type": "array"
+        },
+        "workdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workdir"
+        }
+      },
+      "required": [
+        "base"
+      ],
+      "title": "DeclarativeImage",
+      "type": "object"
+    },
+    "ErrorCode": {
+      "description": "Stable execution error codes used by retry policies and receipts.",
+      "enum": [
+        "authentication",
+        "configuration",
+        "invalid_request",
+        "rate_limited",
+        "provider_unavailable",
+        "timeout",
+        "runtime_unavailable",
+        "harness_failed",
+        "protocol_failed",
+        "environment_failed",
+        "verifier_failed",
+        "evidence_missing",
+        "artifact_failed",
+        "lock_incompatible",
+        "cancelled",
+        "internal"
+      ],
+      "title": "ErrorCode",
+      "type": "string"
+    },
+    "NetworkMode": {
+      "description": "Requested sandbox network policy.",
+      "enum": [
+        "none",
+        "restricted",
+        "full"
+      ],
+      "title": "NetworkMode",
+      "type": "string"
+    },
+    "ResourceRequirements": {
+      "additionalProperties": false,
+      "description": "Optional compute limits.",
+      "properties": {
+        "cpu": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu"
+        },
+        "disk_mb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Mb"
+        },
+        "memory_mb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Mb"
+        },
+        "pids": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pids"
+        }
+      },
+      "title": "ResourceRequirements",
+      "type": "object"
+    },
+    "RetryPolicy": {
+      "additionalProperties": false,
+      "description": "Execution retries, separate from independent benchmark attempts.",
+      "properties": {
+        "initial_backoff_seconds": {
+          "default": 0.25,
+          "minimum": 0,
+          "title": "Initial Backoff Seconds",
+          "type": "number"
+        },
+        "max_backoff_seconds": {
+          "default": 10,
+          "minimum": 0,
+          "title": "Max Backoff Seconds",
+          "type": "number"
+        },
+        "max_retries": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Max Retries",
+          "type": "integer"
+        },
+        "multiplier": {
+          "default": 2,
+          "minimum": 1,
+          "title": "Multiplier",
+          "type": "number"
+        },
+        "retryable_codes": {
+          "default": [
+            "rate_limited",
+            "provider_unavailable",
+            "timeout",
+            "runtime_unavailable"
+          ],
+          "items": {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          "title": "Retryable Codes",
+          "type": "array"
+        }
+      },
+      "title": "RetryPolicy",
+      "type": "object"
+    },
+    "RuntimeSpec": {
+      "additionalProperties": false,
+      "description": "Requested runtime provider and capability constraints.",
+      "properties": {
+        "build_context": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Build Context"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "declarative_image": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeclarativeImage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dockerfile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dockerfile"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkMode",
+          "default": "full"
+        },
+        "network_allowlist": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Network Allowlist",
+          "type": "array"
+        },
+        "provider": {
+          "default": "local",
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "read_only_root": {
+          "default": false,
+          "title": "Read Only Root",
+          "type": "boolean"
+        },
+        "resources": {
+          "$ref": "#/$defs/ResourceRequirements"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshot"
+        },
+        "timeout_seconds": {
+          "default": 300,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        },
+        "unsafe_local": {
+          "default": false,
+          "title": "Unsafe Local",
+          "type": "boolean"
+        }
+      },
+      "title": "RuntimeSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Path-based local job config resolved into an immutable JobSpec.",
+  "properties": {
+    "agents": {
+      "items": {
+        "format": "path",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Agents",
+      "type": "array"
+    },
+    "benchmark": {
+      "default": "benchmark.yaml",
+      "format": "path",
+      "title": "Benchmark",
+      "type": "string"
+    },
+    "concurrency": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Concurrency",
+      "type": "integer"
+    },
+    "environment": {
+      "default": "environment.yaml",
+      "format": "path",
+      "title": "Environment",
+      "type": "string"
+    },
+    "n_attempts": {
+      "default": 1,
+      "minimum": 1,
+      "title": "N Attempts",
+      "type": "integer"
+    },
+    "per_agent_concurrency": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Per Agent Concurrency",
+      "type": "integer"
+    },
+    "retry": {
+      "$ref": "#/$defs/RetryPolicy"
+    },
+    "runtime": {
+      "$ref": "#/$defs/RuntimeSpec"
+    },
+    "schema_version": {
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "agents"
+  ],
+  "title": "JobFile",
+  "type": "object"
+}

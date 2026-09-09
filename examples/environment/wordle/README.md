@@ -107,6 +107,39 @@ decision, advances the turn, rebuilds the observation, and checks termination.
 To compare policies or model IDs over environment tasks, see the
 [benchmarking examples](../../benchmarking/README.md).
 
+## Named benchmarks on one env
+
+A benchmark is a reusable eval, not a single run. The same `WordleEnv` can host several:
+
+- **wordle-easy** — common answers (`crane`, `slate`, `trace`, …), primary metric `scores.solved`
+- **wordle-hard** — rarer answers, same solve-rate goal
+- **wordle-efficiency** — same tasks, primary metric `scores.efficiency` (fewest guesses)
+
+```python
+from plural import Benchmark, TaskData, TaskDataset
+
+easy = TaskDataset(
+    name="wordle-easy",
+    version="1.0.0",
+    tasks=[
+        TaskData(task_id=word, input="Play Wordle. Use guess.", expected=word)
+        for word in ("crane", "slate", "trace", "stare", "raise")
+    ],
+)
+report = Benchmark(
+    WordleEnv(),
+    models=["openai/gpt-5.6-luna", "anthropic/claude-haiku-4-5"],
+    client=client,
+    name="wordle-easy",
+    description="Common Wordle answers.",
+    primary_metric="scores.solved",
+    environment_factory=WordleEnv,
+).run(dataset=easy)
+client.create(report)
+```
+
+Ten words on one model is ten episode traces in one `run_group_id`. Studio Cases shows each word and the guess sequence.
+
 ## Files
 
 | Path | Role |

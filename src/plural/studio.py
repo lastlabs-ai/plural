@@ -167,6 +167,153 @@ class EnvironmentsAPI:
         """
         self._studio.request("DELETE", f"/environments/{slug}")
 
+    def bind_harness(
+        self,
+        environment_id: str,
+        revision_id: str,
+        harness_revision_id: str,
+        *,
+        policy: dict[str, Any] | None = None,
+    ) -> JsonObject:
+        """Allow one exact hosted harness revision for an environment revision."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/environments/{environment_id}/revisions/{revision_id}/harnesses",
+                json={
+                    "harness_revision_id": harness_revision_id,
+                    "policy": policy or {},
+                },
+            ),
+        )
+
+    def list_harnesses(self, environment_id: str, revision_id: str) -> JsonList:
+        """List exact harness bindings for an environment revision."""  # noqa: DOC201
+        return cast(
+            JsonList,
+            self._studio.request(
+                "GET",
+                f"/environments/{environment_id}/revisions/{revision_id}/harnesses",
+            ),
+        )
+
+    def publish_manifest(self, manifest: Any) -> JsonObject:
+        """Publish one exact v1 environment package revision."""  # noqa: DOC201
+        from plural.domain import EnvironmentManifest
+
+        package = (
+            manifest
+            if isinstance(manifest, EnvironmentManifest)
+            else EnvironmentManifest.model_validate(manifest)
+        )
+        try:
+            environment = self.get(slugify(package.name, fallback="environment"))
+        except NotFoundError:
+            environment = self.create(
+                name=package.name,
+                version=package.revision,
+                description=package.description,
+                instructions=package.instructions,
+            )
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/environments/{environment['id']}/revisions",
+                json={
+                    "package_manifest": _exact_package_payload(package),
+                    "source": "sdk_sync",
+                },
+            ),
+        )
+
+
+class HarnessesAPI:
+    """Create packages and publish immutable hosted harness revisions."""
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def list(self) -> JsonList:
+        """List harness package definitions."""  # noqa: DOC201
+        return cast(JsonList, self._studio.request("GET", "/harnesses").get("items", []))
+
+    def get(self, ref: str) -> JsonObject:
+        """Get a harness package by project-unique slug or id."""  # noqa: DOC201
+        return cast(JsonObject, self._studio.request("GET", f"/harnesses/{ref}"))
+
+    def create(
+        self,
+        *,
+        name: str,
+        description: str = "",
+        slug: str | None = None,
+    ) -> JsonObject:
+        """Create a harness package definition."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                "/harnesses",
+                json={"name": name, "description": description, "slug": slug},
+            ),
+        )
+
+    def update(self, ref: str, **fields: Any) -> JsonObject:
+        """Patch mutable harness package metadata."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request("PATCH", f"/harnesses/{ref}", json=fields),
+        )
+
+    def delete(self, ref: str) -> None:
+        """Delete an unreferenced harness package."""
+        self._studio.request("DELETE", f"/harnesses/{ref}")
+
+    def revisions(self, ref: str) -> JsonList:
+        """List immutable revisions for one harness package."""  # noqa: DOC201
+        return cast(
+            JsonList,
+            self._studio.request("GET", f"/harnesses/{ref}/revisions"),
+        )
+
+    def create_revision(self, ref: str, package: Any) -> JsonObject:
+        """Publish a validated v1 ``HarnessPackage`` revision without secrets."""  # noqa: DOC201
+        from plural.domain import HarnessPackage
+
+        validated = (
+            package
+            if isinstance(package, HarnessPackage)
+            else HarnessPackage.model_validate(package)
+        )
+        source = validated.source.model_dump(mode="json")
+        if source["kind"] == "local":
+            source["uri"] = "local"
+        source.pop("trusted", None)
+        source.pop("unsafe_local", None)
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/harnesses/{ref}/revisions",
+                json={
+                    "manifest": validated.manifest.model_dump(mode="json"),
+                    "source": source,
+                },
+            ),
+        )
+
+    def resolve_revision(self, *, name: str, digest: str) -> JsonObject:
+        """Resolve one immutable hosted revision by package name and digest."""  # noqa: DOC201
+        package = self.get(slugify(name, fallback="harness"))
+        for revision in self.revisions(str(package["id"])):
+            if revision.get("source_digest") == digest:
+                return revision
+        raise NotFoundError(
+            f"hosted harness revision {name!r} with digest {digest!r} was not found"
+        )
+
 
 class RemoteAgent:
     """A hosted agent that can be invoked through the gateway."""
@@ -235,6 +382,9 @@ class AgentsAPI:
         description: str = "",
         environment_id: str | None = None,
         environment_revision_id: str | None = None,
+        harness_revision_id: str | None = None,
+        routing: dict[str, Any] | None = None,
+        package_spec: Any | None = None,
     ) -> RemoteAgent:
         """Create an agent.
 
@@ -244,6 +394,9 @@ class AgentsAPI:
             description: Optional description.
             environment_id: Optional environment to bind.
             environment_revision_id: Optional pinned revision.
+            harness_revision_id: Exact hosted harness revision.
+            routing: Portable model routing configuration.
+            package_spec: Exact v1 AgentSpec used for content identity.
 
         Returns:
             Created agent handle.
@@ -257,6 +410,13 @@ class AgentsAPI:
                 "description": description,
                 "environment_id": environment_id,
                 "environment_revision_id": environment_revision_id,
+                "harness_revision_id": harness_revision_id,
+                "routing": routing or {},
+                "package_spec": (
+                    package_spec.model_dump(mode="json")
+                    if package_spec is not None and hasattr(package_spec, "model_dump")
+                    else package_spec
+                ),
             },
         )
         return RemoteAgent(self._studio, cast(JsonObject, payload))
@@ -382,8 +542,12 @@ class BenchmarksAPI:
         environment_id: str | None = None,
         environment_revision_id: str | None = None,
         agent_id: str | None = None,
+        description: str = "",
+        methodology: str = "",
+        primary_metric: str = "reward",
+        slug: str | None = None,
     ) -> JsonObject:
-        """Create a benchmark.
+        """Create a benchmark definition, optionally with a first run.
 
         Args:
             name: Display name.
@@ -392,6 +556,10 @@ class BenchmarksAPI:
             environment_id: Optional environment to attach.
             environment_revision_id: Optional pinned revision.
             agent_id: Optional agent to attach.
+            description: What this eval measures.
+            methodology: How the task set and metric were chosen.
+            primary_metric: Ranking path such as ``reward`` or ``scores.solved``.
+            slug: Optional project-unique slug.
 
         Returns:
             Created benchmark detail.
@@ -403,13 +571,69 @@ class BenchmarksAPI:
                 "/benchmarks",
                 json={
                     "name": name,
+                    "slug": slug,
                     "notes": notes,
+                    "description": description,
+                    "methodology": methodology,
+                    "primary_metric": primary_metric,
                     "report": report or {},
                     "environment_id": environment_id,
                     "environment_revision_id": environment_revision_id,
                     "agent_id": agent_id,
                 },
             ),
+        )
+
+    def create_run(
+        self,
+        slug: str,
+        *,
+        report: dict[str, Any],
+        notes: str = "",
+        environment_id: str | None = None,
+        environment_revision_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> JsonObject:
+        """Attach a scored run to an existing benchmark.
+
+        Args:
+            slug: Project-unique slug, or the hosted id.
+            report: Scored report payload.
+            notes: Optional run notes.
+            environment_id: Optional environment to attach.
+            environment_revision_id: Optional pinned revision.
+            agent_id: Optional agent to attach.
+
+        Returns:
+            Updated benchmark detail including the new latest run.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/benchmarks/{slug}/runs",
+                json={
+                    "notes": notes,
+                    "report": report,
+                    "environment_id": environment_id,
+                    "environment_revision_id": environment_revision_id,
+                    "agent_id": agent_id,
+                },
+            ),
+        )
+
+    def list_runs(self, slug: str) -> JsonList:
+        """List runs for one benchmark.
+
+        Args:
+            slug: Project-unique slug, or the hosted id.
+
+        Returns:
+            Run summaries.
+        """
+        return cast(
+            JsonList,
+            self._studio.request("GET", f"/benchmarks/{slug}/runs").get("items", []),
         )
 
     def update(self, slug: str, **fields: Any) -> JsonObject:
@@ -434,6 +658,60 @@ class BenchmarksAPI:
             slug: Project-unique slug, or the hosted id.
         """
         self._studio.request("DELETE", f"/benchmarks/{slug}")
+
+    def revisions(self, ref: str) -> JsonList:
+        """List immutable revisions for one benchmark definition."""  # noqa: DOC201
+        return cast(
+            JsonList,
+            self._studio.request("GET", f"/benchmarks/{ref}/revisions"),
+        )
+
+    def create_revision(
+        self,
+        ref: str,
+        *,
+        environment_revision_id: str,
+        task_ids: Sequence[str],
+        primary_metric: str | None = None,
+        description: str | None = None,
+        methodology: str | None = None,
+        package_definition: Any | None = None,
+    ) -> JsonObject:
+        """Create and promote an ordered benchmark revision."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/benchmarks/{ref}/revisions",
+                json={
+                    "environment_revision_id": environment_revision_id,
+                    "task_ids": list(task_ids),
+                    "primary_metric": primary_metric,
+                    "description": description,
+                    "methodology": methodology,
+                    "package_definition": (
+                        package_definition.model_dump(mode="json")
+                        if package_definition is not None
+                        and hasattr(package_definition, "model_dump")
+                        else package_definition
+                    ),
+                },
+            ),
+        )
+
+    def get_revision(self, ref: str, revision_id: str) -> JsonObject:
+        """Get one immutable benchmark revision."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request("GET", f"/benchmarks/{ref}/revisions/{revision_id}"),
+        )
+
+    def promote_revision(self, ref: str, revision_id: str) -> JsonObject:
+        """Promote a prior immutable benchmark revision."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request("POST", f"/benchmarks/{ref}/revisions/{revision_id}/promote"),
+        )
 
 
 class TracesAPI:
@@ -473,6 +751,8 @@ class TracesAPI:
         environment_revision_id: str | None = None,
         agent_id: str | None = None,
         run_group_id: str | None = None,
+        job_id: str | None = None,
+        trial_id: str | None = None,
     ) -> JsonObject:
         """Ingest a trace.
 
@@ -482,6 +762,8 @@ class TracesAPI:
             environment_revision_id: Optional pinned revision.
             agent_id: Optional agent to attach.
             run_group_id: Optional run grouping id.
+            job_id: Optional evaluation job provenance.
+            trial_id: Optional evaluation trial provenance.
 
         Returns:
             Stored trace detail.
@@ -497,8 +779,260 @@ class TracesAPI:
                     "environment_revision_id": environment_revision_id,
                     "agent_id": agent_id,
                     "run_group_id": run_group_id,
+                    "job_id": job_id,
+                    "trial_id": trial_id,
                 },
             ),
+        )
+
+
+def _safe_sync_payload(value: Any) -> Any:
+    """Drop credential-shaped fields and bound uploaded diagnostic strings."""  # noqa: DOC201
+    sensitive = {
+        "authorization",
+        "cookie",
+        "password",
+        "secret",
+        "token",
+        "api_key",
+        "access_token",
+        "refresh_token",
+    }
+    if isinstance(value, dict):
+        return {
+            str(key): ("[redacted]" if str(key).lower() in sensitive else _safe_sync_payload(item))
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_safe_sync_payload(item) for item in value]
+    if isinstance(value, str):
+        return value[:20_000]
+    return value
+
+
+def _exact_package_payload(value: Any) -> Any:
+    dumped = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+    sensitive = {
+        "authorization",
+        "cookie",
+        "password",
+        "secret",
+        "token",
+        "api_key",
+        "access_token",
+        "refresh_token",
+    }
+
+    def reject_secret(item: Any) -> None:
+        if isinstance(item, dict):
+            for key, nested in item.items():
+                if str(key).lower() in sensitive and nested is not None and nested != "":
+                    raise InvalidRequestError(
+                        "exact package payload contains a credential-shaped field"
+                    )
+                reject_secret(nested)
+        elif isinstance(item, (list, tuple)):
+            for nested in item:
+                reject_secret(nested)
+
+    reject_secret(dumped)
+    return dumped
+
+
+class TrialsAPI:
+    """Read and cancel hosted immutable trials."""
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def get(self, trial_id: str) -> JsonObject:
+        """Get a hosted trial and all append-only executions."""  # noqa: DOC201
+        return cast(JsonObject, self._studio.request("GET", f"/trials/{trial_id}"))
+
+    def cancel(self, trial_id: str) -> JsonObject:
+        """Cancel a pending hosted trial record."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request("POST", f"/trials/{trial_id}/cancel"),
+        )
+
+
+class JobsAPI:
+    """Register local execution, append receipts, and finalize reports."""
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    @staticmethod
+    def _registration(
+        *,
+        benchmark_revision_id: str,
+        agent_revision_ids: Sequence[str],
+        n_attempts: int,
+        idempotency_key: str,
+        spec_hash: str | None = None,
+        job_spec: Any,
+    ) -> JsonObject:
+        return {
+            "benchmark_revision_id": benchmark_revision_id,
+            "agent_revision_ids": list(agent_revision_ids),
+            "n_attempts": n_attempts,
+            "idempotency_key": idempotency_key,
+            "spec_hash": spec_hash,
+            "job_spec": _exact_package_payload(job_spec),
+        }
+
+    def preflight(
+        self,
+        *,
+        benchmark_revision_id: str,
+        agent_revision_ids: Sequence[str],
+        n_attempts: int = 1,
+        idempotency_key: str = "preflight",
+        job_spec: Any,
+    ) -> JsonObject:
+        """Validate exact hosted compatibility without launching anything."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                "/jobs/preflight",
+                json=self._registration(
+                    benchmark_revision_id=benchmark_revision_id,
+                    agent_revision_ids=agent_revision_ids,
+                    n_attempts=n_attempts,
+                    idempotency_key=idempotency_key,
+                    job_spec=job_spec,
+                ),
+            ),
+        )
+
+    def create(
+        self,
+        *,
+        benchmark_revision_id: str,
+        agent_revision_ids: Sequence[str],
+        idempotency_key: str,
+        n_attempts: int = 1,
+        spec_hash: str | None = None,
+        job_spec: Any,
+    ) -> JsonObject:
+        """Idempotently register a client-orchestrated job."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                "/jobs",
+                json=self._registration(
+                    benchmark_revision_id=benchmark_revision_id,
+                    agent_revision_ids=agent_revision_ids,
+                    n_attempts=n_attempts,
+                    idempotency_key=idempotency_key,
+                    spec_hash=spec_hash,
+                    job_spec=job_spec,
+                ),
+            ),
+        )
+
+    def list(self, **params: Any) -> JsonList:
+        """List hosted jobs with optional status and pagination filters."""  # noqa: DOC201
+        query = {key: value for key, value in params.items() if value is not None}
+        return cast(
+            JsonList,
+            self._studio.request("GET", "/jobs", params=query).get("items", []),
+        )
+
+    def get(self, job_id: str) -> JsonObject:
+        """Get one hosted job."""  # noqa: DOC201
+        return cast(JsonObject, self._studio.request("GET", f"/jobs/{job_id}"))
+
+    def trials(self, job_id: str) -> JsonList:
+        """List deterministic hosted trial expansion order."""  # noqa: DOC201
+        return cast(JsonList, self._studio.request("GET", f"/jobs/{job_id}/trials"))
+
+    def batch(
+        self,
+        job_id: str,
+        executions: Sequence[dict[str, Any]],
+    ) -> JsonObject:
+        """Idempotently append self-reported trial receipts."""  # noqa: DOC201
+        payload = [_safe_sync_payload(item) for item in executions]
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/jobs/{job_id}/trials/batch",
+                json={"executions": payload},
+            ),
+        )
+
+    def upload_results(
+        self,
+        job_id: str,
+        *,
+        trial_keys: Sequence[str],
+        results: Sequence[Any],
+        batch_size: int = 50,
+    ) -> int:
+        """Upload complete local results in replay-safe chunks."""  # noqa: DOC201
+        if len(trial_keys) != len(results):
+            raise InvalidRequestError("hosted trial expansion does not match local results")
+        uploaded = 0
+        pending: list[dict[str, Any]] = []
+        for trial_key, raw in zip(trial_keys, results, strict=True):
+            dumped = raw.model_dump(mode="json") if hasattr(raw, "model_dump") else dict(raw)
+            receipt = dumped.get("receipt")
+            if not isinstance(receipt, dict):
+                raise InvalidRequestError("trial result is missing its receipt")
+            pending.append(
+                {
+                    "trial_key": trial_key,
+                    "result": dumped,
+                    "verifier_metadata": {"verifier_hash": receipt.get("verifier_hash")}
+                    if receipt.get("verifier_hash")
+                    else {},
+                }
+            )
+            if len(pending) >= batch_size:
+                self.batch(job_id, pending)
+                uploaded += len(pending)
+                pending = []
+        if pending:
+            self.batch(job_id, pending)
+            uploaded += len(pending)
+        return uploaded
+
+    def finalize(self, job_id: str, report: Any) -> JsonObject:
+        """Idempotently link a final local report to one BenchmarkRun."""  # noqa: DOC201
+        dumped = report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/jobs/{job_id}/finalize",
+                json={"report": _safe_sync_payload(dumped)},
+            ),
+        )
+
+    def fail(self, job_id: str, *, error_code: str, error_message: str = "") -> JsonObject:
+        """Mark a hosted job failed without implying hosted execution."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/jobs/{job_id}/fail",
+                json={
+                    "error_code": error_code,
+                    "error_message": _safe_sync_payload(error_message),
+                },
+            ),
+        )
+
+    def cancel(self, job_id: str) -> JsonObject:
+        """Cancel hosted records for a client-orchestrated job."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request("POST", f"/jobs/{job_id}/cancel"),
         )
 
 
@@ -508,9 +1042,12 @@ class Studio:
     def __init__(self, client: Client) -> None:
         self.client = client
         self.environments = EnvironmentsAPI(self)
+        self.harnesses = HarnessesAPI(self)
         self.agents = AgentsAPI(self)
         self.benchmarks = BenchmarksAPI(self)
         self.traces = TracesAPI(self)
+        self.jobs = JobsAPI(self)
+        self.trials = TrialsAPI(self)
 
     def request(
         self,
@@ -795,8 +1332,15 @@ def push_report(
     environment_id: str | None = None,
     environment_revision_id: str | None = None,
     agent_id: str | None = None,
+    description: str = "",
+    methodology: str = "",
+    primary_metric: str | None = None,
+    traces: list[Any] | None = None,
 ) -> JsonObject:
     """Store a benchmark report on the hosted project.
+
+    Creates the definition on first push and appends a run afterwards.
+    Case traces are uploaded with ``run_group_id`` set to the run id.
 
     Args:
         client: Authenticated Plural client.
@@ -806,21 +1350,70 @@ def push_report(
         environment_id: Optional environment to attach.
         environment_revision_id: Optional pinned revision.
         agent_id: Optional agent to attach.
+        description: What this eval measures.
+        methodology: How the task set and metric were chosen.
+        primary_metric: Ranking path such as ``reward`` or ``scores.solved``.
+        traces: Optional episode traces to upload with the run.
 
     Returns:
-        Created benchmark detail.
+        Created or updated benchmark detail.
     """
+    from plural.errors import NotFoundError
+
     payload = report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
     env_name = payload.get("environment") or "benchmark"
-    label = name or str(env_name)
-    return Studio(client).benchmarks.create(
-        name=label,
-        notes=notes,
-        report=payload,
-        environment_id=environment_id,
-        environment_revision_id=environment_revision_id,
-        agent_id=agent_id,
+    label = name or str(payload.get("name") or env_name)
+    metric = (
+        primary_metric
+        or payload.get("primary_metric")
+        or (payload.get("manifest") or {}).get("primary_metric")
+        or "reward"
     )
+    studio = Studio(client)
+    slug = slugify(label, fallback="benchmark")
+    try:
+        studio.benchmarks.get(slug)
+        created = studio.benchmarks.create_run(
+            slug,
+            notes=notes,
+            report=payload,
+            environment_id=environment_id,
+            environment_revision_id=environment_revision_id,
+            agent_id=agent_id,
+        )
+    except NotFoundError:
+        created = studio.benchmarks.create(
+            name=label,
+            notes=notes,
+            description=description or str(payload.get("description") or ""),
+            methodology=methodology,
+            primary_metric=str(metric),
+            report=payload,
+            environment_id=environment_id,
+            environment_revision_id=environment_revision_id,
+            agent_id=agent_id,
+        )
+    run_group = ""
+    latest = created.get("latest_run") if isinstance(created, dict) else None
+    if isinstance(latest, dict):
+        run_group = str(latest.get("run_group_id") or latest.get("id") or "")
+    if not run_group:
+        raw_manifest = payload.get("manifest")
+        manifest = raw_manifest if isinstance(raw_manifest, dict) else {}
+        run_group = str(manifest.get("run_id") or "")
+    for trace in traces or []:
+        try:
+            push_trace(
+                client,
+                trace,
+                environment_id=environment_id,
+                environment_revision_id=environment_revision_id,
+                agent_id=agent_id,
+                run_group_id=run_group or None,
+            )
+        except Exception:  # noqa: BLE001
+            continue
+    return created
 
 
 def _benchmark_kwargs(obj: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -833,7 +1426,10 @@ def _benchmark_kwargs(obj: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
             "environment_id",
             getattr(obj.env, "remote_id", None) or getattr(obj.env, "name", None),
         )
-        kwargs.setdefault("name", obj.env.name)
+        kwargs.setdefault("name", obj.name or obj.env.name)
+        kwargs.setdefault("description", obj.description)
+        kwargs.setdefault("primary_metric", obj.primary_metric)
+        kwargs.setdefault("traces", list(obj._traces))
         return kwargs
     return kwargs
 

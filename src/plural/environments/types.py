@@ -11,9 +11,48 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field
 
+HIDDEN_SCHEMA_KEY = "x-plural-hidden"
+
+
+def hidden(default: Any = ..., **kwargs: Any) -> Any:
+    """Mark a :class:`State` field as hidden from the agent.
+
+    The annotation is stored on the JSON Schema as ``x-plural-hidden`` so
+    studio can show a visibility column. Hidden fields still live on
+    ``env.state``; they must not be copied into an :class:`Observation`.
+
+    Args:
+        default: Field default, same as :func:`pydantic.Field`.
+        **kwargs: Other :func:`pydantic.Field` arguments.
+
+    Returns:
+        A Pydantic field with the hidden schema flag.
+    """
+    extra = kwargs.pop("json_schema_extra", None)
+    merged: dict[str, Any] = dict(extra) if isinstance(extra, dict) else {}
+    merged[HIDDEN_SCHEMA_KEY] = True
+    return Field(default, json_schema_extra=merged, **kwargs)
+
+
+def is_hidden_schema_field(spec: Any) -> bool:
+    """Return whether a JSON Schema property is marked hidden.
+
+    Args:
+        spec: One property schema from ``model_json_schema``.
+
+    Returns:
+        ``True`` when the field carries ``x-plural-hidden``.
+    """
+    return isinstance(spec, dict) and spec.get(HIDDEN_SCHEMA_KEY) is True
+
 
 class Observation(BaseModel):
-    """What the agent is allowed to see.
+    """What the agent can observe after an action.
+
+    ``reset`` and ``step`` return this. It is the per-turn projection of
+    :class:`State`, not the environment itself. Persist board history,
+    inventories, and other durable structures on ``State``, then copy only
+    the visible slice here in :meth:`~plural.environments.env.Environment.observe`.
 
     Subclass this with typed fields. The JSON Schema of the subclass is
     the observation contract hosted with the environment. Implement
@@ -28,8 +67,14 @@ class Observation(BaseModel):
         metadata: Extra visible fields that do not need a typed attribute.
     """
 
-    text: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    text: str = Field(
+        default="",
+        description="Default rendered view. Structured subclasses may ignore this.",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra visible fields that do not need a typed attribute.",
+    )
 
     def render(self) -> str:
         """Return the string the policy sees in the conversation.
@@ -45,19 +90,26 @@ class Observation(BaseModel):
 
 
 class State(BaseModel):
-    """Writable episode memory and other internal data structures.
+    """Persistent environment state for the episode.
 
-    Put notes, buffers, inventories, and hidden labels on a subclass.
-    The JSON Schema of that subclass is the state contract. Fields may
-    be hidden from the policy; only :class:`Observation` is visible.
+    Tools and hooks write here. Nested models on this class are the
+    durable data structures (boards, buffers, inventories). Mark secrets
+    and scorer-only facts with :func:`hidden` so they never appear in an
+    :class:`Observation`. Only the observation is visible to the agent.
 
     Attributes:
         seed: Optional RNG seed from the task.
         metadata: Extra internal fields that do not need a typed attribute.
     """
 
-    seed: int | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    seed: int | None = hidden(
+        None,
+        description="Optional RNG seed from the task.",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra internal fields that do not need a typed attribute.",
+    )
 
 
 ObsT = TypeVar("ObsT", bound=Observation)

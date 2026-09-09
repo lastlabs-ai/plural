@@ -35,7 +35,7 @@ from plural.environments.step import StepResult
 from plural.environments.stop import EpisodeError, EpisodeState, StopReason, is_stopped
 from plural.environments.task import TaskData
 from plural.environments.tool import tool
-from plural.environments.types import Observation, State
+from plural.environments.types import Observation, State, hidden
 
 __all__ = [
     "ActionResult",
@@ -60,6 +60,7 @@ __all__ = [
     "TaskDataset",
     "TraceDataset",
     "TraceFilter",
+    "hidden",
     "is_text_action",
     "is_stopped",
     "is_tool_action",

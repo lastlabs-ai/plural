@@ -28,10 +28,18 @@ plugins:
   - llmstxt:
       markdown_description: Unified LLM routing with traces, environments, and benchmarks.
       sections:
+        CLI:
+          - docs/cli/*.md
         Concepts:
           - docs/concepts/*.md
         Guides:
           - docs/guides/*.md
+        Operations:
+          - docs/operations/*.md
+        Migration:
+          - docs/migration/*.md
+        Reference:
+          - docs/reference/*.md
   - mkdocstrings:
       handlers:
         python:
@@ -57,14 +65,22 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - CLI:
+      - Overview and configuration: cli/index.md
+      - Generated command reference: reference/cli-commands.md
   - Concepts:
       - Trace: concepts/trace.md
       - Environment: concepts/environment.md
       - Dataset: concepts/dataset.md
       - Benchmark: concepts/benchmark.md
+      - Packages, jobs, and trials: concepts/execution.md
       - Routing policy: concepts/routing.md
       - Sink: concepts/sink.md
   - Guides:
+      - Build and run a job: guides/jobs.md
+      - Harness packages and adapters: guides/harnesses.md
+      - Sandbox provider plugins: guides/provider-plugins.md
+      - Studio sync: guides/studio-sync.md
       - Streaming, tools, structured output: guides/capabilities.md
       - Routing examples walkthrough: guides/routing-examples.md
       - Capture traces from an app: guides/capture-traces.md
@@ -77,7 +93,15 @@ nav:
       - Azure and Bedrock: guides/cloud-providers.md
       - Add your own provider: guides/add-provider.md
       - Migrate from OpenRouter: guides/migrate-openrouter.md
+  - Operations:
+      - Security and trust: operations/security.md
+      - Troubleshooting: operations/troubleshooting.md
+  - Migration:
+      - v0.7 to v1 foundation: migration/v1.md
   - Reference:
       - API: reference/api.md
+      - Manifest fields: reference/manifests.md
+      - Package JSON schemas: reference/schemas.md
+      - Known limitations: reference/limitations.md
       - Trace JSON schema: reference/trace-schema.md
       - Glossary: reference/glossary.md

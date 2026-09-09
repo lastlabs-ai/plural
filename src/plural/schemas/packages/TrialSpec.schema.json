@@ -1,0 +1,333 @@
+{
+  "$defs": {
+    "DeclarativeImage": {
+      "additionalProperties": false,
+      "description": "Portable subset of Daytona's declarative image builder.",
+      "properties": {
+        "base": {
+          "minLength": 1,
+          "title": "Base",
+          "type": "string"
+        },
+        "environment": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Environment",
+          "type": "object"
+        },
+        "pip_packages": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Pip Packages",
+          "type": "array"
+        },
+        "workdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workdir"
+        }
+      },
+      "required": [
+        "base"
+      ],
+      "title": "DeclarativeImage",
+      "type": "object"
+    },
+    "EnvironmentIdentity": {
+      "additionalProperties": false,
+      "description": "Exact identity and revision for a packaged environment.",
+      "properties": {
+        "digest": {
+          "title": "Digest",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "revision": {
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "revision",
+        "digest"
+      ],
+      "title": "EnvironmentIdentity",
+      "type": "object"
+    },
+    "HarnessBinding": {
+      "additionalProperties": false,
+      "description": "Exact harness binding used by one agent and every resulting trial.",
+      "properties": {
+        "digest": {
+          "title": "Digest",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "revision": {
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "revision",
+        "digest"
+      ],
+      "title": "HarnessBinding",
+      "type": "object"
+    },
+    "NetworkMode": {
+      "description": "Requested sandbox network policy.",
+      "enum": [
+        "none",
+        "restricted",
+        "full"
+      ],
+      "title": "NetworkMode",
+      "type": "string"
+    },
+    "ResourceRequirements": {
+      "additionalProperties": false,
+      "description": "Optional compute limits.",
+      "properties": {
+        "cpu": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu"
+        },
+        "disk_mb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Mb"
+        },
+        "memory_mb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Mb"
+        },
+        "pids": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pids"
+        }
+      },
+      "title": "ResourceRequirements",
+      "type": "object"
+    },
+    "RuntimeSpec": {
+      "additionalProperties": false,
+      "description": "Requested runtime provider and capability constraints.",
+      "properties": {
+        "build_context": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Build Context"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "declarative_image": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeclarativeImage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dockerfile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dockerfile"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkMode",
+          "default": "full"
+        },
+        "network_allowlist": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Network Allowlist",
+          "type": "array"
+        },
+        "provider": {
+          "default": "local",
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "read_only_root": {
+          "default": false,
+          "title": "Read Only Root",
+          "type": "boolean"
+        },
+        "resources": {
+          "$ref": "#/$defs/ResourceRequirements"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshot"
+        },
+        "timeout_seconds": {
+          "default": 300,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        },
+        "unsafe_local": {
+          "default": false,
+          "title": "Unsafe Local",
+          "type": "boolean"
+        }
+      },
+      "title": "RuntimeSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One independent attempt for one agent and environment-owned task.",
+  "properties": {
+    "agent_id": {
+      "minLength": 1,
+      "title": "Agent Id",
+      "type": "string"
+    },
+    "agent_name": {
+      "minLength": 1,
+      "title": "Agent Name",
+      "type": "string"
+    },
+    "attempt": {
+      "minimum": 1,
+      "title": "Attempt",
+      "type": "integer"
+    },
+    "environment": {
+      "$ref": "#/$defs/EnvironmentIdentity"
+    },
+    "harness": {
+      "$ref": "#/$defs/HarnessBinding"
+    },
+    "job_id": {
+      "minLength": 1,
+      "title": "Job Id",
+      "type": "string"
+    },
+    "runtime": {
+      "$ref": "#/$defs/RuntimeSpec"
+    },
+    "task_id": {
+      "minLength": 1,
+      "title": "Task Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "agent_id",
+    "agent_name",
+    "task_id",
+    "attempt",
+    "environment",
+    "harness",
+    "runtime"
+  ],
+  "title": "TrialSpec",
+  "type": "object"
+}

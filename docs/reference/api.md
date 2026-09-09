@@ -106,6 +106,63 @@ writer.
 
 ::: plural.benchmarks.runner.TaskSetMetadata
 
+## Package and execution domain
+
+The strict manifest fields are summarized in [Manifest fields](manifests.md);
+the generated schemas are the serialization authority.
+
+::: plural.domain
+
+::: plural.execution.engine.Job
+
+::: plural.execution.engine.Trial
+
+::: plural.execution.engine.VerifierOutput
+
+::: plural.execution.store.JobStore
+
+## Harness packages and protocol
+
+::: plural.harness.protocol
+
+::: plural.harness.runner
+
+::: plural.harness.packages
+
+::: plural.harness.retrieval
+
+## Sandbox providers
+
+::: plural.sandbox.base.SandboxProvider
+
+::: plural.sandbox.models
+
+::: plural.sandbox.registry.ProviderRegistry
+
+::: plural.sandbox.local.LocalProvider
+
+::: plural.sandbox.docker.DockerProvider
+
+::: plural.sandbox.daytona.DaytonaProvider
+
+## CLI configuration and auth
+
+::: plural.cli.config
+
+::: plural.cli.auth
+
+## Hosted Studio SDK
+
+::: plural.studio.Studio
+
+::: plural.studio.EnvironmentsAPI
+
+::: plural.studio.AgentsAPI
+
+::: plural.studio.BenchmarksAPI
+
+::: plural.studio.TracesAPI
+
 ## Routing
 
 ::: plural.routing.policies

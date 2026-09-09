@@ -1,0 +1,240 @@
+{
+  "$defs": {
+    "ExecutionLimits": {
+      "additionalProperties": false,
+      "description": "Externally supplied limits enforced by built-in harnesses and provider timeout.",
+      "properties": {
+        "max_cost_usd": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cost Usd"
+        },
+        "max_seconds": {
+          "default": 120,
+          "exclusiveMinimum": 0,
+          "title": "Max Seconds",
+          "type": "number"
+        },
+        "max_turns": {
+          "default": 8,
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Max Turns",
+          "type": "integer"
+        }
+      },
+      "title": "ExecutionLimits",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Execution provenance for one trial.",
+  "properties": {
+    "agent_digest": {
+      "default": "",
+      "title": "Agent Digest",
+      "type": "string"
+    },
+    "artifact_hashes": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Artifact Hashes",
+      "type": "object"
+    },
+    "attempt": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Attempt",
+      "type": "integer"
+    },
+    "benchmark_digest": {
+      "default": "",
+      "title": "Benchmark Digest",
+      "type": "string"
+    },
+    "commands_hash": {
+      "default": "",
+      "title": "Commands Hash",
+      "type": "string"
+    },
+    "completed_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Completed At"
+    },
+    "effective_capabilities": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Effective Capabilities",
+      "type": "array"
+    },
+    "effective_policy": {
+      "additionalProperties": true,
+      "title": "Effective Policy",
+      "type": "object"
+    },
+    "environment_digest": {
+      "title": "Environment Digest",
+      "type": "string"
+    },
+    "environment_source_digest": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Environment Source Digest"
+    },
+    "execution_limits": {
+      "$ref": "#/$defs/ExecutionLimits"
+    },
+    "harness_digest": {
+      "title": "Harness Digest",
+      "type": "string"
+    },
+    "image_identity": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Image Identity"
+    },
+    "instructions_hash": {
+      "default": "",
+      "title": "Instructions Hash",
+      "type": "string"
+    },
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "policy": {
+      "additionalProperties": true,
+      "title": "Policy",
+      "type": "object"
+    },
+    "retry_count": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Retry Count",
+      "type": "integer"
+    },
+    "runtime_identity": {
+      "default": "",
+      "title": "Runtime Identity",
+      "type": "string"
+    },
+    "runtime_provider": {
+      "title": "Runtime Provider",
+      "type": "string"
+    },
+    "source_receipt_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Receipt Hash"
+    },
+    "started_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Started At"
+    },
+    "task_hash": {
+      "default": "",
+      "title": "Task Hash",
+      "type": "string"
+    },
+    "timings": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Timings",
+      "type": "object"
+    },
+    "trace_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trace Hash"
+    },
+    "trial_id": {
+      "title": "Trial Id",
+      "type": "string"
+    },
+    "trust": {
+      "const": "self_reported",
+      "default": "self_reported",
+      "title": "Trust",
+      "type": "string"
+    },
+    "verifier_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Verifier Hash"
+    }
+  },
+  "required": [
+    "trial_id",
+    "job_id",
+    "environment_digest",
+    "harness_digest",
+    "runtime_provider"
+  ],
+  "title": "TrialReceipt",
+  "type": "object"
+}

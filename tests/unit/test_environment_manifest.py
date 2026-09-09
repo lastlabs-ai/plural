@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from plural.environments.env import Environment, tool
-from plural.environments.types import Observation, State
+from plural.environments.types import Observation, State, hidden, is_hidden_schema_field
 from plural.studio import environment_manifest
 
 
 class MemoryState(State):
     notes: list[str] = []
+    secret: str = hidden("", description="Not copied into the observation.")
 
 
 class VisibleObs(Observation):
@@ -48,6 +49,9 @@ def test_observation_and_state_schemas_come_from_generic_models() -> None:
     state = env.state_schema()
     assert observation["properties"]["n"]["type"] == "integer"
     assert state["properties"]["notes"]["type"] == "array"
+    assert is_hidden_schema_field(state["properties"]["secret"])
+    assert is_hidden_schema_field(state["properties"]["seed"])
+    assert not is_hidden_schema_field(state["properties"]["notes"])
     assert env._contract_names() == ("VisibleObs", "MemoryState")
 
 

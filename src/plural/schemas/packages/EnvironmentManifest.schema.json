@@ -1,0 +1,345 @@
+{
+  "$defs": {
+    "EnvironmentCommand": {
+      "additionalProperties": false,
+      "description": "Declared argv-only command exposed to bounded harness tool loops.",
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Command",
+          "type": "array"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "timeout_seconds": {
+          "default": 30,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "command"
+      ],
+      "title": "EnvironmentCommand",
+      "type": "object"
+    },
+    "ExecutionLimits": {
+      "additionalProperties": false,
+      "description": "Externally supplied limits enforced by built-in harnesses and provider timeout.",
+      "properties": {
+        "max_cost_usd": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cost Usd"
+        },
+        "max_seconds": {
+          "default": 120,
+          "exclusiveMinimum": 0,
+          "title": "Max Seconds",
+          "type": "number"
+        },
+        "max_turns": {
+          "default": 8,
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Max Turns",
+          "type": "integer"
+        }
+      },
+      "title": "ExecutionLimits",
+      "type": "object"
+    },
+    "HarnessBinding": {
+      "additionalProperties": false,
+      "description": "Exact harness binding used by one agent and every resulting trial.",
+      "properties": {
+        "digest": {
+          "title": "Digest",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "revision": {
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "revision",
+        "digest"
+      ],
+      "title": "HarnessBinding",
+      "type": "object"
+    },
+    "PackageSource": {
+      "additionalProperties": false,
+      "description": "Immutable source for a harness package.\n\nPublished and remote sources require a digest. An unsigned local source is\naccepted only when explicitly marked unsafe. ``trusted`` is retained only\nfor manifest migration and never bypasses digest or unsafe checks.",
+      "properties": {
+        "digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        },
+        "kind": {
+          "enum": [
+            "local",
+            "oci",
+            "archive"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "trusted": {
+          "default": false,
+          "title": "Trusted",
+          "type": "boolean"
+        },
+        "unsafe_local": {
+          "default": false,
+          "title": "Unsafe Local",
+          "type": "boolean"
+        },
+        "uri": {
+          "minLength": 1,
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "uri"
+      ],
+      "title": "PackageSource",
+      "type": "object"
+    },
+    "TaskDefinition": {
+      "additionalProperties": false,
+      "description": "Task owned by an environment package.",
+      "properties": {
+        "expected": {
+          "default": null,
+          "title": "Expected"
+        },
+        "input": {
+          "title": "Input"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "task_id": {
+          "minLength": 1,
+          "title": "Task Id",
+          "type": "string"
+        },
+        "verifier_input": {
+          "default": null,
+          "title": "Verifier Input"
+        }
+      },
+      "required": [
+        "task_id",
+        "input"
+      ],
+      "title": "TaskDefinition",
+      "type": "object"
+    },
+    "VerifierManifest": {
+      "additionalProperties": false,
+      "description": "Isolated verifier command and required evidence contract.",
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Command",
+          "type": "array"
+        },
+        "evidence_required": {
+          "default": true,
+          "title": "Evidence Required",
+          "type": "boolean"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "required_artifacts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Artifacts",
+          "type": "array"
+        },
+        "result_path": {
+          "default": "verifier-result.json",
+          "title": "Result Path",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "default": 60,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "VerifierManifest",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Environment package metadata, tasks, and allowed harnesses.",
+  "properties": {
+    "allowed_harnesses": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/HarnessBinding"
+      },
+      "title": "Allowed Harnesses",
+      "type": "array"
+    },
+    "commands": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EnvironmentCommand"
+      },
+      "title": "Commands",
+      "type": "array"
+    },
+    "context": {
+      "default": null,
+      "title": "Context"
+    },
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "instructions": {
+      "default": "",
+      "title": "Instructions",
+      "type": "string"
+    },
+    "limits": {
+      "$ref": "#/$defs/ExecutionLimits"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "policy": {
+      "additionalProperties": true,
+      "title": "Policy",
+      "type": "object"
+    },
+    "revision": {
+      "default": "0.1.0",
+      "minLength": 1,
+      "title": "Revision",
+      "type": "string"
+    },
+    "runtime_capabilities": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Runtime Capabilities",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PackageSource"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tasks": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TaskDefinition"
+      },
+      "title": "Tasks",
+      "type": "array"
+    },
+    "verifier": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VerifierManifest"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "EnvironmentManifest",
+  "type": "object"
+}

@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from plural import Environment, TaskData
-from plural.environments import Observation, State, tool
+from plural.environments import Observation, State, hidden, tool
 
 try:
     from .words import is_allowed, pattern, pick_answer
@@ -37,7 +37,7 @@ class WordleRow(BaseModel):
 class WordleState(State):
     """Hidden puzzle plus the board. ``secret`` is not in the observation."""
 
-    secret: str = ""
+    secret: str = hidden("", description="Answer word. Never copied into the observation.")
     rows: list[WordleRow] = Field(default_factory=list)
     solved: bool = False
     seen_marks: dict[str, str] = Field(default_factory=dict)

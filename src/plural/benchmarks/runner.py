@@ -148,6 +148,8 @@ class RunManifest(BaseModel):
     task_dataset: TaskDatasetMetadata | None = None
     package_version: str = Field(default_factory=lambda: _package_version())
     status: Literal["completed", "completed_with_failures"] = "completed"
+    benchmark_name: str = ""
+    primary_metric: str = "reward"
 
 
 @dataclass(frozen=True)
@@ -186,6 +188,9 @@ class Report(BaseModel):
 
     environment: str
     environment_version: str = "0.1.0"
+    name: str = ""
+    description: str = ""
+    primary_metric: str = "reward"
     models: dict[str, ModelStats] = Field(default_factory=dict)
     win_rates: dict[str, dict[str, float]] = Field(default_factory=dict)
     cases: list[CaseResult] = Field(default_factory=list)
@@ -290,6 +295,9 @@ class Benchmark:
         client: Client,
         repeats: int = 1,
         concurrency: int = 4,
+        name: str = "",
+        description: str = "",
+        primary_metric: str = "reward",
         environment_factory: Callable[[], Environment[Any, Any]] | None = None,
         runtime_factory: Callable[[], Runtime] | None = None,
     ) -> None:
@@ -314,6 +322,10 @@ class Benchmark:
         self._trace_writer: TraceWriter | None = None
         self.repeats = repeats
         self.concurrency = concurrency
+        self.name = name or env.name
+        self.description = description
+        self.primary_metric = primary_metric or "reward"
+        self._traces: list[Trace] = []
         self.report: Report | None = None
 
     @classmethod
@@ -324,6 +336,9 @@ class Benchmark:
         *,
         repeats: int = 1,
         concurrency: int = 4,
+        name: str = "",
+        description: str = "",
+        primary_metric: str = "reward",
         environment_factory: Callable[[], Environment[Any, Any]] | None = None,
         runtime_factory: Callable[[], Runtime] | None = None,
         trace_writer: TraceWriter | None = None,
@@ -339,6 +354,9 @@ class Benchmark:
             policies: Ordered mapping of target names to fresh-policy factories.
             repeats: Times to run each task per target.
             concurrency: Maximum concurrent episodes.
+            name: Benchmark display name.
+            description: What the benchmark measures.
+            primary_metric: Reward, score, cost, or latency path used for comparison.
             environment_factory: Optional factory for a fresh environment per job.
             runtime_factory: Optional factory for a fresh tool runtime per job.
             trace_writer: Optional caller-owned writer for successful episode traces.
@@ -376,6 +394,10 @@ class Benchmark:
         benchmark._trace_writer = trace_writer
         benchmark.repeats = repeats
         benchmark.concurrency = concurrency
+        benchmark.name = name or env.name
+        benchmark.description = description
+        benchmark.primary_metric = primary_metric or "reward"
+        benchmark._traces = []
         benchmark.report = None
         return benchmark
 
@@ -586,11 +608,20 @@ class Benchmark:
             runtime_fingerprints = [_local_runtime_fingerprint(self.env)]
 
         cases = [_case_result(key, results[key]) for key, _task in jobs]
+        self._traces = []
+        for _key, result in results.items():
+            item = result.item
+            if isinstance(item, Rollout):
+                self._traces.append(item.trace)
+            elif result.failure_trace is not None:
+                self._traces.append(result.failure_trace)
         model_stats = {
             model: _aggregate(model, [case for case in cases if case.key.model == model])
             for model in self.models
         }
-        win_rates, win_rate_pairs = _win_rates(self.models, cases)
+        win_rates, win_rate_pairs = _win_rates(
+            self.models, cases, primary_metric=self.primary_metric
+        )
         completed_at = datetime.now(timezone.utc)
         status: Literal["completed", "completed_with_failures"] = (
             "completed_with_failures"
@@ -608,6 +639,9 @@ class Benchmark:
         self.report = Report(
             environment=environment_identity.name,
             environment_version=environment_identity.version,
+            name=self.name,
+            description=self.description,
+            primary_metric=self.primary_metric,
             models=model_stats,
             win_rates=win_rates,
             cases=cases,
@@ -626,6 +660,8 @@ class Benchmark:
                 task_set=task_set_metadata,
                 task_dataset=dataset_metadata,
                 status=status,
+                benchmark_name=self.name,
+                primary_metric=self.primary_metric,
             ),
             metadata=metadata,
         )
@@ -800,11 +836,36 @@ def _percentile(values: list[float], q: float) -> float | None:
     return ordered[lo] * (hi - idx) + ordered[hi] * (idx - lo)
 
 
+def case_metric(case: CaseResult, primary_metric: str) -> float | None:
+    """Return the comparable value for one case on the chosen metric."""
+    path = (primary_metric or "reward").strip()
+    if path in {"reward", "mean_reward"}:
+        return case.reward
+    if path in {"latency_ms", "mean_latency_ms"}:
+        value = case.metrics.get("latency_ms")
+        return float(value) if isinstance(value, (int, float)) else None
+    if path in {"cost", "mean_cost"}:
+        value = case.metrics.get("cost")
+        return float(value) if isinstance(value, (int, float)) else None
+    name = path.split(".", 1)[1] if path.startswith("scores.") else path
+    value = case.scores.get(name)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _metric_lower_is_better(primary_metric: str) -> bool:
+    tail = primary_metric.split(".")[-1]
+    return tail in {"latency_ms", "mean_latency_ms", "cost", "mean_cost"}
+
+
 def _win_rates(
-    models: list[str], cases: list[CaseResult]
+    models: list[str],
+    cases: list[CaseResult],
+    *,
+    primary_metric: str = "reward",
 ) -> tuple[dict[str, dict[str, float]], list[WinRatePair]]:
     result: dict[str, dict[str, float]] = {model: {} for model in models}
     pairs: list[WinRatePair] = []
+    lower = _metric_lower_is_better(primary_metric)
     by_slot = {(case.key.model, case.key.task_id, case.key.repeat): case for case in cases}
     slots = [(case.key.task_id, case.key.repeat) for case in cases if case.key.model == models[0]]
     for i, a in enumerate(models):
@@ -816,14 +877,16 @@ def _win_rates(
             for task_id, repeat in slots:
                 a_case = by_slot[(a, task_id, repeat)]
                 b_case = by_slot[(b, task_id, repeat)]
-                if a_case.reward is None or b_case.reward is None:
+                a_value = case_metric(a_case, primary_metric)
+                b_value = case_metric(b_case, primary_metric)
+                if a_value is None or b_value is None:
                     excluded += 1
-                elif a_case.reward > b_case.reward:
-                    wins += 1
-                elif a_case.reward < b_case.reward:
-                    losses += 1
-                else:
+                elif a_value == b_value:
                     ties += 1
+                elif (a_value < b_value) if lower else (a_value > b_value):
+                    wins += 1
+                else:
+                    losses += 1
             compared = wins + losses + ties
             rate = (wins + 0.5 * ties) / compared if compared else None
             pairs.append(
