@@ -1,31 +1,9 @@
 # Build and run a job
 
-## Scaffold the complete graph
-
-Run these from an empty directory:
-
-```bash
-plural env init environment --name support
-plural harness init harness --name support-loop
-plural harness validate harness
-plural harness add harness --environment environment
-plural benchmark init benchmark.yaml --name smoke --environment environment
-plural agent init agent.yaml --name candidate --model openai/gpt-4o-mini \
-  --environment environment --harness harness
-plural job init job.yaml --environment environment \
-  --benchmark benchmark.yaml --agent agent.yaml
-plural run job.yaml --dry-run --format json
-```
-
-Edit `environment/tasks.jsonl` for tasks and `environment/environment.yaml` for
-instructions, context, declared argv commands, limits, policy, verifier, and
-runtime capabilities. The scaffold's `environment.py` and Dockerfile are
-starting points; the package loader currently executes the declarative
-manifest/harness protocol, not the legacy `Environment` subclass directly.
-
-After any Environment change, recreate the Benchmark and Agent because both pin
-the exact Environment identity. After a Harness change, re-add it and recreate
-the Agent because the binding digest changed.
+Start with the [complete CLI walkthrough](../tutorials/cli-walkthrough.md) to
+create the files used here, configure model credentials, and grant the harness
+secret. Add a [verifier](../tutorials/package-tools.md) before treating a job as
+a scored evaluation. This page covers operations after your first run.
 
 ## Validate and inspect
 
@@ -55,11 +33,14 @@ only for trusted, unverified development runs.
 
 ## Docker
 
+Examples include `--unsafe-local` to permit the tutorial's mutable local harness
+source. With a digest-pinned archive binding, this source opt-in is unnecessary.
+
 Install Docker and make sure `plural runtime doctor docker` reports healthy.
 Then:
 
 ```bash
-plural run job.yaml --runtime docker --concurrency 4 --retry 2
+plural run job.yaml --runtime docker --unsafe-local --concurrency 4 --retry 2
 ```
 
 If no image/build context is configured, the CLI uses the Environment directory
@@ -79,7 +60,7 @@ Opt-in daemon integration tests use the `docker` pytest marker.
 pip install "plural[daytona]"
 export DAYTONA_API_KEY='...'
 plural runtime doctor daytona
-plural run job.yaml --runtime daytona
+plural run job.yaml --runtime daytona --unsafe-local
 ```
 
 In `job.yaml`, set an image, snapshot, or declarative image. Daytona supports
@@ -113,6 +94,7 @@ plural job resume JOB_ID
 plural job retry JOB_ID
 plural job cancel JOB_ID
 plural job regrade JOB_ID
+plural trial show TRIAL_ID --job JOB_ID
 ```
 
 Resume and retry currently perform the same locked resume operation: successful

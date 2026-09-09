@@ -1,5 +1,68 @@
 # Troubleshooting
 
+## Setup and hosted access
+
+**`plural` is not found.** Activate the virtual environment where you installed
+Plural, or use `uv run plural`. Check `python -m pip show plural` in the same
+environment. See [setup](../getting-started/setup.md).
+
+**CLI login works, but `Client()` says no providers are configured.** The SDK
+does not read the CLI credential store. Export `PLURAL_API_KEY` or pass
+`api_key=`. For BYOK, pass `providers={...}` explicitly.
+
+**I can call a model, but cannot fetch project objects.** Direct provider keys
+do not authorize Plural Intel. Supply a Plural API key and, for an account key,
+a project ID. Verify the SDK `base_url` separately from CLI `--api-url` and the
+harness's `PLURAL_GATEWAY_URL`.
+
+**`auth status` is successful, but the job cannot call a model.** The external
+harness needs a granted secret name in its agent configuration and that secret's
+value in the process environment. Stored device login is not automatically
+forwarded. Confirm the harness endpoint and model ID too.
+
+**Create returns a conflict.** The slug already exists in this project. Fetch
+it and intentionally update it, or choose a new name. A failed update should
+not automatically fall back to creating a second object.
+
+**A fetched environment has no `rollout` method.** Hosted environment reads
+return metadata dictionaries. Install the author's source to run locally, or
+restore complete package definitions and matching sources when supplied. See
+[object retrieval](../guides/push-to-plural.md).
+
+**`agent list` does not show my Intel agents.** The CLI lists local configuration
+files. Use `client.agents.list()` for hosted agents. `org list` and `project list`
+currently report unsupported backend functionality; use known project IDs.
+
+**A hosted agent exists but invocation fails.** Check project permissions and
+whether the deployment implements/configures its agent chat endpoint. Creating
+metadata does not deploy your local Python tools or start a hosted sandbox.
+
+## SDK results and traces
+
+**Score is missing or zero.** No scorer/verifier means no quality score. Zero
+means the configured check did not award credit, not necessarily an execution
+failure. Do not use an exact-answer scorer on unlabeled production work without
+changing how that case is evaluated.
+
+**Trace content is blank.** Content capture is off by default. For approved
+synthetic/debug data, set `capture_content=True`. Close/flush the client before
+reading newly queued traces. A sampled-out trace will not be in the sink.
+
+**Late labels did not update JSONL.** JSONL is append-only. Use SQLite for
+persistent label updates by ID; flush pending trace writes before attaching a
+label to an already-written record.
+
+**Dataset load fails or benchmark reports a stale hash.** Keep the JSONL file
+with its manifest. After intentionally changing tasks, save a new snapshot;
+do not manually edit the manifest hash. `Benchmark.run(dataset=...)` expects a
+`TaskDataset`, not a completed trace `Dataset`.
+
+**A custom environment cannot be copied for comparison.** Supply
+`environment_factory=` or implement `spawn()` when your environment constructor
+needs extra arguments or registered closures capture mutable state.
+
+## Package execution
+
 Start with package validation, a dry run, and provider health:
 
 ```bash
@@ -51,7 +114,8 @@ Common failures:
   `plural job upload <job_id> --store <path>`.
 - **Auth fails or expires** — confirm `--api-url`, use `--no-browser` when
   appropriate, and verify the service implements the documented device
-  endpoints. No client-side refresh loop is wired into CLI commands yet.
+  endpoints. Hosted publication/sync can refresh stored device credentials, but there is
+  no general background refresh loop. Reauthenticate when auth checks expire.
 
 Process exit `1` means a run returned at least one non-success Trial. Exit `2`
 means usage/validation/configuration or another handled command error. Inspect

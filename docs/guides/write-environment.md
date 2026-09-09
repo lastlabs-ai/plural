@@ -1,4 +1,7 @@
-# Write your first environment
+# Write a stateful Python environment
+
+New to Plural? Start with the [complete support walkthrough](../tutorials/sdk-walkthrough.md).
+This guide adds state, custom actions, replay, and lifecycle details.
 
 Use this checklist:
 
@@ -37,7 +40,7 @@ class CounterEnv(Environment[CounterObservation, CounterState]):
         super().setup(task)
         self.state = CounterState(
             seed=self.seed,
-            target=int(task.metadata.get("target", 2)),
+            target=int(task.expected if task.expected is not None else 2),
         )
 
     def observe(self) -> CounterObservation:
@@ -47,7 +50,7 @@ class CounterEnv(Environment[CounterObservation, CounterState]):
         return self.state.count >= self.state.target
 
     def snapshot(self) -> dict:
-        return {"count": self.state.count, "target": self.state.target}
+        return {"count": self.state.count}
 
     @tool
     def increment(self, by: int = 1) -> int:
@@ -90,7 +93,7 @@ task = TaskData(
     task_id="count-to-two",
     input="Reach the target count.",
     expected=2,
-    metadata={"target": 2, "seed": 7},
+    metadata={"seed": 7},
 )
 
 @env.scorer
@@ -201,7 +204,7 @@ uv run python examples/environment/wordle/run.py --secret crane
 
 ## Create the environment on Plural
 
-Once the harness exists in code, sync it to the hosted project:
+Once the environment exists in code, sync it to the hosted project:
 
 ```python
 client.create(env)

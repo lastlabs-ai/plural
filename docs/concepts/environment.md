@@ -1,8 +1,8 @@
 # Environment
 
-An `Environment[Observation, State]` is a versioned, Gymnasium-shaped harness for tasks, actions, observations, stop conditions, and scorers. The policy is separate from the environment, and every completed run produces one scored episode [Trace](trace.md).
+An `Environment[Observation, State]` is a versioned, Gymnasium-shaped interface for tasks, actions, observations, stop conditions, and scorers. The policy is separate from the environment, and every completed run produces one scored episode [Trace](trace.md).
 
-The environment is everything except the model: instructions, tools (actions), observation and state schemas, guardrails, tasks, runtime, and how a turn becomes a `ChatRequest`. A working env can be a name, a version, one `@tool`, and `observe()`. Extra fields stay optional.
+In this Python episode API, the environment owns instructions, tools (actions), observation and state schemas, guardrails, tasks, runtime, and how a turn becomes a `ChatRequest`. A working env can be a name, a version, one `@tool`, and `observe()`. Extra fields stay optional.
 
 ```python
 class RefundEnv(Environment[RefundObservation, RefundState]):

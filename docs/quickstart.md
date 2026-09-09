@@ -1,133 +1,86 @@
-# Quickstart
+# Your first evaluation
 
-Get a multi-provider chat call in under a minute.
+In this walkthrough you will define one customer-support task, run a
+deterministic policy, and inspect its score. No API key or model call is needed
+until the last step. Complete [installation](getting-started/setup.md) first.
 
-## Install
+## 1. Save a tiny environment
+
+Create `first_eval.py` with:
+
+```python
+from plural import ChatResponse, Environment, ScriptedPolicy, TaskData
+
+
+def make_environment():
+    env = Environment(name="support-answer", version="0.1.0")
+
+    @env.scorer
+    def correct(rollout):
+        return float(rollout.response.text.strip().lower() == rollout.task.expected)
+
+    return env
+
+
+task = TaskData(
+    task_id="order-status",
+    input="Reply with only the word shipped.",
+    expected="shipped",
+)
+
+if __name__ == "__main__":
+    policy = ScriptedPolicy([
+        ChatResponse.model_validate({
+            "id": "offline", "model": "scripted",
+            "choices": [{"message": {"role": "assistant", "content": "shipped"}}],
+        }),
+    ])
+    rollout = make_environment().run_episode(task, policy, model="scripted")
+    print("Score:", rollout.trace.outcome.reward)
+    print("Stopped because:", rollout.trace.stop_reason)
+```
+
+## 2. Run it
 
 ```bash
-pip install plural
+python first_eval.py
 ```
 
-## Set your API key
+The score should be `1.0`. `policy_stop` means the policy finished with a text
+answer. The scorer awarded credit independently; finishing and answering
+correctly are different things.
 
-```bash
-export PLURAL_API_KEY=plural-...
-```
+The environment contains the scoring rule. The task contains the input and
+hidden expected answer. The policy supplies the response. This smoke test checks
+the wiring; it does not measure a model's ability.
 
-## Primary: one plural API key
+## 3. Replace the scripted policy with a model
 
-Looks like the OpenAI SDK — construct a client, call `chat`, close when done.
-`Client()` reads `PLURAL_API_KEY` from the environment automatically:
-
-```python
-from plural import Client, Message
-
-client = Client()
-assert client.is_authenticated()
-
-response = client.chat(
-    model="openai/gpt-4o-mini",
-    messages=[Message(role="user", content="Summarize plural in one sentence.")],
-    models=["anthropic/claude-sonnet-4"],  # optional fallback chain
-)
-print(response.text)
-print(response.usage.cost)
-client.close()
-```
-
-Traces append to `.plural/traces.jsonl` by default.
-
-## Tracing style
-
-Use a context manager when you want explicit lifecycle + content capture:
-
-```python
-from plural import Client, Message
-from plural.tracing import JSONLSink
-
-with Client(sink=JSONLSink(".plural/traces.jsonl"), capture_content=True) as client:
-    response = client.chat(
-        model="anthropic/claude-sonnet-4",
-        messages=[Message(role="user", content="Hello")],
-    )
-    print(response.text)
-```
-
-## Secondary: bring your own keys (BYOK)
-
-Pass upstream keys explicitly — they are not loaded unless you ask:
-
-```python
-import os
-from plural import Client
-
-client = Client(
-    providers={
-        "openai": os.environ["OPENAI_API_KEY"],
-        "anthropic": os.environ["ANTHROPIC_API_KEY"],
-    },
-)
-```
-
-Prefer the plural API key for product traffic. See [Routing examples](guides/routing-examples.md).
-
-## Fallback and cost-aware routing
+After [setting your API key](getting-started/setup.md), save `model_eval.py`
+next to `first_eval.py`:
 
 ```python
 from plural import Client
-from plural.routing import LeastCost
+from first_eval import make_environment, task
 
-client = Client(policy=LeastCost())
+with Client(capture_content=True) as client:
+    rollout = make_environment().rollout(task, client, model="openai/gpt-4o-mini")
+    print("Answer:", rollout.response.text)
+    print("Score:", rollout.trace.outcome.reward)
+    print("Trace:", rollout.trace.trace_id)
 ```
-
-## Create local work on a hosted project
-
-`client.create(x)` and `client.update(x)` sync an environment, trace, or
-benchmark report by slug. Agents are created on the host
-(`client.agents.create(...)`) because they need a model and environment
-binding.
-
-```python
-from plural import Environment
-
-env = Environment(name="refund-support", version="0.1.0")
-client.create(env)
-client.update(env)
-```
-
-A project-scoped API key already knows the project. An account-scoped key
-must pass `project=` or `PLURAL_PROJECT`. See [Create and update hosted objects](guides/push-to-plural.md).
-
-## Next concepts
-
-1. [Trace](concepts/trace.md) — what got recorded
-2. [Environment](concepts/environment.md) — turn tasks into scored traces
-3. [Benchmark](concepts/benchmark.md) — compare models on your environment
-4. [Create and update hosted objects](guides/push-to-plural.md) — sync env, trace, and report
-
-## Package execution quickstart (Alpha)
-
-The CLI is included in the base install. This offline sequence creates every v1
-package edge and validates the deterministic plan:
 
 ```bash
-plural env init environment --name demo
-plural harness init harness --name demo-loop
-plural harness add harness --environment environment
-plural benchmark init benchmark.yaml --environment environment
-plural agent init agent.yaml --name demo-agent --model openai/gpt-4o-mini \
-  --environment environment --harness harness
-plural job init job.yaml --environment environment \
-  --benchmark benchmark.yaml --agent agent.yaml
-plural run job.yaml --dry-run --format json
+python model_eval.py
 ```
 
-Run trusted development code with `--runtime local --unsafe-local`, or use
-Docker after `plural runtime doctor docker`. A live model call also needs the
-secret named by the Agent/Harness. Local execution makes no external writes by
-default. Use `--sync` for
-best-effort hosted registration/upload or `plural job upload` to replay a
-completed local result.
+This step makes a paid model call. The trace is saved to `.plural/traces.jsonl`.
+`capture_content=True` saves prompt/response content for this synthetic example;
+it is off by default.
 
-Continue with [CLI configuration](cli/index.md), [job
-execution](guides/jobs.md), and [security boundaries](operations/security.md).
+## Next: make the test useful
+
+A one-question test does not establish quality. Continue with the
+[practical SDK walkthrough](tutorials/sdk-walkthrough.md) to add real tools and
+multiple tasks, compare models, and save reports. If you want executable
+packages and durable jobs, follow the [CLI walkthrough](tutorials/cli-walkthrough.md).

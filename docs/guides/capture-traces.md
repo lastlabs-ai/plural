@@ -1,36 +1,42 @@
 # Capture traces from an existing app
 
-Swap your provider client for plural — about ten lines.
+Configure credentials using [setup](../getting-started/setup.md), then wrap the
+call your application already makes. This example uses synthetic data and
+SQLite so a later review can update the stored trace.
 
 ```python
-from plural import Client, Message
+from plural import Client, Message, SQLiteSink
 
 client = Client(
-    providers={"openai": os.environ["OPENAI_API_KEY"]},
+    sink=SQLiteSink("app-traces.db"),
     capture_content=True,
     tags={"service": "checkout-bot"},
 )
 
-def ask(prompt: str) -> str:
-    resp = client.chat(
+def ask(prompt: str):
+    response = client.chat(
         model="openai/gpt-4o-mini",
         messages=[Message(role="user", content=prompt)],
     )
-    return resp.text or ""
+    return response.text or "", response.raw["plural_trace_id"]
+
+try:
+    answer, trace_id = ask("Write a one-sentence order confirmation.")
+    print(answer)
+    client.flush()
+    # Add only after an actual reviewer supplies this assessment:
+    client.label(trace_id, reward=1.0, feedback="helpful")
+finally:
+    client.close()
 ```
 
-Later, when a human rates the answer:
+In a service, reuse the client and close it at application shutdown. Keep the
+trace ID alongside the answer so human feedback can reference the right record.
+Content capture is off by default; configure [redaction](redact-pii.md) before
+retaining real customer data. JSONL is append-only and cannot update an existing
+record in place when a late label arrives.
 
-```python
-client.label(trace_id, reward=1.0, feedback="helpful")
-```
-
-`trace_id` is on `response.raw["plural_trace_id"]`.
-
-To store a local episode or production `Trace` on the hosted project:
-
-```python
-client.create(trace)
-```
-
-See [Create and update hosted objects](push-to-plural.md).
+To store an existing local `Trace` on Plural Intel, call `client.create(trace)`.
+That is an explicit hosted write, separate from local tracing. See the
+[trace and dataset walkthrough](../tutorials/traces-and-datasets.md) for reading,
+filtering, saving, and uploading traces.

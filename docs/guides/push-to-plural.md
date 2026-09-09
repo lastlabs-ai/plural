@@ -1,108 +1,274 @@
-# Create and update hosted objects
+# Fetch and update Plural Intel objects
 
-!!! warning "Legacy Studio object surface"
-    This page covers the existing SDK `Environment`, hosted `RemoteAgent`,
-    legacy `Benchmark`/`Report`, and `Trace` shapes. The v1 CLI also supports
-    `plural env push`, opt-in `plural run --sync`, and replay with
-    `plural job upload`; see [Studio sync](studio-sync.md).
+This walkthrough uses the current hosted SDK. Source code calls this integration
+`Studio`; these pages call the hosted product **Plural Intel**. You need a
+compatible hosted deployment, a Plural API key, and project access from
+[setup](../getting-started/setup.md). The SDK sends real reads and writes;
+examples labelled create/update are not local previews.
 
-Environments, agents, and benchmarks are addressed by a **slug** that is unique
-inside the project. You do not need the hosted UUID to read, create, or update
-them. Traces stay id-based because there are many of them.
+## 1. Find your objects
 
-```python
-from plural import Client, Environment
-
-client = Client()  # project key, or Client(project="...") for an account key
-env = Environment(name="refund-support", version="0.1.0", system_prompt="Be brief.")
-client.create(env)   # 409 if refund-support already exists
-client.update(env)   # finds it by env.slug
-```
-
-`env.create(client)` and `env.update(client)` are aliases.
-`client.push(env)` / `env.push(client)` still upsert by slug.
-
-## Identity
-
-| Object | Lookup | Create if the slug exists |
-| --- | --- | --- |
-| Environment | slug (or id) | `409` |
-| Agent | slug (or id) | `409` |
-| Benchmark | slug (or id) | `409` |
-| Trace | row id or `trace_id` | upserts that `trace_id` |
-
-The slug is derived from the name (`Refund Support` → `refund-support`). Pass
-that string to `get`, `update`, `delete`, and to attach an environment or agent
-on another object.
+Save as `list_objects.py` and run with `python list_objects.py`:
 
 ```python
-client.environments.get("refund-support")
-client.agents.get("support").invoke("Refund this ticket")
-client.benchmarks.update("smoke", notes="nightly")
+from plural import Client
+
+with Client() as client:
+    for label, objects in (
+        ("Environments", client.environments.list()),
+        ("Agents", client.agents.list()),
+        ("Benchmarks", client.benchmarks.list()),
+    ):
+        print(label)
+        for item in objects:
+            print(item.get("slug") or item.get("id"), item.get("name"))
 ```
 
-## Account keys need a project
+An empty list is valid. A permission or project error is different; check the
+selected project before assuming an object is missing. The SDK returns the
+server's list response; it does not promise automatic pagination of all objects.
 
-A **project key** already knows the project. An **account key** must pass it:
+Environment, agent, and benchmark **slugs** are unique within a project.
+For example, a name such as “Order Support” normally becomes `order-support`.
+Use returned slugs or IDs in subsequent calls; do not guess revision IDs.
+Traces and jobs use their own IDs.
+
+## 2. Fetch objects and save a local snapshot
+
+Replace the three slugs below with values returned by your project:
 
 ```python
-client = Client(api_key="plural_...", project="<project_id>")
-# or export PLURAL_PROJECT
+import json
+from pathlib import Path
+from plural import Client
+
+with Client() as client:
+    environment = client.environments.get("order-support")
+    agent = client.agents.get("support-assistant")
+    benchmark = client.benchmarks.get("order-support-smoke")
+    snapshot = {
+        "environment": environment,
+        "agent": agent.data,
+        "benchmark": benchmark,
+    }
+    Path("intel-objects.json").write_text(
+        json.dumps(snapshot, indent=2), encoding="utf-8",
+    )
+    print("Agent model:", agent.model)
 ```
 
-Without a project, studio calls return an error.
+The environment and benchmark are dictionaries. The agent is a `RemoteAgent`
+handle; `.data` holds the response dictionary. Saving these is a metadata
+snapshot, **not an executable package download**. Treat snapshots as project
+data: they may contain task inputs or other sensitive content.
 
-## Environment
+There is no `Environment.pull()`, `env.agent()`, or general `plural pull`
+command in this release. Getting a hosted environment does not reconstruct
+Python tools, provision services, or install dependencies.
+
+## 3. Use a hosted agent
 
 ```python
-from plural import Environment
+from plural import Client
 
-env = Environment(name="refund-support", version="0.1.0")
-client.create(env)
-client.update(env)
-print(env.slug, env.remote_id)
+with Client() as client:
+    agent = client.agents.get("support-assistant")
+    response = agent.invoke("Where is order A100?")
+    print(response.text)
 ```
 
-`create` fails if the slug is taken. `update` uploads a new revision when the
-fingerprint changed.
+This invokes the deployment's agent chat endpoint and may incur model charges.
+You can also use `client.agents.invoke("support-assistant", "Where is order A100?")`
+or supply a message list. The hosted gateway determines the configured agent's
+behavior; this SDK call does not launch the local package runner or upload your
+Python tool implementations. A stored agent record alone does not establish
+that its invocation endpoint is configured and available.
 
-## Agent
-
-Agents are created on the host with a model and environment slug:
+## 4. Update existing metadata and verify the change
 
 ```python
-agent = client.agents.create(
-    name="support",
-    model="openai/gpt-5.6-luna",
-    environment_id="refund-support",
-)
-agent.invoke("Refund this ticket")
+from plural import Client
+
+with Client() as client:
+    client.environments.update(
+        "order-support", description="Read-only order status support.",
+    )
+    agent = client.agents.update(
+        "support-assistant", description="Answers order-status questions.",
+    )
+    client.benchmarks.update("order-support-smoke", notes="Reviewed smoke suite.")
+    print(client.environments.get("order-support").get("description"))
+    print(agent.description)
+    print(client.benchmarks.get("order-support-smoke").get("notes"))
 ```
 
-## Trace
+These methods send PATCH fields accepted by the hosted deployment. Changing
+model or environment bindings may create or require new revisions according to
+that backend's rules; fetch the result and verify its binding. Do not resend an
+entire fetched object as a patch: it can contain read-only fields.
+
+A metadata update is different from publishing changed executable behavior.
+For behavior changes, update the source environment/package and publish its
+revision as shown below. Existing package pins do not automatically advance.
+
+## 5. Create hosted objects from the Python walkthrough
+
+Complete the [support tutorial](../tutorials/sdk-walkthrough.md) first so that
+`support.py` and `report.json` exist. Save this script beside them:
 
 ```python
-rollout = env.rollout(task, client, model="openai/gpt-5.6-luna")
-client.create(rollout.trace, environment_id=env.slug)
+from pathlib import Path
+from plural import Client, Report
+from support import make_environment
+
+with Client() as client:
+    env = make_environment()
+    created = client.create(env)
+    print("Environment:", env.slug, env.remote_id)
+
+    agent = client.agents.create(
+        name="support-assistant",
+        model="openai/gpt-4o-mini",
+        environment_id=env.slug,
+        description="Read-only order-status assistant.",
+    )
+    print("Agent:", agent.slug)
+
+    report = Report.model_validate_json(Path("report.json").read_text())
+    client.create(
+        report, name="order-support-smoke", environment_id=env.slug,
+    )
 ```
 
-Traces are stored by `trace_id`. Optional kwargs: `environment_id` (slug or
-id), `environment_revision_id`, `agent_id` (slug or id), `run_group_id`.
+`create` fails with a conflict when the slug already exists. On later runs use
+`client.update(env)` and `client.update(report, name="order-support-smoke", ...)`
+for the intended existing objects. For agents use `client.agents.update(...)`.
+`client.create(benchmark)` also works after a local `Benchmark.run()` has set
+its `.report`; an unrun local benchmark cannot be uploaded through that helper.
 
-## Benchmark
+The Python environment upload includes instructions, schemas, fingerprints,
+tool/scorer metadata, and revision information. It is not deployment of Python
+callables. Continue distributing executable source through your normal package
+or repository process.
+
+`env.create(client)` and `env.update(client)` are convenience aliases.
+`client.push(env)` / `env.push(client)` retain upsert behavior, but explicit
+create versus update makes accidental overwrites easier to avoid.
+
+## 6. Keep benchmark run history
+
+To attach another scored run to an existing hosted benchmark:
 
 ```python
-from plural import Benchmark, TaskDataset
+from pathlib import Path
+from plural import Client, Report
 
-benchmark = Benchmark(
-    env,
-    models=["openai/gpt-5.6-luna", "google/gemini-3.7-flash"],
-    client=client,
-)
-report = benchmark.run(dataset=TaskDataset.load("data/refund-support.jsonl"))
-client.create(benchmark)          # slug from env.name unless you pass name=
-client.update(benchmark)          # replace that slug's report
+report = Report.model_validate_json(Path("report.json").read_text())
+with Client() as client:
+    client.benchmarks.create_run(
+        "order-support-smoke",
+        report=report.model_dump(mode="json"),
+        environment_id="order-support",
+        notes="Second evaluation with the same task set.",
+    )
+    print(client.benchmarks.list_runs("order-support-smoke"))
 ```
 
-`create` / `update` fail until `run()` has produced `benchmark.report`.
-Optional kwargs: `name`, `notes`, `environment_id`, `agent_id`.
+Use `benchmarks.update` for metadata and `create_run` to explicitly add a run.
+You can create a hosted benchmark before results exist with
+`client.benchmarks.create(name=..., environment_id=..., description=...,
+methodology=..., primary_metric="reward")`. This differs from the local
+`client.create(Benchmark(...))` helper, which requires a completed report.
+
+## 7. Publish exact package revisions
+
+For the [CLI package tutorial](../tutorials/cli-walkthrough.md):
+
+```bash
+plural env push environment
+```
+
+The SDK equivalent is:
+
+```python
+from pathlib import Path
+from plural import Client
+from plural.cli.scaffold import load_environment
+
+package = load_environment(Path("environment"))
+with Client() as client:
+    revision = client.environments.publish_manifest(package)
+    print("Environment revision:", revision["id"])
+```
+
+The return value identifies the exact published revision. Metadata publication
+does not upload an executable archive or make a local source path portable.
+For full agent, benchmark, harness, and job registration, prefer
+`plural run job.yaml --sync` or `plural job upload JOB_ID`; the CLI coordinates
+the required revision IDs. [Package sync](studio-sync.md) explains the lifecycle.
+
+## 8. Reuse stored package definitions locally (advanced)
+
+Some hosted objects have complete v1 package payloads; older Python/Studio
+records do not. Inspect your deployment's returned data first. A complete
+`AgentSpec` stored in `package_spec` can be validated and saved:
+
+```python
+from pathlib import Path
+from plural import AgentSpec, Client
+from plural.cli.scaffold import write_yaml
+
+with Client() as client:
+    remote = client.agents.get("support-assistant")
+    payload = remote.data.get("package_spec")
+    if payload is None:
+        raise ValueError("This hosted agent has no executable v1 package_spec.")
+    agent_spec = AgentSpec.model_validate(payload)
+    write_yaml(Path("downloaded-agent.yaml"), agent_spec)
+```
+
+Likewise, when a selected environment revision exposes `package_manifest`,
+validate that payload with `EnvironmentManifest.model_validate(...)`. For a
+benchmark revision's `package_definition`, use
+`BenchmarkDefinition.model_validate(...)`. Do not validate the whole hosted
+wrapper as a package. The SDK has explicit benchmark revision reads:
+
+```python
+from plural import BenchmarkDefinition, Client
+
+with Client() as client:
+    revisions = client.benchmarks.revisions("order-support-smoke")
+    if not revisions:
+        raise ValueError("No immutable benchmark revisions are available.")
+    selected_id = revisions[0]["id"]  # inspect/select intentionally in real use
+    revision = client.benchmarks.get_revision("order-support-smoke", selected_id)
+    payload = revision.get("package_definition")
+    if payload is None:
+        raise ValueError("This revision has no v1 package_definition.")
+    definition = BenchmarkDefinition.model_validate(payload)
+    print(definition.task_ids)
+```
+
+There is no dedicated environment-revision get helper in this SDK. Use the
+revision data actually returned by your deployment, or obtain the exact
+manifest from the environment author; do not assume a response layout.
+
+Before executing restored definitions, obtain the matching environment source,
+harness archive/image, dependencies, and credential grants. Local source paths
+from another machine are not usable downloads. Match environment and harness
+digests, validate task ownership, and run a dry plan. If source bytes change,
+create new matching pins instead of changing a digest to bypass validation.
+A hosted snapshot alone is insufficient for a reproducible local run.
+
+## 9. Delete only when intended
+
+The explicit methods are `client.environments.delete(slug)`,
+`client.agents.delete(slug)`, and `client.benchmarks.delete(slug)`.
+They make hosted deletes immediately; referenced objects may be rejected by the
+backend. Keep deletion separate from a repeatable create/update script.
+
+## Related data
+
+For hosted harness revision publishing, benchmark revision promotion, job
+receipts, and traces, see [advanced hosted workflows](../sdk/hosted-advanced.md).
+For exact parameters see the [hosted SDK reference](../reference/api.md#hosted-studio-sdk).

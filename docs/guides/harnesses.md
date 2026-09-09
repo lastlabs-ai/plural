@@ -4,6 +4,14 @@ A HarnessPackage is one executable agent loop plus a strict manifest. One
 Agent binds exactly one Harness revision and every Trial for that Agent uses the
 same binding.
 
+## Choose a built-in profile first
+
+The [CLI tutorial](../tutorials/cli-walkthrough.md) scaffolds `chat.v1`, which
+returns a model answer. `tool-loop.v1` exposes declared Environment commands;
+`code-task.v1` also declares filesystem capability but uses the same bounded
+command loop. Supply the operations yourself. The [tools tutorial](../tutorials/package-tools.md)
+shows a complete command and verifier.
+
 ## Minimal package
 
 ```yaml
@@ -34,7 +42,6 @@ Use `plural harness init`, then:
 
 ```bash
 plural harness validate harness
-plural harness test harness --unsafe-local
 plural harness inspect harness
 plural harness build harness
 plural harness publish harness --output dist/minimal.tar.gz
@@ -43,6 +50,40 @@ plural harness publish harness --output dist/minimal.tar.gz
 `build` and `publish` create the same normalized gzip/tar format (sorted paths,
 zero timestamps/owners, no symlinks) and print its SHA-256. Publish currently
 writes only to a local path; it does not upload to a registry.
+
+## Test protocol conformance
+
+`plural harness test PATH --unsafe-local` executes the package locally with a
+synthetic `test/model` request and no environment commands. It does not supply
+your Agent's secret grants. Consequently, the generated model-backed harness is
+not expected to pass this command unchanged; use a deterministic test harness
+or a conformance entry point that can serve that fixture without credentials.
+Validate and run a real configured Job to test live model integration.
+
+For a credential-free conformance example, create a separate directory
+`offline-harness`, save the minimal YAML above as `harness.yaml`, and save this
+as `harness.py`:
+
+```python
+import json
+import sys
+from pathlib import Path
+
+request = json.loads(sys.stdin.readline())
+Path("result.json").write_text(json.dumps({"response": "ready"}))
+Path("trajectory.jsonl").write_text(json.dumps({"task_id": request["task"]["task_id"]}) + "\n")
+print(json.dumps({
+    "protocol": "plural-harness-v1", "type": "result", "status": "succeeded",
+    "outputs": ["result.json"], "artifacts": ["trajectory.jsonl"],
+}))
+```
+
+```bash
+plural harness test offline-harness --unsafe-local
+plural harness list .
+```
+
+This checks the output contract, not agent intelligence or task success.
 
 ## Immutable archives
 
@@ -53,6 +94,12 @@ plural harness add dist/minimal.tar.gz \
   --digest sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
   --environment environment
 ```
+
+Use the **actual digest printed by build/publish**, not the illustrative value
+above. When creating an agent from the archive, pass the same archive path as
+`--harness` and the actual digest as `--harness-digest`. Recreate the benchmark
+and agent after changing the environment's allowed binding. `harness inspect`
+also accepts an archive reference with `--digest`.
 
 Remote/archive references require a digest. Retrieval accepts HTTPS, `file://`,
 or local paths, refuses HTTPS downgrade, limits compressed/extracted data to

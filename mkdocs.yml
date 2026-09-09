@@ -1,5 +1,5 @@
 site_name: Plural
-site_description: Unified LLM routing with first-class traces, environments, and benchmarks.
+site_description: Build environments, evaluate models and harnesses, and manage agents with the Plural SDK and CLI.
 site_url: https://lastlabs-ai.github.io/plural/
 repo_url: https://github.com/lastlabs-ai/plural
 repo_name: lastlabs-ai/plural
@@ -26,20 +26,27 @@ theme:
 plugins:
   - search
   - llmstxt:
-      markdown_description: Unified LLM routing with traces, environments, and benchmarks.
+      markdown_description: Beginner-to-advanced Plural SDK, CLI, authentication, evaluation, and Plural Intel workflows.
       sections:
+        Getting started:
+          - getting-started/*.md
+          - quickstart.md
+        Walkthroughs:
+          - tutorials/*.md
+        SDK:
+          - sdk/*.md
         CLI:
-          - docs/cli/*.md
+          - cli/*.md
         Concepts:
-          - docs/concepts/*.md
+          - concepts/*.md
         Guides:
-          - docs/guides/*.md
+          - guides/*.md
         Operations:
-          - docs/operations/*.md
+          - operations/*.md
         Migration:
-          - docs/migration/*.md
+          - migration/*.md
         Reference:
-          - docs/reference/*.md
+          - reference/*.md
   - mkdocstrings:
       handlers:
         python:
@@ -64,44 +71,57 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Quickstart: quickstart.md
+  - Start here:
+      - Install and authenticate: getting-started/setup.md
+      - Understand the pieces: getting-started/concepts.md
+      - Your first evaluation: quickstart.md
+  - Walkthroughs:
+      - Build and evaluate an environment: tutorials/sdk-walkthrough.md
+      - Run your first CLI job: tutorials/cli-walkthrough.md
+      - Add tools and verification: tutorials/package-tools.md
+      - Fetch and update Plural Intel objects: guides/push-to-plural.md
+      - Traces and datasets: tutorials/traces-and-datasets.md
+  - SDK:
+      - Model calls and routing: sdk/client.md
+      - Run package jobs from Python: sdk/package-jobs.md
+      - Hosted revisions and jobs: sdk/hosted-advanced.md
+      - Python API reference: reference/api.md
   - CLI:
-      - Overview and configuration: cli/index.md
-      - Generated command reference: reference/cli-commands.md
-  - Concepts:
-      - Trace: concepts/trace.md
-      - Environment: concepts/environment.md
-      - Dataset: concepts/dataset.md
-      - Benchmark: concepts/benchmark.md
-      - Packages, jobs, and trials: concepts/execution.md
-      - Routing policy: concepts/routing.md
-      - Sink: concepts/sink.md
-  - Guides:
-      - Build and run a job: guides/jobs.md
+      - Configuration and authentication: cli/index.md
+      - All commands and options: reference/cli-commands.md
+  - Advanced guides:
+      - Stateful environments and replay: guides/write-environment.md
+      - Benchmark methodology and regression checks: guides/benchmark-models.md
+      - Jobs, runtimes, and recovery: guides/jobs.md
       - Harness packages and adapters: guides/harnesses.md
       - Sandbox provider plugins: guides/provider-plugins.md
-      - Studio sync: guides/studio-sync.md
+      - Plural Intel package sync: guides/studio-sync.md
+      - CI evaluations: guides/ci.md
       - Streaming, tools, structured output: guides/capabilities.md
-      - Routing examples walkthrough: guides/routing-examples.md
+      - Routing and provider examples: guides/routing-examples.md
       - Capture traces from an app: guides/capture-traces.md
       - Production traffic to a dataset: guides/production-to-dataset.md
-      - Write your first environment: guides/write-environment.md
-      - Create and update hosted objects: guides/push-to-plural.md
-      - Benchmark models: guides/benchmark-models.md
       - Redact PII: guides/redact-pii.md
-      - Export to OpenTelemetry: guides/export-otel.md
+      - Export OpenTelemetry: guides/export-otel.md
       - Azure and Bedrock: guides/cloud-providers.md
       - Add your own provider: guides/add-provider.md
       - Migrate from OpenRouter: guides/migrate-openrouter.md
+  - Concepts:
+      - Environment lifecycle: concepts/environment.md
+      - Packages, jobs, and trials: concepts/execution.md
+      - Benchmark: concepts/benchmark.md
+      - Trace: concepts/trace.md
+      - Dataset: concepts/dataset.md
+      - Routing policy: concepts/routing.md
+      - Sink: concepts/sink.md
   - Operations:
       - Security and trust: operations/security.md
       - Troubleshooting: operations/troubleshooting.md
-  - Migration:
-      - v0.7 to v1 foundation: migration/v1.md
+      - Known limitations: reference/limitations.md
   - Reference:
-      - API: reference/api.md
+      - SDK and CLI coverage: reference/feature-map.md
       - Manifest fields: reference/manifests.md
       - Package JSON schemas: reference/schemas.md
-      - Known limitations: reference/limitations.md
       - Trace JSON schema: reference/trace-schema.md
       - Glossary: reference/glossary.md
+      - Version migration: migration/v1.md

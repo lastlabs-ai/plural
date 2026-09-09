@@ -138,12 +138,17 @@ framework-owned so lifecycle and trace invariants are always recorded.
 
 ## Docs
 
-Full documentation: concept pages, guides, and generated API reference.
+Follow the beginner-to-advanced [documentation](https://lastlabs-ai.github.io/plural/):
 
-- Trace schema stability: `schemas/trace.v1.json`
-- Package schemas: `src/plural/schemas/packages/`
-- Generated CLI command reference: `docs/reference/cli-commands.md`
-- Routing walkthrough: [`examples/routing/`](examples/routing) (also under docs → Guides)
+- [Install and authenticate](docs/getting-started/setup.md)
+- [First offline evaluation](docs/quickstart.md)
+- [Practical Python walkthrough](docs/tutorials/sdk-walkthrough.md)
+- [Complete CLI walkthrough](docs/tutorials/cli-walkthrough.md)
+- [Fetch and update Plural Intel objects](docs/guides/push-to-plural.md)
+- [All SDK and CLI features](docs/reference/feature-map.md)
+
+Detailed lifecycle, security, package schemas, and generated command/API
+references remain available for advanced integrations.
 
 ## Development
 

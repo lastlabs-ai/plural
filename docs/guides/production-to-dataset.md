@@ -13,4 +13,9 @@ ds.save("data/prod-refunds-2026-w32.jsonl")
 print(ds.content_hash, len(ds))
 ```
 
-Only include traces that already have outcomes (human labels or online rewards). Unlabeled traffic is useful for inspection but noisy for benchmarks.
+This creates a **trace dataset** for analysis/export. It is not a benchmark
+input. Unlabeled traces can also be useful for debugging; the outcome filter
+here selects reviewed examples. To turn selected inputs into a regression
+suite, create explicit `TaskData` records with independently reviewed expected
+answers, then save a `TaskDataset`. Follow the
+[trace-to-task walkthrough](../tutorials/traces-and-datasets.md).

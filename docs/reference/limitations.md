@@ -5,7 +5,8 @@ This release remains Alpha. Current boundaries are:
 - v1 Environment and client-orchestrated Job sync requires a compatible hosted
   API. Hosted records do not execute workloads or attest local receipts.
 - Device authentication depends on backend endpoints not provided by this
-  package. Stored refresh tokens are not automatically refreshed by CLI calls.
+  package. There is no general background refresh loop. Hosted publication/sync can
+  refresh stored device credentials; auth status/whoami do not provide that flow.
 - `plural run` does not write externally by default. `--sync` opts into
   best-effort registration/upload; `plural job upload` replays stored results.
 - Package digests verify integrity only. Signatures, attestations, publisher
@@ -13,7 +14,7 @@ This release remains Alpha. Current boundaries are:
 - OCI Harnesses require Docker, cannot compose with an Environment image/build,
   and cannot be published by the CLI. OCI Environment staging is unsupported.
 - Local Environment source staging is the only execution form currently
-  accepted.
+  accepted by Job preflight. OCI Environment staging is unsupported.
 - The local provider is not a sandbox. Docker trusts the host/daemon, cannot
   enforce disk limits or network allowlists, and has no compose/persistence.
   Daytona depends on external SDK/service behavior and lacks build-context,
@@ -43,3 +44,6 @@ This release remains Alpha. Current boundaries are:
 Unsupported controls fail preflight where Plural can detect them. A successful
 run should not be interpreted as stronger isolation, authentication, or
 durability than the selected provider and documented backend surface provide.
+
+Hosted reads return records, not installed executable Python environments.
+There is no general CLI pull command; see the [retrieval walkthrough](../guides/push-to-plural.md).

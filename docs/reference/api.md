@@ -1,5 +1,8 @@
 # API reference
 
+For a guided path, start with the [SDK and CLI coverage guide](feature-map.md).
+The entries below document the actual public classes and methods.
+
 ## Client and request types
 
 `Client.create(x)` and `Client.update(x)` sync an `Environment`, `Trace`,
@@ -51,6 +54,8 @@ default dispatch behavior; scalar and custom text environments override
 ::: plural.environments.types.Observation
 
 ::: plural.environments.types.State
+
+::: plural.environments.types.hidden
 
 ## Policies and runtime
 
@@ -163,6 +168,48 @@ the generated schemas are the serialization authority.
 
 ::: plural.studio.TracesAPI
 
+::: plural.studio.RemoteAgent
+
+::: plural.studio.HarnessesAPI
+
+::: plural.studio.JobsAPI
+
+::: plural.studio.TrialsAPI
+
 ## Routing
 
 ::: plural.routing.policies
+
+## Datasets and export
+
+::: plural.environments.export.hf.to_huggingface_records
+
+::: plural.environments.export.verifiers.to_verifiers_trace
+
+## Catalog and costs
+
+::: plural.catalog.models.ModelCatalog
+
+::: plural.catalog.models.ModelSpec
+
+::: plural.catalog.models.estimate_cost
+
+::: plural.catalog.sync
+
+## Trace storage and privacy
+
+::: plural.tracing.writer.TraceWriter
+
+::: plural.tracing.sinks
+
+::: plural.tracing.redaction
+
+## Provider interfaces and errors
+
+::: plural.providers.base
+
+::: plural.errors
+
+## Local package loading
+
+::: plural.cli.scaffold

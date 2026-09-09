@@ -1,5 +1,9 @@
 # Command-line interface
 
+Start with [installation and authentication](../getting-started/setup.md), then
+follow the [complete CLI walkthrough](../tutorials/cli-walkthrough.md). This page
+explains configuration and command conventions.
+
 The `plural` executable is installed with the base package:
 
 ```bash
@@ -58,9 +62,9 @@ Resolution is deterministic:
 3. the selected profile in `config.toml`;
 4. built-in defaults.
 
-`PLURAL_API_KEY` takes precedence over a stored API key. For authenticated
-requests, a stored device-flow access token is preferred when present, then the
-API key. `plural org use NAME` and `plural project use NAME` update the active
+`PLURAL_API_KEY` takes precedence over a stored API key. Auth status/whoami use a stored device access token when present. Hosted
+publication/sync prefer an API key, otherwise refresh a stored refresh token
+when available and use the resulting access token. `plural org use NAME` and `plural project use NAME` update the active
 profile; `show` only prints resolved context. `list` is not implemented yet.
 
 Configuration lives under `PLURAL_CONFIG_HOME`, then
@@ -82,7 +86,7 @@ Most commands emit deterministic JSON. `plural run` additionally accepts
 stdout. JSON is the stable choice for scripts. There is no global format flag
 and no promise that human help text is a stable parsing interface.
 
-- `0`: command completed (including a dry run or an unauthenticated `auth status`);
+- `0`: command completed (including a dry run or `auth status` with no credentials);
 - `1`: execution completed but at least one trial did not succeed;
 - `2`: usage, validation, configuration, unsupported backend, or other handled error;
 - `130`: interrupted with Ctrl-C.

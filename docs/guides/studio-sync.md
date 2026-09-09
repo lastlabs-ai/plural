@@ -1,4 +1,7 @@
-# Studio sync
+# Sync packages and results with Plural Intel
+
+For hosted reads and object edits, start with the [object walkthrough](push-to-plural.md).
+The source module is named `studio`; it connects to Plural Intel.
 
 The existing SDK can create/update hosted legacy `Environment` revisions,
 Agents, Benchmark reports/runs, and Traces:

@@ -1,8 +1,9 @@
 # Streaming, tool calling, structured output, and reasoning
 
-Every host expresses these four features differently. plural normalizes them so
-one piece of client code works across all of them, and the normalized shape is
-always OpenAI's.
+Plural normalizes provider responses into shared types. Start with the
+[runnable model client examples](../sdk/client.md); the snippets below explain
+individual features and assume a configured `client`, `model`, and `messages`.
+Availability still depends on the chosen model, endpoint, and provider adapter.
 
 ## Streaming
 
@@ -55,7 +56,8 @@ fragments carry only argument text.
 
 ## Structured output
 
-`response_format` works on every host.
+`response_format` is translated by the supported provider adapters as described
+below. Check that your selected model accepts the requested output format.
 
 ```python
 resp = client.chat(
@@ -126,7 +128,7 @@ a thinking conversation. Reasoning is never sent to OpenAI-compatible hosts,
 which reject unknown message keys.
 
 !!! note "Some models encrypt their reasoning"
-    Anthropic's current models (Fable, Opus 5, Sonnet 5) often return a thinking
+    A provider can return a thinking
     block with a signature but no readable text. `delta.reasoning` is empty;
     `delta.reasoning_started` and `delta.reasoning_finished` still fire, which
     is what a UI uses to show a thinking indicator the way Cursor does.
