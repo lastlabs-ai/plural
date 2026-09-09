@@ -89,8 +89,9 @@ trajectories are claims, not independent proof.
 
 Plural starts the verifier separately with networking disabled and provides
 declared artifacts beneath `artifacts/`. The built-in harness already declares
-`trajectory.jsonl` as an artifact. An ordinary output file is not automatically
-passed as verifier evidence; declare every needed artifact in the harness.
+`trajectory.jsonl` as an artifact. The runner downloads the union of declared outputs and artifacts and makes
+those files available to the verifier. List mandatory evidence paths in
+`required_artifacts`; every needed file must be declared by the harness.
 
 For private labels, the verifier receives `.plural/verifier-input.json` with
 `task`, `expected`, `verifier_input`, and artifact paths. Never put private
