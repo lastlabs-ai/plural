@@ -74,7 +74,11 @@ def test_cli_help_exposes_v2_objects_and_watch(tmp_path: Path) -> None:
     assert result.exit_code == 0
     for command in ("env", "task", "verifier", "agent", "benchmark", "review"):
         assert command in result.stdout
-    watch = runner.invoke(app, ["job", "watch", "--help"])
+    watch = runner.invoke(
+        app,
+        ["job", "watch", "--help"],
+        terminal_width=160,
+    )
     assert watch.exit_code == 0
     assert "--json" in watch.stdout
 
