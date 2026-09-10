@@ -1,0 +1,106 @@
+{
+  "additionalProperties": false,
+  "description": "Exact token-in/token-out training record stored as an artifact.",
+  "properties": {
+    "assistant_message": {
+      "additionalProperties": true,
+      "title": "Assistant Message",
+      "type": "object"
+    },
+    "input_len": {
+      "minimum": 0,
+      "title": "Input Len",
+      "type": "integer"
+    },
+    "input_token_ids": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "Input Token Ids",
+      "type": "array"
+    },
+    "model": {
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "observation_len": {
+      "minimum": 0,
+      "title": "Observation Len",
+      "type": "integer"
+    },
+    "observation_token_ids": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "Observation Token Ids",
+      "type": "array"
+    },
+    "output_len": {
+      "minimum": 0,
+      "title": "Output Len",
+      "type": "integer"
+    },
+    "output_logprobs": {
+      "items": {
+        "type": "number"
+      },
+      "title": "Output Logprobs",
+      "type": "array"
+    },
+    "output_text": {
+      "title": "Output Text",
+      "type": "string"
+    },
+    "output_token_ids": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "Output Token Ids",
+      "type": "array"
+    },
+    "output_top_logprobs": {
+      "items": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "type": "object"
+      },
+      "title": "Output Top Logprobs",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "step": {
+      "minimum": 0,
+      "title": "Step",
+      "type": "integer"
+    },
+    "tokenizer": {
+      "minLength": 1,
+      "title": "Tokenizer",
+      "type": "string"
+    }
+  },
+  "required": [
+    "step",
+    "tokenizer",
+    "model",
+    "input_token_ids",
+    "output_token_ids",
+    "observation_token_ids",
+    "output_logprobs",
+    "output_top_logprobs",
+    "output_text",
+    "assistant_message",
+    "input_len",
+    "output_len",
+    "observation_len"
+  ],
+  "title": "TITORecord",
+  "type": "object"
+}

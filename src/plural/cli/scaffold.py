@@ -1,153 +1,212 @@
-"""Scaffolding, YAML loading, strict validation, and schema generation."""
+"""Schema-v2 package scaffolding, loading, and generated schemas."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from plural.domain import (
     AgentBinding,
-    AgentTemplate,
+    AgentDefinition,
+    AgentVerifier,
     BenchmarkDefinition,
+    BenchmarkJobSource,
+    DeterministicVerifier,
     EnvironmentManifest,
-    EnvironmentResource,
     EnvironmentRuntime,
     HarnessBinding,
     HarnessPackage,
+    HumanVerifier,
+    JobMode,
     JobSpec,
-    NativeAction,
     PackageSource,
-    RetryPolicy,
-    RuntimeSpec,
+    RubricCriterion,
     TaskDefinition,
-    resolve_harness_stamp,
+    TaskJobSource,
+    VerifierDefinition,
+    WeightedVerifier,
 )
 from plural.harness.retrieval import package_from_archive, tree_digest
 
 
-class JobFile(BaseModel):
-    """Path-based local job config resolved into an immutable JobSpec."""
+class StrictFile(BaseModel):
+    """Strict immutable path-reference file."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: str = "1"
-    environment: Path = Path("environment.yaml")
-    benchmark: Path = Path("benchmark.yaml")
+
+class TaskFile(StrictFile):
+    """Authoring file for one Task revision."""
+
+    schema_version: Literal["2"] = "2"
+    task_id: str
+    revision: str = "0.1.0"
+    instructions: str
+    environment: Path
+    verifiers: tuple[Path, ...] = Field(min_length=1)
+    verifier_weights: tuple[float, ...] = ()
+    info: Any = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BenchmarkFile(StrictFile):
+    """Authoring file for a cross-Environment Benchmark."""
+
+    schema_version: Literal["2"] = "2"
+    name: str
+    revision: str = "0.1.0"
+    tasks: tuple[Path, ...] = Field(min_length=1)
+    primary_metric: str = "reward"
+    description: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class JobFile(StrictFile):
+    """Path-based Job selecting a Benchmark or Task."""
+
+    schema_version: Literal["2"] = "2"
+    source_kind: Literal["benchmark", "task"]
+    source: Path
     agents: tuple[Path, ...] = Field(min_length=1)
-    n_attempts: int = Field(default=1, ge=1)
+    mode: JobMode = JobMode.EVAL
+    attempts: int = Field(default=1, ge=1)
     concurrency: int = Field(default=1, ge=1)
-    per_agent_concurrency: int = Field(default=1, ge=1)
-    runtime: RuntimeSpec = Field(default_factory=RuntimeSpec)
-    retry: RetryPolicy = Field(default_factory=RetryPolicy)
+    per_runtime_concurrency: int = Field(default=1, ge=1)
+    priority: int = 0
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
-    """Read a YAML mapping."""
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
+    """Read one YAML mapping."""
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a YAML mapping")
-    return dict(payload)
+    return dict(value)
 
 
 def write_yaml(path: Path, payload: Any) -> None:
-    """Write deterministic, human-readable YAML."""
+    """Write deterministic YAML."""
     if isinstance(payload, BaseModel):
         payload = payload.model_dump(mode="json", exclude_none=True)
-    path.write_text(
-        yaml.safe_dump(payload, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
 
-def _target(path: Path, default_name: str) -> Path:
-    return path if path.suffix in {".yaml", ".yml"} else path / default_name
+def _target(path: Path, name: str) -> Path:
+    return path if path.suffix in {".yaml", ".yml"} else path / name
 
 
-def _create(path: Path, content: str, *, force: bool) -> None:
+def _create(path: Path, payload: Any, *, force: bool) -> Path:
     if path.exists() and not force:
         raise FileExistsError(f"{path} already exists; pass --force to replace it")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    write_yaml(path, payload)
+    return path
 
 
 def scaffold_environment(directory: Path, name: str, *, force: bool = False) -> list[Path]:
-    """Create a minimal environment package."""
+    """Create a standalone schema-v2 Environment package."""
     directory.mkdir(parents=True, exist_ok=True)
-    manifest: dict[str, Any] = {
-        "schema_version": "1",
-        "name": name,
-        "revision": "0.1.0",
-        "description": "",
-        "instructions": "Complete the task using only the declared native actions and context.",
-        "context": None,
-        "actions": [],
-        "guardrails": [],
-        "resources": [],
-        "runtime": EnvironmentRuntime().model_dump(mode="json"),
-        "harness_policy": {"mode": "allow_all", "allowed_harnesses": []},
-        "limits": {"max_turns": 8, "max_seconds": 120},
-        "tasks": [],
-    }
-    environment_yaml = directory / "environment.yaml"
-    _create(
-        environment_yaml,
-        yaml.safe_dump(manifest, sort_keys=False),
+    manifest = EnvironmentManifest(
+        name=name,
+        overview="A typed runtime world with declared actions and observable state.",
+        runtime=EnvironmentRuntime(),
+    )
+    environment_yaml = _create(
+        directory / "environment.yaml",
+        manifest.model_dump(mode="json", exclude={"source"}),
         force=force,
     )
-    _create(
-        directory / "environment.py",
-        (
-            "from plural import Environment\n\n\n"
-            "class ProjectEnvironment(Environment):\n"
-            f'    name = "{name}"\n'
-            '    version = "0.1.0"\n'
-        ),
-        force=force,
+    environment_py = directory / "environment.py"
+    if environment_py.exists() and not force:
+        raise FileExistsError(f"{environment_py} already exists; pass --force to replace it")
+    environment_py.write_text(
+        "from plural import Environment\n\n\n"
+        "class ProjectEnvironment(Environment):\n"
+        f'    name = "{name}"\n'
+        '    revision = "0.1.0"\n',
+        encoding="utf-8",
     )
-    task = {"task_id": "example", "input": "Replace this example task."}
-    _create(
-        directory / "tasks.jsonl",
-        json.dumps(task, sort_keys=True) + "\n",
-        force=force,
+    dockerfile = directory / "Dockerfile"
+    if dockerfile.exists() and not force:
+        raise FileExistsError(f"{dockerfile} already exists; pass --force to replace it")
+    dockerfile.write_text(
+        "FROM python:3.12-slim\nWORKDIR /workspace/environment\nCOPY . .\n",
+        encoding="utf-8",
     )
-    _create(
-        directory / "Dockerfile",
-        (
-            "FROM python:3.12-slim\n"
-            "WORKDIR /app\n"
-            "COPY . /app\n"
-            'CMD ["python", "-c", "print(\'environment package ready\')"]\n'
-        ),
-        force=force,
+    return [environment_yaml, environment_py, dockerfile]
+
+
+def scaffold_verifier(
+    path: Path,
+    *,
+    name: str,
+    kind: Literal["deterministic", "agent", "human"] = "deterministic",
+    force: bool = False,
+) -> Path:
+    """Create a standalone Verifier revision."""
+    if kind == "deterministic":
+        verifier: VerifierDefinition = DeterministicVerifier(
+            name=name,
+            command=("python", "verify.py"),
+        )
+    elif kind == "agent":
+        verifier = AgentVerifier(
+            name=name,
+            model="openai/gpt-4.1-mini",
+            instructions="Score the submitted result against the rubric.",
+            rubric=(
+                RubricCriterion(
+                    name="correct",
+                    description="The answer is correct.",
+                ),
+            ),
+        )
+    else:
+        verifier = HumanVerifier(
+            name=name,
+            instructions="Review the result.",
+            rubric=(
+                RubricCriterion(
+                    name="correct",
+                    description="The answer is correct.",
+                ),
+            ),
+        )
+    return _create(_target(path, "verifier.yaml"), verifier, force=force)
+
+
+def scaffold_task(
+    path: Path,
+    *,
+    task_id: str,
+    environment_path: Path,
+    verifier_paths: tuple[Path, ...],
+    force: bool = False,
+) -> Path:
+    """Create a standalone Task file with revision references."""
+    task = TaskFile(
+        task_id=task_id,
+        instructions="Complete the task described in info.",
+        environment=environment_path,
+        verifiers=verifier_paths,
+        info={"prompt": "Replace this example."},
     )
-    return [
-        environment_yaml,
-        directory / "environment.py",
-        directory / "tasks.jsonl",
-        directory / "Dockerfile",
-    ]
+    return _create(_target(path, "task.yaml"), task, force=force)
 
 
 def scaffold_harness(directory: Path, name: str, *, force: bool = False) -> list[Path]:
-    """Create a trusted local harness package manifest."""
+    """Create a runnable standalone Harness package."""
     directory.mkdir(parents=True, exist_ok=True)
     package = {
         "manifest": {
-            "schema_version": "1",
+            "schema_version": "2",
             "name": name,
-            "version": "0.1.0",
-            "description": "",
-            "protocol": "plural-harness-v1",
-            "command": ["python", "harness.py", "native.chat.v1"],
-            "requirements": [
-                "OpenAI-compatible POST /chat/completions endpoint",
-                "PLURAL_API_KEY or OPENAI_API_KEY unless explicitly unauthenticated",
-            ],
+            "revision": "0.1.0",
             "implementation": "runnable",
+            "command": ["python", "harness.py", "native.chat.v1"],
             "capabilities": ["shell"],
             "secret_names": ["PLURAL_API_KEY", "OPENAI_API_KEY"],
             "environment_names": [
@@ -155,47 +214,21 @@ def scaffold_harness(directory: Path, name: str, *, force: bool = False) -> list
                 "OPENAI_BASE_URL",
                 "PLURAL_ALLOW_NO_AUTH",
             ],
-            "outputs": [{"path": "result.json", "required": True}],
-            "artifacts": [{"path": "trajectory.jsonl", "required": True}],
+            "outputs": [{"path": "result.json"}],
+            "artifacts": [{"path": "trajectory.jsonl"}],
             "trajectory_path": "trajectory.jsonl",
         },
-        "source": {
-            "kind": "local",
-            "uri": ".",
-            "trusted": False,
-            "unsafe_local": True,
-        },
+        "source": {"kind": "local", "uri": ".", "unsafe_local": True},
     }
-    manifest = directory / "harness.yaml"
-    _create(manifest, yaml.safe_dump(package, sort_keys=False), force=force)
-    _create(
-        directory / "harness.py",
+    manifest = _create(directory / "harness.yaml", package, force=force)
+    runner = directory / "harness.py"
+    if runner.exists() and not force:
+        raise FileExistsError(f"{runner} already exists; pass --force to replace it")
+    runner.write_text(
         (Path(__file__).parents[1] / "harness" / "native_runner.py").read_text(encoding="utf-8"),
-        force=force,
+        encoding="utf-8",
     )
-    return [manifest, directory / "harness.py"]
-
-
-def scaffold_benchmark(
-    path: Path,
-    *,
-    name: str,
-    environment_path: Path,
-    force: bool = False,
-) -> Path:
-    """Create a benchmark selecting environment tasks in file order."""
-    environment = load_environment(environment_path)
-    benchmark = BenchmarkDefinition(
-        name=name,
-        environment=environment.identity,
-        task_ids=tuple(task.task_id for task in environment.tasks),
-    )
-    destination = _target(path, "benchmark.yaml")
-    if destination.exists() and not force:
-        raise FileExistsError(f"{destination} already exists; pass --force to replace it")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    write_yaml(destination, benchmark)
-    return destination
+    return [manifest, runner]
 
 
 def scaffold_agent(
@@ -203,93 +236,177 @@ def scaffold_agent(
     *,
     name: str,
     model: str,
-    environment_path: Path,
-    harness_path: Path | str,
+    harness_path: Path | str | None = None,
     harness_digest: str | None = None,
     secret_names: tuple[str, ...] = (),
     force: bool = False,
+    **_: Any,
 ) -> Path:
-    """Create an agent bound to one exact environment and harness."""
-    environment = load_environment(environment_path)
-    harness = load_harness_reference(str(harness_path), digest=harness_digest)
-    binding = harness_binding(harness)
-    agent = AgentTemplate(
+    """Create an Environment-independent Agent revision."""
+    package = (
+        load_harness_reference(str(harness_path), digest=harness_digest)
+        if harness_path is not None
+        else None
+    )
+    agent = AgentDefinition(
         name=name,
         model=model,
-        environment=environment.identity,
-        harness=binding,
-        harness_package=harness,
-        stamp=resolve_harness_stamp(environment, harness),
+        harness=HarnessBinding.from_package(package) if package else None,
+        harness_package=package,
         secret_names=secret_names,
     )
-    destination = _target(path, "agent.yaml")
-    if destination.exists() and not force:
-        raise FileExistsError(f"{destination} already exists; pass --force to replace it")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    write_yaml(destination, agent)
-    return destination
+    return _create(_target(path, "agent.yaml"), agent, force=force)
+
+
+def scaffold_benchmark(
+    path: Path,
+    *,
+    name: str,
+    task_paths: tuple[Path, ...] = (),
+    force: bool = False,
+    **_: Any,
+) -> Path:
+    """Create a cross-Environment Benchmark reference file."""
+    if not task_paths:
+        raise ValueError("schema-v2 Benchmark requires at least one --task")
+    return _create(
+        _target(path, "benchmark.yaml"),
+        BenchmarkFile(name=name, tasks=task_paths),
+        force=force,
+    )
 
 
 def scaffold_job(
     path: Path,
     *,
-    environment_path: Path,
-    benchmark_path: Path,
+    source_path: Path | None = None,
+    source_kind: Literal["benchmark", "task"] = "benchmark",
     agent_paths: tuple[Path, ...],
     force: bool = False,
+    benchmark_path: Path | None = None,
+    **_: Any,
 ) -> Path:
-    """Create a path-based local job config."""
-    job_file = JobFile(
-        environment=environment_path,
-        benchmark=benchmark_path,
-        agents=agent_paths,
+    """Create a path-based Job."""
+    source = source_path or benchmark_path
+    if source is None:
+        raise ValueError("Job requires a Task or Benchmark source")
+    return _create(
+        _target(path, "job.yaml"),
+        JobFile(source_kind=source_kind, source=source, agents=agent_paths),
+        force=force,
     )
-    destination = _target(path, "job.yaml")
-    if destination.exists() and not force:
-        raise FileExistsError(f"{destination} already exists; pass --force to replace it")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    write_yaml(destination, job_file)
-    return destination
 
 
 def load_environment(path: Path) -> EnvironmentManifest:
-    """Load an environment YAML and its conventional tasks.jsonl."""
+    """Load one canonical Environment manifest and lock its local source."""
     source = _target(path, "environment.yaml")
     payload = read_yaml(source)
-    tasks = payload.get("tasks")
-    task_path = source.parent / "tasks.jsonl"
-    if (tasks is None or tasks == []) and task_path.exists():
-        tasks = [
-            json.loads(line)
-            for line in task_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        payload["tasks"] = tasks
     environment = EnvironmentManifest.model_validate(payload)
-    package_root = source.parent.resolve()
+    root = source.parent.resolve()
     return environment.model_copy(
         update={
             "source": PackageSource(
                 kind="local",
-                uri=str(package_root),
-                digest=tree_digest(package_root),
+                uri=str(root),
+                digest=tree_digest(root),
                 trusted=True,
             )
         }
     )
 
 
+def load_verifier(path: Path) -> VerifierDefinition:
+    """Load one discriminated Verifier."""
+    adapter = Annotated[
+        DeterministicVerifier | AgentVerifier | HumanVerifier,
+        Field(discriminator="kind"),
+    ]
+    from pydantic import TypeAdapter
+
+    return TypeAdapter(adapter).validate_python(read_yaml(_target(path, "verifier.yaml")))
+
+
+def _resolve(base: Path, value: Path) -> Path:
+    return value if value.is_absolute() else base / value
+
+
+def load_task(path: Path) -> TaskDefinition:
+    """Resolve one Task and all pinned revision dependencies."""
+    source = _target(path, "task.yaml")
+    config = TaskFile.model_validate(read_yaml(source))
+    weights = config.verifier_weights or tuple(1.0 for _ in config.verifiers)
+    if len(weights) != len(config.verifiers):
+        raise ValueError("verifier_weights must match verifiers")
+    return TaskDefinition(
+        task_id=config.task_id,
+        revision=config.revision,
+        instructions=config.instructions,
+        environment=load_environment(_resolve(source.parent, config.environment)),
+        verifiers=tuple(
+            WeightedVerifier(
+                verifier=load_verifier(_resolve(source.parent, verifier)),
+                weight=weight,
+            )
+            for verifier, weight in zip(config.verifiers, weights, strict=True)
+        ),
+        info=config.info,
+        metadata=config.metadata,
+    )
+
+
+def load_benchmark(path: Path) -> BenchmarkDefinition:
+    """Resolve a cross-Environment Benchmark."""
+    source = _target(path, "benchmark.yaml")
+    config = BenchmarkFile.model_validate(read_yaml(source))
+    return BenchmarkDefinition(
+        name=config.name,
+        revision=config.revision,
+        tasks=tuple(load_task(_resolve(source.parent, task)) for task in config.tasks),
+        primary_metric=config.primary_metric,
+        description=config.description,
+        metadata=config.metadata,
+    )
+
+
+def load_agent(path: Path) -> AgentDefinition:
+    """Load an Agent revision."""
+    return AgentDefinition.model_validate(read_yaml(_target(path, "agent.yaml")))
+
+
+def load_job(path: Path) -> JobSpec:
+    """Resolve one path-based schema-v2 Job."""
+    source = _target(path, "job.yaml")
+    config = JobFile.model_validate(read_yaml(source))
+    resolved_source = _resolve(source.parent, config.source)
+    job_source = (
+        TaskJobSource(task=load_task(resolved_source))
+        if config.source_kind == "task"
+        else BenchmarkJobSource(benchmark=load_benchmark(resolved_source))
+    )
+    return JobSpec(
+        source=job_source,
+        agents=tuple(
+            AgentBinding(agent=load_agent(_resolve(source.parent, item))) for item in config.agents
+        ),
+        mode=config.mode,
+        attempts=config.attempts,
+        concurrency=config.concurrency,
+        per_runtime_concurrency=config.per_runtime_concurrency,
+        priority=config.priority,
+    )
+
+
 def load_harness(path: Path) -> HarnessPackage:
-    """Load and strictly validate a harness package manifest."""
+    """Load and lock a local Harness package."""
     source = _target(path, "harness.yaml").resolve()
     payload = read_yaml(source)
     package_source = payload.get("source")
     if isinstance(package_source, dict) and package_source.get("kind") == "local":
-        package_path = Path(str(package_source.get("uri", "."))).expanduser()
-        if not package_path.is_absolute():
-            package_path = (source.parent / package_path).resolve()
-        package_source["uri"] = str(package_path)
-        package_source["digest"] = tree_digest(package_path)
+        root = Path(str(package_source.get("uri", "."))).expanduser()
+        if not root.is_absolute():
+            root = (source.parent / root).resolve()
+        package_source["uri"] = str(root)
+        package_source["digest"] = tree_digest(root)
     return HarnessPackage.model_validate(payload)
 
 
@@ -299,208 +416,43 @@ def load_harness_reference(
     digest: str | None = None,
     cache_root: Path | None = None,
 ) -> HarnessPackage:
-    """Load a local manifest or immutable archive reference."""
-    parsed_path = Path(reference).expanduser()
-    if parsed_path.exists() and (parsed_path.is_dir() or parsed_path.suffix in {".yaml", ".yml"}):
-        return load_harness(parsed_path)
+    """Load a local Harness or immutable archive."""
+    path = Path(reference).expanduser()
+    if path.exists() and (path.is_dir() or path.suffix in {".yaml", ".yml"}):
+        return load_harness(path)
     if digest is None:
-        raise ValueError("archive/HTTPS harness references require --digest sha256:<hex>")
+        raise ValueError("archive Harness references require --digest")
     return package_from_archive(reference, digest, cache_root=cache_root)
 
 
-def harness_binding(package: HarnessPackage) -> HarnessBinding:
-    """Return the exact binding represented by a package."""
-    return HarnessBinding.from_package(package)
-
-
-def load_benchmark(path: Path) -> BenchmarkDefinition:
-    """Load and strictly validate a benchmark definition."""
-    return BenchmarkDefinition.model_validate(read_yaml(_target(path, "benchmark.yaml")))
-
-
-def load_agent(path: Path) -> AgentTemplate:
-    """Load and strictly validate an agent template config."""
-    return AgentTemplate.model_validate(read_yaml(_target(path, "agent.yaml")))
-
-
-def load_job(path: Path) -> JobSpec:
-    """Resolve a path-based job file into a validated immutable JobSpec."""
-    source = _target(path, "job.yaml")
-    config = JobFile.model_validate(read_yaml(source))
-
-    def resolve(value: Path) -> Path:
-        return value if value.is_absolute() else source.parent / value
-
-    environment_path = resolve(config.environment)
-    environment = load_environment(environment_path)
-    runtime = config.runtime
-    if (
-        runtime.provider == "docker"
-        and environment.runtime.image is None
-        and environment.runtime.build_context is None
-    ):
-        environment_source = _target(environment_path, "environment.yaml")
-        environment = environment.model_copy(
-            update={
-                "runtime": environment.runtime.model_copy(
-                    update={"build_context": str(environment_source.parent.resolve())}
-                )
-            }
-        )
-    agents: list[AgentBinding] = []
-    for agent_path in config.agents:
-        template = load_agent(resolve(agent_path)).model_copy(
-            update={"environment": environment.identity}
-        )
-        if template.harness_package is not None:
-            template = template.model_copy(
-                update={"stamp": resolve_harness_stamp(environment, template.harness_package)}
-            )
-        agents.append(AgentBinding(template=template))
-    return JobSpec(
-        environment=environment,
-        benchmark=load_benchmark(resolve(config.benchmark)).model_copy(
-            update={"environment": environment.identity}
-        ),
-        agents=tuple(agents),
-        n_attempts=config.n_attempts,
-        concurrency=config.concurrency,
-        per_agent_concurrency=config.per_agent_concurrency,
-        runtime=runtime,
-        retry=config.retry,
-    )
-
-
-def add_task(environment_path: Path, task: TaskDefinition) -> Path:
-    """Append an environment-owned task to conventional tasks.jsonl."""
-    source = _target(environment_path, "environment.yaml")
-    environment = load_environment(source)
-    if task.task_id in {item.task_id for item in environment.tasks}:
-        raise ValueError(f"task {task.task_id!r} already exists")
-    task_path = source.parent / "tasks.jsonl"
-    with task_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(task.model_dump(mode="json"), sort_keys=True) + "\n")
-    return task_path
-
-
-def _environment_yaml(path: Path) -> tuple[Path, dict[str, Any]]:
-    source = _target(path, "environment.yaml")
-    payload = read_yaml(source)
-    if not isinstance(payload, dict):
-        raise ValueError("environment.yaml must be an object")
-    return source, payload
-
-
-def add_environment_action(path: Path, action: NativeAction) -> Path:
-    """Append a native action to an environment package."""
-    source, payload = _environment_yaml(path)
-    actions = list(payload.get("actions") or [])
-    dumped = action.model_dump(mode="json")
-    if any(item.get("name") == action.name for item in actions if isinstance(item, dict)):
-        raise ValueError(f"action {action.name!r} already exists")
-    actions.append(dumped)
-    payload["actions"] = actions
-    write_yaml(source, payload)
-    load_environment(source)
-    return source
-
-
-def remove_environment_action(path: Path, name: str) -> Path:
-    """Remove a native action from an environment package."""
-    source, payload = _environment_yaml(path)
-    actions = [
-        item
-        for item in (payload.get("actions") or [])
-        if not (isinstance(item, dict) and item.get("name") == name)
-    ]
-    payload["actions"] = actions
-    write_yaml(source, payload)
-    load_environment(source)
-    return source
-
-
-def add_environment_resource(path: Path, resource: EnvironmentResource) -> Path:
-    """Append a resource to an environment package."""
-    source, payload = _environment_yaml(path)
-    resources = list(payload.get("resources") or [])
-    dumped = resource.model_dump(mode="json")
-    if any(item.get("name") == resource.name for item in resources if isinstance(item, dict)):
-        raise ValueError(f"resource {resource.name!r} already exists")
-    resources.append(dumped)
-    payload["resources"] = resources
-    write_yaml(source, payload)
-    load_environment(source)
-    return source
-
-
-def unstamp_harness(environment_path: Path, harness_name: str) -> Path:
-    """Remove a harness binding from an environment allowlist."""
-    source, payload = _environment_yaml(environment_path)
-    policy = dict(payload.get("harness_policy") or {})
-    values = [
-        item
-        for item in (policy.get("allowed_harnesses") or [])
-        if not (isinstance(item, dict) and item.get("name") == harness_name)
-    ]
-    policy["allowed_harnesses"] = values
-    payload["harness_policy"] = policy
-    write_yaml(source, payload)
-    load_environment(source)
-    return source
-
-
-def allow_harness(environment_path: Path, harness_path: Path) -> Path:
-    """Add an exact harness binding to an environment manifest."""
-    return allow_harness_package(environment_path, load_harness(harness_path))
-
-
-def allow_harness_package(
-    environment_path: Path,
-    package: HarnessPackage,
-) -> Path:
-    """Add an already-resolved harness package to an environment allowlist."""
-    source = _target(environment_path, "environment.yaml")
-    payload = read_yaml(source)
-    binding = harness_binding(package)
-    policy = dict(payload.get("harness_policy") or {})
-    values = list(policy.get("allowed_harnesses") or payload.get("allowed_harnesses") or [])
-    dumped = binding.model_dump(mode="json")
-    if dumped not in values:
-        values.append(dumped)
-    policy["allowed_harnesses"] = values
-    policy.setdefault("mode", "allow_all")
-    payload["harness_policy"] = policy
-    write_yaml(source, payload)
-    load_environment(source)
-    return source
-
-
 def generate_schemas(directory: Path) -> list[Path]:
-    """Generate JSON schemas for core public package configs."""
+    """Generate canonical schema-v2 JSON schemas."""
     models: tuple[type[BaseModel], ...] = (
-        HarnessPackage,
         EnvironmentManifest,
+        TaskDefinition,
+        DeterministicVerifier,
+        AgentVerifier,
+        HumanVerifier,
+        AgentDefinition,
         BenchmarkDefinition,
-        AgentTemplate,
         JobSpec,
     )
     directory.mkdir(parents=True, exist_ok=True)
-    written: list[Path] = []
+    output = []
     for model in models:
         path = directory / f"{model.__name__}.schema.json"
         path.write_text(
             json.dumps(model.model_json_schema(), indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        written.append(path)
-    return written
+        output.append(path)
+    return output
 
 
 __all__ = [
+    "BenchmarkFile",
     "JobFile",
-    "add_task",
-    "allow_harness",
-    "allow_harness_package",
+    "TaskFile",
     "generate_schemas",
     "load_agent",
     "load_benchmark",
@@ -508,11 +460,15 @@ __all__ = [
     "load_harness",
     "load_harness_reference",
     "load_job",
+    "load_task",
+    "load_verifier",
     "read_yaml",
     "scaffold_agent",
     "scaffold_benchmark",
     "scaffold_environment",
     "scaffold_harness",
     "scaffold_job",
+    "scaffold_task",
+    "scaffold_verifier",
     "write_yaml",
 ]

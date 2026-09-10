@@ -1,140 +1,102 @@
-# Hosted revisions and execution records
+---
+route: /docs/sdk/hosted-advanced
+title: "Hosted schema-v2 revisions and execution records"
+order: 100
+description: "The Python package can always author, validate, plan, execute, and inspect the schema-v2 graph locally. Hosted writes require a compatible deployment; inspect its advertised API before integrating."
+audience: all
+---
+# Hosted schema-v2 revisions and execution records
 
-Start with [fetching and updating objects](../guides/push-to-plural.md).
-This page covers advanced hosted APIs for package revisions and job records.
-All calls require Plural Intel credentials and a compatible backend. Prefer the
-CLI's `--sync` workflow unless you need to integrate registration yourself.
+The Python package can always author, validate, plan, execute, and inspect the
+schema-v2 graph locally. Hosted writes require a compatible deployment; inspect
+its advertised API before integrating.
 
-## Publish and resolve a harness revision
+## Publish the revision graph
 
-This example uses the files from the CLI tutorial and creates hosted records:
+Publish immutable records in dependency order:
+
+1. Harness and Environment revisions.
+2. Deterministic, agent, or human Verifier revisions.
+3. Task revisions, each pinning one Environment and weighted Verifiers.
+4. Environment-independent AgentDefinition revisions.
+5. Benchmark revisions selecting ordered Tasks across any Environments.
+6. A Job whose discriminated source is one Task or Benchmark.
+
+Preserve complete digests and server revision IDs. Harness compatibility and
+the capability stamp are per Trial against the Task's Environment; do not store
+an Environment binding on the Agent.
+
+The resource APIs expose both stages explicitly:
+
+```python
+draft = client.environments.push(environment)
+parent = client.environments.get("environment-slug")
+published = client.environments.publish_revision(
+    parent["id"], draft["id"]
+)
+```
+
+Use the same `push(...)` then `publish_revision(parent_id, revision_id)` flow
+for Tasks, Verifiers, Agents, Harnesses, and Benchmarks. Task push requires
+`environment_revision_id` and aligned `verifier_revision_ids`; Benchmark push
+requires aligned `task_revision_ids`.
+
+## Submit a hosted Job
+
+Use the canonical `JobSpec` plus hosted revision IDs:
 
 ```python
 from pathlib import Path
-from plural import Client
-from plural.cli.scaffold import load_harness
 
-package = load_harness(Path("harness"))
-with Client() as client:
-    hosted = client.harnesses.create(name="support-loop")
-    revision = client.harnesses.create_revision(hosted["id"], package)
-    print(revision)
-    print(client.harnesses.revisions(hosted["id"]))
-    resolved = client.harnesses.resolve_revision(
-        name="support-loop", digest=package.source.digest,
-    )
-    print(resolved["id"])
+from plural.cli.scaffold import load_job
+
+spec = load_job(Path("job.yaml"))
+job = client.jobs.submit(
+    spec,
+    source_revision_id="benchmark_revision_id",
+    agent_revision_ids=["agent_revision_id"],
+    idempotency_key="release-2026-09-10",
+)
 ```
 
-If the harness already exists, use `client.harnesses.get("support-loop")`
-instead of `create`. `list()`, `get(ref)`, `update(ref, **fields)`, and
-`delete(ref)` manage the parent record. `create_revision` publishes a validated
-manifest/source description; it does not upload local source bytes to a registry.
-Local source URIs are sanitized in harness revision publication.
+Planning expands Agent × Task × attempts. Each Trial carries its Task
+Environment's runtime provider and placement. Global and per-runtime
+concurrency are scheduling limits only. A retry appends a TrialExecution under
+the same Trial instead of creating a new attempt.
 
-Stamp exact hosted revisions with:
+## Stream durable events
 
 ```python
-from plural import Client
+from pathlib import Path
 
-with Client() as client:
-    client.environments.stamp_harness(
-        "ENVIRONMENT_ID", "ENVIRONMENT_REVISION_ID", "HARNESS_REVISION_ID",
-    )
-    print(client.environments.list_stamps("ENVIRONMENT_ID", "ENVIRONMENT_REVISION_ID"))
+from plural import JobStore
+
+store = JobStore(Path(".plural/jobs"))
+for event in store.events("JOB_ID", after=0, follow=False):
+    print(event.model_dump_json(exclude_none=True))
 ```
 
-Replace all three placeholders with returned hosted IDs. These are separate
-from local content digests. When creating a packaged hosted template,
-`client.agents.templates.create(...)` accepts `environment_revision_id`,
-`harness_revision_id`, `routing`, and `package_spec` in addition to name/model.
-Keep the supplied package's stamp consistent with those revisions. A declared
-harness can be stamped and shown in the capability matrix; it cannot run.
+When mirroring events to a hosted API, preserve sequence order and idempotency.
+Human Verifiers produce `awaiting_review`; review submission appends new state
+without rewriting prior events.
 
-## Version a benchmark definition
+## Artifacts and modes
 
-A benchmark revision chooses task IDs from an exact environment revision:
+Eval mode runs final Verifiers but disables Rewarders and TITO. Train enables
+Environment Rewarders and fails preflight unless exact TITO capture is
+supported.
 
-```python
-from plural import Client
+TITO records include token IDs, aligned output log probabilities and top log
+probabilities, output text, assistant message, and validated input/output/
+observation lengths. Upload the immutable artifact bytes and their SHA-256
+reference. Do not embed these arrays into Trace or progress-event JSON.
 
-with Client() as client:
-    revision = client.benchmarks.create_revision(
-        "order-support-smoke",
-        environment_revision_id="ENVIRONMENT_REVISION_ID",
-        task_ids=["order-a100"],
-        primary_metric="reward",
-        description="Checks the A100 support response.",
-        methodology="One fixed task and the environment's verifier.",
-    )
-    print(revision)
-```
+## Delivery checks
 
-This creates **and promotes** the revision. Use actual task IDs belonging to
-that environment revision. `package_definition=` optionally stores the exact
-local `BenchmarkDefinition`; its identity must agree with the selected revision.
-`revisions(ref)` lists revision records, `get_revision(ref, revision_id)` reads
-one, and `promote_revision(ref, revision_id)` deliberately restores a previous
-revision as current. Promoting does not rerun old results or update local files.
+A successful local Job does not prove hosted delivery. Verify the hosted Job,
+Trial count, TrialExecution history, latest event sequence, human-review state,
+and every artifact digest after upload. Receipts are integrity records, not
+signed execution attestations.
 
-## Read hosted jobs and trials
-
-```python
-from plural import Client
-
-with Client() as client:
-    for job in client.jobs.list():
-        print(job.get("id"), job.get("status"))
-    # Replace with an ID from the list:
-    job = client.jobs.get("HOSTED_JOB_ID")
-    trials = client.jobs.trials("HOSTED_JOB_ID")
-    print(job, trials)
-```
-
-Local `job_id` and hosted job IDs can differ; use the sync mapping/output to
-associate them. `client.trials.get("HOSTED_TRIAL_ID")` reads one trial and its
-append-only execution history. The CLI's `plural job show` and `trial show`
-read local records, not these hosted endpoints.
-
-## Register and upload from an integration
-
-The lifecycle is:
-
-1. Publish/resolve exact environment, harness, agent, and benchmark revisions.
-2. Call `client.jobs.preflight(benchmark_revision_id=..., agent_revision_ids=...,
-   n_attempts=..., job_spec=spec)` to check hosted compatibility.
-3. Call `client.jobs.create(...)` with the same bindings, `job_spec`, and a
-   stable `idempotency_key`; optionally include the local plan's `spec_hash`.
-4. Read `client.jobs.trials(hosted_job_id)` and map hosted trial keys to the
-   local agent/task/attempt slots. Do not substitute local trial IDs blindly.
-5. Execute the local `Job`. Call `client.jobs.upload_results(hosted_job_id,
-   trial_keys=..., results=...)` with matching ordered sequences. It batches
-   validated results and receipts; `batch(...)` is the lower-level append API.
-6. Call `client.jobs.finalize(hosted_job_id, job.report(result))` to attach the
-   final report to its benchmark run.
-
-Registration never launches hosted execution. Reuse the same idempotency key
-only for the same logical registration; retain local state so interrupted
-uploads can be replayed. The SDK does not automatically orchestrate these calls
-when `Job.run()` executes. The CLI does so with `--sync` and `job upload`.
-
-`client.jobs.fail(id, error_code=..., error_message=...)` marks a hosted failure.
-`client.jobs.cancel(id)` and `client.trials.cancel(id)` update hosted cancellation
-records; they are not remote control over arbitrary local processes. Use
-`await job.cancel()` for active sandboxes owned by your in-process runner.
-
-## Hosted traces
-
-`client.traces.list(**params)` and `get(trace_id)` return dictionaries.
-`client.traces.create(payload, ...)` ingests a serialized trace with optional
-links. For a local `Trace` object, use the simpler `client.create(trace, ...)`.
-See the [trace walkthrough](../tutorials/traces-and-datasets.md) for examples.
-
-## Verify delivery
-
-A local successful run does not prove that every hosted write completed.
-Read the hosted job, trial count, and benchmark run history after syncing.
-Legacy benchmark helpers upload individual case traces best-effort and suppress
-those individual failures. Upload important traces explicitly when you need to
-observe failures. Receipts remain self-reported integrity records, not execution
-attestations. See [sync](../guides/studio-sync.md) and [limitations](../reference/limitations.md).
+See [sync boundaries](../guides/studio-sync.md) and
+[package Job execution](package-jobs.md).

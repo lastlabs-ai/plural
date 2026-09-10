@@ -1,3 +1,10 @@
+---
+route: /docs/guides/cloud-providers
+title: "Azure and Bedrock"
+order: 380
+description: "Enterprises usually cannot send traffic to a model lab directly: the contract, the data residency commitment, and the invoice all sit with a cloud vendor. Azure and Bedrock resell the same flagship models under those terms, so the catalog l"
+audience: all
+---
 # Azure and Bedrock
 
 Enterprises usually cannot send traffic to a model lab directly: the contract, the

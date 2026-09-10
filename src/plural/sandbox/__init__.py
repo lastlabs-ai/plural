@@ -1,4 +1,4 @@
-"""Client-orchestrated sandbox lifecycle providers."""
+"""Sandbox lifecycle providers."""
 
 from plural.sandbox.base import SandboxProvider
 from plural.sandbox.daytona import (

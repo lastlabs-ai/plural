@@ -1,47 +1,47 @@
+---
+route: /docs/concepts/environment
+title: "Environment"
+order: 120
+description: "Learn what an Environment revision owns, how observations differ from hidden state, and how runtime placement applies to every Trial."
+audience: all
+---
 # Environment
 
-The environment is the primary object. It owns instructions, native
-actions, observation and state schemas, guardrails, resources, harness
-policy, and runtime.
+`EnvironmentManifest` is a revisioned execution world. It owns:
 
-## Python API
+- overview, readme, and metadata;
+- native actions;
+- typed hidden state and observable schemas;
+- train-only Rewarders;
+- guardrails, resources, and secret references;
+- runtime provider, placement, image/build, network, compute, and limits;
+- the policy ceiling for an optional Agent Harness.
 
-`Environment.step()` is framework-owned. It records one `Turn` and advances
-the lifecycle. The default `apply_action` hook dispatches to `@action`
-methods. A model response without tool calls becomes
-`ParsedAction(name="respond", source="model_text")` and defaults to
-`policy_stop`.
+It intentionally does not own Tasks, Verifiers, or Job mode.
 
-Do not call `record_turn()` or `finish_turn()` from `apply_action`. Custom
-`ActionResult.info` merges into `StepResult.info` but cannot replace
-canonical `turn`, `stop_reason`, or action-error values.
+## Revision edges
 
-Step rewards become `Turn.reward_events`. End-of-episode scorers become
-`trace.outcome.reward`. Late labels use `trace.credit(...)`.
+A Task pins one complete Environment revision and weighted Verifier revisions.
+AgentDefinition remains independent. During Job planning, optional Harness
+compatibility is resolved against each Task Environment and frozen per Trial.
 
-```python
-trace.transitions(source="events")  # Turn.reward_events only
-```
+Because a Benchmark can select Tasks from different Environments, one Job may
+schedule Trials across multiple providers and placements. The Job controls
+bounded scheduling and retry only; it cannot replace Environment runtime
+policy.
 
-## Package manifest
+## Modes
 
-`EnvironmentManifest` carries `actions`, `observation_schema`,
-`state_schema`, `guardrails`, `resources`, `runtime`, and
-`harness_policy`. Container and network no longer live on `JobSpec`.
+Eval mode ignores Environment Rewarders and disables TITO capture while still
+running Task Verifiers. Train mode enables Rewarders and requires exact
+artifact-backed TITO support.
 
 ```bash
-plural env capabilities ./env
-plural env action list --environment ./env
-plural env resource list --environment ./env
+plural env init environment --name support
+plural env validate environment
+plural env show environment
 ```
-
-## Deterministic replay
-
-`replay_actions()` and `verify_replay()` replay recorded native actions
-against a compatible environment without calling a model. Replay checks
-the environment fingerprint and recorded observations. Redacted traces
-cannot be replayed if required content is missing.
 
 See [native actions](native-actions.md),
 [execution capabilities](execution-capabilities.md), and
-[harness stamping](harness-stamping.md).
+[Environment authoring](../guides/write-environment.md).

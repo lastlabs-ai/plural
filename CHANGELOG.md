@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-10
+
+### Added
+
+- Schema-v2 `Environment`, `Task`, deterministic/agent/human `Verifier`,
+  `AgentDefinition`, cross-environment `BenchmarkDefinition`, `Job`, `Trial`,
+  and retrying `TrialExecution` contracts with immutable revision hashes.
+- Environment-directed bounded execution, append-only live progress events,
+  human-review waits, train-only Rewarders, and artifact-backed exact TITO
+  records.
+- Canonical parent/revision publishing APIs and CLI workflows for authoring,
+  validating, running, watching, reviewing, and publishing the complete graph.
+
+### Changed
+
+- Environments now own actions, hidden state and observations, resources,
+  runtime/network/secrets policy, and train-only Rewarders. Tasks inject one
+  Environment revision and weighted Verifier revisions.
+- Jobs select either a Task or Benchmark and expand Agents × Tasks × attempts;
+  Environment placement remains authoritative while Job concurrency and retry
+  settings control scheduling.
+- `plural run` now validates and synchronizes the complete canonical revision
+  graph, submits a hosted Job with stable idempotency, and watches hosted events
+  by default. `--offline` and `--private` explicitly retain local execution.
+- Trace schema v3 records exact provenance, run mode, verifier/review outcomes,
+  reward events, and artifact references.
+
+### Removed
+
+- Environment-owned tasks/final scorers, `AgentTemplate`/`AgentInstance`,
+  `TaskData`/`TaskDataset`, the legacy Benchmark runner, and parallel v1/v2
+  execution paths.
+
 ## [0.9.0] - 2026-09-09
 
 ### Changed

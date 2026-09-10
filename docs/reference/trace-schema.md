@@ -1,9 +1,16 @@
+---
+route: /docs/reference/trace-schema
+title: "Trace JSON schema"
+order: 470
+description: "Canonical schema version: 3.0.0"
+audience: all
+---
 # Trace JSON schema
 
-Canonical schema version: **2.0.0**
+Canonical schema version: **3.0.0**
 
 The source of truth is the serialization schema generated from
-`plural.tracing.schema.Trace`. Do not hand-edit any `trace.v2.json` file.
+`plural.tracing.schema.Trace`. Do not hand-edit any `trace.v3.json` file.
 
 ```bash
 uv run python scripts/generate_trace_schema.py
@@ -12,9 +19,9 @@ uv run python scripts/generate_trace_schema.py --check
 
 The generator writes identical content to:
 
-- `src/plural/schemas/trace.v2.json` — packaged runtime resource
-- `schemas/trace.v2.json` — repository integration mirror
-- [`docs/schemas/trace.v2.json`](../schemas/trace.v2.json) — documentation mirror
+- `src/plural/schemas/trace.v3.json` — packaged runtime resource
+- `schemas/trace.v3.json` — repository integration mirror
+- [`docs/schemas/trace.v3.json`](../schemas/trace.v3.json) — documentation mirror
 
 ```python
 from plural.tracing import trace_json_schema

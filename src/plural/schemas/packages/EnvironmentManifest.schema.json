@@ -67,7 +67,7 @@
     },
     "EnvironmentResource": {
       "additionalProperties": false,
-      "description": "Data, application, or file the environment provides to the agent.",
+      "description": "Data or application supplied by an Environment.",
       "properties": {
         "config": {
           "additionalProperties": true,
@@ -95,8 +95,7 @@
           "enum": [
             "data",
             "application",
-            "file",
-            "secret"
+            "file"
           ],
           "title": "Kind",
           "type": "string"
@@ -140,7 +139,7 @@
     },
     "EnvironmentRuntime": {
       "additionalProperties": false,
-      "description": "Container, network, compute, and execution surface the environment requires.",
+      "description": "Immutable Environment-owned provider, placement, network, and compute.",
       "properties": {
         "allow_unsafe_local": {
           "default": false,
@@ -225,6 +224,19 @@
           "title": "Persistent",
           "type": "boolean"
         },
+        "placement": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Placement",
+          "type": "object"
+        },
+        "provider": {
+          "default": "docker",
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
         "read_only_root": {
           "default": false,
           "title": "Read Only Root",
@@ -265,7 +277,7 @@
     },
     "ExecutionLimits": {
       "additionalProperties": false,
-      "description": "Externally supplied limits enforced by built-in harnesses and provider timeout.",
+      "description": "Environment execution limits.",
       "properties": {
         "max_cost_usd": {
           "anyOf": [
@@ -298,7 +310,7 @@
       "type": "object"
     },
     "ExecutionTarget": {
-      "description": "Where a trial for this environment may execute.",
+      "description": "Execution isolation class.",
       "enum": [
         "local",
         "docker",
@@ -309,7 +321,7 @@
     },
     "Guardrail": {
       "additionalProperties": false,
-      "description": "One plain-language rule. Instructions, not enforcement.",
+      "description": "A plain-language Environment rule.",
       "properties": {
         "name": {
           "default": "",
@@ -330,7 +342,7 @@
     },
     "HarnessBinding": {
       "additionalProperties": false,
-      "description": "Exact harness binding used by one agent and every resulting trial.",
+      "description": "Exact harness revision.",
       "properties": {
         "digest": {
           "title": "Digest",
@@ -356,7 +368,7 @@
       "type": "object"
     },
     "HarnessCapability": {
-      "description": "Actions a stamped harness may request.",
+      "description": "A capability requested by an agent harness.",
       "enum": [
         "shell",
         "file_read",
@@ -374,7 +386,7 @@
     },
     "HarnessPolicy": {
       "additionalProperties": false,
-      "description": "How an environment restricts any harness stamped onto it.",
+      "description": "Environment ceiling for a Trial's optional Agent harness.",
       "properties": {
         "allowed_capabilities": {
           "anyOf": [
@@ -424,7 +436,7 @@
     },
     "NativeAction": {
       "additionalProperties": false,
-      "description": "One action the environment owns. Acts in the environment, returns an observation.",
+      "description": "An action owned by an Environment.",
       "properties": {
         "command": {
           "default": [],
@@ -494,7 +506,7 @@
     },
     "PackageSource": {
       "additionalProperties": false,
-      "description": "Immutable source for a harness package.\n\nPublished and remote sources require a digest. An unsigned local source is\naccepted only when explicitly marked unsafe. ``trusted`` is retained only\nfor manifest migration and never bypasses digest or unsafe checks.",
+      "description": "Immutable package source.",
       "properties": {
         "digest": {
           "anyOf": [
@@ -600,97 +612,95 @@
       "title": "ResourceRequirements",
       "type": "object"
     },
-    "TaskDefinition": {
+    "RewarderDefinition": {
       "additionalProperties": false,
-      "description": "Task owned by an environment package.",
-      "properties": {
-        "expected": {
-          "default": null,
-          "title": "Expected"
-        },
-        "input": {
-          "title": "Input"
-        },
-        "metadata": {
-          "additionalProperties": true,
-          "title": "Metadata",
-          "type": "object"
-        },
-        "task_id": {
-          "minLength": 1,
-          "title": "Task Id",
-          "type": "string"
-        },
-        "verifier_input": {
-          "default": null,
-          "title": "Verifier Input"
-        }
-      },
-      "required": [
-        "task_id",
-        "input"
-      ],
-      "title": "TaskDefinition",
-      "type": "object"
-    },
-    "VerifierManifest": {
-      "additionalProperties": false,
-      "description": "Isolated verifier command and required evidence contract.",
+      "description": "A train-only state-transition rewarder.",
       "properties": {
         "command": {
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1,
-          "title": "Command",
-          "type": "array"
-        },
-        "evidence_required": {
-          "default": true,
-          "title": "Evidence Required",
-          "type": "boolean"
-        },
-        "image": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Image"
-        },
-        "required_artifacts": {
           "default": [],
           "items": {
             "type": "string"
           },
-          "title": "Required Artifacts",
+          "title": "Command",
           "type": "array"
         },
-        "result_path": {
-          "default": "verifier-result.json",
-          "title": "Result Path",
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "implementation_digest": {
+          "default": "",
+          "title": "Implementation Digest",
+          "type": "string"
+        },
+        "kind": {
+          "default": "command",
+          "enum": [
+            "command",
+            "python"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
           "type": "string"
         },
         "timeout_seconds": {
-          "default": 60,
+          "default": 30,
           "exclusiveMinimum": 0,
           "title": "Timeout Seconds",
+          "type": "number"
+        },
+        "weight": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Weight",
           "type": "number"
         }
       },
       "required": [
-        "command"
+        "name"
       ],
-      "title": "VerifierManifest",
+      "title": "RewarderDefinition",
+      "type": "object"
+    },
+    "SecretReference": {
+      "additionalProperties": false,
+      "description": "A named secret injected by a runtime without embedding its value.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "target": {
+          "default": "environment",
+          "enum": [
+            "environment",
+            "harness",
+            "verifier"
+          ],
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SecretReference",
       "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "Environment package: native actions, runtime, resources, and harness policy.",
+  "description": "Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent.",
   "properties": {
     "actions": {
       "default": [],
@@ -699,10 +709,6 @@
       },
       "title": "Actions",
       "type": "array"
-    },
-    "context": {
-      "default": null,
-      "title": "Context"
     },
     "description": {
       "default": "",
@@ -720,13 +726,13 @@
     "harness_policy": {
       "$ref": "#/$defs/HarnessPolicy"
     },
-    "instructions": {
-      "default": "",
-      "title": "Instructions",
-      "type": "string"
-    },
     "limits": {
       "$ref": "#/$defs/ExecutionLimits"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
     },
     "name": {
       "minLength": 1,
@@ -737,6 +743,16 @@
       "additionalProperties": true,
       "title": "Observation Schema",
       "type": "object"
+    },
+    "overview": {
+      "default": "",
+      "title": "Overview",
+      "type": "string"
+    },
+    "readme": {
+      "default": "",
+      "title": "Readme",
+      "type": "string"
     },
     "resources": {
       "default": [],
@@ -752,14 +768,30 @@
       "title": "Revision",
       "type": "string"
     },
+    "rewarders": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RewarderDefinition"
+      },
+      "title": "Rewarders",
+      "type": "array"
+    },
     "runtime": {
       "$ref": "#/$defs/EnvironmentRuntime"
     },
     "schema_version": {
-      "const": "1",
-      "default": "1",
+      "const": "2",
+      "default": "2",
       "title": "Schema Version",
       "type": "string"
+    },
+    "secrets": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SecretReference"
+      },
+      "title": "Secrets",
+      "type": "array"
     },
     "source": {
       "anyOf": [
@@ -776,25 +808,6 @@
       "additionalProperties": true,
       "title": "State Schema",
       "type": "object"
-    },
-    "tasks": {
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/TaskDefinition"
-      },
-      "title": "Tasks",
-      "type": "array"
-    },
-    "verifier": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/VerifierManifest"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
     }
   },
   "required": [

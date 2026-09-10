@@ -1,201 +1,128 @@
-# Run your first package job
+---
+route: /docs/tutorials/cli-walkthrough
+title: "Run your first schema-v2 Job"
+order: 50
+description: "This walkthrough creates a complete revision graph, runs it through the hosted service by default, and shows the explicit offline alternative."
+audience: all
+---
+# Run your first schema-v2 Job
 
-This walkthrough uses the installed `plural` command. You will create a small
-support-answer package, inspect its plan, run a model, and find its saved result.
-No Python package source changes are required. Commands assume you are in the
-project folder from [setup](../getting-started/setup.md).
+This walkthrough creates a complete revision graph. Dry runs make no hosted
+writes. A normal authenticated run publishes the graph and submits a hosted
+Job; `--offline` or `--private` keeps execution and durable state local.
 
-**Before you start:** configure `PLURAL_API_KEY` and `PLURAL_GATEWAY_URL` for
-model execution. Scaffolding and dry runs do not need credentials. Actual runs
-make paid model calls. This first job has no verifier, so completion is not a
-quality score; the next tutorial adds verification.
-
-## 1. Create an environment and edit its task
+## 1. Create the Environment
 
 ```bash
 plural env init environment --name support
 ```
 
-This creates four files:
+Edit `environment/environment.yaml` to define instructions, actions, typed
+state/observation, resources, secrets, and runtime. Runtime provider, placement,
+network, and compute belong here—not on the Job.
 
-- `environment.yaml`: instructions, native actions, runtime, limits, and package settings.
-- `tasks.jsonl`: one JSON task per line.
-- `environment.py`: a starting Python subclass, not automatically executed by
-  the package runner.
-- `Dockerfile`: a starting runtime image for container jobs.
-
-Replace `environment/tasks.jsonl` with:
-
-```json
-{"task_id":"order-a100","input":"Order A100 has shipped. Reply with a short customer-friendly status update."}
-```
-
-You can add another public task from the terminal:
+## 2. Create a Verifier and Task
 
 ```bash
-plural env task add --environment environment --id order-a200 \
-  --input 'Order A200 is processing. Reply with a short customer-friendly status update.'
-plural env task list --environment environment
-plural env validate environment
+plural verifier init verifier.yaml --name correct --kind deterministic
+plural task init task.yaml --id order-a100 \
+  --environment environment --verifier verifier.yaml
+plural verifier validate verifier.yaml
+plural task validate task.yaml
 ```
 
-Leave `tasks: []` in the YAML to use `tasks.jsonl`. A nonempty inline `tasks`
-array takes precedence. Task listing is for authors: it is not a sanitized
-agent-facing payload and may include `verifier_input` if you add it later.
+Implement the generated deterministic verifier command before execution. A
+Verifier owns its runtime and connectivity independently. `--kind agent`
+creates a model judge; `--kind human` creates a rubric that yields
+`awaiting_review`.
 
-## 2. Create and allow the harness
+The Task owns instructions, public `info`, metadata, one exact Environment
+revision, and one or more weighted Verifier revisions.
+
+## 3. Create an Agent
 
 ```bash
 plural harness init harness --name support-loop
-plural harness validate harness
-plural harness inspect harness
-plural harness add harness --environment environment
-plural env harness list --environment environment
+plural agent init agent.yaml --name candidate \
+  --model openai/gpt-4.1-mini --harness harness
+plural agent validate agent.yaml
 ```
 
-The generated `native.chat.v1` harness asks the model for a response and writes
-`result.json` and `trajectory.jsonl`. It is a working model-backed scaffold,
-not an offline fake. `harness add` records the exact revision; stamp it with
-`plural env harness stamp` to freeze granted versus denied capabilities.
-`plural env harness add harness --environment environment` is another
-local-package spelling of the same allow-list step.
+`AgentDefinition` owns model, instructions, routing, and an optional Harness.
+It does not contain an Environment identity. Harness compatibility and the
+effective capability stamp are resolved separately for every planned Trial.
 
-## 3. Bind an agent and choose the tasks
+## 4. Run the Task directly
 
 ```bash
-plural benchmark init benchmark.yaml --name support-smoke --environment environment
-plural agent init agent.yaml --name candidate --model openai/gpt-4o-mini \
-  --environment environment --harness harness --secret PLURAL_API_KEY
-plural benchmark validate benchmark.yaml --environment environment
-plural benchmark show benchmark.yaml
-plural agent show agent.yaml
+plural run task.yaml --agent agent.yaml --mode eval --dry-run
+plural run task.yaml --agent agent.yaml --mode eval
+plural run task.yaml --agent agent.yaml --mode eval --offline
 ```
 
-`benchmark.yaml` selects the current task IDs in order. `agent.yaml` is an
-`AgentTemplate`: model plus environment identity, optionally plus a stamped
-harness. `--secret` grants a named secret from your shell; it does not store
-its value in the agent file. Omit `--harness` for the native path.
+Eval mode disables Rewarders and TITO capture but still runs final Verifiers.
+The dry run computes stable Job/Trial identities and performs compatibility
+preflight without launching a runtime. The normal run validates the complete
+graph before any write, publishes Harnesses, Environments, Verifiers, Tasks,
+an optional Benchmark, then Agents, submits the hosted Job with exact revision
+IDs, prints it, and follows events. The offline form writes its durable log
+under `.plural/jobs`; `--private` is equivalent.
 
-For direct provider access, change the secret grant and model identifier as
-explained in [setup](../getting-started/setup.md). Changing only the model name
-does not configure a different endpoint.
+## 5. Build a cross-Environment Benchmark
 
-## 4. Make and inspect a job
+Create additional Task files in the same way. They may point at different
+Environment revisions.
 
 ```bash
-plural job init job.yaml --environment environment \
-  --benchmark benchmark.yaml --agent agent.yaml
-plural run job.yaml --dry-run --format json
-plural run job.yaml --print-config --format yaml
-plural trial list job.yaml
+plural benchmark init benchmark.yaml --name support-suite \
+  --task task.yaml --task another-task.yaml
+plural benchmark validate benchmark.yaml
+plural run benchmark.yaml --agent agent.yaml \
+  --mode eval --attempts 2 --concurrency 4 --dry-run
 ```
 
-The dry run should show two trials and print their IDs plus a `job_id`. It checks
-configuration and computes the execution lock, but does not call the model or
-start a sandbox. It is not a runtime health check; use `runtime doctor` next.
+Planning expands Agent × selected Task × attempts. An attempt is a distinct
+Trial. Runtime retries append TrialExecutions beneath the same Trial.
 
-Paths in `job.yaml` resolve relative to that file. Keep these generated files
-at the same project level for this tutorial.
-
-## 5. Run locally or in Docker
-
-For this trusted, unverified development example:
+For a reusable Job file:
 
 ```bash
-plural runtime doctor local
-plural run job.yaml --runtime local --unsafe-local --format json
-```
-
-The local provider executes code with your user account's access. The explicit
-flag acknowledges that it is not a sandbox. A job with an isolated verifier
-cannot run on this provider.
-
-If Docker is installed and running:
-
-```bash
-plural runtime list
-plural runtime show docker
-plural runtime doctor docker
-plural run job.yaml --runtime docker --unsafe-local --format json
-```
-
-Here `--unsafe-local` also permits the mutable local harness source used by the
-scaffold. It does not change Docker into the local provider. For an immutable
-release, build an archive and bind its digest using the [harness guide](../guides/harnesses.md).
-The CLI uses the environment directory as the default Docker build context.
-
-The final result is JSON on stdout; progress goes to stderr. The run stores its
-configuration, lock, results, receipts, logs, and artifacts in `.plural/jobs`.
-Do not expect a reward from this job: no verifier has been configured.
-
-## 6. Inspect a completed run
-
-Replace `JOB_ID` and `TRIAL_ID` with values printed by your run:
-
-```bash
-plural job list
-plural job show JOB_ID
-plural trial list JOB_ID
-plural trial show TRIAL_ID --job JOB_ID
-```
-
-Use the **job ID**, rather than `job.yaml`, to inspect persisted trial results.
-A file path shows the plan. Follow artifact paths under that job's store to read
-`result.json` and `trajectory.jsonl`; receipts identify recorded hashes and
-runtime controls. `status: succeeded` means execution completed successfully.
-
-## 7. Compare another model
-
-```bash
-plural agent init agent-b.yaml --name candidate-b --model anthropic/claude-sonnet-4 \
-  --environment environment --harness harness --secret PLURAL_API_KEY
-plural run job.yaml --agent agent.yaml --agent agent-b.yaml \
-  --n-attempts 2 --concurrency 2 --dry-run
-```
-
-The plan now has eight trials. Remove `--dry-run` and add the runtime flags
-from step 5 to execute. Your gateway must support both model IDs. Add a verifier
-before using this as a scored model comparison.
-
-## 8. Change the environment deliberately
-
-Edit instructions or tasks first, then recreate references to the new identity:
-
-```bash
-plural env validate environment
-plural benchmark init benchmark.yaml --name support-smoke --environment environment --force
-plural agent init agent.yaml --name candidate --model openai/gpt-4o-mini \
-  --environment environment --harness harness --secret PLURAL_API_KEY --force
+plural job init job.yaml --source benchmark.yaml \
+  --source-kind benchmark --agent agent.yaml
 plural run job.yaml --dry-run
+plural run job.yaml --no-watch --idempotency-key release-2026-09-10
 ```
 
-`--force` replaces the named scaffold file; preserve custom edits before using
-it. Recreate `agent-b.yaml` too before including it in another sweep. For a
-harness source change, re-add its new binding **before** recreating benchmark
-and agent files. The path-based job file still points to those filenames.
-An updated package starts a new comparison; it does not rewrite an old job lock.
+Use `--source-kind task` when the Job source is a single Task. Without an
+override, the stable local Job ID is also the hosted idempotency key.
 
-## 9. Publish when ready
+## 6. Watch progress and human review
 
 ```bash
-plural env push environment
-plural run job.yaml --runtime docker --unsafe-local --sync
+plural job watch JOB_ID --hosted --json
+plural trial list JOB_ID
+plural trial watch TRIAL_ID --job JOB_ID --json --follow
+plural review list JOB_ID
+plural review submit JOB_ID TRIAL_ID \
+  --verifier human-review --score 1 --feedback approved
 ```
 
-These commands write to your Plural Intel project. Without `--sync`, execution
-results remain local. If upload fails, the local results remain available:
+Progress events are durable, append-only, monotonic, and sanitized.
+`plural run` already follows hosted Job events unless `--no-watch` is set.
+
+## 7. Train mode
 
 ```bash
-plural job upload JOB_ID
+plural run task.yaml --agent agent.yaml --mode train
+plural run task.yaml --agent agent.yaml --mode train --offline
 ```
 
-Sync registers and uploads a locally executed job; it does not ask Plural Intel
-to run the workload. For hosted reads and metadata updates, use the
-[SDK object walkthrough](../guides/push-to-plural.md). There is no general CLI
-`pull` command; `plural agent list` lists local `agent.yaml` files, not hosted agents.
+Train mode enables Environment Rewarders and exact TITO capture. The Harness
+must declare TITO support or preflight fails. Each record contains step,
+tokenizer/model, input/output/observation token IDs, output log probabilities
+and top log probabilities, output text, assistant message, and validated
+`input_len`, `output_len`, and `observation_len`. Records are stored as hashed
+artifacts instead of embedded in trace JSON.
 
-## Next
-
-[Add tools and an isolated verifier](package-tools.md), then explore
-[retries, resume, cancellation, and Daytona](../guides/jobs.md).
-The [CLI reference](../reference/cli-commands.md) documents every command option.
+See [package execution](package-tools.md) and the generated
+[CLI reference](../reference/cli-commands.md).

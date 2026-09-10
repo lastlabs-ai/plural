@@ -1,173 +1,71 @@
-# Harness packages and adapters
+---
+route: /docs/guides/harnesses
+title: "Build and bind a Harness"
+order: 280
+description: "A HarnessPackage contains a schema-v2 manifest and content-addressed source. It declares its protocol, command, capabilities, supported models, authentication modes, secret names, outputs, and artifacts."
+audience: all
+---
+# Build and bind a Harness
 
-A HarnessPackage is one executable agent loop plus a strict manifest. One
-Agent binds exactly one Harness revision and every Trial for that Agent uses the
-same binding.
-
-## Choose a built-in profile first
-
-The [CLI tutorial](../tutorials/cli-walkthrough.md) scaffolds `native.chat.v1`,
-which returns a model answer. `native.actions.v1` exposes environment native
-actions on the native path. Declared vendor harnesses (`hermes`, `claude-code`,
-`codex`, `cursor`) can be stamped but cannot run. The
-[actions tutorial](../tutorials/package-tools.md) shows a complete native
-action and verifier.
-
-## Minimal package
-
-```yaml
-manifest:
-  schema_version: "1"
-  name: minimal
-  version: 0.1.0
-  protocol: plural-harness-v1
-  command: [python, harness.py]
-  auth_modes: [none]
-  outputs:
-    - {path: result.json, required: true, media_type: application/json}
-  artifacts:
-    - {path: trajectory.jsonl, required: true, media_type: application/jsonl}
-source:
-  kind: local
-  uri: .
-  unsafe_local: true
-```
-
-The executable reads one `HarnessRunRequest` JSON line from stdin and writes
-JSON-line events to stdout. It must finish with exactly one `result` or `error`
-event. Result paths must match declared regular files. A harness cannot emit
-`score`, `scores`, `reward`, `verifier`, `expected`, or `actions` anywhere in
-an event; only the isolated verifier can score, and native actions stay on
-the environment.
-
-Use `plural harness init`, then:
+A `HarnessPackage` contains a schema-v2 manifest and content-addressed source.
+It declares its protocol, command, capabilities, supported models,
+authentication modes, secret names, outputs, and artifacts.
 
 ```bash
+plural harness init harness --name support-loop
 plural harness validate harness
-plural harness inspect harness
-plural harness build harness
-plural harness publish harness --output dist/minimal.tar.gz
+plural harness show harness
 ```
 
-`build` and `publish` create the same normalized gzip/tar format (sorted paths,
-zero timestamps/owners, no symlinks) and print its SHA-256. Publish currently
-writes only to a local path; it does not upload to a registry.
-
-## Test protocol conformance
-
-`plural harness test PATH --unsafe-local` executes the package locally with a
-synthetic `test/model` request and no environment commands. It does not supply
-your Agent's secret grants. Consequently, the generated model-backed harness is
-not expected to pass this command unchanged; use a deterministic test harness
-or a conformance entry point that can serve that fixture without credentials.
-Validate and run a real configured Job to test live model integration.
-
-For a credential-free conformance example, create a separate directory
-`offline-harness`, save the minimal YAML above as `harness.yaml`, and save this
-as `harness.py`:
-
-```python
-import json
-import sys
-from pathlib import Path
-
-request = json.loads(sys.stdin.readline())
-Path("result.json").write_text(json.dumps({"response": "ready"}))
-Path("trajectory.jsonl").write_text(json.dumps({"task_id": request["task"]["task_id"]}) + "\n")
-print(json.dumps({
-    "protocol": "plural-harness-v1", "type": "result", "status": "succeeded",
-    "outputs": ["result.json"], "artifacts": ["trajectory.jsonl"],
-}))
-```
+Bind the Harness to an Environment-independent Agent:
 
 ```bash
-plural harness test offline-harness --unsafe-local
-plural harness list .
+plural agent init agent.yaml --name candidate \
+  --model openai/gpt-4.1-mini --harness harness
+plural agent validate agent.yaml
 ```
 
-This checks the output contract, not agent intelligence or task success.
+`AgentDefinition` carries the exact Harness binding/package but never an
+Environment identity. During planning, Plural resolves a compatibility stamp
+for each Trial against the selected Task's Environment.
 
-## Immutable archives
+## Protocol
 
-Add a local file or HTTPS archive with the exact digest:
+A runnable `plural-harness-v1` process reads one JSON request from stdin and
+emits JSONL events on stdout. It writes declared outputs and artifacts at safe
+relative paths. ACP packages declare `protocol: acp` and
+`protocol_adapter: acp-client-v1`.
 
-```bash
-plural harness add dist/minimal.tar.gz \
-  --digest sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
-  --environment environment
-```
+Declared-only Harnesses describe compatibility but cannot execute.
 
-Use the **actual digest printed by build/publish**, not the illustrative value
-above. When creating an agent from the archive, pass the same archive path as
-`--harness` and the actual digest as `--harness-digest`. Recreate the benchmark
-and agent after changing the environment's allowed binding. `harness inspect`
-also accepts an archive reference with `--digest`.
+## Capabilities and secrets
 
-Remote/archive references require a digest. Retrieval accepts HTTPS, `file://`,
-or local paths, refuses HTTPS downgrade, limits compressed/extracted data to
-100 MiB, rejects links/devices/FIFOs/path traversal/duplicates, verifies bytes
-before extraction, and caches by digest. This is integrity, not publisher
-identity. Cache hits are revalidated against the authenticated archive and a
-tampered extracted tree is rebuilt.
-
-Plural does not currently verify Sigstore, Notary, cosign, PGP, transparency
-logs, or certificate identity. There is no signature field in schema v1.
-Distribute the expected digest through a separately trusted channel.
-`load_harness` derives a binding from the current local source tree, so source
-changes alter the binding, but mutable local development still requires
-`--unsafe-local`. `trusted: true` does not bypass that requirement. Build and
-add the digest-pinned archive for immutable execution.
-
-## OCI
-
-An OCI `PackageSource` must be digest pinned. OCI harness execution currently:
-
-- requires the Docker provider;
-- treats the digest-pinned harness image as the runtime image;
-- cannot compose that image with a separate Environment image, snapshot,
-  declarative image, or build context;
-- does not stage OCI Environment sources;
-- does not pull or publish OCI artifacts through CLI package commands;
-- does not verify signatures or attestations.
-
-Use an archive package when the harness needs to be uploaded into a separately
-built Environment image.
-
-## ACP adapter
-
-Set `protocol: acp` and `protocol_adapter: acp-client-v1`; `command` is the ACP
-agent argv. Plural installs its adapter into the sandbox and translates ACP v1
-`initialize`, `session/new`, `session/prompt`, updates, cancellation, and the
-final response into `result.json` and `trajectory.jsonl`.
-
-The current ACP client advertises no filesystem read/write and no terminal
-capability, passes no MCP servers, supports protocol version 1 only, and rejects
-agent callbacks it cannot serve. Treat this as a narrow stdio adapter rather
-than complete ACP host compatibility.
-
-## Claude Code, Codex, and Hermes
-
-`plural.harness.ADAPTER_RECIPES` contains manifests and installation recipes for
-`claude-code`, `codex`, and `hermes-agent`. Plural ships adapter source only; it
-does not bundle, install, license, authenticate, or pin the vendor CLI.
-
-- Claude Code expects `claude`, supports Anthropic models, and may receive
-  `ANTHROPIC_API_KEY` or the vendor's own OAuth state.
-- Codex expects `codex`, supports OpenAI models, and may receive
-  `OPENAI_API_KEY` or vendor OAuth state.
-- Hermes expects `hermes`, allows any declared model, and may receive
-  `OPENROUTER_API_KEY`.
-
-Vendor stdout formats and flags can change independently. Copy the recipe into a
-versioned external package, pin the vendor dependency yourself, declare only
-required secret names, run `harness test`, and publish a digest-pinned archive.
-
-## Secret grants
+Effective capabilities are the intersection of provider, project,
+Environment, Harness, and Agent policy. Any unsatisfied requirement fails
+preflight before a sandbox is created.
 
 `HarnessManifest.secret_names` is the allowlist a package may request.
-`AgentTemplate.secret_names` is the subset granted to that template and is rejected
-when undeclared. Only granted values present in the parent environment are
-passed. Plural replaces exact secret byte values in captured harness stdout,
-stderr, and error messages, but cannot redact transformed/encoded secrets,
-files the harness writes, provider-side logs, or side channels. Use scoped,
-short-lived credentials and network controls.
+`AgentDefinition.secret_names` is the granted subset. The selected Environment
+must also allow those names. Secret values are injected by the runtime and are
+never embedded in canonical manifests.
+
+## Train-only TITO
+
+Set `supports_tito: true`, choose `tito_path`, and declare that path as an
+artifact. Train mode fails preflight when the selected Harness cannot provide
+exact TITO. Eval mode never requests it.
+
+Each JSONL record includes step, tokenizer/model, input/output/observation token
+IDs, aligned output log probabilities and top log probabilities, output text,
+assistant message, and validated input/output/observation lengths. The engine
+stores the file as an immutable hashed artifact.
+
+## Source integrity
+
+Remote archive and OCI sources require SHA-256 digests. Local sources require
+an explicit unsafe-local declaration and are suitable only for reviewed
+development code. Archive extraction rejects traversal, links, special files,
+duplicates, and oversized content.
+
+See [execution capabilities](../concepts/execution-capabilities.md) and
+[package tools](../tutorials/package-tools.md).

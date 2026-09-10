@@ -2,7 +2,7 @@
   "$defs": {
     "EnvironmentIdentity": {
       "additionalProperties": false,
-      "description": "Exact identity and revision for a packaged environment.",
+      "description": "Exact Environment revision identity.",
       "properties": {
         "digest": {
           "title": "Digest",
@@ -29,7 +29,7 @@
     },
     "HarnessBinding": {
       "additionalProperties": false,
-      "description": "Exact harness binding used by one agent and every resulting trial.",
+      "description": "Exact harness revision.",
       "properties": {
         "digest": {
           "title": "Digest",
@@ -54,50 +54,93 @@
       "title": "HarnessBinding",
       "type": "object"
     },
-    "RuntimeSpec": {
+    "HarnessCapability": {
+      "description": "A capability requested by an agent harness.",
+      "enum": [
+        "shell",
+        "file_read",
+        "file_edit",
+        "code_execution",
+        "web_search",
+        "browser",
+        "network_fetch",
+        "mcp",
+        "subagents",
+        "persistence"
+      ],
+      "title": "HarnessCapability",
+      "type": "string"
+    },
+    "HarnessStamp": {
       "additionalProperties": false,
-      "description": "Requested execution target. Image, network, and resources live on the environment.",
+      "description": "Per-Trial harness compatibility evidence.",
       "properties": {
-        "capabilities": {
-          "default": [],
+        "declared": {
           "items": {
+            "$ref": "#/$defs/HarnessCapability"
+          },
+          "title": "Declared",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "denial_reasons": {
+          "additionalProperties": {
             "type": "string"
           },
-          "title": "Capabilities",
-          "type": "array"
+          "title": "Denial Reasons",
+          "type": "object"
         },
-        "provider": {
-          "default": "docker",
-          "minLength": 1,
-          "title": "Provider",
-          "type": "string"
+        "denied": {
+          "items": {
+            "$ref": "#/$defs/HarnessCapability"
+          },
+          "title": "Denied",
+          "type": "array",
+          "uniqueItems": true
         },
-        "timeout_seconds": {
-          "default": 300,
-          "exclusiveMinimum": 0,
-          "title": "Timeout Seconds",
-          "type": "number"
+        "environment": {
+          "$ref": "#/$defs/EnvironmentIdentity"
         },
-        "unsafe_local": {
-          "default": false,
-          "title": "Unsafe Local",
-          "type": "boolean"
+        "granted": {
+          "items": {
+            "$ref": "#/$defs/HarnessCapability"
+          },
+          "title": "Granted",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "harness": {
+          "$ref": "#/$defs/HarnessBinding"
         }
       },
-      "title": "RuntimeSpec",
+      "required": [
+        "environment",
+        "harness",
+        "declared",
+        "granted",
+        "denied"
+      ],
+      "title": "HarnessStamp",
       "type": "object"
+    },
+    "JobMode": {
+      "description": "Execution mode.",
+      "enum": [
+        "eval",
+        "train"
+      ],
+      "title": "JobMode",
+      "type": "string"
     }
   },
   "additionalProperties": false,
-  "description": "One independent attempt for one agent and environment-owned task.",
+  "description": "One independent Agent attempt.",
   "properties": {
     "agent_id": {
-      "minLength": 1,
       "title": "Agent Id",
       "type": "string"
     },
     "agent_name": {
-      "minLength": 1,
       "title": "Agent Name",
       "type": "string"
     },
@@ -120,30 +163,49 @@
       ],
       "default": null
     },
-    "instance_id": {
+    "harness_stamp": {
       "anyOf": [
         {
-          "type": "string"
+          "$ref": "#/$defs/HarnessStamp"
         },
         {
           "type": "null"
         }
       ],
-      "default": null,
-      "title": "Instance Id"
+      "default": null
     },
     "job_id": {
-      "minLength": 1,
       "title": "Job Id",
       "type": "string"
     },
-    "runtime": {
-      "$ref": "#/$defs/RuntimeSpec"
+    "mode": {
+      "$ref": "#/$defs/JobMode"
+    },
+    "placement": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Placement",
+      "type": "object"
+    },
+    "runtime_provider": {
+      "title": "Runtime Provider",
+      "type": "string"
+    },
+    "task_digest": {
+      "title": "Task Digest",
+      "type": "string"
     },
     "task_id": {
-      "minLength": 1,
       "title": "Task Id",
       "type": "string"
+    },
+    "verifier_digests": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Verifier Digests",
+      "type": "array"
     }
   },
   "required": [
@@ -151,9 +213,12 @@
     "agent_id",
     "agent_name",
     "task_id",
+    "task_digest",
     "attempt",
     "environment",
-    "runtime"
+    "verifier_digests",
+    "mode",
+    "runtime_provider"
   ],
   "title": "TrialSpec",
   "type": "object"

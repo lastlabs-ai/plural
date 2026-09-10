@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from _foundation import build_job
 
-spec = build_job(n_attempts=3, concurrency=4)
+spec = build_job(attempts=3, concurrency=4)
 plan = spec.plan()
 assert plan.trial_count == 6  # one Agent × two tasks × three attempts
 assert len({trial.trial_id for trial in plan.trials}) == 6

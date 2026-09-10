@@ -20,9 +20,9 @@ from plural.tracing import (
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATHS = (
-    ROOT / "src/plural/schemas/trace.v2.json",
-    ROOT / "schemas/trace.v2.json",
-    ROOT / "docs/schemas/trace.v2.json",
+    ROOT / "src/plural/schemas/trace.v3.json",
+    ROOT / "schemas/trace.v3.json",
+    ROOT / "docs/schemas/trace.v3.json",
 )
 
 
@@ -35,7 +35,7 @@ def test_generated_trace_schema_is_current_and_packaged() -> None:
 
     contents = [path.read_text(encoding="utf-8") for path in SCHEMA_PATHS]
     assert contents[0] == contents[1] == contents[2]
-    packaged = files("plural.schemas").joinpath("trace.v2.json")
+    packaged = files("plural.schemas").joinpath("trace.v3.json")
     assert packaged.is_file()
     assert trace_json_schema() == json.loads(contents[0])
 
@@ -54,7 +54,7 @@ def test_trace_schema_contains_variants_and_lineage_fields() -> None:
     assert {"turn_id", "turn", "reasoning", "started_at", "ended_at"} <= set(
         schema["$defs"]["Turn"]["properties"]
     )
-    assert schema["properties"]["schema_version"]["const"] == "2.0.0"
+    assert schema["properties"]["schema_version"]["const"] == "3.0.0"
 
 
 def test_production_and_episode_dumps_validate_against_trace_schema() -> None:

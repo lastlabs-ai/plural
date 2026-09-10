@@ -1,35 +1,8 @@
 {
   "$defs": {
-    "EnvironmentIdentity": {
-      "additionalProperties": false,
-      "description": "Exact identity and revision for a packaged environment.",
-      "properties": {
-        "digest": {
-          "title": "Digest",
-          "type": "string"
-        },
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "revision": {
-          "minLength": 1,
-          "title": "Revision",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "revision",
-        "digest"
-      ],
-      "title": "EnvironmentIdentity",
-      "type": "object"
-    },
     "FileDeclaration": {
       "additionalProperties": false,
-      "description": "One exact file a harness or verifier may emit or consume.",
+      "description": "A file emitted or consumed by a package.",
       "properties": {
         "media_type": {
           "default": "application/octet-stream",
@@ -55,7 +28,7 @@
     },
     "HarnessBinding": {
       "additionalProperties": false,
-      "description": "Exact harness binding used by one agent and every resulting trial.",
+      "description": "Exact harness revision.",
       "properties": {
         "digest": {
           "title": "Digest",
@@ -81,7 +54,7 @@
       "type": "object"
     },
     "HarnessCapability": {
-      "description": "Actions a stamped harness may request.",
+      "description": "A capability requested by an agent harness.",
       "enum": [
         "shell",
         "file_read",
@@ -99,7 +72,7 @@
     },
     "HarnessManifest": {
       "additionalProperties": false,
-      "description": "Public manifest for a single-agent harness package.\n\nA ``declared`` harness can be stamped and inspected but cannot execute a\ntrial. A ``runnable`` harness must provide a command.",
+      "description": "Versioned executable harness contract.",
       "properties": {
         "artifacts": {
           "default": [],
@@ -146,18 +119,6 @@
           "default": "",
           "title": "Description",
           "type": "string"
-        },
-        "entrypoint": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Entrypoint"
         },
         "environment_names": {
           "default": [],
@@ -234,9 +195,15 @@
           "title": "Requirements",
           "type": "array"
         },
+        "revision": {
+          "default": "0.1.0",
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        },
         "schema_version": {
-          "const": "1",
-          "default": "1",
+          "const": "2",
+          "default": "2",
           "title": "Schema Version",
           "type": "string"
         },
@@ -258,6 +225,23 @@
           "title": "Supported Models",
           "type": "array"
         },
+        "supports_tito": {
+          "default": false,
+          "title": "Supports Tito",
+          "type": "boolean"
+        },
+        "tito_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tito Path"
+        },
         "trajectory_path": {
           "anyOf": [
             {
@@ -269,12 +253,6 @@
           ],
           "default": null,
           "title": "Trajectory Path"
-        },
-        "version": {
-          "default": "0.1.0",
-          "minLength": 1,
-          "title": "Version",
-          "type": "string"
         }
       },
       "required": [
@@ -301,61 +279,9 @@
       "title": "HarnessPackage",
       "type": "object"
     },
-    "HarnessStamp": {
-      "additionalProperties": false,
-      "description": "Frozen result of stamping one harness onto one environment revision.",
-      "properties": {
-        "declared": {
-          "items": {
-            "$ref": "#/$defs/HarnessCapability"
-          },
-          "title": "Declared",
-          "type": "array",
-          "uniqueItems": true
-        },
-        "denial_reasons": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Denial Reasons",
-          "type": "object"
-        },
-        "denied": {
-          "items": {
-            "$ref": "#/$defs/HarnessCapability"
-          },
-          "title": "Denied",
-          "type": "array",
-          "uniqueItems": true
-        },
-        "environment": {
-          "$ref": "#/$defs/EnvironmentIdentity"
-        },
-        "granted": {
-          "items": {
-            "$ref": "#/$defs/HarnessCapability"
-          },
-          "title": "Granted",
-          "type": "array",
-          "uniqueItems": true
-        },
-        "harness": {
-          "$ref": "#/$defs/HarnessBinding"
-        }
-      },
-      "required": [
-        "environment",
-        "harness",
-        "declared",
-        "granted",
-        "denied"
-      ],
-      "title": "HarnessStamp",
-      "type": "object"
-    },
     "PackageSource": {
       "additionalProperties": false,
-      "description": "Immutable source for a harness package.\n\nPublished and remote sources require a digest. An unsigned local source is\naccepted only when explicitly marked unsafe. ``trusted`` is retained only\nfor manifest migration and never bypasses digest or unsafe checks.",
+      "description": "Immutable package source.",
       "properties": {
         "digest": {
           "anyOf": [
@@ -403,7 +329,7 @@
     },
     "RoutingSpec": {
       "additionalProperties": false,
-      "description": "Portable model routing configuration for an agent.",
+      "description": "Portable model routing configuration.",
       "properties": {
         "fallback_models": {
           "default": [],
@@ -456,7 +382,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Immutable model + environment configuration, optionally with a stamped harness.",
+  "description": "Revisioned Agent independent of any Environment.",
   "properties": {
     "auth_mode": {
       "default": "environment",
@@ -468,9 +394,6 @@
       ],
       "title": "Auth Mode",
       "type": "string"
-    },
-    "environment": {
-      "$ref": "#/$defs/EnvironmentIdentity"
     },
     "harness": {
       "anyOf": [
@@ -494,6 +417,16 @@
       ],
       "default": null
     },
+    "instructions": {
+      "default": "",
+      "title": "Instructions",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
     "model": {
       "minLength": 1,
       "title": "Model",
@@ -504,12 +437,18 @@
       "title": "Name",
       "type": "string"
     },
+    "revision": {
+      "default": "0.1.0",
+      "minLength": 1,
+      "title": "Revision",
+      "type": "string"
+    },
     "routing": {
       "$ref": "#/$defs/RoutingSpec"
     },
     "schema_version": {
-      "const": "1",
-      "default": "1",
+      "const": "2",
+      "default": "2",
       "title": "Schema Version",
       "type": "string"
     },
@@ -520,24 +459,12 @@
       },
       "title": "Secret Names",
       "type": "array"
-    },
-    "stamp": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/HarnessStamp"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
     }
   },
   "required": [
     "name",
-    "model",
-    "environment"
+    "model"
   ],
-  "title": "AgentTemplate",
+  "title": "AgentDefinition",
   "type": "object"
 }

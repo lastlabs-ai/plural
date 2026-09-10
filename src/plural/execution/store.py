@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from collections.abc import Iterable, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,7 @@ from plural.domain import (
     JobPlan,
     JobResult,
     JobSpec,
+    ProgressEvent,
     TrialResult,
     TrialSpec,
     canonical_json,
@@ -80,11 +83,83 @@ class JobStore:
             output.append(
                 {
                     "job_id": path.name,
-                    "status": "completed" if result_path.exists() else "pending",
+                    "status": (
+                        JobResult.model_validate_json(
+                            result_path.read_text(encoding="utf-8")
+                        ).status
+                        if result_path.exists()
+                        else "pending"
+                    ),
                     "cancel_requested": (path / "cancel").exists(),
                 }
             )
         return tuple(output)
+
+    def emit(
+        self,
+        job_id: str,
+        event_type: str,
+        status: str,
+        *,
+        trial_id: str | None = None,
+        execution_id: int | None = None,
+        message: str = "",
+        data: Mapping[str, Any] | None = None,
+        secret_values: Iterable[str] = (),
+    ) -> ProgressEvent:
+        """Append one monotonic, sanitized progress event."""
+        path = self.job_path(job_id) / "events.jsonl"
+        sequence = 1
+        if path.exists():
+            lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line]
+            if lines:
+                sequence = int(json.loads(lines[-1])["sequence"]) + 1
+        sanitized = _sanitize_event_data(dict(data or {}), secret_values)
+        event = ProgressEvent.model_validate(
+            {
+                "sequence": sequence,
+                "timestamp": datetime.now(timezone.utc),
+                "job_id": job_id,
+                "type": event_type,
+                "status": status,
+                "trial_id": trial_id,
+                "execution_id": execution_id,
+                "message": redact_mapping({"value": message}, secret_values)["value"][:2000],
+                "data": sanitized,
+            }
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            os.write(descriptor, (canonical_json(event) + "\n").encode())
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        return event
+
+    def events(
+        self,
+        job_id: str,
+        *,
+        after: int = 0,
+        follow: bool = False,
+        poll_interval: float = 0.1,
+    ) -> Iterable[ProgressEvent]:
+        """Yield events after a sequence cursor, optionally following updates."""
+        path = self.job_path(job_id) / "events.jsonl"
+        cursor = after
+        while True:
+            if path.exists():
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    if not line:
+                        continue
+                    event = ProgressEvent.model_validate_json(line)
+                    if event.sequence > cursor:
+                        cursor = event.sequence
+                        yield event
+            if not follow or (self.job_path(job_id) / "result.json").exists():
+                return
+            time.sleep(poll_interval)
 
     def request_cancel(self, job_id: str) -> None:
         """Atomically create a cancellation marker."""
@@ -206,30 +281,25 @@ class JobStore:
         self._write_model(path, result)
         return path
 
-    def write_regrade(
+    def write_review(
         self,
         trial: TrialSpec,
+        verifier_name: str,
+        submission: Mapping[str, Any],
         result: TrialResult,
-        *,
-        verifier_stdout: bytes,
-        verifier_stderr: bytes,
     ) -> Path:
-        """Persist verifier-only execution without replacing source attempts."""
-        source_hash = result.receipt.source_receipt_hash
-        if source_hash is None:
-            raise ValueError("regrade receipt requires source_receipt_hash")
+        """Append one immutable human review and publish its resolved Trial result."""
+        if not verifier_name or any(item in verifier_name for item in ("/", "\\", "..", "\x00")):
+            raise ValueError("invalid verifier name")
         self._validate_result_ownership(trial, result)
-        root = self.trial_path(trial) / "regrades"
-        identifiers = (
-            [int(path.name) for path in root.iterdir() if path.is_dir() and path.name.isdigit()]
-            if root.exists()
-            else []
-        )
-        destination = root / str(max(identifiers, default=-1) + 1)
+        destination = self.trial_path(trial) / "reviews" / verifier_name
+        if destination.exists():
+            raise ValueError("review was already submitted")
         destination.mkdir(parents=True, exist_ok=False)
-        self._write_bytes(destination / "logs" / "verifier.stdout.log", verifier_stdout)
-        self._write_bytes(destination / "logs" / "verifier.stderr.log", verifier_stderr)
-        self._write_model(destination / "receipt.json", result.receipt)
+        self._write_bytes(
+            destination / "submission.json",
+            (canonical_json(dict(submission)) + "\n").encode(),
+        )
         self._write_model(destination / "result.json", result)
         self._write_model(self.trial_path(trial) / "result.json", result)
         return destination
@@ -257,29 +327,6 @@ class JobStore:
         raw = json.loads(path.read_text(encoding="utf-8"))
         return dict(raw) if isinstance(raw, dict) else None
 
-    def artifact_files(self, trial: TrialSpec) -> tuple[DownloadedFile, ...]:
-        """Load immutable artifacts for verifier-only regrade."""
-        selected_path = self.trial_path(trial) / "selected.json"
-        if not selected_path.exists():
-            return ()
-        selected = json.loads(selected_path.read_text(encoding="utf-8"))
-        if not isinstance(selected, dict) or not isinstance(selected.get("execution_id"), int):
-            raise ValueError("invalid selected execution pointer")
-        root = self.trial_path(trial) / "attempts" / str(selected["execution_id"]) / "artifacts"
-        if not root.exists():
-            return ()
-        artifacts = tuple(
-            DownloadedFile(path=path.relative_to(root).as_posix(), data=path.read_bytes())
-            for path in sorted(root.rglob("*"))
-            if path.is_file() and not path.is_symlink()
-        )
-        source = self.successful_result(trial)
-        if source is None:
-            raise ValueError("selected artifacts have no successful receipt")
-        if {item.path: item.digest for item in artifacts} != source.receipt.artifact_hashes:
-            raise ValueError("selected artifacts do not match receipt hashes")
-        return artifacts
-
     def _validate_result_ownership(self, trial: TrialSpec, result: TrialResult) -> None:
         receipt = result.receipt
         lock = self.load_lock(trial.job_id)
@@ -290,10 +337,11 @@ class JobStore:
             or receipt.environment_digest != trial.environment.digest
             or receipt.harness_digest != (trial.harness.digest if trial.harness is not None else "")
             or lock.job_id != trial.job_id
-            or lock.environment != trial.environment
-            or lock.benchmark_hash != receipt.benchmark_digest
-            or receipt.agent_digest not in lock.agent_hashes
-            or receipt.harness_digest not in lock.harness_digests
+            or receipt.task_digest != trial.task_digest
+            or receipt.task_digest not in lock.task_digests
+            or receipt.environment_digest not in lock.environment_digests
+            or receipt.agent_digest not in lock.agent_digests
+            or (bool(receipt.harness_digest) and receipt.harness_digest not in lock.harness_digests)
         ):
             raise ValueError("trial result does not belong to its locked job")
 
@@ -332,6 +380,44 @@ def redact_mapping(values: Mapping[str, Any], secret_values: Iterable[str]) -> d
         return value
 
     return {str(key): redact(value) for key, value in values.items()}
+
+
+_PRIVATE_EVENT_KEYS = frozenset(
+    {
+        "expected",
+        "hidden_state",
+        "private_reasoning",
+        "reasoning",
+        "secret",
+        "secrets",
+        "state",
+        "verifier_input",
+    }
+)
+
+
+def _sanitize_event_data(
+    values: Mapping[str, Any],
+    secret_values: Iterable[str],
+) -> dict[str, Any]:
+    redacted = redact_mapping(values, secret_values)
+
+    def sanitize(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                str(key): "[redacted]"
+                if str(key).lower() in _PRIVATE_EVENT_KEYS
+                else sanitize(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [sanitize(item) for item in value[:100]]
+        if isinstance(value, str):
+            return value[:20_000]
+        return value
+
+    sanitized = sanitize(redacted)
+    return sanitized if isinstance(sanitized, dict) else {}
 
 
 __all__ = ["JobStore", "redact_mapping"]

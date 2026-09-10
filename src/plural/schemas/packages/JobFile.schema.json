@@ -1,109 +1,17 @@
 {
   "$defs": {
-    "ErrorCode": {
-      "description": "Stable execution error codes used by retry policies and receipts.",
+    "JobMode": {
+      "description": "Execution mode.",
       "enum": [
-        "authentication",
-        "configuration",
-        "invalid_request",
-        "rate_limited",
-        "provider_unavailable",
-        "timeout",
-        "runtime_unavailable",
-        "harness_failed",
-        "protocol_failed",
-        "environment_failed",
-        "verifier_failed",
-        "evidence_missing",
-        "artifact_failed",
-        "lock_incompatible",
-        "cancelled",
-        "internal"
+        "eval",
+        "train"
       ],
-      "title": "ErrorCode",
+      "title": "JobMode",
       "type": "string"
-    },
-    "RetryPolicy": {
-      "additionalProperties": false,
-      "description": "Execution retries, separate from independent benchmark attempts.",
-      "properties": {
-        "initial_backoff_seconds": {
-          "default": 0.25,
-          "minimum": 0,
-          "title": "Initial Backoff Seconds",
-          "type": "number"
-        },
-        "max_backoff_seconds": {
-          "default": 10,
-          "minimum": 0,
-          "title": "Max Backoff Seconds",
-          "type": "number"
-        },
-        "max_retries": {
-          "default": 0,
-          "minimum": 0,
-          "title": "Max Retries",
-          "type": "integer"
-        },
-        "multiplier": {
-          "default": 2,
-          "minimum": 1,
-          "title": "Multiplier",
-          "type": "number"
-        },
-        "retryable_codes": {
-          "default": [
-            "rate_limited",
-            "provider_unavailable",
-            "timeout",
-            "runtime_unavailable"
-          ],
-          "items": {
-            "$ref": "#/$defs/ErrorCode"
-          },
-          "title": "Retryable Codes",
-          "type": "array"
-        }
-      },
-      "title": "RetryPolicy",
-      "type": "object"
-    },
-    "RuntimeSpec": {
-      "additionalProperties": false,
-      "description": "Requested execution target. Image, network, and resources live on the environment.",
-      "properties": {
-        "capabilities": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Capabilities",
-          "type": "array"
-        },
-        "provider": {
-          "default": "docker",
-          "minLength": 1,
-          "title": "Provider",
-          "type": "string"
-        },
-        "timeout_seconds": {
-          "default": 300,
-          "exclusiveMinimum": 0,
-          "title": "Timeout Seconds",
-          "type": "number"
-        },
-        "unsafe_local": {
-          "default": false,
-          "title": "Unsafe Local",
-          "type": "boolean"
-        }
-      },
-      "title": "RuntimeSpec",
-      "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "Path-based local job config resolved into an immutable JobSpec.",
+  "description": "Path-based Job selecting a Benchmark or Task.",
   "properties": {
     "agents": {
       "items": {
@@ -114,11 +22,11 @@
       "title": "Agents",
       "type": "array"
     },
-    "benchmark": {
-      "default": "benchmark.yaml",
-      "format": "path",
-      "title": "Benchmark",
-      "type": "string"
+    "attempts": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Attempts",
+      "type": "integer"
     },
     "concurrency": {
       "default": 1,
@@ -126,37 +34,44 @@
       "title": "Concurrency",
       "type": "integer"
     },
-    "environment": {
-      "default": "environment.yaml",
-      "format": "path",
-      "title": "Environment",
-      "type": "string"
+    "mode": {
+      "$ref": "#/$defs/JobMode",
+      "default": "eval"
     },
-    "n_attempts": {
+    "per_runtime_concurrency": {
       "default": 1,
       "minimum": 1,
-      "title": "N Attempts",
+      "title": "Per Runtime Concurrency",
       "type": "integer"
     },
-    "per_agent_concurrency": {
-      "default": 1,
-      "minimum": 1,
-      "title": "Per Agent Concurrency",
+    "priority": {
+      "default": 0,
+      "title": "Priority",
       "type": "integer"
-    },
-    "retry": {
-      "$ref": "#/$defs/RetryPolicy"
-    },
-    "runtime": {
-      "$ref": "#/$defs/RuntimeSpec"
     },
     "schema_version": {
-      "default": "1",
+      "const": "2",
+      "default": "2",
       "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "format": "path",
+      "title": "Source",
+      "type": "string"
+    },
+    "source_kind": {
+      "enum": [
+        "benchmark",
+        "task"
+      ],
+      "title": "Source Kind",
       "type": "string"
     }
   },
   "required": [
+    "source_kind",
+    "source",
     "agents"
   ],
   "title": "JobFile",

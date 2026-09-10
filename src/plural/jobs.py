@@ -1,0 +1,552 @@
+"""Schema-v2 Job, Trial, event, result, and TITO orchestration contracts."""
+
+from __future__ import annotations
+
+import math
+from datetime import datetime
+from enum import Enum
+from typing import Annotated, Any, Literal
+
+from pydantic import Field, field_validator, model_validator
+
+from plural.agents import AgentBinding, AgentDefinition
+from plural.common import (
+    SHA256_PATTERN,
+    ErrorCode,
+    FrozenModel,
+    HarnessBinding,
+    HarnessCapability,
+    content_hash,
+    stable_id,
+)
+from plural.environments.manifest import EnvironmentIdentity, EnvironmentManifest, HarnessStamp
+from plural.sandbox.models import NetworkMode
+from plural.tasks import BenchmarkDefinition, TaskDefinition
+
+
+class RetryPolicy(FrozenModel):
+    """TrialExecution retry policy."""
+
+    max_retries: int = Field(default=0, ge=0)
+    initial_backoff_seconds: float = Field(default=0.25, ge=0)
+    max_backoff_seconds: float = Field(default=10, ge=0)
+    multiplier: float = Field(default=2, ge=1)
+    retryable_codes: tuple[ErrorCode, ...] = (
+        ErrorCode.RATE_LIMITED,
+        ErrorCode.PROVIDER_UNAVAILABLE,
+        ErrorCode.TIMEOUT,
+        ErrorCode.RUNTIME_UNAVAILABLE,
+    )
+
+    @model_validator(mode="after")
+    def _bounded(self) -> RetryPolicy:
+        if self.max_backoff_seconds < self.initial_backoff_seconds:
+            raise ValueError("max_backoff_seconds must be at least initial_backoff_seconds")
+        return self
+
+
+class TaskJobSource(FrozenModel):
+    """A Job selecting one Task revision."""
+
+    kind: Literal["task"] = "task"
+    task: TaskDefinition
+
+    @property
+    def tasks(self) -> tuple[TaskDefinition, ...]:
+        """Selected Tasks."""
+        return (self.task,)
+
+
+class BenchmarkJobSource(FrozenModel):
+    """A Job selecting one Benchmark revision."""
+
+    kind: Literal["benchmark"] = "benchmark"
+    benchmark: BenchmarkDefinition
+
+    @property
+    def tasks(self) -> tuple[TaskDefinition, ...]:
+        """Selected Tasks."""
+        return self.benchmark.tasks
+
+
+JobSource = Annotated[TaskJobSource | BenchmarkJobSource, Field(discriminator="kind")]
+
+
+class JobMode(str, Enum):
+    """Execution mode."""
+
+    EVAL = "eval"
+    TRAIN = "train"
+
+
+class TrialStatus(str, Enum):
+    """Durable Trial state machine."""
+
+    PLANNED = "planned"
+    QUEUED = "queued"
+    PROVISIONING = "provisioning"
+    RUNNING = "running"
+    VERIFYING = "verifying"
+    AWAITING_REVIEW = "awaiting_review"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ExecutionStatus(str, Enum):
+    """Durable TrialExecution state machine."""
+
+    QUEUED = "queued"
+    PROVISIONING = "provisioning"
+    RUNNING = "running"
+    VERIFYING = "verifying"
+    AWAITING_REVIEW = "awaiting_review"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ProgressEvent(FrozenModel):
+    """Append-only, sanitized execution progress event."""
+
+    schema_version: Literal["2"] = "2"
+    sequence: int = Field(ge=1)
+    timestamp: datetime
+    job_id: str = Field(min_length=1)
+    type: Literal[
+        "planned",
+        "queued",
+        "provisioning",
+        "environment_ready",
+        "running",
+        "heartbeat",
+        "model_turn",
+        "action",
+        "observation",
+        "reward",
+        "log",
+        "verifying",
+        "awaiting_review",
+        "retrying",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "completed",
+    ]
+    status: str
+    trial_id: str | None = None
+    execution_id: int | None = Field(default=None, ge=0)
+    message: str = ""
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class TITORecord(FrozenModel):
+    """Exact token-in/token-out training record stored as an artifact."""
+
+    schema_version: Literal["1"] = "1"
+    step: int = Field(ge=0)
+    tokenizer: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    input_token_ids: tuple[int, ...]
+    output_token_ids: tuple[int, ...]
+    observation_token_ids: tuple[int, ...]
+    output_logprobs: tuple[float, ...]
+    output_top_logprobs: tuple[dict[str, float], ...]
+    output_text: str
+    assistant_message: dict[str, Any]
+    input_len: int = Field(ge=0)
+    output_len: int = Field(ge=0)
+    observation_len: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _validated_lengths(self) -> TITORecord:
+        size = len(self.output_token_ids)
+        if len(self.output_logprobs) != size or len(self.output_top_logprobs) != size:
+            raise ValueError(
+                "output_token_ids, output_logprobs, and output_top_logprobs lengths must match"
+            )
+        declared = (self.input_len, self.output_len, self.observation_len)
+        actual = (
+            len(self.input_token_ids),
+            len(self.output_token_ids),
+            len(self.observation_token_ids),
+        )
+        if declared != actual:
+            raise ValueError(
+                "input_len, output_len, and observation_len must match their token arrays"
+            )
+        if any(not math.isfinite(value) for value in self.output_logprobs):
+            raise ValueError("output_logprobs must be finite")
+        if any(
+            not math.isfinite(value)
+            for candidates in self.output_top_logprobs
+            for value in candidates.values()
+        ):
+            raise ValueError("output_top_logprobs must be finite")
+        return self
+
+
+class ArtifactReference(FrozenModel):
+    """Hashed artifact reference; large content is never embedded."""
+
+    name: str = Field(min_length=1)
+    digest: str
+    media_type: str
+    size_bytes: int = Field(ge=0)
+
+    @field_validator("digest")
+    @classmethod
+    def _digest(cls, value: str) -> str:
+        if SHA256_PATTERN.fullmatch(value) is None:
+            raise ValueError("digest must be sha256:<64 lowercase hex characters>")
+        return value
+
+
+class VerifierResult(FrozenModel):
+    """One immutable Verifier outcome."""
+
+    verifier_name: str
+    verifier_digest: str
+    kind: Literal["deterministic", "agent", "human"]
+    status: Literal["succeeded", "failed", "awaiting_review"]
+    reward: float | None = None
+    scores: dict[str, float] = Field(default_factory=dict)
+    evidence: tuple[str, ...] = ()
+    feedback: str = ""
+
+    @model_validator(mode="after")
+    def _finite(self) -> VerifierResult:
+        values = [*self.scores.values()]
+        if self.reward is not None:
+            values.append(self.reward)
+        if any(not math.isfinite(item) for item in values):
+            raise ValueError("verifier result contains a non-finite score")
+        if self.status == "succeeded" and self.reward is None:
+            raise ValueError("successful verifier result requires reward")
+        return self
+
+
+_NETWORK_NONE_DENIALS = frozenset(
+    {
+        HarnessCapability.WEB_SEARCH,
+        HarnessCapability.BROWSER,
+        HarnessCapability.NETWORK_FETCH,
+        HarnessCapability.MCP,
+    }
+)
+_NETWORK_RESTRICTED_DENIALS = frozenset({HarnessCapability.WEB_SEARCH, HarnessCapability.BROWSER})
+
+
+def resolve_trial_harness_stamp(
+    environment: EnvironmentManifest,
+    agent: AgentDefinition,
+) -> HarnessStamp | None:
+    """Resolve Agent Harness compatibility against one Trial Environment.
+
+    Returns:
+        Per-Trial stamp, or ``None`` for a native Agent.
+    """
+    package = agent.harness_package
+    binding = agent.harness
+    if binding is None:
+        return None
+    if package is None:
+        raise ValueError(f"Agent {agent.name!r} harness requires an executable package")
+    if package.manifest.implementation != "runnable":
+        raise ValueError(f"Harness {package.manifest.name!r} is declared but not runnable")
+    if HarnessBinding.from_package(package) != binding:
+        raise ValueError("Agent Harness package does not match binding")
+    allowed = set(environment.harness_policy.allowed_harnesses)
+    if environment.harness_policy.mode == "allowlist" and binding not in allowed:
+        raise ValueError(
+            f"Harness {binding.name!r} is not allowed by Environment {environment.name!r}"
+        )
+    declared = package.manifest.capabilities
+    denied: set[HarnessCapability] = set()
+    reasons: dict[str, str] = {}
+
+    def deny(capability: HarnessCapability, reason: str) -> None:
+        if capability in declared and capability not in denied:
+            denied.add(capability)
+            reasons[capability.value] = reason
+
+    for capability in environment.harness_policy.denied_capabilities:
+        deny(capability, "Environment denied")
+    ceiling = environment.harness_policy.allowed_capabilities
+    if ceiling is not None:
+        for capability in declared - ceiling:
+            deny(capability, "not in Environment allowlist")
+    if environment.runtime.network is NetworkMode.NONE:
+        for capability in _NETWORK_NONE_DENIALS:
+            deny(capability, "Environment network=none")
+    elif environment.runtime.network is NetworkMode.RESTRICTED:
+        for capability in _NETWORK_RESTRICTED_DENIALS:
+            deny(capability, "Environment network=restricted")
+    if environment.runtime.read_only_root:
+        deny(HarnessCapability.FILE_EDIT, "Environment read_only_root")
+    return HarnessStamp(
+        environment=environment.identity,
+        harness=binding,
+        declared=declared,
+        granted=declared - denied,
+        denied=frozenset(denied),
+        denial_reasons=reasons,
+    )
+
+
+class JobSpec(FrozenModel):
+    """Complete schema-v2 Job orchestration input."""
+
+    schema_version: Literal["2"] = "2"
+    source: JobSource
+    agents: tuple[AgentBinding, ...] = Field(min_length=1)
+    mode: JobMode = JobMode.EVAL
+    attempts: int = Field(default=1, ge=1)
+    concurrency: int = Field(default=1, ge=1)
+    per_runtime_concurrency: int = Field(default=1, ge=1)
+    priority: int = 0
+    retry: RetryPolicy = Field(default_factory=RetryPolicy)
+
+    @model_validator(mode="after")
+    def _compatible(self) -> JobSpec:
+        agent_ids = [agent.agent_id for agent in self.agents]
+        if len(agent_ids) != len(set(agent_ids)):
+            raise ValueError("agents must have unique identities")
+        for task in self.tasks:
+            target = task.environment.runtime.requested_target
+            if target not in task.environment.runtime.available_targets():
+                reason = task.environment.runtime.target_exclusions().get(
+                    target, "target unavailable"
+                )
+                raise ValueError(
+                    f"Environment {task.environment.name!r} provider is not enforceable: {reason}"
+                )
+            for agent in self.agents:
+                resolve_trial_harness_stamp(task.environment, agent.agent)
+        return self
+
+    @property
+    def tasks(self) -> tuple[TaskDefinition, ...]:
+        """Selected Tasks in deterministic order."""
+        return self.source.tasks
+
+    @property
+    def content_hash(self) -> str:
+        """Stable Job configuration digest."""
+        return content_hash(self)
+
+    @property
+    def job_id(self) -> str:
+        """Stable Trial-set identity excluding retries and scheduling."""
+        return stable_id(
+            "job",
+            {
+                "source": self.source,
+                "agents": self.agents,
+                "mode": self.mode,
+                "attempts": self.attempts,
+            },
+        )
+
+    def plan(self) -> JobPlan:
+        """Expand Agent x Task x attempt and freeze per-Trial compatibility.
+
+        Returns:
+            The deterministic Trial plan and revision lock.
+        """
+        trials = tuple(
+            TrialSpec(
+                job_id=self.job_id,
+                agent_id=agent.agent_id,
+                agent_name=agent.name,
+                task_id=task.task_id,
+                task_digest=task.content_hash,
+                attempt=attempt,
+                environment=task.environment.identity,
+                verifier_digests=tuple(item.verifier.content_hash for item in task.verifiers),
+                harness=agent.harness,
+                harness_stamp=resolve_trial_harness_stamp(task.environment, agent.agent),
+                mode=self.mode,
+                runtime_provider=task.environment.runtime.provider,
+                placement=task.environment.runtime.placement,
+            )
+            for agent in self.agents
+            for task in self.tasks
+            for attempt in range(1, self.attempts + 1)
+        )
+        lock = JobLock(
+            job_id=self.job_id,
+            spec_hash=self.content_hash,
+            source_digest=(
+                self.source.task.content_hash
+                if isinstance(self.source, TaskJobSource)
+                else self.source.benchmark.content_hash
+            ),
+            task_digests=tuple(task.content_hash for task in self.tasks),
+            environment_digests=tuple(task.environment.content_hash for task in self.tasks),
+            verifier_digests=tuple(
+                item.verifier.content_hash for task in self.tasks for item in task.verifiers
+            ),
+            agent_digests=tuple(agent.content_hash for agent in self.agents),
+            harness_digests=tuple(
+                agent.harness.digest for agent in self.agents if agent.harness is not None
+            ),
+            mode=self.mode,
+        )
+        return JobPlan(job_id=self.job_id, spec_hash=self.content_hash, lock=lock, trials=trials)
+
+
+class TrialSpec(FrozenModel):
+    """One independent Agent attempt."""
+
+    job_id: str
+    agent_id: str
+    agent_name: str
+    task_id: str
+    task_digest: str
+    attempt: int = Field(ge=1)
+    environment: EnvironmentIdentity
+    verifier_digests: tuple[str, ...]
+    harness: HarnessBinding | None = None
+    harness_stamp: HarnessStamp | None = None
+    mode: JobMode
+    runtime_provider: str
+    placement: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def trial_id(self) -> str:
+        """Stable identity independent of TrialExecution retries."""
+        return stable_id(
+            "trl",
+            {
+                "job_id": self.job_id,
+                "agent_id": self.agent_id,
+                "task_digest": self.task_digest,
+                "attempt": self.attempt,
+            },
+        )
+
+
+class TrialExecution(FrozenModel):
+    """One retry execution of a Trial."""
+
+    trial_id: str
+    execution_id: int = Field(ge=0)
+    status: ExecutionStatus
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    error_code: ErrorCode | None = None
+
+
+class JobLock(FrozenModel):
+    """Complete immutable revision graph lock."""
+
+    job_id: str
+    spec_hash: str
+    source_digest: str
+    task_digests: tuple[str, ...]
+    environment_digests: tuple[str, ...]
+    verifier_digests: tuple[str, ...]
+    agent_digests: tuple[str, ...]
+    harness_digests: tuple[str, ...]
+    mode: JobMode
+
+
+class JobPlan(FrozenModel):
+    """Deterministic Trial expansion."""
+
+    job_id: str
+    spec_hash: str
+    lock: JobLock
+    trials: tuple[TrialSpec, ...]
+
+    @property
+    def trial_count(self) -> int:
+        """Number of independent Trials."""
+        return len(self.trials)
+
+
+class TrialReceipt(FrozenModel):
+    """Immutable TrialExecution provenance."""
+
+    trial_id: str
+    job_id: str
+    execution_id: int = Field(default=0, ge=0)
+    retry_count: int = Field(default=0, ge=0)
+    attempt: int = Field(default=1, ge=1)
+    task_digest: str
+    environment_digest: str
+    verifier_digests: tuple[str, ...]
+    agent_digest: str
+    harness_digest: str = ""
+    harness_stamp: HarnessStamp | None = None
+    mode: JobMode
+    runtime_provider: str
+    placement: dict[str, str] = Field(default_factory=dict)
+    runtime_identity: str = ""
+    artifact_hashes: dict[str, str] = Field(default_factory=dict)
+    tito_artifact: ArtifactReference | None = None
+    trace_id: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    timings: dict[str, float] = Field(default_factory=dict)
+    trust: Literal["self_reported"] = "self_reported"
+
+    @property
+    def receipt_hash(self) -> str:
+        """Integrity digest."""
+        return content_hash(self)
+
+
+class TrialResult(FrozenModel):
+    """Typed Trial outcome."""
+
+    status: Literal["succeeded", "failed", "cancelled", "awaiting_review"]
+    receipt: TrialReceipt
+    reward: float | None = None
+    scores: dict[str, float] = Field(default_factory=dict)
+    verifier_results: tuple[VerifierResult, ...] = ()
+    trace_id: str | None = None
+    error_code: ErrorCode | None = None
+    error_message: str | None = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> TrialResult:
+        if self.status == "failed" and self.error_code is None:
+            raise ValueError("failed trials require a stable error_code")
+        if self.status != "failed" and self.error_code is not None:
+            raise ValueError("only failed trials may carry error_code")
+        return self
+
+
+class JobResult(FrozenModel):
+    """Collected Trial outcomes."""
+
+    job_id: str
+    plan_hash: str
+    status: Literal["succeeded", "failed", "cancelled", "awaiting_review"]
+    trials: tuple[TrialResult, ...]
+
+
+__all__ = [
+    "ArtifactReference",
+    "BenchmarkJobSource",
+    "ExecutionStatus",
+    "JobLock",
+    "JobMode",
+    "JobPlan",
+    "JobResult",
+    "JobSource",
+    "JobSpec",
+    "ProgressEvent",
+    "RetryPolicy",
+    "TITORecord",
+    "TaskJobSource",
+    "TrialExecution",
+    "TrialReceipt",
+    "TrialResult",
+    "TrialSpec",
+    "TrialStatus",
+    "VerifierResult",
+    "resolve_trial_harness_stamp",
+]

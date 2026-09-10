@@ -1,138 +1,76 @@
+---
+route: /docs/sdk/package-jobs
+title: "Run package jobs from Python"
+order: 90
+description: "The Python SDK and CLI use the same schema-v2 graph and durable event store."
+audience: all
+---
 # Run package jobs from Python
 
-The CLI and this API use the same `JobSpec`, package bindings, trial identities,
-and durable store. Start with the [CLI walkthrough](../tutorials/cli-walkthrough.md)
-so `job.yaml` and its referenced files exist.
+The Python SDK and CLI use the same schema-v2 graph and durable event store.
 
-## Load and inspect without executing
-
-```python
-from pathlib import Path
-from plural.cli.scaffold import load_job
-
-spec = load_job(Path("job.yaml"))
-plan = spec.plan()
-print(plan.job_id, plan.trial_count)
-for trial in plan.trials:
-    print(trial.trial_id, trial.agent_name, trial.task_id, trial.attempt)
-```
-
-`plan()` validates identities and expands the task/agent matrix. It does not
-check remote credentials, start a runtime, or call a model. Use the async
-`Job.preflight()` to check runtime requirements before execution.
-
-## Execute and save a report
-
-For the trusted unverified local example, save `run_job.py`:
+## Load, plan, and run
 
 ```python
 import asyncio
 from pathlib import Path
-from plural import Job, JobSpec, JobStore
+
+from plural import Job, JobStore
 from plural.cli.scaffold import load_job
 
 async def main():
-    loaded = load_job(Path("job.yaml"))
-    payload = loaded.model_dump(mode="json")
-    payload["runtime"].update(provider="local", unsafe_local=True)
-    spec = JobSpec.model_validate(payload)
+    spec = load_job(Path("job.yaml"))
+    plan = spec.plan()
+    print(plan.job_id, plan.trial_count)
 
-    def progress(trial, result):
-        print(trial.task_id, result.status)
-
-    job = Job(spec, store=JobStore(Path(".plural/jobs")), progress=progress)
-    await job.preflight()
-    result = await job.run()
-    report = job.report(result)
-    Path("package-report.json").write_text(report.to_json(), encoding="utf-8")
-    print(result.job_id)
-    print(report.to_markdown())
+    store = JobStore(Path(".plural/jobs"))
+    result = await Job(spec, store=store).run()
+    print(result.status)
 
 asyncio.run(main())
 ```
 
-This makes paid calls with the model-backed harness. It does not sync to Plural
-Intel. In a notebook use `await main()`. For a verified job configure Docker or
-Daytona in `job.yaml` and use the loaded specification unchanged; the local
-provider cannot run an isolated verifier. A job without a verifier has no
-quality reward even when execution succeeds.
+Planning expands Agent × selected Task × attempt. A Benchmark may select Tasks
+from different Environments; the scheduler sends each Trial to the provider and
+placement declared by that Task's Environment.
 
-## Construct a specification in code
-
-You can keep configuration in Python instead of separate YAML files:
+## Construct a Task Job
 
 ```python
-from pathlib import Path
-from plural import AgentBinding, AgentTemplate, BenchmarkDefinition, JobSpec, RuntimeSpec
-from plural.cli.scaffold import load_environment
+from plural import AgentBinding, AgentDefinition, JobSpec, TaskJobSource
+from plural.cli.scaffold import load_task
 
-# These files come from the CLI tutorial. This is the native path: no harness.
-environment = load_environment(Path("environment"))
-template = AgentTemplate(
-    name="candidate",
-    model="openai/gpt-4o-mini",
-    environment=environment.identity,
-    secret_names=("PLURAL_API_KEY",),
-)
-benchmark = BenchmarkDefinition(
-    name="support-smoke",
-    environment=environment.identity,
-    task_ids=tuple(task.task_id for task in environment.tasks),
-)
+task = load_task(Path("task.yaml"))
+agent = AgentDefinition(name="candidate", model="openai/gpt-4.1-mini")
 spec = JobSpec(
-    environment=environment,
-    benchmark=benchmark,
-    agents=(AgentBinding(template=template),),
-    n_attempts=2,
+    source=TaskJobSource(task=task),
+    agents=(AgentBinding(agent=agent),),
+    mode="eval",
+    attempts=2,
     concurrency=2,
-    per_agent_concurrency=2,
-    runtime=RuntimeSpec(provider="docker"),
 )
-print(spec.plan().trial_count)
 ```
 
-A stamped template also needs `harness`, `harness_package`, and a
-`HarnessStamp` from `resolve_harness_stamp()`. Declared harnesses (`hermes`,
-`claude-code`, `codex`, `cursor`) can be stamped but cannot run. The only
-runnable executors are `native_chat_v1()` and `native_actions_v1()`. Local
-execution additionally requires `environment.runtime.allow_unsafe_local=True`,
-`LOCAL` in `targets`, and `RuntimeSpec(unsafe_local=True)` — or
-`plural run --unsafe-local`. A frozen specification should be rebuilt and
-validated when changed; do not alter identity fields merely to make a stale
-dependency pass.
+Use `BenchmarkJobSource(benchmark=...)` for cross-Environment suites. Agents do
+not carry Environment identities. Harness compatibility is resolved and pinned
+on each planned Trial.
 
-## Resume, cancel, and regrade
+## Modes, retries, and monitoring
 
-Use the job ID printed by the completed or interrupted run:
+Eval mode disables Rewarders and TITO capture while still executing every final
+Verifier. Train mode enables Environment Rewarders and requires the Harness to
+produce validated exact TITO JSONL. TITO bytes are stored under the immutable
+TrialExecution artifact directory; receipts contain only hash, media type, and
+size.
+
+`await Job(spec, store=store).run(resume=True)` skips successful Trials. Retry
+executions append under the same Trial identity. `await job.cancel()` writes a
+durable cancellation marker and stops active sandboxes.
 
 ```python
-import asyncio
-from plural import Job, JobStore
-
-async def resume(job_id):
-    store = JobStore()
-    spec = store.load_spec(job_id)
-    return await Job(spec, store=store).run(resume=True)
-
-# Replace with a stored ID before running:
-# result = asyncio.run(resume("JOB_ID"))
+for event in store.events(plan.job_id, after=0, follow=False):
+    print(event.sequence, event.status, event.trial_id)
 ```
 
-`run(resume=True)` skips successful trials and resumes other trials under the
-stored retry policy. `await job.cancel()` requests cancellation and cancels
-active sandboxes owned by that Job instance. `await job.regrade()` reruns only
-the locked verifier over existing artifacts. See [job operations](../guides/jobs.md)
-for prerequisites and how the CLI equivalents differ.
-
-`JobStore` provides `list_jobs()`, `load_spec()`, `load_lock()`,
-`read_job_result()`, and `trial_results()` for local inspection. Advanced callers
-can run a single `Trial`; prefer `Job` for scheduling, retries, and aggregation.
-
-## Runtime and extension points
-
-Pass `provider=` for a configured `SandboxProvider`, `registry=` for a provider
-registry, or `environ=` to control the environment from which named secrets are
-granted. Never serialize credential values into the job specification.
-Use [provider plugins](../guides/provider-plugins.md) when implementing a new
-execution backend. The [API reference](../reference/api.md) documents the full
-models, store, and execution signatures.
+Progress events are monotonic and sanitized. Hidden state, verifier-only input,
+secret values, and private reasoning are not event payloads.

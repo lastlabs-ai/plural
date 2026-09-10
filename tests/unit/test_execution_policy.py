@@ -8,8 +8,8 @@ import pytest
 from plural.domain import ExecutionTarget, HarnessStamp
 from plural.execution.policy import (
     ProjectPolicy,
+    policy_case_agent,
     policy_case_environment,
-    policy_case_template,
     resolve_effective_policy,
 )
 from plural.sandbox.models import CapabilityError, ProviderCapabilities
@@ -31,7 +31,7 @@ def test_resolve_effective_policy_cases(case: dict) -> None:
         stamp_payload = dict(stamp_payload)
         stamp_payload["environment"] = environment.identity.model_dump(mode="json")
         stamp = HarnessStamp.model_validate(stamp_payload)
-    template = policy_case_template(environment, case.get("template") or {}, stamp)
+    agent = policy_case_agent(environment, case.get("template") or {}, stamp)
     provider = ProviderCapabilities.model_validate(case["provider"])
     project = ProjectPolicy.model_validate(case["project"])
     target = ExecutionTarget(case["requested_target"])
@@ -39,7 +39,7 @@ def test_resolve_effective_policy_cases(case: dict) -> None:
         with pytest.raises(CapabilityError, match=case["error_contains"]) as exc_info:
             resolve_effective_policy(
                 environment=environment,
-                template=template,
+                agent=agent,
                 stamp=stamp,
                 project=project,
                 provider=provider,
@@ -50,7 +50,7 @@ def test_resolve_effective_policy_cases(case: dict) -> None:
         return
     policy = resolve_effective_policy(
         environment=environment,
-        template=template,
+        agent=agent,
         stamp=stamp,
         project=project,
         provider=provider,

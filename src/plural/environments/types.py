@@ -1,8 +1,4 @@
-"""Observation and State models for environments.
-
-Subclass these on each environment. Reward and termination stay on
-:class:`~plural.environments.step.StepResult`, not on the observation.
-"""
+"""Typed visible Observation and hidden-capable State models."""
 
 from __future__ import annotations
 
@@ -49,18 +45,13 @@ def is_hidden_schema_field(spec: Any) -> bool:
 class Observation(BaseModel):
     """What the agent can observe after an action.
 
-    ``reset`` and ``step`` return this. It is the per-turn projection of
-    :class:`State`, not the environment itself. Persist board history,
-    inventories, and other durable structures on ``State``, then copy only
-    the visible slice here in :meth:`~plural.environments.env.Environment.observe`.
+    This is the agent-visible projection of :class:`State`, not the
+    Environment itself.
 
     Subclass this with typed fields. The JSON Schema of the subclass is
     the observation contract hosted with the environment. Implement
     :meth:`render` when the prompt should not be a raw dump of the
-    fields. :meth:`~plural.environments.env.Environment.reset` and
-    :meth:`~plural.environments.env.Environment.step` call
-    :meth:`~plural.environments.env.Environment.observe` internally —
-    do not call ``observe`` to drive an agent.
+    fields.
 
     Attributes:
         text: Default rendered view. Structured subclasses may ignore this.
@@ -92,13 +83,12 @@ class Observation(BaseModel):
 class State(BaseModel):
     """Persistent environment state for the episode.
 
-    Tools and hooks write here. Nested models on this class are the
-    durable data structures (boards, buffers, inventories). Mark secrets
-    and scorer-only facts with :func:`hidden` so they never appear in an
-    :class:`Observation`. Only the observation is visible to the agent.
+    Nested models on this class are durable internal structures. Mark secrets
+    and evaluator-only facts with :func:`hidden`; only Observation is visible
+    to the Agent.
 
     Attributes:
-        seed: Optional RNG seed from the task.
+        seed: Optional deterministic seed.
         metadata: Extra internal fields that do not need a typed attribute.
     """
 

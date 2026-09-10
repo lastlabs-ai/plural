@@ -1,3 +1,10 @@
+---
+route: /docs/guides/capabilities
+title: "Streaming, tool calling, structured output, and reasoning"
+order: 320
+description: "Plural normalizes provider responses into shared types. Start with the runnable model client examples; the snippets below explain individual features and assume a configured client, model, and messages. Availability still depends on the cho"
+audience: all
+---
 # Streaming, tool calling, structured output, and reasoning
 
 Plural normalizes provider responses into shared types. Start with the

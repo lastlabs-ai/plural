@@ -262,12 +262,15 @@ class Client:
 
         self.studio = Studio(self)
         self.environments = self.studio.environments
+        self.tasks = self.studio.tasks
+        self.verifiers = self.studio.verifiers
         self.harnesses = self.studio.harnesses
         self.agents = self.studio.agents
         self.benchmarks = self.studio.benchmarks
         self.traces = self.studio.traces
         self.jobs = self.studio.jobs
         self.trials = self.studio.trials
+        self.reviews = self.studio.reviews
         self.router = Router(
             provider_map,
             catalog=self.catalog,
@@ -299,20 +302,12 @@ class Client:
         return all(_provider_is_authenticated(provider) for provider in self._providers.values())
 
     def create(self, obj: Any, **kwargs: Any) -> dict[str, Any]:
-        """Create a hosted environment, trace, or benchmark.
-
-        Environments, agents, and benchmarks are addressed by project-unique
-        slug. Creating a duplicate slug raises
-        :class:`~plural.errors.ConflictError`. Traces are stored by
-        ``trace_id``. Agents are created with :meth:`Client.agents.create`.
+        """Publish a canonical revision or ingest a Trace.
 
         Args:
-            obj: An :class:`~plural.environments.env.Environment`,
-                :class:`~plural.tracing.schema.Trace`,
-                :class:`~plural.benchmarks.runner.Benchmark` (after ``run()``),
-                or :class:`~plural.benchmarks.runner.Report`.
-            **kwargs: Optional labels such as ``name``, ``notes``, or
-                ``environment_id`` (slug or id).
+            obj: Canonical Environment, Task, Verifier, Agent, Harness,
+                Benchmark revision, or Trace.
+            **kwargs: Required hosted revision references for graph edges.
 
         Returns:
             The hosted record created by the studio API.
@@ -322,17 +317,11 @@ class Client:
         return create_object(self, obj, **kwargs)
 
     def update(self, obj: Any, **kwargs: Any) -> dict[str, Any]:
-        """Update a hosted environment or benchmark by slug.
-
-        Traces update by ``trace_id``. Agents use :meth:`Client.agents.update`.
+        """Publish a new immutable canonical revision.
 
         Args:
-            obj: An :class:`~plural.environments.env.Environment`,
-                :class:`~plural.tracing.schema.Trace`,
-                :class:`~plural.benchmarks.runner.Benchmark` (after ``run()``),
-                or :class:`~plural.benchmarks.runner.Report`.
-            **kwargs: Optional labels such as ``name``, ``notes``, or
-                ``environment_id`` (slug or id).
+            obj: Canonical revision or Trace.
+            **kwargs: Required hosted revision references for graph edges.
 
         Returns:
             The hosted record updated by the studio API.
@@ -342,18 +331,11 @@ class Client:
         return update_object(self, obj, **kwargs)
 
     def push(self, obj: Any, **kwargs: Any) -> dict[str, Any]:
-        """Create or update a local environment, trace, or benchmark.
-
-        Prefer :meth:`create` or :meth:`update` when the intent is explicit.
-        ``env.push(client)`` remains as an alias for this upsert.
+        """Publish a canonical revision, creating its parent by slug.
 
         Args:
-            obj: An :class:`~plural.environments.env.Environment`,
-                :class:`~plural.tracing.schema.Trace`,
-                :class:`~plural.benchmarks.runner.Benchmark` (after ``run()``),
-                or :class:`~plural.benchmarks.runner.Report`.
-            **kwargs: Optional labels such as ``name``, ``notes``, or
-                ``environment_id`` (slug or id).
+            obj: Canonical revision or Trace.
+            **kwargs: Required hosted revision references for graph edges.
 
         Returns:
             The hosted record created or updated by the studio API.

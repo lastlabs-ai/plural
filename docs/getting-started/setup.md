@@ -1,3 +1,10 @@
+---
+route: /docs/getting-started/setup
+title: "Install and authenticate"
+order: 10
+description: "You need Python 3.10 or newer. Docker is optional until you run isolated package jobs. You can complete the offline quickstart without any account or API key. The terminal examples below use macOS/Linux shell syntax; in PowerShell, set vari"
+audience: all
+---
 # Install and authenticate
 
 You need Python 3.10 or newer. Docker is optional until you run isolated package
@@ -34,7 +41,8 @@ There are two separate connections:
   use the Plural gateway. Use a Plural API key or the CLI's device login.
 - **Model access** pays for and authenticates inference. The Python client can
   use a Plural gateway key or explicitly supplied upstream provider keys.
-  External harnesses receive only the secrets granted to their AgentTemplate.
+  External Harnesses receive only declared secrets granted to their
+  `AgentDefinition` and allowed by the selected Environment.
 
 A Docker runtime needs a running Docker daemon. Daytona additionally needs its
 own `DAYTONA_API_KEY`; that key does not authenticate model calls.

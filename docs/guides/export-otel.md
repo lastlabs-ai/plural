@@ -1,3 +1,10 @@
+---
+route: /docs/guides/export-otel
+title: "Export to OpenTelemetry"
+order: 370
+description: "plural's Trace object remains canonical. OTelSink maps LLM steps onto Development-status genai. attributes. Prefer the plural schema for datasets and training; use OTel for live ops dashboards."
+audience: all
+---
 # Export to OpenTelemetry
 
 ```bash

@@ -1,13 +1,21 @@
+---
+route: /docs
+title: "Build, evaluate, and use agents with Plural"
+order: 0
+description: "Plural helps you define the work an AI system should do, test different models and harnesses on that work, and keep a record of what happened. You can use the Python SDK, the plural command-line interface, or both."
+audience: all
+---
 # Build, evaluate, and use agents with Plural
 
 Plural helps you define the work an AI system should do, test different models
 and harnesses on that work, and keep a record of what happened. You can use the
 Python SDK, the `plural` command-line interface, or both.
 
-Start with an **environment**: the task instructions, data, operations, and
-checks for your use case. Run a model against it, inspect the results, and
-compare another model under the same conditions. Use **Plural Intel** to store
-and retrieve hosted environments, agents, benchmarks, and results.
+Start with an **Environment**: the state, observations, actions, resources,
+Rewarders, and runtime for your use case. Bind it to a **Task** with separate
+Verifiers, run an Agent against that Task, inspect the resulting Trace, and
+compare another Agent under the same conditions. Use **Plural Intel** to store
+and retrieve the complete revisioned graph and its results.
 
 ## Start here
 
@@ -18,9 +26,9 @@ and retrieve hosted environments, agents, benchmarks, and results.
 3. [Your first evaluation](quickstart.md). Run a small, scored example without
    an API key, then switch to a real model.
 4. [Build a practical Python environment](tutorials/sdk-walkthrough.md).
-   Add tools, tasks, scoring, model comparisons, and saved reports.
+   Add actions, Verifiers, Tasks, model comparisons, and saved Traces.
 5. [Run packages from the CLI](tutorials/cli-walkthrough.md).
-   Create an environment, harness, agent, benchmark, and job.
+   Create an Environment, Verifier, Task, Harness, Agent, Benchmark, and Job.
 6. [Work with Plural Intel objects](guides/push-to-plural.md). Find, fetch,
    create, update, and reuse hosted objects.
 
@@ -37,7 +45,7 @@ then [traces and datasets](tutorials/traces-and-datasets.md).
 - [Benchmark methodology and regression checks](guides/benchmark-models.md)
 - [Run packages from Python](sdk/package-jobs.md)
 - [Custom harnesses and adapters](guides/harnesses.md)
-- [Docker, Daytona, retries, and regrading](guides/jobs.md)
+- [Docker, Daytona, retries, and verification](guides/jobs.md)
 - [Publish and sync package results](guides/studio-sync.md)
 - [Permissions and isolation](operations/security.md)
 - [Troubleshooting](operations/troubleshooting.md)
@@ -49,7 +57,6 @@ to its walkthrough and reference. The [Python API reference](reference/api.md)
 and [generated CLI reference](reference/cli-commands.md) provide exact signatures
 and options.
 
-The package currently includes both a Python episode API and an alpha package
-execution API. Both are documented; they are not interchangeable objects.
-Hosted features require a compatible Plural Intel deployment. See
+The package uses one canonical schema-v2 object graph for local and hosted
+execution. Hosted features require a compatible Plural Intel deployment. See
 [current limitations](reference/limitations.md) before planning a deployment.

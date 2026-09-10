@@ -1,107 +1,101 @@
+---
+route: /docs/cli
+title: "Command-line interface"
+order: 110
+description: "The schema-v2 CLI authors and runs the same canonical revision graph as the Python SDK."
+audience: all
+---
 # Command-line interface
 
-Start with [installation and authentication](../getting-started/setup.md), then
-follow the [complete CLI walkthrough](../tutorials/cli-walkthrough.md). This page
-explains configuration and command conventions.
-
-The `plural` executable is installed with the base package:
+The schema-v2 CLI authors and runs the same canonical revision graph as the
+Python SDK.
 
 ```bash
 pip install plural
 plural --help
 ```
 
-The CLI is an alpha, local-first package and execution client. It can scaffold,
-validate, build, inspect, and run packages; persist jobs; and inspect runtime
-availability. Environment publication and client-orchestrated Job result upload
-require a compatible hosted API. Runs make no external writes unless `--sync`
-is passed; completed results can be replayed with `plural job upload`.
+## Author revisions
 
-New foundation commands: `plural env action`, `plural env resource`,
-`plural env capabilities`, `plural env harness stamp|unstamp|capabilities`,
-`plural runtime doctor --env`, `plural agent template`, and
-`plural agent instance`. See the [command reference](../reference/cli-commands.md).
-
-## Authentication and device flow
-
-`plural auth login` starts `POST /api/v1/auth/device/start`, prints the
-verification URL and user code, optionally opens a browser, and polls the device
-endpoint until approved or expired. Use `--no-browser` on remote hosts.
+Create each independently, then connect them through explicit paths:
 
 ```bash
-plural auth login --no-browser
-plural auth status
-plural auth whoami
-plural auth logout
+plural env init environment --name support
+plural verifier init verifier.yaml --name correct --kind deterministic
+plural task init task.yaml --id support-1 \
+  --environment environment --verifier verifier.yaml
+plural harness init harness --name support-loop
+plural agent init agent.yaml --name candidate \
+  --model openai/gpt-4.1-mini --harness harness
+plural benchmark init benchmark.yaml --name support-suite --task task.yaml
+plural job init job.yaml --source benchmark.yaml \
+  --source-kind benchmark --agent agent.yaml
 ```
 
-These commands require a compatible hosted authentication backend. Passwords
-never pass through the CLI. Logout retains local credentials if remote
-revocation fails, allowing the user to retry safely.
+Environment owns runtime placement, network, resources, secrets, actions,
+typed state/observation, and train-only Rewarders. Task owns its instructions,
+info, and exact Environment and weighted Verifier revisions. Agent is
+Environment-independent. A Benchmark can select Tasks from multiple
+Environments.
 
-For non-interactive CI, use a scoped API key:
+## Run
+
+`plural run` accepts a Task, Benchmark, or Job. A normal authenticated run
+validates the entire graph, synchronizes and publishes every canonical
+revision in dependency order, submits the Job with the exact returned revision
+IDs, prints it, and follows its hosted event stream:
 
 ```bash
-export PLURAL_API_KEY='plural-...'
-export PLURAL_PROJECT='project-slug-or-id'
-plural auth whoami
-plural run job.yaml --dry-run --format json
+plural run task.yaml --agent agent.yaml --mode eval --dry-run
+plural run benchmark.yaml --agent agent.yaml --mode train --attempts 2
+plural run job.yaml --concurrency 8 --per-runtime-concurrency 2 --json
 ```
 
-Do not put keys in `config.toml`, manifests, command arguments, logs, or source
-control.
+Shared Harnesses, Environments, Verifiers, and Tasks are uploaded once and
+reused. The default idempotency key is the stable local Job ID; pass
+`--idempotency-key RELEASE_KEY` to choose one. Use `--no-watch` to return after
+submission.
 
-## Profiles, organization, and project
-
-Global options are accepted before the command:
+To keep execution and its durable log on the current machine, opt in
+explicitly:
 
 ```bash
-plural --profile ci --api-url https://api.example.test \
-  --org acme --project evals auth status
+plural run job.yaml --offline
+plural run job.yaml --private
 ```
 
-Resolution is deterministic:
+`--private` is equivalent to `--offline`.
 
-1. command-line flags (`--profile`, `--api-url`, `--org`, `--project`);
-2. `PLURAL_PROFILE`, `PLURAL_API_URL`, `PLURAL_ORG`, `PLURAL_PROJECT`;
-3. the selected profile in `config.toml`;
-4. built-in defaults.
+Eval disables Rewarders and TITO capture but still runs final Verifiers. Train
+enables Rewarders and fails preflight unless the Harness supports exact TITO
+capture. TITO content is stored as immutable hashed artifacts.
 
-`PLURAL_API_KEY` takes precedence over a stored API key. Auth status/whoami use a stored device access token when present. Hosted
-publication/sync prefer an API key, otherwise refresh a stored refresh token
-when available and use the resulting access token. `plural org use NAME` and `plural project use NAME` update the active
-profile; `show` only prints resolved context. `list` is not implemented yet.
+## Observe and review
 
-Configuration lives under `PLURAL_CONFIG_HOME`, then
-`$XDG_CONFIG_HOME/plural`, then `~/.config/plural`. Non-secret profile data is
-stored in `config.toml`. Credentials use the optional OS keyring when available
-and otherwise a mode-`0600` `credentials.json` in that directory.
+Jobs append monotonic durable events. Replay them for automation or follow them
+live:
 
-Supported environment variables are:
+```bash
+plural job list
+plural job show JOB_ID
+plural job watch JOB_ID --json
+plural job watch JOB_ID --after 42 --follow
+plural job watch JOB_ID --hosted --json
+plural trial list JOB_ID
+plural trial watch TRIAL_ID --job JOB_ID --json --follow
+plural review list JOB_ID
+plural review submit JOB_ID TRIAL_ID \
+  --verifier human-review --score 1 --feedback approved
+```
 
-- `PLURAL_CONFIG_HOME`, `XDG_CONFIG_HOME`, and `PLURAL_PROFILE`;
-- `PLURAL_API_URL`, `PLURAL_ORG`, `PLURAL_PROJECT`, and `PLURAL_API_KEY`;
-- declared harness secret/environment names;
-- `DAYTONA_API_KEY`, optionally `DAYTONA_API_URL` and `DAYTONA_TARGET`.
+A Trial is one Agent × Task × attempt slot. Retries are separate
+TrialExecutions under the same Trial. Human Verifiers leave the Trial in
+`awaiting_review` until review is submitted.
 
-## Output and exit status
+`plural job submit` is the advanced hosted workflow when every source and Agent
+revision ID is already known. Unlike `plural run`, it does not synchronize the
+graph.
 
-Most commands emit deterministic JSON. `plural run` additionally accepts
-`--format json|yaml|text`; progress lines go to stderr and the final document to
-stdout. JSON is the stable choice for scripts. There is no global format flag
-and no promise that human help text is a stable parsing interface.
-
-- `0`: command completed (including a dry run or `auth status` with no credentials);
-- `1`: execution completed but at least one trial did not succeed;
-- `2`: usage, validation, configuration, unsupported backend, or other handled error;
-- `130`: interrupted with Ctrl-C.
-
-Provider and harness failures are also represented by stable `ErrorCode` values
-inside trial results and receipts; the process-level status intentionally stays
-small.
-
-## Command coverage
-
-The generated [command reference](../reference/cli-commands.md) contains every
-command, argument, option, and Typer-provided completion flag from the actual
-application. CI fails if that checked-in reference drifts.
+Most commands emit deterministic JSON; `run` also supports
+`--format json|yaml`. The generated [command reference](../reference/cli-commands.md)
+is the exact authority for arguments and options.

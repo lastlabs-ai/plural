@@ -1,10 +1,10 @@
 """Export datasets to Hugging Face-style record lists.
 
 Examples:
-    >>> from plural.environments.dataset import Dataset
+    >>> from plural.environments.dataset import TraceDataset
     >>> from plural.environments.export.hf import to_huggingface_records
     >>> from plural.tracing.schema import Trace
-    >>> recs = to_huggingface_records(Dataset.from_traces("d", [Trace(trace_id="1")]))
+    >>> recs = to_huggingface_records(TraceDataset.from_traces("d", [Trace(trace_id="1")]))
     >>> recs[0]["trace_id"]
     '1'
 """
@@ -13,10 +13,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from plural.environments.dataset import Dataset
+from plural.environments.dataset import TraceDataset
 
 
-def to_huggingface_records(dataset: Dataset) -> list[dict[str, Any]]:
+def to_huggingface_records(dataset: TraceDataset) -> list[dict[str, Any]]:
     """Convert a dataset to a list of HF-friendly dictionaries.
 
     Args:

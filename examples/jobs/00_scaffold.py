@@ -1,4 +1,4 @@
-"""Scaffold Environment, tasks, Harness, Agent, Benchmark, and Job offline."""
+"""Scaffold Environment, Verifier, Task, Harness, Agent, Benchmark, and Job."""
 
 from __future__ import annotations
 
@@ -22,22 +22,33 @@ def call(*args: str) -> str:
 with tempfile.TemporaryDirectory(prefix="plural-scaffold-") as temporary:
     root = Path(temporary)
     environment = root / "environment"
+    verifier = root / "verifier.yaml"
+    task = root / "task.yaml"
     harness = root / "harness"
     benchmark = root / "benchmark.yaml"
     agent = root / "agent.yaml"
     job = root / "job.yaml"
     call("env", "init", str(environment), "--name", "offline")
+    call("verifier", "init", str(verifier), "--name", "offline-check")
+    call(
+        "task",
+        "init",
+        str(task),
+        "--id",
+        "offline-task",
+        "--environment",
+        str(environment),
+        "--verifier",
+        str(verifier),
+    )
     call("harness", "init", str(harness), "--name", "offline-loop")
-    call("harness", "add", str(harness), "--environment", str(environment))
-    call("benchmark", "init", str(benchmark), "--environment", str(environment))
+    call("benchmark", "init", str(benchmark), "--task", str(task))
     call(
         "agent",
         "init",
         str(agent),
         "--model",
         "offline/model",
-        "--environment",
-        str(environment),
         "--harness",
         str(harness),
     )
@@ -45,9 +56,7 @@ with tempfile.TemporaryDirectory(prefix="plural-scaffold-") as temporary:
         "job",
         "init",
         str(job),
-        "--environment",
-        str(environment),
-        "--benchmark",
+        "--source",
         str(benchmark),
         "--agent",
         str(agent),

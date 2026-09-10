@@ -1,86 +1,70 @@
-# Your first evaluation
+---
+route: /docs/quickstart
+title: "Quickstart: plan a schema-v2 evaluation"
+order: 30
+description: "Plan a complete schema-v2 evaluation graph locally, then inspect its deterministic Job and Trial identities."
+audience: all
+---
+# Quickstart: plan a schema-v2 evaluation
 
-In this walkthrough you will define one customer-support task, run a
-deterministic policy, and inspect its score. No API key or model call is needed
-until the last step. Complete [installation](getting-started/setup.md) first.
-
-## 1. Save a tiny environment
-
-Create `first_eval.py` with:
+Install Plural, then create a complete typed graph without credentials:
 
 ```python
-from plural import ChatResponse, Environment, ScriptedPolicy, TaskData
-
-
-def make_environment():
-    env = Environment(name="support-answer", version="0.1.0")
-
-    @env.scorer
-    def correct(rollout):
-        return float(rollout.response.text.strip().lower() == rollout.task.expected)
-
-    return env
-
-
-task = TaskData(
-    task_id="order-status",
-    input="Reply with only the word shipped.",
-    expected="shipped",
+from plural import (
+    AgentBinding,
+    AgentDefinition,
+    DeterministicVerifier,
+    EnvironmentManifest,
+    JobSpec,
+    TaskDefinition,
+    TaskJobSource,
+    WeightedVerifier,
 )
 
-if __name__ == "__main__":
-    policy = ScriptedPolicy([
-        ChatResponse.model_validate({
-            "id": "offline", "model": "scripted",
-            "choices": [{"message": {"role": "assistant", "content": "shipped"}}],
-        }),
-    ])
-    rollout = make_environment().run_episode(task, policy, model="scripted")
-    print("Score:", rollout.trace.outcome.reward)
-    print("Stopped because:", rollout.trace.stop_reason)
+environment = EnvironmentManifest(name="offline")
+verifier = DeterministicVerifier(
+    name="correct",
+    command=("python", "verify.py"),
+)
+task = TaskDefinition(
+    task_id="hello",
+    instructions="Return a greeting.",
+    environment=environment,
+    verifiers=(WeightedVerifier(verifier=verifier),),
+)
+agent = AgentDefinition(name="candidate", model="openai/gpt-4.1-mini")
+job = JobSpec(
+    source=TaskJobSource(task=task),
+    agents=(AgentBinding(agent=agent),),
+    mode="eval",
+)
+
+plan = job.plan()
+print(plan.job_id, plan.trial_count)
 ```
 
-## 2. Run it
+The Environment owns runtime placement, network, actions, typed state and
+observation, resources, secrets, and train-only Rewarders. The Task pins that
+Environment and one or more weighted Verifier revisions. The Agent is not
+Environment-bound.
+
+To author the same graph with YAML:
 
 ```bash
-python first_eval.py
+plural env init environment --name offline
+plural verifier init verifier.yaml --name correct
+plural task init task.yaml --id hello \
+  --environment environment --verifier verifier.yaml
+plural agent init agent.yaml --model openai/gpt-4.1-mini
+plural run task.yaml --agent agent.yaml --mode eval --dry-run
 ```
 
-The score should be `1.0`. `policy_stop` means the policy finished with a text
-answer. The scorer awarded credit independently; finishing and answering
-correctly are different things.
+Use `plural job watch JOB_ID --json` for durable events. Retries append
+TrialExecutions beneath a Trial. Human Verifiers yield `awaiting_review`.
 
-The environment contains the scoring rule. The task contains the input and
-hidden expected answer. The policy supplies the response. This smoke test checks
-the wiring; it does not measure a model's ability.
+Eval mode disables Rewarders and TITO capture but runs final Verifiers. Train
+mode enables Rewarders and requires exact TITO support; records are stored as
+hashed artifacts.
 
-## 3. Replace the scripted policy with a model
-
-After [setting your API key](getting-started/setup.md), save `model_eval.py`
-next to `first_eval.py`:
-
-```python
-from plural import Client
-from first_eval import make_environment, task
-
-with Client(capture_content=True) as client:
-    rollout = make_environment().rollout(task, client, model="openai/gpt-4o-mini")
-    print("Answer:", rollout.response.text)
-    print("Score:", rollout.trace.outcome.reward)
-    print("Trace:", rollout.trace.trace_id)
-```
-
-```bash
-python model_eval.py
-```
-
-This step makes a paid model call. The trace is saved to `.plural/traces.jsonl`.
-`capture_content=True` saves prompt/response content for this synthetic example;
-it is off by default.
-
-## Next: make the test useful
-
-A one-question test does not establish quality. Continue with the
-[practical SDK walkthrough](tutorials/sdk-walkthrough.md) to add real tools and
-multiple tasks, compare models, and save reports. If you want executable
-packages and durable jobs, follow the [CLI walkthrough](tutorials/cli-walkthrough.md).
+Continue with the [Python walkthrough](tutorials/sdk-walkthrough.md) or
+[CLI walkthrough](tutorials/cli-walkthrough.md).

@@ -8,7 +8,7 @@ from pathlib import Path
 
 request = json.loads(sys.stdin.readline())
 task = request["task"]
-response = f"offline response for {task['task_id']}: {task['input']}"
+response = f"offline response for {task['task_id']}: {task['instructions']}"
 Path("result.json").write_text(json.dumps({"response": response}) + "\n", encoding="utf-8")
 Path("evidence.txt").write_text(response + "\n", encoding="utf-8")
 Path("trajectory.jsonl").write_text(

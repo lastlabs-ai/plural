@@ -1,3 +1,11 @@
+---
+route: /docs/reference/cli-commands
+title: "Generated CLI command reference"
+order: 510
+description: "Generated reference for every Plural CLI command and option exposed by the Typer application."
+audience: all
+---
+
 # Generated CLI command reference
 
 This file is generated from the Typer application. Do not edit it by hand.
@@ -9,30 +17,26 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural [OPTIONS] COMMAND [ARGS]...
 
- Build, validate, inspect, and run reproducible Plural packages.
+ Author and run schema-v2 Plural revision graphs.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --api-url                   <str>  Hosted API base URL.                                          │
-│ --org                       <str>  Organization override.                                        │
-│ --project                   <str>  Project override.                                             │
-│ --profile                   <str>  Named CLI profile.                                            │
-│ --install-completion               Install completion for the current shell.                     │
-│ --show-completion                  Show completion for the current shell, to copy it or          │
-│                                    customize the installation.                                   │
-│ --help                             Show this message and exit.                                   │
+│ --install-completion          Install completion for the current shell.                          │
+│ --show-completion             Show completion for the current shell, to copy it or customize the │
+│                               installation.                                                      │
+│ --help                        Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ run        Validate, lock, and execute a local client-orchestrated job.                          │
-│ auth       Authenticate without entering passwords.                                              │
-│ org        Inspect and select organizations.                                                     │
-│ project    Inspect and select projects.                                                          │
-│ env        Manage environment packages.                                                          │
-│ harness    Manage immutable agent harness packages.                                              │
-│ benchmark  Manage ordered benchmark definitions.                                                 │
-│ agent      Inspect agents and local agent configs.                                               │
-│ runtime    Inspect execution-provider integration points.                                        │
-│ job        Inspect and control jobs.                                                             │
-│ trial      Inspect immutable job trials.                                                         │
+│ run        Synchronize and run a hosted Job, or execute explicitly offline.                      │
+│ schemas    Generate canonical schema-v2 references.                                              │
+│ env        Manage Environment revisions.                                                         │
+│ task       Manage Task revisions.                                                                │
+│ verifier   Manage Verifier revisions.                                                            │
+│ agent      Manage Environment-independent Agent revisions.                                       │
+│ harness    Manage Harness revisions.                                                             │
+│ benchmark  Manage cross-Environment Benchmarks.                                                  │
+│ job        Manage durable Jobs and event streams.                                                │
+│ trial      Inspect and watch Trials.                                                             │
+│ review     Inspect and submit human reviews.                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -42,17 +46,17 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural agent [OPTIONS] COMMAND [ARGS]...
 
- Inspect agents and local agent configs.
+ Manage Environment-independent Agent revisions.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a local agent config with exactly one harness binding.                          │
-│ list      List local agent configs; hosted listing follows in the backend phase.                 │
-│ show      Show a validated local agent config.                                                   │
-│ template  Manage agent templates.                                                                │
-│ instance  Inspect hosted agent instances.                                                        │
+│ init      Create an Agent independent of Environment identity.                                   │
+│ validate  Validate an Agent.                                                                     │
+│ show      Show an Agent.                                                                         │
+│ push      Publish an AgentDefinition parent and immutable revision.                              │
+│ publish   Publish an existing hosted Agent revision.                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -62,150 +66,51 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural agent init [OPTIONS] [path]
 
- Create a local agent config with exactly one harness binding.
+ Create an Agent independent of Environment identity.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: agent.yaml]                                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│    --name                    <str>   [default: agent]                                            │
-│ *  --model                   <str>   [required]                                                  │
-│    --environment     -e      <path>  [default: environment.yaml]                                 │
-│    --harness                 <str>   [default: harness.yaml]                                     │
-│    --harness-digest          <str>                                                               │
-│    --secret                  <str>                                                               │
+│    --name           <str>   [default: agent]                                                     │
+│ *  --model          <str>   [required]                                                           │
+│    --harness        <path>                                                                       │
 │    --force                                                                                       │
-│    --help                            Show this message and exit.                                 │
+│    --help                   Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural agent instance`
+## `plural agent publish`
 
 ```text
 
- Usage: plural agent instance [OPTIONS] COMMAND [ARGS]...
+ Usage: plural agent publish [OPTIONS] {resource_id} {revision_id}
 
- Inspect hosted agent instances.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list        List hosted agent instances.                                                         │
-│ show        Show one hosted agent instance.                                                      │
-│ memory      List instance memories.                                                              │
-│ skills      List instance skills.                                                                │
-│ data        List instance artifacts.                                                             │
-│ experience  Show instance experience counters.                                                   │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural agent instance data`
-
-```text
-
- Usage: plural agent instance data [OPTIONS] {instance_id}
-
- List instance artifacts.
+ Publish an existing hosted Agent revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    instance_id      <str>  [required]                                                          │
+│ *    resource_id      <str>  [required]                                                          │
+│ *    revision_id      <str>  [required]                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural agent instance experience`
+## `plural agent push`
 
 ```text
 
- Usage: plural agent instance experience [OPTIONS] {instance_id}
+ Usage: plural agent push [OPTIONS] [path]
 
- Show instance experience counters.
+ Publish an AgentDefinition parent and immutable revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    instance_id      <str>  [required]                                                          │
+│   path      <path>  [default: agent.yaml]                                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural agent instance list`
-
-```text
-
- Usage: plural agent instance list [OPTIONS]
-
- List hosted agent instances.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural agent instance memory`
-
-```text
-
- Usage: plural agent instance memory [OPTIONS] {instance_id}
-
- List instance memories.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    instance_id      <str>  [required]                                                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural agent instance show`
-
-```text
-
- Usage: plural agent instance show [OPTIONS] {instance_id}
-
- Show one hosted agent instance.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    instance_id      <str>  [required]                                                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural agent instance skills`
-
-```text
-
- Usage: plural agent instance skills [OPTIONS] {instance_id}
-
- List instance skills.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    instance_id      <str>  [required]                                                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural agent list`
-
-```text
-
- Usage: plural agent list [OPTIONS] [path]
-
- List local agent configs; hosted listing follows in the backend phase.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --harness-revision-id        <str>                                                               │
+│ --help                              Show this message and exit.                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -215,7 +120,7 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural agent show [OPTIONS] [path]
 
- Show a validated local agent config.
+ Show an Agent.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: agent.yaml]                                                        │
@@ -225,161 +130,17 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural agent template`
+## `plural agent validate`
 
 ```text
 
- Usage: plural agent template [OPTIONS] COMMAND [ARGS]...
+ Usage: plural agent validate [OPTIONS] [path]
 
- Manage agent templates.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a local agent template.                                                         │
-│ show      Show a local agent template.                                                           │
-│ validate  Validate a local agent template.                                                       │
-│ push      Publish a local agent template to the hosted API.                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural agent template init`
-
-```text
-
- Usage: plural agent template init [OPTIONS] [path]
-
- Create a local agent template.
+ Validate an Agent.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: agent.yaml]                                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│    --name                 <str>   [default: agent]                                               │
-│ *  --model                <str>   [required]                                                     │
-│    --environment  -e      <path>  [default: environment.yaml]                                    │
-│    --harness              <str>                                                                  │
-│    --force                                                                                       │
-│    --help                         Show this message and exit.                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural agent template push`
-
-```text
-
- Usage: plural agent template push [OPTIONS] [path]
-
- Publish a local agent template to the hosted API.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: agent.yaml]                                                        │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural agent template show`
-
-```text
-
- Usage: plural agent template show [OPTIONS] [path]
-
- Show a local agent template.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: agent.yaml]                                                        │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural agent template validate`
-
-```text
-
- Usage: plural agent template validate [OPTIONS] [path]
-
- Validate a local agent template.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: agent.yaml]                                                        │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural auth`
-
-```text
-
- Usage: plural auth [OPTIONS] COMMAND [ARGS]...
-
- Authenticate without entering passwords.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ login   Authenticate with a browser device flow.                                                 │
-│ logout  Revoke stored tokens and remove local credentials.                                       │
-│ status  Check whether the current profile is authenticated.                                      │
-│ whoami  Show the hosted identity for the current credential.                                     │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural auth login`
-
-```text
-
- Usage: plural auth login [OPTIONS]
-
- Authenticate with a browser device flow.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --no-browser          Do not open a browser.                                                     │
-│ --help                Show this message and exit.                                                │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural auth logout`
-
-```text
-
- Usage: plural auth logout [OPTIONS]
-
- Revoke stored tokens and remove local credentials.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural auth status`
-
-```text
-
- Usage: plural auth status [OPTIONS]
-
- Check whether the current profile is authenticated.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural auth whoami`
-
-```text
-
- Usage: plural auth whoami [OPTIONS]
-
- Show the hosted identity for the current credential.
-
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -391,15 +152,17 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural benchmark [OPTIONS] COMMAND [ARGS]...
 
- Manage ordered benchmark definitions.
+ Manage cross-Environment Benchmarks.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create an ordered benchmark tied to an exact environment revision.                     │
-│ validate  Strictly validate a benchmark and optional environment ownership.                      │
-│ show      Show a validated local benchmark definition.                                           │
+│ init      Create a Benchmark selecting Task revisions across Environments.                       │
+│ validate  Validate a complete Benchmark revision graph.                                          │
+│ show      Show a resolved Benchmark.                                                             │
+│ push      Publish a cross-Environment Benchmark revision.                                        │
+│ publish   Publish an existing hosted Benchmark revision.                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -409,16 +172,50 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural benchmark init [OPTIONS] [path]
 
- Create an ordered benchmark tied to an exact environment revision.
+ Create a Benchmark selecting Task revisions across Environments.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: benchmark.yaml]                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --name                 <str>   [default: benchmark]                                              │
-│ --environment  -e      <path>  [default: environment.yaml]                                       │
-│ --force                                                                                          │
-│ --help                         Show this message and exit.                                       │
+│    --name           <str>   [default: benchmark]                                                 │
+│ *  --task   -t      <path>  [required]                                                           │
+│    --force                                                                                       │
+│    --help                   Show this message and exit.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural benchmark publish`
+
+```text
+
+ Usage: plural benchmark publish [OPTIONS] {resource_id} {revision_id}
+
+ Publish an existing hosted Benchmark revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    resource_id      <str>  [required]                                                          │
+│ *    revision_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural benchmark push`
+
+```text
+
+ Usage: plural benchmark push [OPTIONS] [path]
+
+ Publish a cross-Environment Benchmark revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: benchmark.yaml]                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --task-revision-id        <str>  [required]                                                   │
+│    --help                           Show this message and exit.                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -428,7 +225,7 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural benchmark show [OPTIONS] [path]
 
- Show a validated local benchmark definition.
+ Show a resolved Benchmark.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: benchmark.yaml]                                                    │
@@ -444,14 +241,13 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural benchmark validate [OPTIONS] [path]
 
- Strictly validate a benchmark and optional environment ownership.
+ Validate a complete Benchmark revision graph.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: benchmark.yaml]                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <path>                                                                    │
-│ --help                         Show this message and exit.                                       │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -461,223 +257,17 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural env [OPTIONS] COMMAND [ARGS]...
 
- Manage environment packages.
+ Manage Environment revisions.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init          Create environment.yaml, environment.py, tasks.jsonl, and Dockerfile.              │
-│ validate      Strictly validate a local environment and owned tasks.                             │
-│ build         Build a deterministic local environment manifest artifact.                         │
-│ push          Publish the exact local environment revision used by job sync.                     │
-│ capabilities  Show required capabilities and per-target availability.                            │
-│ task          Manage environment-owned tasks.                                                    │
-│ action        Manage environment-owned native actions.                                           │
-│ resource      Manage environment resources.                                                      │
-│ harness       Stamp and inspect harness grants.                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env action`
-
-```text
-
- Usage: plural env action [OPTIONS] COMMAND [ARGS]...
-
- Manage environment-owned native actions.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ add     Add a native action owned by the environment.                                            │
-│ list    List native actions.                                                                     │
-│ remove  Remove a native action.                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env action add`
-
-```text
-
- Usage: plural env action add [OPTIONS] {name}
-
- Add a native action owned by the environment.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name      <str>  [required]                                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│    --environment  -e      <path>  [default: .]                                                   │
-│ *  --description          <str>   [required]                                                     │
-│    --command              <str>                                                                  │
-│    --help                         Show this message and exit.                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env action list`
-
-```text
-
- Usage: plural env action list [OPTIONS]
-
- List native actions.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <path>  [default: .]                                                      │
-│ --help                         Show this message and exit.                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env action remove`
-
-```text
-
- Usage: plural env action remove [OPTIONS] {name}
-
- Remove a native action.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name      <str>  [required]                                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <path>  [default: .]                                                      │
-│ --help                         Show this message and exit.                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env build`
-
-```text
-
- Usage: plural env build [OPTIONS] [path]
-
- Build a deterministic local environment manifest artifact.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env capabilities`
-
-```text
-
- Usage: plural env capabilities [OPTIONS] [path]
-
- Show required capabilities and per-target availability.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env harness`
-
-```text
-
- Usage: plural env harness [OPTIONS] COMMAND [ARGS]...
-
- Stamp and inspect harness grants.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ add           Allow one exact harness revision in an environment.                                │
-│ stamp         Stamp a harness onto an environment and show the grant matrix.                     │
-│ unstamp       Remove a stamped harness from the environment allowlist.                           │
-│ list          List exact harness revisions allowed by an environment.                            │
-│ capabilities  Show granted vs denied capabilities for one stamp.                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env harness add`
-
-```text
-
- Usage: plural env harness add [OPTIONS] {harness}
-
- Allow one exact harness revision in an environment.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    harness      <path>  [required]                                                             │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <path>  [default: .]                                                      │
-│ --help                         Show this message and exit.                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env harness capabilities`
-
-```text
-
- Usage: plural env harness capabilities [OPTIONS] {harness}
-
- Show granted vs denied capabilities for one stamp.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    harness      <path>  [required]                                                             │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <path>  [default: .]                                                      │
-│ --help                         Show this message and exit.                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env harness list`
-
-```text
-
- Usage: plural env harness list [OPTIONS]
-
- List exact harness revisions allowed by an environment.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <path>  [default: .]                                                      │
-│ --help                         Show this message and exit.                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env harness stamp`
-
-```text
-
- Usage: plural env harness stamp [OPTIONS] {harness}
-
- Stamp a harness onto an environment and show the grant matrix.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    harness      <path>  [required]                                                             │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <path>  [default: .]                                                      │
-│ --help                         Show this message and exit.                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env harness unstamp`
-
-```text
-
- Usage: plural env harness unstamp [OPTIONS] {name}
-
- Remove a stamped harness from the environment allowlist.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name      <str>  [required]                                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <path>  [default: .]                                                      │
-│ --help                         Show this message and exit.                                       │
+│ init      Create a standalone Environment package.                                               │
+│ validate  Validate a canonical Environment.                                                      │
+│ show      Show a canonical Environment.                                                          │
+│ push      Publish an Environment parent and immutable revision.                                  │
+│ publish   Publish an existing hosted Environment revision.                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -687,15 +277,32 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural env init [OPTIONS] [path]
 
- Create environment.yaml, environment.py, tasks.jsonl, and Dockerfile.
+ Create a standalone Environment package.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  Package directory. [default: .]                                              │
+│   path      <path>  [default: .]                                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --name         <str>  Environment name. [default: environment]                                   │
-│ --force               Replace scaffold files.                                                    │
+│ --name         <str>  [default: environment]                                                     │
+│ --force                                                                                          │
 │ --help                Show this message and exit.                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural env publish`
+
+```text
+
+ Usage: plural env publish [OPTIONS] {resource_id} {revision_id}
+
+ Publish an existing hosted Environment revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    resource_id      <str>  [required]                                                          │
+│ *    revision_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -705,110 +312,29 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural env push [OPTIONS] [path]
 
- Publish the exact local environment revision used by job sync.
+ Publish an Environment parent and immutable revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  Environment package path. [default: .]                                       │
+│   path      <path>  [default: .]                                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural env resource`
+## `plural env show`
 
 ```text
 
- Usage: plural env resource [OPTIONS] COMMAND [ARGS]...
+ Usage: plural env show [OPTIONS] [path]
 
- Manage environment resources.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ add   Add a resource the environment provides.                                                   │
-│ list  List environment resources.                                                                │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env resource add`
-
-```text
-
- Usage: plural env resource add [OPTIONS] {name}
-
- Add a resource the environment provides.
+ Show a canonical Environment.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name      <str>  [required]                                                                 │
+│   path      <path>  [default: .]                                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --kind                 <str>   [default: file]                                                   │
-│ --environment  -e      <path>  [default: .]                                                      │
-│ --path                 <str>                                                                     │
-│ --help                         Show this message and exit.                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env resource list`
-
-```text
-
- Usage: plural env resource list [OPTIONS]
-
- List environment resources.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <path>  [default: .]                                                      │
-│ --help                         Show this message and exit.                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env task`
-
-```text
-
- Usage: plural env task [OPTIONS] COMMAND [ARGS]...
-
- Manage environment-owned tasks.
-
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ add   Append a task owned by an environment.                                                     │
-│ list  List environment-owned tasks in deterministic order.                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env task add`
-
-```text
-
- Usage: plural env task add [OPTIONS]
-
- Append a task owned by an environment.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│    --environment  -e      <path>  [default: .]                                                   │
-│ *  --id                   <str>   [required]                                                     │
-│ *  --input                <str>   [required]                                                     │
-│    --help                         Show this message and exit.                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural env task list`
-
-```text
-
- Usage: plural env task list [OPTIONS]
-
- List environment-owned tasks in deterministic order.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <path>  [default: .]                                                      │
-│ --help                         Show this message and exit.                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -818,7 +344,7 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural env validate [OPTIONS] [path]
 
- Strictly validate a local environment and owned tasks.
+ Validate a canonical Environment.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: .]                                                                 │
@@ -834,54 +360,17 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural harness [OPTIONS] COMMAND [ARGS]...
 
- Manage immutable agent harness packages.
+ Manage Harness revisions.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a harness manifest and local entry point.                                       │
-│ validate  Strictly validate source trust and package metadata.                                   │
-│ build     Build a deterministic immutable local harness archive.                                 │
-│ test      Run a local package through protocol conformance.                                      │
-│ publish   Publish a deterministic archive to a local path.                                       │
-│ add       Add one exact harness revision to an environment allowlist.                            │
-│ list      List local harness manifests in a directory.                                           │
-│ inspect   Inspect a validated harness and its effective immutable binding.                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural harness add`
-
-```text
-
- Usage: plural harness add [OPTIONS] {harness}
-
- Add one exact harness revision to an environment allowlist.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    harness      <str>  [required]                                                              │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <path>  [default: .]                                                      │
-│ --digest               <str>                                                                     │
-│ --help                         Show this message and exit.                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural harness build`
-
-```text
-
- Usage: plural harness build [OPTIONS] [path]
-
- Build a deterministic immutable local harness archive.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ init      Create a Harness package.                                                              │
+│ validate  Validate and lock a Harness.                                                           │
+│ show      Show a Harness.                                                                        │
+│ push      Publish a Harness parent and immutable revision.                                       │
+│ publish   Publish an existing hosted Harness revision.                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -891,7 +380,7 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural harness init [OPTIONS] [path]
 
- Create a harness manifest and local entry point.
+ Create a Harness package.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: .]                                                                 │
@@ -903,30 +392,30 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural harness inspect`
+## `plural harness publish`
 
 ```text
 
- Usage: plural harness inspect [OPTIONS] [reference]
+ Usage: plural harness publish [OPTIONS] {resource_id} {revision_id}
 
- Inspect a validated harness and its effective immutable binding.
+ Publish an existing hosted Harness revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   reference      <str>  [default: .]                                                             │
+│ *    resource_id      <str>  [required]                                                          │
+│ *    revision_id      <str>  [required]                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --digest        <str>                                                                            │
-│ --help                 Show this message and exit.                                               │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural harness list`
+## `plural harness push`
 
 ```text
 
- Usage: plural harness list [OPTIONS] [path]
+ Usage: plural harness push [OPTIONS] [path]
 
- List local harness manifests in a directory.
+ Publish a Harness parent and immutable revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: .]                                                                 │
@@ -936,38 +425,19 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural harness publish`
+## `plural harness show`
 
 ```text
 
- Usage: plural harness publish [OPTIONS] [path]
+ Usage: plural harness show [OPTIONS] [path]
 
- Publish a deterministic archive to a local path.
+ Show a Harness.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: .]                                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --output        <path>                                                                           │
-│ --help                  Show this message and exit.                                              │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural harness test`
-
-```text
-
- Usage: plural harness test [OPTIONS] [reference]
-
- Run a local package through protocol conformance.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   reference      <str>  [default: .]                                                             │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --digest              <str>                                                                      │
-│ --unsafe-local                                                                                   │
-│ --help                       Show this message and exit.                                         │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -977,7 +447,7 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural harness validate [OPTIONS] [path]
 
- Strictly validate source trust and package metadata.
+ Validate and lock a Harness.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: .]                                                                 │
@@ -993,37 +463,17 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural job [OPTIONS] COMMAND [ARGS]...
 
- Inspect and control jobs.
+ Manage durable Jobs and event streams.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init     Create a path-based job.yaml.                                                           │
-│ list     List durable local job records.                                                         │
-│ show     Show a path-based job config or durable job record.                                     │
-│ resume   Resume a compatible locked job, skipping successful trials.                             │
-│ retry    Retry failed trials without creating new Trial identities.                              │
-│ regrade  Rerun only the isolated verifier over immutable artifacts.                              │
-│ cancel   Request cancellation for a local job.                                                   │
-│ upload   Replay a stored local job sync without launching hosted execution.                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural job cancel`
-
-```text
-
- Usage: plural job cancel [OPTIONS] {job_id}
-
- Request cancellation for a local job.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    job_id      <str>  [required]                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --store        <path>  [default: .plural/jobs]                                                   │
-│ --help                 Show this message and exit.                                               │
+│ init    Create a path-based Job.                                                                 │
+│ list    List durable local Jobs.                                                                 │
+│ show    Show a Job, lock, result, and latest event.                                              │
+│ submit  Submit a hosted Job from exact revision IDs.                                             │
+│ watch   Replay or follow local or hosted append-only Job events.                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1033,17 +483,17 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural job init [OPTIONS] [path]
 
- Create a path-based job.yaml.
+ Create a path-based Job.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: job.yaml]                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│    --environment  -e      <path>  [default: environment.yaml]                                    │
-│    --benchmark    -b      <path>  [default: benchmark.yaml]                                      │
-│ *  --agent                <path>  [required]                                                     │
+│ *  --source               <path>            [required]                                           │
+│    --source-kind          <benchmark|task>  [default: benchmark]                                 │
+│ *  --agent        -a      <path>            [required]                                           │
 │    --force                                                                                       │
-│    --help                         Show this message and exit.                                    │
+│    --help                                   Show this message and exit.                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1051,63 +501,10 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
 ```text
 
- Usage: plural job list [OPTIONS] [path]
+ Usage: plural job list [OPTIONS]
 
- List durable local job records.
+ List durable local Jobs.
 
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .plural/jobs]                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural job regrade`
-
-```text
-
- Usage: plural job regrade [OPTIONS] {job_id}
-
- Rerun only the isolated verifier over immutable artifacts.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    job_id      <str>  [required]                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --store        <path>  [default: .plural/jobs]                                                   │
-│ --help                 Show this message and exit.                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural job resume`
-
-```text
-
- Usage: plural job resume [OPTIONS] {job_id}
-
- Resume a compatible locked job, skipping successful trials.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    job_id      <str>  [required]                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --store        <path>  [default: .plural/jobs]                                                   │
-│ --help                 Show this message and exit.                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural job retry`
-
-```text
-
- Usage: plural job retry [OPTIONS] {job_id}
-
- Retry failed trials without creating new Trial identities.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    job_id      <str>  [required]                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --store        <path>  [default: .plural/jobs]                                                   │
 │ --help                 Show this message and exit.                                               │
@@ -1118,26 +515,9 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
 ```text
 
- Usage: plural job show [OPTIONS] [identifier]
+ Usage: plural job show [OPTIONS] {job_id}
 
- Show a path-based job config or durable job record.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   identifier      <str>  [default: job.yaml]                                                     │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --store        <path>  [default: .plural/jobs]                                                   │
-│ --help                 Show this message and exit.                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural job upload`
-
-```text
-
- Usage: plural job upload [OPTIONS] {job_id}
-
- Replay a stored local job sync without launching hosted execution.
+ Show a Job, lock, result, and latest event.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    job_id      <str>  [required]                                                               │
@@ -1148,123 +528,134 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural org`
+## `plural job submit`
 
 ```text
 
- Usage: plural org [OPTIONS] COMMAND [ARGS]...
+ Usage: plural job submit [OPTIONS] [path]
 
- Inspect and select organizations.
+ Submit a hosted Job from exact revision IDs.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: job.yaml]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --source-revision-id        <str>  [required]                                                 │
+│ *  --agent-revision-id         <str>  [required]                                                 │
+│ *  --idempotency-key           <str>  [required]                                                 │
+│    --name                      <str>  [default: Job]                                             │
+│    --help                             Show this message and exit.                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural job watch`
+
+```text
+
+ Usage: plural job watch [OPTIONS] {job_id}
+
+ Replay or follow local or hosted append-only Job events.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    job_id      <str>  [required]                                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --store         <path>              [default: .plural/jobs]                                      │
+│ --after         <int range> [x>=0]  [default: 0]                                                 │
+│ --follow                                                                                         │
+│ --json                                                                                           │
+│ --hosted                                                                                         │
+│ --help                              Show this message and exit.                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural review`
+
+```text
+
+ Usage: plural review [OPTIONS] COMMAND [ARGS]...
+
+ Inspect and submit human reviews.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ use   Select an organization in the active profile.                                              │
-│ list  List hosted organizations.                                                                 │
-│ show  Show the resolved organization context.                                                    │
+│ list           List local Trials awaiting human review.                                          │
+│ submit         Durably append a local human-review submission.                                   │
+│ hosted-list    List hosted human review assignments.                                             │
+│ hosted-submit  Submit hosted human-review criterion scores.                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural org list`
+## `plural review hosted-list`
 
 ```text
 
- Usage: plural org list [OPTIONS]
+ Usage: plural review hosted-list [OPTIONS]
 
- List hosted organizations.
+ List hosted human review assignments.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --status        <str>  [default: awaiting_review]                                                │
+│ --help                 Show this message and exit.                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural org show`
+## `plural review hosted-submit`
 
 ```text
 
- Usage: plural org show [OPTIONS]
+ Usage: plural review hosted-submit [OPTIONS] {assignment_id}
 
- Show the resolved organization context.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural org use`
-
-```text
-
- Usage: plural org use [OPTIONS] {organization}
-
- Select an organization in the active profile.
+ Submit hosted human-review criterion scores.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    organization      <str>  [required]                                                         │
+│ *    assignment_id      <str>  [required]                                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ *  --score                  <str>  criterion=value [required]                                    │
+│ *  --idempotency-key        <str>  [required]                                                    │
+│    --feedback               <str>                                                                │
+│    --help                          Show this message and exit.                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural project`
+## `plural review list`
 
 ```text
 
- Usage: plural project [OPTIONS] COMMAND [ARGS]...
+ Usage: plural review list [OPTIONS] {job_id}
 
- Inspect and select projects.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ use   Select a project in the active profile.                                                    │
-│ list  List hosted projects.                                                                      │
-│ show  Show the resolved project context.                                                         │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural project list`
-
-```text
-
- Usage: plural project list [OPTIONS]
-
- List hosted projects.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural project show`
-
-```text
-
- Usage: plural project show [OPTIONS]
-
- Show the resolved project context.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-## `plural project use`
-
-```text
-
- Usage: plural project use [OPTIONS] {project}
-
- Select a project in the active profile.
+ List local Trials awaiting human review.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    project      <str>  [required]                                                              │
+│ *    job_id      <str>  [required]                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --store        <path>  [default: .plural/jobs]                                                   │
+│ --help                 Show this message and exit.                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural review submit`
+
+```text
+
+ Usage: plural review submit [OPTIONS] {job_id} {trial_id}
+
+ Durably append a local human-review submission.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    job_id        <str>  [required]                                                             │
+│ *    trial_id      <str>  [required]                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --verifier        <str>    [required]                                                         │
+│ *  --score           <float>  [required]                                                         │
+│    --feedback        <str>                                                                       │
+│    --store           <path>   [default: .plural/jobs]                                            │
+│    --help                     Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1272,88 +663,151 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
 ```text
 
- Usage: plural run [OPTIONS] [job]
+ Usage: plural run [OPTIONS] {source}
 
- Validate, lock, and execute a local client-orchestrated job.
+ Synchronize and run a hosted Job, or execute explicitly offline.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   job      <path>  Local job.yaml path. [default: job.yaml]                                      │
+│ *    source      <path>  Task, Benchmark, or Job YAML. [required]                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --agent                        <path>              Override agent config.                        │
-│ --n-attempts                   <int range> [x>=1]                                                │
-│ --concurrency                  <int range> [x>=1]                                                │
-│ --runtime                      <str>                                                             │
-│ --retry                        <int range> [x>=0]                                                │
+│ --agent                    -a                <path>                                              │
+│ --mode                                       <eval|train>                                        │
+│ --attempts                                   <int range> [x>=1]                                  │
+│ --concurrency                                <int range> [x>=1]                                  │
+│ --per-runtime-concurrency                    <int range> [x>=1]                                  │
 │ --dry-run                                                                                        │
-│ --print-config                                                                                   │
-│ --sync            --no-sync                        Opt in to best-effort hosted registration and │
-│                                                    result upload.                                │
-│                                                    [default: no-sync]                            │
-│ --unsafe-local                                                                                   │
-│ --format                       <str>               json, yaml, or text. [default: json]          │
-│ --help                                             Show this message and exit.                   │
+│ --offline,--private                                              Keep execution and its durable  │
+│                                                                  log local.                      │
+│ --watch                        --no-watch                        Follow hosted Job events after  │
+│                                                                  submission.                     │
+│                                                                  [default: watch]                │
+│ --json                                                           Render watched hosted events as │
+│                                                                  JSON Lines.                     │
+│ --idempotency-key                            <str>                                               │
+│ --name                                       <str>               [default: Job]                  │
+│ --format                                     <json|yaml>         [default: json]                 │
+│ --help                                                           Show this message and exit.     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural runtime`
+## `plural schemas`
 
 ```text
 
- Usage: plural runtime [OPTIONS] COMMAND [ARGS]...
+ Usage: plural schemas [OPTIONS] [path]
 
- Inspect execution-provider integration points.
+ Generate canonical schema-v2 references.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: schemas]                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural task`
+
+```text
+
+ Usage: plural task [OPTIONS] COMMAND [ARGS]...
+
+ Manage Task revisions.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list    List providers that are genuinely available.                                             │
-│ show    Show one runtime's dynamic availability and capabilities.                                │
-│ doctor  Check provider health, or evaluate providers against one environment.                    │
+│ init      Create a Task pinned to an Environment and Verifiers.                                  │
+│ validate  Validate a complete Task revision graph.                                               │
+│ show      Show a resolved Task.                                                                  │
+│ push      Publish a Task revision with exact hosted dependencies.                                │
+│ publish   Publish an existing hosted Task revision.                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural runtime doctor`
+## `plural task init`
 
 ```text
 
- Usage: plural runtime doctor [OPTIONS] [name]
+ Usage: plural task init [OPTIONS] [path]
 
- Check provider health, or evaluate providers against one environment.
+ Create a Task pinned to an Environment and Verifiers.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  [default: local]                                                              │
+│   path      <path>  [default: task.yaml]                                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --env         <path>                                                                             │
-│ --help                Show this message and exit.                                                │
+│    --id                   <str>   [default: task]                                                │
+│ *  --environment  -e      <path>  [required]                                                     │
+│ *  --verifier     -v      <path>  [required]                                                     │
+│    --force                                                                                       │
+│    --help                         Show this message and exit.                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural runtime list`
+## `plural task publish`
 
 ```text
 
- Usage: plural runtime list [OPTIONS]
+ Usage: plural task publish [OPTIONS] {resource_id} {revision_id}
 
- List providers that are genuinely available.
+ Publish an existing hosted Task revision.
 
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    resource_id      <str>  [required]                                                          │
+│ *    revision_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural runtime show`
+## `plural task push`
 
 ```text
 
- Usage: plural runtime show [OPTIONS] {name}
+ Usage: plural task push [OPTIONS] [path]
 
- Show one runtime's dynamic availability and capabilities.
+ Publish a Task revision with exact hosted dependencies.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name      <str>  [required]                                                                 │
+│   path      <path>  [default: task.yaml]                                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --environment-revision-id        <str>  [required]                                            │
+│ *  --verifier-revision-id           <str>  [required]                                            │
+│    --help                                  Show this message and exit.                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural task show`
+
+```text
+
+ Usage: plural task show [OPTIONS] [path]
+
+ Show a resolved Task.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: task.yaml]                                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural task validate`
+
+```text
+
+ Usage: plural task validate [OPTIONS] [path]
+
+ Validate a complete Task revision graph.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: task.yaml]                                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
@@ -1366,14 +820,14 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural trial [OPTIONS] COMMAND [ARGS]...
 
- Inspect immutable job trials.
+ Inspect and watch Trials.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list  List planned trials with local result status.                                              │
-│ show  Show one planned trial and its persisted result.                                           │
+│ list   List planned Trials and current states.                                                   │
+│ watch  Replay or follow events for one Trial.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1381,12 +835,12 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
 ```text
 
- Usage: plural trial list [OPTIONS] {identifier}
+ Usage: plural trial list [OPTIONS] {job_id}
 
- List planned trials with local result status.
+ List planned Trials and current states.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    identifier      <str>  [required]                                                           │
+│ *    job_id      <str>  [required]                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --store        <path>  [default: .plural/jobs]                                                   │
@@ -1394,20 +848,128 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-## `plural trial show`
+## `plural trial watch`
 
 ```text
 
- Usage: plural trial show [OPTIONS] {trial_id}
+ Usage: plural trial watch [OPTIONS] {trial_id}
 
- Show one planned trial and its persisted result.
+ Replay or follow events for one Trial.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    trial_id      <str>  [required]                                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --job          <str>   [default: job.yaml]                                                       │
-│ --store        <path>  [default: .plural/jobs]                                                   │
-│ --help                 Show this message and exit.                                               │
+│ *  --job           <str>               [required]                                                │
+│    --store         <path>              [default: .plural/jobs]                                   │
+│    --after         <int range> [x>=0]  [default: 0]                                              │
+│    --follow                                                                                      │
+│    --json                                                                                        │
+│    --hosted                                                                                      │
+│    --help                              Show this message and exit.                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural verifier`
+
+```text
+
+ Usage: plural verifier [OPTIONS] COMMAND [ARGS]...
+
+ Manage Verifier revisions.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init      Create a deterministic, agent, or human Verifier.                                      │
+│ validate  Validate a Verifier.                                                                   │
+│ show      Show a Verifier.                                                                       │
+│ push      Publish a Verifier parent and immutable revision.                                      │
+│ publish   Publish an existing hosted Verifier revision.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural verifier init`
+
+```text
+
+ Usage: plural verifier init [OPTIONS] [path]
+
+ Create a deterministic, agent, or human Verifier.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: verifier.yaml]                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --name         <str>                        [default: verifier]                                  │
+│ --kind         <deterministic|agent|human>  [default: deterministic]                             │
+│ --force                                                                                          │
+│ --help                                      Show this message and exit.                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural verifier publish`
+
+```text
+
+ Usage: plural verifier publish [OPTIONS] {resource_id} {revision_id}
+
+ Publish an existing hosted Verifier revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    resource_id      <str>  [required]                                                          │
+│ *    revision_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural verifier push`
+
+```text
+
+ Usage: plural verifier push [OPTIONS] [path]
+
+ Publish a Verifier parent and immutable revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: verifier.yaml]                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural verifier show`
+
+```text
+
+ Usage: plural verifier show [OPTIONS] [path]
+
+ Show a Verifier.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: verifier.yaml]                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural verifier validate`
+
+```text
+
+ Usage: plural verifier validate [OPTIONS] [path]
+
+ Validate a Verifier.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: verifier.yaml]                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```

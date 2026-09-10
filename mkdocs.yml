@@ -111,10 +111,9 @@ nav:
       - Native actions: concepts/native-actions.md
       - Harness stamping: concepts/harness-stamping.md
       - Execution capabilities: concepts/execution-capabilities.md
-      - Agent templates and instances: concepts/agent-instances.md
+      - Jobs, Tasks, and Trials: concepts/execution.md
       - Observability: concepts/observability.md
       - Hub: concepts/hub.md
-      - Packages, jobs, and trials: concepts/execution.md
       - Benchmark: concepts/benchmark.md
       - Trace: concepts/trace.md
       - Dataset: concepts/dataset.md

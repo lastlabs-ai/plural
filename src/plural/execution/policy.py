@@ -13,7 +13,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from plural.domain import (
-    AgentTemplate,
+    AgentDefinition,
     EnvironmentManifest,
     EnvironmentRuntime,
     ExecutionTarget,
@@ -21,6 +21,7 @@ from plural.domain import (
     HarnessCapability,
     HarnessPolicy,
     HarnessStamp,
+    VerifierRuntime,
 )
 from plural.sandbox.models import (
     Capability,
@@ -143,7 +144,7 @@ def sandbox_requirements_for(
     *,
     network: NetworkMode | None = None,
     resources: ResourceRequirements | None = None,
-    verifier: bool = False,
+    verifier_runtime: VerifierRuntime | None = None,
     harness_digest: str | None = None,
 ) -> SandboxRequirements:
     """Build sandbox requirements from an environment runtime."""
@@ -151,25 +152,21 @@ def sandbox_requirements_for(
     identity = environment.identity.digest
     if harness_digest:
         identity = f"{identity}:{harness_digest}"
-    if verifier:
+    if verifier_runtime is not None:
         return SandboxRequirements(
-            image=environment.verifier.image if environment.verifier else runtime.image,
+            image=verifier_runtime.image,
             snapshot=None,
             declarative_image=None,
-            execution_identity=identity,
+            execution_identity=f"{identity}:verifier",
             build_context=None,
             dockerfile=None,
-            resources=resources or runtime.resources,
-            network=NetworkMode.NONE,
-            network_allowlist=(),
-            timeout_seconds=(
-                environment.verifier.timeout_seconds
-                if environment.verifier
-                else runtime.timeout_seconds
-            ),
+            resources=verifier_runtime.resources,
+            network=verifier_runtime.network,
+            network_allowlist=verifier_runtime.network_allowlist,
+            timeout_seconds=verifier_runtime.timeout_seconds,
             persistent=False,
             compose=False,
-            read_only_root=runtime.read_only_root,
+            read_only_root=False,
         )
     return SandboxRequirements(
         image=runtime.image,
@@ -191,7 +188,7 @@ def sandbox_requirements_for(
 def resolve_effective_policy(
     *,
     environment: EnvironmentManifest,
-    template: AgentTemplate,
+    agent: AgentDefinition,
     stamp: HarnessStamp | None,
     project: ProjectPolicy,
     provider: ProviderCapabilities,
@@ -269,9 +266,9 @@ def resolve_effective_policy(
 
     granted: frozenset[HarnessCapability] = stamp.granted if stamp is not None else frozenset()
     if stamp is not None:
-        if template.harness is None:
+        if agent.harness is None:
             raise CapabilityError(
-                "harness stamp required by agent does not match a native template"
+                "harness stamp required by agent does not match a native AgentDefinition"
             )
         if project.allowed_harness_capabilities is not None:
             blocked = stamp.granted - project.allowed_harness_capabilities
@@ -291,7 +288,7 @@ def resolve_effective_policy(
                     f"has no granted capabilities after project policy"
                 )
 
-    _ = template  # template routing/secrets are validated at job compatibility
+    _ = agent  # routing and secrets are validated at Job compatibility
     return EffectivePolicy(
         provider=provider.provider,
         requirements=requirements,
@@ -313,17 +310,15 @@ def policy_case_environment(payload: dict[str, Any]) -> EnvironmentManifest:
     )
 
 
-def policy_case_template(
+def policy_case_agent(
     environment: EnvironmentManifest,
     payload: dict[str, Any],
     stamp: HarnessStamp | None,
-) -> AgentTemplate:
-    """Build a minimal agent template from a shared policy fixture case."""
+) -> AgentDefinition:
+    """Build a minimal Agent from a shared policy fixture case."""
     harness = payload.get("harness")
-    return AgentTemplate(
+    return AgentDefinition(
         name=str(payload.get("name") or "agent"),
         model=str(payload.get("model") or "openai/gpt-4.1-mini"),
-        environment=environment.identity,
         harness=harness,
-        stamp=stamp,
     )

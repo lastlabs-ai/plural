@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "RubricCriterion": {
+      "additionalProperties": false,
+      "description": "One deterministic human or agent rubric criterion.",
+      "properties": {
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "max_score": {
+          "default": 1,
+          "title": "Max Score",
+          "type": "number"
+        },
+        "min_score": {
+          "default": 0,
+          "title": "Min Score",
+          "type": "number"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "weight": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Weight",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "RubricCriterion",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Human review verifier.",
+  "properties": {
+    "instructions": {
+      "default": "",
+      "title": "Instructions",
+      "type": "string"
+    },
+    "kind": {
+      "const": "human",
+      "default": "human",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "revision": {
+      "default": "0.1.0",
+      "minLength": 1,
+      "title": "Revision",
+      "type": "string"
+    },
+    "rubric": {
+      "items": {
+        "$ref": "#/$defs/RubricCriterion"
+      },
+      "minItems": 1,
+      "title": "Rubric",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "2",
+      "default": "2",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "rubric"
+  ],
+  "title": "HumanVerifier",
+  "type": "object"
+}

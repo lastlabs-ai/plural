@@ -40,23 +40,12 @@ client.close()
 | Folder | What it covers |
 | --- | --- |
 | [`tracing/`](tracing/) | Redaction, sinks, late labels |
-| [`environment/`](environment/) | Tasks, tools, scorers → episode traces |
-| [`environment/library/`](environment/library/) | Basic RL: search / read / answer, then `returns(γ)` |
-| [`environment/wordle/`](environment/wordle/) | Wordle: `uv run python examples/environment/wordle/run.py --secret crane` |
-| [`environment/twitter/`](environment/twitter/) | `TwitterEnv`: run a simulated Twitter account |
-| [`benchmarking/`](benchmarking/) | Compare models or arbitrary policies |
-| [`jobs/`](jobs/) | v1 packages, local/Docker/Daytona Jobs, attempts, resume/regrade, Studio payload |
+| [`environment/`](environment/) | Canonical typed Environment authoring notebooks |
+| [`benchmarking/`](benchmarking/) | Cross-Environment `BenchmarkDefinition` Jobs |
+| [`jobs/`](jobs/) | Packages, local/Docker/Daytona Jobs, attempts, events, and Studio revisions |
 
-Each environment folder includes a short `walkthrough.ipynb` covering its
-tools, scored traces, versioned tasks, and policy benchmarking.
-
-Environment demos are offline:
-
-```bash
-uv run python examples/environment/library/run.py
-uv run python examples/environment/wordle/run.py --secret crane
-uv run python examples/environment/twitter/run.py
-```
+Each Environment notebook covers typed state/observation, actions, runtime
+placement, and compiling an immutable `EnvironmentManifest`.
 
 The two [benchmarking flows](benchmarking/README.md) are also offline:
 

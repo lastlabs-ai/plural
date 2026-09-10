@@ -1,101 +1,92 @@
 from __future__ import annotations
 
-from plural.environments.env import Environment, action
-from plural.environments.types import Observation, State, hidden, is_hidden_schema_field
-from plural.studio import environment_manifest
+from plural import (
+    Environment,
+    EnvironmentResource,
+    EnvironmentRuntime,
+    Observation,
+    SecretReference,
+    State,
+    action,
+    hidden,
+    rewarder,
+)
 
 
-class MemoryState(State):
-    notes: list[str] = []
-    secret: str = hidden("", description="Not copied into the observation.")
+class CounterState(State):
+    count: int = 0
+    answer: str = hidden("secret")
 
 
-class VisibleObs(Observation):
-    n: int = 0
-
-    def render(self) -> str:
-        return f"n={self.n}"
+class CounterObservation(Observation):
+    count: int = 0
 
 
-class DemoEnv(Environment[VisibleObs, MemoryState]):
-    name = "demo-world"
-    version = "0.2.0"
-    description = "A tiny writable counter."
-    readme = "# Demo\n\nThe agent writes notes into state."
-    system_prompt = "Stay inside the observation."
-    guardrails = [
-        "Do not invent hidden state.",
-        {"name": "horizon", "rule": "Stop when the task is done."},
-    ]
-    skills = ["triage", {"name": "refund", "tool_names": ["inc"]}]
-
-    def setup(self, task):
-        super().setup(task)
-        self.state = MemoryState(seed=self.seed, notes=[])
-
-    def observe(self) -> VisibleObs:
-        return VisibleObs(n=len(self.state.notes))
+class CounterEnvironment(Environment[CounterObservation, CounterState]):
+    name = "counter"
+    revision = "1.2.0"
+    overview = "A stateful counter."
+    readme = "# Counter"
 
     @action
-    def inc(self) -> dict:
-        """Append a note."""
-        self.state.notes.append("tick")
-        return {"n": len(self.state.notes)}
+    def increment(self, amount: int) -> dict[str, int]:
+        """Increment the counter."""
+        self.state.count += amount
+        self.observation.count = self.state.count
+        return {"count": self.state.count}
+
+    @rewarder(weight=2)
+    def progress(self, previous_state, current_state, action, result) -> float:
+        """Reward increasing state."""
+        del action, result
+        return float(current_state["count"] > previous_state["count"])
 
 
-def test_observation_and_state_schemas_come_from_generic_models() -> None:
-    env = DemoEnv()
-    observation = env.observation_schema()
-    state = env.state_schema()
-    assert observation["properties"]["n"]["type"] == "integer"
-    assert state["properties"]["notes"]["type"] == "array"
-    assert is_hidden_schema_field(state["properties"]["secret"])
-    assert is_hidden_schema_field(state["properties"]["seed"])
-    assert not is_hidden_schema_field(state["properties"]["notes"])
-    assert env._contract_names() == ("VisibleObs", "MemoryState")
+def test_environment_compiles_exact_manifest() -> None:
+    environment = CounterEnvironment(
+        runtime=EnvironmentRuntime(provider="docker"),
+        resources=(EnvironmentResource(kind="data", name="orders"),),
+        secrets=(SecretReference(name="DATABASE_URL"),),
+        metadata={"owner": "evals"},
+    )
+    manifest = environment.manifest()
+    assert manifest.name == "counter"
+    assert manifest.revision == "1.2.0"
+    assert manifest.overview == "A stateful counter."
+    assert manifest.readme == "# Counter"
+    assert manifest.actions[0].name == "increment"
+    assert manifest.actions[0].kind == "python"
+    assert manifest.rewarders[0].name == "progress"
+    assert manifest.rewarders[0].weight == 2
+    assert manifest.state_schema["properties"]["answer"]["x-plural-hidden"] is True
+    assert manifest.observation_schema["properties"]["count"]["type"] == "integer"
+    assert manifest.resources[0].name == "orders"
+    assert manifest.secrets[0].name == "DATABASE_URL"
+    dumped = manifest.model_dump(mode="json")
+    assert "tasks" not in dumped
+    assert "verifier" not in dumped
+    assert "mode" not in dumped
+    assert "instructions" not in dumped
 
 
-def test_plain_environment_uses_default_schemas() -> None:
-    env = Environment(name="blank")
-    assert "text" in env.observation_schema()["properties"]
-    assert "seed" in env.state_schema()["properties"]
-    assert env.normalized_guardrails() == []
-    assert env.context_policy()["include_history"] is True
+def test_snapshots_are_json_safe_and_detached() -> None:
+    environment = CounterEnvironment()
+    state = environment.state_snapshot()
+    observation = environment.observation_snapshot()
+    state["count"] = 99
+    observation["count"] = 99
+    assert environment.state.count == 0
+    assert environment.observation.count == 0
 
 
-def test_environment_manifest_includes_world_contract() -> None:
-    env = DemoEnv()
-    manifest = environment_manifest(env)
-    assert manifest["observation_type"] == "VisibleObs"
-    assert manifest["state_type"] == "MemoryState"
-    assert manifest["observation_schema"]["properties"]["n"]["type"] == "integer"
-    assert manifest["state_schema"]["properties"]["notes"]["type"] == "array"
-    assert manifest["guardrails"][0]["rule"] == "Do not invent hidden state."
-    assert manifest["guardrails"][1] == {"name": "horizon", "rule": "Stop when the task is done."}
-    assert manifest["skills"][0]["name"] == "triage"
-    assert manifest["skills"][1]["tool_names"] == ["inc"]
-    assert "setup" in manifest["hooks"]
-    assert "observe" in manifest["hooks"]
-    assert manifest["context"]["max_turns"] == 8
-    assert manifest["tools"][0]["name"] == "inc"
+def test_rewarder_signature_is_enforced() -> None:
+    try:
 
+        @rewarder
+        def invalid(value) -> float:
+            return float(value)
 
-def test_fingerprint_covers_guardrails_and_schemas() -> None:
-    first = DemoEnv().fingerprint()
-    other = DemoEnv()
-    other.guardrails = ["A different rule."]
-    assert other.fingerprint() != first
-    third = DemoEnv()
-    assert third.fingerprint() == first
-
-
-def test_spawn_copies_world_fields() -> None:
-    env = DemoEnv()
-    env.guardrails.append("Copied rule.")
-    spawned = env.spawn()
-    assert spawned.description == env.description
-    assert spawned.readme == env.readme
-    assert spawned.guardrails == env.guardrails
-    assert spawned.skills == env.skills
-    spawned.guardrails.append("only-child")
-    assert "only-child" not in env.guardrails
+    except TypeError as exc:
+        assert "previous_state" in str(exc)
+    else:
+        raise AssertionError("invalid rewarder signature was accepted")

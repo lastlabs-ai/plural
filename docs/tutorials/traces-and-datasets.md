@@ -1,3 +1,10 @@
+---
+route: /docs/tutorials/traces-and-datasets
+title: "Inspect runs and build datasets"
+order: 70
+description: "A trace records what happened during a model call or environment episode. A task dataset contains work to evaluate. A trace dataset contains completed activity. Keep those roles separate when moving from debugging to evaluation."
+audience: all
+---
 # Inspect runs and build datasets
 
 A trace records what happened during a model call or environment episode.
@@ -71,28 +78,28 @@ print(len(restored), restored.content_hash)
 `where=` predicate. See [dataset integrity](../concepts/dataset.md) for hash and
 manifest behavior.
 
-## 4. Turn reviewed examples into new tasks
+## 4. Turn reviewed examples into Task revisions
 
-Review and select useful inputs; do not pass a trace dataset to `Benchmark.run`.
-Build explicit tasks with independent expected outcomes:
+Review and select useful inputs; do not use a Trace dataset as a Job source.
+Build a first-class Task that pins an Environment and Verifier:
 
 ```python
-from plural import TaskData, TaskDataset
+from plural import TaskDefinition, WeightedVerifier
 
-suite = TaskDataset(
-    name="support-regression", version="1.0.0",
-    tasks=[TaskData(
-        task_id="unknown-order", input="Where is A999?", expected="unknown",
-    )],
+task = TaskDefinition(
+    task_id="unknown-order",
+    revision="1.0.0",
+    instructions="Return the status for order A999.",
+    info={"order_id": "A999"},
+    environment=environment,
+    verifiers=(WeightedVerifier(verifier=correctness),),
 )
-suite.save("data/support-regression.jsonl")
-loaded = TaskDataset.load("data/support-regression.jsonl")
-print(loaded.content_hash)
+print(task.content_hash)
 ```
 
-Do not treat the previous model's answer as ground truth without review.
-`expected` is stored in the task dataset even though it is evaluator-only at
-execution time. Keep its JSONL and manifest access appropriate for that data.
+Do not treat the previous model's answer as ground truth without review. Keep
+private labels in Verifier-controlled data or hidden Environment state, not
+Task `info` or metadata.
 
 ## 5. Upload selected traces to Plural Intel
 
@@ -120,9 +127,6 @@ list parameters.
 - `trace.credit(...)` adds late reward events. `transitions(source=...)`,
   `decision_rewards(...)`, and `returns(...)` support analysis of step and
   episode rewards. See [trace semantics](../concepts/trace.md).
-- [Replay](../concepts/environment.md#deterministic-replay) checks recorded
-  actions against a compatible environment without model calls. Redacted traces
-  cannot be deterministically replayed if required content is missing.
 - `plural.environments.export` contains Hugging Face-style row and verifier-row
   export helpers. Their exact formats are documented in the
   [API reference](../reference/api.md#datasets-and-export).

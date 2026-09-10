@@ -1,56 +1,72 @@
-# Sync packages and results with Plural Intel
+---
+route: /docs/guides/studio-sync
+title: "Sync revision graphs and results"
+order: 300
+description: "Synchronize a complete canonical schema-v2 revision graph for hosted execution, or explicitly retain execution and durable evidence on the local machine."
+audience: all
+---
+# Sync revision graphs and results
 
-For hosted reads and object edits, start with the [object walkthrough](push-to-plural.md).
-The source module is named `studio`; it connects to Plural Intel.
+An authenticated `plural run` validates and synchronizes the complete
+schema-v2 graph before submitting a hosted Job. An explicit offline/private
+run instead retains the resolved source, Agent bindings, revision lock, Trials,
+TrialExecutions, append-only progress events, receipts, and artifacts in its
+local Job store.
 
-The existing SDK can create/update hosted `Environment` revisions, agent
-templates, instances, Benchmark reports/runs, and Traces:
+Hosted publication requires a backend that supports the same schema-v2 graph:
 
-```python
-from plural import Client, Environment
+- Environment revisions with runtime placement, network, resources, and secrets;
+- independent AgentDefinition, Task, Verifier, Harness, and Benchmark revisions;
+- Task-or-Benchmark Jobs and their planned Trials;
+- append-only TrialExecution and ProgressEvent records;
+- human `awaiting_review` state and review submissions;
+- immutable hashed artifacts, including train-only TITO.
 
-with Client(project="project-id") as client:
-    env = Environment(name="support", version="0.7.4")
-    created = client.create(env)
-    template = client.agents.templates.create(
-        name="support-agent",
-        model="openai/gpt-4o-mini",
-        environment_id=str(created["environment_id"]),
-    )
-```
+Never flatten a cross-Environment Benchmark into one Job-level Environment.
+Never move runtime policy onto a Job. Publish each pinned revision and preserve
+the Task edges that define the graph.
 
-Project-scoped keys already identify a project. Account-scoped keys require
-`project=` or `PLURAL_PROJECT`. SDK requests use `/api/v1` derived from the
-gateway base URL and send the project as `X-Project-Id` when supplied.
-
-Environment sync sends description/readme plus a revision payload containing
-instructions, fingerprint, package version, max turns, action/scorer definitions,
-skills, hooks, observation/state schemas, guardrails, and context policy.
-Benchmark sync stores a report and then best-effort uploads case traces with a
-run-group ID. Trace upload failures in that final best-effort loop are currently
-suppressed, so callers needing delivery guarantees should upload and verify
-traces explicitly.
-
-## v1 package and Job sync
-
-The CLI can publish an `EnvironmentManifest` with `plural env push`, register a
-client-orchestrated Job, append self-reported Trial results, and finalize its
-Benchmark report. Local execution is still authoritative: receipts and
-artifacts remain under `.plural/jobs`.
-
-External writes are opt-in. `plural run job.yaml` runs locally without hosted
-registration. Pass `--sync` to request best-effort registration and incremental
-result upload; `--no-sync` is the explicit equivalent of the safe default.
-Sync failure does not discard local results. Replay a completed result with:
+## Hosted synchronization
 
 ```bash
-plural job upload <job_id> --store .plural/jobs
+plural run benchmark.yaml --agent agent.yaml --mode eval
+plural run benchmark.yaml --agent agent.yaml --no-watch \
+  --idempotency-key release-42
+plural job watch JOB_ID --hosted --json
 ```
 
-The hosted API stores package metadata, locks, receipts, and report linkage; it
-does not execute the sandbox workload. Receipts remain self-reported rather
-than remote attestations. Organization/project listing and `plural agent list`
-retain their separately documented local/backend limitations.
+Before the first write, the CLI validates the complete graph. It then publishes
+Harnesses; Environments and Verifiers; Tasks; the Benchmark when present;
+Agents; and finally the Job. Shared dependencies are reused once. The Job
+submission contains only the exact hosted source and Agent revision IDs
+returned by that pass. Its default idempotency key is the stable local Job ID.
 
-See [`examples/jobs/06_studio_sync.py`](https://github.com/lastlabs-ai/plural/blob/main/examples/jobs/06_studio_sync.py)
-for offline payload construction and an explicitly credential-gated live call.
+## Local durability
+
+```bash
+plural run benchmark.yaml --agent agent.yaml --mode eval --offline
+plural job show JOB_ID
+plural job watch JOB_ID --json
+plural trial watch TRIAL_ID --job JOB_ID --json
+```
+
+Use `--private` for the same behavior.
+
+Events are sanitized; secret values, hidden Environment state, and giant TITO
+payloads are excluded. Artifact references include digest, media type, and size.
+
+## Hosted compatibility
+
+Hosted endpoints evolve independently from the package. Confirm that your
+deployment advertises schema-v2 revision and event APIs before writing. A
+deployment that only accepts an Environment-bound Agent or an embedded Task
+list cannot represent this graph without losing
+identity and must be upgraded.
+
+Project-scoped keys already identify a project. Account-scoped keys require
+`project=` or `PLURAL_PROJECT`. Use `plural job submit` only for the advanced
+workflow where exact hosted revision IDs are already available; it does not
+synchronize local dependencies.
+
+See [hosted advanced workflows](../sdk/hosted-advanced.md) and
+[Python Jobs](../sdk/package-jobs.md).

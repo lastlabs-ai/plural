@@ -1,3 +1,10 @@
+---
+route: /docs/reference/api
+title: "API reference"
+order: 500
+description: "For a guided path, start with the SDK and CLI coverage guide. The entries below document the actual public classes and methods."
+audience: all
+---
 # API reference
 
 For a guided path, start with the [SDK and CLI coverage guide](feature-map.md).
@@ -5,9 +12,10 @@ The entries below document the actual public classes and methods.
 
 ## Client and request types
 
-`Client.create(x)` and `Client.update(x)` sync an `Environment`, `Trace`,
-`Benchmark` (after `run()`), or `Report` by slug. Agent templates are created
-with `client.agents.templates.create(...)`.
+`Client.create(x)` and `Client.update(x)` support the hosted object types
+implemented by the connected deployment. Canonical local execution uses
+schema-v2 `EnvironmentManifest`, `AgentDefinition`, Task/Verifier revisions,
+and Task-or-Benchmark `JobSpec` values.
 
 ::: plural.client.Client
 
@@ -29,96 +37,13 @@ with `client.agents.templates.create(...)`.
 
 ::: plural.tracing.resources.trace_json_schema
 
-## Environments
-
-`Environment.step()` is framework-owned and final. Action environments use its
-default dispatch behavior; scalar and custom text environments override
-`apply_action()` and return `ActionResult`. `finish_turn()` remains public for
-advanced manual integrations, but normal `apply_action()` hooks should not
-call it.
-
-::: plural.environments.env.Environment
-
-::: plural.environments.action.ActionResult
-
-::: plural.environments.task.TaskData
-
-::: plural.environments.dataset.TaskDataset
-
-::: plural.environments.dataset.Dataset
-
-::: plural.environments.dataset.TraceFilter
-
-::: plural.environments.step.StepResult
-
-::: plural.environments.rollout.Rollout
-
-::: plural.environments.action_registry.action
-
-::: plural.environments.types.Observation
-
-::: plural.environments.types.State
-
-::: plural.environments.types.hidden
-
-## Policies and runtime
-
-::: plural.environments.policy.Policy
-
-::: plural.environments.policy.PluralPolicy
-
-::: plural.environments.policy.ScriptedPolicy
-
-::: plural.environments.runtime.Runtime
-
-::: plural.environments.runtime.LocalRuntime
-
-::: plural.environments.runtime.runtime_fingerprint
-
-## Lifecycle and replay
-
-::: plural.environments.stop.EpisodeState
-
-::: plural.environments.stop.StopReason
-
-::: plural.environments.stop.EpisodeError
-
-::: plural.environments.replay.replay_actions
-
-::: plural.environments.replay.verify_replay
-
-::: plural.environments.replay.ReplayResult
-
-::: plural.environments.replay.ReplayMismatch
-
-## Benchmarks
-
-`Benchmark.from_policies(trace_writer=...)` records both successful and failed
-episode traces when a writer is supplied. The caller owns and closes the
-writer.
-
-::: plural.benchmarks.runner.Benchmark
-
-::: plural.benchmarks.runner.Report
-
-::: plural.benchmarks.runner.ModelStats
-
-::: plural.benchmarks.runner.CaseKey
-
-::: plural.benchmarks.runner.CaseResult
-
-::: plural.benchmarks.runner.WinRatePair
-
-::: plural.benchmarks.runner.RunManifest
-
-::: plural.benchmarks.runner.TaskDatasetMetadata
-
-::: plural.benchmarks.runner.TaskSetMetadata
-
 ## Package and execution domain
 
-The strict manifest fields are summarized in [Manifest fields](manifests.md);
-the generated schemas are the serialization authority.
+The canonical domain contains EnvironmentManifest, AgentDefinition,
+first-class Task and Verifier revisions, cross-Environment
+BenchmarkDefinition, discriminated Job sources, Trial/TrialExecution,
+ProgressEvent, and exact TITORecord. The generated schemas are the
+serialization authority.
 
 ::: plural.domain
 
@@ -129,6 +54,16 @@ the generated schemas are the serialization authority.
 ::: plural.execution.engine.VerifierOutput
 
 ::: plural.execution.store.JobStore
+
+## Environment authoring
+
+::: plural.environments.env.Environment
+
+::: plural.environments.env.action
+
+::: plural.environments.env.rewarder
+
+::: plural.environments.types
 
 ## Harness packages and protocol
 
@@ -166,19 +101,23 @@ the generated schemas are the serialization authority.
 
 ::: plural.studio.EnvironmentsAPI
 
+::: plural.studio.TasksAPI
+
+::: plural.studio.VerifiersAPI
+
 ::: plural.studio.AgentsAPI
 
 ::: plural.studio.BenchmarksAPI
 
 ::: plural.studio.TracesAPI
 
-::: plural.studio.RemoteAgent
-
 ::: plural.studio.HarnessesAPI
 
 ::: plural.studio.JobsAPI
 
 ::: plural.studio.TrialsAPI
+
+::: plural.studio.ReviewsAPI
 
 ## Routing
 

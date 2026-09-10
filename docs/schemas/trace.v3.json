@@ -931,7 +931,7 @@
       "type": "object"
     },
     "Outcome": {
-      "description": "Labeled outcome attached to a trace.\n\nAttributes:\n    scores: Named scorer outputs.\n    reward: Scalar reward used for RL / ranking.\n    labels: Discrete labels (e.g. intent, success/fail).\n    feedback: Free-form human or automated feedback.",
+      "description": "Labeled outcome attached to a trace.\n\nAttributes:\n    scores: Named Verifier outputs.\n    reward: Scalar reward used for RL / ranking.\n    labels: Discrete labels (e.g. intent, success/fail).\n    feedback: Free-form human or automated feedback.",
       "properties": {
         "feedback": {
           "anyOf": [
@@ -1294,6 +1294,99 @@
       "title": "ToolCall",
       "type": "object"
     },
+    "TraceArtifactReference": {
+      "description": "Hashed external artifact referenced by a semantic Trace.",
+      "properties": {
+        "digest": {
+          "title": "Digest",
+          "type": "string"
+        },
+        "media_type": {
+          "title": "Media Type",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "digest",
+        "media_type",
+        "size_bytes"
+      ],
+      "title": "TraceArtifactReference",
+      "type": "object"
+    },
+    "TraceVerifierResult": {
+      "description": "Final Verifier or pending human-review state.",
+      "properties": {
+        "digest": {
+          "title": "Digest",
+          "type": "string"
+        },
+        "feedback": {
+          "default": "",
+          "title": "Feedback",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "deterministic",
+            "agent",
+            "human"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "reward": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reward"
+        },
+        "scores": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Scores",
+          "type": "object"
+        },
+        "status": {
+          "enum": [
+            "succeeded",
+            "failed",
+            "awaiting_review"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "digest",
+        "kind",
+        "status"
+      ],
+      "title": "TraceVerifierResult",
+      "type": "object"
+    },
     "Turn": {
       "description": "One model turn inside an episode: observation \u2192 action \u2192 observation.",
       "properties": {
@@ -1445,11 +1538,11 @@
       "type": "object"
     }
   },
-  "$id": "https://pluralintel.com/schemas/trace.v2.json",
+  "$id": "https://pluralintel.com/schemas/trace.v3.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "A complete record of an LLM interaction or environment rollout.\n\nProduction traffic and environment rollouts emit the same shape so that\ndatasets, benchmarks, and a future autorouter can consume either source.\n\nAttributes:\n    trace_id: Opaque unique id.\n    environment: Environment name when produced by a rollout.\n    environment_version: Environment version string.\n    environment_fingerprint: Hash of tools, instructions, and scorers.\n    task_id: Task id within an environment.\n    model: Policy / model id used for this episode.\n    initial_state: Environment snapshot at reset.\n    steps: Ordered steps (decisions, LLM calls, tool calls, events).\n    final_state: Environment snapshot at episode close.\n    outcome: Optional labeled outcome. ``outcome.reward`` is the return.\n    metrics: Episode aggregates (turns, cost, latency, tool counts).\n    terminated: Natural end (``env.done()``).\n    truncated: Cut off by ``max_turns``.\n    tags: Free-form tags for filtering.\n    metadata: Arbitrary metadata.\n    created_at: Creation timestamp (UTC).\n    schema_version: Trace schema version for stability.\n\nExamples:\n    >>> t = Trace(trace_id=\"t1\", tags={\"env\": \"prod\"})\n    >>> t.schema_version\n    '2.0.0'",
+  "description": "A complete record of an LLM interaction or environment rollout.\n\nProduction traffic and environment rollouts emit the same shape so that\ndatasets, benchmarks, and a future autorouter can consume either source.\n\nAttributes:\n    trace_id: Opaque unique id.\n    environment: Environment name when produced by a rollout.\n    environment_version: Environment version string.\n    environment_fingerprint: Hash of the Environment revision.\n    task_id: Task identity for this Trial.\n    model: Policy / model id used for this episode.\n    initial_state: Explicitly safe Environment snapshot at reset.\n    steps: Ordered steps (decisions, LLM calls, tool calls, events).\n    final_state: Explicitly safe Environment snapshot at episode close.\n    outcome: Optional labeled outcome. ``outcome.reward`` is the return.\n    metrics: Episode aggregates (turns, cost, latency, tool counts).\n    terminated: Natural end (``env.done()``).\n    truncated: Cut off by ``max_turns``.\n    tags: Free-form tags for filtering.\n    metadata: Arbitrary metadata.\n    created_at: Creation timestamp (UTC).\n    schema_version: Trace schema version for stability.\n\nExamples:\n    >>> t = Trace(trace_id=\"t1\", tags={\"env\": \"prod\"})\n    >>> t.schema_version\n    '3.0.0'",
   "properties": {
-    "agent_instance_id": {
+    "agent_revision_digest": {
       "anyOf": [
         {
           "type": "string"
@@ -1459,19 +1552,14 @@
         }
       ],
       "default": null,
-      "title": "Agent Instance Id"
+      "title": "Agent Revision Digest"
     },
-    "agent_template_id": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Agent Template Id"
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/TraceArtifactReference"
+      },
+      "title": "Artifacts",
+      "type": "array"
     },
     "capability_denials": {
       "default": [],
@@ -1517,6 +1605,18 @@
       ],
       "default": null,
       "title": "Environment Fingerprint"
+    },
+    "environment_revision_digest": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Environment Revision Digest"
     },
     "environment_version": {
       "anyOf": [
@@ -1596,6 +1696,18 @@
       "default": null,
       "title": "Harness Implementation"
     },
+    "harness_revision_digest": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Harness Revision Digest"
+    },
     "initial_state": {
       "anyOf": [
         {
@@ -1620,6 +1732,22 @@
       ],
       "default": null,
       "title": "Job Id"
+    },
+    "job_mode": {
+      "anyOf": [
+        {
+          "enum": [
+            "eval",
+            "train"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Job Mode"
     },
     "metadata": {
       "additionalProperties": true,
@@ -1667,8 +1795,8 @@
       "title": "Parent Trace Id"
     },
     "schema_version": {
-      "const": "2.0.0",
-      "default": "2.0.0",
+      "const": "3.0.0",
+      "default": "3.0.0",
       "title": "Schema Version",
       "type": "string"
     },
@@ -1732,6 +1860,18 @@
       "default": null,
       "title": "Task Id"
     },
+    "task_revision_digest": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Revision Digest"
+    },
     "terminated": {
       "anyOf": [
         {
@@ -1743,6 +1883,17 @@
       ],
       "default": null,
       "title": "Terminated"
+    },
+    "tito_artifact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TraceArtifactReference"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "trace_id": {
       "title": "Trace Id",
@@ -1781,6 +1932,21 @@
       ],
       "default": null,
       "title": "Truncated"
+    },
+    "verifier_results": {
+      "items": {
+        "$ref": "#/$defs/TraceVerifierResult"
+      },
+      "title": "Verifier Results",
+      "type": "array"
+    },
+    "verifier_revision_digests": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Verifier Revision Digests",
+      "type": "array"
     }
   },
   "title": "Plural Trace",

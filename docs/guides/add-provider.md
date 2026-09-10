@@ -1,3 +1,10 @@
+---
+route: /docs/guides/add-provider
+title: "Add your own provider"
+order: 390
+description: "Implement the four methods on the class protocol and translate to plural's normalized types."
+audience: all
+---
 # Add your own provider
 
 Implement the four methods on the :class:`~plural.providers.base.Provider` protocol and translate to plural's normalized types.

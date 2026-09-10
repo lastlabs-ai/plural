@@ -1,3 +1,10 @@
+---
+route: /docs/guides/migrate-openrouter
+title: "Migrate from OpenRouter"
+order: 400
+description: "The package documented here does not include hosted multi-provider billing, a CLI, or a learned routing service."
+audience: all
+---
 # Migrate from OpenRouter
 
 ## Constructor diff

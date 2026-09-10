@@ -1,3 +1,10 @@
+---
+route: /docs/sdk/client
+title: "Model calls, routing, and responses"
+order: 80
+description: "Use Client when you need a model response without creating an environment. Complete authentication first. These examples make live model calls; use IDs supported by your configured endpoint."
+audience: all
+---
 # Model calls, routing, and responses
 
 Use `Client` when you need a model response without creating an environment.

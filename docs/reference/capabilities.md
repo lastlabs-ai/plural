@@ -1,3 +1,10 @@
+---
+route: /docs/reference/capabilities
+title: "Capability table"
+order: 480
+description: "Generated from plural.sandbox.models.Capability and plural.domain.HarnessCapability. Local, Docker, and remote (Daytona) are the only providers."
+audience: all
+---
 # Capability table
 
 Generated from `plural.sandbox.models.Capability` and

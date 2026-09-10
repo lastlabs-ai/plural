@@ -1,3 +1,10 @@
+---
+route: /docs/guides/jobs
+title: "Build and run a job"
+order: 270
+description: "Start with the complete CLI walkthrough to create the files used here, configure model credentials, and grant the harness secret. Add a verifier before treating a job as a scored evaluation. This page covers operations after your first run."
+audience: all
+---
 # Build and run a job
 
 Start with the [complete CLI walkthrough](../tutorials/cli-walkthrough.md) to
@@ -9,42 +16,55 @@ a scored evaluation. This page covers operations after your first run.
 
 ```bash
 plural env validate environment
-plural env action list --environment environment
-plural env capabilities --environment environment
-plural env task list --environment environment
-plural env harness list --environment environment
-plural env harness capabilities --environment environment
-plural runtime doctor --env environment
-plural benchmark validate benchmark.yaml --environment environment
-plural agent template show agent.yaml
-plural run job.yaml --print-config --format yaml
+plural verifier validate verifier.yaml
+plural task validate task.yaml
+plural benchmark validate benchmark.yaml
+plural agent show agent.yaml
+plural run job.yaml --dry-run --format yaml
 ```
 
 `--dry-run` computes the job ID, complete lock, trial IDs, and count without
 starting a sandbox. It is the safest release/CI preflight.
 
+## Hosted execution
+
+With `PLURAL_API_KEY` configured, `plural run` validates the complete graph,
+publishes it in dependency order, submits a hosted Job using the exact returned
+revision IDs, prints the Job, and follows hosted events:
+
+```bash
+plural run job.yaml
+plural run job.yaml --json
+plural run job.yaml --no-watch --idempotency-key release-42
+```
+
+The default idempotency key is the stable local Job ID. Identical shared
+dependencies are published once per synchronization pass. `plural job submit`
+remains the advanced workflow for callers that already have exact hosted source
+and Agent revision IDs.
+
 ## Local development
 
 ```bash
-plural run job.yaml --runtime local --unsafe-local
+plural run task.yaml --agent agent.yaml --mode eval --offline
 ```
+
+`--private` is equivalent to `--offline`. Both keep the durable Job log under
+`.plural/jobs`.
 
 The local provider is not a sandbox. It executes package commands as child
 processes under your user account and cannot enforce network, resources,
-filesystem boundaries, or a read-only root. Because verifiers always require
-no-network enforcement, a Job with a verifier cannot run on `local`. Use it
-only for trusted, unverified development runs.
+filesystem boundaries, or a read-only root. It is available only when the
+Task's Environment declares provider `local`, `network: full`, and
+`allow_unsafe_local: true`. Verifiers declare runtime and connectivity
+independently.
 
 ## Docker
 
-Examples include `--unsafe-local` to permit the tutorial's mutable local harness
-source. With a digest-pinned archive binding, this source opt-in is unnecessary.
-
-Install Docker and make sure `plural runtime doctor docker` reports healthy.
-Then:
+Install Docker and make sure the daemon is healthy. Then:
 
 ```bash
-plural run job.yaml --runtime docker --unsafe-local --concurrency 4 --retry 2
+plural run benchmark.yaml --agent agent.yaml --concurrency 4 --offline
 ```
 
 If no image/build context is configured, the CLI uses the Environment directory
@@ -65,11 +85,11 @@ Opt-in daemon integration tests use the `docker` pytest marker.
 ```bash
 pip install "plural[daytona]"
 export DAYTONA_API_KEY='...'
-plural runtime doctor daytona
-plural run job.yaml --runtime daytona --unsafe-local
+plural run job.yaml --offline
 ```
 
-In `job.yaml`, set an image, snapshot, or declarative image. Daytona supports
+Set the provider and image, snapshot, or declarative image on each Environment
+revision. Daytona supports
 CPU/memory and `none`, `full`, or non-empty restricted network allowlists in the
 current adapter. Local Docker build contexts, pid/disk limits, persistence,
 compose, read-only root, and stdin execution are unavailable. The harness runner
@@ -80,38 +100,41 @@ credentials and the `daytona` marker.
 
 ```bash
 plural run job.yaml --agent agent-a.yaml --agent agent-b.yaml \
-  --n-attempts 3 --concurrency 8
+  --attempts 3 --concurrency 8 --per-runtime-concurrency 4 --offline
 ```
 
-Set `per_agent_concurrency` in `job.yaml` to cap one Agent independently of the
-global limit. Three Agents, ten selected tasks, and two attempts plan sixty
-Trials. `--retry 2` may execute an individual Trial up to three times but does
-not add Trials.
+`per_runtime_concurrency` bounds launches independently for each Environment
+runtime while `concurrency` is the global ceiling. Three Agents, ten selected
+Tasks, and two attempts plan sixty Trials. Retry policy may append multiple
+TrialExecutions but does not add Trials.
 
-## Resume, retry, cancel, and regrade
+## Resume, retry, cancel, and review
 
-The run prints its `job_id` and stores state under `.plural/jobs`.
+An offline/private run prints its `job_id` and stores state under
+`.plural/jobs`.
 
 ```bash
 plural job list
 plural job show JOB_ID
 plural trial list JOB_ID
-plural job resume JOB_ID
-plural job retry JOB_ID
-plural job cancel JOB_ID
-plural job regrade JOB_ID
-plural trial show TRIAL_ID --job JOB_ID
+plural job watch JOB_ID --json
+plural trial watch TRIAL_ID --job JOB_ID --json
+plural review list JOB_ID
+plural review submit JOB_ID TRIAL_ID --verifier human-review --score 1
 ```
 
-Resume and retry currently perform the same locked resume operation: successful
-Trials are skipped and all other Trials execute under the configured retry
-policy. Cancellation writes a marker checked before launches; an in-process
-`Job.cancel()` also force-cancels active sandboxes. The CLI cancellation command
-cannot reach active processes owned by another already-running CLI process.
+The append-only event stream records planning, provisioning, execution,
+verification, retry, human-review, and terminal transitions. `TrialExecution`
+distinguishes retries from independent Trial attempts. Use the Python
+`Job.run(resume=True)` and `Job.cancel()` APIs for local lifecycle operations.
+Human review submissions resolve Trials that are explicitly
+`awaiting_review`.
 
-Regrade requires a configured verifier and a successful stored result for every
-Trial. It reruns the verifier over immutable stored artifacts, does not rerun
-the harness, and links the new receipt with `source_receipt_hash`.
+For a hosted Job submitted with `--no-watch`, reconnect with:
+
+```bash
+plural job watch JOB_ID --hosted --json
+```
 
 Runnable offline counterparts are in
 [`examples/jobs`](https://github.com/lastlabs-ai/plural/tree/main/examples/jobs).

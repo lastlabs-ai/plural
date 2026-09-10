@@ -13,7 +13,7 @@ from plural import Job, JobStore
 
 spec = build_job(provider="daytona")
 if os.environ.get("PLURAL_RUN_DAYTONA") != "1":
-    assert spec.environment.runtime.image == "python:3.12-slim"
+    assert spec.tasks[0].environment.runtime.image == "python:3.12-slim"
     print("Daytona live run gated; set PLURAL_RUN_DAYTONA=1 and DAYTONA_API_KEY")
 else:
     with tempfile.TemporaryDirectory(prefix="plural-daytona-job-") as temporary:

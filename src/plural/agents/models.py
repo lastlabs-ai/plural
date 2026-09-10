@@ -1,72 +1,112 @@
-"""Hosted agent instance types."""
+"""First-class schema-v2 Agent definitions."""
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field, model_validator
+
+from plural.common import (
+    FrozenModel,
+    HarnessBinding,
+    HarnessPackage,
+    RoutingSpec,
+    content_hash,
+    stable_id,
+)
 
 
-class AgentModel(BaseModel):
-    """Strict hosted agent value."""
+class AgentDefinition(FrozenModel):
+    """Revisioned Agent independent of any Environment."""
 
-    model_config = ConfigDict(extra="forbid")
-
-
-class AgentMemory(AgentModel):
-    """One memory written onto a persistent agent instance."""
-
-    memory_id: str
-    instance_id: str
-    kind: str
-    content: Any
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    source_trial_id: str | None = None
-    created_at: datetime | None = None
-
-
-class AgentSkill(AgentModel):
-    """A named skill the instance has learned or been given."""
-
-    name: str
-    description: str = ""
+    schema_version: Literal["2"] = "2"
+    name: str = Field(min_length=1)
+    revision: str = Field(default="0.1.0", min_length=1)
+    model: str = Field(min_length=1)
     instructions: str = ""
-    action_names: tuple[str, ...] = ()
-    origin: str = "user"
-    updated_at: datetime | None = None
+    routing: RoutingSpec = Field(default_factory=RoutingSpec)
+    harness: HarnessBinding | None = None
+    harness_package: HarnessPackage | None = None
+    auth_mode: Literal["environment", "api_key", "oauth", "none"] = "environment"
+    secret_names: tuple[str, ...] = ()
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _package_matches_binding(self) -> AgentDefinition:
+        if self.harness is None and self.harness_package is not None:
+            raise ValueError("harness_package requires a harness binding")
+        if (
+            self.harness is not None
+            and self.harness_package is not None
+            and HarnessBinding.from_package(self.harness_package) != self.harness
+        ):
+            raise ValueError("harness_package does not match the exact harness binding")
+        if self.auth_mode == "api_key" and not self.secret_names:
+            raise ValueError("api_key auth_mode requires a secret name")
+        if self.auth_mode == "none" and self.secret_names:
+            raise ValueError("none auth_mode cannot declare secrets")
+        return self
+
+    @property
+    def content_hash(self) -> str:
+        """Stable Agent revision digest."""
+        return content_hash(self)
+
+    @property
+    def agent_id(self) -> str:
+        """Stable Agent revision identifier."""
+        return stable_id("agt", self)
 
 
-class AgentArtifact(AgentModel):
-    """A file or structured blob stored on the instance."""
+class AgentBinding(FrozenModel):
+    """A Job participant."""
 
-    name: str
-    content_type: str = "application/octet-stream"
-    size_bytes: int = 0
-    checksum: str = ""
-    object_key: str = ""
+    agent: AgentDefinition
+
+    @property
+    def agent_id(self) -> str:
+        """Planning identity."""
+        return self.agent.agent_id
+
+    @property
+    def name(self) -> str:
+        """Display name."""
+        return self.agent.name
+
+    @property
+    def model(self) -> str:
+        """Model id."""
+        return self.agent.model
+
+    @property
+    def routing(self) -> RoutingSpec:
+        """Routing policy."""
+        return self.agent.routing
+
+    @property
+    def harness(self) -> HarnessBinding | None:
+        """Optional harness binding."""
+        return self.agent.harness
+
+    @property
+    def harness_package(self) -> HarnessPackage | None:
+        """Optional executable package."""
+        return self.agent.harness_package
+
+    @property
+    def auth_mode(self) -> str:
+        """Authentication mode."""
+        return self.agent.auth_mode
+
+    @property
+    def secret_names(self) -> tuple[str, ...]:
+        """Secret references granted to the harness."""
+        return self.agent.secret_names
+
+    @property
+    def content_hash(self) -> str:
+        """Stable binding digest."""
+        return content_hash(self)
 
 
-class AgentExperience(AgentModel):
-    """Read-only counters accumulated by running in environments."""
-
-    trial_count: int = 0
-    task_count: int = 0
-    mean_reward: float | None = None
-    total_cost_usd: float = 0.0
-    total_tokens: int = 0
-    last_trial_at: datetime | None = None
-
-
-class AgentInstance(AgentModel):
-    """A live agent instance bound to one template revision."""
-
-    id: str
-    template_id: str
-    template_revision_id: str | None = None
-    name: str
-    slug: str = ""
-    status: Literal["active", "archived"] = "active"
-    experience: AgentExperience = Field(default_factory=AgentExperience)
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+__all__ = ["AgentBinding", "AgentDefinition", "RoutingSpec"]

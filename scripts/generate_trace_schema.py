@@ -10,13 +10,13 @@ from typing import Any
 
 from plural.tracing import Trace
 
-SCHEMA_ID = "https://pluralintel.com/schemas/trace.v2.json"
+SCHEMA_ID = "https://pluralintel.com/schemas/trace.v3.json"
 SCHEMA_TITLE = "Plural Trace"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_PATHS = (
-    REPOSITORY_ROOT / "src/plural/schemas/trace.v2.json",
-    REPOSITORY_ROOT / "schemas/trace.v2.json",
-    REPOSITORY_ROOT / "docs/schemas/trace.v2.json",
+    REPOSITORY_ROOT / "src/plural/schemas/trace.v3.json",
+    REPOSITORY_ROOT / "schemas/trace.v3.json",
+    REPOSITORY_ROOT / "docs/schemas/trace.v3.json",
 )
 
 

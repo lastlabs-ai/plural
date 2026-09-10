@@ -1,3 +1,10 @@
+---
+route: /docs/concepts/harness-stamping
+title: "Harness stamping"
+order: 140
+description: "Stamping freezes what one harness revision may do on one environment revision. Implementations of vendor loops are out of scope; the mechanism and the grant matrix are not."
+audience: all
+---
 # Harness stamping
 
 Stamping freezes what one harness revision may do on one environment
@@ -22,7 +29,7 @@ harness <name> is declared but not runnable
 
 ## How a stamp is computed
 
-`resolve_harness_stamp(environment, harness)` starts from the harness
+`resolve_trial_harness_stamp(environment, agent)` starts from the Harness
 declared capabilities and only subtracts:
 
 1. `environment.harness_policy.denied_capabilities`

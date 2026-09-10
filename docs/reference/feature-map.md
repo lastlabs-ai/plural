@@ -1,3 +1,10 @@
+---
+route: /docs/reference/feature-map
+title: "SDK and CLI coverage guide"
+order: 440
+description: "Use this page to find a workflow by feature. Read tutorials in order for a first run; use the linked reference for every supported parameter. APIs and command names here describe the installed package, not proposed future convenience APIs."
+audience: all
+---
 # SDK and CLI coverage guide
 
 Use this page to find a workflow by feature. Read tutorials in order for a first
@@ -30,18 +37,13 @@ names here describe the installed package, not proposed future convenience APIs.
 
 ## Python environments and evaluation
 
-- Runnable native actions, tasks, scorer, scripted smoke test, single-model
-  rollout, model comparison, real task input:
+- Typed Environment, Task, Verifier, AgentDefinition, Benchmark, and Job graphs:
   [SDK tutorial](../tutorials/sdk-walkthrough.md).
-- `Environment`, `State`, `Observation`, `hidden`, decorated actions, setup/done,
-  `ActionResult`, snapshots, fingerprints, and reconstruction:
-  [authoring guide](../guides/write-environment.md).
-- `reset`, final `step`, `messages`, `close_episode`, stop reasons, replay,
-  `Policy` / `PluralPolicy` / `ScriptedPolicy`, synchronous tool `Runtime`:
-  [environment lifecycle](../concepts/environment.md).
-- `Benchmark`, `Report`, repeats/concurrency, policy factories, paired win rates,
-  compatibility and regression tolerance: [benchmark guide](../guides/benchmark-models.md)
-  and [benchmark concepts](../concepts/benchmark.md).
+- Environment actions, typed state/observation, Rewarders, resources, secrets,
+  and runtime placement: [authoring guide](../guides/write-environment.md).
+- Cross-Environment Task selection, attempts, bounded scheduling, verification,
+  and modes: [benchmark guide](../guides/benchmark-models.md) and
+  [benchmark concepts](../concepts/benchmark.md).
 
 ## Traces, datasets, and export
 
@@ -49,7 +51,7 @@ names here describe the installed package, not proposed future convenience APIs.
   [trace and dataset tutorial](../tutorials/traces-and-datasets.md).
 - `Trace`, `TraceContext`, `Turn`, action steps, reward events, credit,
   transitions and returns: [trace concepts](../concepts/trace.md).
-- `TaskDataset`, `Dataset` / `TraceDataset`, `TraceFilter`, hashes and manifests:
+- Trace `Dataset`, filtering, hashes, and manifests:
   [datasets](../concepts/dataset.md).
 - `JSONLSink`, `SQLiteSink`, `MultiSink`, `OTelSink`, writer lifecycle:
   [sinks](../concepts/sink.md), [capture](../guides/capture-traces.md),
@@ -68,7 +70,7 @@ names here describe the installed package, not proposed future convenience APIs.
   cancellation, resume, and reports: [Python jobs](../sdk/package-jobs.md).
 - Attempts versus retries, deterministic locks, receipts, and identity:
   [execution concepts](../concepts/execution.md).
-- Docker/Daytona, concurrency, runtime health, retries/resume/regrade/cancel:
+- Docker/Daytona, concurrency, runtime health, retries/resume/cancel:
   [job operations](../guides/jobs.md).
 - Custom harness protocols, first-party profiles, vendor recipes, ACP,
   immutable archives, OCI, and secret grants: [harness guide](../guides/harnesses.md).
@@ -77,12 +79,11 @@ names here describe the installed package, not proposed future convenience APIs.
 
 ## Plural Intel objects
 
-- List/get/create/update/delete environments, agent templates, instances, and
-  benchmarks; invoke hosted templates; snapshot records; reuse stored package
-  definitions: [object walkthrough](../guides/push-to-plural.md).
-- Exact harness revisions, environment stamps, benchmark revisions and
-  promotion, jobs/trials and result upload: [advanced hosted API](../sdk/hosted-advanced.md).
-- `env push`, `run --sync`, `job upload`, delivery and local/hosted boundaries:
+- Publish and resolve exact schema-v2 Environment, Harness, AgentDefinition,
+  Task, Verifier, and cross-Environment Benchmark revisions:
+  [advanced hosted API](../sdk/hosted-advanced.md).
+- Preserve Task-or-Benchmark Job sources, Trial/TrialExecution identity,
+  append-only events, human review state, and artifact digests:
   [package sync](../guides/studio-sync.md).
 
 ## Every CLI command group
@@ -91,28 +92,12 @@ The [generated CLI reference](cli-commands.md) includes all options, positional
 arguments, defaults, help, and shell-completion flags. Its entries are generated
 from the command tree and checked for drift.
 
-- `auth login`, `logout`, `status`, `whoami`: [setup](../getting-started/setup.md).
-- `org use/show/list`, `project use/show/list`: [CLI context](../cli/index.md).
-  The `list` commands currently report unsupported backend functionality.
-- `env init/validate/build/push`, `env action add/list/remove`,
-  `env resource add/list`, `env capabilities`, `env harness stamp/unstamp/list/capabilities`,
-  `env task add/list`:
-  [CLI tutorial](../tutorials/cli-walkthrough.md) and [sync](../guides/studio-sync.md).
-  `env build` writes a deterministic manifest artifact; it does not build a
-  runtime image or publish source code.
-- `harness init/validate/build/test/publish/add/list/inspect`:
-  [harness guide](../guides/harnesses.md).
-- `agent template init/show/validate/push`, `agent instance list/show/memory/skills/data/experience`,
-  `benchmark init/validate/show`, `job init`, and `run`:
-  [CLI tutorial](../tutorials/cli-walkthrough.md).
-- `runtime list/show/doctor [--env]`: [runtime operations](../guides/jobs.md).
-- `job list/show/resume/retry/regrade/cancel/upload`, `trial list/show`:
+- `env`, `task`, `verifier`, `agent`, `harness`, and `benchmark`
+  `init/validate/show`: [CLI tutorial](../tutorials/cli-walkthrough.md).
+- `job init/list/show/watch`, `trial list/watch`, and `review list/submit`:
   [job operations](../guides/jobs.md).
-
-There are no general hosted CLI list/get/update/pull commands for environments,
-agents, and benchmarks. `agent list` finds local `agent.yaml` files at the given
-root and one directory level below; it does not find every arbitrarily named
-YAML file. Use hosted SDK helpers for Plural Intel reads and metadata updates.
+- `run <task|benchmark|job> --mode <eval|train>` and `schemas`:
+  [CLI overview](../cli/index.md).
 
 ## Reference and operations
 

@@ -1,3 +1,10 @@
+---
+route: /docs/guides/routing-examples
+title: "Routing examples walkthrough"
+order: 330
+description: "Cookbook-style scripts under examples/routing/."
+audience: all
+---
 # Routing examples walkthrough
 
 Cookbook-style scripts under [`examples/routing/`](https://github.com/lastlabs-ai/plural/tree/main/examples/routing).

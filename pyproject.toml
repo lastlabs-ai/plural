@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "plural"
 dynamic = ["version"]
-description = "Unified LLM routing with first-class traces, environments, and benchmarks."
+description = "Build environments, evaluate agents, compare models, and capture traces."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"

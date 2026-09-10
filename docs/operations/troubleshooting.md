@@ -1,3 +1,10 @@
+---
+route: /docs/operations/troubleshooting
+title: "Troubleshooting"
+order: 420
+description: "plural is not found. Activate the virtual environment where you installed Plural, or use uv run plural. Check python -m pip show plural in the same environment. See setup."
+audience: all
+---
 # Troubleshooting
 
 ## Setup and hosted access
@@ -33,16 +40,12 @@ restore complete package definitions and matching sources when supplied. See
 files. Use `client.agents.list()` for hosted agents. `org list` and `project list`
 currently report unsupported backend functionality; use known project IDs.
 
-**A hosted agent exists but invocation fails.** Check project permissions and
-whether the deployment implements/configures its agent chat endpoint. Creating
-metadata does not deploy your local Python tools or start a hosted sandbox.
-
 ## SDK results and traces
 
-**Score is missing or zero.** No scorer/verifier means no quality score. Zero
-means the configured check did not award credit, not necessarily an execution
-failure. Do not use an exact-answer scorer on unlabeled production work without
-changing how that case is evaluated.
+**Score is missing or zero.** No Verifier means no quality score. Zero means
+the configured check did not award credit, not necessarily an execution
+failure. Do not apply exact-answer verification to unlabeled production work
+without changing how that case is evaluated.
 
 **Trace content is blank.** Content capture is off by default. For approved
 synthetic/debug data, set `capture_content=True`. Close/flush the client before
@@ -52,10 +55,9 @@ reading newly queued traces. A sampled-out trace will not be in the sink.
 persistent label updates by ID; flush pending trace writes before attaching a
 label to an already-written record.
 
-**Dataset load fails or benchmark reports a stale hash.** Keep the JSONL file
-with its manifest. After intentionally changing tasks, save a new snapshot;
-do not manually edit the manifest hash. `Benchmark.run(dataset=...)` expects a
-`TaskDataset`, not a completed trace `Dataset`.
+**A Trace dataset hash is stale.** Keep the JSONL file with its manifest and
+save a new snapshot after intentional changes. Trace datasets are analysis
+outputs, not schema-v2 Task or Benchmark Job sources.
 
 **A custom environment cannot be copied for comparison.** Supply
 `environment_factory=` or implement `spawn()` when your environment constructor
@@ -68,28 +70,29 @@ Start with package validation, a dry run, and provider health:
 ```bash
 plural env validate environment
 plural harness validate harness
-plural benchmark validate benchmark.yaml --environment environment
+plural verifier validate verifier.yaml
+plural task validate task.yaml
+plural benchmark validate benchmark.yaml
 plural run job.yaml --dry-run
-plural runtime doctor docker
 ```
 
 Common failures:
 
-- **Environment identity is stale** — tasks, instructions, policy, source, or
-  another Environment field changed. Recreate the Benchmark and Agent pins,
-  then recreate the Job file.
+- **Revision identity is stale** — the Environment, Task, Verifier, Agent, or
+  Harness changed. Recreate dependent revision files and then the Job source.
 - **Harness source lock mismatch** — package files changed after binding.
   Rebuild/publish, add the new digest to the Environment, and recreate Agents.
 - **`lock_incompatible`** — the same job ID/store contains a different complete
   config or lock. Do not edit stored files; use the original config or create a
   newly identified Job.
-- **Local execution refused** — pass `--unsafe-local` only for trusted
-  development code or use Docker/Daytona.
+- **Local execution refused** — set provider `local`, `network: full`, and
+  `allow_unsafe_local: true` on a trusted Environment, or use an isolated
+  provider.
 - **Missing declared harness secrets** — export every Agent-granted name. Do
   not add undeclared names to the Agent; add them to the package manifest and
   regenerate the binding.
-- **Runtime unavailable/capability error** — run `runtime doctor`; install the
-  optional dependency, start Docker, configure Daytona, or remove a requirement
+- **Runtime unavailable/capability error** — install the optional dependency,
+  start Docker, configure Daytona, or remove a requirement
   only if the security policy truly permits it.
 - **Docker build/image failure** — verify the Environment Dockerfile works for
   UID 65532 and the harness command exists in/uploaded to the image. Daytona
@@ -104,14 +107,10 @@ Common failures:
   non-finite values/no evidence, timed out, or exited nonzero.
 - **Resume does not rerun success** — expected behavior. Successful Trial IDs
   are reused; retries target non-successful Trials.
-- **Regrade refused** — every Trial needs a successful source receipt and the
-  Environment needs a verifier.
-- **Cancellation appears delayed** — CLI `job cancel` writes a durable marker
-  for pending launches but does not IPC into another active CLI. In-process
-  callers should invoke `await job.cancel()`.
-- **Hosted sync failed** — local results remain under `.plural/jobs`. Confirm
-  authentication and API compatibility, then replay with
-  `plural job upload <job_id> --store <path>`.
+- **Regrade refused** — every Trial needs a successful source receipt and
+  pinned Verifier revisions.
+- **Cancellation appears delayed** — in-process callers should invoke
+  `await job.cancel()`; cancellation is not a CLI command.
 - **Auth fails or expires** — confirm `--api-url`, use `--no-browser` when
   appropriate, and verify the service implements the documented device
   endpoints. Hosted publication/sync can refresh stored device credentials, but there is
@@ -120,5 +119,5 @@ Common failures:
 Process exit `1` means a run returned at least one non-success Trial. Exit `2`
 means usage/validation/configuration or another handled command error. Inspect
 the JSON `error_code`, persisted attempt logs, receipt effective policy, and
-provider doctor output; avoid posting unredacted artifacts or config directories
+provider diagnostics; avoid posting unredacted artifacts or config directories
 in bug reports.

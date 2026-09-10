@@ -1,6 +1,13 @@
+---
+route: /docs/reference/manifests
+title: "Manifest field reference"
+order: 450
+description: "All schema-v2 models are frozen, reject unknown fields, and use schemaversion: \"2\" where present. Generated JSON Schemas are the exact validation authority."
+audience: all
+---
 # Manifest field reference
 
-All v1 models are frozen, reject unknown fields, and use `schema_version: "1"`
+All schema-v2 models are frozen, reject unknown fields, and use `schema_version: "2"`
 where present. Generated JSON Schemas are the exact validation authority.
 
 ## `PackageSource`
@@ -13,7 +20,7 @@ where present. Generated JSON Schemas are the exact validation authority.
 
 ## `HarnessManifest` and `HarnessPackage`
 
-- `schema_version`, `name`, `version`, `description`.
+- `schema_version`, `name`, `revision`, `description`.
 - `protocol`: `plural-harness-v1` or `acp`.
 - `protocol_adapter`: must be `acp-client-v1` exactly when protocol is ACP.
 - `entrypoint`: optional metadata; execution uses `command`.
@@ -35,98 +42,87 @@ where present. Generated JSON Schemas are the exact validation authority.
 
 ## `EnvironmentManifest`
 
-- `schema_version`, `name`, `revision`, `description`.
-- `instructions`: authoritative harness instructions.
-- `context`: arbitrary public context.
-- `actions`: unique `NativeAction` values: `name`, `description`, `kind`,
-  argv `command` when `kind=command`, `parameters`, `observation_schema`,
-  `mutates_state`, `timeout_seconds`.
-- `observation_schema`, `state_schema`.
-- `guardrails`, `resources`.
-- `runtime`: `EnvironmentRuntime` — image/build, network, resources, targets,
-  persistence, compose, `allow_unsafe_local`.
-- `harness_policy`: `allow_all` or `allowlist`, denied/allowed capabilities.
-- `limits`: `max_turns` (1–128), positive `max_seconds`, optional positive
-  `max_cost_usd`.
-- `tasks`: unique `TaskDefinition` values with `task_id`, public `input`,
-  evaluator-only `expected`/`verifier_input`, and public `metadata`.
-- `verifier`: optional `VerifierManifest`.
-- `source`: optional Environment package source. Execution currently stages
-  local sources only.
+- `schema_version`, `name`, `revision`, `description`, `overview`, `readme`,
+  and `metadata`.
+- unique native `actions`, typed `observation_schema`, and hidden
+  `state_schema`.
+- train-only `rewarders`, plus `guardrails`, `resources`, and named `secrets`.
+- `runtime`: the Environment-owned provider, placement, image/build,
+  network, resources, targets, persistence, compose, and local opt-in.
+- `harness_policy` and execution `limits`.
+- optional `source`.
 
-`VerifierManifest` has argv `command`, optional image, positive timeout,
-safe `required_artifacts`, safe `result_path`, and `evidence_required`.
-Verifier JSON accepts finite optional `reward`, named finite `scores`, and
-`evidence` strings.
+Tasks, Verifiers, and Job mode are intentionally absent.
+
+## `VerifierDefinition` and `TaskDefinition`
+
+A Verifier is a discriminated `deterministic`, `agent`, or `human` revision.
+Deterministic and agent Verifiers own their runtime and network policy. Human
+Verifiers own a rubric and instructions and yield `awaiting_review` until a
+review is submitted.
+
+A Task owns `task_id`, `revision`, `instructions`, `info`, and `metadata`. It
+embeds one exact Environment revision and one or more `WeightedVerifier`
+revisions. Weighted successful rewards aggregate in a stable declared order.
 
 ## `BenchmarkDefinition`
 
-- `schema_version`, `name`, `description`, `primary_metric`.
-- `environment`: exact `EnvironmentIdentity` (`name`, `revision`, `digest`).
-- `task_ids`: non-empty, unique, ordered selection owned by that Environment.
+A Benchmark owns `name`, `revision`, description, primary metric, metadata, and
+an ordered unique list of complete Task revisions. Those Tasks may pin different
+Environments.
 
-`BenchmarkSpec` is an alias. This v1 model is distinct from the compatible
-legacy `plural.Benchmark` runner.
+## `AgentDefinition`
 
-## `AgentTemplate`
+- `schema_version`, `name`, `revision`, `model`, `instructions`, and metadata.
+- `routing`: provider, ordered fallbacks, temperature, and maximum tokens.
+- optional exact Harness binding/package, authentication mode, and secret grants.
 
-- `schema_version`, `name`, `model`.
-- `routing`: optional `provider`, ordered `fallback_models`, `temperature`, and
-  positive `max_tokens`.
-- `environment`: exact Environment identity.
-- `harness`: optional binding. `None` is the native path.
-- `stamp`: required when `harness` is set.
-- `harness_package`: optional executable package; must match the binding.
-- `secret_names`: granted subset of package-declared names.
-
-Derived `content_hash` and `template_id` include the complete immutable config.
+An Agent never owns an Environment. Harness compatibility is resolved and
+stamped against the Task's Environment for each Trial.
 
 ## `JobFile` and `JobSpec`
 
-Human `job.yaml` uses `JobFile`: `schema_version`, paths `environment`,
-`benchmark`, and non-empty `agents`; positive `n_attempts`, `concurrency`, and
-`per_agent_concurrency`; plus `runtime` and `retry`. Paths resolve relative to
-the Job file.
+`JobFile` has a discriminated `source_kind` (`task` or `benchmark`), one source
+path, Agent paths, `mode`, `attempts`, global concurrency,
+`per_runtime_concurrency`, and priority. Paths resolve relative to the Job file.
 
-Resolved `JobSpec` embeds complete `environment`, `benchmark`, and `agents`
-instead of paths, then carries the same scheduling/runtime/retry fields. It
-validates exact Environment identity, task ownership, Agent identities, allowed
-Harness bindings, and unique Agents.
+Resolved `JobSpec` embeds a `TaskJobSource` or `BenchmarkJobSource` and Agent
+bindings. It owns scheduling and retry policy only; each selected Task's
+Environment owns its runtime.
 
 `RetryPolicy` fields are non-negative `max_retries` and initial/max backoff,
 multiplier at least 1, and `retryable_codes`. Defaults retry rate limits,
 provider unavailability, timeout, and runtime unavailability.
 
-`RuntimeSpec` fields:
-
-- `provider`; requested `capabilities`;
-- mutually exclusive `image`, `snapshot`, `declarative_image`;
-- Docker `build_context` and optional `dockerfile`;
-- `resources`: optional positive `cpu`, `memory_mb`, `pids`, `disk_mb`;
-- `network`: `none`, `restricted`, or `full`; an allowlist is valid only for
-  `restricted`;
-- positive `timeout_seconds`, `read_only_root`, and `unsafe_local`.
+`EnvironmentRuntime` fields include provider and placement, mutually exclusive
+image/snapshot/declarative image, Docker build context, resources, network and
+allowlist, timeout, target set, persistence, compose, read-only root, and
+unsafe-local opt-in.
 
 `DeclarativeImage` has `base`, `pip_packages`, process `environment`, and
 optional `workdir`.
 
 ## Planning, Trials, and receipts
 
-`TrialSpec` contains `job_id`, `agent_id`, `agent_name`, `task_id`, one-based
-`attempt`, exact Environment/Harness bindings, and Runtime. `trial_id` is
-derived independently of retries.
+`TrialSpec` contains Job, Agent, Task, one-based attempt, exact
+Environment/Harness bindings, and the Environment's runtime provider.
+`trial_id` is derived independently of retries.
 
-`JobLock` records job/spec IDs; Environment, Benchmark, task-set, Agent and
-Harness hashes; optional Environment source digest; execution limits;
-instructions/commands/policy hashes; and Runtime.
+Each retry appends a `TrialExecution` with its own execution index. Jobs and
+executions append monotonic `ProgressEvent` records. Human results use
+`awaiting_review`.
+
+`JobLock` records job/spec IDs and the complete revision graph needed to replay
+the plan.
 
 `TrialReceipt` records Trial/Job/retry/attempt identity; Environment, Benchmark,
 Agent, Harness, Runtime, image, task, trace, artifact and verifier hashes;
-effective capabilities/policy; source-receipt link for regrade; UTC timestamps;
+effective capabilities/policy; UTC timestamps;
 timings; Environment source/instruction/command/limit/policy provenance; and
 `trust`, currently only `self_reported`.
 
-`TrialResult` is `succeeded`, `failed`, or `cancelled`, with receipt, optional
-reward/scores/trace, and stable error details. Failure requires `error_code`;
-success forbids one. `JobResult` contains `job_id`, `plan_hash`, and ordered
-Trial results.
+`TrialResult` is `succeeded`, `failed`, `cancelled`, or `awaiting_review`, with
+receipt, weighted Verifier results, optional aggregate reward/scores/trace, and
+stable error details. In train mode, exact TITO records are validated and stored
+as hashed artifacts; eval mode disables TITO and Rewarders while retaining final
+verification.

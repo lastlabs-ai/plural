@@ -2,7 +2,7 @@
   "$defs": {
     "FileDeclaration": {
       "additionalProperties": false,
-      "description": "One exact file a harness or verifier may emit or consume.",
+      "description": "A file emitted or consumed by a package.",
       "properties": {
         "media_type": {
           "default": "application/octet-stream",
@@ -27,7 +27,7 @@
       "type": "object"
     },
     "HarnessCapability": {
-      "description": "Actions a stamped harness may request.",
+      "description": "A capability requested by an agent harness.",
       "enum": [
         "shell",
         "file_read",
@@ -45,7 +45,7 @@
     },
     "HarnessManifest": {
       "additionalProperties": false,
-      "description": "Public manifest for a single-agent harness package.\n\nA ``declared`` harness can be stamped and inspected but cannot execute a\ntrial. A ``runnable`` harness must provide a command.",
+      "description": "Versioned executable harness contract.",
       "properties": {
         "artifacts": {
           "default": [],
@@ -92,18 +92,6 @@
           "default": "",
           "title": "Description",
           "type": "string"
-        },
-        "entrypoint": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Entrypoint"
         },
         "environment_names": {
           "default": [],
@@ -180,9 +168,15 @@
           "title": "Requirements",
           "type": "array"
         },
+        "revision": {
+          "default": "0.1.0",
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        },
         "schema_version": {
-          "const": "1",
-          "default": "1",
+          "const": "2",
+          "default": "2",
           "title": "Schema Version",
           "type": "string"
         },
@@ -204,6 +198,23 @@
           "title": "Supported Models",
           "type": "array"
         },
+        "supports_tito": {
+          "default": false,
+          "title": "Supports Tito",
+          "type": "boolean"
+        },
+        "tito_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tito Path"
+        },
         "trajectory_path": {
           "anyOf": [
             {
@@ -215,12 +226,6 @@
           ],
           "default": null,
           "title": "Trajectory Path"
-        },
-        "version": {
-          "default": "0.1.0",
-          "minLength": 1,
-          "title": "Version",
-          "type": "string"
         }
       },
       "required": [
@@ -231,7 +236,7 @@
     },
     "PackageSource": {
       "additionalProperties": false,
-      "description": "Immutable source for a harness package.\n\nPublished and remote sources require a digest. An unsigned local source is\naccepted only when explicitly marked unsafe. ``trusted`` is retained only\nfor manifest migration and never bypasses digest or unsafe checks.",
+      "description": "Immutable package source.",
       "properties": {
         "digest": {
           "anyOf": [

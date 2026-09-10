@@ -74,7 +74,10 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
         raise ValueError(f"{profile} requires at least one environment native action")
     prompt = _prompt(request, environment)
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": str(environment.get("instructions") or "")},
+        {
+            "role": "system",
+            "content": str(agent.get("instructions") or "").strip(),
+        },
         {"role": "user", "content": prompt},
     ]
     tools = [
@@ -259,12 +262,10 @@ def _prompt(request: dict[str, Any], environment: dict[str, Any]) -> str:
     task = _mapping(request.get("task"), "task")
     return json.dumps(
         {
-            "context": environment.get("context"),
-            "task": {
-                "task_id": task.get("task_id"),
-                "input": task.get("input"),
-                "metadata": task.get("metadata", {}),
-            },
+            "instructions": task.get("instructions"),
+            "task_info": task.get("info"),
+            "metadata": task.get("metadata", {}),
+            "observation": environment.get("observation"),
         },
         sort_keys=True,
     )

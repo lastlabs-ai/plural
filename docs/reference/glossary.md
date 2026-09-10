@@ -1,19 +1,28 @@
+---
+route: /docs/reference/glossary
+title: "Glossary"
+order: 490
+description: "Definitions for the canonical Plural SDK, execution, runtime, tracing, and hosted revision terminology."
+audience: all
+---
 # Glossary
 
 | Term | Meaning |
 | --- | --- |
-| **Environment** | Primary object: instructions, native actions, schemas, guardrails, resources, runtime. |
+| **Environment** | Revisioned actions, typed hidden state/observation, Rewarders, resources, secrets, and runtime placement. |
 | **Native action** | Environment-owned action that returns an observation. |
 | **Harness** | Prebuilt loop that can be stamped onto an environment. |
-| **Stamp** | Frozen granted/denied capability set for one harness on one environment revision. |
+| **Stamp** | Per-Trial compatibility and capability result for a Harness against a Task's Environment. |
 | **Model** | The LLM. |
-| **Agent template** | Immutable Model + Environment, optionally + stamped Harness. |
-| **Agent instance** | Template plus hosted memory, skills, data, and experience. |
-| **Task** | One unit of work on an environment. |
-| **Benchmark** | Ordered grouping of tasks. |
-| **Job** | Group of trials. |
-| **Trial / episode** | One agent run on one task. |
-| **Trace** | Record of turns, reasoning, actions, and observations. Schema 2.0.0. |
+| **AgentDefinition** | Revisioned model, instructions, routing, and optional Harness; never Environment-bound. |
+| **Task** | Revisioned instructions/info that pin one Environment and weighted Verifier revisions. |
+| **Verifier** | Independent deterministic, agent, or human final evaluator. |
+| **Benchmark** | Ordered Task revision selection that may span Environments. |
+| **Job** | Task-or-Benchmark source plus Agents, mode, attempts, scheduling, and retry policy. |
+| **Trial / episode** | One Agent × Task × independent-attempt slot. |
+| **TrialExecution** | One execution or retry under a Trial identity. |
+| **ProgressEvent** | Durable append-only Job/TrialExecution state transition. |
+| **Trace** | Semantic observations/actions plus pinned revisions, Verifier results, and artifact references. Schema 3.0.0. |
 | **Turn** | One model step inside a trace. |
 | **ActionStep** | One action invocation plus the observation it returned. |
 | **EffectivePolicy** | Five-layer intersection used at preflight. |

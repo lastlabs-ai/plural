@@ -1,7 +1,7 @@
 manifest:
-  schema_version: "1"
+  schema_version: "2"
   name: example-harness
-  version: 0.1.0
+  revision: 0.1.0
   description: Offline protocol example.
   protocol: plural-harness-v1
   implementation: runnable
@@ -17,4 +17,4 @@ manifest:
 source:
   kind: local
   uri: .
-  trusted: true
+  unsafe_local: true

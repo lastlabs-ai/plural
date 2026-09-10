@@ -95,8 +95,10 @@ def test_archive_is_deterministic_verified_and_cached(tmp_path: Path) -> None:
     (package / "harness.yaml").write_text(
         """
 manifest:
-  schema_version: "1"
+  schema_version: "2"
   name: archived
+  revision: "0.1.0"
+  implementation: runnable
   command: [python, harness.py]
 source:
   kind: local

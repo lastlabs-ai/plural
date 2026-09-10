@@ -1,3 +1,10 @@
+---
+route: /docs/concepts/sink
+title: "Sink"
+order: 230
+description: "Scenario: You want traces on disk for local debugging, in SQLite for queries, and optionally exported to your OpenTelemetry collector — without changing call sites."
+audience: all
+---
 # Sink
 
 **Scenario:** You want traces on disk for local debugging, in SQLite for queries, and optionally exported to your OpenTelemetry collector — without changing call sites.

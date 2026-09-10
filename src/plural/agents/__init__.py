@@ -1,17 +1,5 @@
-"""Hosted agent templates and persistent agent instances."""
+"""First-class schema-v2 Agent contracts."""
 
-from plural.agents.models import (
-    AgentArtifact,
-    AgentExperience,
-    AgentInstance,
-    AgentMemory,
-    AgentSkill,
-)
+from plural.agents.models import AgentBinding, AgentDefinition, RoutingSpec
 
-__all__ = [
-    "AgentArtifact",
-    "AgentExperience",
-    "AgentInstance",
-    "AgentMemory",
-    "AgentSkill",
-]
+__all__ = ["AgentBinding", "AgentDefinition", "RoutingSpec"]

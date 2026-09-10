@@ -6,11 +6,11 @@ from typing import Any
 
 from plural import (
     AgentBinding,
-    AgentTemplate,
-    Benchmark,
+    AgentDefinition,
     BenchmarkDefinition,
+    BenchmarkJobSource,
     Client,
-    Dataset,
+    DeterministicVerifier,
     Environment,
     EnvironmentManifest,
     ErrorCode,
@@ -28,17 +28,16 @@ from plural import (
     NetworkMode,
     PackageSource,
     RetryPolicy,
-    RuntimeSpec,
     SandboxProvider,
-    TaskData,
     TaskDefinition,
     Trace,
+    TraceDataset,
     Trial,
     TrialReceipt,
     TrialResult,
     TrialSpec,
     Usage,
-    VerifierManifest,
+    WeightedVerifier,
 )
 
 
@@ -48,13 +47,11 @@ def main() -> None:
     usage: Usage = Usage.from_counts(1, 1)
     msg: Message = Message(role="user", content="hi")
     trace: Trace = Trace(trace_id="t")
-    env: Environment[Any, Any] = Environment(name="x", version="0.1.0")
-    task: TaskData = TaskData(task_id="1", input="hi")
-    ds: Dataset = Dataset.from_traces("d", [trace])
+    env: Environment[Any, Any] = Environment(name="x", revision="0.1.0")
+    ds: TraceDataset = TraceDataset.from_traces("d", [trace])
     assert usage.total_tokens == 2
     assert msg.role == "user"
     assert env.name == "x"
-    assert task.task_id == "1"
     assert len(ds) == 1
     package = HarnessPackage(
         manifest=HarnessManifest(
@@ -66,33 +63,34 @@ def main() -> None:
     )
     binding = HarnessBinding.from_package(package)
     _ = binding
-    manifest = EnvironmentManifest(
-        name="x",
-        tasks=(TaskDefinition(task_id="1", input="hi"),),
+    manifest = EnvironmentManifest(name="x")
+    verifier = DeterministicVerifier(name="v", command=("python", "-c", "pass"))
+    task_definition = TaskDefinition(
+        task_id="1",
+        instructions="Say hi.",
+        environment=manifest,
+        verifiers=(WeightedVerifier(verifier=verifier),),
     )
     definition = BenchmarkDefinition(
         name="b",
-        environment=manifest.identity,
-        task_ids=("1",),
+        tasks=(task_definition,),
     )
     agent = AgentBinding(
-        template=AgentTemplate(
+        agent=AgentDefinition(
             name="a",
             model="openai/model",
-            environment=manifest.identity,
         )
     )
     plan: JobPlan = JobSpec(
-        environment=manifest,
-        benchmark=definition,
+        source=BenchmarkJobSource(benchmark=definition),
         agents=(agent,),
     ).plan()
     assert plan.trial_count == 1
     trial: TrialSpec = plan.trials[0]
     lock: JobLock = plan.lock
-    runtime: RuntimeSpec = trial.runtime
+    runtime_provider: str = trial.runtime_provider
     retry: RetryPolicy = RetryPolicy()
-    verifier: VerifierManifest = VerifierManifest(command=("python", "-c", "pass"))
+    verifier_definition: DeterministicVerifier = verifier
     _ = (
         Job,
         JobResult,
@@ -104,12 +102,11 @@ def main() -> None:
         TrialResult,
         ErrorCode,
         lock,
-        runtime,
+        runtime_provider,
         retry,
-        verifier,
+        verifier_definition,
     )
     _ = Client
-    _ = Benchmark
 
 
 if __name__ == "__main__":

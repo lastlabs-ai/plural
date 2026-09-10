@@ -11,12 +11,19 @@ from pydantic import BaseModel
 from plural.cli.config import CLIConfig, ResolvedContext
 from plural.cli.scaffold import JobFile
 from plural.domain import (
-    AgentTemplate,
+    AgentDefinition,
+    AgentVerifier,
     BenchmarkDefinition,
+    DeterministicVerifier,
     EnvironmentManifest,
     HarnessManifest,
     HarnessPackage,
+    HumanVerifier,
     JobSpec,
+    ProgressEvent,
+    TaskDefinition,
+    TITORecord,
+    TrialExecution,
     TrialReceipt,
     TrialSpec,
 )
@@ -25,14 +32,21 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "src" / "plural" / "schemas" / "packages"
 MODELS: tuple[type[BaseModel], ...] = (
     EnvironmentManifest,
+    TaskDefinition,
+    DeterministicVerifier,
+    AgentVerifier,
+    HumanVerifier,
     HarnessManifest,
     HarnessPackage,
-    AgentTemplate,
+    AgentDefinition,
     BenchmarkDefinition,
     JobFile,
     JobSpec,
     TrialSpec,
+    TrialExecution,
     TrialReceipt,
+    ProgressEvent,
+    TITORecord,
     CLIConfig,
     ResolvedContext,
 )
@@ -58,12 +72,14 @@ def main() -> int:
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     expected = rendered_schemas()
+    extras = set(OUTPUT.glob("*.schema.json")) - set(expected) if OUTPUT.exists() else set()
     if args.check:
         drift = [
             path.relative_to(ROOT)
             for path, content in expected.items()
             if not path.exists() or path.read_text(encoding="utf-8") != content
         ]
+        drift.extend(path.relative_to(ROOT) for path in sorted(extras))
         if drift:
             print("Package schema drift:")
             for path in drift:
@@ -72,6 +88,8 @@ def main() -> int:
         print(f"Package schemas are current ({len(expected)} files).")
         return 0
     OUTPUT.mkdir(parents=True, exist_ok=True)
+    for path in extras:
+        path.unlink()
     for path, content in expected.items():
         path.write_text(content, encoding="utf-8")
     print(f"Wrote {len(expected)} package schemas to {OUTPUT.relative_to(ROOT)}.")

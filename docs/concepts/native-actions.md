@@ -1,3 +1,10 @@
+---
+route: /docs/concepts/native-actions
+title: "Native actions"
+order: 130
+description: "A native action is owned by the environment. It acts in the environment and returns an observation from the environment. Only the environment declares them."
+audience: all
+---
 # Native actions
 
 A native action is owned by the environment. It acts in the environment and
@@ -34,13 +41,13 @@ description, `kind` (`command` or `python`), argv, JSON parameters,
 observation schema, `mutates_state`, and timeout.
 
 ```bash
-plural env action add lookup_order --description "Look up an order" --command python --command lookup.py
-plural env action list
+plural env validate environment
+plural env show environment
 ```
 
 ## Native versus stamped execution
 
-On the **native path** (`AgentTemplate.harness is None`) those actions are
+On the **native path** (`AgentDefinition.harness is None`) those actions are
 converted to model tool definitions and executed by `native.actions.v1`.
 
 On the **stamped path** native actions are omitted from

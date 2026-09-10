@@ -26,6 +26,8 @@ class HarnessRunRequest(ProtocolModel):
     task: dict[str, Any]
     agent: dict[str, Any]
     environment: dict[str, Any]
+    mode: Literal["eval", "train"] = "eval"
+    capture_tito: bool = False
     workspace: str = "/workspace"
     granted_capabilities: tuple[str, ...] = ()
     denied_capabilities: tuple[str, ...] = ()
@@ -43,8 +45,6 @@ class HarnessEvent(ProtocolModel):
         "result",
         "error",
         "capability",
-        "memory",
-        "skill",
     ]
     message: str | None = None
     path: str | None = None

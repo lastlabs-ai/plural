@@ -15,5 +15,5 @@ with tempfile.TemporaryDirectory(prefix="plural-local-job-") as temporary:
     result = asyncio.run(Job(spec, store=JobStore(Path(temporary))).run())
     assert len(result.trials) == 2
     assert all(trial.status == "succeeded" for trial in result.trials)
-    assert all(trial.reward is None for trial in result.trials)
-    print(f"{result.job_id}: {len(result.trials)} successful offline trials")
+    assert all(trial.reward == 1.0 for trial in result.trials)
+    print(f"{result.job_id}: {len(result.trials)} verified offline trials")

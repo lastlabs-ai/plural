@@ -205,7 +205,7 @@ class Outcome(BaseModel):
     """Labeled outcome attached to a trace.
 
     Attributes:
-        scores: Named scorer outputs.
+        scores: Named Verifier outputs.
         reward: Scalar reward used for RL / ranking.
         labels: Discrete labels (e.g. intent, success/fail).
         feedback: Free-form human or automated feedback.
@@ -215,6 +215,27 @@ class Outcome(BaseModel):
     reward: float | None = None
     labels: dict[str, Any] = Field(default_factory=dict)
     feedback: str | None = None
+
+
+class TraceArtifactReference(BaseModel):
+    """Hashed external artifact referenced by a semantic Trace."""
+
+    name: str
+    digest: str
+    media_type: str
+    size_bytes: int = Field(ge=0)
+
+
+class TraceVerifierResult(BaseModel):
+    """Final Verifier or pending human-review state."""
+
+    name: str
+    digest: str
+    kind: Literal["deterministic", "agent", "human"]
+    status: Literal["succeeded", "failed", "awaiting_review"]
+    reward: float | None = None
+    scores: dict[str, float] = Field(default_factory=dict)
+    feedback: str = ""
 
 
 class Trace(BaseModel):
@@ -227,12 +248,12 @@ class Trace(BaseModel):
         trace_id: Opaque unique id.
         environment: Environment name when produced by a rollout.
         environment_version: Environment version string.
-        environment_fingerprint: Hash of tools, instructions, and scorers.
-        task_id: Task id within an environment.
+        environment_fingerprint: Hash of the Environment revision.
+        task_id: Task identity for this Trial.
         model: Policy / model id used for this episode.
-        initial_state: Environment snapshot at reset.
+        initial_state: Explicitly safe Environment snapshot at reset.
         steps: Ordered steps (decisions, LLM calls, tool calls, events).
-        final_state: Environment snapshot at episode close.
+        final_state: Explicitly safe Environment snapshot at episode close.
         outcome: Optional labeled outcome. ``outcome.reward`` is the return.
         metrics: Episode aggregates (turns, cost, latency, tool counts).
         terminated: Natural end (``env.done()``).
@@ -245,7 +266,7 @@ class Trace(BaseModel):
     Examples:
         >>> t = Trace(trace_id="t1", tags={"env": "prod"})
         >>> t.schema_version
-        '2.0.0'
+        '3.0.0'
     """
 
     trace_id: str = Field(default_factory=new_trace_id)
@@ -263,14 +284,21 @@ class Trace(BaseModel):
     granted_capabilities: tuple[str, ...] = ()
     denied_capabilities: tuple[str, ...] = ()
     capability_denials: tuple[CapabilityDenial, ...] = ()
-    agent_template_id: str | None = None
-    agent_instance_id: str | None = None
+    task_revision_digest: str | None = None
+    environment_revision_digest: str | None = None
+    verifier_revision_digests: tuple[str, ...] = ()
+    agent_revision_digest: str | None = None
+    harness_revision_digest: str | None = None
     job_id: str | None = None
     trial_id: str | None = None
+    job_mode: Literal["eval", "train"] | None = None
     initial_state: dict[str, Any] | None = None
     steps: list[Step] = Field(default_factory=list)
     final_state: dict[str, Any] | None = None
     outcome: Outcome | None = None
+    verifier_results: list[TraceVerifierResult] = Field(default_factory=list)
+    artifacts: list[TraceArtifactReference] = Field(default_factory=list)
+    tito_artifact: TraceArtifactReference | None = None
     metrics: dict[str, Any] = Field(default_factory=dict)
     terminated: bool | None = None
     truncated: bool | None = None
@@ -278,7 +306,7 @@ class Trace(BaseModel):
     tags: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: Literal["2.0.0"] = "2.0.0"
+    schema_version: Literal["3.0.0"] = "3.0.0"
 
     def add_llm(
         self,
@@ -589,7 +617,7 @@ class Trace(BaseModel):
         """Attach or update the outcome.
 
         Args:
-            scores: Named scorer outputs.
+            scores: Named Verifier outputs.
             reward: Scalar reward.
             labels: Discrete labels.
             feedback: Free-form feedback.

@@ -1,16 +1,19 @@
-"""Hosted studio resources: environments, agents, benchmarks, and traces.
+"""Canonical hosted schema-v2 parent, revision, Job, event, and review APIs."""
 
-Account API keys must pass ``project`` on :class:`~plural.client.Client`.
-Project API keys already know the project.
-"""
+# Public method names map directly to HTTP operations; class-level API
+# documentation carries the contract.
+# ruff: noqa: D101, D102, DOC201
 
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Iterator, Sequence
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+from urllib.parse import quote
 
 import httpx
+from pydantic import BaseModel
 
 from plural.errors import (
     AuthenticationError,
@@ -20,1275 +23,496 @@ from plural.errors import (
     NotFoundError,
     PluralError,
 )
-from plural.types import ChatResponse, Choice, Message
+from plural.foundation import (
+    AgentDefinition,
+    BenchmarkDefinition,
+    DeterministicVerifier,
+    EnvironmentManifest,
+    HarnessPackage,
+    HumanVerifier,
+    JobSpec,
+    TaskDefinition,
+)
+from plural.tracing.schema import Trace
 
 if TYPE_CHECKING:
     from plural.client import Client
-    from plural.environments.env import Environment
+    from plural.foundation import VerifierDefinition
 
 JsonObject = dict[str, Any]
-JsonList = list[dict[str, Any]]
+JsonList = list[JsonObject]
+T = TypeVar("T", bound=BaseModel)
 
 
 def slugify(name: str, *, fallback: str = "item") -> str:
-    """Turn a display name into the hosted slug.
-
-    Args:
-        name: Human-readable name.
-        fallback: Used when the name has no slug characters.
-
-    Returns:
-        A lowercase hyphenated slug.
-    """
-    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
-    return slug[:80] or fallback
+    """Return a project-safe resource slug."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:80] or fallback
 
 
 def studio_base_url(gateway_base: str) -> str:
-    """Map a gateway ``/v1`` URL to the studio ``/api/v1`` prefix.
-
-    Args:
-        gateway_base: Hosted gateway base, usually ending in ``/v1``.
-
-    Returns:
-        Studio API root such as ``https://host/api/v1``.
-    """
+    """Map a model gateway URL to the hosted API root."""
     root = gateway_base.rstrip("/")
     if root.endswith("/v1"):
-        root = root[: -len("/v1")]
+        root = root[:-3]
     return f"{root.rstrip('/')}/api/v1"
 
 
 def _raise_http(response: httpx.Response) -> None:
-    detail = ""
     try:
-        payload = response.json()
-        if isinstance(payload, dict):
-            detail = str(payload.get("detail") or payload.get("message") or "")
+        body = response.json()
+        detail = str(body.get("detail") or body.get("message") or "")
     except Exception:
         detail = response.text.strip()
     message = detail or response.reason_phrase or "request failed"
-    if response.status_code in (401, 403):
-        raise AuthenticationError(message, status_code=response.status_code)
-    if response.status_code == 404:
-        raise NotFoundError(message, status_code=response.status_code)
-    if response.status_code == 409:
-        raise ConflictError(message, status_code=response.status_code)
-    if response.status_code == 400:
-        raise InvalidRequestError(message, status_code=response.status_code)
-    raise PluralError(message, status_code=response.status_code)
-
-
-class EnvironmentsAPI:
-    """Create, read, update, and push hosted environments."""
-
-    def __init__(self, studio: Studio) -> None:
-        self._studio = studio
-
-    def list(self) -> JsonList:
-        """List environments in the resolved project.
-
-        Returns:
-            Environment summaries.
-        """
-        items = self._studio.request("GET", "/environments").get("items", [])
-        return cast(JsonList, items)
-
-    def get(self, slug: str) -> JsonObject:
-        """Fetch one environment.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-
-        Returns:
-            Environment detail.
-        """
-        return cast(JsonObject, self._studio.request("GET", f"/environments/{slug}"))
-
-    def create(
-        self,
-        *,
-        name: str,
-        version: str = "0.1.0",
-        description: str = "",
-        instructions: str = "",
-        readme_md: str = "",
-        tasks: JsonList | None = None,
-    ) -> JsonObject:
-        """Create an environment.
-
-        Args:
-            name: Display name.
-            version: Starting version string.
-            description: Optional description.
-            instructions: System prompt / instructions.
-            readme_md: Optional markdown overview.
-            tasks: Optional initial tasks.
-
-        Returns:
-            Created environment detail.
-        """
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                "/environments",
-                json={
-                    "name": name,
-                    "version": version,
-                    "description": description,
-                    "instructions": instructions,
-                    "readme_md": readme_md,
-                    "tasks": tasks or [],
-                },
-            ),
-        )
-
-    def update(self, slug: str, **fields: Any) -> JsonObject:
-        """Patch an environment.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-            **fields: Fields accepted by the studio PATCH route.
-
-        Returns:
-            Updated environment detail.
-        """
-        return cast(
-            JsonObject,
-            self._studio.request("PATCH", f"/environments/{slug}", json=fields),
-        )
-
-    def delete(self, slug: str) -> None:
-        """Delete an environment.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-        """
-        self._studio.request("DELETE", f"/environments/{slug}")
-
-    def stamp_harness(
-        self,
-        environment_id: str,
-        revision_id: str,
-        harness_revision_id: str,
-    ) -> JsonObject:
-        """Stamp one hosted harness revision onto an environment revision."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/environments/{environment_id}/revisions/{revision_id}/stamps",
-                json={"harness_revision_id": harness_revision_id},
-            ),
-        )
-
-    def list_stamps(self, environment_id: str, revision_id: str) -> JsonList:
-        """List harness stamps for an environment revision."""  # noqa: DOC201
-        return cast(
-            JsonList,
-            self._studio.request(
-                "GET",
-                f"/environments/{environment_id}/revisions/{revision_id}/stamps",
-            ),
-        )
-
-    def unstamp_harness(
-        self,
-        environment_id: str,
-        revision_id: str,
-        harness_revision_id: str,
-    ) -> None:
-        """Remove a harness stamp from an environment revision."""
-        self._studio.request(
-            "DELETE",
-            f"/environments/{environment_id}/revisions/{revision_id}/stamps/{harness_revision_id}",
-        )
-
-    def publish_manifest(self, manifest: Any) -> JsonObject:
-        """Publish one exact v1 environment package revision."""  # noqa: DOC201
-        from plural.domain import EnvironmentManifest
-
-        package = (
-            manifest
-            if isinstance(manifest, EnvironmentManifest)
-            else EnvironmentManifest.model_validate(manifest)
-        )
-        try:
-            environment = self.get(slugify(package.name, fallback="environment"))
-        except NotFoundError:
-            environment = self.create(
-                name=package.name,
-                version=package.revision,
-                description=package.description,
-                instructions=package.instructions,
-            )
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/environments/{environment['id']}/revisions",
-                json={
-                    "package_manifest": _exact_package_payload(package),
-                    "source": "sdk_sync",
-                },
-            ),
-        )
-
-
-class HarnessesAPI:
-    """Create packages and publish immutable hosted harness revisions."""
-
-    def __init__(self, studio: Studio) -> None:
-        self._studio = studio
-
-    def list(self) -> JsonList:
-        """List harness package definitions."""  # noqa: DOC201
-        return cast(JsonList, self._studio.request("GET", "/harnesses").get("items", []))
-
-    def get(self, ref: str) -> JsonObject:
-        """Get a harness package by project-unique slug or id."""  # noqa: DOC201
-        return cast(JsonObject, self._studio.request("GET", f"/harnesses/{ref}"))
-
-    def create(
-        self,
-        *,
-        name: str,
-        description: str = "",
-        slug: str | None = None,
-    ) -> JsonObject:
-        """Create a harness package definition."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                "/harnesses",
-                json={"name": name, "description": description, "slug": slug},
-            ),
-        )
-
-    def update(self, ref: str, **fields: Any) -> JsonObject:
-        """Patch mutable harness package metadata."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request("PATCH", f"/harnesses/{ref}", json=fields),
-        )
-
-    def delete(self, ref: str) -> None:
-        """Delete an unreferenced harness package."""
-        self._studio.request("DELETE", f"/harnesses/{ref}")
-
-    def revisions(self, ref: str) -> JsonList:
-        """List immutable revisions for one harness package."""  # noqa: DOC201
-        return cast(
-            JsonList,
-            self._studio.request("GET", f"/harnesses/{ref}/revisions"),
-        )
-
-    def create_revision(self, ref: str, package: Any) -> JsonObject:
-        """Publish a validated v1 ``HarnessPackage`` revision without secrets."""  # noqa: DOC201
-        from plural.domain import HarnessPackage
-
-        validated = (
-            package
-            if isinstance(package, HarnessPackage)
-            else HarnessPackage.model_validate(package)
-        )
-        source = validated.source.model_dump(mode="json")
-        if source["kind"] == "local":
-            source["uri"] = "local"
-        source.pop("trusted", None)
-        source.pop("unsafe_local", None)
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/harnesses/{ref}/revisions",
-                json={
-                    "manifest": validated.manifest.model_dump(mode="json"),
-                    "source": source,
-                },
-            ),
-        )
-
-    def resolve_revision(self, *, name: str, digest: str) -> JsonObject:
-        """Resolve one immutable hosted revision by package name and digest."""  # noqa: DOC201
-        package = self.get(slugify(name, fallback="harness"))
-        for revision in self.revisions(str(package["id"])):
-            if revision.get("source_digest") == digest:
-                return revision
-        raise NotFoundError(
-            f"hosted harness revision {name!r} with digest {digest!r} was not found"
-        )
-
-
-class RemoteAgent:
-    """A hosted agent that can be invoked through the gateway."""
-
-    def __init__(self, studio: Studio, payload: dict[str, Any]) -> None:
-        self._studio = studio
-        self.id = str(payload["id"])
-        self.name = str(payload.get("name") or "")
-        self.slug = str(payload.get("slug") or "")
-        self.description = str(payload.get("description") or "")
-        self.model = payload.get("model")
-        self.environment_id = payload.get("environment_id")
-        self.invoke_url = str(payload.get("invoke_url") or "")
-        self.data = payload
-
-    def invoke(
-        self,
-        prompt: str | Sequence[Message | dict[str, Any]],
-        **kwargs: Any,
-    ) -> ChatResponse:
-        """Call this agent.
-
-        Args:
-            prompt: User text or a full message list.
-            **kwargs: Extra chat-completion fields.
-
-        Returns:
-            Gateway chat response.
-        """
-        return self._studio.agents.invoke(self.slug or self.id, prompt, **kwargs)
-
-
-class AgentTemplatesAPI:
-    """Hosted agent templates (immutable configuration)."""
-
-    def __init__(self, studio: Studio) -> None:
-        self._studio = studio
-
-    def list(self) -> JsonList:
-        """List templates in the resolved project."""  # noqa: DOC201
-        return cast(
-            JsonList,
-            self._studio.request("GET", "/agent-templates").get("items", []),
-        )
-
-    def get(self, template_id: str) -> JsonObject:
-        """Fetch one agent template."""  # noqa: DOC201
-        return cast(JsonObject, self._studio.request("GET", f"/agent-templates/{template_id}"))
-
-    def create(self, **fields: Any) -> JsonObject:
-        """Create an agent template."""  # noqa: DOC201
-        return cast(JsonObject, self._studio.request("POST", "/agent-templates", json=fields))
-
-    def revisions(self, template_id: str) -> JsonList:
-        """List immutable template revisions."""  # noqa: DOC201
-        return cast(
-            JsonList,
-            self._studio.request("GET", f"/agent-templates/{template_id}/revisions").get(
-                "items", []
-            ),
-        )
-
-
-class AgentInstanceMemoriesAPI:
-    """Hosted memory rows for one instance."""
-
-    def __init__(self, studio: Studio, instance_id: str) -> None:
-        self._studio = studio
-        self.instance_id = instance_id
-
-    def list(self) -> JsonList:
-        """List memories."""  # noqa: DOC201
-        return cast(
-            JsonList,
-            self._studio.request("GET", f"/agent-instances/{self.instance_id}/memories").get(
-                "items", []
-            ),
-        )
-
-    def append(self, kind: str, content: Any, metadata: dict[str, Any] | None = None) -> JsonObject:
-        """Append one memory."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/agent-instances/{self.instance_id}/memories",
-                json={"kind": kind, "content": content, "metadata": metadata or {}},
-            ),
-        )
-
-    def search(self, query: str) -> JsonList:
-        """Search memories."""  # noqa: DOC201
-        return cast(
-            JsonList,
-            self._studio.request(
-                "GET",
-                f"/agent-instances/{self.instance_id}/memories",
-                params={"q": query},
-            ).get("items", []),
-        )
-
-    def forget(self, memory_id: str) -> None:
-        """Delete one memory."""
-        self._studio.request(
-            "DELETE",
-            f"/agent-instances/{self.instance_id}/memories/{memory_id}",
-        )
-
-
-class AgentInstanceSkillsAPI:
-    """Hosted skills for one instance."""
-
-    def __init__(self, studio: Studio, instance_id: str) -> None:
-        self._studio = studio
-        self.instance_id = instance_id
-
-    def list(self) -> JsonList:
-        """List skills."""  # noqa: DOC201
-        return cast(
-            JsonList,
-            self._studio.request("GET", f"/agent-instances/{self.instance_id}/skills").get(
-                "items", []
-            ),
-        )
-
-    def upsert(
-        self,
-        name: str,
-        *,
-        description: str = "",
-        instructions: str = "",
-        action_names: Sequence[str] = (),
-    ) -> JsonObject:
-        """Create or replace a skill."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "PUT",
-                f"/agent-instances/{self.instance_id}/skills/{name}",
-                json={
-                    "description": description,
-                    "instructions": instructions,
-                    "action_names": list(action_names),
-                },
-            ),
-        )
-
-    def remove(self, name: str) -> None:
-        """Delete a skill."""
-        self._studio.request("DELETE", f"/agent-instances/{self.instance_id}/skills/{name}")
-
-
-class AgentInstanceDataAPI:
-    """Hosted artifacts for one instance."""
-
-    def __init__(self, studio: Studio, instance_id: str) -> None:
-        self._studio = studio
-        self.instance_id = instance_id
-
-    def list(self) -> JsonList:
-        """List artifacts."""  # noqa: DOC201
-        return cast(
-            JsonList,
-            self._studio.request("GET", f"/agent-instances/{self.instance_id}/artifacts").get(
-                "items", []
-            ),
-        )
-
-    def put(self, name: str, content: Any, content_type: str = "application/json") -> JsonObject:
-        """Store one artifact."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "PUT",
-                f"/agent-instances/{self.instance_id}/artifacts/{name}",
-                json={"content": content, "content_type": content_type},
-            ),
-        )
-
-    def get(self, name: str) -> JsonObject:
-        """Read one artifact."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request("GET", f"/agent-instances/{self.instance_id}/artifacts/{name}"),
-        )
-
-    def delete(self, name: str) -> None:
-        """Delete one artifact."""
-        self._studio.request("DELETE", f"/agent-instances/{self.instance_id}/artifacts/{name}")
-
-
-class AgentInstancesAPI:
-    """Persistent hosted agent instances."""
-
-    def __init__(self, studio: Studio) -> None:
-        self._studio = studio
-
-    def list(self) -> JsonList:
-        """List instances in the resolved project."""  # noqa: DOC201
-        return cast(
-            JsonList,
-            self._studio.request("GET", "/agent-instances").get("items", []),
-        )
-
-    def get(self, instance_id: str) -> JsonObject:
-        """Fetch one instance."""  # noqa: DOC201
-        return cast(JsonObject, self._studio.request("GET", f"/agent-instances/{instance_id}"))
-
-    def create(self, template_id: str, name: str) -> JsonObject:
-        """Create an instance from a template."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                "/agent-instances",
-                json={"template_id": template_id, "name": name},
-            ),
-        )
-
-    def delete(self, instance_id: str) -> None:
-        """Delete an instance."""
-        self._studio.request("DELETE", f"/agent-instances/{instance_id}")
-
-    def experience(self, instance_id: str) -> JsonObject:
-        """Read experience counters."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request("GET", f"/agent-instances/{instance_id}/experience"),
-        )
-
-    def memories(self, instance_id: str) -> AgentInstanceMemoriesAPI:
-        """Memory API for one instance."""  # noqa: DOC201
-        return AgentInstanceMemoriesAPI(self._studio, instance_id)
-
-    def skills(self, instance_id: str) -> AgentInstanceSkillsAPI:
-        """Skills API for one instance."""  # noqa: DOC201
-        return AgentInstanceSkillsAPI(self._studio, instance_id)
-
-    def data(self, instance_id: str) -> AgentInstanceDataAPI:
-        """Artifact API for one instance."""  # noqa: DOC201
-        return AgentInstanceDataAPI(self._studio, instance_id)
-
-
-class AgentsAPI:
-    """Create, read, update, and invoke hosted agents."""
-
-    def __init__(self, studio: Studio) -> None:
-        self._studio = studio
-        self.templates = AgentTemplatesAPI(studio)
-        self.instances = AgentInstancesAPI(studio)
-
-    def list(self) -> JsonList:
-        """List agents in the resolved project.
-
-        Returns:
-            Agent summaries.
-        """
-        return cast(JsonList, self._studio.request("GET", "/agent-templates").get("items", []))
-
-    def get(self, slug: str) -> RemoteAgent:
-        """Fetch one agent.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-
-        Returns:
-            Agent handle.
-        """
-        return RemoteAgent(
-            self._studio,
-            cast(JsonObject, self._studio.request("GET", f"/agent-templates/{slug}")),
-        )
-
-    def create(
-        self,
-        *,
-        name: str,
-        model: str,
-        description: str = "",
-        environment_id: str | None = None,
-        environment_revision_id: str | None = None,
-        harness_revision_id: str | None = None,
-        routing: dict[str, Any] | None = None,
-        package_spec: Any | None = None,
-    ) -> RemoteAgent:
-        """Create an agent.
-
-        Args:
-            name: Display name.
-            model: Routed model id.
-            description: Optional description.
-            environment_id: Optional environment to bind.
-            environment_revision_id: Optional pinned revision.
-            harness_revision_id: Exact hosted harness revision.
-            routing: Portable model routing configuration.
-            package_spec: Exact AgentTemplate used for content identity.
-
-        Returns:
-            Created agent handle.
-        """
-        payload = self._studio.request(
-            "POST",
-            "/agent-templates",
-            json={
-                "name": name,
-                "model": model,
-                "description": description,
-                "environment_id": environment_id,
-                "environment_revision_id": environment_revision_id,
-                "harness_revision_id": harness_revision_id,
-                "routing": routing or {},
-                "package_spec": (
-                    package_spec.model_dump(mode="json")
-                    if package_spec is not None and hasattr(package_spec, "model_dump")
-                    else package_spec
-                ),
-            },
-        )
-        return RemoteAgent(self._studio, cast(JsonObject, payload))
-
-    def update(self, slug: str, **fields: Any) -> RemoteAgent:
-        """Patch an agent.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-            **fields: Fields accepted by the studio PATCH route.
-
-        Returns:
-            Updated agent handle.
-        """
-        payload = self._studio.request("PATCH", f"/agent-templates/{slug}", json=fields)
-        return RemoteAgent(self._studio, cast(JsonObject, payload))
-
-    def delete(self, slug: str) -> None:
-        """Delete an agent.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-        """
-        self._studio.request("DELETE", f"/agent-templates/{slug}")
-
-    def invoke(
-        self,
-        slug: str,
-        prompt: str | Sequence[Message | dict[str, Any]],
-        **kwargs: Any,
-    ) -> ChatResponse:
-        """Invoke an agent through the gateway.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-            prompt: User text or a full message list.
-            **kwargs: Extra chat-completion fields.
-
-        Returns:
-            Gateway chat response.
-        """
-        messages: Sequence[Message | dict[str, Any]] = (
-            [Message(role="user", content=prompt)] if isinstance(prompt, str) else prompt
-        )
-        client = self._studio.client
-        if not client.api_key:
-            raise ConfigurationError("agent invoke requires api_key=... or PLURAL_API_KEY")
-        serialized = [item.model_dump() if isinstance(item, Message) else item for item in messages]
-        headers = {
-            "Authorization": f"Bearer {client.api_key}",
-            "Content-Type": "application/json",
-        }
-        project = getattr(client, "project", None)
-        if project:
-            headers["X-Project-Id"] = project
-        response = httpx.post(
-            f"{client.base_url.rstrip('/')}/agents/{slug}/chat/completions",
-            headers=headers,
-            json={
-                "model": str(kwargs.pop("model", None) or "plural/agent"),
-                "messages": serialized,
-                **kwargs,
-            },
-            timeout=60.0,
-        )
-        if response.status_code >= 400:
-            _raise_http(response)
-        data = response.json()
-        choices = []
-        for row in data.get("choices") or []:
-            message = row.get("message") or {}
-            choices.append(
-                Choice(
-                    message=Message(
-                        role=message.get("role") or "assistant",
-                        content=message.get("content"),
-                    )
-                )
-            )
-        if not choices:
-            choices = [Choice(message=Message(role="assistant", content=""))]
-        return ChatResponse(
-            id=str(data.get("id") or slug),
-            model=str(data.get("model") or ""),
-            choices=choices,
-            raw=data,
-        )
-
-
-class BenchmarksAPI:
-    """Create, read, and update hosted benchmark reports."""
-
-    def __init__(self, studio: Studio) -> None:
-        self._studio = studio
-
-    def list(self) -> JsonList:
-        """List benchmarks in the resolved project.
-
-        Returns:
-            Benchmark summaries.
-        """
-        return cast(JsonList, self._studio.request("GET", "/benchmarks").get("items", []))
-
-    def get(self, slug: str) -> JsonObject:
-        """Fetch one benchmark.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-
-        Returns:
-            Benchmark detail.
-        """
-        return cast(JsonObject, self._studio.request("GET", f"/benchmarks/{slug}"))
-
-    def create(
-        self,
-        *,
-        name: str,
-        notes: str = "",
-        report: dict[str, Any] | None = None,
-        environment_id: str | None = None,
-        environment_revision_id: str | None = None,
-        agent_id: str | None = None,
-        description: str = "",
-        methodology: str = "",
-        primary_metric: str = "reward",
-        slug: str | None = None,
-    ) -> JsonObject:
-        """Create a benchmark definition, optionally with a first run.
-
-        Args:
-            name: Display name.
-            notes: Optional notes.
-            report: Optional scored report payload.
-            environment_id: Optional environment to attach.
-            environment_revision_id: Optional pinned revision.
-            agent_id: Optional agent to attach.
-            description: What this eval measures.
-            methodology: How the task set and metric were chosen.
-            primary_metric: Ranking path such as ``reward`` or ``scores.solved``.
-            slug: Optional project-unique slug.
-
-        Returns:
-            Created benchmark detail.
-        """
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                "/benchmarks",
-                json={
-                    "name": name,
-                    "slug": slug,
-                    "notes": notes,
-                    "description": description,
-                    "methodology": methodology,
-                    "primary_metric": primary_metric,
-                    "report": report or {},
-                    "environment_id": environment_id,
-                    "environment_revision_id": environment_revision_id,
-                    "agent_id": agent_id,
-                },
-            ),
-        )
-
-    def create_run(
-        self,
-        slug: str,
-        *,
-        report: dict[str, Any],
-        notes: str = "",
-        environment_id: str | None = None,
-        environment_revision_id: str | None = None,
-        agent_id: str | None = None,
-    ) -> JsonObject:
-        """Attach a scored run to an existing benchmark.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-            report: Scored report payload.
-            notes: Optional run notes.
-            environment_id: Optional environment to attach.
-            environment_revision_id: Optional pinned revision.
-            agent_id: Optional agent to attach.
-
-        Returns:
-            Updated benchmark detail including the new latest run.
-        """
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/benchmarks/{slug}/runs",
-                json={
-                    "notes": notes,
-                    "report": report,
-                    "environment_id": environment_id,
-                    "environment_revision_id": environment_revision_id,
-                    "agent_id": agent_id,
-                },
-            ),
-        )
-
-    def list_runs(self, slug: str) -> JsonList:
-        """List runs for one benchmark.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-
-        Returns:
-            Run summaries.
-        """
-        return cast(
-            JsonList,
-            self._studio.request("GET", f"/benchmarks/{slug}/runs").get("items", []),
-        )
-
-    def update(self, slug: str, **fields: Any) -> JsonObject:
-        """Patch a benchmark.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-            **fields: Fields accepted by the studio PATCH route.
-
-        Returns:
-            Updated benchmark detail.
-        """
-        return cast(
-            JsonObject,
-            self._studio.request("PATCH", f"/benchmarks/{slug}", json=fields),
-        )
-
-    def delete(self, slug: str) -> None:
-        """Delete a benchmark.
-
-        Args:
-            slug: Project-unique slug, or the hosted id.
-        """
-        self._studio.request("DELETE", f"/benchmarks/{slug}")
-
-    def revisions(self, ref: str) -> JsonList:
-        """List immutable revisions for one benchmark definition."""  # noqa: DOC201
-        return cast(
-            JsonList,
-            self._studio.request("GET", f"/benchmarks/{ref}/revisions"),
-        )
-
-    def create_revision(
-        self,
-        ref: str,
-        *,
-        environment_revision_id: str,
-        task_ids: Sequence[str],
-        primary_metric: str | None = None,
-        description: str | None = None,
-        methodology: str | None = None,
-        package_definition: Any | None = None,
-    ) -> JsonObject:
-        """Create and promote an ordered benchmark revision."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/benchmarks/{ref}/revisions",
-                json={
-                    "environment_revision_id": environment_revision_id,
-                    "task_ids": list(task_ids),
-                    "primary_metric": primary_metric,
-                    "description": description,
-                    "methodology": methodology,
-                    "package_definition": (
-                        package_definition.model_dump(mode="json")
-                        if package_definition is not None
-                        and hasattr(package_definition, "model_dump")
-                        else package_definition
-                    ),
-                },
-            ),
-        )
-
-    def get_revision(self, ref: str, revision_id: str) -> JsonObject:
-        """Get one immutable benchmark revision."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request("GET", f"/benchmarks/{ref}/revisions/{revision_id}"),
-        )
-
-    def promote_revision(self, ref: str, revision_id: str) -> JsonObject:
-        """Promote a prior immutable benchmark revision."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request("POST", f"/benchmarks/{ref}/revisions/{revision_id}/promote"),
-        )
-
-
-class TracesAPI:
-    """Ingest and read hosted traces."""
+    error_type = {
+        400: InvalidRequestError,
+        401: AuthenticationError,
+        403: AuthenticationError,
+        404: NotFoundError,
+        409: ConflictError,
+    }.get(response.status_code, PluralError)
+    raise error_type(message, status_code=response.status_code)
+
+
+def _dump(value: Any, *, exclude: set[str] | None = None) -> JsonObject:
+    if not isinstance(value, BaseModel):
+        raise InvalidRequestError("canonical SDK object must be a Pydantic model")
+    payload = value.model_dump(mode="json", exclude_none=True, exclude=exclude or set())
+    return payload
+
+
+class RevisionResourceAPI(Generic[T]):
+    """Common parent and immutable revision operations."""
+
+    collection: str
+    model_type: type[T]
 
     def __init__(self, studio: Studio) -> None:
         self._studio = studio
 
     def list(self, **params: Any) -> JsonList:
-        """List traces in the resolved project.
+        response = self._studio.request("GET", f"/{self.collection}", params=params)
+        return cast(JsonList, response.get("items", response))
 
-        Args:
-            **params: Optional list filters such as ``kind``.
-
-        Returns:
-            Trace summaries.
-        """
-        query = {key: value for key, value in params.items() if value is not None}
-        return cast(JsonList, self._studio.request("GET", "/traces", params=query).get("items", []))
-
-    def get(self, trace_id: str) -> JsonObject:
-        """Fetch one trace.
-
-        Args:
-            trace_id: Hosted row id or trace id accepted by the API.
-
-        Returns:
-            Trace detail.
-        """
-        return cast(JsonObject, self._studio.request("GET", f"/traces/{trace_id}"))
+    def get(self, resource_id: str) -> JsonObject:
+        return cast(JsonObject, self._studio.request("GET", f"/{self.collection}/{resource_id}"))
 
     def create(
         self,
-        trace: dict[str, Any],
         *,
-        environment_id: str | None = None,
-        environment_revision_id: str | None = None,
-        agent_id: str | None = None,
-        run_group_id: str | None = None,
-        job_id: str | None = None,
-        trial_id: str | None = None,
+        name: str,
+        slug: str | None = None,
+        description: str = "",
     ) -> JsonObject:
-        """Ingest a trace.
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/{self.collection}",
+                json={"name": name, "slug": slug, "description": description},
+            ),
+        )
 
-        Args:
-            trace: Trace payload.
-            environment_id: Optional environment to attach.
-            environment_revision_id: Optional pinned revision.
-            agent_id: Optional agent to attach.
-            run_group_id: Optional run grouping id.
-            job_id: Optional evaluation job provenance.
-            trial_id: Optional evaluation trial provenance.
+    def update(self, resource_id: str, **fields: Any) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request("PATCH", f"/{self.collection}/{resource_id}", json=fields),
+        )
 
-        Returns:
-            Stored trace detail.
-        """
+    def delete(self, resource_id: str) -> None:
+        self._studio.request("DELETE", f"/{self.collection}/{resource_id}")
+
+    def revisions(self, resource_id: str) -> JsonList:
+        return cast(
+            JsonList,
+            self._studio.request("GET", f"/{self.collection}/{resource_id}/revisions"),
+        )
+
+    def revision(self, resource_id: str, revision_id: str) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "GET", f"/{self.collection}/{resource_id}/revisions/{revision_id}"
+            ),
+        )
+
+    def _parent(self, value: T) -> JsonObject:
+        slug = slugify(self._name(value), fallback=self.collection.rstrip("s"))
+        try:
+            return self.get(slug)
+        except NotFoundError:
+            return self.create(
+                name=self._name(value),
+                slug=slug,
+                description=str(getattr(value, "description", "")),
+            )
+
+    @staticmethod
+    def _name(value: T) -> str:
+        name = getattr(value, "name", None) or getattr(value, "task_id", None)
+        if not isinstance(name, str) or not name:
+            raise InvalidRequestError("revision object has no parent name")
+        return name
+
+    def _publish_payload(self, value: T, **references: Any) -> JsonObject:
+        del references
+        return _dump(value, exclude={"name", "description"})
+
+    def push(self, value: T, **references: Any) -> JsonObject:
+        if not isinstance(value, self.model_type):
+            raise InvalidRequestError(f"{self.collection} push requires {self.model_type.__name__}")
+        parent = self._parent(value)
+        resource_id = str(parent.get("id") or parent.get("slug"))
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/{self.collection}/{resource_id}/revisions",
+                json=self._publish_payload(value, **references),
+            ),
+        )
+
+    def publish_revision(self, resource_id: str, revision_id: str) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/{self.collection}/{resource_id}/revisions/{revision_id}/publish",
+            ),
+        )
+
+    def publish(self, value: T, **references: Any) -> JsonObject:
+        revision = self.push(value, **references)
+        revision_id = revision.get("id")
+        if not isinstance(revision_id, str) or not revision_id:
+            raise InvalidRequestError("created revision response omitted id")
+        parent = self._parent(value)
+        resource_id = str(parent.get("id") or parent.get("slug"))
+        return self.publish_revision(resource_id, revision_id)
+
+
+class EnvironmentsAPI(RevisionResourceAPI[EnvironmentManifest]):
+    collection = "environments"
+    model_type = EnvironmentManifest
+
+    def _publish_payload(self, value: EnvironmentManifest, **references: Any) -> JsonObject:
+        del references
+        return _dump(value, exclude={"name", "description"})
+
+
+class TasksAPI(RevisionResourceAPI[TaskDefinition]):
+    collection = "tasks"
+    model_type = TaskDefinition
+
+    def _publish_payload(self, value: TaskDefinition, **references: Any) -> JsonObject:
+        environment_revision_id = references.get("environment_revision_id")
+        verifier_revision_ids = references.get("verifier_revision_ids")
+        if not isinstance(environment_revision_id, str) or not environment_revision_id:
+            raise InvalidRequestError("Task publish requires environment_revision_id")
+        if not isinstance(verifier_revision_ids, Sequence) or isinstance(
+            verifier_revision_ids, (str, bytes)
+        ):
+            raise InvalidRequestError("Task publish requires verifier_revision_ids")
+        ids = [str(item) for item in verifier_revision_ids]
+        if len(ids) != len(value.verifiers):
+            raise InvalidRequestError("verifier_revision_ids must align with Task verifiers")
+        payload = _dump(
+            value,
+            exclude={"task_id", "environment", "verifiers"},
+        )
+        payload["environment_revision_id"] = environment_revision_id
+        payload["verifiers"] = [
+            {"verifier_revision_id": revision_id, "weight": weighted.weight}
+            for revision_id, weighted in zip(ids, value.verifiers, strict=True)
+        ]
+        return payload
+
+
+class VerifiersAPI(RevisionResourceAPI[Any]):
+    collection = "verifiers"
+    model_type = BaseModel
+
+    def push(self, value: VerifierDefinition, **references: Any) -> JsonObject:
+        if getattr(value, "kind", None) not in {"deterministic", "agent", "human"}:
+            raise InvalidRequestError("Verifier push requires VerifierDefinition")
+        return super().push(value, **references)
+
+    def _publish_payload(self, value: Any, **references: Any) -> JsonObject:
+        del references
+        return _dump(value, exclude={"name"})
+
+
+class AgentsAPI(RevisionResourceAPI[AgentDefinition]):
+    """Hosted AgentDefinition parents and immutable revisions."""
+
+    collection = "agents"
+    model_type = AgentDefinition
+
+    def _publish_payload(self, value: AgentDefinition, **references: Any) -> JsonObject:
+        harness_revision_id = references.get("harness_revision_id")
+        if value.harness is not None and not harness_revision_id:
+            raise InvalidRequestError("Harness-bound Agent publish requires harness_revision_id")
+        payload = _dump(value, exclude={"name", "harness", "harness_package"})
+        payload["harness_revision_id"] = harness_revision_id
+        return payload
+
+
+class HarnessesAPI(RevisionResourceAPI[HarnessPackage]):
+    collection = "harnesses"
+    model_type = HarnessPackage
+
+    @staticmethod
+    def _name(value: HarnessPackage) -> str:
+        return value.manifest.name
+
+    def _publish_payload(self, value: HarnessPackage, **references: Any) -> JsonObject:
+        del references
+        return _dump(value)
+
+
+class BenchmarksAPI(RevisionResourceAPI[BenchmarkDefinition]):
+    collection = "benchmarks"
+    model_type = BenchmarkDefinition
+
+    def _publish_payload(self, value: BenchmarkDefinition, **references: Any) -> JsonObject:
+        task_revision_ids = references.get("task_revision_ids")
+        if not isinstance(task_revision_ids, Sequence) or isinstance(
+            task_revision_ids, (str, bytes)
+        ):
+            raise InvalidRequestError("Benchmark publish requires task_revision_ids")
+        ids = [str(item) for item in task_revision_ids]
+        if len(ids) != len(value.tasks):
+            raise InvalidRequestError("task_revision_ids must align with Benchmark tasks")
+        payload = _dump(value, exclude={"name", "tasks"})
+        payload["task_revision_ids"] = ids
+        return payload
+
+
+class TracesAPI:
+    """Canonical Trace ingest, TITO upload, and reads."""
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def list(self, **params: Any) -> JsonList:
+        response = self._studio.request("GET", "/traces", params=params)
+        return cast(JsonList, response.get("items", response))
+
+    def get(self, trace_id: str) -> JsonObject:
+        return cast(JsonObject, self._studio.request("GET", f"/traces/{trace_id}"))
+
+    def create(self, trace: Trace | JsonObject, **links: Any) -> JsonObject:
+        payload = trace.model_dump(mode="json") if isinstance(trace, Trace) else trace
         return cast(
             JsonObject,
             self._studio.request(
                 "POST",
                 "/traces",
-                json={
-                    "trace": trace,
-                    "environment_id": environment_id,
-                    "environment_revision_id": environment_revision_id,
-                    "agent_id": agent_id,
-                    "run_group_id": run_group_id,
-                    "job_id": job_id,
-                    "trial_id": trial_id,
-                },
+                json={"trace": payload, **{k: v for k, v in links.items() if v is not None}},
             ),
         )
 
-
-def _safe_sync_payload(value: Any) -> Any:
-    """Drop credential-shaped fields and bound uploaded diagnostic strings."""  # noqa: DOC201
-    sensitive = {
-        "authorization",
-        "cookie",
-        "password",
-        "secret",
-        "token",
-        "api_key",
-        "access_token",
-        "refresh_token",
-    }
-    if isinstance(value, dict):
-        return {
-            str(key): ("[redacted]" if str(key).lower() in sensitive else _safe_sync_payload(item))
-            for key, item in value.items()
-        }
-    if isinstance(value, (list, tuple)):
-        return [_safe_sync_payload(item) for item in value]
-    if isinstance(value, str):
-        return value[:20_000]
-    return value
-
-
-def _exact_package_payload(value: Any) -> Any:
-    dumped = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
-    sensitive = {
-        "authorization",
-        "cookie",
-        "password",
-        "secret",
-        "token",
-        "api_key",
-        "access_token",
-        "refresh_token",
-    }
-
-    def reject_secret(item: Any) -> None:
-        if isinstance(item, dict):
-            for key, nested in item.items():
-                if str(key).lower() in sensitive and nested is not None and nested != "":
-                    raise InvalidRequestError(
-                        "exact package payload contains a credential-shaped field"
-                    )
-                reject_secret(nested)
-        elif isinstance(item, (list, tuple)):
-            for nested in item:
-                reject_secret(nested)
-
-    reject_secret(dumped)
-    return dumped
-
-
-class TrialsAPI:
-    """Read and cancel hosted immutable trials."""
-
-    def __init__(self, studio: Studio) -> None:
-        self._studio = studio
-
-    def get(self, trial_id: str) -> JsonObject:
-        """Get a hosted trial and all append-only executions."""  # noqa: DOC201
-        return cast(JsonObject, self._studio.request("GET", f"/trials/{trial_id}"))
-
-    def cancel(self, trial_id: str) -> JsonObject:
-        """Cancel a pending hosted trial record."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request("POST", f"/trials/{trial_id}/cancel"),
-        )
-
-
-class JobsAPI:
-    """Register local execution, append receipts, and finalize reports."""
-
-    def __init__(self, studio: Studio) -> None:
-        self._studio = studio
-
-    @staticmethod
-    def _registration(
-        *,
-        benchmark_revision_id: str,
-        agent_revision_ids: Sequence[str],
-        n_attempts: int,
-        idempotency_key: str,
-        spec_hash: str | None = None,
-        job_spec: Any,
-    ) -> JsonObject:
-        return {
-            "benchmark_revision_id": benchmark_revision_id,
-            "agent_revision_ids": list(agent_revision_ids),
-            "n_attempts": n_attempts,
-            "idempotency_key": idempotency_key,
-            "spec_hash": spec_hash,
-            "job_spec": _exact_package_payload(job_spec),
-        }
-
-    def preflight(
+    def upload_tito(
         self,
+        trace_id: str,
+        data: bytes,
         *,
-        benchmark_revision_id: str,
-        agent_revision_ids: Sequence[str],
-        n_attempts: int = 1,
-        idempotency_key: str = "preflight",
-        job_spec: Any,
+        content_type: str = "application/x-ndjson; profile=tito-v1",
     ) -> JsonObject:
-        """Validate exact hosted compatibility without launching anything."""  # noqa: DOC201
+        """Upload immutable, server-validated TITO NDJSON for a hosted Trace."""
         return cast(
             JsonObject,
             self._studio.request(
                 "POST",
-                "/jobs/preflight",
-                json=self._registration(
-                    benchmark_revision_id=benchmark_revision_id,
-                    agent_revision_ids=agent_revision_ids,
-                    n_attempts=n_attempts,
-                    idempotency_key=idempotency_key,
-                    job_spec=job_spec,
-                ),
+                f"/traces/{quote(trace_id, safe='')}/artifacts/tito",
+                content=data,
+                content_type=content_type,
             ),
         )
 
-    def create(
+
+class JobsAPI:
+    """Hosted Job submission, transitions, and live events."""
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def submit(
         self,
+        spec: JobSpec,
         *,
-        benchmark_revision_id: str,
+        source_revision_id: str,
         agent_revision_ids: Sequence[str],
         idempotency_key: str,
-        n_attempts: int = 1,
-        spec_hash: str | None = None,
-        job_spec: Any,
+        name: str = "Job",
+        description: str = "",
     ) -> JsonObject:
-        """Idempotently register a client-orchestrated job."""  # noqa: DOC201
+        if len(agent_revision_ids) != len(spec.agents):
+            raise InvalidRequestError("agent_revision_ids must align with Job agents")
         return cast(
             JsonObject,
             self._studio.request(
                 "POST",
                 "/jobs",
-                json=self._registration(
-                    benchmark_revision_id=benchmark_revision_id,
-                    agent_revision_ids=agent_revision_ids,
-                    n_attempts=n_attempts,
-                    idempotency_key=idempotency_key,
-                    spec_hash=spec_hash,
-                    job_spec=job_spec,
-                ),
-            ),
-        )
-
-    def list(self, **params: Any) -> JsonList:
-        """List hosted jobs with optional status and pagination filters."""  # noqa: DOC201
-        query = {key: value for key, value in params.items() if value is not None}
-        return cast(
-            JsonList,
-            self._studio.request("GET", "/jobs", params=query).get("items", []),
-        )
-
-    def get(self, job_id: str) -> JsonObject:
-        """Get one hosted job."""  # noqa: DOC201
-        return cast(JsonObject, self._studio.request("GET", f"/jobs/{job_id}"))
-
-    def trials(self, job_id: str) -> JsonList:
-        """List deterministic hosted trial expansion order."""  # noqa: DOC201
-        return cast(JsonList, self._studio.request("GET", f"/jobs/{job_id}/trials"))
-
-    def batch(
-        self,
-        job_id: str,
-        executions: Sequence[dict[str, Any]],
-    ) -> JsonObject:
-        """Idempotently append self-reported trial receipts."""  # noqa: DOC201
-        payload = [_safe_sync_payload(item) for item in executions]
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/jobs/{job_id}/trials/batch",
-                json={"executions": payload},
-            ),
-        )
-
-    def upload_results(
-        self,
-        job_id: str,
-        *,
-        trial_keys: Sequence[str],
-        results: Sequence[Any],
-        batch_size: int = 50,
-    ) -> int:
-        """Upload complete local results in replay-safe chunks."""  # noqa: DOC201
-        if len(trial_keys) != len(results):
-            raise InvalidRequestError("hosted trial expansion does not match local results")
-        uploaded = 0
-        pending: list[dict[str, Any]] = []
-        for trial_key, raw in zip(trial_keys, results, strict=True):
-            dumped = raw.model_dump(mode="json") if hasattr(raw, "model_dump") else dict(raw)
-            receipt = dumped.get("receipt")
-            if not isinstance(receipt, dict):
-                raise InvalidRequestError("trial result is missing its receipt")
-            pending.append(
-                {
-                    "trial_key": trial_key,
-                    "result": dumped,
-                    "verifier_metadata": {"verifier_hash": receipt.get("verifier_hash")}
-                    if receipt.get("verifier_hash")
-                    else {},
-                }
-            )
-            if len(pending) >= batch_size:
-                self.batch(job_id, pending)
-                uploaded += len(pending)
-                pending = []
-        if pending:
-            self.batch(job_id, pending)
-            uploaded += len(pending)
-        return uploaded
-
-    def finalize(self, job_id: str, report: Any) -> JsonObject:
-        """Idempotently link a final local report to one BenchmarkRun."""  # noqa: DOC201
-        dumped = report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/jobs/{job_id}/finalize",
-                json={"report": _safe_sync_payload(dumped)},
-            ),
-        )
-
-    def fail(self, job_id: str, *, error_code: str, error_message: str = "") -> JsonObject:
-        """Mark a hosted job failed without implying hosted execution."""  # noqa: DOC201
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/jobs/{job_id}/fail",
                 json={
-                    "error_code": error_code,
-                    "error_message": _safe_sync_payload(error_message),
+                    "name": name,
+                    "description": description,
+                    "source": {
+                        "type": spec.source.kind,
+                        "revision_id": source_revision_id,
+                    },
+                    "agent_revision_ids": list(agent_revision_ids),
+                    "attempts": spec.attempts,
+                    "concurrency": spec.concurrency,
+                    "per_runtime_concurrency": spec.per_runtime_concurrency,
+                    "priority": spec.priority,
+                    "retry": spec.retry.model_dump(mode="json"),
+                    "mode": spec.mode.value,
+                    "idempotency_key": idempotency_key,
                 },
             ),
         )
 
-    def cancel(self, job_id: str) -> JsonObject:
-        """Cancel hosted records for a client-orchestrated job."""  # noqa: DOC201
+    def list(self, **params: Any) -> JsonList:
+        response = self._studio.request("GET", "/jobs", params=params)
+        return cast(JsonList, response.get("items", response))
+
+    def get(self, job_id: str) -> JsonObject:
+        return cast(JsonObject, self._studio.request("GET", f"/jobs/{job_id}"))
+
+    def trials(self, job_id: str) -> JsonList:
+        return cast(JsonList, self._studio.request("GET", f"/jobs/{job_id}/trials"))
+
+    def transition(self, job_id: str, status: str, **fields: Any) -> JsonObject:
         return cast(
             JsonObject,
-            self._studio.request("POST", f"/jobs/{job_id}/cancel"),
+            self._studio.request(
+                "POST", f"/jobs/{job_id}/transition", json={"status": status, **fields}
+            ),
+        )
+
+    def cancel(self, job_id: str) -> JsonObject:
+        return self.transition(job_id, "cancelled")
+
+    def watch(self, job_id: str, *, cursor: int = 0) -> Iterator[JsonObject]:
+        return self._studio.watch(f"/jobs/{job_id}/events", cursor=cursor)
+
+
+class TrialsAPI:
+    """Hosted Trial and TrialExecution operations."""
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def get(self, trial_id: str) -> JsonObject:
+        return cast(JsonObject, self._studio.request("GET", f"/trials/{trial_id}"))
+
+    def transition(self, trial_id: str, status: str, **fields: Any) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST", f"/trials/{trial_id}/transition", json={"status": status, **fields}
+            ),
+        )
+
+    def cancel(self, trial_id: str) -> JsonObject:
+        return self.transition(trial_id, "cancelled")
+
+    def create_execution(
+        self,
+        trial_id: str,
+        *,
+        idempotency_key: str,
+        worker_id: str | None = None,
+    ) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/trials/{trial_id}/executions",
+                json={"idempotency_key": idempotency_key, "worker_id": worker_id},
+            ),
+        )
+
+    def watch(self, trial_id: str, *, cursor: int = 0) -> Iterator[JsonObject]:
+        return self._studio.watch(f"/trials/{trial_id}/events", cursor=cursor)
+
+
+class ReviewsAPI:
+    """Human review assignments and submissions."""
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def list(self, *, status: str | None = "awaiting_review") -> JsonList:
+        return cast(
+            JsonList,
+            self._studio.request("GET", "/reviews", params={"status": status}),
+        )
+
+    def get(self, assignment_id: str) -> JsonObject:
+        return cast(JsonObject, self._studio.request("GET", f"/reviews/{assignment_id}"))
+
+    def claim(self, assignment_id: str) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request("POST", f"/reviews/{assignment_id}/claim", json={}),
+        )
+
+    def assign(self, assignment_id: str, user_id: str) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/reviews/{assignment_id}/assign",
+                json={"assigned_to_user_id": user_id},
+            ),
+        )
+
+    def submit(
+        self,
+        assignment_id: str,
+        *,
+        scores: dict[str, float],
+        idempotency_key: str,
+        feedback: str = "",
+        payload: JsonObject | None = None,
+    ) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/reviews/{assignment_id}/submissions",
+                json={
+                    "scores": scores,
+                    "idempotency_key": idempotency_key,
+                    "feedback": feedback,
+                    "payload": payload or {},
+                },
+            ),
         )
 
 
 class Studio:
-    """Hosted studio client bound to a :class:`~plural.client.Client`."""
+    """Hosted client for canonical schema-v2 resources."""
 
     def __init__(self, client: Client) -> None:
         self.client = client
         self.environments = EnvironmentsAPI(self)
-        self.harnesses = HarnessesAPI(self)
+        self.tasks = TasksAPI(self)
+        self.verifiers = VerifiersAPI(self)
         self.agents = AgentsAPI(self)
+        self.harnesses = HarnessesAPI(self)
         self.benchmarks = BenchmarksAPI(self)
         self.traces = TracesAPI(self)
         self.jobs = JobsAPI(self)
         self.trials = TrialsAPI(self)
+        self.reviews = ReviewsAPI(self)
 
-    def request(
-        self,
-        method: str,
-        path: str,
-        *,
-        json: Any = None,
-        params: dict[str, Any] | None = None,
-    ) -> Any:
-        """Send an authenticated studio request.
-
-        Args:
-            method: HTTP method.
-            path: Path under ``/api/v1``.
-            json: Optional JSON body.
-            params: Optional query string.
-
-        Returns:
-            Parsed JSON, or ``None`` for an empty 204.
-        """
+    def _headers(self) -> dict[str, str]:
         api_key = getattr(self.client, "api_key", None)
         if not api_key:
-            raise ConfigurationError("studio calls require api_key=... or PLURAL_API_KEY")
+            raise ConfigurationError("hosted calls require api_key=... or PLURAL_API_KEY")
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -1296,484 +520,114 @@ class Studio:
         project = getattr(self.client, "project", None)
         if project:
             headers["X-Project-Id"] = project
-        url = f"{studio_base_url(self.client.base_url)}{path}"
+        return headers
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: Any = None,
+        params: JsonObject | None = None,
+        content: bytes | None = None,
+        content_type: str | None = None,
+    ) -> Any:
+        if json is not None and content is not None:
+            raise InvalidRequestError("hosted request cannot contain JSON and raw content")
+        headers = self._headers()
+        if content_type:
+            headers["Content-Type"] = content_type
         response = httpx.request(
             method,
-            url,
+            f"{studio_base_url(self.client.base_url)}{path}",
             headers=headers,
             json=json,
             params=params,
-            timeout=30.0,
+            content=content,
+            timeout=30,
         )
-        if response.status_code == 204:
-            return None
         if response.status_code >= 400:
             _raise_http(response)
-        if not response.content:
+        if response.status_code == 204 or not response.content:
             return {}
         return response.json()
 
-
-def environment_manifest(env: Environment[Any, Any]) -> JsonObject:
-    """Build the hosted revision manifest from a local environment.
-
-    Args:
-        env: Local environment instance.
-
-    Returns:
-        Manifest with actions, schemas, guardrails, skills, and context.
-    """
-    tools = []
-    for definition in env.action_defs:
-        dumped = definition.model_dump(mode="json")
-        function = dumped.get("function") if isinstance(dumped, dict) else None
-        if isinstance(function, dict):
-            tools.append(
-                {
-                    "name": function.get("name"),
-                    "description": function.get("description") or "",
-                    "parameters": function.get("parameters") or {},
-                }
-            )
-    observation_type, state_type = env._contract_names()
-    scorers = [
-        {
-            "name": name,
-            "weight": weight,
-            "description": (getattr(fn, "__doc__", None) or "").strip(),
-        }
-        for name, fn, weight in env.scorers
-    ]
-    return {
-        "tools": tools,
-        "scorers": scorers,
-        "skills": env.normalized_skills(),
-        "hooks": env.overridden_hooks(),
-        "observation_type": observation_type,
-        "state_type": state_type,
-        "observation_schema": env.observation_schema(),
-        "state_schema": env.state_schema(),
-        "guardrails": env.normalized_guardrails(),
-        "context": env.context_policy(),
-    }
+    def watch(self, path: str, *, cursor: int = 0) -> Iterator[JsonObject]:
+        with httpx.stream(
+            "GET",
+            f"{studio_base_url(self.client.base_url)}{path}",
+            headers={**self._headers(), "Accept": "text/event-stream"},
+            params={"cursor": cursor},
+            timeout=None,
+        ) as response:
+            if response.status_code >= 400:
+                _raise_http(response)
+            for line in response.iter_lines():
+                if line.startswith("data:"):
+                    value = json.loads(line.removeprefix("data:").strip())
+                    if isinstance(value, dict):
+                        yield value
 
 
-def _environment_ref(
-    env: Environment[Any, Any],
-    *,
-    environment_id: str | None = None,
-    name: str | None = None,
-) -> str:
-    return environment_id or slugify(name or env.name, fallback="environment")
+def environment_manifest(environment: Any) -> JsonObject:
+    """Serialize a Python Environment compiler or EnvironmentManifest."""
+    value = environment.manifest() if hasattr(environment, "manifest") else environment
+    if not isinstance(value, EnvironmentManifest):
+        raise InvalidRequestError("environment must compile to EnvironmentManifest")
+    return _dump(value)
 
 
-def _ingest_environment_revision(
-    studio: Studio,
-    env: Environment[Any, Any],
-    ref: str,
-) -> JsonObject:
-    from plural import __version__
-
-    revision = studio.request(
-        "POST",
-        f"/environments/{ref}/revisions",
-        json={
-            "version": env.version,
-            "instructions": env.system_prompt or "",
-            "fingerprint": env.fingerprint(),
-            "plural_package_version": __version__,
-            "max_turns": env.max_turns,
-            "manifest": environment_manifest(env),
-            "source": "sdk_sync",
-        },
-    )
-    payload = revision if isinstance(revision, dict) else {}
-    return payload
-
-
-def create_environment(
-    client: Client,
-    env: Environment[Any, Any],
-    *,
-    name: str | None = None,
-    description: str | None = None,
-    readme: str | None = None,
-) -> JsonObject:
-    """Create a hosted environment from ``env``. Fails if the slug exists.
-
-    Args:
-        client: Authenticated Plural client.
-        env: Local environment instance.
-        name: Optional name override.
-        description: Optional description override.
-        readme: Optional markdown overview override.
-
-    Returns:
-        Created revision plus ``environment_id`` and ``slug``.
-    """
+def create_object(client: Client, obj: Any, **references: Any) -> JsonObject:
+    """Publish one canonical revision or ingest one Trace."""
     studio = Studio(client)
-    label = name or env.name
-    created = studio.environments.create(
-        name=label,
-        version=env.version,
-        description=env.description if description is None else description,
-        instructions=env.system_prompt or "",
-        readme_md=env.readme if readme is None else readme,
-    )
-    ref = str(created.get("slug") or created["id"])
-    env.remote_id = created["id"]
-    payload = _ingest_environment_revision(studio, env, ref)
-    return {**payload, "environment_id": created["id"], "slug": ref}
-
-
-def update_environment(
-    client: Client,
-    env: Environment[Any, Any],
-    *,
-    environment_id: str | None = None,
-    name: str | None = None,
-    description: str | None = None,
-    readme: str | None = None,
-) -> JsonObject:
-    """Update a hosted environment found by slug or id.
-
-    Args:
-        client: Authenticated Plural client.
-        env: Local environment instance.
-        environment_id: Optional slug or id override.
-        name: Optional display-name patch.
-        description: Optional description override.
-        readme: Optional markdown overview override.
-
-    Returns:
-        Created revision plus ``environment_id`` and ``slug``.
-    """
-    studio = Studio(client)
-    ref = _environment_ref(env, environment_id=environment_id, name=name)
-    existing = studio.environments.get(ref)
-    env.remote_id = existing["id"]
-    fields: dict[str, Any] = {
-        "description": env.description if description is None else description,
-        "readme_md": env.readme if readme is None else readme,
-    }
-    if name is not None:
-        fields["name"] = name
-    studio.environments.update(ref, **fields)
-    payload = _ingest_environment_revision(studio, env, ref)
-    return {
-        **payload,
-        "environment_id": existing["id"],
-        "slug": existing.get("slug") or ref,
-    }
-
-
-def push_environment(
-    client: Client,
-    env: Environment[Any, Any],
-    *,
-    environment_id: str | None = None,
-    name: str | None = None,
-    description: str | None = None,
-    readme: str | None = None,
-) -> JsonObject:
-    """Create or update ``env`` using its slug.
-
-    Prefer :func:`create_environment` or :func:`update_environment` when the
-    intent is explicit. This helper updates the existing slug or creates it.
-
-    Args:
-        client: Authenticated Plural client.
-        env: Local environment instance.
-        environment_id: Optional slug or id override.
-        name: Optional name override when creating.
-        description: Optional description when creating.
-        readme: Optional markdown overview when creating.
-
-    Returns:
-        Created revision plus ``environment_id`` and ``slug``.
-    """
-    studio = Studio(client)
-    ref = _environment_ref(env, environment_id=environment_id, name=name)
-    try:
-        existing = studio.environments.get(ref)
-    except NotFoundError:
-        return create_environment(client, env, name=name, description=description, readme=readme)
-    env.remote_id = existing["id"]
-    return update_environment(
-        client,
-        env,
-        environment_id=ref,
-        name=name,
-        description=description,
-        readme=readme,
-    )
-
-
-def push_trace(
-    client: Client,
-    trace: Any,
-    *,
-    environment_id: str | None = None,
-    environment_revision_id: str | None = None,
-    agent_id: str | None = None,
-    run_group_id: str | None = None,
-) -> JsonObject:
-    """Ingest a local trace on the hosted project.
-
-    Args:
-        client: Authenticated Plural client.
-        trace: Local :class:`~plural.tracing.schema.Trace`.
-        environment_id: Optional environment to attach.
-        environment_revision_id: Optional pinned revision.
-        agent_id: Optional agent to attach.
-        run_group_id: Optional run grouping id.
-
-    Returns:
-        Stored trace detail.
-    """
-    payload = trace.model_dump(mode="json") if hasattr(trace, "model_dump") else dict(trace)
-    return Studio(client).traces.create(
-        payload,
-        environment_id=environment_id,
-        environment_revision_id=environment_revision_id,
-        agent_id=agent_id,
-        run_group_id=run_group_id,
-    )
-
-
-def push_report(
-    client: Client,
-    report: Any,
-    *,
-    name: str | None = None,
-    notes: str = "",
-    environment_id: str | None = None,
-    environment_revision_id: str | None = None,
-    agent_id: str | None = None,
-    description: str = "",
-    methodology: str = "",
-    primary_metric: str | None = None,
-    traces: list[Any] | None = None,
-) -> JsonObject:
-    """Store a benchmark report on the hosted project.
-
-    Creates the definition on first push and appends a run afterwards.
-    Case traces are uploaded with ``run_group_id`` set to the run id.
-
-    Args:
-        client: Authenticated Plural client.
-        report: Local :class:`~plural.benchmarks.runner.Report`.
-        name: Optional display name.
-        notes: Optional notes.
-        environment_id: Optional environment to attach.
-        environment_revision_id: Optional pinned revision.
-        agent_id: Optional agent to attach.
-        description: What this eval measures.
-        methodology: How the task set and metric were chosen.
-        primary_metric: Ranking path such as ``reward`` or ``scores.solved``.
-        traces: Optional episode traces to upload with the run.
-
-    Returns:
-        Created or updated benchmark detail.
-    """
-    from plural.errors import NotFoundError
-
-    payload = report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
-    env_name = payload.get("environment") or "benchmark"
-    label = name or str(payload.get("name") or env_name)
-    metric = (
-        primary_metric
-        or payload.get("primary_metric")
-        or (payload.get("manifest") or {}).get("primary_metric")
-        or "reward"
-    )
-    studio = Studio(client)
-    slug = slugify(label, fallback="benchmark")
-    try:
-        studio.benchmarks.get(slug)
-        created = studio.benchmarks.create_run(
-            slug,
-            notes=notes,
-            report=payload,
-            environment_id=environment_id,
-            environment_revision_id=environment_revision_id,
-            agent_id=agent_id,
-        )
-    except NotFoundError:
-        created = studio.benchmarks.create(
-            name=label,
-            notes=notes,
-            description=description or str(payload.get("description") or ""),
-            methodology=methodology,
-            primary_metric=str(metric),
-            report=payload,
-            environment_id=environment_id,
-            environment_revision_id=environment_revision_id,
-            agent_id=agent_id,
-        )
-    run_group = ""
-    latest = created.get("latest_run") if isinstance(created, dict) else None
-    if isinstance(latest, dict):
-        run_group = str(latest.get("run_group_id") or latest.get("id") or "")
-    if not run_group:
-        raw_manifest = payload.get("manifest")
-        manifest = raw_manifest if isinstance(raw_manifest, dict) else {}
-        run_group = str(manifest.get("run_id") or "")
-    for trace in traces or []:
-        try:
-            push_trace(
-                client,
-                trace,
-                environment_id=environment_id,
-                environment_revision_id=environment_revision_id,
-                agent_id=agent_id,
-                run_group_id=run_group or None,
-            )
-        except Exception:  # noqa: BLE001
-            continue
-    return created
-
-
-def _benchmark_kwargs(obj: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
-    from plural.benchmarks.runner import Benchmark
-
-    if isinstance(obj, Benchmark):
-        if obj.report is None:
-            raise InvalidRequestError("run the benchmark before creating or updating it")
-        kwargs.setdefault(
-            "environment_id",
-            getattr(obj.env, "remote_id", None) or getattr(obj.env, "name", None),
-        )
-        kwargs.setdefault("name", obj.name or obj.env.name)
-        kwargs.setdefault("description", obj.description)
-        kwargs.setdefault("primary_metric", obj.primary_metric)
-        kwargs.setdefault("traces", list(obj._traces))
-        return kwargs
-    return kwargs
-
-
-def _report_slug(report: Any, *, name: str | None = None) -> str:
-    payload = report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
-    return slugify(name or str(payload.get("environment") or "benchmark"), fallback="benchmark")
-
-
-def create_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
-    """Create a hosted environment, trace, or benchmark.
-
-    Agent templates are created with ``client.agents.templates.create(...)``.
-
-    Args:
-        client: Authenticated Plural client.
-        obj: Environment, Trace, Benchmark, or Report.
-        **kwargs: Forwarded to the typed helper.
-
-    Returns:
-        Hosted record created by the studio API.
-    """
-    from plural.benchmarks.runner import Benchmark, Report
-    from plural.environments.env import Environment
-    from plural.tracing.schema import Trace
-
-    if isinstance(obj, Environment):
-        return create_environment(client, obj, **kwargs)
+    if hasattr(obj, "manifest") and callable(obj.manifest):
+        obj = obj.manifest()
+    if isinstance(obj, EnvironmentManifest):
+        return studio.environments.push(obj)
+    if isinstance(obj, TaskDefinition):
+        return studio.tasks.push(obj, **references)
+    if (
+        isinstance(obj, (DeterministicVerifier, HumanVerifier))
+        or getattr(obj, "kind", None) == "agent"
+    ):
+        return studio.verifiers.push(obj)
+    if isinstance(obj, AgentDefinition):
+        return studio.agents.push(obj, **references)
+    if isinstance(obj, HarnessPackage):
+        return studio.harnesses.push(obj)
+    if isinstance(obj, BenchmarkDefinition):
+        return studio.benchmarks.push(obj, **references)
     if isinstance(obj, Trace):
-        return push_trace(client, obj, **kwargs)
-    if isinstance(obj, Report):
-        return push_report(client, obj, **kwargs)
-    if isinstance(obj, Benchmark):
-        return push_report(client, obj.report, **_benchmark_kwargs(obj, kwargs))
-    raise InvalidRequestError(
-        "client.create accepts Environment, Trace, Benchmark, or Report; "
-        "create agent templates with client.agents.templates.create(...)"
-    )
+        return studio.traces.create(obj, **references)
+    raise InvalidRequestError("unsupported canonical SDK object")
 
 
-def update_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
-    """Update a hosted environment or benchmark by slug. Traces update by id.
-
-    Args:
-        client: Authenticated Plural client.
-        obj: Environment, Trace, Benchmark, or Report.
-        **kwargs: Forwarded to the typed helper.
-
-    Returns:
-        Hosted record updated by the studio API.
-    """
-    from plural.benchmarks.runner import Benchmark, Report
-    from plural.environments.env import Environment
-    from plural.tracing.schema import Trace
-
-    if isinstance(obj, Environment):
-        return update_environment(client, obj, **kwargs)
-    if isinstance(obj, Trace):
-        return push_trace(client, obj, **kwargs)
-    if isinstance(obj, (Report, Benchmark)):
-        report = obj.report if isinstance(obj, Benchmark) else obj
-        if report is None:
-            raise InvalidRequestError("run the benchmark before updating it")
-        if isinstance(obj, Benchmark):
-            fields = _benchmark_kwargs(obj, dict(kwargs))
-        else:
-            fields = dict(kwargs)
-        slug = fields.pop("slug", None) or _report_slug(report, name=fields.get("name"))
-        dumped = report.model_dump(mode="json") if hasattr(report, "model_dump") else dict(report)
-        body = {
-            "notes": fields.get("notes", ""),
-            "report": dumped,
-        }
-        if fields.get("name"):
-            body["name"] = fields["name"]
-        if fields.get("environment_id"):
-            body["environment_id"] = fields["environment_id"]
-        if fields.get("agent_id"):
-            body["agent_id"] = fields["agent_id"]
-        return Studio(client).benchmarks.update(slug, **body)
-    raise InvalidRequestError(
-        "client.update accepts Environment, Trace, Benchmark, or Report; "
-        "update agents with client.agents.update(...)"
-    )
+def update_object(client: Client, obj: Any, **references: Any) -> JsonObject:
+    """Publish a new immutable revision; revisions are never patched."""
+    return create_object(client, obj, **references)
 
 
-def push_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
-    """Create or update a hosted environment, trace, or benchmark.
+def push_object(client: Client, obj: Any, **references: Any) -> JsonObject:
+    """Publish a canonical revision; parent creation is idempotent by slug."""
+    return create_object(client, obj, **references)
 
-    Prefer :func:`create_object` or :func:`update_object` when the intent is
-    explicit. Agents are not accepted.
 
-    Args:
-        client: Authenticated Plural client.
-        obj: Environment, Trace, Benchmark, or Report.
-        **kwargs: Forwarded to the typed helper.
-
-    Returns:
-        Hosted record created or updated by the studio API.
-    """
-    from plural.benchmarks.runner import Benchmark, Report
-    from plural.environments.env import Environment
-    from plural.tracing.schema import Trace
-
-    if isinstance(obj, Environment):
-        return push_environment(client, obj, **kwargs)
-    if isinstance(obj, Trace):
-        return push_trace(client, obj, **kwargs)
-    if isinstance(obj, Report):
-        slug = kwargs.get("slug") or _report_slug(obj, name=kwargs.get("name"))
-        try:
-            Studio(client).benchmarks.get(slug)
-        except NotFoundError:
-            return push_report(client, obj, **kwargs)
-        return update_object(client, obj, **kwargs)
-    if isinstance(obj, Benchmark):
-        fields = _benchmark_kwargs(obj, dict(kwargs))
-        slug = fields.get("slug") or slugify(
-            fields.get("name") or obj.env.name, fallback="benchmark"
-        )
-        try:
-            Studio(client).benchmarks.get(slug)
-        except NotFoundError:
-            return push_report(client, obj.report, **fields)
-        return update_object(client, obj, **fields)
-    raise InvalidRequestError(
-        "client.push accepts Environment, Trace, Benchmark, or Report; "
-        "create agent templates with client.agents.templates.create(...)"
-    )
+__all__ = [
+    "AgentsAPI",
+    "BenchmarksAPI",
+    "EnvironmentsAPI",
+    "HarnessesAPI",
+    "JobsAPI",
+    "ReviewsAPI",
+    "Studio",
+    "TasksAPI",
+    "TracesAPI",
+    "TrialsAPI",
+    "VerifiersAPI",
+    "create_object",
+    "environment_manifest",
+    "push_object",
+    "slugify",
+    "studio_base_url",
+    "update_object",
+]

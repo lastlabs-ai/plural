@@ -1,3 +1,10 @@
+---
+route: /docs/guides/provider-plugins
+title: "Sandbox provider plugins"
+order: 290
+description: "Implement and package a sandbox provider plugin that enforces canonical runtime requirements and capability preflight."
+audience: all
+---
 # Sandbox provider plugins
 
 Package a plugin with an entry point in `pyproject.toml`:

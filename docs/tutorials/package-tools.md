@@ -1,38 +1,22 @@
-# Add native actions and verification to a package
+---
+route: /docs/tutorials/package-tools
+title: "Add actions, verification, and training capture"
+order: 60
+description: "Continue from the CLI walkthrough."
+audience: all
+---
+# Add actions, verification, and training capture
 
-Continue from the [CLI walkthrough](cli-walkthrough.md). This example adds a
-read-only native action and a verifier that checks the final answer. It uses
-synthetic public data and requires Docker for verification. It makes model
-calls when run.
+Continue from the [CLI walkthrough](cli-walkthrough.md).
 
-## 1. Implement an action
+## Environment actions and runtime
 
-Save `environment/lookup_order.py`:
-
-```python
-import json
-import sys
-
-arguments = json.load(sys.stdin)
-orders = {"A100": "shipped", "A200": "processing"}
-print(json.dumps({"status": orders.get(arguments["order_id"], "unknown")}))
-```
-
-The environment passes a JSON object on stdin. Your program writes its
-observation on stdout. Validate inputs and enforce service permissions in the
-implementation when replacing this example with a real service.
-
-## 2. Declare the action and instructions
-
-In `environment/environment.yaml`, replace the `instructions` and `actions`
-values, leaving the other fields intact:
+Declare native actions in `environment/environment.yaml`:
 
 ```yaml
-instructions: >-
-  Use lookup_order to find the order status. Reply with only the status word.
 actions:
   - name: lookup_order
-    description: Look up the status of an order.
+    description: Look up an order.
     kind: command
     command: [python, lookup_order.py]
     parameters:
@@ -41,110 +25,82 @@ actions:
         order_id: {type: string}
       required: [order_id]
       additionalProperties: false
-    timeout_seconds: 10
+runtime:
+  provider: docker
+  image: python:3.12-slim
+  network: none
+  targets: [docker]
 ```
 
-Or add the same action from the CLI:
+Environment owns this runtime, including provider, placement, network,
+resources, and secrets. Job files cannot override it.
+
+When `AgentDefinition.harness` is `None`, native actions are exposed through
+the built-in native protocol. An external Harness brings its own action loop;
+its compatibility and capability stamp are resolved against the Environment
+per Trial.
+
+## Deterministic, agent, and human Verifiers
+
+Create Verifiers independently:
 
 ```bash
-plural env action add --environment environment --name lookup_order \
-  --description 'Look up the status of an order.' \
-  --command python --command lookup_order.py
+plural verifier init correct.yaml --name correct --kind deterministic
+plural verifier init judge.yaml --name judge --kind agent
+plural verifier init review.yaml --name human-review --kind human
 ```
 
-Change the tasks file to a single task for this verifier:
+A deterministic Verifier runs its command. An agent Verifier runs a model
+against its rubric. Both own runtime/connectivity independently from the task
+Environment. A human Verifier launches no runtime and moves the Trial to
+`awaiting_review`.
 
-```json
-{"task_id":"order-a100","input":"What is the status of A100?"}
-```
-
-On the native path (`AgentTemplate.harness is None`) the runner uses
-`native.actions.v1` because the environment now has actions. `native.chat.v1`
-does not expose actions. A stamped harness never receives these native
-actions; it brings its own. Declared vendor harnesses cannot run.
-
-## 3. Add an isolated final-answer verifier
-
-Add this top-level `verifier` field to `environment/environment.yaml`:
-
-```yaml
-verifier:
-  command:
-    - python
-    - -c
-    - |
-      import json
-      from pathlib import Path
-      rows = [json.loads(line) for line in Path("artifacts/trajectory.jsonl").read_text().splitlines()]
-      messages = [row["message"] for row in rows if "message" in row]
-      answer = (messages[-1].get("content") or "").strip().lower() if messages else ""
-      reward = float(answer == "shipped")
-      Path("verifier-result.json").write_text(json.dumps({
-          "reward": reward,
-          "scores": {"correct_status": reward},
-          "evidence": ["Observed final answer: " + answer],
-      }))
-  required_artifacts: [trajectory.jsonl]
-  result_path: verifier-result.json
-  timeout_seconds: 30
-```
-
-This check intentionally uses a public, fixed answer for one demonstration
-task. It verifies the final answer, not that the lookup was performed. A
-production verifier should check evidence that actually establishes the task's
-success, including authoritative state where needed. Harness-authored
-trajectories are claims, not independent proof.
-
-Plural starts the verifier separately with networking disabled and provides
-declared artifacts beneath `artifacts/`. The built-in harness already declares
-`trajectory.jsonl` as an artifact. The runner downloads the union of declared outputs and artifacts and makes
-those files available to the verifier. List mandatory evidence paths in
-`required_artifacts`; every needed file must be declared by the harness.
-
-For private labels, the verifier receives `.plural/verifier-input.json` with
-`task`, `expected`, `verifier_input`, and artifact paths. Never put private
-labels or verifier secrets in the source bundle/image visible to the harness.
-A task file inside a staged environment source directory is readable to a
-harness with filesystem access even if the protocol excludes its `expected`
-field. Keep secret evaluator data outside that source and supply it through the
-execution specification. See [security](../operations/security.md).
-
-## 4. Refresh pins and run
-
-The environment and harness have both changed. Regenerate their references in
-this order (these commands replace the existing benchmark and agent files):
+Pin one or more Verifiers on a Task:
 
 ```bash
-plural harness validate harness
-plural harness add harness --environment environment
-plural env validate environment
-plural benchmark init benchmark.yaml --name support-smoke --environment environment --force
-plural agent init agent.yaml --name candidate --model openai/gpt-4o-mini \
-  --environment environment --harness harness --secret PLURAL_API_KEY --force
-plural run job.yaml --dry-run
-plural runtime doctor docker
-plural run job.yaml --runtime docker --unsafe-local
+plural task init task.yaml --id order-a100 \
+  --environment environment \
+  --verifier correct.yaml --verifier judge.yaml
 ```
 
-Expect one trial. Its reward is `1.0` only if the final answer is exactly
-`shipped`; a completed run with reward `0.0` is a valid failed task, whereas a
-verifier crash is an execution error. The verifier cannot run on `local`, because
-that provider cannot enforce its no-network requirement.
+Edit `verifier_weights` in the Task file when weights are not all `1.0`.
+Successful finite rewards aggregate by normalized weight in declaration order,
+so identical revision graphs produce identical totals.
 
-For file-based verifier programs, install the verifier in the runtime image
-and use its absolute command path. The verifier sandbox does not automatically
-receive the environment source upload used by the harness phase.
-
-## 5. Regrade without calling the model again
+## Eval and train
 
 ```bash
-plural job regrade JOB_ID
+plural run task.yaml --agent agent.yaml --mode eval
+plural run task.yaml --agent agent.yaml --mode train
+plural run task.yaml --agent agent.yaml --mode eval --offline
 ```
 
-Regrade uses the stored immutable artifacts and locked verifier. It requires
-successful stored results for every trial and links the new receipt to the
-source receipt. It does not pick up arbitrary changes you just made to a local
-verifier file; a changed evaluation definition belongs to a new revision.
+Eval always executes final Verifiers but disables Environment Rewarders and
+TITO. Train enables Rewarders and requires exact TITO support from the selected
+Harness. The first two commands synchronize and submit hosted Jobs by default;
+the explicit offline form executes locally and stores its durable log under
+`.plural/jobs`. `--private` has the same behavior.
 
-Continue with [job operations](../guides/jobs.md) or
-[custom harness protocol and packaging](../guides/harnesses.md).
+A TITO JSONL record must include:
+
+- `step`, `tokenizer`, and `model`;
+- `input_token_ids`, `output_token_ids`, and `observation_token_ids`;
+- `output_logprobs` and `output_top_logprobs`, each aligned to output tokens;
+- `output_text` and `assistant_message`;
+- validated `input_len`, `output_len`, and `observation_len`.
+
+The engine validates lengths and finite probabilities before storing the JSONL
+as an immutable SHA-256-addressed artifact. Trace and event payloads carry only
+artifact references, never the giant token arrays.
+
+## Observe and complete review
+
+```bash
+plural job watch JOB_ID --hosted --json
+plural review list JOB_ID
+plural review submit JOB_ID TRIAL_ID \
+  --verifier human-review --score 1 --feedback approved
+```
+
+Review submission appends durable state; it does not rewrite prior progress
+events or TrialExecutions.

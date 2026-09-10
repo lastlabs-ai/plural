@@ -1,3 +1,10 @@
+---
+route: /docs/operations/security
+title: "Security, isolation, and trust"
+order: 410
+description: "Interactive tokens are stored in the OS keyring when the optional keyring extra works; otherwise Plural writes owner-only credentials.json in an owner-only config directory. This fallback is permissions protection, not encryption. Non-secre"
+audience: all
+---
 # Security, isolation, and trust
 
 ## Credentials
@@ -16,15 +23,17 @@ runtime. Rotate credentials after any suspected exposure.
 
 ## Boundaries
 
-The Environment owns instructions, tasks, hidden evaluator values, commands,
-code/source, limits, policy, and verifier. The harness sees only public task
-data and the declared environment view. It must not score itself.
+The Environment owns overview, actions, typed hidden state and observation,
+code/source, resources, secrets policy, limits, and runtime. A Task separately
+pins that Environment plus weighted Verifier revisions. The Harness sees only
+the Task's public payload and declared Environment view. It must not score
+itself.
 
-The verifier is launched separately, with networking disabled, and receives
-hidden expected/verifier input plus declared artifacts. Separate launch reduces
-accidental leakage but shares the selected provider, host/provider account,
-runtime image policy, and local job store. It is not an independent
-administrative trust domain.
+A deterministic or agent Verifier is launched separately using its own declared
+runtime and connectivity, and receives the Task plus declared artifacts.
+Separate launch reduces accidental leakage but is not an independent
+administrative trust domain. Human Verifiers persist `awaiting_review` without
+launching a runtime.
 
 `local` provides no isolation. Docker drops Linux capabilities, enables
 no-new-privileges, runs as UID/GID 65532, applies a pid limit, and can disable
@@ -54,10 +63,9 @@ untrusted input when opening or publishing them.
 ## Network and resources
 
 Prefer `network: none`. Restricted allowlists are available only where the
-provider advertises them (currently Daytona, not Docker/local). Default
-`RuntimeSpec.network` is `full`, so set a stricter value deliberately. Limits
-are provider-specific; unsupported disk/pid/read-only controls fail rather than
-degrade.
+provider advertises them (currently Daytona, not Docker/local).
+`EnvironmentRuntime.network` defaults to `none`. Limits are provider-specific;
+unsupported disk/pid/read-only controls fail rather than degrade.
 
 Timeout is enforced by the provider/host and cancellation destroys active
 sandboxes where possible. A process that escapes the provider boundary, a

@@ -1,0 +1,99 @@
+{
+  "additionalProperties": false,
+  "description": "Append-only, sanitized execution progress event.",
+  "properties": {
+    "data": {
+      "additionalProperties": true,
+      "title": "Data",
+      "type": "object"
+    },
+    "execution_id": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Execution Id"
+    },
+    "job_id": {
+      "minLength": 1,
+      "title": "Job Id",
+      "type": "string"
+    },
+    "message": {
+      "default": "",
+      "title": "Message",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "2",
+      "default": "2",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sequence": {
+      "minimum": 1,
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "status": {
+      "title": "Status",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "trial_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trial Id"
+    },
+    "type": {
+      "enum": [
+        "planned",
+        "queued",
+        "provisioning",
+        "environment_ready",
+        "running",
+        "heartbeat",
+        "model_turn",
+        "action",
+        "observation",
+        "reward",
+        "log",
+        "verifying",
+        "awaiting_review",
+        "retrying",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "completed"
+      ],
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "sequence",
+    "timestamp",
+    "job_id",
+    "type",
+    "status"
+  ],
+  "title": "ProgressEvent",
+  "type": "object"
+}

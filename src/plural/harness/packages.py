@@ -46,7 +46,7 @@ class HarnessRecipe(BaseModel):
 def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> HarnessPackage:
     manifest = HarnessManifest(
         name=profile,
-        version="1.0.0",
+        revision="1.0.0",
         description=f"Plural first-party {profile} harness profile.",
         implementation="runnable",
         command=("python", "native_runner.py", profile),

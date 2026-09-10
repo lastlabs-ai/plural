@@ -21,10 +21,9 @@ def main() -> None:
     timeout = float(limits.get("max_seconds", 120))
     prompt = json.dumps(
         {
-            "instructions": environment.get("instructions"),
-            "context": environment.get("context"),
             "task": request.get("task"),
             "agent": request.get("agent"),
+            "observation": environment.get("observation"),
         },
         sort_keys=True,
     )

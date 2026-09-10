@@ -1,3 +1,10 @@
+---
+route: /docs/guides/capture-traces
+title: "Capture traces from an existing app"
+order: 340
+description: "Configure credentials using setup, then wrap the call your application already makes. This example uses synthetic data and SQLite so a later review can update the stored trace."
+audience: all
+---
 # Capture traces from an existing app
 
 Configure credentials using [setup](../getting-started/setup.md), then wrap the

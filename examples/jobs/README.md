@@ -8,18 +8,19 @@ uv run python examples/jobs/01_local_job.py
 uv run python examples/jobs/02_docker_job.py
 uv run python examples/jobs/03_daytona_job.py
 uv run python examples/jobs/04_attempts_and_concurrency.py
-uv run python examples/jobs/05_resume_and_regrade.py
+uv run python examples/jobs/05_resume.py
 uv run python examples/jobs/06_studio_sync.py
 ```
 
 All commands above are credential-free in their default mode. `02` and `03`
 validate/plan but require `PLURAL_RUN_DOCKER=1` or
-`PLURAL_RUN_DAYTONA=1` for external execution. `05` demonstrates local resume;
-setting `PLURAL_RUN_DOCKER=1` also runs verifier-only regrade because the local
-provider cannot enforce the verifier's required no-network boundary. `06` only prints the legacy
-Studio payload unless `PLURAL_RUN_STUDIO=1` is explicitly set.
+`PLURAL_RUN_DAYTONA=1` for external execution. `05` demonstrates durable resume
+without rerunning successful Trials. `06` prints the canonical schema-v2 Job
+graph for a compatible hosted API—the same graph an authenticated `plural run`
+synchronizes before submitting and watching its hosted Job.
 
 `minimal_harness/` is a complete `plural-harness-v1` package. It reads one
 request, writes one result plus evidence/trajectory artifacts, and emits one
-terminal event. `_foundation.py` binds it to an Environment, Benchmark, Agent,
-verifier, and provider-neutral Job.
+terminal event. `_foundation.py` builds first-class Task and Verifier revisions,
+an Environment-independent AgentDefinition, a Benchmark source, and an
+Environment-routed Job.

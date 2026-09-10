@@ -89,10 +89,9 @@ def main() -> None:
             raise RuntimeError("ACP session/new response omitted sessionId")
         prompt = json.dumps(
             {
-                "instructions": environment.get("instructions"),
-                "context": environment.get("context"),
                 "task": request.get("task"),
                 "agent": request.get("agent"),
+                "observation": environment.get("observation"),
             },
             sort_keys=True,
         )

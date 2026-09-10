@@ -1,3 +1,10 @@
+---
+route: /docs/guides/redact-pii
+title: "Redact PII before anything hits disk"
+order: 360
+description: "Client(capturecontent=False) is the default. When no custom redactor is supplied, the client installs Redactor(dropcontent=True) before its sink."
+audience: all
+---
 # Redact PII before anything hits disk
 
 `Client(capture_content=False)` is the default. When no custom redactor is supplied, the client installs `Redactor(drop_content=True)` before its sink.

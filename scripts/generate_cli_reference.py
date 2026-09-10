@@ -56,6 +56,17 @@ def render() -> str:
         Complete generated Markdown.
     """
     sections = [
+        "---",
+        "route: /docs/reference/cli-commands",
+        'title: "Generated CLI command reference"',
+        "order: 510",
+        (
+            'description: "Generated reference for every Plural CLI command '
+            'and option exposed by the Typer application."'
+        ),
+        "audience: all",
+        "---",
+        "",
         "# Generated CLI command reference",
         "",
         "This file is generated from the Typer application. Do not edit it by hand.",

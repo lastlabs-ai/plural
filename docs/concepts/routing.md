@@ -1,3 +1,10 @@
+---
+route: /docs/concepts/routing
+title: "Routing policy"
+order: 220
+description: "Scenario: gpt-4o is down or rate-limited. You want the request to fall back to Claude, prefer cheaper models when quality is equal, and leave a seat for a learned autorouter later."
+audience: all
+---
 # Routing policy
 
 **Scenario:** `gpt-4o` is down or rate-limited. You want the request to fall back to Claude, prefer cheaper models when quality is equal, and leave a seat for a learned autorouter later.
