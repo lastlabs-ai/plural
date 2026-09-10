@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from typer.core import TyperGroup
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from plural.cli.main import app
@@ -68,19 +70,18 @@ def test_agent_yaml_has_no_environment_binding(tmp_path: Path) -> None:
     assert "environment" not in agent.model_dump()
 
 
-def test_cli_help_exposes_v2_objects_and_watch(tmp_path: Path) -> None:
+def test_cli_help_exposes_v2_objects_and_watch() -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     for command in ("env", "task", "verifier", "agent", "benchmark", "review"):
         assert command in result.stdout
-    watch = runner.invoke(
-        app,
-        ["job", "watch", "--help"],
-        terminal_width=160,
-    )
-    assert watch.exit_code == 0
-    assert "--json" in watch.stdout
+    root = get_command(app)
+    assert isinstance(root, TyperGroup)
+    job = root.commands["job"]
+    assert isinstance(job, TyperGroup)
+    watch = job.commands["watch"]
+    assert any("--json" in parameter.opts for parameter in watch.params)
 
 
 def test_direct_benchmark_dry_run_supports_mode_attempts(tmp_path: Path) -> None:
