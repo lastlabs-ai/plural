@@ -24,6 +24,8 @@ from plural.cli.config import (
     save_config,
 )
 from plural.cli.scaffold import (
+    add_environment_action,
+    add_environment_resource,
     add_task,
     allow_harness,
     allow_harness_package,
@@ -33,15 +35,27 @@ from plural.cli.scaffold import (
     load_harness,
     load_harness_reference,
     load_job,
+    remove_environment_action,
     scaffold_agent,
     scaffold_benchmark,
     scaffold_environment,
     scaffold_harness,
     scaffold_job,
+    unstamp_harness,
 )
-from plural.domain import RetryPolicy, TaskDefinition
+from plural.domain import (
+    AgentBinding,
+    AgentTemplate,
+    EnvironmentResource,
+    ExecutionTarget,
+    NativeAction,
+    RetryPolicy,
+    TaskDefinition,
+    resolve_harness_stamp,
+)
 from plural.execution import Job as ExecutionJob
 from plural.execution import JobStore
+from plural.execution.policy import ProjectPolicy, resolve_effective_policy
 from plural.harness import HarnessRunner, HarnessRunRequest
 from plural.harness.retrieval import build_archive, materialize_package
 from plural.sandbox import LocalProvider, NetworkMode, SandboxRequirements, default_registry
@@ -56,10 +70,14 @@ org_app = typer.Typer(help="Inspect and select organizations.")
 project_app = typer.Typer(help="Inspect and select projects.")
 env_app = typer.Typer(help="Manage environment packages.")
 env_task_app = typer.Typer(help="Manage environment-owned tasks.")
-env_harness_app = typer.Typer(help="Manage environment-allowed harnesses.")
+env_action_app = typer.Typer(help="Manage environment-owned native actions.")
+env_resource_app = typer.Typer(help="Manage environment resources.")
+env_harness_app = typer.Typer(help="Stamp and inspect harness grants.")
 harness_app = typer.Typer(help="Manage immutable agent harness packages.")
 benchmark_app = typer.Typer(help="Manage ordered benchmark definitions.")
 agent_app = typer.Typer(help="Inspect agents and local agent configs.")
+agent_template_app = typer.Typer(help="Manage agent templates.")
+agent_instance_app = typer.Typer(help="Inspect hosted agent instances.")
 runtime_app = typer.Typer(help="Inspect execution-provider integration points.")
 job_app = typer.Typer(help="Inspect and control jobs.")
 trial_app = typer.Typer(help="Inspect immutable job trials.")
@@ -69,7 +87,11 @@ app.add_typer(org_app, name="org")
 app.add_typer(project_app, name="project")
 app.add_typer(env_app, name="env")
 env_app.add_typer(env_task_app, name="task")
+env_app.add_typer(env_action_app, name="action")
+env_app.add_typer(env_resource_app, name="resource")
 env_app.add_typer(env_harness_app, name="harness")
+agent_app.add_typer(agent_template_app, name="template")
+agent_app.add_typer(agent_instance_app, name="instance")
 app.add_typer(harness_app, name="harness")
 app.add_typer(benchmark_app, name="benchmark")
 app.add_typer(agent_app, name="agent")
@@ -495,7 +517,9 @@ def env_validate(path: Path = typer.Argument(Path("."))) -> None:
             "valid": True,
             "identity": environment.identity.model_dump(mode="json"),
             "tasks": len(environment.tasks),
-            "allowed_harnesses": len(environment.allowed_harnesses),
+            "stamped_harnesses": len(environment.harness_policy.allowed_harnesses),
+            "actions": len(environment.actions),
+            "network": environment.runtime.network.value,
         }
     )
 
@@ -569,6 +593,107 @@ def env_task_list(path: Path = typer.Option(Path("."), "--environment", "-e")) -
     _emit([task.model_dump(mode="json", exclude={"expected"}) for task in environment.tasks])
 
 
+@env_action_app.command("add")
+def env_action_add(
+    name: str,
+    path: Path = typer.Option(Path("."), "--environment", "-e"),
+    description: str = typer.Option(..., "--description"),
+    command: list[str] | None = typer.Option(None, "--command"),
+) -> None:
+    """Add a native action owned by the environment."""
+    try:
+        destination = add_environment_action(
+            path,
+            NativeAction(
+                name=name,
+                description=description,
+                command=tuple(command or ()),
+            ),
+        )
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
+    _emit({"updated": str(destination), "action": name})
+
+
+@env_action_app.command("list")
+def env_action_list(path: Path = typer.Option(Path("."), "--environment", "-e")) -> None:
+    """List native actions."""
+    try:
+        environment = load_environment(path)
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
+    _emit([item.model_dump(mode="json") for item in environment.actions])
+
+
+@env_action_app.command("remove")
+def env_action_remove(
+    name: str,
+    path: Path = typer.Option(Path("."), "--environment", "-e"),
+) -> None:
+    """Remove a native action."""
+    try:
+        destination = remove_environment_action(path, name)
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
+    _emit({"updated": str(destination), "removed": name})
+
+
+@env_resource_app.command("add")
+def env_resource_add(
+    name: str,
+    kind: str = typer.Option("file", "--kind"),
+    path: Path = typer.Option(Path("."), "--environment", "-e"),
+    resource_path: str | None = typer.Option(None, "--path"),
+) -> None:
+    """Add a resource the environment provides."""
+    try:
+        destination = add_environment_resource(
+            path,
+            EnvironmentResource(kind=kind, name=name, path=resource_path),  # type: ignore[arg-type]
+        )
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
+    _emit({"updated": str(destination), "resource": name})
+
+
+@env_resource_app.command("list")
+def env_resource_list(path: Path = typer.Option(Path("."), "--environment", "-e")) -> None:
+    """List environment resources."""
+    try:
+        environment = load_environment(path)
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
+    _emit([item.model_dump(mode="json") for item in environment.resources])
+
+
+@env_app.command("capabilities")
+def env_capabilities(path: Path = typer.Argument(Path("."))) -> None:
+    """Show required capabilities and per-target availability."""
+    try:
+        environment = load_environment(path)
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
+    runtime = environment.runtime
+    exclusions = {
+        target.value: reason for target, reason in runtime.target_exclusions().items()
+    }
+    _emit(
+        {
+            "environment": environment.name,
+            "network": runtime.network.value,
+            "required_capabilities": sorted(item.value for item in runtime.required_capabilities()),
+            "targets": {
+                target.value: {
+                    "declared": target in runtime.targets,
+                    "available": target in runtime.available_targets(),
+                    "excluded": exclusions.get(target.value),
+                }
+                for target in ExecutionTarget
+            },
+        }
+    )
+
+
 @env_harness_app.command("add")
 def env_harness_add(
     harness: Path,
@@ -582,6 +707,42 @@ def env_harness_add(
     _emit({"updated": str(destination)})
 
 
+@env_harness_app.command("stamp")
+def env_harness_stamp(
+    harness: Path,
+    path: Path = typer.Option(Path("."), "--environment", "-e"),
+) -> None:
+    """Stamp a harness onto an environment and show the grant matrix."""
+    try:
+        destination = allow_harness(path, harness)
+        environment = load_environment(path)
+        package = load_harness(harness)
+        stamp = resolve_harness_stamp(environment, package)
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
+    _emit(
+        {
+            "updated": str(destination),
+            "stamp": stamp.model_dump(mode="json"),
+            "granted": sorted(item.value for item in stamp.granted),
+            "denied": stamp.denial_reasons,
+        }
+    )
+
+
+@env_harness_app.command("unstamp")
+def env_harness_unstamp(
+    name: str,
+    path: Path = typer.Option(Path("."), "--environment", "-e"),
+) -> None:
+    """Remove a stamped harness from the environment allowlist."""
+    try:
+        destination = unstamp_harness(path, name)
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
+    _emit({"updated": str(destination), "removed": name})
+
+
 @env_harness_app.command("list")
 def env_harness_list(path: Path = typer.Option(Path("."), "--environment", "-e")) -> None:
     """List exact harness revisions allowed by an environment."""
@@ -589,7 +750,24 @@ def env_harness_list(path: Path = typer.Option(Path("."), "--environment", "-e")
         environment = load_environment(path)
     except (OSError, ValueError, ValidationError) as exc:
         _error(str(exc))
-    _emit([item.model_dump(mode="json") for item in environment.allowed_harnesses])
+    _emit(
+        [item.model_dump(mode="json") for item in environment.harness_policy.allowed_harnesses]
+    )
+
+
+@env_harness_app.command("capabilities")
+def env_harness_capabilities(
+    harness: Path,
+    path: Path = typer.Option(Path("."), "--environment", "-e"),
+) -> None:
+    """Show granted vs denied capabilities for one stamp."""
+    try:
+        environment = load_environment(path)
+        package = load_harness(harness)
+        stamp = resolve_harness_stamp(environment, package)
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
+    _emit(stamp.model_dump(mode="json"))
 
 
 @harness_app.command("init")
@@ -849,6 +1027,146 @@ def agent_show(path: Path = typer.Argument(Path("agent.yaml"))) -> None:
         _error(str(exc))
 
 
+@agent_template_app.command("init")
+def agent_template_init(
+    path: Path = typer.Argument(Path("agent.yaml")),
+    name: str = typer.Option("agent", "--name"),
+    model: str = typer.Option(..., "--model"),
+    environment: Path = typer.Option(Path("environment.yaml"), "--environment", "-e"),
+    harness: str | None = typer.Option(None, "--harness"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    """Create a local agent template."""
+    if harness is None:
+        try:
+            environment_manifest = load_environment(environment)
+            destination = path if path.suffix else path / "agent.yaml"
+            if destination.exists() and not force:
+                raise FileExistsError(f"{destination} already exists; pass --force to replace it")
+            template = AgentTemplate(
+                name=name,
+                model=model,
+                environment=environment_manifest.identity,
+            )
+            from plural.cli.scaffold import write_yaml
+
+            write_yaml(destination, json.loads(template.model_dump_json()))
+        except (OSError, ValueError, ValidationError, FileExistsError) as exc:
+            _error(str(exc))
+        _emit({"created": str(destination)})
+        return
+    agent_init(
+        path=path,
+        name=name,
+        model=model,
+        environment=environment,
+        harness=harness,
+        harness_digest=None,
+        secret=None,
+        force=force,
+    )
+
+
+@agent_template_app.command("show")
+def agent_template_show(path: Path = typer.Argument(Path("agent.yaml"))) -> None:
+    """Show a local agent template."""
+    agent_show(path)
+
+
+@agent_template_app.command("validate")
+def agent_template_validate(path: Path = typer.Argument(Path("agent.yaml"))) -> None:
+    """Validate a local agent template."""
+    try:
+        template = load_agent(path)
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
+    _emit({"valid": True, "digest": template.content_hash})
+
+
+@agent_template_app.command("push")
+def agent_template_push(
+    ctx: typer.Context,
+    path: Path = typer.Argument(Path("agent.yaml")),
+) -> None:
+    """Publish a local agent template to the hosted API."""
+    try:
+        template = load_agent(path)
+        client = _hosted_client(_state(ctx))
+        if client is None:
+            raise ValueError("template publication requires authentication")
+        created = client.agents.templates.create(
+            name=template.name,
+            model=template.model,
+            package_spec=template.model_dump(mode="json"),
+        )
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        _error(str(exc))
+    _emit(created)
+
+
+def _instance_client(ctx: typer.Context):
+    client = _hosted_client(_state(ctx))
+    if client is None:
+        _error("hosted instance commands require authentication")
+    return client
+
+
+@agent_instance_app.command("list")
+def agent_instance_list(ctx: typer.Context) -> None:
+    """List hosted agent instances."""
+    try:
+        _emit(_instance_client(ctx).agents.instances.list())
+    except Exception as exc:  # noqa: BLE001
+        _error(str(exc))
+
+
+@agent_instance_app.command("show")
+def agent_instance_show(ctx: typer.Context, instance_id: str) -> None:
+    """Show one hosted agent instance."""
+    try:
+        _emit(_instance_client(ctx).agents.instances.get(instance_id))
+    except Exception as exc:  # noqa: BLE001
+        _error(str(exc))
+
+
+@agent_instance_app.command("memory")
+def agent_instance_memory(ctx: typer.Context, instance_id: str) -> None:
+    """List instance memories."""
+    try:
+        _emit(_instance_client(ctx).agents.instances.memories(instance_id).list())
+    except Exception as exc:  # noqa: BLE001
+        _error(str(exc))
+
+
+@agent_instance_app.command("skills")
+def agent_instance_skills(ctx: typer.Context, instance_id: str) -> None:
+    """List instance skills."""
+    try:
+        _emit(_instance_client(ctx).agents.instances.skills(instance_id).list())
+    except Exception as exc:  # noqa: BLE001
+        _error(str(exc))
+
+
+@agent_instance_app.command("data")
+def agent_instance_data(ctx: typer.Context, instance_id: str) -> None:
+    """List instance artifacts."""
+    try:
+        _emit(_instance_client(ctx).agents.instances.data(instance_id).list())
+    except Exception as exc:  # noqa: BLE001
+        _error(str(exc))
+
+
+@agent_instance_app.command("experience")
+def agent_instance_experience(ctx: typer.Context, instance_id: str) -> None:
+    """Show instance experience counters."""
+    try:
+        _emit(_instance_client(ctx).agents.instances.experience(instance_id))
+    except Exception as exc:  # noqa: BLE001
+        _error(str(exc))
+
+
 @runtime_app.command("list")
 def runtime_list() -> None:
     """List providers that are genuinely available."""
@@ -866,13 +1184,66 @@ def runtime_show(name: str) -> None:
 
 
 @runtime_app.command("doctor")
-def runtime_doctor(name: str = typer.Argument("local")) -> None:
-    """Check provider dependencies, daemon, or credentials."""
+def runtime_doctor(
+    name: str = typer.Argument("local"),
+    env_path: Path | None = typer.Option(None, "--env"),
+) -> None:
+    """Check provider health, or evaluate providers against one environment."""
     try:
-        runtime = asyncio.run(default_registry.get(name).doctor())
+        if env_path is None:
+            runtime = asyncio.run(default_registry.get(name).doctor())
+            _emit(runtime)
+            return
+        environment = load_environment(env_path)
+        reports = []
+        for doctor in asyncio.run(default_registry.doctors()):
+            try:
+                provider = default_registry.get(doctor.name)
+            except KeyError:
+                continue
+            capabilities = asyncio.run(provider.capabilities())
+            target = (
+                ExecutionTarget.LOCAL
+                if doctor.name == "local"
+                else ExecutionTarget.REMOTE
+                if doctor.name == "daytona"
+                else ExecutionTarget.DOCKER
+            )
+            try:
+                policy = resolve_effective_policy(
+                    environment=environment,
+                    template=AgentTemplate(
+                        name="doctor",
+                        model="openai/gpt-4.1-mini",
+                        environment=environment.identity,
+                    ),
+                    stamp=None,
+                    project=ProjectPolicy.permissive(allow_unsafe_local=True),
+                    provider=capabilities,
+                    requested_target=target,
+                )
+                reports.append(
+                    {
+                        "provider": doctor.name,
+                        "target": target.value,
+                        "ok": True,
+                        "enforced": sorted(item.value for item in policy.enforced),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                reports.append(
+                    {
+                        "provider": doctor.name,
+                        "target": target.value,
+                        "ok": False,
+                        "error": str(exc),
+                    }
+                )
+        _emit({"environment": environment.name, "providers": reports})
     except KeyError:
         _error(f"unknown runtime {name!r}")
-    _emit(runtime)
+    except (OSError, ValueError, ValidationError) as exc:
+        _error(str(exc))
 
 
 @app.command("run")
@@ -901,7 +1272,7 @@ def run_job(
         spec = load_job(job)
         updates: dict[str, Any] = {}
         if agent:
-            updates["agents"] = tuple(load_agent(path) for path in agent)
+            updates["agents"] = tuple(AgentBinding(template=load_agent(path)) for path in agent)
         if n_attempts is not None:
             updates["n_attempts"] = n_attempts
         if concurrency is not None:
@@ -910,8 +1281,8 @@ def run_job(
             runtime_updates: dict[str, Any] = {"provider": runtime}
             if (
                 runtime == "docker"
-                and spec.runtime.image is None
-                and spec.runtime.build_context is None
+                and spec.environment.runtime.image is None
+                and spec.environment.runtime.build_context is None
             ):
                 job_source = job / "job.yaml" if job.is_dir() else job
                 raw_job = yaml.safe_load(job_source.read_text(encoding="utf-8"))
@@ -923,17 +1294,63 @@ def run_job(
                 environment_source = (
                     environment_path if environment_path.is_dir() else environment_path.parent
                 )
-                runtime_updates["build_context"] = str(environment_source.resolve())
+                updates["environment"] = spec.environment.model_copy(
+                    update={
+                        "runtime": spec.environment.runtime.model_copy(
+                            update={"build_context": str(environment_source.resolve())}
+                        )
+                    }
+                )
             updates["runtime"] = spec.runtime.model_copy(update=runtime_updates)
         if unsafe_local:
             base_runtime = updates.get("runtime", spec.runtime)
-            updates["runtime"] = base_runtime.model_copy(update={"unsafe_local": True})
+            updates["runtime"] = base_runtime.model_copy(
+                update={"provider": "local", "unsafe_local": True}
+            )
+            env_runtime = (updates.get("environment") or spec.environment).runtime
+            updates["environment"] = (updates.get("environment") or spec.environment).model_copy(
+                update={
+                    "runtime": env_runtime.model_copy(
+                        update={
+                            "network": NetworkMode.FULL,
+                            "network_allowlist": (),
+                            "allow_unsafe_local": True,
+                            "build_context": None,
+                            "dockerfile": None,
+                            "targets": frozenset(
+                                {*env_runtime.targets, ExecutionTarget.LOCAL}
+                            ),
+                        }
+                    )
+                }
+            )
         if retry is not None:
             updates["retry"] = RetryPolicy(
                 max_retries=retry,
                 retryable_codes=spec.retry.retryable_codes,
             )
         if updates:
+            if "environment" in updates:
+                environment = updates["environment"]
+                rebound: list[AgentBinding] = []
+                for binding in updates.get("agents", spec.agents):
+                    template = binding.template.model_copy(
+                        update={"environment": environment.identity}
+                    )
+                    if template.harness_package is not None:
+                        template = template.model_copy(
+                            update={
+                                "stamp": resolve_harness_stamp(
+                                    environment, template.harness_package
+                                )
+                            }
+                        )
+                    rebound.append(AgentBinding(template=template, instance=binding.instance))
+                updates["agents"] = tuple(rebound)
+                if "benchmark" not in updates:
+                    updates["benchmark"] = spec.benchmark.model_copy(
+                        update={"environment": environment.identity}
+                    )
             spec = type(spec).model_validate({**spec.model_dump(mode="json"), **updates})
         plan = spec.plan()
     except (OSError, ValueError, ValidationError, json.JSONDecodeError) as exc:

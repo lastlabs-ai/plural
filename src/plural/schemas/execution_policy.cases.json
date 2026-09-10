@@ -1,0 +1,232 @@
+{
+  "cases": [
+    {
+      "id": "provider_lacks_network_none",
+      "expect": "error",
+      "layer": "provider",
+      "requested_target": "docker",
+      "environment": {
+        "name": "support-triage",
+        "runtime": {
+          "network": "none",
+          "targets": ["docker", "remote"]
+        }
+      },
+      "template": {},
+      "stamp": null,
+      "project": {
+        "allowed_targets": ["local", "docker", "remote"],
+        "network_ceiling": "full",
+        "allow_unsafe_local": true
+      },
+      "provider": {
+        "provider": "local",
+        "available": true,
+        "capabilities": [
+          "upload",
+          "download",
+          "timeout",
+          "cancel",
+          "working_directory",
+          "environment",
+          "log_capture"
+        ]
+      },
+      "error_contains": "network_none required by environment 'support-triage' is not enforceable by provider 'local'"
+    },
+    {
+      "id": "project_denies_local_target",
+      "expect": "error",
+      "layer": "project",
+      "requested_target": "local",
+      "environment": {
+        "name": "support-triage",
+        "runtime": {
+          "network": "full",
+          "targets": ["local", "docker", "remote"],
+          "allow_unsafe_local": true
+        }
+      },
+      "template": {},
+      "stamp": null,
+      "project": {
+        "allowed_targets": ["docker", "remote"],
+        "network_ceiling": "full",
+        "allow_unsafe_local": true
+      },
+      "provider": {
+        "provider": "local",
+        "available": true,
+        "capabilities": [
+          "upload",
+          "download",
+          "timeout",
+          "cancel",
+          "working_directory",
+          "environment",
+          "log_capture"
+        ]
+      },
+      "error_contains": "target local required by agent is not allowed by project policy"
+    },
+    {
+      "id": "environment_excludes_local_for_network_none",
+      "expect": "error",
+      "layer": "environment",
+      "requested_target": "local",
+      "environment": {
+        "name": "support-triage",
+        "runtime": {
+          "network": "none",
+          "targets": ["local", "docker", "remote"],
+          "allow_unsafe_local": true
+        }
+      },
+      "template": {},
+      "stamp": null,
+      "project": {
+        "allowed_targets": ["local", "docker", "remote"],
+        "network_ceiling": "full",
+        "allow_unsafe_local": true
+      },
+      "provider": {
+        "provider": "local",
+        "available": true,
+        "capabilities": [
+          "upload",
+          "download",
+          "timeout",
+          "cancel",
+          "working_directory",
+          "environment",
+          "log_capture",
+          "network_none"
+        ]
+      },
+      "error_contains": "cannot enforce network=none required by environment 'support-triage' is not enforceable by target 'local'"
+    },
+    {
+      "id": "project_blocks_harness_capabilities",
+      "expect": "error",
+      "layer": "project",
+      "requested_target": "docker",
+      "environment": {
+        "name": "support-triage",
+        "runtime": {
+          "network": "full",
+          "targets": ["docker", "remote"]
+        }
+      },
+      "template": {
+        "harness": {
+          "name": "hermes",
+          "revision": "1.0.0",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "stamp": {
+        "environment": {
+          "name": "support-triage",
+          "revision": "0.1.0",
+          "digest": "will-be-replaced"
+        },
+        "harness": {
+          "name": "hermes",
+          "revision": "1.0.0",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "declared": ["shell", "web_search"],
+        "granted": ["web_search"],
+        "denied": ["shell"],
+        "denial_reasons": {}
+      },
+      "project": {
+        "allowed_targets": ["docker", "remote"],
+        "network_ceiling": "full",
+        "allowed_harness_capabilities": ["shell"],
+        "allow_unsafe_local": false
+      },
+      "provider": {
+        "provider": "docker",
+        "available": true,
+        "capabilities": [
+          "upload",
+          "download",
+          "timeout",
+          "cancel",
+          "working_directory",
+          "environment",
+          "log_capture"
+        ]
+      },
+      "error_contains": "has no granted capabilities after project policy"
+    },
+    {
+      "id": "agent_requests_undeclared_target",
+      "expect": "error",
+      "layer": "agent",
+      "requested_target": "remote",
+      "environment": {
+        "name": "support-triage",
+        "runtime": {
+          "network": "full",
+          "targets": ["docker"]
+        }
+      },
+      "template": {},
+      "stamp": null,
+      "project": {
+        "allowed_targets": ["docker", "remote"],
+        "network_ceiling": "full",
+        "allow_unsafe_local": false
+      },
+      "provider": {
+        "provider": "daytona",
+        "available": true,
+        "capabilities": [
+          "upload",
+          "download",
+          "timeout",
+          "cancel",
+          "working_directory",
+          "environment",
+          "log_capture"
+        ]
+      },
+      "error_contains": "target remote required by agent is not declared by environment 'support-triage'"
+    },
+    {
+      "id": "docker_full_network_succeeds",
+      "expect": "ok",
+      "layer": null,
+      "requested_target": "docker",
+      "environment": {
+        "name": "support-triage",
+        "runtime": {
+          "network": "full",
+          "targets": ["docker", "remote"]
+        }
+      },
+      "template": {},
+      "stamp": null,
+      "project": {
+        "allowed_targets": ["docker", "remote"],
+        "network_ceiling": "full",
+        "allow_unsafe_local": false
+      },
+      "provider": {
+        "provider": "docker",
+        "available": true,
+        "capabilities": [
+          "upload",
+          "download",
+          "timeout",
+          "cancel",
+          "working_directory",
+          "environment",
+          "log_capture"
+        ]
+      }
+    }
+  ]
+}

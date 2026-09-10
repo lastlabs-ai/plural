@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-09
+
+### Changed
+
+- Foundation rewrite: environments own native actions and runtime; harnesses
+  are stamped and capability-restricted; agents split into templates and
+  instances; traces are schema 2.0.0 (`Turn` / `ActionStep`).
+- `@tool` is `@action`. `AgentSpec` and `EnvironmentCommand` are deleted.
+- Secure defaults: `network=none`, local excluded. Unsatisfiable requirements
+  fail in `resolve_effective_policy()` before launch.
+- Declared harnesses (`hermes`, `claude-code`, `codex`, `cursor`) cannot run.
+  The native runner (`native.chat.v1`, `native.actions.v1`) is the only
+  runnable executor.
+
+### Removed
+
+- Backward-compatible aliases, `_migrate_legacy_trace`, and v1 trace schema.
+
 ## [0.8.0] - 2026-09-09
 
 ### Added

@@ -46,34 +46,34 @@ class LocalRuntime:
         tools: Mapping of tool name to callable.
     """
 
-    def __init__(self, tools: dict[str, Callable[..., Any]] | None = None) -> None:
-        self.tools = dict(tools or {})
+    def __init__(self, actions: dict[str, Callable[..., Any]] | None = None) -> None:
+        self.actions = dict(actions or {})
 
     def register(self, name: str, fn: Callable[..., Any]) -> None:
-        """Register a tool.
+        """Register an action.
 
         Args:
-            name: Tool name.
+            name: Action name.
             fn: Python callable.
         """
-        self.tools[name] = fn
+        self.actions[name] = fn
 
     def call(self, name: str, arguments: dict[str, Any]) -> Any:
-        """Call a registered tool.
+        """Call a registered action.
 
         Args:
-            name: Tool name.
+            name: Action name.
             arguments: Keyword arguments.
 
         Returns:
-            Tool result.
+            Action result.
 
         Raises:
-            KeyError: If the tool is unknown.
+            KeyError: If the action is unknown.
         """
-        if name not in self.tools:
-            raise KeyError(f"unknown tool: {name}")
-        return self.tools[name](**arguments)
+        if name not in self.actions:
+            raise KeyError(f"unknown action: {name}")
+        return self.actions[name](**arguments)
 
     def call_timed(self, name: str, arguments: dict[str, Any]) -> tuple[Any, float]:
         """Call a tool and return ``(result, latency_ms)``.
@@ -106,9 +106,9 @@ def runtime_fingerprint(runtime: Runtime) -> str:
     payload: Any
     if isinstance(runtime, LocalRuntime):
         payload = {
-            "tools": {
+            "actions": {
                 name: callable_implementation_digest(fn)
-                for name, fn in sorted(runtime.tools.items())
+                for name, fn in sorted(runtime.actions.items())
             }
         }
     elif callable(payload_hook):

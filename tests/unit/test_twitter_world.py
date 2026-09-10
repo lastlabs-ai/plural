@@ -98,7 +98,7 @@ def test_make_env_registers_tools() -> None:
     env = make_env()
     assert env.name == "twitter-account"
     assert env.version == "0.2.0"
-    names = {t.function.name for t in env.tool_defs}
+    names = {t.function.name for t in env.action_defs}
     for required in {
         "view_timeline",
         "view_profile",
@@ -147,7 +147,7 @@ def test_reply_goal_run_episode_records_actions() -> None:
     rollout = env.run_episode(task, _ReplyPolicy())
 
     actions = [
-        action.name for decision in rollout.trace.decisions() for action in decision.parsed_action
+        action.name for decision in rollout.trace.turns() for action in decision.parsed_action
     ]
     assert actions == ["view_notifications", "reply", "reply"]
     assert rollout.trace.terminated is True
@@ -168,7 +168,7 @@ def test_likes_goal_step_and_replay() -> None:
     assert second.observation.followers == 3
     assert env.score() == 1.0
     actions = [
-        action.name for decision in rollout.trace.decisions() for action in decision.parsed_action
+        action.name for decision in rollout.trace.turns() for action in decision.parsed_action
     ]
     assert actions == ["tweet", "wait_for_engagement"]
     replay = verify_replay(make_env(), rollout.trace)

@@ -139,7 +139,7 @@ def serialize_observation(value: Any) -> Any:
         value: Observation or other payload.
 
     Returns:
-        A JSON-ready value for ``Decision.observation``.
+        A JSON-ready value for ``Turn.observation``.
     """
     if isinstance(value, Observation):
         return value.model_dump()

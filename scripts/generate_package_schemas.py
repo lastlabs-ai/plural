@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from plural.cli.config import CLIConfig, ResolvedContext
 from plural.cli.scaffold import JobFile
 from plural.domain import (
-    AgentSpec,
+    AgentTemplate,
     BenchmarkDefinition,
     EnvironmentManifest,
     HarnessManifest,
@@ -27,7 +27,7 @@ MODELS: tuple[type[BaseModel], ...] = (
     EnvironmentManifest,
     HarnessManifest,
     HarnessPackage,
-    AgentSpec,
+    AgentTemplate,
     BenchmarkDefinition,
     JobFile,
     JobSpec,

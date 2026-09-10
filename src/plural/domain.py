@@ -17,7 +17,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_core import to_jsonable_python
 
-from plural.sandbox.models import DeclarativeImage, NetworkMode, ResourceRequirements
+from plural.sandbox.models import (
+    Capability,
+    DeclarativeImage,
+    NetworkMode,
+    ResourceRequirements,
+    environment_required_capabilities,
+)
 
 SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -72,6 +78,29 @@ class ErrorCode(str, Enum):
     INTERNAL = "internal"
 
 
+class ExecutionTarget(str, Enum):
+    """Where a trial for this environment may execute."""
+
+    LOCAL = "local"
+    DOCKER = "docker"
+    REMOTE = "remote"
+
+
+class HarnessCapability(str, Enum):
+    """Actions a stamped harness may request."""
+
+    SHELL = "shell"
+    FILE_READ = "file_read"
+    FILE_EDIT = "file_edit"
+    CODE_EXECUTION = "code_execution"
+    WEB_SEARCH = "web_search"
+    BROWSER = "browser"
+    NETWORK_FETCH = "network_fetch"
+    MCP = "mcp"
+    SUBAGENTS = "subagents"
+    PERSISTENCE = "persistence"
+
+
 class PackageSource(FrozenModel):
     """Immutable source for a harness package.
 
@@ -104,56 +133,6 @@ class PackageSource(FrozenModel):
         return self
 
 
-class HarnessManifest(FrozenModel):
-    """Public manifest for a single-agent harness package."""
-
-    schema_version: Literal["1"] = "1"
-    name: str = Field(min_length=1)
-    version: str = Field(default="0.1.0", min_length=1)
-    description: str = ""
-    protocol: Literal["plural-harness-v1", "acp"] = "plural-harness-v1"
-    protocol_adapter: Literal["acp-client-v1"] | None = None
-    entrypoint: str | None = None
-    command: tuple[str, ...] = Field(min_length=1)
-    requirements: tuple[str, ...] = ()
-    capabilities: tuple[str, ...] = ()
-    supported_models: tuple[str, ...] = ("*",)
-    auth_modes: tuple[Literal["environment", "api_key", "oauth", "none"], ...] = ("environment",)
-    secret_names: tuple[str, ...] = ()
-    environment_names: tuple[str, ...] = ()
-    healthcheck: tuple[str, ...] | None = None
-    trajectory_path: str | None = None
-    outputs: tuple[FileDeclaration, ...] = ()
-    artifacts: tuple[FileDeclaration, ...] = ()
-
-    @field_validator(
-        "command",
-        "requirements",
-        "capabilities",
-        "supported_models",
-        "secret_names",
-        "environment_names",
-        "healthcheck",
-    )
-    @classmethod
-    def _nonempty_items(cls, value: tuple[str, ...] | None) -> tuple[str, ...] | None:
-        if value is not None and any(not item.strip() for item in value):
-            raise ValueError("items must be non-empty strings")
-        return value
-
-    @model_validator(mode="after")
-    def _protocol_is_runnable(self) -> HarnessManifest:
-        if self.protocol == "acp" and self.protocol_adapter != "acp-client-v1":
-            raise ValueError("protocol='acp' requires protocol_adapter='acp-client-v1'")
-        if self.protocol != "acp" and self.protocol_adapter is not None:
-            raise ValueError("protocol_adapter is valid only for protocol='acp'")
-        if self.trajectory_path is not None:
-            declared = {item.path for item in self.artifacts}
-            if self.trajectory_path not in declared:
-                raise ValueError("trajectory_path must be declared in artifacts")
-        return self
-
-
 class FileDeclaration(FrozenModel):
     """One exact file a harness or verifier may emit or consume."""
 
@@ -167,6 +146,62 @@ class FileDeclaration(FrozenModel):
         from plural.sandbox.models import safe_relative_path
 
         return safe_relative_path(value)
+
+
+class HarnessManifest(FrozenModel):
+    """Public manifest for a single-agent harness package.
+
+    A ``declared`` harness can be stamped and inspected but cannot execute a
+    trial. A ``runnable`` harness must provide a command.
+    """
+
+    schema_version: Literal["1"] = "1"
+    name: str = Field(min_length=1)
+    version: str = Field(default="0.1.0", min_length=1)
+    description: str = ""
+    protocol: Literal["plural-harness-v1", "acp"] = "plural-harness-v1"
+    protocol_adapter: Literal["acp-client-v1"] | None = None
+    entrypoint: str | None = None
+    implementation: Literal["declared", "runnable"] = "declared"
+    command: tuple[str, ...] = ()
+    requirements: tuple[str, ...] = ()
+    capabilities: frozenset[HarnessCapability] = frozenset()
+    supported_models: tuple[str, ...] = ("*",)
+    auth_modes: tuple[Literal["environment", "api_key", "oauth", "none"], ...] = ("environment",)
+    secret_names: tuple[str, ...] = ()
+    environment_names: tuple[str, ...] = ()
+    healthcheck: tuple[str, ...] | None = None
+    trajectory_path: str | None = None
+    outputs: tuple[FileDeclaration, ...] = ()
+    artifacts: tuple[FileDeclaration, ...] = ()
+
+    @field_validator(
+        "command",
+        "requirements",
+        "supported_models",
+        "secret_names",
+        "environment_names",
+        "healthcheck",
+    )
+    @classmethod
+    def _nonempty_items(cls, value: tuple[str, ...] | None) -> tuple[str, ...] | None:
+        if value is not None and any(not item.strip() for item in value):
+            raise ValueError("items must be non-empty strings")
+        return value
+
+    @model_validator(mode="after")
+    def _protocol_and_implementation(self) -> HarnessManifest:
+        if self.protocol == "acp" and self.protocol_adapter != "acp-client-v1":
+            raise ValueError("protocol='acp' requires protocol_adapter='acp-client-v1'")
+        if self.protocol != "acp" and self.protocol_adapter is not None:
+            raise ValueError("protocol_adapter is valid only for protocol='acp'")
+        if self.trajectory_path is not None:
+            declared = {item.path for item in self.artifacts}
+            if self.trajectory_path not in declared:
+                raise ValueError("trajectory_path must be declared in artifacts")
+        if self.implementation == "runnable" and not self.command:
+            raise ValueError("runnable harnesses require a command")
+        return self
 
 
 class HarnessPackage(FrozenModel):
@@ -276,15 +311,18 @@ class VerifierManifest(FrozenModel):
         return safe_relative_path(value)
 
 
-class EnvironmentCommand(FrozenModel):
-    """Declared argv-only command exposed to bounded harness tool loops."""
+class NativeAction(FrozenModel):
+    """One action the environment owns. Acts in the environment, returns an observation."""
 
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
-    command: tuple[str, ...] = Field(min_length=1)
+    kind: Literal["command", "python"] = "command"
+    command: tuple[str, ...] = ()
     parameters: dict[str, Any] = Field(
         default_factory=lambda: {"type": "object", "additionalProperties": True}
     )
+    observation_schema: dict[str, Any] = Field(default_factory=dict)
+    mutates_state: bool = True
     timeout_seconds: float = Field(default=30, gt=0)
 
     @field_validator("command")
@@ -293,6 +331,114 @@ class EnvironmentCommand(FrozenModel):
         if any(not item or "\x00" in item for item in value):
             raise ValueError("command items must be non-empty and contain no NUL")
         return value
+
+    @model_validator(mode="after")
+    def _command_kind_requires_argv(self) -> NativeAction:
+        if self.kind == "command" and not self.command:
+            raise ValueError("kind='command' requires a non-empty command")
+        return self
+
+
+class Guardrail(FrozenModel):
+    """One plain-language rule. Instructions, not enforcement."""
+
+    name: str = ""
+    rule: str = Field(min_length=1)
+
+
+class EnvironmentResource(FrozenModel):
+    """Data, application, or file the environment provides to the agent."""
+
+    kind: Literal["data", "application", "file", "secret"]
+    name: str = Field(min_length=1)
+    path: str | None = None
+    uri: str | None = None
+    digest: str | None = None
+    content_type: str = ""
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class EnvironmentRuntime(FrozenModel):
+    """Container, network, compute, and execution surface the environment requires."""
+
+    image: str | None = None
+    snapshot: str | None = None
+    declarative_image: DeclarativeImage | None = None
+    build_context: str | None = None
+    dockerfile: str | None = None
+    network: NetworkMode = NetworkMode.NONE
+    network_allowlist: tuple[str, ...] = ()
+    resources: ResourceRequirements = Field(default_factory=ResourceRequirements)
+    read_only_root: bool = False
+    targets: frozenset[ExecutionTarget] = Field(
+        default_factory=lambda: frozenset({ExecutionTarget.DOCKER, ExecutionTarget.REMOTE})
+    )
+    persistent: bool = False
+    compose: bool = False
+    extra_capabilities: frozenset[Capability] = frozenset()
+    timeout_seconds: float = Field(default=300, gt=0)
+    allow_unsafe_local: bool = False
+
+    @model_validator(mode="after")
+    def _valid_runtime(self) -> EnvironmentRuntime:
+        if self.network_allowlist and self.network is not NetworkMode.RESTRICTED:
+            raise ValueError("network_allowlist requires network='restricted'")
+        sources = (
+            self.image is not None,
+            self.snapshot is not None,
+            self.declarative_image is not None,
+        )
+        if sum(sources) > 1:
+            raise ValueError("image, snapshot, and declarative_image are mutually exclusive")
+        if ExecutionTarget.LOCAL in self.targets and not self.allow_unsafe_local:
+            raise ValueError("ExecutionTarget.LOCAL requires allow_unsafe_local=true")
+        return self
+
+    def required_capabilities(self) -> frozenset[Capability]:
+        """Return the sandbox controls this environment requires."""
+        return environment_required_capabilities(self)
+
+    def target_exclusions(self) -> dict[ExecutionTarget, str]:
+        """Return derived reasons a target cannot run this environment."""
+        reasons: dict[ExecutionTarget, str] = {}
+        if self.network in {NetworkMode.NONE, NetworkMode.RESTRICTED}:
+            reasons[ExecutionTarget.LOCAL] = f"cannot enforce network={self.network.value}"
+        elif not self.allow_unsafe_local:
+            reasons[ExecutionTarget.LOCAL] = "allow_unsafe_local is required for local execution"
+        if ExecutionTarget.LOCAL not in reasons and self.persistent:
+            reasons[ExecutionTarget.LOCAL] = "cannot enforce persistence"
+        if ExecutionTarget.LOCAL not in reasons and self.compose:
+            reasons[ExecutionTarget.LOCAL] = "cannot enforce compose"
+        if ExecutionTarget.LOCAL not in reasons and self.resources.configured:
+            reasons[ExecutionTarget.LOCAL] = "cannot enforce resource limits"
+        if self.build_context or self.dockerfile:
+            reasons[ExecutionTarget.REMOTE] = "remote provider cannot consume a local build context"
+        return reasons
+
+    def available_targets(self) -> frozenset[ExecutionTarget]:
+        """Return declared targets that are not derived-excluded."""
+        excluded = self.target_exclusions()
+        return frozenset(target for target in self.targets if target not in excluded)
+
+
+class HarnessPolicy(FrozenModel):
+    """How an environment restricts any harness stamped onto it."""
+
+    mode: Literal["allow_all", "allowlist"] = "allow_all"
+    allowed_harnesses: tuple[HarnessBinding, ...] = ()
+    allowed_capabilities: frozenset[HarnessCapability] | None = None
+    denied_capabilities: frozenset[HarnessCapability] = frozenset()
+
+
+class HarnessStamp(FrozenModel):
+    """Frozen result of stamping one harness onto one environment revision."""
+
+    environment: EnvironmentIdentity
+    harness: HarnessBinding
+    declared: frozenset[HarnessCapability]
+    granted: frozenset[HarnessCapability]
+    denied: frozenset[HarnessCapability]
+    denial_reasons: dict[str, str] = Field(default_factory=dict)
 
 
 class ExecutionLimits(FrozenModel):
@@ -304,7 +450,7 @@ class ExecutionLimits(FrozenModel):
 
 
 class EnvironmentManifest(FrozenModel):
-    """Environment package metadata, tasks, and allowed harnesses."""
+    """Environment package: native actions, runtime, resources, and harness policy."""
 
     schema_version: Literal["1"] = "1"
     name: str = Field(min_length=1)
@@ -312,12 +458,15 @@ class EnvironmentManifest(FrozenModel):
     description: str = ""
     instructions: str = ""
     context: Any = None
-    commands: tuple[EnvironmentCommand, ...] = ()
+    actions: tuple[NativeAction, ...] = ()
+    observation_schema: dict[str, Any] = Field(default_factory=dict)
+    state_schema: dict[str, Any] = Field(default_factory=dict)
+    guardrails: tuple[Guardrail, ...] = ()
+    resources: tuple[EnvironmentResource, ...] = ()
+    runtime: EnvironmentRuntime = Field(default_factory=EnvironmentRuntime)
+    harness_policy: HarnessPolicy = Field(default_factory=HarnessPolicy)
     limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
-    policy: dict[str, Any] = Field(default_factory=dict)
     tasks: tuple[TaskDefinition, ...] = ()
-    allowed_harnesses: tuple[HarnessBinding, ...] = ()
-    runtime_capabilities: tuple[str, ...] = ()
     verifier: VerifierManifest | None = None
     source: PackageSource | None = None
 
@@ -326,12 +475,18 @@ class EnvironmentManifest(FrozenModel):
         task_ids = [task.task_id for task in self.tasks]
         if len(task_ids) != len(set(task_ids)):
             raise ValueError("environment task_id values must be unique")
-        harnesses = [(item.name, item.revision, item.digest) for item in self.allowed_harnesses]
+        harnesses = [
+            (item.name, item.revision, item.digest)
+            for item in self.harness_policy.allowed_harnesses
+        ]
         if len(harnesses) != len(set(harnesses)):
             raise ValueError("allowed harness bindings must be unique")
-        command_names = [item.name for item in self.commands]
-        if len(command_names) != len(set(command_names)):
-            raise ValueError("environment command names must be unique")
+        action_names = [item.name for item in self.actions]
+        if len(action_names) != len(set(action_names)):
+            raise ValueError("environment action names must be unique")
+        resource_names = [item.name for item in self.resources]
+        if len(resource_names) != len(set(resource_names)):
+            raise ValueError("environment resource names must be unique")
         return self
 
     @property
@@ -385,23 +540,31 @@ class RoutingSpec(FrozenModel):
     max_tokens: int | None = Field(default=None, gt=0)
 
 
-class AgentSpec(FrozenModel):
-    """Model, routing, environment identity, and exactly one harness binding."""
+class AgentTemplate(FrozenModel):
+    """Immutable model + environment configuration, optionally with a stamped harness."""
 
     schema_version: Literal["1"] = "1"
     name: str = Field(min_length=1)
     model: str = Field(min_length=1)
     routing: RoutingSpec = Field(default_factory=RoutingSpec)
     environment: EnvironmentIdentity
-    harness: HarnessBinding
+    harness: HarnessBinding | None = None
     harness_package: HarnessPackage | None = None
+    stamp: HarnessStamp | None = None
     auth_mode: Literal["environment", "api_key", "oauth", "none"] = "environment"
     secret_names: tuple[str, ...] = ()
 
     @model_validator(mode="after")
-    def _package_matches_binding(self) -> AgentSpec:
+    def _package_matches_binding(self) -> AgentTemplate:
+        if self.harness is None and self.stamp is not None:
+            raise ValueError("stamp requires a harness binding")
+        if self.harness is not None and self.stamp is None:
+            raise ValueError("stamped harness requires a HarnessStamp")
+        if self.harness is None and self.harness_package is not None:
+            raise ValueError("harness_package requires a harness binding")
         if (
             self.harness_package is not None
+            and self.harness is not None
             and HarnessBinding.from_package(self.harness_package) != self.harness
         ):
             raise ValueError("harness_package does not match the exact harness binding")
@@ -425,13 +588,90 @@ class AgentSpec(FrozenModel):
 
     @property
     def content_hash(self) -> str:
-        """Stable agent configuration digest."""
+        """Stable agent template digest."""
         return content_hash(self)
 
     @property
+    def template_id(self) -> str:
+        """Stable agent template identifier."""
+        return stable_id("atp", self)
+
+    @property
     def agent_id(self) -> str:
-        """Stable agent identifier."""
-        return stable_id("agt", self)
+        """Stable identifier used by job planning."""
+        return self.template_id
+
+
+class AgentInstanceRef(FrozenModel):
+    """Hosted identity of a persistent agent instance."""
+
+    instance_id: str = Field(min_length=1)
+    template_id: str = Field(min_length=1)
+    template_hash: str = Field(min_length=1)
+
+
+class AgentBinding(FrozenModel):
+    """A job participant: a template, optionally bound to a hosted instance."""
+
+    template: AgentTemplate
+    instance: AgentInstanceRef | None = None
+
+    @property
+    def agent_id(self) -> str:
+        """Stable planning identity for this binding."""
+        if self.instance is not None:
+            return self.instance.instance_id
+        return self.template.template_id
+
+    @property
+    def name(self) -> str:
+        """Display name from the template."""
+        return self.template.name
+
+    @property
+    def harness(self) -> HarnessBinding | None:
+        """Optional stamped harness."""
+        return self.template.harness
+
+    @property
+    def harness_package(self) -> HarnessPackage | None:
+        """Optional executable harness package."""
+        return self.template.harness_package
+
+    @property
+    def stamp(self) -> HarnessStamp | None:
+        """Frozen harness stamp, if any."""
+        return self.template.stamp
+
+    @property
+    def environment(self) -> EnvironmentIdentity:
+        """Pinned environment identity."""
+        return self.template.environment
+
+    @property
+    def model(self) -> str:
+        """Routed model id."""
+        return self.template.model
+
+    @property
+    def routing(self) -> RoutingSpec:
+        """Portable routing configuration."""
+        return self.template.routing
+
+    @property
+    def auth_mode(self) -> str:
+        """Declared authentication mode."""
+        return self.template.auth_mode
+
+    @property
+    def secret_names(self) -> tuple[str, ...]:
+        """Secret names granted to this agent."""
+        return self.template.secret_names
+
+    @property
+    def content_hash(self) -> str:
+        """Stable binding digest."""
+        return content_hash(self)
 
 
 class RetryPolicy(FrozenModel):
@@ -456,38 +696,21 @@ class RetryPolicy(FrozenModel):
 
 
 class RuntimeSpec(FrozenModel):
-    """Requested runtime provider and capability constraints."""
+    """Requested execution target. Image, network, and resources live on the environment."""
 
-    provider: str = Field(default="local", min_length=1)
+    provider: str = Field(default="docker", min_length=1)
     capabilities: tuple[str, ...] = ()
-    image: str | None = None
-    snapshot: str | None = None
-    declarative_image: DeclarativeImage | None = None
-    build_context: str | None = None
-    dockerfile: str | None = None
-    resources: ResourceRequirements = Field(default_factory=ResourceRequirements)
-    network: NetworkMode = NetworkMode.FULL
-    network_allowlist: tuple[str, ...] = ()
     timeout_seconds: float = Field(default=300, gt=0)
-    read_only_root: bool = False
     unsafe_local: bool = False
 
-    @model_validator(mode="after")
-    def _valid_network(self) -> RuntimeSpec:
-        if self.network_allowlist and self.network is not NetworkMode.RESTRICTED:
-            raise ValueError("network_allowlist requires network='restricted'")
-        if (
-            sum(
-                (
-                    self.image is not None,
-                    self.snapshot is not None,
-                    self.declarative_image is not None,
-                )
-            )
-            > 1
-        ):
-            raise ValueError("image, snapshot, and declarative_image are mutually exclusive")
-        return self
+    @property
+    def requested_target(self) -> ExecutionTarget:
+        """Map a provider name onto an execution target."""
+        if self.provider == ExecutionTarget.LOCAL.value:
+            return ExecutionTarget.LOCAL
+        if self.provider == ExecutionTarget.REMOTE.value or self.provider == "daytona":
+            return ExecutionTarget.REMOTE
+        return ExecutionTarget.DOCKER
 
 
 class JobSpec(FrozenModel):
@@ -496,7 +719,7 @@ class JobSpec(FrozenModel):
     schema_version: Literal["1"] = "1"
     environment: EnvironmentManifest
     benchmark: BenchmarkDefinition
-    agents: tuple[AgentSpec, ...] = Field(min_length=1)
+    agents: tuple[AgentBinding, ...] = Field(min_length=1)
     n_attempts: int = Field(default=1, ge=1)
     concurrency: int = Field(default=1, ge=1)
     per_agent_concurrency: int = Field(default=1, ge=1)
@@ -506,6 +729,17 @@ class JobSpec(FrozenModel):
     @model_validator(mode="after")
     def _compatible(self) -> JobSpec:
         validate_job_compatibility(self.environment, self.benchmark, self.agents)
+        target = self.runtime.requested_target
+        available = self.environment.runtime.available_targets()
+        if target not in available:
+            reason = self.environment.runtime.target_exclusions().get(
+                target, "not in environment.runtime.targets"
+            )
+            raise ValueError(
+                f"requested target {target.value!r} is not available for this environment: {reason}"
+            )
+        if target is ExecutionTarget.LOCAL and not self.runtime.unsafe_local:
+            raise ValueError("local execution requires runtime.unsafe_local=true")
         agent_ids = [agent.agent_id for agent in self.agents]
         if len(agent_ids) != len(set(agent_ids)):
             raise ValueError("agents must have unique identities")
@@ -550,6 +784,7 @@ class JobSpec(FrozenModel):
                             attempt=attempt,
                             environment=self.benchmark.environment,
                             harness=agent.harness,
+                            instance_id=agent.instance.instance_id if agent.instance else None,
                             runtime=self.runtime,
                         )
                     )
@@ -562,14 +797,16 @@ class JobSpec(FrozenModel):
             benchmark_hash=self.benchmark.content_hash,
             task_set_hash=content_hash(selected_tasks),
             agent_hashes=tuple(agent.content_hash for agent in self.agents),
-            harness_digests=tuple(agent.harness.digest for agent in self.agents),
+            harness_digests=tuple(
+                agent.harness.digest for agent in self.agents if agent.harness is not None
+            ),
             environment_source_digest=(
                 self.environment.source.digest if self.environment.source is not None else None
             ),
             execution_limits=self.environment.limits,
             instructions_hash=content_hash(self.environment.instructions),
-            commands_hash=content_hash(self.environment.commands),
-            policy_hash=content_hash(self.environment.policy),
+            actions_hash=content_hash(self.environment.actions),
+            guardrails_hash=content_hash(self.environment.guardrails),
             runtime=self.runtime,
         )
         return JobPlan(
@@ -586,7 +823,8 @@ class TrialSpec(FrozenModel):
     task_id: str = Field(min_length=1)
     attempt: int = Field(ge=1)
     environment: EnvironmentIdentity
-    harness: HarnessBinding
+    harness: HarnessBinding | None = None
+    instance_id: str | None = None
     runtime: RuntimeSpec
 
     @property
@@ -616,8 +854,8 @@ class JobLock(FrozenModel):
     environment_source_digest: str | None = None
     execution_limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
     instructions_hash: str = ""
-    commands_hash: str = ""
-    policy_hash: str = ""
+    actions_hash: str = ""
+    guardrails_hash: str = ""
     runtime: RuntimeSpec
 
 
@@ -645,7 +883,7 @@ class TrialReceipt(FrozenModel):
     environment_digest: str
     benchmark_digest: str = ""
     agent_digest: str = ""
-    harness_digest: str
+    harness_digest: str = ""
     runtime_provider: str
     runtime_identity: str = ""
     effective_capabilities: tuple[str, ...] = ()
@@ -661,10 +899,13 @@ class TrialReceipt(FrozenModel):
     completed_at: datetime | None = None
     timings: dict[str, float] = Field(default_factory=dict)
     instructions_hash: str = ""
-    commands_hash: str = ""
+    actions_hash: str = ""
     environment_source_digest: str | None = None
     execution_limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
-    policy: dict[str, Any] = Field(default_factory=dict)
+    guardrails: tuple[Guardrail, ...] = ()
+    agent_instance_id: str | None = None
+    harness_implementation: Literal["declared", "runnable"] | None = None
+    granted_capabilities: tuple[str, ...] = ()
 
     @property
     def receipt_hash(self) -> str:
@@ -700,10 +941,74 @@ class JobResult(FrozenModel):
     trials: tuple[TrialResult, ...]
 
 
+_NETWORK_NONE_DENIALS = frozenset(
+    {
+        HarnessCapability.WEB_SEARCH,
+        HarnessCapability.BROWSER,
+        HarnessCapability.NETWORK_FETCH,
+        HarnessCapability.MCP,
+    }
+)
+_NETWORK_RESTRICTED_DENIALS = frozenset(
+    {HarnessCapability.WEB_SEARCH, HarnessCapability.BROWSER}
+)
+
+
+def resolve_harness_stamp(
+    environment: EnvironmentManifest,
+    harness: HarnessPackage | HarnessManifest,
+) -> HarnessStamp:
+    """Compute the frozen effective capability set for one harness on one environment."""
+    manifest = harness.manifest if isinstance(harness, HarnessPackage) else harness
+    binding = (
+        HarnessBinding.from_package(harness)
+        if isinstance(harness, HarnessPackage)
+        else HarnessBinding(
+            name=manifest.name,
+            revision=manifest.version,
+            digest=content_hash(manifest),
+        )
+    )
+    declared = frozenset(manifest.capabilities)
+    denied: set[HarnessCapability] = set()
+    reasons: dict[str, str] = {}
+
+    def _deny(capability: HarnessCapability, reason: str) -> None:
+        if capability in declared and capability not in denied:
+            denied.add(capability)
+            reasons[capability.value] = reason
+
+    for capability in environment.harness_policy.denied_capabilities:
+        _deny(capability, "environment denied")
+    allowed = environment.harness_policy.allowed_capabilities
+    if allowed is not None:
+        for capability in declared:
+            if capability not in allowed:
+                _deny(capability, "not in environment allowlist")
+    network = environment.runtime.network
+    if network is NetworkMode.NONE:
+        for capability in _NETWORK_NONE_DENIALS:
+            _deny(capability, "environment network=none")
+    elif network is NetworkMode.RESTRICTED:
+        for capability in _NETWORK_RESTRICTED_DENIALS:
+            _deny(capability, "environment network=restricted")
+    if environment.runtime.read_only_root:
+        _deny(HarnessCapability.FILE_EDIT, "environment read_only_root")
+    granted = frozenset(capability for capability in declared if capability not in denied)
+    return HarnessStamp(
+        environment=environment.identity,
+        harness=binding,
+        declared=declared,
+        granted=granted,
+        denied=frozenset(denied),
+        denial_reasons=reasons,
+    )
+
+
 def validate_job_compatibility(
     environment: EnvironmentManifest,
     benchmark: BenchmarkDefinition,
-    agents: tuple[AgentSpec, ...],
+    agents: tuple[AgentBinding, ...],
 ) -> None:
     """Validate environment ownership and exact agent/harness compatibility."""
     if benchmark.environment != environment.identity:
@@ -712,31 +1017,60 @@ def validate_job_compatibility(
     missing = [task_id for task_id in benchmark.task_ids if task_id not in owned_tasks]
     if missing:
         raise ValueError(f"benchmark selects tasks not owned by environment: {missing!r}")
-    allowed = set(environment.allowed_harnesses)
+    allowed = set(environment.harness_policy.allowed_harnesses)
     for agent in agents:
-        if agent.environment != benchmark.environment:
-            raise ValueError(f"agent {agent.name!r} targets a different environment identity")
-        if agent.harness not in allowed:
-            raise ValueError(f"agent {agent.name!r} harness is not allowed by the environment")
+        template = agent.template
+        if template.environment != benchmark.environment:
+            raise ValueError(f"agent {template.name!r} targets a different environment identity")
+        if template.harness is None:
+            if template.stamp is not None:
+                raise ValueError(f"agent {template.name!r} stamp requires a harness")
+            continue
+        if environment.harness_policy.mode == "allowlist" and template.harness not in allowed:
+            raise ValueError(f"agent {template.name!r} harness is not allowed by the environment")
+        package = template.harness_package
+        if package is not None:
+            if package.manifest.implementation == "declared":
+                raise ValueError(
+                    f"harness {package.manifest.name} is declared but not runnable"
+                )
+            expected = resolve_harness_stamp(environment, package)
+            if template.stamp != expected:
+                raise ValueError(f"agent {template.name!r} harness stamp is stale")
+            if not expected.granted:
+                raise ValueError(
+                    f"agent {template.name!r} harness has no granted capabilities"
+                )
+        elif template.stamp is None:
+            raise ValueError(f"agent {template.name!r} stamped harness requires a stamp")
 
 
 __all__ = [
-    "AgentSpec",
+    "AgentBinding",
+    "AgentInstanceRef",
+    "AgentTemplate",
     "BenchmarkDefinition",
     "BenchmarkSpec",
     "EnvironmentIdentity",
-    "EnvironmentCommand",
     "EnvironmentManifest",
+    "EnvironmentResource",
+    "EnvironmentRuntime",
     "ErrorCode",
     "ExecutionLimits",
+    "ExecutionTarget",
     "FileDeclaration",
+    "Guardrail",
     "HarnessBinding",
+    "HarnessCapability",
     "HarnessManifest",
     "HarnessPackage",
+    "HarnessPolicy",
+    "HarnessStamp",
     "JobLock",
     "JobPlan",
     "JobResult",
     "JobSpec",
+    "NativeAction",
     "PackageSource",
     "RetryPolicy",
     "RoutingSpec",
@@ -748,6 +1082,7 @@ __all__ = [
     "VerifierManifest",
     "canonical_json",
     "content_hash",
+    "resolve_harness_stamp",
     "stable_id",
     "validate_job_compatibility",
 ]

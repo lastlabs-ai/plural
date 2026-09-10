@@ -10,16 +10,21 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from plural.domain import (
-    AgentSpec,
+    AgentBinding,
+    AgentTemplate,
     BenchmarkDefinition,
     EnvironmentManifest,
+    EnvironmentResource,
+    EnvironmentRuntime,
     HarnessBinding,
     HarnessPackage,
     JobSpec,
+    NativeAction,
     PackageSource,
     RetryPolicy,
     RuntimeSpec,
     TaskDefinition,
+    resolve_harness_stamp,
 )
 from plural.harness.retrieval import package_from_archive, tree_digest
 
@@ -77,14 +82,15 @@ def scaffold_environment(directory: Path, name: str, *, force: bool = False) -> 
         "name": name,
         "revision": "0.1.0",
         "description": "",
-        "instructions": "Complete the task using only the declared commands and context.",
+        "instructions": "Complete the task using only the declared native actions and context.",
         "context": None,
-        "commands": [],
+        "actions": [],
+        "guardrails": [],
+        "resources": [],
+        "runtime": EnvironmentRuntime().model_dump(mode="json"),
+        "harness_policy": {"mode": "allow_all", "allowed_harnesses": []},
         "limits": {"max_turns": 8, "max_seconds": 120},
-        "policy": {},
         "tasks": [],
-        "allowed_harnesses": [],
-        "runtime_capabilities": [],
     }
     environment_yaml = directory / "environment.yaml"
     _create(
@@ -136,12 +142,13 @@ def scaffold_harness(directory: Path, name: str, *, force: bool = False) -> list
             "version": "0.1.0",
             "description": "",
             "protocol": "plural-harness-v1",
-            "command": ["python", "harness.py", "chat.v1"],
+            "command": ["python", "harness.py", "native.chat.v1"],
             "requirements": [
                 "OpenAI-compatible POST /chat/completions endpoint",
                 "PLURAL_API_KEY or OPENAI_API_KEY unless explicitly unauthenticated",
             ],
-            "capabilities": ["chat"],
+            "implementation": "runnable",
+            "capabilities": ["shell"],
             "secret_names": ["PLURAL_API_KEY", "OPENAI_API_KEY"],
             "environment_names": [
                 "PLURAL_GATEWAY_URL",
@@ -163,7 +170,7 @@ def scaffold_harness(directory: Path, name: str, *, force: bool = False) -> list
     _create(manifest, yaml.safe_dump(package, sort_keys=False), force=force)
     _create(
         directory / "harness.py",
-        (Path(__file__).parents[1] / "harness" / "builtin_runner.py").read_text(encoding="utf-8"),
+        (Path(__file__).parents[1] / "harness" / "native_runner.py").read_text(encoding="utf-8"),
         force=force,
     )
     return [manifest, directory / "harness.py"]
@@ -205,12 +212,14 @@ def scaffold_agent(
     """Create an agent bound to one exact environment and harness."""
     environment = load_environment(environment_path)
     harness = load_harness_reference(str(harness_path), digest=harness_digest)
-    agent = AgentSpec(
+    binding = harness_binding(harness)
+    agent = AgentTemplate(
         name=name,
         model=model,
         environment=environment.identity,
-        harness=harness_binding(harness),
+        harness=binding,
         harness_package=harness,
+        stamp=resolve_harness_stamp(environment, harness),
         secret_names=secret_names,
     )
     destination = _target(path, "agent.yaml")
@@ -309,9 +318,9 @@ def load_benchmark(path: Path) -> BenchmarkDefinition:
     return BenchmarkDefinition.model_validate(read_yaml(_target(path, "benchmark.yaml")))
 
 
-def load_agent(path: Path) -> AgentSpec:
-    """Load and strictly validate an agent config."""
-    return AgentSpec.model_validate(read_yaml(_target(path, "agent.yaml")))
+def load_agent(path: Path) -> AgentTemplate:
+    """Load and strictly validate an agent template config."""
+    return AgentTemplate.model_validate(read_yaml(_target(path, "agent.yaml")))
 
 
 def load_job(path: Path) -> JobSpec:
@@ -323,16 +332,37 @@ def load_job(path: Path) -> JobSpec:
         return value if value.is_absolute() else source.parent / value
 
     environment_path = resolve(config.environment)
+    environment = load_environment(environment_path)
     runtime = config.runtime
-    if runtime.provider == "docker" and runtime.image is None and runtime.build_context is None:
+    if (
+        runtime.provider == "docker"
+        and environment.runtime.image is None
+        and environment.runtime.build_context is None
+    ):
         environment_source = _target(environment_path, "environment.yaml")
-        runtime = runtime.model_copy(
-            update={"build_context": str(environment_source.parent.resolve())}
+        environment = environment.model_copy(
+            update={
+                "runtime": environment.runtime.model_copy(
+                    update={"build_context": str(environment_source.parent.resolve())}
+                )
+            }
         )
+    agents: list[AgentBinding] = []
+    for agent_path in config.agents:
+        template = load_agent(resolve(agent_path)).model_copy(
+            update={"environment": environment.identity}
+        )
+        if template.harness_package is not None:
+            template = template.model_copy(
+                update={"stamp": resolve_harness_stamp(environment, template.harness_package)}
+            )
+        agents.append(AgentBinding(template=template))
     return JobSpec(
-        environment=load_environment(environment_path),
-        benchmark=load_benchmark(resolve(config.benchmark)),
-        agents=tuple(load_agent(resolve(agent)) for agent in config.agents),
+        environment=environment,
+        benchmark=load_benchmark(resolve(config.benchmark)).model_copy(
+            update={"environment": environment.identity}
+        ),
+        agents=tuple(agents),
         n_attempts=config.n_attempts,
         concurrency=config.concurrency,
         per_agent_concurrency=config.per_agent_concurrency,
@@ -353,6 +383,72 @@ def add_task(environment_path: Path, task: TaskDefinition) -> Path:
     return task_path
 
 
+def _environment_yaml(path: Path) -> tuple[Path, dict[str, Any]]:
+    source = _target(path, "environment.yaml")
+    payload = read_yaml(source)
+    if not isinstance(payload, dict):
+        raise ValueError("environment.yaml must be an object")
+    return source, payload
+
+
+def add_environment_action(path: Path, action: NativeAction) -> Path:
+    """Append a native action to an environment package."""
+    source, payload = _environment_yaml(path)
+    actions = list(payload.get("actions") or [])
+    dumped = action.model_dump(mode="json")
+    if any(item.get("name") == action.name for item in actions if isinstance(item, dict)):
+        raise ValueError(f"action {action.name!r} already exists")
+    actions.append(dumped)
+    payload["actions"] = actions
+    write_yaml(source, payload)
+    load_environment(source)
+    return source
+
+
+def remove_environment_action(path: Path, name: str) -> Path:
+    """Remove a native action from an environment package."""
+    source, payload = _environment_yaml(path)
+    actions = [
+        item
+        for item in (payload.get("actions") or [])
+        if not (isinstance(item, dict) and item.get("name") == name)
+    ]
+    payload["actions"] = actions
+    write_yaml(source, payload)
+    load_environment(source)
+    return source
+
+
+def add_environment_resource(path: Path, resource: EnvironmentResource) -> Path:
+    """Append a resource to an environment package."""
+    source, payload = _environment_yaml(path)
+    resources = list(payload.get("resources") or [])
+    dumped = resource.model_dump(mode="json")
+    if any(item.get("name") == resource.name for item in resources if isinstance(item, dict)):
+        raise ValueError(f"resource {resource.name!r} already exists")
+    resources.append(dumped)
+    payload["resources"] = resources
+    write_yaml(source, payload)
+    load_environment(source)
+    return source
+
+
+def unstamp_harness(environment_path: Path, harness_name: str) -> Path:
+    """Remove a harness binding from an environment allowlist."""
+    source, payload = _environment_yaml(environment_path)
+    policy = dict(payload.get("harness_policy") or {})
+    values = [
+        item
+        for item in (policy.get("allowed_harnesses") or [])
+        if not (isinstance(item, dict) and item.get("name") == harness_name)
+    ]
+    policy["allowed_harnesses"] = values
+    payload["harness_policy"] = policy
+    write_yaml(source, payload)
+    load_environment(source)
+    return source
+
+
 def allow_harness(environment_path: Path, harness_path: Path) -> Path:
     """Add an exact harness binding to an environment manifest."""
     return allow_harness_package(environment_path, load_harness(harness_path))
@@ -366,11 +462,14 @@ def allow_harness_package(
     source = _target(environment_path, "environment.yaml")
     payload = read_yaml(source)
     binding = harness_binding(package)
-    values = list(payload.get("allowed_harnesses") or [])
+    policy = dict(payload.get("harness_policy") or {})
+    values = list(policy.get("allowed_harnesses") or payload.get("allowed_harnesses") or [])
     dumped = binding.model_dump(mode="json")
     if dumped not in values:
         values.append(dumped)
-    payload["allowed_harnesses"] = values
+    policy["allowed_harnesses"] = values
+    policy.setdefault("mode", "allow_all")
+    payload["harness_policy"] = policy
     write_yaml(source, payload)
     load_environment(source)
     return source
@@ -382,7 +481,7 @@ def generate_schemas(directory: Path) -> list[Path]:
         HarnessPackage,
         EnvironmentManifest,
         BenchmarkDefinition,
-        AgentSpec,
+        AgentTemplate,
         JobSpec,
     )
     directory.mkdir(parents=True, exist_ok=True)

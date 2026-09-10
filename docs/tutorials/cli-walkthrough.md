@@ -18,7 +18,7 @@ plural env init environment --name support
 
 This creates four files:
 
-- `environment.yaml`: instructions, commands, limits, and package settings.
+- `environment.yaml`: instructions, native actions, runtime, limits, and package settings.
 - `tasks.jsonl`: one JSON task per line.
 - `environment.py`: a starting Python subclass, not automatically executed by
   the package runner.
@@ -53,11 +53,12 @@ plural harness add harness --environment environment
 plural env harness list --environment environment
 ```
 
-The generated `chat.v1` harness asks the model for a response and writes
+The generated `native.chat.v1` harness asks the model for a response and writes
 `result.json` and `trajectory.jsonl`. It is a working model-backed scaffold,
-not an offline fake. `harness add` records the exact allowed revision in the
-environment. `plural env harness add harness --environment environment` is
-another local-package spelling of the same operation.
+not an offline fake. `harness add` records the exact revision; stamp it with
+`plural env harness stamp` to freeze granted versus denied capabilities.
+`plural env harness add harness --environment environment` is another
+local-package spelling of the same allow-list step.
 
 ## 3. Bind an agent and choose the tasks
 
@@ -70,9 +71,10 @@ plural benchmark show benchmark.yaml
 plural agent show agent.yaml
 ```
 
-`benchmark.yaml` selects the current task IDs in order. `agent.yaml` binds the
-model, environment identity, and harness identity. `--secret` grants a named
-secret from your shell; it does not store its value in the agent file.
+`benchmark.yaml` selects the current task IDs in order. `agent.yaml` is an
+`AgentTemplate`: model plus environment identity, optionally plus a stamped
+harness. `--secret` grants a named secret from your shell; it does not store
+its value in the agent file. Omit `--harness` for the native path.
 
 For direct provider access, change the secret grant and model identifier as
 explained in [setup](../getting-started/setup.md). Changing only the model name

@@ -1,5 +1,141 @@
 {
   "$defs": {
+    "ActionStep": {
+      "description": "One action invocation and the observation it returned.",
+      "properties": {
+        "action_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Id"
+        },
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        },
+        "children": {
+          "items": {
+            "$ref": "#/$defs/ActionStep"
+          },
+          "title": "Children",
+          "type": "array"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended At"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "latency_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latency Ms"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "observation": {
+          "default": null,
+          "title": "Observation"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent"
+        },
+        "result": {
+          "default": null,
+          "title": "Result"
+        },
+        "source": {
+          "default": "environment_native",
+          "enum": [
+            "environment_native",
+            "harness",
+            "model_text"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "tool_call_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Call Id"
+        },
+        "type": {
+          "const": "action",
+          "default": "action",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ActionStep",
+      "type": "object"
+    },
     "Attempt": {
       "description": "A single provider attempt within an LLM call.\n\nAttributes:\n    model: Model id attempted.\n    provider: Provider slug.\n    error: Error message if failed.\n    latency_ms: Attempt latency.\n    status_code: HTTP status code if available.",
       "properties": {
@@ -78,6 +214,30 @@
         "data"
       ],
       "title": "AudioContent",
+      "type": "object"
+    },
+    "CapabilityDenial": {
+      "description": "A capability the environment or policy removed during a trial.",
+      "properties": {
+        "capability": {
+          "title": "Capability",
+          "type": "string"
+        },
+        "layer": {
+          "title": "Layer",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "capability",
+        "layer",
+        "reason"
+      ],
+      "title": "CapabilityDenial",
       "type": "object"
     },
     "ChatRequest": {
@@ -390,97 +550,6 @@
         "message"
       ],
       "title": "Choice",
-      "type": "object"
-    },
-    "Decision": {
-      "description": "One model turn inside an episode: observation \u2192 action \u2192 reward.\n\nA single decision may include several tool calls (the model liked a post\nand replied in the same turn).\n\nAttributes:\n    type: Discriminator; always ``\"decision\"``.\n    observation: Environment observation the policy saw this turn.\n    model_context: Chat request actually sent (the policy input).\n    model_output: Chat response from the model.\n    parsed_action: Structured actions extracted from the model output.\n    tool_calls: Tool invocations with results.\n    reward_events: Per-tool step rewards.\n    timestamp: When the decision was recorded (UTC).",
-      "properties": {
-        "decision_id": {
-          "title": "Decision Id",
-          "type": "string"
-        },
-        "index": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Index"
-        },
-        "model_context": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ChatRequest"
-            },
-            {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model Context"
-        },
-        "model_output": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ChatResponse"
-            },
-            {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model Output"
-        },
-        "observation": {
-          "default": null,
-          "title": "Observation"
-        },
-        "parsed_action": {
-          "items": {
-            "$ref": "#/$defs/ParsedAction"
-          },
-          "title": "Parsed Action",
-          "type": "array"
-        },
-        "reward_events": {
-          "items": {
-            "$ref": "#/$defs/RewardEvent"
-          },
-          "title": "Reward Events",
-          "type": "array"
-        },
-        "timestamp": {
-          "format": "date-time",
-          "title": "Timestamp",
-          "type": "string"
-        },
-        "tool_calls": {
-          "items": {
-            "$ref": "#/$defs/ToolCallStep"
-          },
-          "title": "Tool Calls",
-          "type": "array"
-        },
-        "type": {
-          "const": "decision",
-          "default": "decision",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "title": "Decision",
       "type": "object"
     },
     "Event": {
@@ -905,8 +974,20 @@
       "type": "object"
     },
     "ParsedAction": {
-      "description": "A structured action the policy chose this turn.\n\nAttributes:\n    name: Tool / action name. Empty or ``\"respond\"`` means no tool call.\n    arguments: Parsed arguments.",
+      "description": "A structured action the policy chose this turn.",
       "properties": {
+        "action_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Id"
+        },
         "arguments": {
           "additionalProperties": true,
           "title": "Arguments",
@@ -914,6 +995,16 @@
         },
         "name": {
           "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "default": "environment_native",
+          "enum": [
+            "environment_native",
+            "harness",
+            "model_text"
+          ],
+          "title": "Source",
           "type": "string"
         }
       },
@@ -1032,6 +1123,42 @@
       "title": "ProviderPreferences",
       "type": "object"
     },
+    "ReasoningBlock": {
+      "description": "One chain-of-thought or assistant text block from a turn.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "thinking",
+            "text",
+            "redacted"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "signature": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signature"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "ReasoningBlock",
+      "type": "object"
+    },
     "ResponseFormat": {
       "description": "Structured output / response format request.\n\nAttributes:\n    type: Format type such as ``\"text\"``, ``\"json_object\"``, or ``\"json_schema\"``.\n    json_schema: Schema payload when ``type`` is ``\"json_schema\"``.",
       "properties": {
@@ -1063,7 +1190,7 @@
       "type": "object"
     },
     "RewardEvent": {
-      "description": "A dense reward attached to one decision.\n\nAttributes:\n    name: Reward source (usually the tool name).\n    value: Scalar reward.\n    reason: Optional human-readable reason.",
+      "description": "A dense reward attached to one turn.",
       "properties": {
         "name": {
           "title": "Name",
@@ -1167,24 +1294,20 @@
       "title": "ToolCall",
       "type": "object"
     },
-    "ToolCallStep": {
-      "description": "A tool invocation step within a rollout.\n\nAttributes:\n    type: Discriminator; always ``\"tool\"``.\n    tool_call_id: Correlates with the model's tool call id.\n    name: Tool name.\n    arguments: Parsed arguments.\n    result: Tool result payload.\n    error: Error message if the tool failed.\n    latency_ms: Tool execution latency.\n    parent: Name of the enclosing tool when this call was nested.\n    children: Tools invoked by this tool (hierarchical actions).",
+    "Turn": {
+      "description": "One model turn inside an episode: observation \u2192 action \u2192 observation.",
       "properties": {
-        "arguments": {
-          "additionalProperties": true,
-          "title": "Arguments",
-          "type": "object"
-        },
-        "children": {
+        "actions": {
           "items": {
-            "$ref": "#/$defs/ToolCallStep"
+            "$ref": "#/$defs/ActionStep"
           },
-          "title": "Children",
+          "title": "Actions",
           "type": "array"
         },
-        "error": {
+        "ended_at": {
           "anyOf": [
             {
+              "format": "date-time",
               "type": "string"
             },
             {
@@ -1192,63 +1315,99 @@
             }
           ],
           "default": null,
-          "title": "Error"
+          "title": "Ended At"
         },
-        "latency_ms": {
+        "model_context": {
           "anyOf": [
             {
-              "type": "number"
+              "$ref": "#/$defs/ChatRequest"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "title": "Latency Ms"
+          "title": "Model Context"
         },
-        "name": {
-          "title": "Name",
+        "model_output": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatResponse"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Output"
+        },
+        "observation": {
+          "default": null,
+          "title": "Observation"
+        },
+        "parsed_action": {
+          "items": {
+            "$ref": "#/$defs/ParsedAction"
+          },
+          "title": "Parsed Action",
+          "type": "array"
+        },
+        "reasoning": {
+          "items": {
+            "$ref": "#/$defs/ReasoningBlock"
+          },
+          "title": "Reasoning",
+          "type": "array"
+        },
+        "reward_events": {
+          "items": {
+            "$ref": "#/$defs/RewardEvent"
+          },
+          "title": "Reward Events",
+          "type": "array"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
           "type": "string"
         },
-        "parent": {
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "turn": {
           "anyOf": [
             {
-              "type": "string"
+              "type": "integer"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "title": "Parent"
+          "title": "Turn"
         },
-        "result": {
-          "default": null,
-          "title": "Result"
-        },
-        "tool_call_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Tool Call Id"
+        "turn_id": {
+          "title": "Turn Id",
+          "type": "string"
         },
         "type": {
-          "const": "tool",
-          "default": "tool",
+          "const": "turn",
+          "default": "turn",
           "title": "Type",
           "type": "string"
         }
       },
-      "required": [
-        "name"
-      ],
-      "title": "ToolCallStep",
+      "title": "Turn",
       "type": "object"
     },
     "Usage": {
@@ -1286,14 +1445,54 @@
       "type": "object"
     }
   },
-  "$id": "https://pluralintel.com/schemas/trace.v1.json",
+  "$id": "https://pluralintel.com/schemas/trace.v2.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "A complete record of an LLM interaction or environment rollout.\n\nProduction traffic and environment rollouts emit the same shape so that\ndatasets, benchmarks, and a future autorouter can consume either source.\n\nAttributes:\n    trace_id: Opaque unique id.\n    environment: Environment name when produced by a rollout.\n    environment_version: Environment version string.\n    environment_fingerprint: Hash of tools, instructions, and scorers.\n    task_id: Task id within an environment.\n    model: Policy / model id used for this episode.\n    initial_state: Environment snapshot at reset.\n    steps: Ordered steps (decisions, LLM calls, tool calls, events).\n    final_state: Environment snapshot at episode close.\n    outcome: Optional labeled outcome. ``outcome.reward`` is the return.\n    metrics: Episode aggregates (turns, cost, latency, tool counts).\n    terminated: Natural end (``env.done()``).\n    truncated: Cut off by ``max_turns``.\n    tags: Free-form tags for filtering.\n    metadata: Arbitrary metadata.\n    created_at: Creation timestamp (UTC).\n    schema_version: Trace schema version for stability.\n\nExamples:\n    >>> t = Trace(trace_id=\"t1\", tags={\"env\": \"prod\"})\n    >>> t.schema_version\n    '1.0.0'",
+  "description": "A complete record of an LLM interaction or environment rollout.\n\nProduction traffic and environment rollouts emit the same shape so that\ndatasets, benchmarks, and a future autorouter can consume either source.\n\nAttributes:\n    trace_id: Opaque unique id.\n    environment: Environment name when produced by a rollout.\n    environment_version: Environment version string.\n    environment_fingerprint: Hash of tools, instructions, and scorers.\n    task_id: Task id within an environment.\n    model: Policy / model id used for this episode.\n    initial_state: Environment snapshot at reset.\n    steps: Ordered steps (decisions, LLM calls, tool calls, events).\n    final_state: Environment snapshot at episode close.\n    outcome: Optional labeled outcome. ``outcome.reward`` is the return.\n    metrics: Episode aggregates (turns, cost, latency, tool counts).\n    terminated: Natural end (``env.done()``).\n    truncated: Cut off by ``max_turns``.\n    tags: Free-form tags for filtering.\n    metadata: Arbitrary metadata.\n    created_at: Creation timestamp (UTC).\n    schema_version: Trace schema version for stability.\n\nExamples:\n    >>> t = Trace(trace_id=\"t1\", tags={\"env\": \"prod\"})\n    >>> t.schema_version\n    '2.0.0'",
   "properties": {
+    "agent_instance_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Instance Id"
+    },
+    "agent_template_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Template Id"
+    },
+    "capability_denials": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/CapabilityDenial"
+      },
+      "title": "Capability Denials",
+      "type": "array"
+    },
     "created_at": {
       "format": "date-time",
       "title": "Created At",
       "type": "string"
+    },
+    "denied_capabilities": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Denied Capabilities",
+      "type": "array"
     },
     "environment": {
       "anyOf": [
@@ -1361,6 +1560,42 @@
       "default": null,
       "title": "Final State"
     },
+    "granted_capabilities": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Granted Capabilities",
+      "type": "array"
+    },
+    "harness": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Harness"
+    },
+    "harness_implementation": {
+      "anyOf": [
+        {
+          "enum": [
+            "declared",
+            "runnable"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Harness Implementation"
+    },
     "initial_state": {
       "anyOf": [
         {
@@ -1373,6 +1608,18 @@
       ],
       "default": null,
       "title": "Initial State"
+    },
+    "job_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Job Id"
     },
     "metadata": {
       "additionalProperties": true,
@@ -1420,8 +1667,8 @@
       "title": "Parent Trace Id"
     },
     "schema_version": {
-      "const": "1.0.0",
-      "default": "1.0.0",
+      "const": "2.0.0",
+      "default": "2.0.0",
       "title": "Schema Version",
       "type": "string"
     },
@@ -1429,10 +1676,10 @@
       "items": {
         "discriminator": {
           "mapping": {
-            "decision": "#/$defs/Decision",
+            "action": "#/$defs/ActionStep",
             "event": "#/$defs/Event",
             "llm": "#/$defs/LLMCall",
-            "tool": "#/$defs/ToolCallStep"
+            "turn": "#/$defs/Turn"
           },
           "propertyName": "type"
         },
@@ -1441,13 +1688,13 @@
             "$ref": "#/$defs/LLMCall"
           },
           {
-            "$ref": "#/$defs/ToolCallStep"
+            "$ref": "#/$defs/ActionStep"
           },
           {
             "$ref": "#/$defs/Event"
           },
           {
-            "$ref": "#/$defs/Decision"
+            "$ref": "#/$defs/Turn"
           }
         ]
       },
@@ -1510,6 +1757,18 @@
       ],
       "title": "Trace Kind",
       "type": "string"
+    },
+    "trial_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trial Id"
     },
     "truncated": {
       "anyOf": [

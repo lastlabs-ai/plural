@@ -16,7 +16,7 @@ def trace_json_schema() -> dict[str, Any]:
     Raises:
         ValueError: If the packaged resource is not a JSON object.
     """
-    resource = files("plural.schemas").joinpath("trace.v1.json")
+    resource = files("plural.schemas").joinpath("trace.v2.json")
     schema = json.loads(resource.read_text(encoding="utf-8"))
     if not isinstance(schema, dict):
         raise ValueError("packaged trace schema is not a JSON object")

@@ -1,4 +1,3 @@
-import hashlib
 import json
 import subprocess
 import sys
@@ -9,20 +8,20 @@ import jsonschema
 import pytest
 
 from plural.tracing import (
+    ActionStep,
     Event,
     Outcome,
     ParsedAction,
     RewardEvent,
-    ToolCallStep,
     Trace,
     trace_json_schema,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATHS = (
-    ROOT / "src/plural/schemas/trace.v1.json",
-    ROOT / "schemas/trace.v1.json",
-    ROOT / "docs/schemas/trace.v1.json",
+    ROOT / "src/plural/schemas/trace.v2.json",
+    ROOT / "schemas/trace.v2.json",
+    ROOT / "docs/schemas/trace.v2.json",
 )
 
 
@@ -35,7 +34,7 @@ def test_generated_trace_schema_is_current_and_packaged() -> None:
 
     contents = [path.read_text(encoding="utf-8") for path in SCHEMA_PATHS]
     assert contents[0] == contents[1] == contents[2]
-    packaged = files("plural.schemas").joinpath("trace.v1.json")
+    packaged = files("plural.schemas").joinpath("trace.v2.json")
     assert packaged.is_file()
     assert trace_json_schema() == json.loads(contents[0])
 
@@ -46,13 +45,15 @@ def test_trace_schema_contains_variants_and_lineage_fields() -> None:
 
     step_schema = schema["properties"]["steps"]["items"]
     step_refs = {variant["$ref"].rsplit("/", maxsplit=1)[-1] for variant in step_schema["oneOf"]}
-    assert step_refs == {"Decision", "Event", "LLMCall", "ToolCallStep"}
-    assert set(step_schema["discriminator"]["mapping"]) == {"decision", "event", "llm", "tool"}
+    assert step_refs == {"ActionStep", "Event", "LLMCall", "Turn"}
+    assert set(step_schema["discriminator"]["mapping"]) == {"action", "event", "llm", "turn"}
     assert {"trace_kind", "parent_trace_id", "episode_trace_id", "stop_reason"} <= set(
         schema["properties"]
     )
-    assert {"decision_id", "index"} <= set(schema["$defs"]["Decision"]["properties"])
-    assert schema["properties"]["schema_version"]["const"] == "1.0.0"
+    assert {"turn_id", "turn", "reasoning", "started_at", "ended_at"} <= set(
+        schema["$defs"]["Turn"]["properties"]
+    )
+    assert schema["properties"]["schema_version"]["const"] == "2.0.0"
 
 
 def test_production_and_episode_dumps_validate_against_trace_schema() -> None:
@@ -65,7 +66,7 @@ def test_production_and_episode_dumps_validate_against_trace_schema() -> None:
         stop_reason="complete",
     )
     production.add_llm(request=None, response=None)
-    production.add_tool("lookup", {"query": "plural"}, result={"found": True})
+    production.add_action("lookup", {"query": "plural"}, result={"found": True})
     production.steps.append(Event(name="routed", data={"provider": "test"}))
 
     episode = Trace(
@@ -77,11 +78,11 @@ def test_production_and_episode_dumps_validate_against_trace_schema() -> None:
         outcome=Outcome(reward=1.0),
         terminated=True,
     )
-    episode.add_decision(
-        index=0,
+    episode.add_turn(
+        turn=0,
         observation={"turn": 0},
         parsed_action=[ParsedAction(name="lookup", arguments={"query": "plural"})],
-        tool_calls=[ToolCallStep(name="lookup", result={"found": True})],
+        actions=[ActionStep(name="lookup", result={"found": True}, observation={"found": True})],
         reward_events=[RewardEvent(name="lookup", value=1.0)],
     )
 
@@ -89,29 +90,18 @@ def test_production_and_episode_dumps_validate_against_trace_schema() -> None:
     validator.validate(episode.model_dump(mode="json"))
 
     invalid = production.model_dump(mode="json")
-    invalid["schema_version"] = "2.0.0"
+    invalid["schema_version"] = "1.0.0"
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(invalid)
 
 
-def test_legacy_trace_fixture_migrates_episode_lineage_and_decisions() -> None:
+def test_legacy_traces_are_rejected() -> None:
     raw = (ROOT / "tests/fixtures/legacy_trace_v0_4.json").read_text(encoding="utf-8")
-    first = Trace.model_validate_json(raw)
-    second = Trace.model_validate_json(raw)
-
-    assert first.trace_kind == "episode"
-    assert first.episode_trace_id == first.trace_id
-    assert first.schema_version == "1.0.0"
-    assert [decision.index for decision in first.decisions()] == [0, 1]
-    expected_ids = [
-        hashlib.sha256(f"{first.trace_id}:decision:{index}".encode()).hexdigest()[:32]
-        for index in range(2)
-    ]
-    assert [decision.decision_id for decision in first.decisions()] == expected_ids
-    assert [decision.decision_id for decision in second.decisions()] == expected_ids
+    with pytest.raises(Exception):
+        Trace.model_validate_json(raw)
 
     current_a = Trace(trace_kind="episode")
     current_b = Trace(trace_kind="episode")
-    current_a.add_decision()
-    current_b.add_decision()
-    assert current_a.decisions()[0].decision_id != current_b.decisions()[0].decision_id
+    current_a.add_turn()
+    current_b.add_turn()
+    assert current_a.turns()[0].turn_id != current_b.turns()[0].turn_id

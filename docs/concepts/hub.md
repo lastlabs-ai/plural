@@ -1,0 +1,17 @@
+# Hub
+
+The hub is a listing of published environments, benchmarks, harnesses, and
+agent instances. It is not a marketplace: visibility and a readme, not
+payments or cross-account install.
+
+Listings live in `hub_listings` (`object_type`, `slug`, `title`,
+`readme_md`, `license`, `visibility`, `version`).
+
+```bash
+# Hosted API
+# GET  /api/v1/hub/listings
+# POST /api/v1/hub/listings
+# GET  /api/v1/hub/listings/{slug}
+```
+
+Browse and publish from Plural Intel `/hub`.

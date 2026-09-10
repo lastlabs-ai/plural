@@ -7,14 +7,14 @@ from typing import Any
 import pytest
 
 from plural import ActionResult, Client, Dataset, Environment, TaskData, Trace
-from plural.environments import Observation, State, StepResult, tool
+from plural.environments import Observation, State, StepResult, action
 from plural.environments.env import TaskData as TaskDataFromEnv
 from plural.environments.export.hf import to_huggingface_records
 from plural.environments.export.verifiers import to_verifiers_trace
 from plural.environments.runtime import Runtime
 from plural.environments.task import TaskData as TaskDataFromTask
 from plural.tracing import JSONLSink
-from plural.tracing.schema import Decision, Outcome, ParsedAction
+from plural.tracing.schema import Outcome, ParsedAction, Turn
 from plural.types import (
     ChatRequest,
     ChatResponse,
@@ -104,7 +104,7 @@ class CounterEnv(Environment[CounterObservation, CounterState]):
             return 0.25
         return None
 
-    @tool
+    @action
     def inc(self, by: int = 1) -> dict[str, int]:
         """Increment the counter."""
         self.state.n += by
@@ -149,7 +149,7 @@ def test_reset_step_gym_tuple() -> None:
     assert rollout.trace.terminated is True
     assert rollout.trace.initial_state == {"n": 0, "seed": 7, "finished": False}
     assert rollout.trace.final_state == {"n": 2, "seed": 7, "finished": True}
-    assert all(isinstance(s, Decision) for s in rollout.trace.steps)
+    assert all(isinstance(s, Turn) for s in rollout.trace.steps)
     assert rollout.trace.steps[0].model_context is None
     assert rollout.trace.steps[0].parsed_action[0].name == "inc"
 
@@ -170,7 +170,7 @@ def test_truncated_at_max_turns() -> None:
         def done(self) -> bool:
             return False
 
-        @tool
+        @action
         def inc(self, by: int = 1) -> dict[str, int]:
             """Increment the counter."""
             self.state.n += by
@@ -208,7 +208,7 @@ def test_rollout_records_request_on_decision(tmp_path: Path) -> None:
     assert rollout.trace.outcome is not None
     assert rollout.trace.outcome.reward == 1.0
     assert rollout.trace.model == "openai/gpt-4o-mini"
-    decisions = [s for s in rollout.trace.steps if s.type == "decision"]
+    decisions = [s for s in rollout.trace.steps if s.type == "turn"]
     assert decisions
     assert decisions[0].model_context is not None
     request = decisions[0].model_context
@@ -269,7 +269,7 @@ def test_custom_scalar_apply_action_receives_raw_action() -> None:
 def test_fingerprint_changes_with_tools_and_scorers() -> None:
     env = Environment(name="x", version="0.1.0", system_prompt="A")
 
-    @env.tool
+    @env.action
     def ping() -> str:
         """Ping."""
         return "pong"
@@ -277,7 +277,7 @@ def test_fingerprint_changes_with_tools_and_scorers() -> None:
     first = env.fingerprint()
     assert first == env.fingerprint()
 
-    @env.tool
+    @env.action
     def pong() -> str:
         """Pong."""
         return "ping"
@@ -286,7 +286,7 @@ def test_fingerprint_changes_with_tools_and_scorers() -> None:
 
     env2 = Environment(name="x", version="0.1.0", system_prompt="A")
 
-    @env2.tool(name="ping")
+    @env2.action(name="ping")
     def ping_env2() -> str:
         """Ping."""
         return "pong"
@@ -302,7 +302,7 @@ def test_support_triage_still_works(tmp_path: Path) -> None:
     client = _client(SequentialProvider(["refund"]), tmp_path)
     env = Environment(name="support-triage", version="0.1.0", system_prompt="Triage tickets.")
 
-    @env.tool
+    @env.action
     def lookup_order(order_id: str) -> dict[str, str]:
         """Look up an order."""
         return {"order_id": order_id, "status": "shipped"}
@@ -378,21 +378,21 @@ def test_decision_round_trip() -> None:
         truncated=False,
         outcome=Outcome(reward=1.0, scores={"ok": 1.0}),
     )
-    trace.add_decision(
+    trace.add_turn(
         observation="count=0",
         parsed_action=[ParsedAction(name="inc", arguments={"by": 1})],
-        index=0,
+        turn=0,
     )
     loaded = Trace.model_validate_json(trace.model_dump_json())
-    assert loaded.steps[0].type == "decision"
-    assert loaded.decisions()[0].decision_id == trace.decisions()[0].decision_id
-    assert loaded.decisions()[0].index == 0
+    assert loaded.steps[0].type == "turn"
+    assert loaded.turns()[0].turn_id == trace.turns()[0].turn_id
+    assert loaded.turns()[0].turn == 0
     assert loaded.environment_fingerprint == "abc"
     assert loaded.transitions()[0].action[0].name == "inc"
 
 
 def test_flat_trace_transitions_fallback() -> None:
-    from plural.tracing.schema import LLMCall, ToolCallStep
+    from plural.tracing.schema import ActionStep, LLMCall
 
     trace = Trace(trace_id="p", outcome=Outcome(reward=0.5), terminated=True)
     trace.steps.append(
@@ -401,7 +401,7 @@ def test_flat_trace_transitions_fallback() -> None:
             response=None,
         )
     )
-    trace.steps.append(ToolCallStep(name="lookup", arguments={"id": "1"}))
+    trace.steps.append(ActionStep(name="lookup", arguments={"id": "1"}))
     trans = trace.transitions()
     assert len(trans) == 1
     assert trans[0].action[0].name == "lookup"

@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from plural import Environment, TaskData
-from plural.environments import Observation, State, hidden, tool
+from plural.environments import Observation, State, hidden, action
 
 try:
     from .words import is_allowed, pattern, pick_answer
@@ -148,7 +148,7 @@ class WordleEnv(Environment[WordleObservation, WordleState]):
         """Submitted rows."""
         return self.state.rows
 
-    @tool
+    @action
     def guess(self, word: str) -> dict[str, Any]:
         """Submit a 5-letter guess. Invalid words do not consume a guess slot."""
         self.state.last_new_greens = 0

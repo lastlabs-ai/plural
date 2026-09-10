@@ -48,9 +48,11 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init  Create a local agent config with exactly one harness binding.                              │
-│ list  List local agent configs; hosted listing follows in the backend phase.                     │
-│ show  Show a validated local agent config.                                                       │
+│ init      Create a local agent config with exactly one harness binding.                          │
+│ list      List local agent configs; hosted listing follows in the backend phase.                 │
+│ show      Show a validated local agent config.                                                   │
+│ template  Manage agent templates.                                                                │
+│ instance  Inspect hosted agent instances.                                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -77,6 +79,120 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
+## `plural agent instance`
+
+```text
+
+ Usage: plural agent instance [OPTIONS] COMMAND [ARGS]...
+
+ Inspect hosted agent instances.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ list        List hosted agent instances.                                                         │
+│ show        Show one hosted agent instance.                                                      │
+│ memory      List instance memories.                                                              │
+│ skills      List instance skills.                                                                │
+│ data        List instance artifacts.                                                             │
+│ experience  Show instance experience counters.                                                   │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural agent instance data`
+
+```text
+
+ Usage: plural agent instance data [OPTIONS] {instance_id}
+
+ List instance artifacts.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    instance_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural agent instance experience`
+
+```text
+
+ Usage: plural agent instance experience [OPTIONS] {instance_id}
+
+ Show instance experience counters.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    instance_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural agent instance list`
+
+```text
+
+ Usage: plural agent instance list [OPTIONS]
+
+ List hosted agent instances.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural agent instance memory`
+
+```text
+
+ Usage: plural agent instance memory [OPTIONS] {instance_id}
+
+ List instance memories.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    instance_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural agent instance show`
+
+```text
+
+ Usage: plural agent instance show [OPTIONS] {instance_id}
+
+ Show one hosted agent instance.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    instance_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural agent instance skills`
+
+```text
+
+ Usage: plural agent instance skills [OPTIONS] {instance_id}
+
+ List instance skills.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    instance_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
 ## `plural agent list`
 
 ```text
@@ -100,6 +216,94 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
  Usage: plural agent show [OPTIONS] [path]
 
  Show a validated local agent config.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: agent.yaml]                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural agent template`
+
+```text
+
+ Usage: plural agent template [OPTIONS] COMMAND [ARGS]...
+
+ Manage agent templates.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init      Create a local agent template.                                                         │
+│ show      Show a local agent template.                                                           │
+│ validate  Validate a local agent template.                                                       │
+│ push      Publish a local agent template to the hosted API.                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural agent template init`
+
+```text
+
+ Usage: plural agent template init [OPTIONS] [path]
+
+ Create a local agent template.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: agent.yaml]                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│    --name                 <str>   [default: agent]                                               │
+│ *  --model                <str>   [required]                                                     │
+│    --environment  -e      <path>  [default: environment.yaml]                                    │
+│    --harness              <str>                                                                  │
+│    --force                                                                                       │
+│    --help                         Show this message and exit.                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural agent template push`
+
+```text
+
+ Usage: plural agent template push [OPTIONS] [path]
+
+ Publish a local agent template to the hosted API.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: agent.yaml]                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural agent template show`
+
+```text
+
+ Usage: plural agent template show [OPTIONS] [path]
+
+ Show a local agent template.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: agent.yaml]                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural agent template validate`
+
+```text
+
+ Usage: plural agent template validate [OPTIONS] [path]
+
+ Validate a local agent template.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   path      <path>  [default: agent.yaml]                                                        │
@@ -263,12 +467,83 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create environment.yaml, environment.py, tasks.jsonl, and Dockerfile.                  │
-│ validate  Strictly validate a local environment and owned tasks.                                 │
-│ build     Build a deterministic local environment manifest artifact.                             │
-│ push      Publish the exact local environment revision used by job sync.                         │
-│ task      Manage environment-owned tasks.                                                        │
-│ harness   Manage environment-allowed harnesses.                                                  │
+│ init          Create environment.yaml, environment.py, tasks.jsonl, and Dockerfile.              │
+│ validate      Strictly validate a local environment and owned tasks.                             │
+│ build         Build a deterministic local environment manifest artifact.                         │
+│ push          Publish the exact local environment revision used by job sync.                     │
+│ capabilities  Show required capabilities and per-target availability.                            │
+│ task          Manage environment-owned tasks.                                                    │
+│ action        Manage environment-owned native actions.                                           │
+│ resource      Manage environment resources.                                                      │
+│ harness       Stamp and inspect harness grants.                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural env action`
+
+```text
+
+ Usage: plural env action [OPTIONS] COMMAND [ARGS]...
+
+ Manage environment-owned native actions.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ add     Add a native action owned by the environment.                                            │
+│ list    List native actions.                                                                     │
+│ remove  Remove a native action.                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural env action add`
+
+```text
+
+ Usage: plural env action add [OPTIONS] {name}
+
+ Add a native action owned by the environment.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  [required]                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│    --environment  -e      <path>  [default: .]                                                   │
+│ *  --description          <str>   [required]                                                     │
+│    --command              <str>                                                                  │
+│    --help                         Show this message and exit.                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural env action list`
+
+```text
+
+ Usage: plural env action list [OPTIONS]
+
+ List native actions.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --environment  -e      <path>  [default: .]                                                      │
+│ --help                         Show this message and exit.                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural env action remove`
+
+```text
+
+ Usage: plural env action remove [OPTIONS] {name}
+
+ Remove a native action.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  [required]                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --environment  -e      <path>  [default: .]                                                      │
+│ --help                         Show this message and exit.                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -288,20 +563,39 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
+## `plural env capabilities`
+
+```text
+
+ Usage: plural env capabilities [OPTIONS] [path]
+
+ Show required capabilities and per-target availability.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: .]                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
 ## `plural env harness`
 
 ```text
 
  Usage: plural env harness [OPTIONS] COMMAND [ARGS]...
 
- Manage environment-allowed harnesses.
+ Stamp and inspect harness grants.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ add   Allow one exact harness revision in an environment.                                        │
-│ list  List exact harness revisions allowed by an environment.                                    │
+│ add           Allow one exact harness revision in an environment.                                │
+│ stamp         Stamp a harness onto an environment and show the grant matrix.                     │
+│ unstamp       Remove a stamped harness from the environment allowlist.                           │
+│ list          List exact harness revisions allowed by an environment.                            │
+│ capabilities  Show granted vs denied capabilities for one stamp.                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -322,6 +616,23 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
+## `plural env harness capabilities`
+
+```text
+
+ Usage: plural env harness capabilities [OPTIONS] {harness}
+
+ Show granted vs denied capabilities for one stamp.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    harness      <path>  [required]                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --environment  -e      <path>  [default: .]                                                      │
+│ --help                         Show this message and exit.                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
 ## `plural env harness list`
 
 ```text
@@ -330,6 +641,40 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  List exact harness revisions allowed by an environment.
 
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --environment  -e      <path>  [default: .]                                                      │
+│ --help                         Show this message and exit.                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural env harness stamp`
+
+```text
+
+ Usage: plural env harness stamp [OPTIONS] {harness}
+
+ Stamp a harness onto an environment and show the grant matrix.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    harness      <path>  [required]                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --environment  -e      <path>  [default: .]                                                      │
+│ --help                         Show this message and exit.                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural env harness unstamp`
+
+```text
+
+ Usage: plural env harness unstamp [OPTIONS] {name}
+
+ Remove a stamped harness from the environment allowlist.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  [required]                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --environment  -e      <path>  [default: .]                                                      │
 │ --help                         Show this message and exit.                                       │
@@ -367,6 +712,56 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural env resource`
+
+```text
+
+ Usage: plural env resource [OPTIONS] COMMAND [ARGS]...
+
+ Manage environment resources.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ add   Add a resource the environment provides.                                                   │
+│ list  List environment resources.                                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural env resource add`
+
+```text
+
+ Usage: plural env resource add [OPTIONS] {name}
+
+ Add a resource the environment provides.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  [required]                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --kind                 <str>   [default: file]                                                   │
+│ --environment  -e      <path>  [default: .]                                                      │
+│ --path                 <str>                                                                     │
+│ --help                         Show this message and exit.                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## `plural env resource list`
+
+```text
+
+ Usage: plural env resource list [OPTIONS]
+
+ List environment resources.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --environment  -e      <path>  [default: .]                                                      │
+│ --help                         Show this message and exit.                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -915,7 +1310,7 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ list    List providers that are genuinely available.                                             │
 │ show    Show one runtime's dynamic availability and capabilities.                                │
-│ doctor  Check provider dependencies, daemon, or credentials.                                     │
+│ doctor  Check provider health, or evaluate providers against one environment.                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -925,13 +1320,14 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 
  Usage: plural runtime doctor [OPTIONS] [name]
 
- Check provider dependencies, daemon, or credentials.
+ Check provider health, or evaluate providers against one environment.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   name      <str>  [default: local]                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --env         <path>                                                                             │
+│ --help                Show this message and exit.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

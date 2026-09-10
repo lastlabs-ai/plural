@@ -17,7 +17,7 @@ from plural.benchmarks import (
     RunManifest,
     TaskSetMetadata,
 )
-from plural.environments import Environment, Rollout, TaskData, TaskDataset, tool
+from plural.environments import Environment, Rollout, TaskData, TaskDataset, action
 from plural.environments.runtime import LocalRuntime, runtime_fingerprint
 from plural.tracing import JSONLSink, Outcome, ParsedAction, Trace, TraceWriter
 
@@ -408,7 +408,7 @@ class _RequiredConstructorEnvironment(Environment[Any, Any]):
 
 
 class _ToolEnvironment(Environment[Any, Any]):
-    @tool
+    @action
     def ping(self) -> str:
         return "local"
 
@@ -523,16 +523,16 @@ def test_generic_policy_factories_need_no_client_and_are_fresh_per_case() -> Non
 def test_environment_factory_supports_required_constructor_and_dynamic_tools() -> None:
     dynamic_template = Environment(name="dynamic")
 
-    @dynamic_template.tool
+    @dynamic_template.action
     def captured_tool() -> str:
         return dynamic_template.name
 
-    with pytest.raises(RuntimeError, match="dynamic tool.*environment_factory"):
+    with pytest.raises(RuntimeError, match="dynamic action.*environment_factory"):
         dynamic_template.spawn()
 
     template = _RequiredConstructorEnvironment("template", name="required")
 
-    @template.tool
+    @template.action
     def unsafe_tool() -> str:
         return template.required
 
@@ -542,7 +542,7 @@ def test_environment_factory_supports_required_constructor_and_dynamic_tools() -
     def environment_factory() -> _RequiredConstructorEnvironment:
         env = _RequiredConstructorEnvironment("fresh", name="required")
 
-        @env.tool
+        @env.action
         def safe_tool() -> str:
             return env.required
 
@@ -712,7 +712,7 @@ def test_default_local_runtime_is_attributable_per_case() -> None:
         {"agent": _ToolThenStopPolicy},
     ).run([TaskData(task_id="one", input="x")])
 
-    expected = runtime_fingerprint(LocalRuntime(_ToolEnvironment().tool_functions))
+    expected = runtime_fingerprint(LocalRuntime(_ToolEnvironment().action_functions))
     assert report.cases[0].runtime_fingerprint == expected
     assert report.manifest.runtime_fingerprints == [expected]
     assert expected != "local"

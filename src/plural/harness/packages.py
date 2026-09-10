@@ -6,8 +6,29 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from plural.domain import FileDeclaration, HarnessManifest, HarnessPackage, PackageSource
+from plural.domain import (
+    FileDeclaration,
+    HarnessCapability,
+    HarnessManifest,
+    HarnessPackage,
+    PackageSource,
+)
 from plural.harness.retrieval import tree_digest
+
+_CODE_CAPABILITIES = frozenset(
+    {
+        HarnessCapability.SHELL,
+        HarnessCapability.FILE_READ,
+        HarnessCapability.FILE_EDIT,
+        HarnessCapability.CODE_EXECUTION,
+        HarnessCapability.WEB_SEARCH,
+        HarnessCapability.BROWSER,
+        HarnessCapability.NETWORK_FETCH,
+        HarnessCapability.MCP,
+        HarnessCapability.SUBAGENTS,
+        HarnessCapability.PERSISTENCE,
+    }
+)
 
 
 class HarnessRecipe(BaseModel):
@@ -22,12 +43,13 @@ class HarnessRecipe(BaseModel):
     notes: str
 
 
-def _builtin(profile: str, capabilities: tuple[str, ...]) -> HarnessPackage:
+def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> HarnessPackage:
     manifest = HarnessManifest(
         name=profile,
         version="1.0.0",
         description=f"Plural first-party {profile} harness profile.",
-        command=("python", "builtin_runner.py", profile),
+        implementation="runnable",
+        command=("python", "native_runner.py", profile),
         requirements=(
             "OpenAI-compatible POST /chat/completions endpoint",
             "PLURAL_API_KEY or OPENAI_API_KEY unless explicitly unauthenticated",
@@ -56,82 +78,97 @@ def _builtin(profile: str, capabilities: tuple[str, ...]) -> HarnessPackage:
     )
 
 
-def chat_v1() -> HarnessPackage:
-    """Return the basic chat request/response profile."""
-    return _builtin("chat.v1", ("chat",))
+def native_chat_v1() -> HarnessPackage:
+    """Return the native chat request/response profile."""
+    return _builtin("native.chat.v1", frozenset())
 
 
-def tool_loop_v1() -> HarnessPackage:
-    """Return the iterative tool-use profile."""
-    return _builtin("tool-loop.v1", ("chat", "tools", "trajectory"))
-
-
-def code_task_v1() -> HarnessPackage:
-    """Return the code-editing profile."""
-    return _builtin("code-task.v1", ("chat", "tools", "filesystem", "trajectory"))
+def native_actions_v1() -> HarnessPackage:
+    """Return the native environment-action profile."""
+    return _builtin(
+        "native.actions.v1",
+        frozenset({HarnessCapability.SHELL, HarnessCapability.FILE_READ}),
+    )
 
 
 BUILTIN_PROFILES = {
-    "chat.v1": chat_v1,
-    "tool-loop.v1": tool_loop_v1,
-    "code-task.v1": code_task_v1,
+    "native.chat.v1": native_chat_v1,
+    "native.actions.v1": native_actions_v1,
+}
+
+
+def _declared(
+    name: str,
+    *,
+    capabilities: frozenset[HarnessCapability],
+    supported_models: tuple[str, ...] = ("*",),
+    auth_modes: tuple[str, ...] = ("environment",),
+    secret_names: tuple[str, ...] = (),
+    requirements: tuple[str, ...] = (),
+) -> HarnessManifest:
+    return HarnessManifest(
+        name=name,
+        implementation="declared",
+        capabilities=capabilities,
+        supported_models=supported_models,
+        auth_modes=auth_modes,  # type: ignore[arg-type]
+        secret_names=secret_names,
+        requirements=requirements,
+    )
+
+
+DECLARED_HARNESSES = {
+    "hermes": _declared(
+        "hermes",
+        capabilities=_CODE_CAPABILITIES,
+        secret_names=("OPENROUTER_API_KEY",),
+        requirements=("Installed `hermes` executable on PATH",),
+    ),
+    "claude-code": _declared(
+        "claude-code",
+        capabilities=_CODE_CAPABILITIES,
+        supported_models=("anthropic/*",),
+        auth_modes=("environment", "oauth"),
+        secret_names=("ANTHROPIC_API_KEY",),
+        requirements=("Installed `claude` executable on PATH",),
+    ),
+    "codex": _declared(
+        "codex",
+        capabilities=_CODE_CAPABILITIES,
+        supported_models=("openai/*",),
+        auth_modes=("environment", "oauth"),
+        secret_names=("OPENAI_API_KEY",),
+        requirements=("Installed `codex` executable on PATH",),
+    ),
+    "cursor": _declared(
+        "cursor",
+        capabilities=_CODE_CAPABILITIES,
+        requirements=("Installed Cursor agent CLI on PATH",),
+    ),
 }
 
 
 ADAPTER_RECIPES = {
     "claude-code": HarnessRecipe(
         name="claude-code",
-        manifest=HarnessManifest(
-            name="claude-code",
-            command=("python", "vendor_adapter.py", "claude-code"),
-            requirements=("Installed `claude` executable on PATH",),
-            capabilities=("chat", "tools", "filesystem", "trajectory"),
-            supported_models=("anthropic/*",),
-            auth_modes=("environment", "oauth"),
-            secret_names=("ANTHROPIC_API_KEY",),
-            outputs=(FileDeclaration(path="result.json"),),
-            artifacts=(FileDeclaration(path="trajectory.jsonl"),),
-            trajectory_path="trajectory.jsonl",
-        ),
+        manifest=DECLARED_HARNESSES["claude-code"],
         install=(("npm", "install", "--global", "@anthropic-ai/claude-code"),),
         adapter_source=str(Path(__file__).with_name("vendor_adapter.py")),
-        notes="Vendor CLI is separate; Plural ships only the protocol adapter source.",
+        notes="Declared-only in this release; Plural ships only the protocol adapter source.",
     ),
     "codex": HarnessRecipe(
         name="codex",
-        manifest=HarnessManifest(
-            name="codex",
-            command=("python", "vendor_adapter.py", "codex"),
-            requirements=("Installed `codex` executable on PATH",),
-            capabilities=("chat", "tools", "filesystem", "trajectory"),
-            supported_models=("openai/*",),
-            auth_modes=("environment", "oauth"),
-            secret_names=("OPENAI_API_KEY",),
-            outputs=(FileDeclaration(path="result.json"),),
-            artifacts=(FileDeclaration(path="trajectory.jsonl"),),
-            trajectory_path="trajectory.jsonl",
-        ),
+        manifest=DECLARED_HARNESSES["codex"],
         install=(("npm", "install", "--global", "@openai/codex"),),
         adapter_source=str(Path(__file__).with_name("vendor_adapter.py")),
-        notes="Vendor CLI is separate; Plural ships only the protocol adapter source.",
+        notes="Declared-only in this release; Plural ships only the protocol adapter source.",
     ),
     "hermes-agent": HarnessRecipe(
         name="hermes-agent",
-        manifest=HarnessManifest(
-            name="hermes-agent",
-            command=("python", "vendor_adapter.py", "hermes-agent"),
-            requirements=("Installed `hermes` executable on PATH",),
-            capabilities=("chat", "tools", "filesystem", "trajectory"),
-            supported_models=("*",),
-            auth_modes=("environment",),
-            secret_names=("OPENROUTER_API_KEY",),
-            outputs=(FileDeclaration(path="result.json"),),
-            artifacts=(FileDeclaration(path="trajectory.jsonl"),),
-            trajectory_path="trajectory.jsonl",
-        ),
+        manifest=DECLARED_HARNESSES["hermes"],
         install=(("pip", "install", "hermes-agent"),),
         adapter_source=str(Path(__file__).with_name("vendor_adapter.py")),
-        notes="Vendor agent is separate; Plural ships only the protocol adapter source.",
+        notes="Declared-only in this release; Plural ships only the protocol adapter source.",
     ),
 }
 
@@ -139,8 +176,8 @@ ADAPTER_RECIPES = {
 __all__ = [
     "ADAPTER_RECIPES",
     "BUILTIN_PROFILES",
+    "DECLARED_HARNESSES",
     "HarnessRecipe",
-    "chat_v1",
-    "code_task_v1",
-    "tool_loop_v1",
+    "native_actions_v1",
+    "native_chat_v1",
 ]

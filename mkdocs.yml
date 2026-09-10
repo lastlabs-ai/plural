@@ -78,7 +78,7 @@ nav:
   - Walkthroughs:
       - Build and evaluate an environment: tutorials/sdk-walkthrough.md
       - Run your first CLI job: tutorials/cli-walkthrough.md
-      - Add tools and verification: tutorials/package-tools.md
+      - Add native actions and verification: tutorials/package-tools.md
       - Fetch and update Plural Intel objects: guides/push-to-plural.md
       - Traces and datasets: tutorials/traces-and-datasets.md
   - SDK:
@@ -108,6 +108,12 @@ nav:
       - Migrate from OpenRouter: guides/migrate-openrouter.md
   - Concepts:
       - Environment lifecycle: concepts/environment.md
+      - Native actions: concepts/native-actions.md
+      - Harness stamping: concepts/harness-stamping.md
+      - Execution capabilities: concepts/execution-capabilities.md
+      - Agent templates and instances: concepts/agent-instances.md
+      - Observability: concepts/observability.md
+      - Hub: concepts/hub.md
       - Packages, jobs, and trials: concepts/execution.md
       - Benchmark: concepts/benchmark.md
       - Trace: concepts/trace.md
@@ -123,5 +129,6 @@ nav:
       - Manifest fields: reference/manifests.md
       - Package JSON schemas: reference/schemas.md
       - Trace JSON schema: reference/trace-schema.md
+      - Capability table: reference/capabilities.md
       - Glossary: reference/glossary.md
       - Version migration: migration/v1.md

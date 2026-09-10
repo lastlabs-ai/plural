@@ -142,6 +142,43 @@ class SandboxRequirements(SandboxModel):
         return frozenset(required)
 
 
+def environment_required_capabilities(runtime: Any) -> frozenset[Capability]:
+    """Derive sandbox controls required by an environment runtime declaration."""
+    required = {
+        Capability.UPLOAD,
+        Capability.DOWNLOAD,
+        Capability.TIMEOUT,
+        Capability.CANCEL,
+        Capability.WORKING_DIRECTORY,
+        Capability.ENVIRONMENT,
+        Capability.LOG_CAPTURE,
+    }
+    if (
+        getattr(runtime, "image", None)
+        or getattr(runtime, "snapshot", None)
+        or getattr(runtime, "declarative_image", None)
+    ):
+        required.add(Capability.IMAGE)
+    if getattr(runtime, "build_context", None):
+        required.add(Capability.BUILD)
+    resources = getattr(runtime, "resources", None)
+    if resources is not None and getattr(resources, "configured", False):
+        required.add(Capability.RESOURCES)
+    network = getattr(runtime, "network", NetworkMode.NONE)
+    if network is NetworkMode.NONE:
+        required.add(Capability.NETWORK_NONE)
+    elif network is NetworkMode.RESTRICTED:
+        required.add(Capability.NETWORK_ALLOWLIST)
+    if getattr(runtime, "persistent", False):
+        required.add(Capability.PERSISTENCE)
+    if getattr(runtime, "compose", False):
+        required.add(Capability.COMPOSE)
+    if getattr(runtime, "read_only_root", False):
+        required.add(Capability.READ_ONLY_ROOT)
+    extra = getattr(runtime, "extra_capabilities", frozenset()) or frozenset()
+    return frozenset(required) | frozenset(extra)
+
+
 class EffectiveSandboxPolicy(SandboxModel):
     """Provider-confirmed requirements captured in receipts."""
 
@@ -255,6 +292,7 @@ __all__ = [
     "DeclarativeImage",
     "DownloadedFile",
     "EffectiveSandboxPolicy",
+    "environment_required_capabilities",
     "ExecRequest",
     "ExecResult",
     "FileUpload",

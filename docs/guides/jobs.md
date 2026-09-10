@@ -9,10 +9,14 @@ a scored evaluation. This page covers operations after your first run.
 
 ```bash
 plural env validate environment
+plural env action list --environment environment
+plural env capabilities --environment environment
 plural env task list --environment environment
 plural env harness list --environment environment
+plural env harness capabilities --environment environment
+plural runtime doctor --env environment
 plural benchmark validate benchmark.yaml --environment environment
-plural agent show agent.yaml
+plural agent template show agent.yaml
 plural run job.yaml --print-config --format yaml
 ```
 
@@ -44,8 +48,10 @@ plural run job.yaml --runtime docker --unsafe-local --concurrency 4 --retry 2
 ```
 
 If no image/build context is configured, the CLI uses the Environment directory
-as a Docker build context. You can instead set `runtime.image` to a pinned image
-reference. `network: none` is the strongest supported Docker network policy;
+as a Docker build context. You can instead set `environment.runtime.image` to a
+pinned image reference. Container, network, and compute live on the environment;
+the job only selects a requested target. `network: none` is the strongest
+supported Docker network policy;
 `restricted` domain/CIDR allowlists are not implemented by this provider.
 Docker resource support covers CPU, memory, and process count, not per-container
 disk limits. Plural records the inspected image ID in the receipt.

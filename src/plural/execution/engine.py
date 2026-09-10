@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from plural.benchmarks import CaseKey, CaseResult, ModelStats, Report, RunManifest
 from plural.domain import (
-    AgentSpec,
+    AgentBinding,
     ErrorCode,
     HarnessPackage,
     JobResult,
@@ -29,6 +29,11 @@ from plural.domain import (
     TrialSpec,
     content_hash,
 )
+from plural.execution.policy import (
+    ProjectPolicy,
+    resolve_effective_policy,
+    sandbox_requirements_for,
+)
 from plural.execution.store import JobStore
 from plural.harness import (
     BUILTIN_PROFILES,
@@ -36,13 +41,14 @@ from plural.harness import (
     HarnessProtocolError,
     HarnessRunner,
     HarnessRunRequest,
+    native_actions_v1,
+    native_chat_v1,
 )
 from plural.harness.retrieval import materialize_package, retrieve_archive, tree_digest
 from plural.sandbox import (
     CapabilityError,
     DownloadedFile,
     FileUpload,
-    NetworkMode,
     ProviderRegistry,
     SandboxError,
     SandboxHandle,
@@ -85,36 +91,16 @@ def _requirements(
     verifier: bool = False,
     harness_digest: str | None = None,
 ) -> SandboxRequirements:
-    runtime = spec.runtime
-    verifier_manifest = spec.environment.verifier if verifier else None
-    identity = content_hash(
-        {
-            "environment": spec.environment.identity.digest,
-            "harness": harness_digest,
-            "verifier": verifier_manifest if verifier else None,
-        }
+    requirements = sandbox_requirements_for(
+        spec.environment,
+        verifier=verifier,
+        harness_digest=harness_digest,
     )
-    return SandboxRequirements(
-        image=verifier_manifest.image
-        if verifier_manifest and verifier_manifest.image
-        else runtime.image,
-        snapshot=None if verifier_manifest and verifier_manifest.image else runtime.snapshot,
-        declarative_image=(
-            None if verifier_manifest and verifier_manifest.image else runtime.declarative_image
-        ),
-        execution_identity=identity,
-        build_context=(
-            None if verifier_manifest and verifier_manifest.image else runtime.build_context
-        ),
-        dockerfile=None if verifier_manifest and verifier_manifest.image else runtime.dockerfile,
-        resources=runtime.resources,
-        network=NetworkMode.NONE if verifier else runtime.network,
-        network_allowlist=() if verifier else runtime.network_allowlist,
-        timeout_seconds=(
-            verifier_manifest.timeout_seconds if verifier_manifest else runtime.timeout_seconds
-        ),
-        read_only_root=runtime.read_only_root,
+    timeout = min(
+        requirements.timeout_seconds or spec.runtime.timeout_seconds,
+        spec.runtime.timeout_seconds,
     )
+    return requirements.model_copy(update={"timeout_seconds": timeout})
 
 
 def _classify(exc: BaseException) -> ErrorCode:
@@ -124,6 +110,10 @@ def _classify(exc: BaseException) -> ErrorCode:
         return ErrorCode.TIMEOUT
     if isinstance(exc, HarnessProtocolError):
         return ErrorCode.PROTOCOL_FAILED
+    if isinstance(exc, HarnessExecutionError) and "denied capability" in str(exc):
+        return ErrorCode.PROTOCOL_FAILED
+    if isinstance(exc, HarnessExecutionError):
+        return ErrorCode.HARNESS_FAILED
     if isinstance(exc, CapabilityError):
         return ErrorCode.RUNTIME_UNAVAILABLE
     if isinstance(exc, SandboxError):
@@ -142,11 +132,12 @@ def _package_requirements(spec: JobSpec, package: HarnessPackage) -> SandboxRequ
     )
     if package.source.kind != "oci":
         return requirements
+    env_runtime = spec.environment.runtime
     if (
-        spec.runtime.image
-        or spec.runtime.snapshot
-        or spec.runtime.declarative_image
-        or spec.runtime.build_context
+        env_runtime.image
+        or env_runtime.snapshot
+        or env_runtime.declarative_image
+        or env_runtime.build_context
     ):
         raise CapabilityError(
             "OCI harness image composition with a separate environment image is unsupported; "
@@ -164,9 +155,14 @@ def _package_requirements(spec: JobSpec, package: HarnessPackage) -> SandboxRequ
     )
 
 
-def _package_for(agent: AgentSpec) -> HarnessPackage:
+def _package_for(agent: AgentBinding, spec: JobSpec | None = None) -> HarnessPackage:
     if agent.harness_package is not None:
         return agent.harness_package
+    if agent.harness is None:
+        environment = spec.environment if spec is not None else None
+        if environment is not None and environment.actions:
+            return native_actions_v1()
+        return native_chat_v1()
     factory = BUILTIN_PROFILES.get(agent.harness.name)
     if factory is None:
         raise ExecutionFailure(
@@ -180,7 +176,7 @@ def _package_for(agent: AgentSpec) -> HarnessPackage:
 
 
 def _harness_environment(
-    agent: AgentSpec,
+    agent: AgentBinding,
     package: HarnessPackage,
     environ: Mapping[str, str],
 ) -> tuple[dict[str, str], dict[str, str]]:
@@ -199,8 +195,15 @@ def _harness_environment(
     return {**configured, **secrets}, secrets
 
 
-def _validate_harness_preflight(spec: JobSpec, agent: AgentSpec, package: HarnessPackage) -> None:
+def _validate_harness_preflight(
+    spec: JobSpec, agent: AgentBinding, package: HarnessPackage
+) -> None:
     manifest = package.manifest
+    if manifest.implementation == "declared":
+        raise ExecutionFailure(
+            ErrorCode.CONFIGURATION,
+            f"harness {manifest.name} is declared but not runnable",
+        )
     if not any(fnmatch.fnmatchcase(agent.model, pattern) for pattern in manifest.supported_models):
         raise CapabilityError(
             f"harness {manifest.name!r} does not support model {agent.model!r}; "
@@ -215,22 +218,24 @@ def _validate_harness_preflight(spec: JobSpec, agent: AgentSpec, package: Harnes
         raise CapabilityError(
             f"agent requests undeclared harness secrets: {sorted(undeclared_secrets)!r}"
         )
-    known = {"chat", "tools", "commands", "filesystem", "trajectory", "acp"}
-    unknown = set(manifest.capabilities) - known
-    if unknown:
-        raise CapabilityError(f"unknown harness capabilities: {sorted(unknown)!r}")
-    available = {"chat"}
-    if spec.environment.commands:
-        available.update({"tools", "commands", "filesystem"})
-    if manifest.trajectory_path is not None:
-        available.add("trajectory")
-    if manifest.protocol == "acp":
-        available.add("acp")
-    missing = set(manifest.capabilities) - available
-    if missing:
-        raise CapabilityError(
-            f"environment cannot provide harness capabilities: {sorted(missing)!r}"
-        )
+    stamp = agent.stamp
+    if stamp is not None and not stamp.granted:
+        raise CapabilityError(f"agent {agent.name!r} harness has no granted capabilities")
+
+
+def _environment_payload(spec: JobSpec, *, stamped: bool) -> dict[str, Any]:
+    payload = {
+        "name": spec.environment.name,
+        "instructions": spec.environment.instructions,
+        "context": spec.environment.context,
+        "limits": spec.environment.limits.model_dump(mode="json"),
+        "guardrails": [item.model_dump(mode="json") for item in spec.environment.guardrails],
+        "resources": [item.model_dump(mode="json") for item in spec.environment.resources],
+        "workspace": "/workspace/environment",
+    }
+    if not stamped:
+        payload["actions"] = [item.model_dump(mode="json") for item in spec.environment.actions]
+    return payload
 
 
 def _redact_bytes(value: bytes, secrets: Mapping[str, str]) -> bytes:
@@ -252,12 +257,16 @@ class Trial:
         provider: SandboxProvider,
         store: JobStore,
         environ: Mapping[str, str] | None = None,
+        project_policy: ProjectPolicy | None = None,
     ) -> None:
         self.spec = spec
         self.job_spec = job_spec
         self.provider = provider
         self.store = store
         self.environ = os.environ if environ is None else environ
+        self.project_policy = project_policy or ProjectPolicy.permissive(
+            allow_unsafe_local=job_spec.runtime.unsafe_local
+        )
         self._active: dict[str, SandboxHandle] = {}
 
     async def cancel(self) -> None:
@@ -275,7 +284,7 @@ class Trial:
         task = next(
             item for item in self.job_spec.environment.tasks if item.task_id == self.spec.task_id
         )
-        package = _package_for(agent)
+        package = _package_for(agent, self.job_spec)
         secrets: dict[str, str] = {}
         harness_env: dict[str, str] = {}
         stdout = b""
@@ -314,7 +323,8 @@ class Trial:
                     ErrorCode.CONFIGURATION,
                     "local development harness requires explicit unsafe opt-in",
                 )
-            _validate_harness_preflight(self.job_spec, agent, package)
+            if agent.harness is not None:
+                _validate_harness_preflight(self.job_spec, agent, package)
             if (
                 package.source.kind == "local"
                 and source is not None
@@ -325,10 +335,30 @@ class Trial:
                     ErrorCode.CONFIGURATION,
                     "local harness source digest does not match its lock",
                 )
+            declared = await self.provider.capabilities()
+            resolved = resolve_effective_policy(
+                environment=self.job_spec.environment,
+                template=agent.template,
+                stamp=agent.stamp,
+                project=self.project_policy,
+                provider=declared,
+                requested_target=self.job_spec.runtime.requested_target,
+            )
             requirements = _package_requirements(self.job_spec, package)
-            policy = await self.provider.preflight(requirements)
-            effective = policy.model_dump(mode="json")
-            effective["enforced"] = sorted(item.value for item in policy.enforced)
+            requirements = resolved.requirements.model_copy(
+                update={
+                    "image": requirements.image,
+                    "snapshot": requirements.snapshot,
+                    "declarative_image": requirements.declarative_image,
+                    "execution_identity": requirements.execution_identity,
+                    "build_context": requirements.build_context,
+                    "dockerfile": requirements.dockerfile,
+                    "timeout_seconds": requirements.timeout_seconds,
+                }
+            )
+            await self.provider.preflight(requirements)
+            effective = resolved.model_dump(mode="json")
+            effective["enforced"] = sorted(item.value for item in resolved.enforced)
             handle = await self.provider.create(requirements)
             self._active[handle.sandbox_id] = handle
             image_identity = handle.image_identity
@@ -376,19 +406,21 @@ class Trial:
                         "model": agent.model,
                         "routing": agent.routing.model_dump(mode="json", exclude_none=True),
                     },
-                    environment={
-                        "name": self.job_spec.environment.name,
-                        "instructions": self.job_spec.environment.instructions,
-                        "context": self.job_spec.environment.context,
-                        "commands": [
-                            item.model_dump(mode="json")
-                            for item in self.job_spec.environment.commands
-                        ],
-                        "limits": self.job_spec.environment.limits.model_dump(mode="json"),
-                        "policy": self.job_spec.environment.policy,
-                        "workspace": "/workspace/environment",
-                    },
+                    environment=_environment_payload(
+                        self.job_spec,
+                        stamped=agent.harness is not None,
+                    ),
                     workspace="/workspace/harness",
+                    granted_capabilities=tuple(
+                        sorted(item.value for item in agent.stamp.granted)
+                    )
+                    if agent.stamp is not None
+                    else (),
+                    denied_capabilities=tuple(
+                        sorted(item.value for item in agent.stamp.denied)
+                    )
+                    if agent.stamp is not None
+                    else (),
                 )
                 execution = await HarnessRunner(self.provider).run(
                     handle,
@@ -548,7 +580,7 @@ class Trial:
     def _receipt(
         self,
         *,
-        agent: AgentSpec,
+        agent: AgentBinding,
         task: TaskDefinition,
         package: HarnessPackage,
         retry: int,
@@ -597,14 +629,21 @@ class Trial:
             completed_at=datetime.now(timezone.utc),
             timings=timings,
             instructions_hash=content_hash(self.job_spec.environment.instructions),
-            commands_hash=content_hash(self.job_spec.environment.commands),
+            actions_hash=content_hash(self.job_spec.environment.actions),
             environment_source_digest=(
                 self.job_spec.environment.source.digest
                 if self.job_spec.environment.source is not None
                 else None
             ),
             execution_limits=self.job_spec.environment.limits,
-            policy=self.job_spec.environment.policy,
+            guardrails=self.job_spec.environment.guardrails,
+            agent_instance_id=self.spec.instance_id,
+            harness_implementation=(
+                package.manifest.implementation if agent.harness is not None else None
+            ),
+            granted_capabilities=tuple(
+                sorted(item.value for item in agent.stamp.granted) if agent.stamp else ()
+            ),
         )
 
 
@@ -626,6 +665,7 @@ class Job:
         store: JobStore | None = None,
         environ: Mapping[str, str] | None = None,
         progress: Callable[[TrialSpec, TrialResult], None] | None = None,
+        project_policy: ProjectPolicy | None = None,
     ) -> None:
         self.spec = spec
         self.plan = spec.plan()
@@ -633,6 +673,9 @@ class Job:
         self.store = store or JobStore()
         self.environ = os.environ if environ is None else environ
         self.progress = progress
+        self.project_policy = project_policy or ProjectPolicy.permissive(
+            allow_unsafe_local=spec.runtime.unsafe_local
+        )
         self._trials: set[Trial] = set()
 
     async def cancel(self) -> None:
@@ -648,16 +691,16 @@ class Job:
                 "pass --unsafe-local or set runtime.unsafe_local=true"
             )
         declared = await self.provider.capabilities()
-        requested = set(self.spec.runtime.capabilities) | set(
-            self.spec.environment.runtime_capabilities
-        )
-        supported = {item.value for item in declared.capabilities}
-        missing = requested - supported
-        if missing:
-            raise CapabilityError(
-                f"{self.provider.name} cannot enforce requested capabilities: "
-                f"{', '.join(sorted(missing))}"
+        for agent in self.spec.agents:
+            resolve_effective_policy(
+                environment=self.spec.environment,
+                template=agent.template,
+                stamp=agent.stamp,
+                project=self.project_policy,
+                provider=declared,
+                requested_target=self.spec.runtime.requested_target,
             )
+        await self.provider.preflight(_requirements(self.spec))
         if self.spec.environment.verifier is not None:
             await self.provider.preflight(_requirements(self.spec, verifier=True))
         environment_source = self.spec.environment.source
@@ -673,8 +716,9 @@ class Job:
             ):
                 raise ValueError("environment source lock mismatch")
         for agent in self.spec.agents:
-            package = _package_for(agent)
-            _validate_harness_preflight(self.spec, agent, package)
+            package = _package_for(agent, self.spec)
+            if agent.harness is not None:
+                _validate_harness_preflight(self.spec, agent, package)
             if package.source.kind == "oci" and self.provider.name != "docker":
                 raise CapabilityError("OCI harness images currently require DockerProvider")
             await self.provider.preflight(_package_requirements(self.spec, package))
@@ -723,6 +767,7 @@ class Job:
                         provider=self.provider,
                         store=self.store,
                         environ=self.environ,
+                        project_policy=self.project_policy,
                     )
                     self._trials.add(trial)
                     try:
@@ -768,6 +813,7 @@ class Job:
                 provider=self.provider,
                 store=self.store,
                 environ=self.environ,
+                project_policy=self.project_policy,
             )
             started = time.monotonic()
             output, stdout, stderr, duration = await runtime._verify(task, artifacts)
@@ -920,7 +966,7 @@ class Job:
             environment_digest=trial.environment.digest,
             benchmark_digest=self.spec.benchmark.content_hash,
             agent_digest=agent.content_hash,
-            harness_digest=trial.harness.digest,
+            harness_digest=trial.harness.digest if trial.harness is not None else "",
             runtime_provider=self.provider.name,
             task_hash=content_hash(task),
             started_at=now,

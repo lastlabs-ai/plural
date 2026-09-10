@@ -3,8 +3,8 @@
 For hosted reads and object edits, start with the [object walkthrough](push-to-plural.md).
 The source module is named `studio`; it connects to Plural Intel.
 
-The existing SDK can create/update hosted legacy `Environment` revisions,
-Agents, Benchmark reports/runs, and Traces:
+The existing SDK can create/update hosted `Environment` revisions, agent
+templates, instances, Benchmark reports/runs, and Traces:
 
 ```python
 from plural import Client, Environment
@@ -12,7 +12,7 @@ from plural import Client, Environment
 with Client(project="project-id") as client:
     env = Environment(name="support", version="0.7.4")
     created = client.create(env)
-    agent = client.agents.create(
+    template = client.agents.templates.create(
         name="support-agent",
         model="openai/gpt-4o-mini",
         environment_id=str(created["environment_id"]),
@@ -24,7 +24,7 @@ Project-scoped keys already identify a project. Account-scoped keys require
 gateway base URL and send the project as `X-Project-Id` when supplied.
 
 Environment sync sends description/readme plus a revision payload containing
-instructions, fingerprint, package version, max turns, tool/scorer definitions,
+instructions, fingerprint, package version, max turns, action/scorer definitions,
 skills, hooks, observation/state schemas, guardrails, and context policy.
 Benchmark sync stores a report and then best-effort uploads case traces with a
 run-group ID. Trace upload failures in that final best-effort loop are currently

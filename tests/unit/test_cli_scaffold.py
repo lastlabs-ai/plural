@@ -129,11 +129,14 @@ def test_cli_does_not_claim_execution_succeeded(tmp_path: Path) -> None:
     job_path = _project(tmp_path)
     result = CliRunner().invoke(
         app,
-        ["run", str(job_path)],
+        ["run", str(job_path), "--runtime", "local"],
         env={"PLURAL_CONFIG_HOME": str(tmp_path / "config")},
     )
     assert result.exit_code == 2
-    assert "not configured" in result.stderr
+    assert any(
+        token in result.stderr
+        for token in ("unsafe_local", "not configured", "cannot enforce network")
+    )
 
 
 def test_cli_executes_and_persists_unsafe_local_job(tmp_path: Path) -> None:

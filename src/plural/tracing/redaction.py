@@ -196,7 +196,7 @@ def _drop_content(data: dict[str, Any]) -> dict[str, Any]:
                 f"steps[{step_index}].response",
                 redacted_fields,
             )
-        elif step_type == "decision":
+        elif step_type == "turn":
             _omit_request_messages(
                 step.get("model_context"),
                 f"steps[{step_index}].model_context",
@@ -222,5 +222,23 @@ def _drop_content(data: dict[str, Any]) -> dict[str, Any]:
                             f"steps[{step_index}].parsed_action[{action_index}].arguments.text"
                         )
                     action["arguments"]["text"] = _CONTENT_OMITTED
+            for action_index, action in enumerate(step.get("actions") or []):
+                if not isinstance(action, dict):
+                    continue
+                if action.get("observation") is not None:
+                    redacted_fields.add(
+                        f"steps[{step_index}].actions[{action_index}].observation"
+                    )
+                    action["observation"] = _CONTENT_OMITTED
+                if action.get("result") is not None:
+                    redacted_fields.add(f"steps[{step_index}].actions[{action_index}].result")
+                    action["result"] = _CONTENT_OMITTED
+        elif step_type == "action":
+            if step.get("observation") is not None:
+                redacted_fields.add(f"steps[{step_index}].observation")
+                step["observation"] = _CONTENT_OMITTED
+            if step.get("result") is not None:
+                redacted_fields.add(f"steps[{step_index}].result")
+                step["result"] = _CONTENT_OMITTED
     metadata["redacted_fields"] = sorted(redacted_fields)
     return data

@@ -3,10 +3,10 @@
 from plural.harness.packages import (
     ADAPTER_RECIPES,
     BUILTIN_PROFILES,
+    DECLARED_HARNESSES,
     HarnessRecipe,
-    chat_v1,
-    code_task_v1,
-    tool_loop_v1,
+    native_actions_v1,
+    native_chat_v1,
 )
 from plural.harness.protocol import (
     HarnessEvent,
@@ -24,9 +24,12 @@ from plural.harness.retrieval import (
 )
 from plural.harness.runner import HarnessExecution, HarnessExecutionError, HarnessRunner
 
+from . import native_runner
+
 __all__ = [
     "ADAPTER_RECIPES",
     "BUILTIN_PROFILES",
+    "DECLARED_HARNESSES",
     "HarnessEvent",
     "HarnessExecution",
     "HarnessExecutionError",
@@ -34,14 +37,14 @@ __all__ = [
     "HarnessRecipe",
     "HarnessRunRequest",
     "HarnessRunner",
-    "chat_v1",
     "build_archive",
-    "code_task_v1",
+    "native_actions_v1",
+    "native_chat_v1",
+    "native_runner",
     "encode_request",
     "parse_events",
     "materialize_package",
     "package_from_archive",
     "retrieve_archive",
     "tree_digest",
-    "tool_loop_v1",
 ]

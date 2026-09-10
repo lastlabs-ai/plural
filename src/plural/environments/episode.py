@@ -16,7 +16,7 @@ from typing import Any
 
 from plural.environments.stop import StopReason
 from plural.environments.task import TaskData
-from plural.tracing.schema import Decision, Trace
+from plural.tracing.schema import Trace, Turn
 from plural.types import ChatResponse, Message
 
 
@@ -42,17 +42,17 @@ def episode_metrics(episode: Episode) -> dict[str, Any]:
     """Aggregate turn, cost, and latency stats for a closing episode.
 
     Args:
-        episode: Episode whose decisions are scored.
+        episode: Episode whose turns are scored.
 
     Returns:
         Metrics dict stored on ``trace.metrics``.
     """
-    decisions = [s for s in episode.trace.steps if isinstance(s, Decision)]
-    tool_count = sum(len(d.tool_calls) for d in decisions)
+    turns = [s for s in episode.trace.steps if isinstance(s, Turn)]
+    tool_count = sum(len(item.actions) for item in turns)
     cost = 0.0
     latency = 0.0
-    for decision in decisions:
-        output = decision.model_output
+    for turn in turns:
+        output = turn.model_output
         if isinstance(output, ChatResponse):
             if output.usage and output.usage.cost is not None:
                 cost += output.usage.cost
@@ -66,8 +66,8 @@ def episode_metrics(episode: Episode) -> dict[str, Any]:
                 latency += float(output["latency_ms"])
     return {
         "turns": episode.turn,
-        "decisions": len(decisions),
-        "tool_calls": tool_count,
+        "turn_steps": len(turns),
+        "action_calls": tool_count,
         "cost": cost,
         "latency_ms": latency,
         "stop_reason": episode.stop_reason.value if episode.stop_reason is not None else None,

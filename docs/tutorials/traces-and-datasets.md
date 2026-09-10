@@ -40,13 +40,13 @@ traces = Dataset.from_sink(
 )
 for trace in traces.traces:
     print(trace.trace_id, trace.stop_reason, trace.outcome)
-    for decision in trace.decisions():
-        print(decision.index, decision.parsed_action)
+    for turn in trace.turns():
+        print(turn.turn, turn.parsed_action)
 ```
 
-Inspect failed calls, tool errors, stop reasons, and observations. A text answer
-can finish an episode with `policy_stop`; `truncated` means the turn budget was
-reached. A failed episode is not a successful low-scoring answer.
+Inspect failed calls, action errors, stop reasons, and observations. A text
+answer can finish an episode with `policy_stop`; `truncated` means the turn
+budget was reached. A failed episode is not a successful low-scoring answer.
 
 `rollout` records one episode trace by default. `record_llm_traces=True` adds
 linked model-call child traces. When writing custom loops, pass lineage through

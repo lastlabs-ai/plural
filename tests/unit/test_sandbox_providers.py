@@ -63,7 +63,7 @@ async def test_local_cancel_terminates_descendant_processes(tmp_path: Path) -> N
                     "python",
                     "-c",
                     "import pathlib,subprocess,time;"
-                    "p=subprocess.Popen(['python','-c','import time;time.sleep(60)']);"
+                    "p=subprocess.Popen([__import__('sys').executable,'-c','import time;time.sleep(60)']);"
                     "pathlib.Path('child.pid').write_text(str(p.pid));time.sleep(60)",
                 )
             ),

@@ -44,13 +44,13 @@ from plural.environments.runtime import LocalRuntime, Runtime
 from plural.environments.step import StepResult
 from plural.environments.stop import EpisodeError, EpisodeState, StopReason, is_stopped
 from plural.environments.task import TaskData, TaskFn
-from plural.environments.tool import (
-    instrument_tool,
-    iter_env_tools,
-    make_tool_def,
-    root_tool_steps,
-    tool,
-    tool_root_scope,
+from plural.environments.action_registry import (
+    action,
+    action_root_scope,
+    instrument_action,
+    iter_env_actions,
+    make_action_def,
+    root_action_steps,
 )
 from plural.environments.types import (
     Observation,
@@ -62,16 +62,16 @@ from plural.environments.types import (
     serialize_observation,
 )
 from plural.tracing.schema import (
+    ActionStep,
     Outcome,
     ParsedAction,
     RewardEvent,
-    ToolCallStep,
     Trace,
     TraceContext,
 )
 from plural.types import ChatRequest, ChatResponse, Message, Tool
 
-__all__ = ["Environment", "Rollout", "StepResult", "TaskData", "tool"]
+__all__ = ["Environment", "Rollout", "StepResult", "TaskData", "action"]
 
 
 def _references_instance(value: Any, instance: Any, seen: set[int] | None = None) -> bool:
@@ -257,7 +257,7 @@ class Environment(Generic[ObsT, StateT]):
 
     Examples:
         >>> from plural.environments.env import Environment
-        >>> from plural.environments.tool import tool
+        >>> from plural.environments.action_registry import action
         >>> from plural.environments.types import Observation, State
         >>> class CounterState(State):
         ...     n: int = 0
@@ -277,13 +277,13 @@ class Environment(Generic[ObsT, StateT]):
         ...     def observe(self):
         ...         return CounterObservation(n=self.state.n)
         ...
-        ...     @tool
+        ...     @action
         ...     def inc(self, by: int = 1) -> dict:
         ...         '''Increment the counter.'''
         ...         self.state.n += by
         ...         return {"n": self.state.n}
         >>> env = CounterEnv()
-        >>> "inc" in env.tool_functions
+        >>> "inc" in env.actions
         True
     """
 
@@ -327,8 +327,8 @@ class Environment(Generic[ObsT, StateT]):
         self.skills = list(cls.skills if skills is None else skills)
         self.metadata = metadata or {}
         self.remote_id: str | None = None
-        self.tool_functions: dict[str, Callable[..., Any]] = {}
-        self.tool_defs: list[Tool] = []
+        self.action_functions: dict[str, Callable[..., Any]] = {}
+        self.action_defs: list[Tool] = []
         self.scorers: list[tuple[str, ScorerFn, float]] = []
         self._tasks_fn: TaskFn | None = None
         self.task: Any = None
@@ -336,7 +336,7 @@ class Environment(Generic[ObsT, StateT]):
         self._state: State = State()
         self._observation: Observation | None = None
         self._episode: Episode | None = None
-        self._register_class_tools()
+        self._register_class_actions()
 
     @property
     def slug(self) -> str:
@@ -532,12 +532,12 @@ class Environment(Generic[ObsT, StateT]):
         """
         return None
 
-    def step_reward(self, tool_name: str, result: Any) -> float | None:
-        """Optional dense reward after one tool call.
+    def step_reward(self, action_name: str, result: Any) -> float | None:
+        """Optional dense reward after one native action.
 
         Args:
-            tool_name: Tool that just ran.
-            result: Tool result payload.
+            action_name: Action that just ran.
+            result: Action result payload.
 
         Returns:
             A float reward, or ``None`` to record nothing.
@@ -564,14 +564,14 @@ class Environment(Generic[ObsT, StateT]):
                 f"{type(self).__name__}.spawn() could not construct a fresh environment; "
                 "override spawn() or pass Benchmark(environment_factory=...)"
             ) from exc
-        for tool_name, func in self.tool_functions.items():
-            if tool_name not in other.tool_functions:
+        for action_name, func in self.action_functions.items():
+            if action_name not in other.action_functions:
                 if _references_instance(func, self):
                     raise RuntimeError(
-                        f"dynamic tool {tool_name!r} references the original environment and "
+                        f"dynamic action {action_name!r} references the original environment and "
                         "cannot be isolated by spawn(); use Benchmark(environment_factory=...)"
                     )
-                other._add_tool(tool_name, func)
+                other._add_action(action_name, func)
 
         fresh_scorers = list(other.scorers)
         rebuilt_scorers: list[tuple[str, ScorerFn, float]] = []
@@ -620,24 +620,29 @@ class Environment(Generic[ObsT, StateT]):
         other.skills = list(self.skills)
         return other
 
-    def tool(self, fn: Callable[..., Any] | None = None, *, name: str | None = None) -> Any:
-        """Register a Python function as a tool.
+    def action(self, fn: Callable[..., Any] | None = None, *, name: str | None = None) -> Any:
+        """Register a Python function as a native action.
 
         Args:
             fn: Function to register (decorator usage).
-            name: Optional explicit tool name.
+            name: Optional explicit action name.
 
         Returns:
             The original function (decorator) or a decorator.
         """
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-            self._add_tool(name or func.__name__, func)
+            self._add_action(name or func.__name__, func)
             return func
 
         if fn is not None:
             return decorator(fn)
         return decorator
+
+    @property
+    def actions(self) -> dict[str, Callable[..., Any]]:
+        """Registered native action callables."""
+        return self.action_functions
 
     def scorer(
         self,
@@ -711,7 +716,7 @@ class Environment(Generic[ObsT, StateT]):
         obs_name, state_name = self._contract_names()
         tool_schemas = {
             definition.function.name: definition.model_dump(mode="json")
-            for definition in self.tool_defs
+            for definition in self.action_defs
         }
         payload = {
             "name": self.name,
@@ -731,7 +736,7 @@ class Environment(Generic[ObsT, StateT]):
                     "schema": tool_schemas.get(name),
                     "implementation": callable_implementation_digest(fn),
                 }
-                for name, fn in sorted(self.tool_functions.items())
+                for name, fn in sorted(self.action_functions.items())
             ],
             "scorers": [
                 {
@@ -907,7 +912,7 @@ class Environment(Generic[ObsT, StateT]):
         custom text environments can mutate state here and return their own
         :class:`~plural.environments.action.ActionResult`.
 
-        This hook must not call :meth:`record_decision` or :meth:`finish_turn`;
+        This hook must not call :meth:`record_turn` or :meth:`finish_turn`;
         framework-owned :meth:`step` performs that bookkeeping.
 
         Args:
@@ -919,28 +924,32 @@ class Environment(Generic[ObsT, StateT]):
             Applied action, tool, reward, stop, and diagnostic fields.
         """
         parsed, tool_calls_in = normalize_action(action, response)
-        tool_steps: list[ToolCallStep] = []
+        action_steps: list[ActionStep] = []
         reward_events: list[RewardEvent] = []
 
         for parsed_action, tool_call_id in zip(parsed, tool_calls_in, strict=False):
             if not is_tool_action(parsed_action):
+                if parsed_action.source == "environment_native":
+                    parsed_action.source = "model_text"
                 continue
-            with tool_root_scope():
+            with action_root_scope():
                 result, latency_ms, error = self._invoke_tool(
                     runtime, parsed_action.name, parsed_action.arguments
                 )
-                roots = root_tool_steps()
-            tool_step = roots[0] if roots else None
-            if tool_step is None:
-                tool_step = ToolCallStep(
+                roots = root_action_steps()
+            action_step = roots[0] if roots else None
+            if action_step is None:
+                action_step = ActionStep(
                     name=parsed_action.name,
                     arguments=parsed_action.arguments,
+                    source="environment_native",
+                    observation=result,
                     result=result,
                     error=error,
                     latency_ms=latency_ms,
                 )
-            tool_step.tool_call_id = tool_call_id
-            tool_steps.append(tool_step)
+            action_step.tool_call_id = tool_call_id
+            action_steps.append(action_step)
             value = self.step_reward(parsed_action.name, result)
             if value is not None:
                 reward_events.append(RewardEvent(name=parsed_action.name, value=float(value)))
@@ -950,7 +959,7 @@ class Environment(Generic[ObsT, StateT]):
             stop_reason = StopReason.POLICY_STOP
         return ActionResult(
             parsed_actions=parsed,
-            tool_calls=tool_steps,
+            actions=action_steps,
             reward_events=reward_events,
             stop_reason=stop_reason,
         )
@@ -968,7 +977,7 @@ class Environment(Generic[ObsT, StateT]):
 
         This method is framework-owned and cannot be overridden. It records
         the policy response, delegates action semantics to :meth:`apply_action`
-        exactly once, records a :class:`~plural.tracing.schema.Decision`, and
+        exactly once, records a :class:`~plural.tracing.schema.Turn`, and
         advances the lifecycle. Override :meth:`apply_action` for scalar or
         custom text actions.
 
@@ -1018,33 +1027,39 @@ class Environment(Generic[ObsT, StateT]):
             self.record_response(policy_response)
         observation = episode.observation
         if runtime is None:
-            runtime = LocalRuntime(self.tool_functions)
+            runtime = LocalRuntime(self.action_functions)
 
         action_result = self.apply_action(action, runtime=runtime, response=policy_response)
         if not isinstance(action_result, ActionResult):
             raise TypeError("Environment.apply_action() must return ActionResult")
 
-        episode.tool_errors = self._tool_errors(action_result.tool_calls)
-        for tool_step in action_result.tool_calls:
+        episode.tool_errors = self._tool_errors(action_result.actions)
+        for action_step in action_result.actions:
             episode.messages.append(
                 Message(
                     role="tool",
-                    tool_call_id=tool_step.tool_call_id,
-                    name=tool_step.name,
+                    tool_call_id=action_step.tool_call_id,
+                    name=action_step.name,
                     content=(
-                        json.dumps(tool_step.result)
-                        if not isinstance(tool_step.result, str)
-                        else tool_step.result
+                        json.dumps(action_step.observation)
+                        if not isinstance(action_step.observation, str)
+                        else action_step.observation
+                    )
+                    if action_step.observation is not None
+                    else (
+                        json.dumps(action_step.result)
+                        if not isinstance(action_step.result, str)
+                        else action_step.result
                     ),
                 )
             )
 
-        self.record_decision(
+        self.record_turn(
             observation=observation,
             model_context=request,
             model_output=policy_response,
             parsed_action=action_result.parsed_actions,
-            tool_calls=action_result.tool_calls,
+            actions=action_result.actions,
             reward_events=action_result.reward_events,
         )
         step_result = self.finish_turn(
@@ -1054,38 +1069,30 @@ class Environment(Generic[ObsT, StateT]):
         step_result.info = {**action_result.info, **step_result.info}
         return step_result
 
-    def record_decision(
+    def record_turn(
         self,
         *,
         observation: Any = None,
         model_context: ChatRequest | dict[str, Any] | None = None,
         model_output: ChatResponse | None = None,
         parsed_action: list[ParsedAction] | None = None,
-        tool_calls: list[ToolCallStep] | None = None,
+        actions: list[ActionStep] | None = None,
         reward_events: list[RewardEvent] | None = None,
     ) -> None:
-        """Append a decision to the open episode trace.
+        """Append a turn to the open episode trace.
 
         :meth:`step` calls this automatically from the
         :class:`~plural.environments.action.ActionResult` returned by
         :meth:`apply_action`. It remains public for advanced manual use.
-
-        Args:
-            observation: Observation the policy saw this turn.
-            model_context: Chat request, if any.
-            model_output: Chat response, if any.
-            parsed_action: Actions applied this turn.
-            tool_calls: Tool results this turn.
-            reward_events: Step rewards this turn.
         """
         episode = self._require_episode()
-        episode.trace.add_decision(
-            index=episode.turn,
+        episode.trace.add_turn(
+            turn=episode.turn,
             observation=serialize_observation(observation),
             model_context=model_context,
             model_output=model_output,
             parsed_action=parsed_action or [],
-            tool_calls=tool_calls or [],
+            actions=actions or [],
             reward_events=reward_events or [],
         )
         if model_output is not None:
@@ -1217,7 +1224,7 @@ class Environment(Generic[ObsT, StateT]):
             The closed, scored rollout.
         """
         if runtime is None:
-            runtime = LocalRuntime(self.tool_functions)
+            runtime = LocalRuntime(self.action_functions)
         self.reset(task, model=model)
         trace_context = self.trace_context()
         final_response: ChatResponse | None = None
@@ -1227,7 +1234,7 @@ class Environment(Generic[ObsT, StateT]):
                 request = ChatRequest(
                     model=model or "policy",
                     messages=self.messages(),
-                    tools=self.tool_defs or None,
+                    tools=self.action_defs or None,
                 )
                 policy_output = policy.act(request, trace_context=trace_context)
                 response = policy_output if isinstance(policy_output, ChatResponse) else None
@@ -1355,17 +1362,17 @@ class Environment(Generic[ObsT, StateT]):
         episode.messages.append(Message(role="user", content=text))
 
     @staticmethod
-    def _tool_errors(tool_calls: list[ToolCallStep]) -> list[str]:
+    def _tool_errors(action_steps: list[ActionStep]) -> list[str]:
         errors: list[str] = []
 
-        def collect(tool_step: ToolCallStep) -> None:
-            if tool_step.error:
-                errors.append(tool_step.error)
-            for child in tool_step.children:
+        def collect(action_step: ActionStep) -> None:
+            if action_step.error:
+                errors.append(action_step.error)
+            for child in action_step.children:
                 collect(child)
 
-        for tool_step in tool_calls:
-            collect(tool_step)
+        for action_step in action_steps:
+            collect(action_step)
         return errors
 
     def _append_assistant(self, response: ChatResponse | None) -> None:
@@ -1395,25 +1402,25 @@ class Environment(Generic[ObsT, StateT]):
             raise ValueError("scorer aggregate produced a non-finite reward")
         return scores, reward
 
-    def _register_class_tools(self) -> None:
-        for tool_name, func in iter_env_tools(type(self)):
+    def _register_class_actions(self) -> None:
+        for action_name, func in iter_env_actions(type(self)):
             bound = getattr(self, func.__name__)
-            self._add_tool(tool_name, bound, schema_from=func, bind_method=func.__name__)
+            self._add_action(action_name, bound, schema_from=func, bind_method=func.__name__)
 
-    def _add_tool(
+    def _add_action(
         self,
-        tool_name: str,
+        action_name: str,
         func: Callable[..., Any],
         *,
         schema_from: Callable[..., Any] | None = None,
         bind_method: str | None = None,
     ) -> None:
         source = schema_from or func
-        wrapped = instrument_tool(tool_name, func)
-        self.tool_functions[tool_name] = wrapped
+        wrapped = instrument_action(action_name, func)
+        self.action_functions[action_name] = wrapped
         if bind_method:
             setattr(self, bind_method, wrapped)
-        self.tool_defs.append(make_tool_def(tool_name, source))
+        self.action_defs.append(make_action_def(action_name, source))
 
     def _contract_types(self) -> tuple[type[Any], type[Any]]:
         for cls in type(self).__mro__:

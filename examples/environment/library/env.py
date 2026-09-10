@@ -5,8 +5,8 @@ submitted answer matches the hidden fact. A trainer uses discounted returns
 to credit search/read — the same pattern as researching, then posting, then
 getting likes later.
 
-``research`` is a hierarchical tool: it calls ``search`` then ``read``. That
-is still one Decision; inner calls are recorded as children for a future
+``research`` is a hierarchical action: it calls ``search`` then ``read``. That
+is still one Turn; inner calls are recorded as children for a future
 skill trainer.
 """
 
@@ -17,7 +17,7 @@ from typing import Any
 from pydantic import Field
 
 from plural import Environment, TaskData
-from plural.environments import Observation, State, tool
+from plural.environments import Observation, State, action
 
 CORPUS: list[dict[str, str]] = [
     {
@@ -122,7 +122,7 @@ class LibraryEnv(Environment[LibraryObservation, LibraryState]):
         """No dense reward — research is credited by the trainer."""
         return None
 
-    @tool
+    @action
     def search(self, query: str) -> dict[str, Any]:
         """Search the library. Returns matching titles, not full text."""
         q = query.lower()
@@ -133,7 +133,7 @@ class LibraryEnv(Environment[LibraryObservation, LibraryState]):
         ]
         return {"query": query, "hits": hits}
 
-    @tool
+    @action
     def read(self, doc_id: str) -> dict[str, Any]:
         """Read the full text of one document."""
         for doc in self.state.docs:
@@ -141,7 +141,7 @@ class LibraryEnv(Environment[LibraryObservation, LibraryState]):
                 return dict(doc)
         return {"error": f"unknown document {doc_id}"}
 
-    @tool
+    @action
     def research(self, query: str) -> dict[str, Any]:
         """Search, then read the first hit. Nested search/read are recorded."""
         found = self.search(query)
@@ -151,7 +151,7 @@ class LibraryEnv(Environment[LibraryObservation, LibraryState]):
         doc = self.read(str(hits[0]["doc_id"]))
         return {"query": query, "hits": hits, "doc": doc}
 
-    @tool
+    @action
     def answer(self, text: str) -> dict[str, Any]:
         """Submit the final answer and end the episode."""
         self.state.submitted = text

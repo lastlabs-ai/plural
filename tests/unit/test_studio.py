@@ -10,9 +10,8 @@ import respx
 from plural import Client, Environment
 from plural.benchmarks.runner import Benchmark, Report
 from plural.domain import (
-    AgentSpec,
+    AgentTemplate,
     EnvironmentManifest,
-    HarnessBinding,
     HarnessManifest,
     HarnessPackage,
     PackageSource,
@@ -377,7 +376,7 @@ def test_publish_environment_and_agent_exact_package_identity(
             },
         )
     )
-    agent_route = respx.post("https://api.example.com/api/v1/agents").mock(
+    agent_route = respx.post("https://api.example.com/api/v1/agent-templates").mock(
         return_value=httpx.Response(
             200,
             json={"id": "agent_1", "name": "Agent", "slug": "agent"},
@@ -392,16 +391,10 @@ def test_publish_environment_and_agent_exact_package_identity(
     assert published["package_content_hash"] == package.content_hash
     sent_environment = json.loads(revision_route.calls.last.request.content)
     assert sent_environment["package_manifest"]["name"] == "World"
-    binding = HarnessBinding(
-        name="runner",
-        revision="1.0.0",
-        digest=f"sha256:{'a' * 64}",
-    )
-    agent = AgentSpec(
+    agent = AgentTemplate(
         name="Agent",
         model="test/model",
         environment=package.identity,
-        harness=binding,
     )
     client.agents.create(
         name=agent.name,

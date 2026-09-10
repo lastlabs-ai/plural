@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from plural import (
-    AgentSpec,
+    AgentBinding,
+    AgentTemplate,
     Benchmark,
     BenchmarkDefinition,
     Client,
@@ -56,25 +57,30 @@ def main() -> None:
     assert task.task_id == "1"
     assert len(ds) == 1
     package = HarnessPackage(
-        manifest=HarnessManifest(name="h", command=("python", "harness.py")),
+        manifest=HarnessManifest(
+            name="h",
+            implementation="runnable",
+            command=("python", "harness.py"),
+        ),
         source=PackageSource(kind="local", uri=".", unsafe_local=True),
     )
     binding = HarnessBinding.from_package(package)
+    _ = binding
     manifest = EnvironmentManifest(
         name="x",
         tasks=(TaskDefinition(task_id="1", input="hi"),),
-        allowed_harnesses=(binding,),
     )
     definition = BenchmarkDefinition(
         name="b",
         environment=manifest.identity,
         task_ids=("1",),
     )
-    agent = AgentSpec(
-        name="a",
-        model="openai/model",
-        environment=manifest.identity,
-        harness=binding,
+    agent = AgentBinding(
+        template=AgentTemplate(
+            name="a",
+            model="openai/model",
+            environment=manifest.identity,
+        )
     )
     plan: JobPlan = JobSpec(
         environment=manifest,

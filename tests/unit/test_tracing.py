@@ -70,7 +70,7 @@ def test_drop_content_redacts_task_and_state_without_dropping_keys() -> None:
         final_state={"secret": "after"},
         metadata={"task": {"task_id": "t", "input": "private", "metadata": {}}},
     )
-    trace.add_decision(
+    trace.add_turn(
         observation="private observation",
         parsed_action=[ParsedAction(name="respond", arguments={"text": "private answer"})],
     )
@@ -81,8 +81,8 @@ def test_drop_content_redacts_task_and_state_without_dropping_keys() -> None:
     assert "final_state" in redacted.model_fields_set
     assert redacted.initial_state is None
     assert redacted.final_state is None
-    assert redacted.decisions()[0].observation is None
-    assert redacted.decisions()[0].parsed_action[0].arguments["text"] is None
+    assert redacted.turns()[0].observation is None
+    assert redacted.turns()[0].parsed_action[0].arguments["text"] is None
     assert redacted.metadata["redaction"] == {"drop_content": True}
     assert "initial_state" in redacted.metadata["redacted_fields"]
     assert Trace.model_validate_json(redacted.model_dump_json()) == redacted

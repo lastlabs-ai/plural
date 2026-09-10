@@ -40,10 +40,10 @@ def test_valid_step_records_reward_result_and_decision() -> None:
 
     assert result.reward == pytest.approx(0.2)
     assert result.observation.guesses_left == 5
-    decision = env.episode_trace.decisions()[0]
+    decision = env.episode_trace.turns()[0]
     assert decision.parsed_action[0].name == "guess"
-    assert decision.tool_calls[0].result["pattern"] == "..G.G"
-    assert "SLATE" in decision.tool_calls[0].result["board"]
+    assert decision.actions[0].result["pattern"] == "..G.G"
+    assert "SLATE" in decision.actions[0].result["board"]
 
 
 def test_invalid_step_preserves_guess_slot_but_uses_episode_turn() -> None:
@@ -56,7 +56,7 @@ def test_invalid_step_preserves_guess_slot_but_uses_episode_turn() -> None:
     assert result.info["turn"] == 1
     assert result.observation.guesses_left == MAX_GUESSES
     assert env.rows == []
-    assert "error" in env.episode_trace.decisions()[0].tool_calls[0].result
+    assert "error" in env.episode_trace.turns()[0].actions[0].result
 
 
 def test_missing_word_is_recorded_as_tool_error() -> None:
@@ -65,7 +65,7 @@ def test_missing_word_is_recorded_as_tool_error() -> None:
 
     result = env.step(ParsedAction(name="guess", arguments={}))
 
-    tool_call = env.episode_trace.decisions()[0].tool_calls[0]
+    tool_call = env.episode_trace.turns()[0].actions[0]
     assert result.info["tool_errors"]
     assert result.reward == pytest.approx(-0.05)
     assert tool_call.error is not None
@@ -107,4 +107,4 @@ def test_make_env_is_tool_only_and_versioned() -> None:
     env = make_env()
     assert env.version == "0.3.0"
     assert env.max_turns == MAX_GUESSES * 4
-    assert {item.function.name for item in env.tool_defs} == {"guess"}
+    assert {item.function.name for item in env.action_defs} == {"guess"}

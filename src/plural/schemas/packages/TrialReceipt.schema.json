@@ -33,15 +33,53 @@
       },
       "title": "ExecutionLimits",
       "type": "object"
+    },
+    "Guardrail": {
+      "additionalProperties": false,
+      "description": "One plain-language rule. Instructions, not enforcement.",
+      "properties": {
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "rule": {
+          "minLength": 1,
+          "title": "Rule",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule"
+      ],
+      "title": "Guardrail",
+      "type": "object"
     }
   },
   "additionalProperties": false,
   "description": "Execution provenance for one trial.",
   "properties": {
+    "actions_hash": {
+      "default": "",
+      "title": "Actions Hash",
+      "type": "string"
+    },
     "agent_digest": {
       "default": "",
       "title": "Agent Digest",
       "type": "string"
+    },
+    "agent_instance_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Instance Id"
     },
     "artifact_hashes": {
       "additionalProperties": {
@@ -59,11 +97,6 @@
     "benchmark_digest": {
       "default": "",
       "title": "Benchmark Digest",
-      "type": "string"
-    },
-    "commands_hash": {
-      "default": "",
-      "title": "Commands Hash",
       "type": "string"
     },
     "completed_at": {
@@ -111,9 +144,42 @@
     "execution_limits": {
       "$ref": "#/$defs/ExecutionLimits"
     },
+    "granted_capabilities": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Granted Capabilities",
+      "type": "array"
+    },
+    "guardrails": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Guardrail"
+      },
+      "title": "Guardrails",
+      "type": "array"
+    },
     "harness_digest": {
+      "default": "",
       "title": "Harness Digest",
       "type": "string"
+    },
+    "harness_implementation": {
+      "anyOf": [
+        {
+          "enum": [
+            "declared",
+            "runnable"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Harness Implementation"
     },
     "image_identity": {
       "anyOf": [
@@ -135,11 +201,6 @@
     "job_id": {
       "title": "Job Id",
       "type": "string"
-    },
-    "policy": {
-      "additionalProperties": true,
-      "title": "Policy",
-      "type": "object"
     },
     "retry_count": {
       "default": 0,
@@ -232,7 +293,6 @@
     "trial_id",
     "job_id",
     "environment_digest",
-    "harness_digest",
     "runtime_provider"
   ],
   "title": "TrialReceipt",

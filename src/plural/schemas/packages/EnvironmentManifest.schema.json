@@ -1,20 +1,104 @@
 {
   "$defs": {
-    "EnvironmentCommand": {
+    "Capability": {
+      "description": "Individual controls a provider can enforce.",
+      "enum": [
+        "image",
+        "build",
+        "resources",
+        "network_none",
+        "network_allowlist",
+        "upload",
+        "download",
+        "timeout",
+        "cancel",
+        "persistence",
+        "compose",
+        "read_only_root",
+        "working_directory",
+        "environment",
+        "log_capture"
+      ],
+      "title": "Capability",
+      "type": "string"
+    },
+    "DeclarativeImage": {
       "additionalProperties": false,
-      "description": "Declared argv-only command exposed to bounded harness tool loops.",
+      "description": "Portable subset of Daytona's declarative image builder.",
       "properties": {
-        "command": {
+        "base": {
+          "minLength": 1,
+          "title": "Base",
+          "type": "string"
+        },
+        "environment": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Environment",
+          "type": "object"
+        },
+        "pip_packages": {
+          "default": [],
           "items": {
             "type": "string"
           },
-          "minItems": 1,
-          "title": "Command",
+          "title": "Pip Packages",
           "type": "array"
         },
-        "description": {
-          "minLength": 1,
-          "title": "Description",
+        "workdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workdir"
+        }
+      },
+      "required": [
+        "base"
+      ],
+      "title": "DeclarativeImage",
+      "type": "object"
+    },
+    "EnvironmentResource": {
+      "additionalProperties": false,
+      "description": "Data, application, or file the environment provides to the agent.",
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "content_type": {
+          "default": "",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        },
+        "kind": {
+          "enum": [
+            "data",
+            "application",
+            "file",
+            "secret"
+          ],
+          "title": "Kind",
           "type": "string"
         },
         "name": {
@@ -22,24 +106,161 @@
           "title": "Name",
           "type": "string"
         },
-        "parameters": {
-          "additionalProperties": true,
-          "title": "Parameters",
-          "type": "object"
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uri"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "EnvironmentResource",
+      "type": "object"
+    },
+    "EnvironmentRuntime": {
+      "additionalProperties": false,
+      "description": "Container, network, compute, and execution surface the environment requires.",
+      "properties": {
+        "allow_unsafe_local": {
+          "default": false,
+          "title": "Allow Unsafe Local",
+          "type": "boolean"
+        },
+        "build_context": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Build Context"
+        },
+        "compose": {
+          "default": false,
+          "title": "Compose",
+          "type": "boolean"
+        },
+        "declarative_image": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeclarativeImage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dockerfile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dockerfile"
+        },
+        "extra_capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "title": "Extra Capabilities",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkMode",
+          "default": "none"
+        },
+        "network_allowlist": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Network Allowlist",
+          "type": "array"
+        },
+        "persistent": {
+          "default": false,
+          "title": "Persistent",
+          "type": "boolean"
+        },
+        "read_only_root": {
+          "default": false,
+          "title": "Read Only Root",
+          "type": "boolean"
+        },
+        "resources": {
+          "$ref": "#/$defs/ResourceRequirements"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshot"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/ExecutionTarget"
+          },
+          "title": "Targets",
+          "type": "array",
+          "uniqueItems": true
         },
         "timeout_seconds": {
-          "default": 30,
+          "default": 300,
           "exclusiveMinimum": 0,
           "title": "Timeout Seconds",
           "type": "number"
         }
       },
-      "required": [
-        "name",
-        "description",
-        "command"
-      ],
-      "title": "EnvironmentCommand",
+      "title": "EnvironmentRuntime",
       "type": "object"
     },
     "ExecutionLimits": {
@@ -76,6 +297,37 @@
       "title": "ExecutionLimits",
       "type": "object"
     },
+    "ExecutionTarget": {
+      "description": "Where a trial for this environment may execute.",
+      "enum": [
+        "local",
+        "docker",
+        "remote"
+      ],
+      "title": "ExecutionTarget",
+      "type": "string"
+    },
+    "Guardrail": {
+      "additionalProperties": false,
+      "description": "One plain-language rule. Instructions, not enforcement.",
+      "properties": {
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "rule": {
+          "minLength": 1,
+          "title": "Rule",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule"
+      ],
+      "title": "Guardrail",
+      "type": "object"
+    },
     "HarnessBinding": {
       "additionalProperties": false,
       "description": "Exact harness binding used by one agent and every resulting trial.",
@@ -102,6 +354,143 @@
       ],
       "title": "HarnessBinding",
       "type": "object"
+    },
+    "HarnessCapability": {
+      "description": "Actions a stamped harness may request.",
+      "enum": [
+        "shell",
+        "file_read",
+        "file_edit",
+        "code_execution",
+        "web_search",
+        "browser",
+        "network_fetch",
+        "mcp",
+        "subagents",
+        "persistence"
+      ],
+      "title": "HarnessCapability",
+      "type": "string"
+    },
+    "HarnessPolicy": {
+      "additionalProperties": false,
+      "description": "How an environment restricts any harness stamped onto it.",
+      "properties": {
+        "allowed_capabilities": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/HarnessCapability"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Capabilities"
+        },
+        "allowed_harnesses": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HarnessBinding"
+          },
+          "title": "Allowed Harnesses",
+          "type": "array"
+        },
+        "denied_capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HarnessCapability"
+          },
+          "title": "Denied Capabilities",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "mode": {
+          "default": "allow_all",
+          "enum": [
+            "allow_all",
+            "allowlist"
+          ],
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "HarnessPolicy",
+      "type": "object"
+    },
+    "NativeAction": {
+      "additionalProperties": false,
+      "description": "One action the environment owns. Acts in the environment, returns an observation.",
+      "properties": {
+        "command": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Command",
+          "type": "array"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "default": "command",
+          "enum": [
+            "command",
+            "python"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "mutates_state": {
+          "default": true,
+          "title": "Mutates State",
+          "type": "boolean"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "observation_schema": {
+          "additionalProperties": true,
+          "title": "Observation Schema",
+          "type": "object"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "timeout_seconds": {
+          "default": 30,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "NativeAction",
+      "type": "object"
+    },
+    "NetworkMode": {
+      "description": "Requested sandbox network policy.",
+      "enum": [
+        "none",
+        "restricted",
+        "full"
+      ],
+      "title": "NetworkMode",
+      "type": "string"
     },
     "PackageSource": {
       "additionalProperties": false,
@@ -149,6 +538,66 @@
         "uri"
       ],
       "title": "PackageSource",
+      "type": "object"
+    },
+    "ResourceRequirements": {
+      "additionalProperties": false,
+      "description": "Optional compute limits.",
+      "properties": {
+        "cpu": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu"
+        },
+        "disk_mb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Mb"
+        },
+        "memory_mb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Mb"
+        },
+        "pids": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pids"
+        }
+      },
+      "title": "ResourceRequirements",
       "type": "object"
     },
     "TaskDefinition": {
@@ -241,22 +690,14 @@
     }
   },
   "additionalProperties": false,
-  "description": "Environment package metadata, tasks, and allowed harnesses.",
+  "description": "Environment package: native actions, runtime, resources, and harness policy.",
   "properties": {
-    "allowed_harnesses": {
+    "actions": {
       "default": [],
       "items": {
-        "$ref": "#/$defs/HarnessBinding"
+        "$ref": "#/$defs/NativeAction"
       },
-      "title": "Allowed Harnesses",
-      "type": "array"
-    },
-    "commands": {
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/EnvironmentCommand"
-      },
-      "title": "Commands",
+      "title": "Actions",
       "type": "array"
     },
     "context": {
@@ -267,6 +708,17 @@
       "default": "",
       "title": "Description",
       "type": "string"
+    },
+    "guardrails": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Guardrail"
+      },
+      "title": "Guardrails",
+      "type": "array"
+    },
+    "harness_policy": {
+      "$ref": "#/$defs/HarnessPolicy"
     },
     "instructions": {
       "default": "",
@@ -281,10 +733,18 @@
       "title": "Name",
       "type": "string"
     },
-    "policy": {
+    "observation_schema": {
       "additionalProperties": true,
-      "title": "Policy",
+      "title": "Observation Schema",
       "type": "object"
+    },
+    "resources": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EnvironmentResource"
+      },
+      "title": "Resources",
+      "type": "array"
     },
     "revision": {
       "default": "0.1.0",
@@ -292,13 +752,8 @@
       "title": "Revision",
       "type": "string"
     },
-    "runtime_capabilities": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "title": "Runtime Capabilities",
-      "type": "array"
+    "runtime": {
+      "$ref": "#/$defs/EnvironmentRuntime"
     },
     "schema_version": {
       "const": "1",
@@ -316,6 +771,11 @@
         }
       ],
       "default": null
+    },
+    "state_schema": {
+      "additionalProperties": true,
+      "title": "State Schema",
+      "type": "object"
     },
     "tasks": {
       "default": [],

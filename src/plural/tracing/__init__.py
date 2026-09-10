@@ -11,24 +11,27 @@ from __future__ import annotations
 from plural.tracing.redaction import Redactor, Sampler
 from plural.tracing.resources import trace_json_schema
 from plural.tracing.schema import (
-    Decision,
+    ActionStep,
+    CapabilityDenial,
     Event,
     LLMCall,
     Outcome,
     ParsedAction,
+    ReasoningBlock,
     RewardEvent,
     Step,
-    ToolCallStep,
     Trace,
     TraceContext,
     TraceKind,
     Transition,
+    Turn,
 )
 from plural.tracing.sinks import JSONLSink, MultiSink, OTelSink, Sink, SQLiteSink
 from plural.tracing.writer import TraceWriter
 
 __all__ = [
-    "Decision",
+    "ActionStep",
+    "CapabilityDenial",
     "Event",
     "JSONLSink",
     "LLMCall",
@@ -36,17 +39,18 @@ __all__ = [
     "OTelSink",
     "Outcome",
     "ParsedAction",
+    "ReasoningBlock",
     "Redactor",
     "RewardEvent",
     "SQLiteSink",
     "Sampler",
     "Sink",
     "Step",
-    "ToolCallStep",
     "Trace",
     "TraceContext",
     "TraceKind",
     "TraceWriter",
     "Transition",
+    "Turn",
     "trace_json_schema",
 ]

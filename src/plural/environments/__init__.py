@@ -34,7 +34,7 @@ from plural.environments.runtime import LocalRuntime, Runtime
 from plural.environments.step import StepResult
 from plural.environments.stop import EpisodeError, EpisodeState, StopReason, is_stopped
 from plural.environments.task import TaskData
-from plural.environments.tool import tool
+from plural.environments.action_registry import action
 from plural.environments.types import Observation, State, hidden
 
 __all__ = [
@@ -66,6 +66,6 @@ __all__ = [
     "is_tool_action",
     "normalize_action",
     "replay_actions",
-    "tool",
+    "action",
     "verify_replay",
 ]

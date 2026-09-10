@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import ConfigDict, Field
 
 from plural import Environment, TaskData
-from plural.environments import Observation, State, tool
+from plural.environments import Observation, State, action
 
 INSTRUCTIONS = (
     "You operate this Twitter account. Use tools to look around and act the "
@@ -239,13 +239,13 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
             return min(1.0, self._likes_on_own_posts() / max(target, 1))
         return 0.0
 
-    @tool
+    @action
     def view_timeline(self, limit: int = 10) -> dict[str, Any]:
         """Show the home timeline (posts from accounts you follow, newest first)."""
         posts = self._timeline_posts()[: max(1, min(limit, 50))]
         return {"posts": [self._post_view(p) for p in posts]}
 
-    @tool
+    @action
     def view_profile(self, handle: str) -> dict[str, Any]:
         """View a user profile and their recent posts."""
         user = self._user(handle)
@@ -264,7 +264,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
             "recent_posts": [self._post_view(p) for p in posts[:5]],
         }
 
-    @tool
+    @action
     def view_post(self, post_id: str) -> dict[str, Any]:
         """View a single post and its replies."""
         post = self.posts.get(post_id)
@@ -273,7 +273,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         replies = [p for p in self.posts.values() if p.reply_to == post_id]
         return {**self._post_view(post), "replies": [self._post_view(p) for p in replies]}
 
-    @tool
+    @action
     def view_notifications(self) -> dict[str, Any]:
         """View mentions and replies directed at this account."""
         mentions = self._mentions()
@@ -281,7 +281,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
             self._seen_notifications.add(post.post_id)
         return {"mentions": [self._post_view(p) for p in mentions]}
 
-    @tool
+    @action
     def follow(self, handle: str) -> dict[str, Any]:
         """Follow a user."""
         user = self._user(handle)
@@ -294,7 +294,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         self.tick += 1
         return {"ok": True, "following": user.handle}
 
-    @tool
+    @action
     def unfollow(self, handle: str) -> dict[str, Any]:
         """Unfollow a user."""
         user = self._user(handle)
@@ -305,13 +305,13 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         self.tick += 1
         return {"ok": True, "unfollowed": user.handle}
 
-    @tool
+    @action
     def tweet(self, text: str, media_ids: list[str] | None = None) -> dict[str, Any]:
         """Publish a tweet from this account."""
         post = self._create_post(self.account, text, media_ids=media_ids)
         return {"ok": True, "post": self._post_view(post)}
 
-    @tool
+    @action
     def wait_for_engagement(self) -> dict[str, int]:
         """Advance the simulator and let followers like non-empty own posts."""
         followers = sorted(self.users[self.account].followers)
@@ -328,7 +328,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
             "likes_on_own_posts": self._likes_on_own_posts(),
         }
 
-    @tool
+    @action
     def reply(self, post_id: str, text: str) -> dict[str, Any]:
         """Reply to a post."""
         if post_id not in self.posts:
@@ -336,7 +336,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         post = self._create_post(self.account, text, reply_to=post_id)
         return {"ok": True, "post": self._post_view(post)}
 
-    @tool
+    @action
     def like(self, post_id: str) -> dict[str, Any]:
         """Like a post."""
         post = self.posts.get(post_id)
@@ -346,7 +346,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         self.tick += 1
         return {"ok": True, "likes": len(post.likes)}
 
-    @tool
+    @action
     def unlike(self, post_id: str) -> dict[str, Any]:
         """Remove a like from a post."""
         post = self.posts.get(post_id)
@@ -356,7 +356,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         self.tick += 1
         return {"ok": True, "likes": len(post.likes)}
 
-    @tool
+    @action
     def repost(self, post_id: str) -> dict[str, Any]:
         """Repost / retweet a post."""
         post = self.posts.get(post_id)
@@ -366,7 +366,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         self.tick += 1
         return {"ok": True, "reposts": len(post.reposts)}
 
-    @tool
+    @action
     def quote(self, post_id: str, text: str) -> dict[str, Any]:
         """Quote-tweet a post with your own commentary."""
         if post_id not in self.posts:
@@ -375,7 +375,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         self.posts[post_id].reposts.add(self.account)
         return {"ok": True, "post": self._post_view(post)}
 
-    @tool
+    @action
     def bookmark(self, post_id: str) -> dict[str, Any]:
         """Bookmark a post for later."""
         post = self.posts.get(post_id)
@@ -385,7 +385,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         self.tick += 1
         return {"ok": True, "bookmarked": post_id}
 
-    @tool
+    @action
     def create_image(self, prompt: str) -> dict[str, Any]:
         """Create an image attachment (placeholder id in this simulator)."""
         media_id = self._new_id("img")
@@ -398,7 +398,7 @@ class TwitterEnv(Environment[TwitterObservation, TwitterState]):
         self.tick += 1
         return self.media[media_id]
 
-    @tool
+    @action
     def create_video(self, prompt: str) -> dict[str, Any]:
         """Create a video attachment (placeholder id in this simulator)."""
         media_id = self._new_id("vid")

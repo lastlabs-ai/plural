@@ -9,12 +9,11 @@ Examples:
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from plural.types import ChatRequest, ChatResponse, Usage
 
@@ -87,30 +86,42 @@ class LLMCall(BaseModel):
     error: str | None = None
 
 
-class ToolCallStep(BaseModel):
-    """A tool invocation step within a rollout.
+ActionSource = Literal["environment_native", "harness", "model_text"]
 
-    Attributes:
-        type: Discriminator; always ``"tool"``.
-        tool_call_id: Correlates with the model's tool call id.
-        name: Tool name.
-        arguments: Parsed arguments.
-        result: Tool result payload.
-        error: Error message if the tool failed.
-        latency_ms: Tool execution latency.
-        parent: Name of the enclosing tool when this call was nested.
-        children: Tools invoked by this tool (hierarchical actions).
-    """
 
-    type: Literal["tool"] = "tool"
+class ReasoningBlock(BaseModel):
+    """One chain-of-thought or assistant text block from a turn."""
+
+    kind: Literal["thinking", "text", "redacted"]
+    text: str
+    signature: str | None = None
+
+
+class CapabilityDenial(BaseModel):
+    """A capability the environment or policy removed during a trial."""
+
+    capability: str
+    layer: str
+    reason: str
+
+
+class ActionStep(BaseModel):
+    """One action invocation and the observation it returned."""
+
+    type: Literal["action"] = "action"
+    action_id: str | None = None
     tool_call_id: str | None = None
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    source: ActionSource = "environment_native"
+    observation: Any = None
     result: Any = None
     error: str | None = None
     latency_ms: float | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
     parent: str | None = None
-    children: list[ToolCallStep] = Field(default_factory=list)
+    children: list[ActionStep] = Field(default_factory=list)
 
 
 class Event(BaseModel):
@@ -128,57 +139,37 @@ class Event(BaseModel):
 
 
 class ParsedAction(BaseModel):
-    """A structured action the policy chose this turn.
-
-    Attributes:
-        name: Tool / action name. Empty or ``"respond"`` means no tool call.
-        arguments: Parsed arguments.
-    """
+    """A structured action the policy chose this turn."""
 
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    source: ActionSource = "environment_native"
+    action_id: str | None = None
 
 
 class RewardEvent(BaseModel):
-    """A dense reward attached to one decision.
-
-    Attributes:
-        name: Reward source (usually the tool name).
-        value: Scalar reward.
-        reason: Optional human-readable reason.
-    """
+    """A dense reward attached to one turn."""
 
     name: str
     value: float
     reason: str | None = None
 
 
-class Decision(BaseModel):
-    """One model turn inside an episode: observation → action → reward.
+class Turn(BaseModel):
+    """One model turn inside an episode: observation → action → observation."""
 
-    A single decision may include several tool calls (the model liked a post
-    and replied in the same turn).
-
-    Attributes:
-        type: Discriminator; always ``"decision"``.
-        observation: Environment observation the policy saw this turn.
-        model_context: Chat request actually sent (the policy input).
-        model_output: Chat response from the model.
-        parsed_action: Structured actions extracted from the model output.
-        tool_calls: Tool invocations with results.
-        reward_events: Per-tool step rewards.
-        timestamp: When the decision was recorded (UTC).
-    """
-
-    type: Literal["decision"] = "decision"
-    decision_id: str = Field(default_factory=new_trace_id)
-    index: int | None = None
+    type: Literal["turn"] = "turn"
+    turn_id: str = Field(default_factory=new_trace_id)
+    turn: int | None = None
     observation: Any = None
     model_context: ChatRequest | dict[str, Any] | None = None
     model_output: ChatResponse | dict[str, Any] | None = None
+    reasoning: list[ReasoningBlock] = Field(default_factory=list)
     parsed_action: list[ParsedAction] = Field(default_factory=list)
-    tool_calls: list[ToolCallStep] = Field(default_factory=list)
+    actions: list[ActionStep] = Field(default_factory=list)
     reward_events: list[RewardEvent] = Field(default_factory=list)
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    ended_at: datetime | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -205,7 +196,7 @@ class Transition(BaseModel):
 
 
 Step = Annotated[
-    LLMCall | ToolCallStep | Event | Decision,
+    LLMCall | ActionStep | Event | Turn,
     Field(discriminator="type"),
 ]
 
@@ -254,7 +245,7 @@ class Trace(BaseModel):
     Examples:
         >>> t = Trace(trace_id="t1", tags={"env": "prod"})
         >>> t.schema_version
-        '1.0.0'
+        '2.0.0'
     """
 
     trace_id: str = Field(default_factory=new_trace_id)
@@ -267,6 +258,15 @@ class Trace(BaseModel):
     environment_fingerprint: str | None = None
     task_id: str | None = None
     model: str | None = None
+    harness: str | None = None
+    harness_implementation: Literal["declared", "runnable"] | None = None
+    granted_capabilities: tuple[str, ...] = ()
+    denied_capabilities: tuple[str, ...] = ()
+    capability_denials: tuple[CapabilityDenial, ...] = ()
+    agent_template_id: str | None = None
+    agent_instance_id: str | None = None
+    job_id: str | None = None
+    trial_id: str | None = None
     initial_state: dict[str, Any] | None = None
     steps: list[Step] = Field(default_factory=list)
     final_state: dict[str, Any] | None = None
@@ -278,56 +278,7 @@ class Trace(BaseModel):
     tags: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: Literal["1.0.0"] = "1.0.0"
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_trace(cls, value: Any) -> Any:
-        """Migrate pre-1.0 raw traces without changing new-trace defaults.
-
-        Returns:
-            The migrated raw payload, or the original non-legacy value.
-        """
-        if not isinstance(value, dict) or "trace_kind" in value:
-            return value
-
-        data = dict(value)
-        raw_steps = data.get("steps")
-        steps = list(raw_steps) if isinstance(raw_steps, list) else []
-        has_decisions = any(
-            isinstance(step, dict) and step.get("type") == "decision" for step in steps
-        )
-        has_environment = any(
-            data.get(field) is not None
-            for field in ("environment", "environment_version", "environment_fingerprint")
-        )
-        is_episode = has_environment or has_decisions
-        data["trace_kind"] = "episode" if is_episode else "production"
-        data["schema_version"] = "1.0.0"
-
-        trace_id = data.get("trace_id")
-        if is_episode and isinstance(trace_id, str):
-            data.setdefault("episode_trace_id", trace_id)
-
-        if isinstance(trace_id, str) and has_decisions:
-            migrated_steps: list[Any] = []
-            decision_position = 0
-            for step in steps:
-                if not isinstance(step, dict) or step.get("type") != "decision":
-                    migrated_steps.append(step)
-                    continue
-                migrated = dict(step)
-                migrated.setdefault("index", decision_position)
-                migrated.setdefault(
-                    "decision_id",
-                    hashlib.sha256(f"{trace_id}:decision:{decision_position}".encode()).hexdigest()[
-                        :32
-                    ],
-                )
-                migrated_steps.append(migrated)
-                decision_position += 1
-            data["steps"] = migrated_steps
-        return data
+    schema_version: Literal["2.0.0"] = "2.0.0"
 
     def add_llm(
         self,
@@ -364,33 +315,27 @@ class Trace(BaseModel):
         self.steps.append(step)
         return step
 
-    def add_tool(
+    def add_action(
         self,
         name: str,
         arguments: dict[str, Any],
         *,
+        action_id: str | None = None,
         tool_call_id: str | None = None,
+        source: ActionSource = "environment_native",
+        observation: Any = None,
         result: Any = None,
         error: str | None = None,
         latency_ms: float | None = None,
-    ) -> ToolCallStep:
-        """Append a tool call step.
-
-        Args:
-            name: Tool name.
-            arguments: Tool arguments.
-            tool_call_id: Optional correlation id.
-            result: Tool result.
-            error: Error message if failed.
-            latency_ms: Execution latency.
-
-        Returns:
-            The appended :class:`ToolCallStep`.
-        """
-        step = ToolCallStep(
+    ) -> ActionStep:
+        """Append an action step."""  # noqa: DOC201
+        step = ActionStep(
             name=name,
             arguments=arguments,
+            action_id=action_id,
             tool_call_id=tool_call_id,
+            source=source,
+            observation=observation if observation is not None else result,
             result=result,
             error=error,
             latency_ms=latency_ms,
@@ -398,39 +343,32 @@ class Trace(BaseModel):
         self.steps.append(step)
         return step
 
-    def add_decision(
+    def add_turn(
         self,
         *,
         observation: Any = None,
         model_context: ChatRequest | dict[str, Any] | None = None,
         model_output: ChatResponse | None = None,
         parsed_action: list[ParsedAction] | None = None,
-        tool_calls: list[ToolCallStep] | None = None,
+        actions: list[ActionStep] | None = None,
         reward_events: list[RewardEvent] | None = None,
-        index: int | None = None,
-    ) -> Decision:
-        """Append a decision step for one model turn.
-
-        Args:
-            observation: Environment observation the policy saw.
-            model_context: Chat request sent to the model.
-            model_output: Chat response.
-            parsed_action: Structured actions.
-            tool_calls: Tool invocations with results.
-            reward_events: Per-tool step rewards.
-            index: Optional zero-based episode turn.
-
-        Returns:
-            The appended :class:`Decision`.
-        """
-        step = Decision(
-            index=index,
+        reasoning: list[ReasoningBlock] | None = None,
+        turn: int | None = None,
+    ) -> Turn:
+        """Append a turn step for one model turn."""  # noqa: DOC201
+        now = datetime.now(timezone.utc)
+        step = Turn(
+            turn=turn,
             observation=observation,
             model_context=model_context,
             model_output=model_output,
+            reasoning=reasoning or [],
             parsed_action=parsed_action or [],
-            tool_calls=tool_calls or [],
+            actions=actions or [],
             reward_events=reward_events or [],
+            started_at=now,
+            ended_at=now,
+            timestamp=now,
         )
         self.steps.append(step)
         return step
@@ -442,27 +380,23 @@ class Trace(BaseModel):
     ) -> list[Transition]:
         """Flatten this episode into Gymnasium-style transitions.
 
-        Prefers :class:`Decision` steps. Falls back to grouping flat
-        ``llm`` / ``tool`` steps so production traces still export.
+        Prefers :class:`Turn` steps. Falls back to grouping flat
+        ``llm`` / ``action`` steps so production traces still export.
 
         Args:
-            source: Reward source, matching :meth:`decision_rewards`.
+            source: Reward source, matching :meth:`turn_rewards`.
 
         Returns:
-            One :class:`Transition` per decision.
+            One :class:`Transition` per turn.
         """
-        decisions = self.decisions()
-        if decisions:
-            return self._transitions_from_decisions(decisions, source=source)
+        turns = self.turns()
+        if turns:
+            return self._transitions_from_turns(turns, source=source)
         return self._transitions_from_flat_steps(source=source)
 
-    def decisions(self) -> list[Decision]:
-        """Return decision steps in order.
-
-        Returns:
-            The :class:`Decision` steps in this episode.
-        """
-        return [s for s in self.steps if isinstance(s, Decision)]
+    def turns(self) -> list[Turn]:
+        """Return turn steps in order."""
+        return [s for s in self.steps if isinstance(s, Turn)]
 
     def credit(
         self,
@@ -470,9 +404,9 @@ class Trace(BaseModel):
         *,
         name: str = "late",
         reason: str | None = None,
-        decision_index: int | None = None,
+        turn_index: int | None = None,
     ) -> RewardEvent | Outcome:
-        """Inject reward after the fact — episode-wide or onto one decision.
+        """Inject reward after the fact — episode-wide or onto one turn.
 
         Use this when the signal arrives late (likes, a human review, a
         downstream KPI). Credit assignment across earlier actions is
@@ -482,7 +416,7 @@ class Trace(BaseModel):
             value: Reward to add.
             name: Reward source (``"likes"``, ``"review"``, …).
             reason: Optional human-readable reason.
-            decision_index: Which decision to attribute to. ``None`` updates
+            turn_index: Which turn to attribute to. ``None`` updates
                 ``outcome.reward`` (and ``outcome.scores[name]``). Negative
                 indices count from the end.
 
@@ -490,49 +424,39 @@ class Trace(BaseModel):
             The new :class:`RewardEvent` or the updated :class:`Outcome`.
 
         Raises:
-            IndexError: If ``decision_index`` is out of range.
+            IndexError: If ``turn_index`` is out of range.
         """
-        if decision_index is None:
+        if turn_index is None:
             current = self.outcome or Outcome()
             current.scores[name] = current.scores.get(name, 0.0) + float(value)
             current.reward = (current.reward or 0.0) + float(value)
             self.outcome = current
             return current
-        decisions = self.decisions()
-        if not decisions:
-            raise IndexError("trace has no decision steps to credit")
-        index = decision_index if decision_index >= 0 else len(decisions) + decision_index
-        if index < 0 or index >= len(decisions):
-            raise IndexError(f"decision_index {decision_index} out of range")
+        turns = self.turns()
+        if not turns:
+            raise IndexError("trace has no turn steps to credit")
+        index = turn_index if turn_index >= 0 else len(turns) + turn_index
+        if index < 0 or index >= len(turns):
+            raise IndexError(f"turn_index {turn_index} out of range")
         event = RewardEvent(name=name, value=float(value), reason=reason)
-        decisions[index].reward_events.append(event)
+        turns[index].reward_events.append(event)
         return event
 
-    def decision_rewards(
+    def turn_rewards(
         self,
         *,
         source: Literal["outcome", "events", "both"] = "outcome",
     ) -> list[float]:
-        """Per-decision reward used as ``r_t`` before discounting.
-
-        Args:
-            source: ``"outcome"`` — sparse: zeros, then ``outcome.reward`` on
-                the last decision (research-then-answer). ``"events"`` — only
-                ``reward_events`` (dense shaping and late-attributed credit).
-                ``"both"`` — events plus outcome on the last decision.
-
-        Returns:
-            One float per decision. Empty if there are no decisions.
-        """
-        decisions = self.decisions()
-        if not decisions:
+        """Per-turn reward used as ``r_t`` before discounting."""  # noqa: DOC201
+        turns = self.turns()
+        if not turns:
             return []
-        rewards = [sum(event.value for event in d.reward_events) for d in decisions]
+        rewards = [sum(event.value for event in item.reward_events) for item in turns]
         terminal = self.outcome.reward if self.outcome and self.outcome.reward is not None else None
         if source == "events":
             return rewards
         if source == "outcome":
-            out = [0.0] * len(decisions)
+            out = [0.0] * len(turns)
             if terminal is not None:
                 out[-1] = float(terminal)
             return out
@@ -554,19 +478,19 @@ class Trace(BaseModel):
 
         Args:
             gamma: Discount factor in ``[0, 1]``.
-            source: See :meth:`decision_rewards`.
+            source: See :meth:`turn_rewards`.
 
         Returns:
-            One return per decision, same order as :meth:`decisions`.
+            One return per turn, same order as :meth:`turns`.
 
         Examples:
             >>> t = Trace(outcome=Outcome(reward=1.0))
-            >>> t.add_decision(parsed_action=[ParsedAction(name="search")])
-            >>> t.add_decision(parsed_action=[ParsedAction(name="answer")])
+            >>> t.add_turn(parsed_action=[ParsedAction(name="search")])
+            >>> t.add_turn(parsed_action=[ParsedAction(name="answer")])
             >>> t.returns(gamma=0.9)
             [0.9, 1.0]
         """
-        rewards = self.decision_rewards(source=source)
+        rewards = self.turn_rewards(source=source)
         out = [0.0] * len(rewards)
         running = 0.0
         for i in range(len(rewards) - 1, -1, -1):
@@ -574,21 +498,21 @@ class Trace(BaseModel):
             out[i] = running
         return out
 
-    def _transitions_from_decisions(
+    def _transitions_from_turns(
         self,
-        decisions: list[Decision],
+        turns: list[Turn],
         *,
         source: Literal["outcome", "events", "both"],
     ) -> list[Transition]:
         out: list[Transition] = []
-        rewards = self.decision_rewards(source=source)
-        for i, decision in enumerate(decisions):
-            is_last = i == len(decisions) - 1
-            next_obs = decisions[i + 1].observation if not is_last else self.final_state
+        rewards = self.turn_rewards(source=source)
+        for i, turn in enumerate(turns):
+            is_last = i == len(turns) - 1
+            next_obs = turns[i + 1].observation if not is_last else self.final_state
             out.append(
                 Transition(
-                    observation=decision.observation,
-                    action=list(decision.parsed_action),
+                    observation=turn.observation,
+                    action=list(turn.parsed_action),
                     reward=rewards[i],
                     next_observation=next_obs,
                     terminated=bool(self.terminated) if is_last else False,
@@ -624,7 +548,7 @@ class Trace(BaseModel):
                     msgs = step.request.get("messages") or []
                     if msgs:
                         current_obs = msgs[-1].get("content")
-            elif isinstance(step, ToolCallStep):
+            elif isinstance(step, ActionStep):
                 started = True
                 pending_actions.append(ParsedAction(name=step.name, arguments=step.arguments))
         if started:

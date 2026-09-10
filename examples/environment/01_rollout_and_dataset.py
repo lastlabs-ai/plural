@@ -22,7 +22,7 @@ def main() -> None:
 
     env = Environment(name="support-triage", version="0.1.0")
 
-    @env.tool
+    @env.action
     def lookup_order(order_id: str) -> dict[str, str]:
         """Look up an order by id."""
         return {"order_id": order_id, "status": "shipped"}

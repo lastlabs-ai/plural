@@ -5,15 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 
 from plural import (
-    AgentSpec,
+    AgentBinding,
+    AgentTemplate,
     BenchmarkDefinition,
     EnvironmentManifest,
+    EnvironmentRuntime,
+    ExecutionTarget,
     HarnessBinding,
     JobSpec,
     NetworkMode,
     RuntimeSpec,
     TaskDefinition,
     VerifierManifest,
+    resolve_harness_stamp,
 )
 from plural.cli.scaffold import load_harness
 from plural.harness import tree_digest
@@ -42,6 +46,7 @@ def build_job(
     )
     binding = HarnessBinding.from_package(package)
     verifier_enabled = provider != "local" if with_verifier is None else with_verifier
+    isolated = provider != "local"
     environment = EnvironmentManifest(
         name="offline-example",
         revision="1.0.0",
@@ -50,7 +55,16 @@ def build_job(
             TaskDefinition(task_id="one", input="hello", expected="hello"),
             TaskDefinition(task_id="two", input="world", expected="world"),
         ),
-        allowed_harnesses=(binding,),
+        runtime=EnvironmentRuntime(
+            image="python:3.12-slim" if provider in {"docker", "daytona"} else None,
+            network=NetworkMode.NONE if isolated else NetworkMode.FULL,
+            targets=frozenset(
+                {ExecutionTarget.LOCAL, ExecutionTarget.DOCKER, ExecutionTarget.REMOTE}
+                if provider == "local"
+                else {ExecutionTarget.DOCKER, ExecutionTarget.REMOTE}
+            ),
+            allow_unsafe_local=provider == "local",
+        ),
         verifier=(
             VerifierManifest(
                 command=("python", "-c", VERIFY),
@@ -60,23 +74,25 @@ def build_job(
             else None
         ),
     )
+    stamp = resolve_harness_stamp(environment, package)
     benchmark = BenchmarkDefinition(
         name="offline-smoke",
         environment=environment.identity,
         task_ids=("one", "two"),
     )
-    agent = AgentSpec(
-        name="offline-agent",
-        model="offline/deterministic",
-        environment=environment.identity,
-        harness=binding,
-        harness_package=package,
-        auth_mode="none",
+    agent = AgentBinding(
+        template=AgentTemplate(
+            name="offline-agent",
+            model="offline/deterministic",
+            environment=environment.identity,
+            harness=binding,
+            harness_package=package,
+            stamp=stamp,
+            auth_mode="none",
+        )
     )
     runtime = RuntimeSpec(
         provider=provider,
-        image="python:3.12-slim" if provider in {"docker", "daytona"} else None,
-        network=NetworkMode.NONE if provider != "local" else NetworkMode.FULL,
         unsafe_local=provider == "local",
     )
     return JobSpec(

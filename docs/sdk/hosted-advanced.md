@@ -32,23 +32,24 @@ instead of `create`. `list()`, `get(ref)`, `update(ref, **fields)`, and
 manifest/source description; it does not upload local source bytes to a registry.
 Local source URIs are sanitized in harness revision publication.
 
-Bind exact hosted revisions with:
+Stamp exact hosted revisions with:
 
 ```python
 from plural import Client
 
 with Client() as client:
-    client.environments.bind_harness(
+    client.environments.stamp_harness(
         "ENVIRONMENT_ID", "ENVIRONMENT_REVISION_ID", "HARNESS_REVISION_ID",
     )
-    print(client.environments.list_harnesses("ENVIRONMENT_ID", "ENVIRONMENT_REVISION_ID"))
+    print(client.environments.list_stamps("ENVIRONMENT_ID", "ENVIRONMENT_REVISION_ID"))
 ```
 
 Replace all three placeholders with returned hosted IDs. These are separate
-from local content digests. When creating a packaged hosted agent,
-`client.agents.create(...)` accepts `environment_revision_id`,
+from local content digests. When creating a packaged hosted template,
+`client.agents.templates.create(...)` accepts `environment_revision_id`,
 `harness_revision_id`, `routing`, and `package_spec` in addition to name/model.
-Keep the supplied package's bindings consistent with those revisions.
+Keep the supplied package's stamp consistent with those revisions. A declared
+harness can be stamped and shown in the capability matrix; it cannot run.
 
 ## Version a benchmark definition
 

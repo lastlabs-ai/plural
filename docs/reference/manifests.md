@@ -17,8 +17,9 @@ where present. Generated JSON Schemas are the exact validation authority.
 - `protocol`: `plural-harness-v1` or `acp`.
 - `protocol_adapter`: must be `acp-client-v1` exactly when protocol is ACP.
 - `entrypoint`: optional metadata; execution uses `command`.
-- `command`: non-empty argv; no shell parsing by the runner.
-- `requirements`, `capabilities`, `supported_models`: package declarations.
+- `implementation`: `declared` or `runnable`. Declared harnesses have no command.
+- `command`: required argv only when `implementation` is `runnable`.
+- `requirements`, `capabilities` (`HarnessCapability` values), `supported_models`.
 - `auth_modes`: any of `environment`, `api_key`, `oauth`, `none`.
 - `secret_names`: secrets an Agent may grant.
 - `environment_names`: non-secret process environment names passed when set.
@@ -37,16 +38,18 @@ where present. Generated JSON Schemas are the exact validation authority.
 - `schema_version`, `name`, `revision`, `description`.
 - `instructions`: authoritative harness instructions.
 - `context`: arbitrary public context.
-- `commands`: unique `EnvironmentCommand` values: `name`, `description`, argv
-  `command`, JSON-Schema-like `parameters`, positive `timeout_seconds`.
+- `actions`: unique `NativeAction` values: `name`, `description`, `kind`,
+  argv `command` when `kind=command`, `parameters`, `observation_schema`,
+  `mutates_state`, `timeout_seconds`.
+- `observation_schema`, `state_schema`.
+- `guardrails`, `resources`.
+- `runtime`: `EnvironmentRuntime` — image/build, network, resources, targets,
+  persistence, compose, `allow_unsafe_local`.
+- `harness_policy`: `allow_all` or `allowlist`, denied/allowed capabilities.
 - `limits`: `max_turns` (1–128), positive `max_seconds`, optional positive
-  `max_cost_usd`. Built-in loops/provider timeout enforce available limits;
-  generic external harnesses remain responsible for honoring turn/cost limits.
-- `policy`: arbitrary declared execution policy captured in locks/receipts.
+  `max_cost_usd`.
 - `tasks`: unique `TaskDefinition` values with `task_id`, public `input`,
   evaluator-only `expected`/`verifier_input`, and public `metadata`.
-- `allowed_harnesses`: unique exact bindings.
-- `runtime_capabilities`: extra provider capability names checked before launch.
 - `verifier`: optional `VerifierManifest`.
 - `source`: optional Environment package source. Execution currently stages
   local sources only.
@@ -65,18 +68,18 @@ Verifier JSON accepts finite optional `reward`, named finite `scores`, and
 `BenchmarkSpec` is an alias. This v1 model is distinct from the compatible
 legacy `plural.Benchmark` runner.
 
-## `AgentSpec`
+## `AgentTemplate`
 
 - `schema_version`, `name`, `model`.
 - `routing`: optional `provider`, ordered `fallback_models`, `temperature`, and
   positive `max_tokens`.
 - `environment`: exact Environment identity.
-- `harness`: exactly one binding.
-- `harness_package`: optional executable package; if supplied it must match the
-  binding. Built-in profile bindings can resolve without this field.
+- `harness`: optional binding. `None` is the native path.
+- `stamp`: required when `harness` is set.
+- `harness_package`: optional executable package; must match the binding.
 - `secret_names`: granted subset of package-declared names.
 
-Derived `content_hash` and `agent_id` include the complete immutable config.
+Derived `content_hash` and `template_id` include the complete immutable config.
 
 ## `JobFile` and `JobSpec`
 

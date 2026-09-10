@@ -34,7 +34,7 @@ There are two separate connections:
   use the Plural gateway. Use a Plural API key or the CLI's device login.
 - **Model access** pays for and authenticates inference. The Python client can
   use a Plural gateway key or explicitly supplied upstream provider keys.
-  External harnesses receive only the secrets granted to their AgentSpec.
+  External harnesses receive only the secrets granted to their AgentTemplate.
 
 A Docker runtime needs a running Docker daemon. Daytona additionally needs its
 own `DAYTONA_API_KEY`; that key does not authenticate model calls.

@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, field_validator
 
 PROTOCOL_VERSION = "plural-harness-v1"
-FORBIDDEN_HARNESS_KEYS = frozenset({"score", "scores", "reward", "verifier", "expected"})
+FORBIDDEN_HARNESS_KEYS = frozenset({"score", "scores", "reward", "verifier", "expected", "actions"})
 
 
 class ProtocolModel(BaseModel):
@@ -27,19 +27,35 @@ class HarnessRunRequest(ProtocolModel):
     agent: dict[str, Any]
     environment: dict[str, Any]
     workspace: str = "/workspace"
+    granted_capabilities: tuple[str, ...] = ()
+    denied_capabilities: tuple[str, ...] = ()
 
 
 class HarnessEvent(ProtocolModel):
     """One parsed harness event."""
 
     protocol: Literal["plural-harness-v1"] = "plural-harness-v1"
-    type: Literal["ready", "log", "trajectory", "artifact", "result", "error"]
+    type: Literal[
+        "ready",
+        "log",
+        "trajectory",
+        "artifact",
+        "result",
+        "error",
+        "capability",
+        "memory",
+        "skill",
+    ]
     message: str | None = None
     path: str | None = None
     status: Literal["succeeded", "failed"] | None = None
     outputs: tuple[str, ...] = ()
     artifacts: tuple[str, ...] = ()
     trace_id: str | None = None
+    capability: str | None = None
+    kind: str | None = None
+    content: Any = None
+    metadata: dict[str, Any] | None = None
 
     @field_validator("outputs", "artifacts")
     @classmethod
@@ -51,6 +67,14 @@ class HarnessEvent(ProtocolModel):
 
 class HarnessProtocolError(ValueError):
     """Malformed or policy-violating harness output."""
+
+
+def environment_payload_for_harness(environment: dict[str, Any]) -> dict[str, Any]:
+    """Return the public environment payload a stamped harness may see."""
+    payload = dict(environment)
+    payload.pop("actions", None)
+    payload.pop("commands", None)
+    return payload
 
 
 def encode_request(request: HarnessRunRequest) -> bytes:
@@ -111,5 +135,6 @@ __all__ = [
     "HarnessRunRequest",
     "PROTOCOL_VERSION",
     "encode_request",
+    "environment_payload_for_harness",
     "parse_events",
 ]

@@ -126,13 +126,13 @@ with Client() as client:
     created = client.create(env)
     print("Environment:", env.slug, env.remote_id)
 
-    agent = client.agents.create(
+    template = client.agents.templates.create(
         name="support-assistant",
         model="openai/gpt-4o-mini",
         environment_id=env.slug,
         description="Read-only order-status assistant.",
     )
-    print("Agent:", agent.slug)
+    print("Agent template:", template["slug"])
 
     report = Report.model_validate_json(Path("report.json").read_text())
     client.create(
@@ -211,20 +211,20 @@ the required revision IDs. [Package sync](studio-sync.md) explains the lifecycle
 
 Some hosted objects have complete v1 package payloads; older Python/Studio
 records do not. Inspect your deployment's returned data first. A complete
-`AgentSpec` stored in `package_spec` can be validated and saved:
+`AgentTemplate` stored in `package_spec` can be validated and saved:
 
 ```python
 from pathlib import Path
-from plural import AgentSpec, Client
+from plural import AgentTemplate, Client
 from plural.cli.scaffold import write_yaml
 
 with Client() as client:
-    remote = client.agents.get("support-assistant")
-    payload = remote.data.get("package_spec")
+    remote = client.agents.templates.get("support-assistant")
+    payload = remote.get("package_spec")
     if payload is None:
-        raise ValueError("This hosted agent has no executable v1 package_spec.")
-    agent_spec = AgentSpec.model_validate(payload)
-    write_yaml(Path("downloaded-agent.yaml"), agent_spec)
+        raise ValueError("This hosted template has no executable package_spec.")
+    template = AgentTemplate.model_validate(payload)
+    write_yaml(Path("downloaded-agent.yaml"), template)
 ```
 
 Likewise, when a selected environment revision exposes `package_manifest`,

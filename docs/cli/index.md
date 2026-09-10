@@ -17,6 +17,11 @@ availability. Environment publication and client-orchestrated Job result upload
 require a compatible hosted API. Runs make no external writes unless `--sync`
 is passed; completed results can be replayed with `plural job upload`.
 
+New foundation commands: `plural env action`, `plural env resource`,
+`plural env capabilities`, `plural env harness stamp|unstamp|capabilities`,
+`plural runtime doctor --env`, `plural agent template`, and
+`plural agent instance`. See the [command reference](../reference/cli-commands.md).
+
 ## Authentication and device flow
 
 `plural auth login` starts `POST /api/v1/auth/device/start`, prints the

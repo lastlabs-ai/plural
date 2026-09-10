@@ -19,10 +19,10 @@ def _print_episode(title: str, trace: Trace) -> None:
     print(f"\n== {title} ==")
     reward = trace.outcome.reward if trace.outcome else None
     print(f"reward={reward}  terminated={trace.terminated}")
-    for i, decision in enumerate(trace.decisions()):
+    for i, decision in enumerate(trace.turns()):
         action = ", ".join(a.name for a in decision.parsed_action) or "respond"
         print(f"  t={i}  {action}")
-    print(f"  r_t  (outcome) {trace.decision_rewards(source='outcome')}")
+    print(f"  r_t  (outcome) {trace.turn_rewards(source='outcome')}")
     print(f"  G_t  γ=0.9    {trace.returns(gamma=0.9)}")
 
 
@@ -49,10 +49,10 @@ def main() -> None:
 
     good = traces[0]
     # Likes / a reviewer arrive later — attribute them to the answer decision.
-    good.credit(0.4, name="reviewer", reason="readers found it useful", decision_index=-1)
+    good.credit(0.4, name="reviewer", reason="readers found it useful", turn_index=-1)
     print("\n== researcher after late reviewer credit on the answer ==")
-    print(f"  r_t  (events) {good.decision_rewards(source='events')}")
-    print(f"  r_t  (both)   {good.decision_rewards(source='both')}")
+    print(f"  r_t  (events) {good.turn_rewards(source='events')}")
+    print(f"  r_t  (both)   {good.turn_rewards(source='both')}")
     print(f"  G_t  γ=0.9 both {good.returns(gamma=0.9, source='both')}")
     print("  search/read now share credit for the later review — no env rewrite.")
 

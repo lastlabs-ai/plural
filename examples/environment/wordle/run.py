@@ -105,7 +105,7 @@ def play(
         request = ChatRequest(
             model=model,
             messages=env.messages(),
-            tools=env.tool_defs or None,
+            tools=env.action_defs or None,
         )
         response = client.chat(
             model=model,
@@ -131,12 +131,12 @@ def _print_episode(title: str, trace: Trace, board: str) -> None:
     reward = trace.outcome.reward if trace.outcome else None
     print(f"reward={reward}  terminated={trace.terminated}")
     print(board)
-    for i, decision in enumerate(trace.decisions()):
+    for i, decision in enumerate(trace.turns()):
         action = ", ".join(f"{a.name}({a.arguments})" for a in decision.parsed_action)
         step_r = sum(e.value for e in decision.reward_events)
         print(f"  t={i}  {action}  step_reward={step_r:.2f}")
-    print(f"  r_t  (outcome) {trace.decision_rewards(source='outcome')}")
-    print(f"  r_t  (both)    {trace.decision_rewards(source='both')}")
+    print(f"  r_t  (outcome) {trace.turn_rewards(source='outcome')}")
+    print(f"  r_t  (both)    {trace.turn_rewards(source='both')}")
     print(f"  G_t  γ=1 both  {trace.returns(gamma=1.0, source='both')}")
 
 
@@ -158,7 +158,7 @@ def _print_harness(env: Environment, rollout: Rollout) -> None:
     """Show the conversation the policy saw and each recorded decision."""
     print("\n== harness (what the policy was sent) ==")
     print(f"environment={env.name}@{env.version}  max_turns={env.max_turns}")
-    print(f"tools={[t.function.name for t in env.tool_defs]}")
+    print(f"tools={[t.function.name for t in env.action_defs]}")
     print("secret is hidden from the policy (only in state / final_state)")
     for i, message in enumerate(rollout.messages):
         text = _message_text(message)
@@ -167,7 +167,7 @@ def _print_harness(env: Environment, rollout: Rollout) -> None:
         print(preview)
 
     print("\n== decisions (trace) ==")
-    for i, decision in enumerate(rollout.trace.decisions()):
+    for i, decision in enumerate(rollout.trace.turns()):
         action = ", ".join(f"{a.name}({a.arguments})" for a in decision.parsed_action)
         step_r = sum(e.value for e in decision.reward_events)
         print(f"\n--- t={i}  {action}  step_reward={step_r:.2f} ---")
@@ -187,12 +187,12 @@ def _episode_summary(env: Environment, trace: Trace) -> dict[str, object]:
     rows = env.rows
     invalids = [
         tool
-        for decision in trace.decisions()
+        for decision in trace.turns()
         for tool in decision.tool_calls
         if isinstance(tool.result, dict) and tool.result.get("error")
     ]
     words: list[str] = []
-    for decision in trace.decisions():
+    for decision in trace.turns():
         for action in decision.parsed_action:
             if action.name == "guess":
                 words.append(str(action.arguments.get("word", "")))

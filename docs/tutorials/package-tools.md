@@ -1,10 +1,11 @@
-# Add tools and verification to a package
+# Add native actions and verification to a package
 
 Continue from the [CLI walkthrough](cli-walkthrough.md). This example adds a
-read-only command and a verifier that checks the final answer. It uses synthetic
-public data and requires Docker for verification. It makes model calls when run.
+read-only native action and a verifier that checks the final answer. It uses
+synthetic public data and requires Docker for verification. It makes model
+calls when run.
 
-## 1. Implement a command
+## 1. Implement an action
 
 Save `environment/lookup_order.py`:
 
@@ -17,21 +18,22 @@ orders = {"A100": "shipped", "A200": "processing"}
 print(json.dumps({"status": orders.get(arguments["order_id"], "unknown")}))
 ```
 
-The harness passes a JSON object on stdin. Your program writes its result on
-stdout. Validate inputs and enforce service permissions in the implementation
-when replacing this example with a real service.
+The environment passes a JSON object on stdin. Your program writes its
+observation on stdout. Validate inputs and enforce service permissions in the
+implementation when replacing this example with a real service.
 
-## 2. Declare the tool and instructions
+## 2. Declare the action and instructions
 
-In `environment/environment.yaml`, replace the `instructions` and `commands`
+In `environment/environment.yaml`, replace the `instructions` and `actions`
 values, leaving the other fields intact:
 
 ```yaml
 instructions: >-
   Use lookup_order to find the order status. Reply with only the status word.
-commands:
+actions:
   - name: lookup_order
     description: Look up the status of an order.
+    kind: command
     command: [python, lookup_order.py]
     parameters:
       type: object
@@ -42,18 +44,24 @@ commands:
     timeout_seconds: 10
 ```
 
+Or add the same action from the CLI:
+
+```bash
+plural env action add --environment environment --name lookup_order \
+  --description 'Look up the status of an order.' \
+  --command python --command lookup_order.py
+```
+
 Change the tasks file to a single task for this verifier:
 
 ```json
 {"task_id":"order-a100","input":"What is the status of A100?"}
 ```
 
-In `harness/harness.yaml`, change `manifest.command` to
-`[python, harness.py, tool-loop.v1]` and `manifest.capabilities` to
-`[chat, tools, trajectory]`. `chat.v1` does not expose tools; `tool-loop.v1`
-uses the environment's declarations and dispatches only named commands.
-`code-task.v1` uses the same bounded command mechanism; it does not invent a
-Python or shell tool for you.
+On the native path (`AgentTemplate.harness is None`) the runner uses
+`native.actions.v1` because the environment now has actions. `native.chat.v1`
+does not expose actions. A stamped harness never receives these native
+actions; it brings its own. Declared vendor harnesses cannot run.
 
 ## 3. Add an isolated final-answer verifier
 

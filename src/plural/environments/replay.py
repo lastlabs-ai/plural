@@ -12,7 +12,7 @@ from plural.environments.runtime import LocalRuntime, Runtime
 from plural.environments.stop import is_stopped
 from plural.environments.task import TaskData
 from plural.environments.types import serialize_observation
-from plural.tracing.schema import ToolCallStep, Trace
+from plural.tracing.schema import ActionStep, Trace
 
 
 class ReplayMismatch(BaseModel):
@@ -101,7 +101,7 @@ def replay_actions(
         return ReplayResult(mismatches=mismatches)
 
     if runtime is None:
-        runtime = LocalRuntime(environment.tool_functions)
+        runtime = LocalRuntime(environment.action_functions)
     environment.reset(replay_task, model=trace.model)
     replay_episode = environment._require_episode(allow_stopped=True)
     _compare(
@@ -111,7 +111,7 @@ def replay_actions(
         expected=trace.initial_state,
         actual=replay_episode.trace.initial_state,
     )
-    decisions = trace.decisions()
+    decisions = trace.turns()
     expected_transitions = trace.transitions(source="events")
 
     for index, decision in enumerate(decisions):
@@ -129,7 +129,7 @@ def replay_actions(
         except Exception as exc:
             raise RuntimeError(f"replay execution failed at decision {index}: {exc}") from exc
 
-        actual_decisions = environment._require_episode(allow_stopped=True).trace.decisions()
+        actual_decisions = environment._require_episode(allow_stopped=True).trace.turns()
         if index >= len(actual_decisions):
             mismatches.append(
                 ReplayMismatch(
@@ -146,8 +146,8 @@ def replay_actions(
                 mismatches,
                 kind="tool_calls",
                 message="tool call results, errors, or children differ",
-                expected=[_tool_result_payload(tool) for tool in decision.tool_calls],
-                actual=[_tool_result_payload(tool) for tool in actual_decision.tool_calls],
+                expected=[_tool_result_payload(tool) for tool in decision.actions],
+                actual=[_tool_result_payload(tool) for tool in actual_decision.actions],
                 decision_index=index,
             )
             _compare(
@@ -311,11 +311,12 @@ def _compare(
         )
 
 
-def _tool_result_payload(tool: ToolCallStep) -> dict[str, Any]:
-    """Return deterministic tool execution fields, excluding timing and ids."""
+def _tool_result_payload(tool: ActionStep) -> dict[str, Any]:
+    """Return deterministic action execution fields, excluding timing and ids."""
     return {
         "name": tool.name,
         "result": tool.result,
+        "observation": tool.observation,
         "error": tool.error,
         "children": [_tool_result_payload(child) for child in tool.children],
     }

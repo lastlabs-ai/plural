@@ -10,6 +10,13 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
+from plural.agents import (
+    AgentArtifact,
+    AgentExperience,
+    AgentInstance,
+    AgentMemory,
+    AgentSkill,
+)
 from plural.benchmarks import (
     Benchmark,
     CaseKey,
@@ -24,22 +31,31 @@ from plural.benchmarks import (
 from plural.catalog import ModelCatalog, ModelSpec, estimate_cost
 from plural.client import Client, Plural
 from plural.domain import (
-    AgentSpec,
+    AgentBinding,
+    AgentInstanceRef,
+    AgentTemplate,
     BenchmarkDefinition,
     BenchmarkSpec,
-    EnvironmentCommand,
     EnvironmentIdentity,
     EnvironmentManifest,
+    EnvironmentResource,
+    EnvironmentRuntime,
     ErrorCode,
     ExecutionLimits,
+    ExecutionTarget,
     FileDeclaration,
+    Guardrail,
     HarnessBinding,
+    HarnessCapability,
     HarnessManifest,
     HarnessPackage,
+    HarnessPolicy,
+    HarnessStamp,
     JobLock,
     JobPlan,
     JobResult,
     JobSpec,
+    NativeAction,
     PackageSource,
     RetryPolicy,
     RoutingSpec,
@@ -50,6 +66,7 @@ from plural.domain import (
     TrialSpec,
     VerifierManifest,
     content_hash,
+    resolve_harness_stamp,
     stable_id,
 )
 from plural.environments import (
@@ -81,7 +98,7 @@ from plural.errors import (
     is_retryable,
 )
 from plural.execution import Job, JobStore, Trial
-from plural.harness import chat_v1, code_task_v1, tool_loop_v1
+from plural.harness import native_actions_v1, native_chat_v1
 from plural.sandbox import (
     Capability,
     DaytonaProvider,
@@ -116,7 +133,14 @@ except PackageNotFoundError:  # pragma: no cover
 __all__ = [
     "ActionResult",
     "Agent",
-    "AgentSpec",
+    "AgentArtifact",
+    "AgentBinding",
+    "AgentExperience",
+    "AgentInstance",
+    "AgentMemory",
+    "AgentSkill",
+    "AgentInstanceRef",
+    "AgentTemplate",
     "AuthenticationError",
     "Benchmark",
     "BenchmarkDefinition",
@@ -134,14 +158,20 @@ __all__ = [
     "Dataset",
     "Environment",
     "EnvironmentIdentity",
-    "EnvironmentCommand",
     "EnvironmentManifest",
+    "EnvironmentResource",
+    "EnvironmentRuntime",
     "ErrorCode",
     "ExecutionLimits",
+    "ExecutionTarget",
     "FileDeclaration",
+    "Guardrail",
     "HarnessBinding",
+    "HarnessCapability",
     "HarnessManifest",
     "HarnessPackage",
+    "HarnessPolicy",
+    "HarnessStamp",
     "InvalidRequestError",
     "JSONLSink",
     "Job",
@@ -154,6 +184,7 @@ __all__ = [
     "ModelCatalog",
     "ModelSpec",
     "ModelStats",
+    "NativeAction",
     "NotFoundError",
     "Outcome",
     "PackageSource",
@@ -195,12 +226,12 @@ __all__ = [
     "WinRatePair",
     "__version__",
     "content_hash",
-    "chat_v1",
-    "code_task_v1",
+    "resolve_harness_stamp",
     "estimate_cost",
     "is_retryable",
+    "native_actions_v1",
+    "native_chat_v1",
     "stable_id",
-    "tool_loop_v1",
     "VerifierManifest",
     "Capability",
     "DaytonaProvider",

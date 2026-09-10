@@ -6,8 +6,8 @@ The entries below document the actual public classes and methods.
 ## Client and request types
 
 `Client.create(x)` and `Client.update(x)` sync an `Environment`, `Trace`,
-`Benchmark` (after `run()`), or `Report` by slug. Agents are created with
-`client.agents.create(...)`.
+`Benchmark` (after `run()`), or `Report` by slug. Agent templates are created
+with `client.agents.templates.create(...)`.
 
 ::: plural.client.Client
 
@@ -19,7 +19,11 @@ The entries below document the actual public classes and methods.
 
 ::: plural.tracing.schema.TraceContext
 
-::: plural.tracing.schema.Decision
+::: plural.tracing.schema.Turn
+
+::: plural.tracing.schema.ActionStep
+
+::: plural.tracing.schema.ReasoningBlock
 
 ::: plural.tracing.schema.Transition
 
@@ -27,11 +31,11 @@ The entries below document the actual public classes and methods.
 
 ## Environments
 
-`Environment.step()` is framework-owned and final. Tool environments use its
+`Environment.step()` is framework-owned and final. Action environments use its
 default dispatch behavior; scalar and custom text environments override
-`apply_action()` and return `ActionResult`. `record_decision()` and
-`finish_turn()` remain public for advanced manual integrations, but normal
-`apply_action()` hooks should not call them.
+`apply_action()` and return `ActionResult`. `finish_turn()` remains public for
+advanced manual integrations, but normal `apply_action()` hooks should not
+call it.
 
 ::: plural.environments.env.Environment
 
@@ -49,7 +53,7 @@ default dispatch behavior; scalar and custom text environments override
 
 ::: plural.environments.rollout.Rollout
 
-::: plural.environments.tool.tool
+::: plural.environments.action_registry.action
 
 ::: plural.environments.types.Observation
 

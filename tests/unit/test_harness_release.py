@@ -10,7 +10,8 @@ import pytest
 from pydantic import ValidationError
 
 from plural.domain import FileDeclaration, HarnessManifest
-from plural.harness import HarnessRunner, HarnessRunRequest, builtin_runner, vendor_adapter
+from plural.harness import HarnessRunner, HarnessRunRequest, vendor_adapter
+from plural.harness import native_runner
 from plural.harness.retrieval import build_archive, package_from_archive, retrieve_archive
 from plural.sandbox import LocalProvider, NetworkMode, SandboxRequirements
 
@@ -24,9 +25,9 @@ def _request() -> HarnessRunRequest:
             "name": "test",
             "instructions": "Solve the task.",
             "context": {"public": True},
-            "commands": [],
+            "actions": [],
             "limits": {"max_turns": 2, "max_seconds": 10},
-            "policy": {},
+            "guardrails": [],
             "workspace": "/workspace",
         },
     )
@@ -156,7 +157,7 @@ def test_trajectory_path_must_be_declared_as_artifact() -> None:
         )
 
 
-def test_tool_loop_executes_only_declared_bounded_commands(
+def test_native_actions_executes_only_declared_actions(
     tmp_path: Path,
     monkeypatch: object,
 ) -> None:
@@ -193,9 +194,9 @@ def test_tool_loop_executes_only_declared_bounded_commands(
             },
         )
     )
-    monkeypatch.setattr(builtin_runner, "_model_call", lambda **_kwargs: next(responses))
+    monkeypatch.setattr(native_runner, "_model_call", lambda **_kwargs: next(responses))
     request = _request().model_dump(mode="json")
-    request["environment"]["commands"] = [
+    request["environment"]["actions"] = [
         {
             "name": "inspect",
             "description": "Inspect a value",
@@ -207,12 +208,12 @@ def test_tool_loop_executes_only_declared_bounded_commands(
     request["environment"]["workspace"] = str(tmp_path)
     request["environment"]["limits"]["max_cost_usd"] = 1
 
-    result, trajectory, _trace_id = builtin_runner._run("tool-loop.v1", request)
+    result, trajectory, _trace_id = native_runner._run("native.actions.v1", request)
 
     assert result["response"] == "complete"
     assert result["turns"] == 2
     assert result["cost_usd"] == 0.02
-    assert '"seen": 7' in trajectory[1]["tool_result"]["content"]
+    assert '"seen": 7' in trajectory[1]["observation"]["content"]
 
 
 def test_vendor_adapter_invokes_installed_cli_and_translates(

@@ -108,7 +108,7 @@ def test_environment_rollout_and_benchmark(tmp_path: Path) -> None:
 
     env = Environment(name="support-triage", version="0.1.0", system_prompt="Triage tickets.")
 
-    @env.tool
+    @env.action
     def lookup_order(order_id: str) -> dict[str, str]:
         """Look up an order."""
         return {"order_id": order_id, "status": "shipped"}
@@ -208,7 +208,7 @@ def test_text_only_episode_persistence_redacts_all_copied_content(tmp_path: Path
     trace = persisted[0]
     assert trace.initial_state is None
     assert trace.final_state is None
-    assert trace.decisions()[0].parsed_action[0].arguments["text"] is None
+    assert trace.turns()[0].parsed_action[0].arguments["text"] is None
     assert trace.metadata["redaction"] == {"drop_content": True}
     serialized = trace.model_dump_json()
     assert "private answer" not in serialized
@@ -236,7 +236,7 @@ def test_rollout_child_traces_are_opt_in_and_linked(tmp_path: Path) -> None:
     assert episode.trace_id == rollout.trace.trace_id
     assert child.parent_trace_id == episode.trace_id
     assert child.episode_trace_id == episode.trace_id
-    assert episode.decisions()[0].index == 0
+    assert episode.turns()[0].turn == 0
     client.close()
 
 
@@ -280,7 +280,7 @@ async def test_achat_trace_controls(tmp_path: Path) -> None:
 
 def test_dataset_hash_filter_and_corruption_detection(tmp_path: Path) -> None:
     first = Trace(trace_id="1", trace_kind="episode", environment="a", model="m")
-    first.add_decision(observation="before")
+    first.add_turn(observation="before")
     second = first.model_copy(deep=True)
     second.steps[0].observation = "after"
     assert (
@@ -350,19 +350,10 @@ def test_dataset_loads_legacy_manifest(tmp_path: Path) -> None:
     assert loaded.content_hash == legacy_hash
 
 
-def test_legacy_jsonl_migration_has_stable_dataset_hash(tmp_path: Path) -> None:
+def test_legacy_jsonl_traces_are_rejected() -> None:
     fixture = Path(__file__).resolve().parents[1] / "fixtures/legacy_traces_v0_4.jsonl"
-    first = Dataset.from_sink(fixture, "legacy")
-    second = Dataset.from_sink(fixture, "legacy")
-
-    assert first.content_hash == second.content_hash
-    assert [trace.trace_kind for trace in first.traces] == ["episode", "production"]
-    assert first.traces[0].decisions()[0].decision_id == second.traces[0].decisions()[0].decision_id
-
-    saved = tmp_path / "migrated.jsonl"
-    first.save(saved)
-    loaded = Dataset.load(saved)
-    assert loaded.content_hash == first.content_hash
+    with pytest.raises(Exception):
+        Dataset.from_sink(fixture, "legacy")
 
 
 def test_plural_is_client_alias() -> None:

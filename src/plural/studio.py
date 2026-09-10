@@ -167,35 +167,42 @@ class EnvironmentsAPI:
         """
         self._studio.request("DELETE", f"/environments/{slug}")
 
-    def bind_harness(
+    def stamp_harness(
         self,
         environment_id: str,
         revision_id: str,
         harness_revision_id: str,
-        *,
-        policy: dict[str, Any] | None = None,
     ) -> JsonObject:
-        """Allow one exact hosted harness revision for an environment revision."""  # noqa: DOC201
+        """Stamp one hosted harness revision onto an environment revision."""  # noqa: DOC201
         return cast(
             JsonObject,
             self._studio.request(
                 "POST",
-                f"/environments/{environment_id}/revisions/{revision_id}/harnesses",
-                json={
-                    "harness_revision_id": harness_revision_id,
-                    "policy": policy or {},
-                },
+                f"/environments/{environment_id}/revisions/{revision_id}/stamps",
+                json={"harness_revision_id": harness_revision_id},
             ),
         )
 
-    def list_harnesses(self, environment_id: str, revision_id: str) -> JsonList:
-        """List exact harness bindings for an environment revision."""  # noqa: DOC201
+    def list_stamps(self, environment_id: str, revision_id: str) -> JsonList:
+        """List harness stamps for an environment revision."""  # noqa: DOC201
         return cast(
             JsonList,
             self._studio.request(
                 "GET",
-                f"/environments/{environment_id}/revisions/{revision_id}/harnesses",
+                f"/environments/{environment_id}/revisions/{revision_id}/stamps",
             ),
+        )
+
+    def unstamp_harness(
+        self,
+        environment_id: str,
+        revision_id: str,
+        harness_revision_id: str,
+    ) -> None:
+        """Remove a harness stamp from an environment revision."""
+        self._studio.request(
+            "DELETE",
+            f"/environments/{environment_id}/revisions/{revision_id}/stamps/{harness_revision_id}",
         )
 
     def publish_manifest(self, manifest: Any) -> JsonObject:
@@ -346,11 +353,224 @@ class RemoteAgent:
         return self._studio.agents.invoke(self.slug or self.id, prompt, **kwargs)
 
 
+class AgentTemplatesAPI:
+    """Hosted agent templates (immutable configuration)."""
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def list(self) -> JsonList:
+        """List templates in the resolved project."""  # noqa: DOC201
+        return cast(
+            JsonList,
+            self._studio.request("GET", "/agent-templates").get("items", []),
+        )
+
+    def get(self, template_id: str) -> JsonObject:
+        """Fetch one agent template."""  # noqa: DOC201
+        return cast(JsonObject, self._studio.request("GET", f"/agent-templates/{template_id}"))
+
+    def create(self, **fields: Any) -> JsonObject:
+        """Create an agent template."""  # noqa: DOC201
+        return cast(JsonObject, self._studio.request("POST", "/agent-templates", json=fields))
+
+    def revisions(self, template_id: str) -> JsonList:
+        """List immutable template revisions."""  # noqa: DOC201
+        return cast(
+            JsonList,
+            self._studio.request("GET", f"/agent-templates/{template_id}/revisions").get(
+                "items", []
+            ),
+        )
+
+
+class AgentInstanceMemoriesAPI:
+    """Hosted memory rows for one instance."""
+
+    def __init__(self, studio: Studio, instance_id: str) -> None:
+        self._studio = studio
+        self.instance_id = instance_id
+
+    def list(self) -> JsonList:
+        """List memories."""  # noqa: DOC201
+        return cast(
+            JsonList,
+            self._studio.request("GET", f"/agent-instances/{self.instance_id}/memories").get(
+                "items", []
+            ),
+        )
+
+    def append(self, kind: str, content: Any, metadata: dict[str, Any] | None = None) -> JsonObject:
+        """Append one memory."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/agent-instances/{self.instance_id}/memories",
+                json={"kind": kind, "content": content, "metadata": metadata or {}},
+            ),
+        )
+
+    def search(self, query: str) -> JsonList:
+        """Search memories."""  # noqa: DOC201
+        return cast(
+            JsonList,
+            self._studio.request(
+                "GET",
+                f"/agent-instances/{self.instance_id}/memories",
+                params={"q": query},
+            ).get("items", []),
+        )
+
+    def forget(self, memory_id: str) -> None:
+        """Delete one memory."""
+        self._studio.request(
+            "DELETE",
+            f"/agent-instances/{self.instance_id}/memories/{memory_id}",
+        )
+
+
+class AgentInstanceSkillsAPI:
+    """Hosted skills for one instance."""
+
+    def __init__(self, studio: Studio, instance_id: str) -> None:
+        self._studio = studio
+        self.instance_id = instance_id
+
+    def list(self) -> JsonList:
+        """List skills."""  # noqa: DOC201
+        return cast(
+            JsonList,
+            self._studio.request("GET", f"/agent-instances/{self.instance_id}/skills").get(
+                "items", []
+            ),
+        )
+
+    def upsert(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        instructions: str = "",
+        action_names: Sequence[str] = (),
+    ) -> JsonObject:
+        """Create or replace a skill."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "PUT",
+                f"/agent-instances/{self.instance_id}/skills/{name}",
+                json={
+                    "description": description,
+                    "instructions": instructions,
+                    "action_names": list(action_names),
+                },
+            ),
+        )
+
+    def remove(self, name: str) -> None:
+        """Delete a skill."""
+        self._studio.request("DELETE", f"/agent-instances/{self.instance_id}/skills/{name}")
+
+
+class AgentInstanceDataAPI:
+    """Hosted artifacts for one instance."""
+
+    def __init__(self, studio: Studio, instance_id: str) -> None:
+        self._studio = studio
+        self.instance_id = instance_id
+
+    def list(self) -> JsonList:
+        """List artifacts."""  # noqa: DOC201
+        return cast(
+            JsonList,
+            self._studio.request("GET", f"/agent-instances/{self.instance_id}/artifacts").get(
+                "items", []
+            ),
+        )
+
+    def put(self, name: str, content: Any, content_type: str = "application/json") -> JsonObject:
+        """Store one artifact."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "PUT",
+                f"/agent-instances/{self.instance_id}/artifacts/{name}",
+                json={"content": content, "content_type": content_type},
+            ),
+        )
+
+    def get(self, name: str) -> JsonObject:
+        """Read one artifact."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request("GET", f"/agent-instances/{self.instance_id}/artifacts/{name}"),
+        )
+
+    def delete(self, name: str) -> None:
+        """Delete one artifact."""
+        self._studio.request("DELETE", f"/agent-instances/{self.instance_id}/artifacts/{name}")
+
+
+class AgentInstancesAPI:
+    """Persistent hosted agent instances."""
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def list(self) -> JsonList:
+        """List instances in the resolved project."""  # noqa: DOC201
+        return cast(
+            JsonList,
+            self._studio.request("GET", "/agent-instances").get("items", []),
+        )
+
+    def get(self, instance_id: str) -> JsonObject:
+        """Fetch one instance."""  # noqa: DOC201
+        return cast(JsonObject, self._studio.request("GET", f"/agent-instances/{instance_id}"))
+
+    def create(self, template_id: str, name: str) -> JsonObject:
+        """Create an instance from a template."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                "/agent-instances",
+                json={"template_id": template_id, "name": name},
+            ),
+        )
+
+    def delete(self, instance_id: str) -> None:
+        """Delete an instance."""
+        self._studio.request("DELETE", f"/agent-instances/{instance_id}")
+
+    def experience(self, instance_id: str) -> JsonObject:
+        """Read experience counters."""  # noqa: DOC201
+        return cast(
+            JsonObject,
+            self._studio.request("GET", f"/agent-instances/{instance_id}/experience"),
+        )
+
+    def memories(self, instance_id: str) -> AgentInstanceMemoriesAPI:
+        """Memory API for one instance."""  # noqa: DOC201
+        return AgentInstanceMemoriesAPI(self._studio, instance_id)
+
+    def skills(self, instance_id: str) -> AgentInstanceSkillsAPI:
+        """Skills API for one instance."""  # noqa: DOC201
+        return AgentInstanceSkillsAPI(self._studio, instance_id)
+
+    def data(self, instance_id: str) -> AgentInstanceDataAPI:
+        """Artifact API for one instance."""  # noqa: DOC201
+        return AgentInstanceDataAPI(self._studio, instance_id)
+
+
 class AgentsAPI:
     """Create, read, update, and invoke hosted agents."""
 
     def __init__(self, studio: Studio) -> None:
         self._studio = studio
+        self.templates = AgentTemplatesAPI(studio)
+        self.instances = AgentInstancesAPI(studio)
 
     def list(self) -> JsonList:
         """List agents in the resolved project.
@@ -358,7 +578,7 @@ class AgentsAPI:
         Returns:
             Agent summaries.
         """
-        return cast(JsonList, self._studio.request("GET", "/agents").get("items", []))
+        return cast(JsonList, self._studio.request("GET", "/agent-templates").get("items", []))
 
     def get(self, slug: str) -> RemoteAgent:
         """Fetch one agent.
@@ -371,7 +591,7 @@ class AgentsAPI:
         """
         return RemoteAgent(
             self._studio,
-            cast(JsonObject, self._studio.request("GET", f"/agents/{slug}")),
+            cast(JsonObject, self._studio.request("GET", f"/agent-templates/{slug}")),
         )
 
     def create(
@@ -396,14 +616,14 @@ class AgentsAPI:
             environment_revision_id: Optional pinned revision.
             harness_revision_id: Exact hosted harness revision.
             routing: Portable model routing configuration.
-            package_spec: Exact v1 AgentSpec used for content identity.
+            package_spec: Exact AgentTemplate used for content identity.
 
         Returns:
             Created agent handle.
         """
         payload = self._studio.request(
             "POST",
-            "/agents",
+            "/agent-templates",
             json={
                 "name": name,
                 "model": model,
@@ -433,7 +653,7 @@ class AgentsAPI:
         """
         return RemoteAgent(
             self._studio,
-            cast(JsonObject, self._studio.request("PATCH", f"/agents/{slug}", json=fields)),
+            cast(JsonObject, self._studio.request("PATCH", f"/agent-templates/{slug}", json=fields)),
         )
 
     def delete(self, slug: str) -> None:
@@ -442,7 +662,7 @@ class AgentsAPI:
         Args:
             slug: Project-unique slug, or the hosted id.
         """
-        self._studio.request("DELETE", f"/agents/{slug}")
+        self._studio.request("DELETE", f"/agent-templates/{slug}")
 
     def invoke(
         self,
@@ -1106,7 +1326,7 @@ def environment_manifest(env: Environment[Any, Any]) -> JsonObject:
         Manifest with actions, schemas, guardrails, skills, and context.
     """
     tools = []
-    for definition in env.tool_defs:
+    for definition in env.action_defs:
         dumped = definition.model_dump(mode="json")
         function = dumped.get("function") if isinstance(dumped, dict) else None
         if isinstance(function, dict):
@@ -1442,7 +1662,7 @@ def _report_slug(report: Any, *, name: str | None = None) -> str:
 def create_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
     """Create a hosted environment, trace, or benchmark.
 
-    Agents are created with ``client.agents.create(...)``.
+    Agent templates are created with ``client.agents.templates.create(...)``.
 
     Args:
         client: Authenticated Plural client.
@@ -1466,7 +1686,7 @@ def create_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
         return push_report(client, obj.report, **_benchmark_kwargs(obj, kwargs))
     raise InvalidRequestError(
         "client.create accepts Environment, Trace, Benchmark, or Report; "
-        "create agents with client.agents.create(...)"
+        "create agent templates with client.agents.templates.create(...)"
     )
 
 
@@ -1557,5 +1777,5 @@ def push_object(client: Client, obj: Any, **kwargs: Any) -> JsonObject:
         return update_object(client, obj, **fields)
     raise InvalidRequestError(
         "client.push accepts Environment, Trace, Benchmark, or Report; "
-        "create agents with client.agents.create(...)"
+        "create agent templates with client.agents.templates.create(...)"
     )

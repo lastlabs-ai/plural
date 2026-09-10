@@ -8,12 +8,15 @@ from pathlib import Path
 import pytest
 
 from plural.domain import (
-    AgentSpec,
+    AgentBinding,
+    AgentTemplate,
     BenchmarkDefinition,
     EnvironmentManifest,
+    EnvironmentRuntime,
     ErrorCode,
     FileDeclaration,
     HarnessBinding,
+    HarnessCapability,
     HarnessManifest,
     HarnessPackage,
     JobSpec,
@@ -22,6 +25,7 @@ from plural.domain import (
     RuntimeSpec,
     TaskDefinition,
     VerifierManifest,
+    resolve_harness_stamp,
 )
 from plural.execution import Job, JobStore
 from plural.harness import HarnessProtocolError, parse_events
@@ -164,7 +168,9 @@ def _spec(
     package = HarnessPackage(
         manifest=HarnessManifest(
             name="test",
+            implementation="runnable",
             command=("python", "harness.py"),
+            capabilities=frozenset({HarnessCapability.SHELL}),
             secret_names=("TEST_TOKEN",),
             outputs=(FileDeclaration(path="answer.txt"),),
         ),
@@ -182,7 +188,7 @@ def _spec(
             )
             for index in range(tasks)
         ),
-        allowed_harnesses=(binding,),
+        runtime=EnvironmentRuntime(network=NetworkMode.FULL),
         verifier=(
             VerifierManifest(
                 command=("python", "verify.py"),
@@ -192,18 +198,22 @@ def _spec(
             else None
         ),
     )
+    stamp = resolve_harness_stamp(environment, package)
     benchmark = BenchmarkDefinition(
         name="test",
         environment=environment.identity,
         task_ids=tuple(task.task_id for task in environment.tasks),
     )
     agent_specs = tuple(
-        AgentSpec(
-            name=f"agent-{index}",
-            model="test/model",
-            environment=environment.identity,
-            harness=binding,
-            harness_package=package,
+        AgentBinding(
+            template=AgentTemplate(
+                name=f"agent-{index}",
+                model="test/model",
+                environment=environment.identity,
+                harness=binding,
+                harness_package=package,
+                stamp=stamp,
+            )
         )
         for index in range(agents)
     )
@@ -213,7 +223,7 @@ def _spec(
         agents=agent_specs,
         concurrency=concurrency,
         per_agent_concurrency=per_agent_concurrency,
-        runtime=RuntimeSpec(provider="fake", network=NetworkMode.FULL, unsafe_local=True),
+        runtime=RuntimeSpec(provider="fake", unsafe_local=True),
         retry=retry or RetryPolicy(),
     )
 
@@ -223,17 +233,28 @@ def _replace_harness(spec: JobSpec, manifest: HarnessManifest) -> JobSpec:
     assert package is not None
     package = package.model_copy(update={"manifest": manifest})
     binding = HarnessBinding.from_package(package)
-    environment = spec.environment.model_copy(update={"allowed_harnesses": (binding,)})
+    environment = spec.environment
+    stamp = resolve_harness_stamp(environment, package)
     benchmark = spec.benchmark.model_copy(update={"environment": environment.identity})
-    agent = spec.agents[0].model_copy(
-        update={
-            "environment": environment.identity,
-            "harness": binding,
-            "harness_package": package,
-        }
+    agent = AgentBinding(
+        template=spec.agents[0].template.model_copy(
+            update={
+                "environment": environment.identity,
+                "harness": binding,
+                "harness_package": package,
+                "stamp": stamp,
+            }
+        )
     )
-    return spec.model_copy(
-        update={"environment": environment, "benchmark": benchmark, "agents": (agent,)}
+    return JobSpec(
+        environment=environment,
+        benchmark=benchmark,
+        agents=(agent,),
+        n_attempts=spec.n_attempts,
+        concurrency=spec.concurrency,
+        per_agent_concurrency=spec.per_agent_concurrency,
+        runtime=spec.runtime,
+        retry=spec.retry,
     )
 
 
@@ -271,14 +292,11 @@ async def test_preflight_enforces_models_auth_and_harness_capabilities(tmp_path:
             unsupported_model, provider=provider, store=JobStore(tmp_path / "one")
         ).preflight()
 
-    unknown_capability = _replace_harness(
-        base,
-        package.manifest.model_copy(update={"capabilities": ("telepathy",)}),
-    )
-    with pytest.raises(CapabilityError, match="unknown harness capabilities"):
-        await Job(
-            unknown_capability, provider=provider, store=JobStore(tmp_path / "two")
-        ).preflight()
+    with pytest.raises(Exception, match="declared but not runnable"):
+        _replace_harness(
+            base,
+            package.manifest.model_copy(update={"implementation": "declared", "command": ()}),
+        )
     assert provider.created == []
 
 
@@ -397,8 +415,8 @@ async def test_global_and_per_agent_concurrency_are_bounded(tmp_path: Path) -> N
 async def test_failed_logs_and_receipt_errors_are_redacted(tmp_path: Path) -> None:
     provider = FakeProvider(fail_first=True)
     base = _spec(tmp_path)
-    agent = base.agents[0].model_copy(update={"secret_names": ("TEST_TOKEN",)})
-    spec = base.model_copy(update={"agents": (agent,)})
+    template = base.agents[0].template.model_copy(update={"secret_names": ("TEST_TOKEN",)})
+    spec = base.model_copy(update={"agents": (AgentBinding(template=template),)})
     store = JobStore(tmp_path / "jobs")
 
     result = await Job(

@@ -1,89 +1,87 @@
 # Understand the pieces
 
-Imagine evaluating an assistant that looks up customer orders. You need to
-provide the order data, decide which actions are available, give it customer
-questions, and check its answers. Plural separates those concerns so you can
-repeat the same test with a different model.
+Plural evaluates agents in environments they cannot rewrite. The eight
+canonical objects are Environment, Harness, Model, Agent (template or
+instance), Task, Benchmark, Trial, and Trace.
 
-## The vocabulary you need first
+## The vocabulary
 
-An **environment** defines the setting for the work. In the Python API, it can
-hold state and expose Python tools. In package execution, its manifest declares
-instructions, tasks, commands, execution requirements, and an optional verifier.
+An **environment** is the primary object. It owns instructions, **native
+actions**, observation and state schemas, guardrails, resources, and the
+**runtime** (container, network policy, compute, and which targets may run
+it). Native actions act in the environment and return observations.
 
-A **task** is one input to that environment, with a stable identifier and,
-optionally, an answer or other information reserved for evaluation.
+A **harness** is a prebuilt agent loop that can be **stamped** onto an
+environment. The environment subtracts capabilities the harness may not
+use. A stamped harness never receives native actions. Four reference
+harnesses (`hermes`, `claude-code`, `codex`, `cursor`) ship as `declared`
+manifests only. The only runnable executor in this release is the native
+path.
 
-A **model** produces responses and requests actions. A **harness** manages the
-model interaction and execution loop. A packaged **agent** binds one model to
-one exact environment revision and one exact harness revision.
+A **model** is the LLM. An **agent** is Model + Environment, optionally plus
+a stamped Harness. That configuration is an **agent template**. A live
+**agent instance** is a template that has accumulated hosted memory, skills,
+data, and experience.
 
-A **benchmark** defines the comparison. A **result** tells you what happened;
-a **trace** records the model calls and actions that led to it. A successful
-process exit does not necessarily mean the task was solved: look at its score.
+A **task** is one unit of work on an environment. A **benchmark** is an
+ordered grouping of those tasks. A **job** expands into **trials**. A
+**trial** (also called an episode) is one agent run on one task and
+produces a **trace**.
+
+## The four invariants
+
+1. The environment owns native actions.
+2. A stamped harness cannot take a native action, and the environment
+   restricts what it can do.
+3. Templates are configuration; instances hold experience.
+4. Unsatisfiable execution requirements fail before any sandbox is created.
+   Effective permissions are the intersection of provider capability,
+   project policy, environment constraints, harness requirements, and the
+   agent request.
+
+See [execution capabilities](../concepts/execution-capabilities.md) and
+[harness stamping](../concepts/harness-stamping.md).
 
 ## Choose one starting path
 
 ### Python environment evaluations
 
-Use this when you want to write tools as Python functions, experiment in a
-notebook, or score model behavior in a simulator.
+Write `@action` methods on `Environment`, supply `TaskData`, and call
+`env.rollout(...)`. `Benchmark` repeats that work across models. Follow the
+[Python walkthrough](../tutorials/sdk-walkthrough.md).
 
-You author `Environment`, supply `TaskData`, and call `env.rollout(...)`.
-`Benchmark` repeats that work across models. The environment drives the episode
-loop; `Policy.act()` is the extension for choosing the next action.
+### Package execution
 
-You do not need to create a hosted Agent or a package manifest first.
-Follow the [Python walkthrough](../tutorials/sdk-walkthrough.md).
+Configure `EnvironmentManifest`, an optional `HarnessPackage`,
+`AgentTemplate`, and `BenchmarkDefinition`. A `JobSpec` combines them.
+A trial is one agent attempting one task once. Start with the
+[CLI walkthrough](../tutorials/cli-walkthrough.md).
 
-### Package execution with the CLI or Python
-
-Use this when you need a separately executable harness, a container or remote
-sandbox, durable job state, or isolated verification.
-
-You configure `EnvironmentManifest`, `HarnessPackage`, `AgentSpec`, and
-`BenchmarkDefinition`. A `JobSpec` combines them. A **trial** is one agent
-attempting one task once. Two agents, five tasks, and three attempts produce
-30 trials. Retrying a failed execution keeps the same trial identity.
-
-Start with the [CLI walkthrough](../tutorials/cli-walkthrough.md). The
-[Python job API](../sdk/package-jobs.md) uses the same execution domain.
+Native path (`AgentTemplate.harness is None`) exposes environment actions to
+the model via `native.actions.v1` or `native.chat.v1`. Stamped declared
+harnesses are refused at preflight.
 
 ### Hosted objects in Plural Intel
 
-Use `client.environments`, `client.agents`, and `client.benchmarks` to read and
-manage project objects. These helpers are also available through `client.studio`;
-older documentation and source code call the hosted integration “Studio.”
-
-A fetched environment or benchmark is a dictionary of hosted data. A fetched
-agent is a `RemoteAgent` handle with `.invoke()`. Neither is automatically a
-local executable package. `from plural import Agent` is an alias for that hosted
-handle; use `AgentSpec` for a local packaged agent.
-
-See [fetch and update objects](../guides/push-to-plural.md) for a complete path.
+Use `client.environments`, `client.agents.templates`,
+`client.agents.instances`, and `client.benchmarks`. A fetched template is
+configuration. An instance has memory, skills, data, and experience
+counters written through the API.
 
 ## What can the agent do?
 
-Start by reading the environment's tools or command declarations and its
-instructions. Then check the harness and runtime: a harness with shell access
-may have access beyond the model's displayed tool list.
+Read the environment's native actions and instructions. If a harness is
+stamped, read the grant matrix (`plural env harness capabilities`) — not
+the harness's declared set. `network=none` removes web search, browser,
+network fetch, and MCP from every stamp.
 
-In-process Python tools run with your application's permissions. The CLI's
-`local` provider runs child processes under your user account. Neither is an
-isolation boundary. Docker and Daytona provide different enforceable controls.
-Plain-language guardrails are instructions, not filesystem or service permissions.
-
-Keep evaluator-only answers in `expected` / `verifier_input`, and avoid putting
-them in public task metadata, instructions, or source files visible to the
-harness. The [security guide](../operations/security.md) explains the boundaries.
+`plural env capabilities` and `plural runtime doctor --env` must agree
+with what the engine will enforce. The local target is excluded when the
+environment requires network isolation, persistence, compose, or resource
+limits.
 
 ## Local versus hosted changes
 
-Saving a dataset or running a local job does not publish it to Plural Intel.
-A model call still contacts its configured provider. Publishing happens through
-explicit SDK create/update/push calls, `plural env push`, `plural run --sync`,
-or `plural job upload`.
-
-Changing a local package does not update already-pinned agents and benchmarks.
-Those references must be regenerated for the new revision. Changing hosted
-metadata does not change the source code installed on your computer.
+Saving a dataset or running a local job does not publish it. Publishing
+happens through explicit SDK or CLI push. Changing a local package does
+not update already-pinned templates and benchmarks.

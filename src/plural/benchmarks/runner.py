@@ -692,7 +692,7 @@ def _local_runtime_fingerprint(environment: Any) -> str:
     Returns:
         Stable runtime fingerprint.
     """
-    tools = getattr(environment, "tool_functions", {})
+    tools = getattr(environment, "action_functions", {})
     configured_tools = dict(tools) if isinstance(tools, Mapping) else {}
     return runtime_fingerprint(LocalRuntime(configured_tools))
 

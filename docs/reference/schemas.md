@@ -5,7 +5,7 @@ Plural packages these deterministic schemas under
 
 - `EnvironmentManifest.schema.json`
 - `HarnessManifest.schema.json` and `HarnessPackage.schema.json`
-- `AgentSpec.schema.json`
+- `AgentTemplate.schema.json`
 - `BenchmarkDefinition.schema.json`
 - `JobFile.schema.json` and `JobSpec.schema.json`
 - `TrialSpec.schema.json` and `TrialReceipt.schema.json`
@@ -19,8 +19,7 @@ uv run python scripts/generate_package_schemas.py --check
 ```
 
 The generator derives directly from the strict Pydantic models, sorts keys, and
-writes stable indentation/newlines. CI uses `--check`. The existing Trace schema
-has a separate compatibility process and remains unchanged:
+writes stable indentation/newlines. CI uses `--check`. The Trace schema is generated separately as `trace.v2.json`:
 
 ```bash
 uv run python scripts/generate_trace_schema.py --check

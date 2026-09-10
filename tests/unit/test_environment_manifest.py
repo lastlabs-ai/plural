@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from plural.environments.env import Environment, tool
+from plural.environments.env import Environment, action
 from plural.environments.types import Observation, State, hidden, is_hidden_schema_field
 from plural.studio import environment_manifest
 
@@ -36,7 +36,7 @@ class DemoEnv(Environment[VisibleObs, MemoryState]):
     def observe(self) -> VisibleObs:
         return VisibleObs(n=len(self.state.notes))
 
-    @tool
+    @action
     def inc(self) -> dict:
         """Append a note."""
         self.state.notes.append("tick")

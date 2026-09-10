@@ -6,11 +6,12 @@ same binding.
 
 ## Choose a built-in profile first
 
-The [CLI tutorial](../tutorials/cli-walkthrough.md) scaffolds `chat.v1`, which
-returns a model answer. `tool-loop.v1` exposes declared Environment commands;
-`code-task.v1` also declares filesystem capability but uses the same bounded
-command loop. Supply the operations yourself. The [tools tutorial](../tutorials/package-tools.md)
-shows a complete command and verifier.
+The [CLI tutorial](../tutorials/cli-walkthrough.md) scaffolds `native.chat.v1`,
+which returns a model answer. `native.actions.v1` exposes environment native
+actions on the native path. Declared vendor harnesses (`hermes`, `claude-code`,
+`codex`, `cursor`) can be stamped but cannot run. The
+[actions tutorial](../tutorials/package-tools.md) shows a complete native
+action and verifier.
 
 ## Minimal package
 
@@ -35,8 +36,9 @@ source:
 The executable reads one `HarnessRunRequest` JSON line from stdin and writes
 JSON-line events to stdout. It must finish with exactly one `result` or `error`
 event. Result paths must match declared regular files. A harness cannot emit
-`score`, `scores`, `reward`, `verifier`, or `expected` anywhere in an event;
-only the isolated verifier can score.
+`score`, `scores`, `reward`, `verifier`, `expected`, or `actions` anywhere in
+an event; only the isolated verifier can score, and native actions stay on
+the environment.
 
 Use `plural harness init`, then:
 
@@ -163,7 +165,7 @@ required secret names, run `harness test`, and publish a digest-pinned archive.
 ## Secret grants
 
 `HarnessManifest.secret_names` is the allowlist a package may request.
-`AgentSpec.secret_names` is the subset granted to that Agent and is rejected
+`AgentTemplate.secret_names` is the subset granted to that template and is rejected
 when undeclared. Only granted values present in the parent environment are
 passed. Plural replaces exact secret byte values in captured harness stdout,
 stderr, and error messages, but cannot redact transformed/encoded secrets,

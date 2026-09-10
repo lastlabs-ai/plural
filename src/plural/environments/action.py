@@ -14,7 +14,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from plural.environments.stop import StopReason
-from plural.tracing.schema import ParsedAction, RewardEvent, ToolCallStep
+from plural.tracing.schema import ActionStep, ParsedAction, RewardEvent
 from plural.types import ChatResponse, ToolCall, text_content
 
 TEXT_ACTION = "respond"
@@ -30,14 +30,14 @@ class ActionResult(BaseModel):
 
     Attributes:
         parsed_actions: Trace-safe representations of the applied actions.
-        tool_calls: Tool executions produced while applying the action.
+        actions: Native action executions produced while applying the action.
         reward_events: Dense rewards attached to this policy turn.
         stop_reason: Explicit reason to stop, or ``None`` to continue.
         info: Author-defined diagnostics merged into the step result.
     """
 
     parsed_actions: list[ParsedAction] = Field(default_factory=list)
-    tool_calls: list[ToolCallStep] = Field(default_factory=list)
+    actions: list[ActionStep] = Field(default_factory=list)
     reward_events: list[RewardEvent] = Field(default_factory=list)
     stop_reason: StopReason | None = None
     info: dict[str, Any] = Field(default_factory=dict)
@@ -77,10 +77,11 @@ def normalize_action(
                 ParsedAction(
                     name=TEXT_ACTION,
                     arguments={"text": text_content(action.message)},
+                    source="model_text",
                 )
             ], [None]
     if not action:
-        return [ParsedAction(name=TEXT_ACTION, arguments={})], [None]
+        return [ParsedAction(name=TEXT_ACTION, arguments={}, source="model_text")], [None]
     if isinstance(action, ParsedAction):
         return [action], [None]
     if isinstance(action, ToolCall):
@@ -108,6 +109,9 @@ def normalize_action(
                 ParsedAction(
                     name=str(item.get("name") or TEXT_ACTION),
                     arguments=dict(item.get("arguments") or {}),
+                    source="model_text"
+                    if str(item.get("name") or TEXT_ACTION) == TEXT_ACTION
+                    else "environment_native",
                 )
             )
             ids.append(item.get("id"))

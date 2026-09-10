@@ -63,35 +63,43 @@ You can keep configuration in Python instead of separate YAML files:
 
 ```python
 from pathlib import Path
-from plural import AgentSpec, BenchmarkDefinition, HarnessBinding, JobSpec, RuntimeSpec
-from plural.cli.scaffold import load_environment, load_harness
+from plural import AgentBinding, AgentTemplate, BenchmarkDefinition, JobSpec, RuntimeSpec
+from plural.cli.scaffold import load_environment
 
-# These files come from the CLI tutorial; allow the harness before loading the environment.
+# These files come from the CLI tutorial. This is the native path: no harness.
 environment = load_environment(Path("environment"))
-harness = load_harness(Path("harness"))
-binding = HarnessBinding.from_package(harness)
-agent = AgentSpec(
-    name="candidate", model="openai/gpt-4o-mini",
+template = AgentTemplate(
+    name="candidate",
+    model="openai/gpt-4o-mini",
     environment=environment.identity,
-    harness=binding, harness_package=harness,
     secret_names=("PLURAL_API_KEY",),
 )
 benchmark = BenchmarkDefinition(
-    name="support-smoke", environment=environment.identity,
+    name="support-smoke",
+    environment=environment.identity,
     task_ids=tuple(task.task_id for task in environment.tasks),
 )
 spec = JobSpec(
-    environment=environment, benchmark=benchmark, agents=(agent,),
-    n_attempts=2, concurrency=2, per_agent_concurrency=2,
-    runtime=RuntimeSpec(provider="local", unsafe_local=True),
+    environment=environment,
+    benchmark=benchmark,
+    agents=(AgentBinding(template=template),),
+    n_attempts=2,
+    concurrency=2,
+    per_agent_concurrency=2,
+    runtime=RuntimeSpec(provider="docker"),
 )
 print(spec.plan().trial_count)
 ```
 
-The environment must already allow the binding. A frozen specification should
-be rebuilt and validated when changed; do not alter identity fields merely to
-make a stale dependency pass. Public builders `chat_v1()`, `tool_loop_v1()`,
-and `code_task_v1()` return first-party harness packages for programmatic use.
+A stamped template also needs `harness`, `harness_package`, and a
+`HarnessStamp` from `resolve_harness_stamp()`. Declared harnesses (`hermes`,
+`claude-code`, `codex`, `cursor`) can be stamped but cannot run. The only
+runnable executors are `native_chat_v1()` and `native_actions_v1()`. Local
+execution additionally requires `environment.runtime.allow_unsafe_local=True`,
+`LOCAL` in `targets`, and `RuntimeSpec(unsafe_local=True)` — or
+`plural run --unsafe-local`. A frozen specification should be rebuilt and
+validated when changed; do not alter identity fields merely to make a stale
+dependency pass.
 
 ## Resume, cancel, and regrade
 

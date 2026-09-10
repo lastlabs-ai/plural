@@ -26,7 +26,7 @@ def make_environment(*, scored=True):
         ),
     )
 
-    @env.tool
+    @env.action
     def lookup_order(order_id: str) -> dict:
         """Return an order's status, or unknown if it does not exist."""
         return {"order_id": order_id, "status": ORDERS.get(order_id, "unknown")}
@@ -53,16 +53,16 @@ def make_tasks():
     )
 ```
 
-`@env.tool` derives the model-facing tool schema from the function signature
-and docstring. The function owns the implementation. There is no write tool in
+`@env.action` derives the model-facing action schema from the function signature
+and docstring. The function owns the implementation. There is no write action in
 this example. Its read-only behavior comes from the implementation; this
 in-process environment is not a security sandbox.
 
 `expected` is used by the scorer and is not copied into policy requests.
 The scorer checks the final answer, not whether the lookup was performed. If
-using the tool is itself a requirement, add a separate check over the recorded
-decisions/tool calls. An exact-match scorer is useful for this constrained
-output; open-ended answers need a task-appropriate verifier.
+using the action is itself a requirement, add a separate check over the recorded
+turns. An exact-match scorer is useful for this constrained output; open-ended
+answers need a task-appropriate verifier.
 
 ## 2. Check the wiring without spending tokens
 
@@ -82,16 +82,17 @@ policy = ScriptedPolicy([
 ])
 rollout = make_environment().run_episode(make_tasks().tasks[0], policy, model="scripted")
 assert rollout.trace.outcome.reward == 1.0
-assert len(rollout.trace.decisions()) == 2
-print("Tool and scorer work; score:", rollout.trace.outcome.reward)
+assert len(rollout.trace.turns()) == 2
+print("Action and scorer work; score:", rollout.trace.outcome.reward)
 ```
 
 ```bash
 python check_support.py
 ```
 
-This exercises an actual tool call and final answer. A scripted policy returns
-exactly the supplied actions; it is a deterministic test of your environment.
+This exercises an actual native action and final answer. A scripted policy
+returns exactly the supplied actions; it is a deterministic test of your
+environment.
 
 ## 3. Run one task with a model
 
@@ -115,10 +116,11 @@ with Client(capture_content=True) as client:
 python run_support.py
 ```
 
-Plural sends the instructions and tool definitions to the model, dispatches
-requested tool calls, and scores the completed episode. One episode trace is
-written to `.plural/traces.jsonl`. A missing final response, truncation, or score
-of zero is a reason to inspect that trace, not assume the test was solved.
+Plural sends the instructions and native action definitions to the model,
+dispatches requested actions, and scores the completed episode. One episode
+trace is written to `.plural/traces.jsonl`. A missing final response,
+truncation, or score of zero is a reason to inspect that trace, not assume the
+test was solved.
 
 ## 4. Evaluate a second model
 
@@ -201,11 +203,11 @@ with Client() as client:
     print(result.response.text if result.response else "No final answer")
 ```
 
-This configuration keeps the same lookup tool and instructions but omits the
+This configuration keeps the same lookup action and instructions but omits the
 exact-answer scorer, so the result has no benchmark quality reward. A missing
 score does not establish success; use human review or a suitable operational
 check when needed. The local data remains synthetic; connecting a real order
-service requires implementing that connection in the tool.
+service requires implementing that connection in the action.
 
 ## Next
 

@@ -7,7 +7,7 @@ Use this checklist:
 
 1. Subclass `Environment[MyObservation, MyState]`; set `name`, `version`, and `max_turns`.
 2. Seed `self.state` in `setup(task)`. Persist boards and other durable structures there, mark secrets with `hidden()`, and expose only the visible slice from `observe()`.
-3. Decorate actions with `@tool`, or register functions with `@env.tool`.
+3. Decorate actions with `@action`, or register functions with `@env.action`.
 4. For scalar or custom text actions, override `apply_action()` and return `ActionResult`; tool-only environments need no override.
 5. Implement `done()` for natural termination and scorers for the final outcome.
 6. If state should be persisted, override `snapshot()` with an explicitly trace-safe dictionary. The default is `None`.
@@ -52,7 +52,7 @@ class CounterEnv(Environment[CounterObservation, CounterState]):
     def snapshot(self) -> dict:
         return {"count": self.state.count}
 
-    @tool
+    @action
     def increment(self, by: int = 1) -> int:
         """Increment the counter."""
         self.state.count += by
@@ -63,7 +63,7 @@ class CounterEnv(Environment[CounterObservation, CounterState]):
 
 ## Custom scalar and text actions
 
-`Environment.step()` is final and framework-owned so every turn receives the same lifecycle checks, policy-message handling, trace decision, and observation update. Tool authors do not override action handling: the base `apply_action()` normalizes and dispatches their `@tool` calls.
+`Environment.step()` is final and framework-owned so every turn receives the same lifecycle checks, policy-message handling, `Turn` record, and observation update. Action authors do not override action handling: the base `apply_action()` normalizes and dispatches their `@action` calls.
 
 Override `apply_action()` when the policy emits another action type. The hook receives the raw action and returns trace-safe turn data:
 
@@ -213,12 +213,12 @@ client.update(env)
 
 `create` fails if the slug already exists. `update` uploads a new revision
 when the fingerprint changed. Agents are created with
-`client.agents.create(name=..., model=..., environment_id=env.slug)`.
+`client.agents.templates.create(name=..., model=..., environment_id=env.slug)`.
 See [Create and update hosted objects](push-to-plural.md).
 
 ## Version and fingerprint
 
-Bump `version` when the public environment contract changes. The fingerprint covers `max_turns`, tool schemas, callable implementation bodies/configured state, scorer weights, author hooks, and `fingerprint_payload()`, so replay and benchmark reports can detect many forms of execution-contract drift.
+Bump `version` when the public environment contract changes. The fingerprint covers `max_turns`, action schemas, callable implementation bodies/configured state, scorer weights, author hooks, and `fingerprint_payload()`, so replay and benchmark reports can detect many forms of execution-contract drift.
 
 ```python
 class CounterEnv(Environment[CounterObservation, CounterState]):

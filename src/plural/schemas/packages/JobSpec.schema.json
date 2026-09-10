@@ -1,8 +1,61 @@
 {
   "$defs": {
-    "AgentSpec": {
+    "AgentBinding": {
       "additionalProperties": false,
-      "description": "Model, routing, environment identity, and exactly one harness binding.",
+      "description": "A job participant: a template, optionally bound to a hosted instance.",
+      "properties": {
+        "instance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentInstanceRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "template": {
+          "$ref": "#/$defs/AgentTemplate"
+        }
+      },
+      "required": [
+        "template"
+      ],
+      "title": "AgentBinding",
+      "type": "object"
+    },
+    "AgentInstanceRef": {
+      "additionalProperties": false,
+      "description": "Hosted identity of a persistent agent instance.",
+      "properties": {
+        "instance_id": {
+          "minLength": 1,
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "template_hash": {
+          "minLength": 1,
+          "title": "Template Hash",
+          "type": "string"
+        },
+        "template_id": {
+          "minLength": 1,
+          "title": "Template Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_id",
+        "template_id",
+        "template_hash"
+      ],
+      "title": "AgentInstanceRef",
+      "type": "object"
+    },
+    "AgentTemplate": {
+      "additionalProperties": false,
+      "description": "Immutable model + environment configuration, optionally with a stamped harness.",
       "properties": {
         "auth_mode": {
           "default": "environment",
@@ -19,7 +72,15 @@
           "$ref": "#/$defs/EnvironmentIdentity"
         },
         "harness": {
-          "$ref": "#/$defs/HarnessBinding"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HarnessBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "harness_package": {
           "anyOf": [
@@ -58,15 +119,25 @@
           },
           "title": "Secret Names",
           "type": "array"
+        },
+        "stamp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HarnessStamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
         "name",
         "model",
-        "environment",
-        "harness"
+        "environment"
       ],
-      "title": "AgentSpec",
+      "title": "AgentTemplate",
       "type": "object"
     },
     "BenchmarkDefinition": {
@@ -114,6 +185,28 @@
       "title": "BenchmarkDefinition",
       "type": "object"
     },
+    "Capability": {
+      "description": "Individual controls a provider can enforce.",
+      "enum": [
+        "image",
+        "build",
+        "resources",
+        "network_none",
+        "network_allowlist",
+        "upload",
+        "download",
+        "timeout",
+        "cancel",
+        "persistence",
+        "compose",
+        "read_only_root",
+        "working_directory",
+        "environment",
+        "log_capture"
+      ],
+      "title": "Capability",
+      "type": "string"
+    },
     "DeclarativeImage": {
       "additionalProperties": false,
       "description": "Portable subset of Daytona's declarative image builder.",
@@ -157,48 +250,6 @@
       "title": "DeclarativeImage",
       "type": "object"
     },
-    "EnvironmentCommand": {
-      "additionalProperties": false,
-      "description": "Declared argv-only command exposed to bounded harness tool loops.",
-      "properties": {
-        "command": {
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1,
-          "title": "Command",
-          "type": "array"
-        },
-        "description": {
-          "minLength": 1,
-          "title": "Description",
-          "type": "string"
-        },
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "parameters": {
-          "additionalProperties": true,
-          "title": "Parameters",
-          "type": "object"
-        },
-        "timeout_seconds": {
-          "default": 30,
-          "exclusiveMinimum": 0,
-          "title": "Timeout Seconds",
-          "type": "number"
-        }
-      },
-      "required": [
-        "name",
-        "description",
-        "command"
-      ],
-      "title": "EnvironmentCommand",
-      "type": "object"
-    },
     "EnvironmentIdentity": {
       "additionalProperties": false,
       "description": "Exact identity and revision for a packaged environment.",
@@ -228,22 +279,14 @@
     },
     "EnvironmentManifest": {
       "additionalProperties": false,
-      "description": "Environment package metadata, tasks, and allowed harnesses.",
+      "description": "Environment package: native actions, runtime, resources, and harness policy.",
       "properties": {
-        "allowed_harnesses": {
+        "actions": {
           "default": [],
           "items": {
-            "$ref": "#/$defs/HarnessBinding"
+            "$ref": "#/$defs/NativeAction"
           },
-          "title": "Allowed Harnesses",
-          "type": "array"
-        },
-        "commands": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/EnvironmentCommand"
-          },
-          "title": "Commands",
+          "title": "Actions",
           "type": "array"
         },
         "context": {
@@ -254,6 +297,17 @@
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "guardrails": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Guardrail"
+          },
+          "title": "Guardrails",
+          "type": "array"
+        },
+        "harness_policy": {
+          "$ref": "#/$defs/HarnessPolicy"
         },
         "instructions": {
           "default": "",
@@ -268,10 +322,18 @@
           "title": "Name",
           "type": "string"
         },
-        "policy": {
+        "observation_schema": {
           "additionalProperties": true,
-          "title": "Policy",
+          "title": "Observation Schema",
           "type": "object"
+        },
+        "resources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EnvironmentResource"
+          },
+          "title": "Resources",
+          "type": "array"
         },
         "revision": {
           "default": "0.1.0",
@@ -279,13 +341,8 @@
           "title": "Revision",
           "type": "string"
         },
-        "runtime_capabilities": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Runtime Capabilities",
-          "type": "array"
+        "runtime": {
+          "$ref": "#/$defs/EnvironmentRuntime"
         },
         "schema_version": {
           "const": "1",
@@ -303,6 +360,11 @@
             }
           ],
           "default": null
+        },
+        "state_schema": {
+          "additionalProperties": true,
+          "title": "State Schema",
+          "type": "object"
         },
         "tasks": {
           "default": [],
@@ -328,6 +390,204 @@
         "name"
       ],
       "title": "EnvironmentManifest",
+      "type": "object"
+    },
+    "EnvironmentResource": {
+      "additionalProperties": false,
+      "description": "Data, application, or file the environment provides to the agent.",
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "content_type": {
+          "default": "",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        },
+        "kind": {
+          "enum": [
+            "data",
+            "application",
+            "file",
+            "secret"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uri"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "EnvironmentResource",
+      "type": "object"
+    },
+    "EnvironmentRuntime": {
+      "additionalProperties": false,
+      "description": "Container, network, compute, and execution surface the environment requires.",
+      "properties": {
+        "allow_unsafe_local": {
+          "default": false,
+          "title": "Allow Unsafe Local",
+          "type": "boolean"
+        },
+        "build_context": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Build Context"
+        },
+        "compose": {
+          "default": false,
+          "title": "Compose",
+          "type": "boolean"
+        },
+        "declarative_image": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeclarativeImage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dockerfile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dockerfile"
+        },
+        "extra_capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "title": "Extra Capabilities",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkMode",
+          "default": "none"
+        },
+        "network_allowlist": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Network Allowlist",
+          "type": "array"
+        },
+        "persistent": {
+          "default": false,
+          "title": "Persistent",
+          "type": "boolean"
+        },
+        "read_only_root": {
+          "default": false,
+          "title": "Read Only Root",
+          "type": "boolean"
+        },
+        "resources": {
+          "$ref": "#/$defs/ResourceRequirements"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshot"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/ExecutionTarget"
+          },
+          "title": "Targets",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "timeout_seconds": {
+          "default": 300,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "title": "EnvironmentRuntime",
       "type": "object"
     },
     "ErrorCode": {
@@ -387,6 +647,16 @@
       "title": "ExecutionLimits",
       "type": "object"
     },
+    "ExecutionTarget": {
+      "description": "Where a trial for this environment may execute.",
+      "enum": [
+        "local",
+        "docker",
+        "remote"
+      ],
+      "title": "ExecutionTarget",
+      "type": "string"
+    },
     "FileDeclaration": {
       "additionalProperties": false,
       "description": "One exact file a harness or verifier may emit or consume.",
@@ -411,6 +681,27 @@
         "path"
       ],
       "title": "FileDeclaration",
+      "type": "object"
+    },
+    "Guardrail": {
+      "additionalProperties": false,
+      "description": "One plain-language rule. Instructions, not enforcement.",
+      "properties": {
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "rule": {
+          "minLength": 1,
+          "title": "Rule",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule"
+      ],
+      "title": "Guardrail",
       "type": "object"
     },
     "HarnessBinding": {
@@ -440,9 +731,26 @@
       "title": "HarnessBinding",
       "type": "object"
     },
+    "HarnessCapability": {
+      "description": "Actions a stamped harness may request.",
+      "enum": [
+        "shell",
+        "file_read",
+        "file_edit",
+        "code_execution",
+        "web_search",
+        "browser",
+        "network_fetch",
+        "mcp",
+        "subagents",
+        "persistence"
+      ],
+      "title": "HarnessCapability",
+      "type": "string"
+    },
     "HarnessManifest": {
       "additionalProperties": false,
-      "description": "Public manifest for a single-agent harness package.",
+      "description": "Public manifest for a single-agent harness package.\n\nA ``declared`` harness can be stamped and inspected but cannot execute a\ntrial. A ``runnable`` harness must provide a command.",
       "properties": {
         "artifacts": {
           "default": [],
@@ -471,16 +779,17 @@
         "capabilities": {
           "default": [],
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/HarnessCapability"
           },
           "title": "Capabilities",
-          "type": "array"
+          "type": "array",
+          "uniqueItems": true
         },
         "command": {
+          "default": [],
           "items": {
             "type": "string"
           },
-          "minItems": 1,
           "title": "Command",
           "type": "array"
         },
@@ -523,6 +832,15 @@
           ],
           "default": null,
           "title": "Healthcheck"
+        },
+        "implementation": {
+          "default": "declared",
+          "enum": [
+            "declared",
+            "runnable"
+          ],
+          "title": "Implementation",
+          "type": "string"
         },
         "name": {
           "minLength": 1,
@@ -611,8 +929,7 @@
         }
       },
       "required": [
-        "name",
-        "command"
+        "name"
       ],
       "title": "HarnessManifest",
       "type": "object"
@@ -633,6 +950,168 @@
         "source"
       ],
       "title": "HarnessPackage",
+      "type": "object"
+    },
+    "HarnessPolicy": {
+      "additionalProperties": false,
+      "description": "How an environment restricts any harness stamped onto it.",
+      "properties": {
+        "allowed_capabilities": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/HarnessCapability"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Capabilities"
+        },
+        "allowed_harnesses": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HarnessBinding"
+          },
+          "title": "Allowed Harnesses",
+          "type": "array"
+        },
+        "denied_capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HarnessCapability"
+          },
+          "title": "Denied Capabilities",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "mode": {
+          "default": "allow_all",
+          "enum": [
+            "allow_all",
+            "allowlist"
+          ],
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "HarnessPolicy",
+      "type": "object"
+    },
+    "HarnessStamp": {
+      "additionalProperties": false,
+      "description": "Frozen result of stamping one harness onto one environment revision.",
+      "properties": {
+        "declared": {
+          "items": {
+            "$ref": "#/$defs/HarnessCapability"
+          },
+          "title": "Declared",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "denial_reasons": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Denial Reasons",
+          "type": "object"
+        },
+        "denied": {
+          "items": {
+            "$ref": "#/$defs/HarnessCapability"
+          },
+          "title": "Denied",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentIdentity"
+        },
+        "granted": {
+          "items": {
+            "$ref": "#/$defs/HarnessCapability"
+          },
+          "title": "Granted",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "harness": {
+          "$ref": "#/$defs/HarnessBinding"
+        }
+      },
+      "required": [
+        "environment",
+        "harness",
+        "declared",
+        "granted",
+        "denied"
+      ],
+      "title": "HarnessStamp",
+      "type": "object"
+    },
+    "NativeAction": {
+      "additionalProperties": false,
+      "description": "One action the environment owns. Acts in the environment, returns an observation.",
+      "properties": {
+        "command": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Command",
+          "type": "array"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "default": "command",
+          "enum": [
+            "command",
+            "python"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "mutates_state": {
+          "default": true,
+          "title": "Mutates State",
+          "type": "boolean"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "observation_schema": {
+          "additionalProperties": true,
+          "title": "Observation Schema",
+          "type": "object"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "timeout_seconds": {
+          "default": 30,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "NativeAction",
       "type": "object"
     },
     "NetworkMode": {
@@ -853,20 +1332,8 @@
     },
     "RuntimeSpec": {
       "additionalProperties": false,
-      "description": "Requested runtime provider and capability constraints.",
+      "description": "Requested execution target. Image, network, and resources live on the environment.",
       "properties": {
-        "build_context": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Build Context"
-        },
         "capabilities": {
           "default": [],
           "items": {
@@ -875,78 +1342,11 @@
           "title": "Capabilities",
           "type": "array"
         },
-        "declarative_image": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DeclarativeImage"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "dockerfile": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Dockerfile"
-        },
-        "image": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Image"
-        },
-        "network": {
-          "$ref": "#/$defs/NetworkMode",
-          "default": "full"
-        },
-        "network_allowlist": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Network Allowlist",
-          "type": "array"
-        },
         "provider": {
-          "default": "local",
+          "default": "docker",
           "minLength": 1,
           "title": "Provider",
           "type": "string"
-        },
-        "read_only_root": {
-          "default": false,
-          "title": "Read Only Root",
-          "type": "boolean"
-        },
-        "resources": {
-          "$ref": "#/$defs/ResourceRequirements"
-        },
-        "snapshot": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Snapshot"
         },
         "timeout_seconds": {
           "default": 300,
@@ -1057,7 +1457,7 @@
   "properties": {
     "agents": {
       "items": {
-        "$ref": "#/$defs/AgentSpec"
+        "$ref": "#/$defs/AgentBinding"
       },
       "minItems": 1,
       "title": "Agents",

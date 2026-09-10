@@ -25,10 +25,27 @@
       ],
       "title": "FileDeclaration",
       "type": "object"
+    },
+    "HarnessCapability": {
+      "description": "Actions a stamped harness may request.",
+      "enum": [
+        "shell",
+        "file_read",
+        "file_edit",
+        "code_execution",
+        "web_search",
+        "browser",
+        "network_fetch",
+        "mcp",
+        "subagents",
+        "persistence"
+      ],
+      "title": "HarnessCapability",
+      "type": "string"
     }
   },
   "additionalProperties": false,
-  "description": "Public manifest for a single-agent harness package.",
+  "description": "Public manifest for a single-agent harness package.\n\nA ``declared`` harness can be stamped and inspected but cannot execute a\ntrial. A ``runnable`` harness must provide a command.",
   "properties": {
     "artifacts": {
       "default": [],
@@ -57,16 +74,17 @@
     "capabilities": {
       "default": [],
       "items": {
-        "type": "string"
+        "$ref": "#/$defs/HarnessCapability"
       },
       "title": "Capabilities",
-      "type": "array"
+      "type": "array",
+      "uniqueItems": true
     },
     "command": {
+      "default": [],
       "items": {
         "type": "string"
       },
-      "minItems": 1,
       "title": "Command",
       "type": "array"
     },
@@ -109,6 +127,15 @@
       ],
       "default": null,
       "title": "Healthcheck"
+    },
+    "implementation": {
+      "default": "declared",
+      "enum": [
+        "declared",
+        "runnable"
+      ],
+      "title": "Implementation",
+      "type": "string"
     },
     "name": {
       "minLength": 1,
@@ -197,8 +224,7 @@
     }
   },
   "required": [
-    "name",
-    "command"
+    "name"
   ],
   "title": "HarnessManifest",
   "type": "object"

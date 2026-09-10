@@ -105,7 +105,7 @@ def test_make_env_and_rollout(tmp_path: Path) -> None:
     env = make_env()
     assert env.name == "library"
     assert env.version == "0.2.0"
-    names = {t.function.name for t in env.tool_defs}
+    names = {t.function.name for t in env.action_defs}
     assert "research" in names
     client = Client(
         providers={"openai": Provider()},
@@ -115,7 +115,7 @@ def test_make_env_and_rollout(tmp_path: Path) -> None:
     rollout = env.rollout(next(env.iter_tasks()), client, model="openai/gpt-4o-mini")
     assert rollout.trace.outcome is not None
     assert rollout.trace.outcome.reward == 1.0
-    names = [a.name for d in rollout.trace.decisions() for a in d.parsed_action]
+    names = [a.name for d in rollout.trace.turns() for a in d.parsed_action]
     assert names == ["search", "read", "answer"]
     assert rollout.trace.returns(gamma=0.9) == pytest.approx([0.81, 0.9, 1.0])
     assert rollout.trace.initial_state is not None
@@ -135,10 +135,10 @@ def test_research_records_nested_tools() -> None:
     env.reset(task)
     env.step([ParsedAction(name="research", arguments={"query": "voting"})])
     rollout = env.close_episode()
-    decision = rollout.trace.decisions()[0]
-    assert decision.tool_calls[0].name == "research"
-    assert [child.name for child in decision.tool_calls[0].children] == ["search", "read"]
-    assert decision.tool_calls[0].children[0].parent == "research"
+    decision = rollout.trace.turns()[0]
+    assert decision.actions[0].name == "research"
+    assert [child.name for child in decision.actions[0].children] == ["search", "read"]
+    assert decision.actions[0].children[0].parent == "research"
 
 
 def test_run_episode_with_scripted_policy() -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import selectors
+import shutil
 import subprocess
 import sys
 import time
@@ -23,6 +24,8 @@ def main() -> None:
     command = sys.argv[split + 1 :]
     if not command:
         raise SystemExit("ACP adapter requires an agent command")
+    if command[0] == "python" and shutil.which("python") is None:
+        command[0] = sys.executable
     request = json.loads(sys.stdin.readline())
     environment = request.get("environment") or {}
     limits = environment.get("limits") or {}

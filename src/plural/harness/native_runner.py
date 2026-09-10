@@ -1,9 +1,10 @@
-"""First-party OpenAI-compatible chat and bounded command-loop harnesses."""
+"""Native-path OpenAI-compatible chat and environment-action loops."""
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -14,9 +15,19 @@ from typing import Any
 from uuid import uuid4
 
 
+def _local_command(command: list[Any]) -> list[str]:
+    resolved = [str(item) for item in command]
+    if resolved and resolved[0] == "python" and shutil.which("python") is None:
+        resolved[0] = sys.executable
+    return resolved
+
+_CHAT_PROFILES = {"native.chat.v1"}
+_ACTION_PROFILES = {"native.actions.v1"}
+
+
 def main() -> None:
-    """Run one model-backed profile without evaluating its own answer."""
-    profile = sys.argv[1] if len(sys.argv) > 1 else "chat.v1"
+    """Run one model-backed native profile without evaluating its own answer."""
+    profile = sys.argv[1] if len(sys.argv) > 1 else "native.chat.v1"
     request = json.loads(sys.stdin.readline())
     try:
         result, trajectory, trace_id = _run(profile, request)
@@ -44,6 +55,8 @@ def main() -> None:
 
 
 def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+    if profile not in _CHAT_PROFILES | _ACTION_PROFILES:
+        raise ValueError(f"unknown native profile {profile!r}")
     agent = _mapping(request.get("agent"), "agent")
     environment = _mapping(request.get("environment"), "environment")
     limits = _mapping(environment.get("limits"), "environment.limits")
@@ -51,13 +64,13 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
     max_seconds = float(limits.get("max_seconds", 120))
     max_cost = limits.get("max_cost_usd")
     deadline = time.monotonic() + max_seconds
-    commands = {
+    actions = {
         str(item["name"]): item
-        for item in environment.get("commands", [])
+        for item in environment.get("actions", [])
         if isinstance(item, dict) and item.get("name")
     }
-    if profile in {"tool-loop.v1", "code-task.v1"} and not commands:
-        raise ValueError(f"{profile} requires at least one Environment command declaration")
+    if profile in _ACTION_PROFILES and not actions:
+        raise ValueError(f"{profile} requires at least one environment native action")
     prompt = _prompt(request, environment)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": str(environment.get("instructions") or "")},
@@ -68,12 +81,12 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
             "type": "function",
             "function": {
                 "name": name,
-                "description": str(command.get("description") or name),
-                "parameters": command.get("parameters")
+                "description": str(action.get("description") or name),
+                "parameters": action.get("parameters")
                 or {"type": "object", "additionalProperties": True},
             },
         }
-        for name, command in commands.items()
+        for name, action in actions.items()
     ]
     trajectory: list[dict[str, Any]] = []
     total_cost = 0.0
@@ -86,7 +99,7 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
             model=str(agent.get("model") or ""),
             routing=_mapping(agent.get("routing") or {}, "agent.routing"),
             messages=messages,
-            tools=tools if profile != "chat.v1" else [],
+            tools=tools if profile in _ACTION_PROFILES else [],
             timeout=remaining,
         )
         message = _response_message(response)
@@ -110,13 +123,13 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
         )
         messages.append(message)
         calls = message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
-        if profile == "chat.v1" or not calls:
+        if profile in _CHAT_PROFILES or not calls:
             final_message = message
             break
         for call in calls:
-            tool_result = _run_command(call, commands, environment, deadline)
-            messages.append(tool_result)
-            trajectory.append({"turn": turn, "tool_result": tool_result})
+            observation = _run_action(call, actions, environment, deadline)
+            messages.append(observation)
+            trajectory.append({"turn": turn, "observation": observation})
     if final_message is None:
         raise RuntimeError(f"{profile} reached max_turns={max_turns} without a final response")
     trace_id = str(uuid4())
@@ -153,7 +166,7 @@ def _model_call(
     key = os.environ.get("PLURAL_API_KEY") or os.environ.get("OPENAI_API_KEY")
     if not key and os.environ.get("PLURAL_ALLOW_NO_AUTH") != "1":
         raise ValueError(
-            "chat harness requires PLURAL_API_KEY or OPENAI_API_KEY "
+            "native runner requires PLURAL_API_KEY or OPENAI_API_KEY "
             "(or PLURAL_ALLOW_NO_AUTH=1 for an explicitly unauthenticated local gateway)"
         )
     body: dict[str, Any] = {"model": model, "messages": messages}
@@ -184,32 +197,35 @@ def _model_call(
     return payload
 
 
-def _run_command(
+def _run_action(
     call: Any,
-    commands: dict[str, dict[str, Any]],
+    actions: dict[str, dict[str, Any]],
     environment: dict[str, Any],
     deadline: float,
 ) -> dict[str, Any]:
     if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
-        raise ValueError("model emitted an invalid tool call")
+        raise ValueError("model emitted an invalid action call")
     function = call["function"]
     name = str(function.get("name") or "")
-    declaration = commands.get(name)
+    declaration = actions.get(name)
     if declaration is None:
-        raise ValueError(f"model requested undeclared Environment command {name!r}")
+        raise ValueError(f"model requested undeclared environment action {name!r}")
     raw_arguments = function.get("arguments") or "{}"
     arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
     remaining = deadline - time.monotonic()
     timeout = min(float(declaration.get("timeout_seconds", 30)), remaining)
     if timeout <= 0:
-        raise TimeoutError("Environment command deadline expired")
+        raise TimeoutError("environment action deadline expired")
+    command = declaration.get("command") or []
+    if not command:
+        raise ValueError(f"environment action {name!r} has no command to execute")
     clean_env = {
         key: value
         for key, value in os.environ.items()
         if key in {"PATH", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT"}
     }
     completed = subprocess.run(
-        [str(item) for item in declaration["command"]],
+        _local_command(command),
         input=json.dumps(arguments).encode(),
         cwd=_workspace_path(str(environment.get("workspace") or "/workspace/environment")),
         env=clean_env,

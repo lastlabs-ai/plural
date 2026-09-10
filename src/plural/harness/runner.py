@@ -130,6 +130,14 @@ class HarnessRunner:
                 stdout=result.stdout,
                 stderr=result.stderr,
             ) from exc
+        granted = set(request.granted_capabilities)
+        for event in events:
+            if event.type == "capability" and event.capability and event.capability not in granted:
+                raise HarnessExecutionError(
+                    f"harness used denied capability {event.capability!r}",
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                )
         terminal = events[-1]
         if terminal.type == "error" or terminal.status == "failed":
             raise HarnessExecutionError(

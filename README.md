@@ -49,10 +49,10 @@ client.close()
 ```
 
 Create or update a hosted environment, trace, or benchmark with
-`client.create(x)` and `client.update(x)`. Environments, agents, and
+`client.create(x)` and `client.update(x)`. Environments, agent templates, and
 benchmarks are addressed by project-unique slug, so you do not need the
-hosted id. Create agents with `client.agents.create(...)`. A project API
-key already knows the project; an account key needs `project=` or
+hosted id. Create templates with `client.agents.templates.create(...)`. A
+project API key already knows the project; an account key needs `project=` or
 `PLURAL_PROJECT`.
 
 Optional BYOK (pass your own upstream keys explicitly):
@@ -70,40 +70,41 @@ client = Client(providers={"openai": os.environ["OPENAI_API_KEY"]})
 | --- | --- |
 | **Router** | Sync/async chat + streaming, fallbacks, retries, cost accounting, model catalog |
 | **Tracing** | JSONL / SQLite / OTel sinks, redaction, sampling, late labels, attempt history |
-| **Environments** | Versioned `Environment` subclass + tools + scorers → one episode Trace |
+| **Environments** | Versioned `Environment` subclass + native actions + scorers → one episode Trace |
 | **Benchmarks** | Environment × models → markdown/JSON report with win rates |
 
-## v1 package execution foundation (Alpha)
+## Package execution foundation (0.9)
 
-Plural now includes a local-first CLI and immutable execution domain for
-external agent harnesses:
+Plural includes a local-first CLI and immutable execution domain. Environments
+own native actions, schemas, guardrails, runtime, and resources. Harnesses are
+stamped and capability-restricted. Agents split into templates and instances.
 
 ```bash
 plural env init environment --name support
+plural env action list --environment environment
+plural env capabilities --environment environment
 plural harness init harness --name support-loop
-plural harness add harness --environment environment
+plural env harness stamp harness --environment environment
 plural benchmark init benchmark.yaml --environment environment
-plural agent init agent.yaml --model openai/gpt-4o-mini \
-  --environment environment --harness harness
+plural agent template init agent.yaml --model openai/gpt-4o-mini \
+  --environment environment
 plural job init job.yaml --environment environment \
   --benchmark benchmark.yaml --agent agent.yaml
 plural run job.yaml --dry-run
 ```
 
-An Environment owns tasks, instructions, commands/tools, code/source, policy,
-limits, and verification. An Agent binds one model to exactly one immutable
-HarnessPackage. A Job expands Agents × selected task IDs × `n_attempts` into
-stable Trials; retries keep the same Trial identity. Locks, logs, artifacts,
-receipts, and results persist under `.plural/jobs`.
+An Environment owns tasks, instructions, native actions, runtime, and
+verification. An `AgentTemplate` is Model + Environment, optionally plus a
+stamped harness. A Job expands templates × selected task IDs × `n_attempts`
+into stable Trials; retries keep the same Trial identity. Locks, logs,
+artifacts, receipts, and results persist under `.plural/jobs`.
 
 Execution providers are unsafe local subprocesses (explicit opt-in), hardened
 Docker containers, optional Daytona sandboxes, and entry-point plugins.
+Unsatisfiable environment requirements fail before any sandbox is created.
 Receipts are currently `self_reported` and package signatures are not verified.
 Local runs make no hosted writes unless `--sync` is passed; completed results
-can be replayed with `plural job upload`. Studio observes uploaded Jobs and
-can mark synced records cancelled; it does not launch hosted execution. The
-existing SDK Studio APIs continue to support their legacy
-Environment/Agent/Benchmark/Trace shapes. See the
+can be replayed with `plural job upload`. See the
 [CLI docs](https://lastlabs-ai.github.io/plural/cli/), [security
 boundaries](https://lastlabs-ai.github.io/plural/operations/security/), and
 [known limitations](https://lastlabs-ai.github.io/plural/reference/limitations/).
@@ -115,7 +116,7 @@ from plural import Environment, TaskData
 
 env = Environment(name="support-triage", version="0.1.0")
 
-@env.tool
+@env.action
 def lookup_order(order_id: str) -> dict:
     """Look up an order."""
     return {"status": "shipped"}
@@ -132,7 +133,7 @@ rollout = env.rollout(next(env.iter_tasks()), client, model="openai/gpt-4o-mini"
 print(rollout.trace.outcome)
 ```
 
-Tool environments use the built-in action dispatch. For scalar or custom text
+Action environments use the built-in dispatch. For scalar or custom text
 actions, override `apply_action()` and return `ActionResult`; `step()` remains
 framework-owned so lifecycle and trace invariants are always recorded.
 

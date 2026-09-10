@@ -17,12 +17,12 @@ from plural.environments import (
     is_text_action,
     is_tool_action,
     normalize_action,
+    action,
     replay_actions,
-    tool,
     verify_replay,
 )
 from plural.environments.runtime import Runtime
-from plural.tracing.schema import ParsedAction, RewardEvent, ToolCallStep
+from plural.tracing.schema import ActionStep, ParsedAction, RewardEvent
 from plural.types import ChatResponse, Choice, Message
 
 
@@ -59,7 +59,7 @@ class AlphaEnv(Environment[AlphaObservation, AlphaState]):
         del result
         return 0.5 if tool_name == "inc" else None
 
-    @tool
+    @action
     def inc(self, by: int = 1) -> int:
         """Increment the counter."""
         self.state.count += by
@@ -184,9 +184,9 @@ def test_stop_reasons_and_gym_precedence() -> None:
     assert policy_stop.terminated is False
     assert policy_stop.truncated is False
     assert policy_stop.info["stop_reason"] == StopReason.POLICY_STOP.value
-    decision = policy_env.close_episode().trace.decisions()[0]
+    decision = policy_env.close_episode().trace.turns()[0]
     assert decision.parsed_action == [
-        ParsedAction(name="respond", arguments={"text": "final answer"})
+        ParsedAction(name="respond", arguments={"text": "final answer"}, source="model_text")
     ]
     assert isinstance(decision.model_output, ChatResponse)
     assert decision.model_output.text == "final answer"
@@ -219,7 +219,7 @@ def test_text_action_normalization_and_helpers() -> None:
     response = _response("hello")
     direct, direct_ids = normalize_action(response, None)
     fallback, fallback_ids = normalize_action(None, response)
-    expected = ParsedAction(name="respond", arguments={"text": "hello"})
+    expected = ParsedAction(name="respond", arguments={"text": "hello"}, source="model_text")
     assert direct == fallback == [expected]
     assert direct_ids == fallback_ids == [None]
     assert is_text_action(expected)
@@ -239,10 +239,10 @@ def test_scripted_policy_runs_without_client() -> None:
     rollout = env.run_episode(_task(), policy, model="scripted")
     assert rollout.trace.terminated is True
     assert rollout.trace.stop_reason == "terminated"
-    assert len(rollout.trace.decisions()) == 2
-    assert rollout.trace.decisions()[0].model_context is not None
+    assert len(rollout.trace.turns()) == 2
+    assert rollout.trace.turns()[0].model_context is not None
     with pytest.raises(RuntimeError, match="ScriptedPolicy exhausted"):
-        policy.act(rollout.trace.decisions()[0].model_context)
+        policy.act(rollout.trace.turns()[0].model_context)
 
 
 def test_text_only_policy_output_is_policy_stop() -> None:
@@ -269,7 +269,7 @@ def test_plural_policy_uses_configured_model_when_trace_model_is_alias() -> None
 
     assert client.models == ["provider/actual"]
     assert rollout.trace.model == "benchmark-alias"
-    request = rollout.trace.decisions()[0].model_context
+    request = rollout.trace.turns()[0].model_context
     assert request is not None
     assert request.model == "provider/actual"
 
@@ -295,7 +295,7 @@ def test_custom_text_action_records_each_response_without_forced_policy_stop() -
 
     assistants = [message.content for message in rollout.messages if message.role == "assistant"]
     assert assistants == ["first", "second"]
-    assert len(rollout.trace.decisions()) == 2
+    assert len(rollout.trace.turns()) == 2
     assert rollout.trace.stop_reason == "terminated"
 
 
@@ -312,7 +312,7 @@ def test_action_result_fields_are_recorded_and_canonical_info_wins() -> None:
             self.state.count += 1
             return ActionResult(
                 parsed_actions=[ParsedAction(name="scalar", arguments={"value": action})],
-                tool_calls=[ToolCallStep(name="virtual", result={"count": self.state.count})],
+                actions=[ActionStep(name="virtual", result={"count": self.state.count})],
                 reward_events=[RewardEvent(name="progress", value=1.25)],
                 info={
                     "custom": "kept",
@@ -334,7 +334,7 @@ def test_action_result_fields_are_recorded_and_canonical_info_wins() -> None:
         "tool_errors": [],
     }
     assert env.messages()[-2].role == "tool"
-    decision = env.episode_trace.decisions()[0]  # type: ignore[union-attr]
+    decision = env.episode_trace.turns()[0]  # type: ignore[union-attr]
     assert decision.parsed_action == [ParsedAction(name="scalar", arguments={"value": 7})]
     assert decision.reward_events == [RewardEvent(name="progress", value=1.25)]
 
@@ -374,9 +374,9 @@ def test_default_apply_action_keeps_tool_dispatch_and_trace_behavior() -> None:
     assert env.state.count == 1
     assert any(message.role == "tool" and message.name == "inc" for message in env.messages())
     assert trace is not None
-    decision = trace.decisions()[0]
+    decision = trace.turns()[0]
     assert decision.parsed_action == [ParsedAction(name="inc", arguments={"by": 1})]
-    assert decision.tool_calls[0].name == "inc"
+    assert decision.actions[0].name == "inc"
     assert decision.reward_events == [RewardEvent(name="inc", value=0.5)]
 
 
@@ -424,8 +424,8 @@ def test_fingerprint_detects_same_named_callable_body_changes() -> None:
 
     first = Environment(name="same", version="1.0.0")
     second = Environment(name="same", version="1.0.0")
-    first.tool(first_namespace["implementation"], name="same_tool")
-    second.tool(second_namespace["implementation"], name="same_tool")
+    first.action(first_namespace["implementation"], name="same_tool")
+    second.action(second_namespace["implementation"], name="same_tool")
 
     assert first_namespace["implementation"].__qualname__ == "implementation"
     assert second_namespace["implementation"].__qualname__ == "implementation"
@@ -543,11 +543,11 @@ def test_spawn_rejects_nested_environment_captures() -> None:
     tool_env = Environment(name="nested-tool")
     tool_capture = {"nested": [tool_env]}
 
-    @tool_env.tool
+    @tool_env.action
     def nested_tool() -> str:
         return tool_capture["nested"][0].name
 
-    with pytest.raises(RuntimeError, match="dynamic tool.*environment_factory"):
+    with pytest.raises(RuntimeError, match="dynamic action.*environment_factory"):
         tool_env.spawn()
 
     scorer_env = Environment(name="nested-scorer")
@@ -581,8 +581,8 @@ def test_spawn_rejects_callable_objects_with_private_and_slotted_captures() -> N
             return self._env.name
 
     tool_env = Environment(name="private-tool")
-    tool_env.tool(PrivateTool(tool_env), name="captured")
-    with pytest.raises(RuntimeError, match="dynamic tool.*environment_factory"):
+    tool_env.action(PrivateTool(tool_env), name="captured")
+    with pytest.raises(RuntimeError, match="dynamic action.*environment_factory"):
         tool_env.spawn()
 
     class SlottedScorer:
@@ -674,7 +674,7 @@ def test_replay_success_mismatches_and_fingerprint_guard() -> None:
     assert replayed.rollout.trace.final_state == trace.final_state
 
     changed = trace.model_copy(deep=True)
-    changed.decisions()[0].observation = {"text": "different"}
+    changed.turns()[0].observation = {"text": "different"}
     mismatched = verify_replay(AlphaEnv(), changed)
     assert not mismatched.matched
     assert any(item.kind == "observation" for item in mismatched.mismatches)
@@ -702,7 +702,7 @@ def test_replay_checks_snapshots_tools_rewards_and_outcomes() -> None:
             super().setup(task)
             self.state.count = 5
 
-        @tool
+        @action
         def inc(self, by: int = 1) -> int:
             """Increment differently."""
             self.state.count += by + 1
