@@ -28,11 +28,63 @@ from plural.sandbox.models import (
 SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
+_UNORDERED_KEYS = frozenset(
+    {
+        "allowed_capabilities",
+        "allowed_harness_capabilities",
+        "allowed_targets",
+        "capabilities",
+        "declared",
+        "denied",
+        "denied_capabilities",
+        "enforced",
+        "extra_capabilities",
+        "granted",
+        "granted_harness_capabilities",
+        "targets",
+    }
+)
+
+
+def _sort_unordered(value: Any) -> Any:
+    """Sort frozenset-backed lists so content hashes do not depend on hash seed.
+
+    Returns:
+        A JSON-friendly value with unordered collections in a stable order.
+    """
+    if isinstance(value, dict):
+        payload = {key: _sort_unordered(item) for key, item in value.items()}
+        for key in _UNORDERED_KEYS:
+            item = payload.get(key)
+            if isinstance(item, list):
+                payload[key] = sorted(
+                    item,
+                    key=lambda entry: json.dumps(
+                        entry, sort_keys=True, default=str, allow_nan=False
+                    ),
+                )
+        return payload
+    if isinstance(value, (set, frozenset)):
+        items = [_sort_unordered(item) for item in value]
+        return sorted(
+            items,
+            key=lambda entry: json.dumps(entry, sort_keys=True, default=str, allow_nan=False),
+        )
+    if isinstance(value, list):
+        return [_sort_unordered(item) for item in value]
+    if isinstance(value, tuple):
+        return [_sort_unordered(item) for item in value]
+    return value
+
+
 def canonical_json(value: Any) -> str:
     """Return deterministic JSON for a model or JSON-compatible value."""
-    value = to_jsonable_python(value, exclude_none=False)
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json", exclude_none=False)
+    else:
+        value = to_jsonable_python(value, exclude_none=False)
     return json.dumps(
-        value,
+        _sort_unordered(value),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -949,16 +1001,18 @@ _NETWORK_NONE_DENIALS = frozenset(
         HarnessCapability.MCP,
     }
 )
-_NETWORK_RESTRICTED_DENIALS = frozenset(
-    {HarnessCapability.WEB_SEARCH, HarnessCapability.BROWSER}
-)
+_NETWORK_RESTRICTED_DENIALS = frozenset({HarnessCapability.WEB_SEARCH, HarnessCapability.BROWSER})
 
 
 def resolve_harness_stamp(
     environment: EnvironmentManifest,
     harness: HarnessPackage | HarnessManifest,
 ) -> HarnessStamp:
-    """Compute the frozen effective capability set for one harness on one environment."""
+    """Compute the frozen effective capability set for one harness on one environment.
+
+    Returns:
+        The stamp with granted and denied capabilities plus denial reasons.
+    """
     manifest = harness.manifest if isinstance(harness, HarnessPackage) else harness
     binding = (
         HarnessBinding.from_package(harness)
@@ -1031,16 +1085,12 @@ def validate_job_compatibility(
         package = template.harness_package
         if package is not None:
             if package.manifest.implementation == "declared":
-                raise ValueError(
-                    f"harness {package.manifest.name} is declared but not runnable"
-                )
+                raise ValueError(f"harness {package.manifest.name} is declared but not runnable")
             expected = resolve_harness_stamp(environment, package)
             if template.stamp != expected:
                 raise ValueError(f"agent {template.name!r} harness stamp is stale")
             if not expected.granted:
-                raise ValueError(
-                    f"agent {template.name!r} harness has no granted capabilities"
-                )
+                raise ValueError(f"agent {template.name!r} harness has no granted capabilities")
         elif template.stamp is None:
             raise ValueError(f"agent {template.name!r} stamped harness requires a stamp")
 

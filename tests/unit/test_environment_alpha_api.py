@@ -14,10 +14,10 @@ from plural.environments import (
     ReplayResult,
     State,
     TaskData,
+    action,
     is_text_action,
     is_tool_action,
     normalize_action,
-    action,
     replay_actions,
     verify_replay,
 )

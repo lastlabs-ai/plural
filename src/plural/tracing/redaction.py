@@ -226,9 +226,7 @@ def _drop_content(data: dict[str, Any]) -> dict[str, Any]:
                 if not isinstance(action, dict):
                     continue
                 if action.get("observation") is not None:
-                    redacted_fields.add(
-                        f"steps[{step_index}].actions[{action_index}].observation"
-                    )
+                    redacted_fields.add(f"steps[{step_index}].actions[{action_index}].observation")
                     action["observation"] = _CONTENT_OMITTED
                 if action.get("result") is not None:
                     redacted_fields.add(f"steps[{step_index}].actions[{action_index}].result")

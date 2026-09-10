@@ -43,7 +43,7 @@ class LocalRuntime:
     """In-process runtime that calls registered Python callables.
 
     Args:
-        tools: Mapping of tool name to callable.
+        actions: Mapping of action name to callable.
     """
 
     def __init__(self, actions: dict[str, Callable[..., Any]] | None = None) -> None:

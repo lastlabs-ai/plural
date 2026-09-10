@@ -288,7 +288,7 @@ class JobStore:
             or receipt.trial_id != trial.trial_id
             or receipt.attempt != trial.attempt
             or receipt.environment_digest != trial.environment.digest
-            or receipt.harness_digest != trial.harness.digest
+            or receipt.harness_digest != (trial.harness.digest if trial.harness is not None else "")
             or lock.job_id != trial.job_id
             or lock.environment != trial.environment
             or lock.benchmark_hash != receipt.benchmark_digest

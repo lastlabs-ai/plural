@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import pytest
 import respx
+from pydantic import ValidationError
 
 from plural import Benchmark, Client, Dataset, Environment, TaskData, Trace
 from plural.client import Plural
@@ -352,7 +353,7 @@ def test_dataset_loads_legacy_manifest(tmp_path: Path) -> None:
 
 def test_legacy_jsonl_traces_are_rejected() -> None:
     fixture = Path(__file__).resolve().parents[1] / "fixtures/legacy_traces_v0_4.jsonl"
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         Dataset.from_sink(fixture, "legacy")
 
 

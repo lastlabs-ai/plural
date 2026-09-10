@@ -33,6 +33,14 @@ from typing import Any, Generic, cast, final, get_args, get_origin
 
 from plural.client import Client
 from plural.environments.action import ActionResult, is_tool_action, normalize_action
+from plural.environments.action_registry import (
+    action,
+    action_root_scope,
+    instrument_action,
+    iter_env_actions,
+    make_action_def,
+    root_action_steps,
+)
 from plural.environments.episode import Episode, episode_metrics
 from plural.environments.fingerprint import (
     callable_implementation_digest,
@@ -44,14 +52,6 @@ from plural.environments.runtime import LocalRuntime, Runtime
 from plural.environments.step import StepResult
 from plural.environments.stop import EpisodeError, EpisodeState, StopReason, is_stopped
 from plural.environments.task import TaskData, TaskFn
-from plural.environments.action_registry import (
-    action,
-    action_root_scope,
-    instrument_action,
-    iter_env_actions,
-    make_action_def,
-    root_action_steps,
-)
 from plural.environments.types import (
     Observation,
     ObsT,

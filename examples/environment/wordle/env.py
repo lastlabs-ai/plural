@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from plural import Environment, TaskData
-from plural.environments import Observation, State, hidden, action
+from plural.environments import Observation, State, action, hidden
 
 try:
     from .words import is_allowed, pattern, pick_answer

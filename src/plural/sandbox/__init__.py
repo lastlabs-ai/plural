@@ -15,7 +15,6 @@ from plural.sandbox.models import (
     DeclarativeImage,
     DownloadedFile,
     EffectiveSandboxPolicy,
-    environment_required_capabilities,
     ExecRequest,
     ExecResult,
     FileUpload,
@@ -28,6 +27,7 @@ from plural.sandbox.models import (
     SandboxHandle,
     SandboxRequirements,
     SandboxTimeoutError,
+    environment_required_capabilities,
     safe_relative_path,
 )
 from plural.sandbox.registry import ProviderRegistry, default_registry

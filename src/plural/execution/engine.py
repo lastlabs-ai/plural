@@ -411,14 +411,10 @@ class Trial:
                         stamped=agent.harness is not None,
                     ),
                     workspace="/workspace/harness",
-                    granted_capabilities=tuple(
-                        sorted(item.value for item in agent.stamp.granted)
-                    )
+                    granted_capabilities=tuple(sorted(item.value for item in agent.stamp.granted))
                     if agent.stamp is not None
                     else (),
-                    denied_capabilities=tuple(
-                        sorted(item.value for item in agent.stamp.denied)
-                    )
+                    denied_capabilities=tuple(sorted(item.value for item in agent.stamp.denied))
                     if agent.stamp is not None
                     else (),
                 )

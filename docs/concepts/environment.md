@@ -35,6 +35,13 @@ plural env action list --environment ./env
 plural env resource list --environment ./env
 ```
 
+## Deterministic replay
+
+`replay_actions()` and `verify_replay()` replay recorded native actions
+against a compatible environment without calling a model. Replay checks
+the environment fingerprint and recorded observations. Redacted traces
+cannot be replayed if required content is missing.
+
 See [native actions](native-actions.md),
 [execution capabilities](execution-capabilities.md), and
 [harness stamping](harness-stamping.md).

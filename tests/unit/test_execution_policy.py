@@ -14,9 +14,7 @@ from plural.execution.policy import (
 )
 from plural.sandbox.models import CapabilityError, ProviderCapabilities
 
-CASES_PATH = (
-    Path(__file__).resolve().parents[2] / "src/plural/schemas/execution_policy.cases.json"
-)
+CASES_PATH = Path(__file__).resolve().parents[2] / "src/plural/schemas/execution_policy.cases.json"
 
 
 def _load_cases() -> list[dict]:

@@ -26,12 +26,8 @@ from plural.types import FunctionDefinition, Tool
 
 _ACTION_ATTR = "__plural_action__"
 _INSTRUMENTED = "_plural_instrumented"
-_action_stack: ContextVar[list[ActionStep] | None] = ContextVar(
-    "plural_action_stack", default=None
-)
-_action_roots: ContextVar[list[ActionStep] | None] = ContextVar(
-    "plural_action_roots", default=None
-)
+_action_stack: ContextVar[list[ActionStep] | None] = ContextVar("plural_action_stack", default=None)
+_action_roots: ContextVar[list[ActionStep] | None] = ContextVar("plural_action_roots", default=None)
 
 
 def action(fn: Callable[..., Any] | None = None, *, name: str | None = None) -> Any:
@@ -86,7 +82,11 @@ def root_action_steps() -> list[ActionStep]:
 
 
 def instrument_action(action_name: str, func: Callable[..., Any]) -> Callable[..., Any]:
-    """Wrap ``func`` so nested ``@action`` calls become step children."""
+    """Wrap ``func`` so nested ``@action`` calls become step children.
+
+    Returns:
+        The instrumented callable, or ``func`` if it is already wrapped.
+    """
     if getattr(func, _INSTRUMENTED, False):
         return func
 
@@ -135,7 +135,11 @@ def instrument_action(action_name: str, func: Callable[..., Any]) -> Callable[..
 def call_arguments(
     func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> dict[str, Any]:
-    """Map positional args onto parameter names for the trace."""
+    """Map positional args onto parameter names for the trace.
+
+    Returns:
+        Combined keyword arguments including positional values by name.
+    """
     recorded = dict(kwargs)
     if not args:
         return recorded
@@ -150,7 +154,11 @@ def call_arguments(
 
 
 def function_schema(fn: Callable[..., Any]) -> dict[str, Any]:
-    """Build a JSON-schema object from an action callable's signature."""
+    """Build a JSON-schema object from an action callable's signature.
+
+    Returns:
+        A JSON Schema object describing the callable's parameters.
+    """
     sig = inspect.signature(fn)
     properties: dict[str, Any] = {}
     required: list[str] = []
@@ -171,7 +179,11 @@ def function_schema(fn: Callable[..., Any]) -> dict[str, Any]:
 
 
 def make_action_def(name: str, source: Callable[..., Any]) -> Tool:
-    """Build a chat :class:`~plural.types.Tool` from a Python callable."""
+    """Build a chat :class:`~plural.types.Tool` from a Python callable.
+
+    Returns:
+        A tool definition the native path can send to a model.
+    """
     return Tool(
         function=FunctionDefinition(
             name=name,

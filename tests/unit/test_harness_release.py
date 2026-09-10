@@ -10,8 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from plural.domain import FileDeclaration, HarnessManifest
-from plural.harness import HarnessRunner, HarnessRunRequest, vendor_adapter
-from plural.harness import native_runner
+from plural.harness import HarnessRunner, HarnessRunRequest, native_runner, vendor_adapter
 from plural.harness.retrieval import build_archive, package_from_archive, retrieve_archive
 from plural.sandbox import LocalProvider, NetworkMode, SandboxRequirements
 

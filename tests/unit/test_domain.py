@@ -240,9 +240,7 @@ def test_local_target_is_excluded_when_network_is_isolated() -> None:
             ),
             agents=(
                 AgentBinding(
-                    template=AgentTemplate(
-                        name="a", model="m", environment=environment.identity
-                    )
+                    template=AgentTemplate(name="a", model="m", environment=environment.identity)
                 ),
             ),
             runtime=RuntimeSpec(provider="local", unsafe_local=True),
@@ -251,3 +249,28 @@ def test_local_target_is_excluded_when_network_is_isolated() -> None:
         assert "cannot enforce network=none" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("local target was accepted for an isolated environment")
+
+
+def test_job_spec_json_roundtrip_keeps_environment_identity() -> None:
+    environment = EnvironmentManifest(
+        name="world",
+        tasks=(TaskDefinition(task_id="t1", input="go"),),
+        runtime=EnvironmentRuntime(network=NetworkMode.FULL),
+    )
+    spec = JobSpec(
+        environment=environment,
+        benchmark=BenchmarkDefinition(
+            name="bench",
+            environment=environment.identity,
+            task_ids=("t1",),
+        ),
+        agents=(
+            AgentBinding(
+                template=AgentTemplate(name="a", model="m", environment=environment.identity)
+            ),
+        ),
+        runtime=RuntimeSpec(provider="docker"),
+    )
+    restored = JobSpec.model_validate_json(spec.model_dump_json())
+    assert restored.environment.identity == spec.environment.identity
+    assert restored.benchmark.environment == restored.environment.identity

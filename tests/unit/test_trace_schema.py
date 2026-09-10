@@ -6,6 +6,7 @@ from pathlib import Path
 
 import jsonschema
 import pytest
+from pydantic import ValidationError
 
 from plural.tracing import (
     ActionStep,
@@ -97,7 +98,7 @@ def test_production_and_episode_dumps_validate_against_trace_schema() -> None:
 
 def test_legacy_traces_are_rejected() -> None:
     raw = (ROOT / "tests/fixtures/legacy_trace_v0_4.json").read_text(encoding="utf-8")
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         Trace.model_validate_json(raw)
 
     current_a = Trace(trace_kind="episode")

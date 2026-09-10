@@ -15,9 +15,11 @@ from pydantic import Field
 from plural.domain import (
     AgentTemplate,
     EnvironmentManifest,
+    EnvironmentRuntime,
     ExecutionTarget,
     FrozenModel,
     HarnessCapability,
+    HarnessPolicy,
     HarnessStamp,
 )
 from plural.sandbox.models import (
@@ -123,8 +125,7 @@ def _cap_resources(
                 capability="resources",
                 layer="project",
                 reason=(
-                    f"project max_disk_mb={project.max_disk_mb} "
-                    f"caps environment disk_mb={disk_mb}"
+                    f"project max_disk_mb={project.max_disk_mb} caps environment disk_mb={disk_mb}"
                 ),
             )
         )
@@ -208,8 +209,7 @@ def resolve_effective_policy(
 
     if requested_target not in project.allowed_targets:
         raise CapabilityError(
-            f"target {requested_target.value} required by agent "
-            f"is not allowed by project policy"
+            f"target {requested_target.value} required by agent is not allowed by project policy"
         )
 
     if requested_target is ExecutionTarget.LOCAL and not project.allow_unsafe_local:
@@ -307,9 +307,9 @@ def policy_case_environment(payload: dict[str, Any]) -> EnvironmentManifest:
     runtime = payload.get("runtime") or {}
     return EnvironmentManifest(
         name=str(payload.get("name") or "env"),
-        runtime=runtime,
+        runtime=EnvironmentRuntime.model_validate(runtime),
         actions=tuple(payload.get("actions") or ()),
-        harness_policy=payload.get("harness_policy") or {},
+        harness_policy=HarnessPolicy.model_validate(payload.get("harness_policy") or {}),
     )
 
 

@@ -20,6 +20,7 @@ from plural.environments.action import (
     is_tool_action,
     normalize_action,
 )
+from plural.environments.action_registry import action
 from plural.environments.dataset import Dataset, TaskDataset, TraceDataset, TraceFilter
 from plural.environments.env import Environment
 from plural.environments.policy import PluralPolicy, Policy, ScriptedPolicy
@@ -34,7 +35,6 @@ from plural.environments.runtime import LocalRuntime, Runtime
 from plural.environments.step import StepResult
 from plural.environments.stop import EpisodeError, EpisodeState, StopReason, is_stopped
 from plural.environments.task import TaskData
-from plural.environments.action_registry import action
 from plural.environments.types import Observation, State, hidden
 
 __all__ = [

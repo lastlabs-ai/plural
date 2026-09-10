@@ -13,14 +13,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from uuid import uuid4
 
-
-def resolve_local_command(command: Sequence[str]) -> list[str]:
-    """Rewrite a bare ``python`` argv to this interpreter when needed."""
-    resolved = [str(item) for item in command]
-    if resolved and resolved[0] == "python" and shutil.which("python") is None:
-        resolved[0] = sys.executable
-    return resolved
-
 from plural.sandbox.base import SandboxProvider
 from plural.sandbox.models import (
     Capability,
@@ -34,6 +26,14 @@ from plural.sandbox.models import (
     SandboxRequirements,
     safe_relative_path,
 )
+
+
+def resolve_local_command(command: Sequence[str]) -> list[str]:
+    """Rewrite a bare ``python`` argv to this interpreter when needed."""
+    resolved = [str(item) for item in command]
+    if resolved and resolved[0] == "python" and shutil.which("python") is None:
+        resolved[0] = sys.executable
+    return resolved
 
 
 class LocalProvider(SandboxProvider):

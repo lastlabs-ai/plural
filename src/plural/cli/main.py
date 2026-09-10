@@ -674,9 +674,7 @@ def env_capabilities(path: Path = typer.Argument(Path("."))) -> None:
     except (OSError, ValueError, ValidationError) as exc:
         _error(str(exc))
     runtime = environment.runtime
-    exclusions = {
-        target.value: reason for target, reason in runtime.target_exclusions().items()
-    }
+    exclusions = {target.value: reason for target, reason in runtime.target_exclusions().items()}
     _emit(
         {
             "environment": environment.name,
@@ -750,9 +748,7 @@ def env_harness_list(path: Path = typer.Option(Path("."), "--environment", "-e")
         environment = load_environment(path)
     except (OSError, ValueError, ValidationError) as exc:
         _error(str(exc))
-    _emit(
-        [item.model_dump(mode="json") for item in environment.harness_policy.allowed_harnesses]
-    )
+    _emit([item.model_dump(mode="json") for item in environment.harness_policy.allowed_harnesses])
 
 
 @env_harness_app.command("capabilities")
@@ -1106,7 +1102,7 @@ def agent_template_push(
     _emit(created)
 
 
-def _instance_client(ctx: typer.Context):
+def _instance_client(ctx: typer.Context) -> Any:
     client = _hosted_client(_state(ctx))
     if client is None:
         _error("hosted instance commands require authentication")
@@ -1317,9 +1313,7 @@ def run_job(
                             "allow_unsafe_local": True,
                             "build_context": None,
                             "dockerfile": None,
-                            "targets": frozenset(
-                                {*env_runtime.targets, ExecutionTarget.LOCAL}
-                            ),
+                            "targets": frozenset({*env_runtime.targets, ExecutionTarget.LOCAL}),
                         }
                     )
                 }

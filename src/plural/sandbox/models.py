@@ -175,7 +175,9 @@ def environment_required_capabilities(runtime: Any) -> frozenset[Capability]:
         required.add(Capability.COMPOSE)
     if getattr(runtime, "read_only_root", False):
         required.add(Capability.READ_ONLY_ROOT)
-    extra = getattr(runtime, "extra_capabilities", frozenset()) or frozenset()
+    extra: frozenset[Capability] = (
+        getattr(runtime, "extra_capabilities", frozenset()) or frozenset()
+    )
     return frozenset(required) | frozenset(extra)
 
 

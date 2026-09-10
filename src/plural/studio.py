@@ -651,10 +651,8 @@ class AgentsAPI:
         Returns:
             Updated agent handle.
         """
-        return RemoteAgent(
-            self._studio,
-            cast(JsonObject, self._studio.request("PATCH", f"/agent-templates/{slug}", json=fields)),
-        )
+        payload = self._studio.request("PATCH", f"/agent-templates/{slug}", json=fields)
+        return RemoteAgent(self._studio, cast(JsonObject, payload))
 
     def delete(self, slug: str) -> None:
         """Delete an agent.

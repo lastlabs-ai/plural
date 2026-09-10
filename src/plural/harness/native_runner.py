@@ -21,6 +21,7 @@ def _local_command(command: list[Any]) -> list[str]:
         resolved[0] = sys.executable
     return resolved
 
+
 _CHAT_PROFILES = {"native.chat.v1"}
 _ACTION_PROFILES = {"native.actions.v1"}
 
