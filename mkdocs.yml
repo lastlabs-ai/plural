@@ -1,5 +1,5 @@
 site_name: Plural
-site_description: Build environments, evaluate models and harnesses, and manage agents with the Plural SDK and CLI.
+site_description: Author environments, evaluate agents, and keep a record of what happened.
 site_url: https://lastlabs-ai.github.io/plural/
 repo_url: https://github.com/lastlabs-ai/plural
 repo_name: lastlabs-ai/plural
@@ -26,27 +26,24 @@ theme:
 plugins:
   - search
   - llmstxt:
-      markdown_description: Beginner-to-advanced Plural SDK, CLI, authentication, evaluation, and Plural Intel workflows.
+      markdown_description: Author an Environment, pin Tasks and Verifiers, run Agents, and read the Trace.
       sections:
-        Getting started:
-          - getting-started/*.md
-          - quickstart.md
-        Walkthroughs:
-          - tutorials/*.md
-        SDK:
-          - sdk/*.md
-        CLI:
-          - cli/*.md
-        Concepts:
-          - concepts/*.md
-        Guides:
-          - guides/*.md
-        Operations:
-          - operations/*.md
-        Migration:
-          - migration/*.md
+        Start:
+          - index.md
+          - motivation.md
+          - getting-started.md
+        Project:
+          - project/*.md
+        Running:
+          - running/*.md
+        Tutorial:
+          - tutorials/wordle.md
         Reference:
-          - reference/*.md
+          - reference/definitions.md
+          - reference/cli-commands.md
+          - reference/glossary.md
+          - reference/integrations.md
+          - reference/api.md
   - mkdocstrings:
       handlers:
         python:
@@ -61,7 +58,11 @@ plugins:
 markdown_extensions:
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight
   - pymdownx.tabbed:
       alternate_style: true
@@ -70,65 +71,25 @@ markdown_extensions:
       permalink: true
 
 nav:
-  - Home: index.md
-  - Start here:
-      - Install and authenticate: getting-started/setup.md
-      - Understand the pieces: getting-started/concepts.md
-      - Your first evaluation: quickstart.md
-  - Walkthroughs:
-      - Build and evaluate an environment: tutorials/sdk-walkthrough.md
-      - Run your first CLI job: tutorials/cli-walkthrough.md
-      - Add native actions and verification: tutorials/package-tools.md
-      - Fetch and update Plural Intel objects: guides/push-to-plural.md
-      - Traces and datasets: tutorials/traces-and-datasets.md
-  - SDK:
-      - Model calls and routing: sdk/client.md
-      - Run package jobs from Python: sdk/package-jobs.md
-      - Hosted revisions and jobs: sdk/hosted-advanced.md
-      - Python API reference: reference/api.md
-  - CLI:
-      - Configuration and authentication: cli/index.md
-      - All commands and options: reference/cli-commands.md
-  - Advanced guides:
-      - Stateful environments and replay: guides/write-environment.md
-      - Benchmark methodology and regression checks: guides/benchmark-models.md
-      - Jobs, runtimes, and recovery: guides/jobs.md
-      - Harness packages and adapters: guides/harnesses.md
-      - Sandbox provider plugins: guides/provider-plugins.md
-      - Plural Intel package sync: guides/studio-sync.md
-      - CI evaluations: guides/ci.md
-      - Streaming, tools, structured output: guides/capabilities.md
-      - Routing and provider examples: guides/routing-examples.md
-      - Capture traces from an app: guides/capture-traces.md
-      - Production traffic to a dataset: guides/production-to-dataset.md
-      - Redact PII: guides/redact-pii.md
-      - Export OpenTelemetry: guides/export-otel.md
-      - Azure and Bedrock: guides/cloud-providers.md
-      - Add your own provider: guides/add-provider.md
-      - Migrate from OpenRouter: guides/migrate-openrouter.md
-  - Concepts:
-      - Environment lifecycle: concepts/environment.md
-      - Native actions: concepts/native-actions.md
-      - Harness and Environment policy: concepts/harness-policy.md
-      - Evidence contract: concepts/evidence-contract.md
-      - Execution capabilities: concepts/execution-capabilities.md
-      - Jobs, Tasks, and Trials: concepts/execution.md
-      - Observability: concepts/observability.md
-      - Hub: concepts/hub.md
-      - Benchmark: concepts/benchmark.md
-      - Trace: concepts/trace.md
-      - Dataset: concepts/dataset.md
-      - Routing policy: concepts/routing.md
-      - Sink: concepts/sink.md
-  - Operations:
-      - Security and trust: operations/security.md
-      - Troubleshooting: operations/troubleshooting.md
-      - Known limitations: reference/limitations.md
+  - Start:
+      - Overview: index.md
+      - Motivation: motivation.md
+      - Getting started: getting-started.md
+  - Project:
+      - Environments: project/environments.md
+      - Tasks: project/tasks.md
+      - Verifiers: project/verifiers.md
+      - Agents: project/agents.md
+      - Benchmarks: project/benchmarks.md
+  - Running:
+      - Jobs: running/jobs.md
+      - Traces: running/traces.md
+      - Reviews: running/reviews.md
+  - Tutorial:
+      - Wordle: tutorials/wordle.md
   - Reference:
-      - SDK and CLI coverage: reference/feature-map.md
-      - Definition fields: reference/definitions.md
-      - Package JSON schemas: reference/schemas.md
-      - Trace JSON schema: reference/trace-schema.md
-      - Capability table: reference/capabilities.md
+      - Definitions: reference/definitions.md
+      - CLI: reference/cli-commands.md
       - Glossary: reference/glossary.md
-      - Version migration: migration/v1.md
+      - Integrations: reference/integrations.md
+      - API: reference/api.md

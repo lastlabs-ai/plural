@@ -1,21 +1,11 @@
 ---
 route: /docs/concepts/sink
 title: "Sink"
-order: 230
-description: "Scenario: You want traces on disk for local debugging, in SQLite for queries, and optionally exported to your OpenTelemetry collector — without changing call sites."
+order: 912
+description: "This page moved to Integrations. Open that guide for the current walkthrough and examples."
 audience: all
+nav: false
 ---
 # Sink
 
-**Scenario:** You want traces on disk for local debugging, in SQLite for queries, and optionally exported to your OpenTelemetry collector — without changing call sites.
-
-A **Sink** is where traces go.
-
-| Sink | Use |
-| --- | --- |
-| `JSONLSink` | Default; append-only, easy to ship |
-| `SQLiteSink` | Query by environment / id; supports late labels |
-| `OTelSink` | Export `gen_ai.*` spans (`pip install plural[otel]`) |
-| `MultiSink` | Fan out to several sinks |
-
-Redaction and sampling run **before** the sink, so PII never reaches disk when configured correctly. Writes are queued on a background thread so tracing does not block requests — call `client.flush()` or `client.close()` on shutdown.
+This page moved to [Integrations](../reference/integrations.md).

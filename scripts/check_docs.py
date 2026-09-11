@@ -1,4 +1,4 @@
-"""Validate documentation frontmatter and local links."""
+"""Validate documentation frontmatter, local links, and nav parity."""
 
 from __future__ import annotations
 
@@ -9,11 +9,34 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
+MKDOCS = ROOT / "mkdocs.yml"
 LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
-FRONTMATTER = re.compile(r"\A---\n(?P<metadata>.*?)\n---\n", re.DOTALL)
+FRONTMATTER = re.compile(
+    r"\A\ufeff?---[ \t]*\r?\n(?P<metadata>.*?)\r?\n---[ \t]*(?:\r?\n|$)",
+    re.DOTALL,
+)
 HEADING = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
-REQUIRED_FIELDS = frozenset({"route", "title", "order", "description", "audience"})
+REQUIRED_FIELDS = frozenset({"route", "title", "order", "description", "audience", "nav"})
 AUDIENCES = frozenset({"all", "developers", "operators", "maintainers", "internal"})
+NAV_GROUPS = frozenset({"Start", "Project", "Running", "Tutorial", "Reference"})
+PACKAGE_NAV = [
+    ("Start", "/docs", "index.md"),
+    ("Start", "/docs/motivation", "motivation.md"),
+    ("Start", "/docs/getting-started", "getting-started.md"),
+    ("Project", "/docs/project/environments", "project/environments.md"),
+    ("Project", "/docs/project/tasks", "project/tasks.md"),
+    ("Project", "/docs/project/verifiers", "project/verifiers.md"),
+    ("Project", "/docs/project/agents", "project/agents.md"),
+    ("Project", "/docs/project/benchmarks", "project/benchmarks.md"),
+    ("Running", "/docs/running/jobs", "running/jobs.md"),
+    ("Running", "/docs/running/traces", "running/traces.md"),
+    ("Running", "/docs/running/reviews", "running/reviews.md"),
+    ("Tutorial", "/docs/tutorials/wordle", "tutorials/wordle.md"),
+    ("Reference", "/docs/reference/definitions", "reference/definitions.md"),
+    ("Reference", "/docs/reference/cli-commands", "reference/cli-commands.md"),
+    ("Reference", "/docs/reference/glossary", "reference/glossary.md"),
+    ("Reference", "/docs/reference/integrations", "reference/integrations.md"),
+]
 
 
 def intended_route(source: Path) -> str:
@@ -73,7 +96,52 @@ def _metadata(source: Path, text: str, failures: list[str]) -> dict[str, object]
     audience = metadata["audience"]
     if not isinstance(audience, str) or audience not in AUDIENCES:
         failures.append(f"{shown}: audience must be one of {', '.join(sorted(AUDIENCES))}")
+    nav = metadata["nav"]
+    if not isinstance(nav, bool):
+        failures.append(f"{shown}: nav must be a boolean")
+    elif nav:
+        group = metadata.get("nav_group")
+        if not isinstance(group, str) or group not in NAV_GROUPS:
+            failures.append(
+                f"{shown}: nav_group must be one of {', '.join(sorted(NAV_GROUPS))}"
+            )
     return metadata
+
+
+def _nav_paths(node: object) -> list[str]:
+    paths: list[str] = []
+    if isinstance(node, str):
+        paths.append(node)
+    elif isinstance(node, dict):
+        for value in node.values():
+            paths.extend(_nav_paths(value))
+    elif isinstance(node, list):
+        for item in node:
+            paths.extend(_nav_paths(item))
+    return paths
+
+
+def _nav_parity(documents: dict[str, dict[str, object]], failures: list[str]) -> None:
+    expected = {(group, route, Path(relative)) for group, route, relative in PACKAGE_NAV}
+    actual = set()
+    for path, meta in documents.items():
+        if meta.get("nav") is True:
+            actual.add((str(meta.get("nav_group") or ""), str(meta.get("route") or ""), path.relative_to(DOCS)))
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        if missing:
+            failures.append(f"nav missing: {missing}")
+        if extra:
+            failures.append(f"nav extra: {extra}")
+
+    mkdocs_text = MKDOCS.read_text(encoding="utf-8")
+    nav_block = mkdocs_text.split("\nnav:\n", 1)[1]
+    mkdocs_nav = yaml.safe_load("nav:\n" + nav_block)
+    listed = [item for item in _nav_paths(mkdocs_nav.get("nav")) if item != "reference/api.md"]
+    expected_files = [relative for _, _, relative in PACKAGE_NAV]
+    if listed != expected_files:
+        failures.append(f"mkdocs.yml nav must match PACKAGE_NAV, got {listed}")
 
 
 def main() -> int:
@@ -85,9 +153,11 @@ def main() -> int:
     failures: list[str] = []
     routes: dict[str, Path] = {}
     orders: dict[int, Path] = {}
+    documents: dict[Path, dict[str, object]] = {}
     for source in sorted(DOCS.rglob("*.md")):
         text = source.read_text(encoding="utf-8")
         metadata = _metadata(source, text, failures)
+        documents[source] = metadata
         route = metadata.get("route")
         if isinstance(route, str):
             previous = routes.setdefault(route, source)
@@ -120,6 +190,7 @@ def main() -> int:
                     else destination
                 )
                 failures.append(f"{source.relative_to(ROOT)} -> {target} ({shown})")
+    _nav_parity(documents, failures)
     if failures:
         print("Documentation validation failures:")
         for failure in failures:

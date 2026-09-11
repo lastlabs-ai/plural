@@ -1,16 +1,17 @@
 ---
 route: /docs/reference/limitations
 title: "Known limitations"
-order: 430
-description: "Current alpha limitations for execution providers, harnesses, TITO capture, human review, and hosted workflows."
+order: 250
+description: "Current limitations for execution providers, harnesses, TITO capture, human review, and hosted workflows."
 audience: all
+nav: false
 ---
 # Known limitations
 
-This release remains Alpha:
+Known gaps:
 
 - Hosted synchronization requires a backend that supports the complete
-  schema-v2 revision graph and append-only execution records.
+  revision graph and append-only execution records.
 - Package digests verify integrity only. Signatures, attestations, publisher
   identity, transparency logs, and keyless verification are unsupported.
 - The local provider is not a sandbox. Docker trusts the host/daemon and has

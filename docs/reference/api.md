@@ -1,20 +1,21 @@
 ---
 route: /docs/reference/api
 title: "API reference"
-order: 500
-description: "For a guided path, start with the SDK and CLI coverage guide. The entries below document the actual public classes and methods."
+order: 240
+description: "Public Python classes and methods for the Plural package. MkDocs renders this page with mkdocstrings."
 audience: all
+nav: false
 ---
 # API reference
 
-For a guided path, start with the [SDK and CLI coverage guide](feature-map.md).
-The entries below document the actual public classes and methods.
+For a guided path, start with [Getting started](../getting-started.md) and the [definition fields](definitions.md).
+The entries below document the public classes and methods.
 
 ## Client and request types
 
 `Client.create(x)` and `Client.update(x)` support the hosted object types
 implemented by the connected deployment. Canonical local execution uses
-schema-v2 `EnvironmentDefinition`, `AgentDefinition`, Task/Verifier revisions,
+`EnvironmentDefinition`, `AgentDefinition`, Task/Verifier revisions,
 and Task-or-Benchmark `JobSpec` values.
 
 ::: plural.client.Client

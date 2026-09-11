@@ -1,62 +1,44 @@
 ---
 route: /docs
-title: "Build, evaluate, and use agents with Plural"
+title: "Know which model to use on your work"
 order: 0
-description: "Plural helps you define the work an AI system should do, test different models and harnesses on that work, and keep a record of what happened. You can use the Python SDK, the plural command-line interface, or both."
+description: "Plural runs models on your tasks, scores them the way you define success, and keeps that scoreboard so you can judge the next model the same way."
 audience: all
+nav: true
+nav_group: Start
+outcome: You can turn the work you care about into a scoreboard, then reuse it every time a new model ships.
 ---
-# Build, evaluate, and use agents with Plural
+# Know which model to use on your work
 
-Plural helps you define the work an AI system should do, test different models
-and harnesses on that work, and keep a record of what happened. You can use the
-Python SDK, the `plural` command-line interface, or both.
+A public ranking cannot tell you which model to put on your tickets, your checkout, or your policy. Those tasks are yours. Plural is how you measure models against them, keep the record, and pick one with evidence.
 
-Start with an **Environment**: the state, observations, actions, resources,
-Rewarders, and runtime for your use case. Bind it to a **Task** with separate
-Verifiers, run an Agent against that Task, inspect the resulting Trace, and
-compare another Agent under the same conditions. Use **Plural Intel** to store
-and retrieve the complete revisioned graph and its results.
+When the next model ships, you do not start over. You run the same tasks, with the same definition of success, and you see what changed.
 
-## Start here
+```mermaid
+flowchart LR
+  tasks[Your_tasks]
+  score[Your_score]
+  models[Models]
+  job[Job]
+  pick[Which_to_use]
+  tasks --> job
+  score --> job
+  models --> job
+  job --> pick
+```
 
-1. [Install and authenticate](getting-started/setup.md). Set up Python, API
-   keys, and your Plural Intel project.
-2. [Choose your workflow](getting-started/concepts.md). Understand what you
-   need to configure and which objects are local or hosted.
-3. [Your first evaluation](quickstart.md). Run a small, scored example without
-   an API key, then switch to a real model.
-4. [Build a practical Python environment](tutorials/sdk-walkthrough.md).
-   Add actions, Verifiers, Tasks, model comparisons, and saved Traces.
-5. [Run packages from the CLI](tutorials/cli-walkthrough.md).
-   Create an Environment, Verifier, Task, Harness, Agent, Benchmark, and Job.
-6. [Work with Plural Intel objects](guides/push-to-plural.md). Find, fetch,
-   create, update, and reuse hosted objects.
+That scoreboard is four objects you will see on every later page.
 
-**New to programming?** Read the setup and concepts pages first. The CLI
-walkthrough explains each file and command. Running a prepared environment
-needs configuration; implementing new tools and success checks needs code.
+1. A **Task** is one piece of work you care about.
+2. A **Verifier** is what counts as success on that work.
+3. An **Agent** is a model you want to try, plus the instructions it gets.
+4. A **Job** runs those Agents on those Tasks and writes a **Trace** you can inspect.
 
-**Already have an application?** Start with [model calls and streaming](sdk/client.md),
-then [traces and datasets](tutorials/traces-and-datasets.md).
+Start here, then build the scoreboard, then run it.
 
-## Go deeper when you need to
+1. [Motivation](motivation.md) — why a public ranking is the wrong default.
+2. [Getting started](getting-started.md) — install and run a scored Job on your machine.
+3. [Environments](project/environments.md) through [Benchmarks](project/benchmarks.md) — the objects that make the scoreboard yours.
+4. [Jobs](running/jobs.md), [Traces](running/traces.md), and [Reviews](running/reviews.md) — how you compare and decide.
 
-- [Stateful environments and custom actions](guides/write-environment.md)
-- [Benchmark methodology and regression checks](guides/benchmark-models.md)
-- [Run packages from Python](sdk/package-jobs.md)
-- [Custom harnesses and adapters](guides/harnesses.md)
-- [Docker, Daytona, retries, and verification](guides/jobs.md)
-- [Publish and sync package results](guides/studio-sync.md)
-- [Permissions and isolation](operations/security.md)
-- [Troubleshooting](operations/troubleshooting.md)
-
-## Find every feature
-
-The [SDK and CLI coverage guide](reference/feature-map.md) connects each feature
-to its walkthrough and reference. The [Python API reference](reference/api.md)
-and [generated CLI reference](reference/cli-commands.md) provide exact signatures
-and options.
-
-The package uses one canonical schema-v2 object graph for local and hosted
-execution. Hosted features require a compatible Plural Intel deployment. See
-[current limitations](reference/limitations.md) before planning a deployment.
+When you want a complete worked example, walk [Wordle](tutorials/wordle.md). It uses the same filenames `plural env init` creates.

@@ -1,14 +1,15 @@
 ---
 route: /docs/reference/definitions
-title: "Definition field reference"
-order: 450
-description: "All schema-v2 models are frozen, reject unknown fields, and use schema_version: \"2\" where present. Generated JSON Schemas are the exact validation authority."
+title: "Definitions"
+order: 200
+description: "Field-level reference for Environment, Task, Verifier, Agent, Benchmark, and Job objects. Generated JSON Schemas are the validation authority."
 audience: all
+nav: true
+nav_group: Reference
 ---
-# Definition field reference
+# Definitions
 
-All schema-v2 models are frozen, reject unknown fields, and use `schema_version: "2"`
-where present. Generated JSON Schemas are the exact validation authority.
+Models are frozen and reject unknown fields. Generated JSON Schemas are the validation authority.
 
 ## `PackageSource`
 
@@ -36,7 +37,7 @@ where present. Generated JSON Schemas are the exact validation authority.
 - `outputs`, `artifacts`: exact `FileDeclaration` values (`path`, `required`,
   `media_type`).
 - `HarnessPackage.definition` and `.source`: complete package. `content_hash` and
-  `package_id` are derived. Load still accepts the 0.10 key `manifest`.
+  `package_id` are derived.
 
 `HarnessBinding` contains `name`, `revision`, and required digest.
 

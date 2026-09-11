@@ -1,9 +1,10 @@
 ---
 route: /docs/operations/troubleshooting
 title: "Troubleshooting"
-order: 420
-description: "plural is not found. Activate the virtual environment where you installed Plural, or use uv run plural. Check python -m pip show plural in the same environment. See setup."
+order: 260
+description: "Install, hosted access, runtime, and Job failures. Activate the environment where you installed Plural, or use uv run plural."
 audience: all
+nav: false
 ---
 # Troubleshooting
 
@@ -57,7 +58,7 @@ label to an already-written record.
 
 **A Trace dataset hash is stale.** Keep the JSONL file with its manifest and
 save a new snapshot after intentional changes. Trace datasets are analysis
-outputs, not schema-v2 Task or Benchmark Job sources.
+outputs, not Task or Benchmark Job sources.
 
 **A custom environment cannot be copied for comparison.** Supply
 `environment_factory=` or implement `spawn()` when your environment constructor
