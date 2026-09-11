@@ -36,7 +36,7 @@ A model response with no tool calls is normalized to
 
 ## In a package
 
-`EnvironmentManifest.actions` is a tuple of `NativeAction` values: name,
+`EnvironmentDefinition.actions` is a tuple of `NativeAction` values: name,
 description, `kind` (`command` or `python`), argv, JSON parameters,
 observation schema, `mutates_state`, and timeout.
 
@@ -45,14 +45,13 @@ plural env validate environment
 plural env show environment
 ```
 
-## Native versus stamped execution
+## Native versus harness-wrapped execution
 
-On the **native path** (`AgentDefinition.harness is None`) those actions are
-converted to model tool definitions and executed by `native.actions.v1`.
+Environment actions are always present on `HarnessRunRequest.environment`.
+The native runner exposes them as `environment.<action>` tools.
+A harness may add `harness.<tool>` tools; the Environment may only subtract
+those. Restricted harness tools are soft-denied. A harness event may not
+smuggle scores, rewards, or an `actions` key back in.
 
-On the **stamped path** native actions are omitted from
-`HarnessRunRequest.environment`. The harness brings its own actions. A
-harness event may not smuggle an `actions` key back in.
-
-See [harness stamping](harness-stamping.md) and
+See [Harness and Environment policy](harness-policy.md) and
 [observability](observability.md).

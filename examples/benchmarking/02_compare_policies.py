@@ -6,14 +6,14 @@ from plural import (
     BenchmarkDefinition,
     BenchmarkJobSource,
     DeterministicVerifier,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     JobSpec,
     RoutingSpec,
     TaskDefinition,
     WeightedVerifier,
 )
 
-environment = EnvironmentManifest(name="routing-world")
+environment = EnvironmentDefinition(name="routing-world")
 verifier = DeterministicVerifier(name="correct", command=("python", "verify.py"))
 task = TaskDefinition(
     task_id="route-request",

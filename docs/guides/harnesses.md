@@ -44,7 +44,7 @@ Effective capabilities are the intersection of provider, project,
 Environment, Harness, and Agent policy. Any unsatisfied requirement fails
 preflight before a sandbox is created.
 
-`HarnessManifest.secret_names` is the allowlist a package may request.
+`HarnessDefinition.secret_names` is the allowlist a package may request.
 `AgentDefinition.secret_names` is the granted subset. The selected Environment
 must also allow those names. Secret values are injected by the runtime and are
 never embedded in canonical manifests.

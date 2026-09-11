@@ -43,7 +43,7 @@
       "title": "HarnessCapability",
       "type": "string"
     },
-    "HarnessManifest": {
+    "HarnessDefinition": {
       "additionalProperties": false,
       "description": "Versioned executable harness contract.",
       "properties": {
@@ -231,7 +231,7 @@
       "required": [
         "name"
       ],
-      "title": "HarnessManifest",
+      "title": "HarnessDefinition",
       "type": "object"
     },
     "PackageSource": {
@@ -284,17 +284,17 @@
     }
   },
   "additionalProperties": false,
-  "description": "Content-addressed harness manifest and source.",
+  "description": "Content-addressed harness definition and source.",
   "properties": {
-    "manifest": {
-      "$ref": "#/$defs/HarnessManifest"
+    "definition": {
+      "$ref": "#/$defs/HarnessDefinition"
     },
     "source": {
       "$ref": "#/$defs/PackageSource"
     }
   },
   "required": [
-    "manifest",
+    "definition",
     "source"
   ],
   "title": "HarnessPackage",

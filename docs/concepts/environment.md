@@ -7,7 +7,7 @@ audience: all
 ---
 # Environment
 
-`EnvironmentManifest` is a revisioned execution world. It owns:
+`EnvironmentDefinition` is a revisioned execution world. It owns:
 
 - overview, readme, and metadata;
 - native actions;

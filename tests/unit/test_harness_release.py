@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from plural.domain import FileDeclaration, HarnessManifest
+from plural.domain import FileDeclaration, HarnessDefinition
 from plural.harness import HarnessRunner, HarnessRunRequest, native_runner, vendor_adapter
 from plural.harness.retrieval import build_archive, package_from_archive, retrieve_archive
 from plural.sandbox import LocalProvider, NetworkMode, SandboxRequirements
@@ -34,7 +34,7 @@ def _request() -> HarnessRunRequest:
 
 def test_raw_acp_manifest_is_rejected() -> None:
     try:
-        HarnessManifest(name="acp", protocol="acp", command=("agent",))
+        HarnessDefinition(name="acp", protocol="acp", command=("agent",))
     except ValidationError as exc:
         assert "protocol_adapter='acp-client-v1'" in str(exc)
     else:
@@ -66,7 +66,7 @@ for line in sys.stdin:
 """.lstrip(),
         encoding="utf-8",
     )
-    manifest = HarnessManifest(
+    manifest = HarnessDefinition(
         name="acp",
         protocol="acp",
         protocol_adapter="acp-client-v1",
@@ -116,7 +116,7 @@ source:
 
     cache = tmp_path / "cache"
     loaded = package_from_archive(str(first), digest, cache_root=cache)
-    assert loaded.manifest.name == "archived"
+    assert loaded.definition.name == "archived"
     assert loaded.source.kind == "archive"
     cached = cache / digest[7:] / "package"
     assert retrieve_archive(str(first), digest, cache_root=cache) == cached
@@ -151,7 +151,7 @@ def test_archive_rejects_traversal(tmp_path: Path) -> None:
 
 def test_trajectory_path_must_be_declared_as_artifact() -> None:
     with pytest.raises(ValidationError, match="trajectory_path must be declared"):
-        HarnessManifest(
+        HarnessDefinition(
             name="bad-trajectory",
             command=("python", "harness.py"),
             trajectory_path="trajectory.jsonl",

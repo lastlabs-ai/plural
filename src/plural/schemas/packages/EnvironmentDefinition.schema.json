@@ -813,6 +813,6 @@
   "required": [
     "name"
   ],
-  "title": "EnvironmentManifest",
+  "title": "EnvironmentDefinition",
   "type": "object"
 }

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-11
+
+### Added
+
+- `EvidenceContract` on every Verifier kind. `TaskDefinition` and hosted task
+  revision create fail closed when observation or state paths are absent from
+  the Environment schemas. Verifier sandboxes receive a filtered
+  `environment_view`.
+- `HarnessGrant` (formerly `HarnessStamp`) records the Environment ceiling on
+  harness tools for one Trial. Denied tools are injected before the first turn
+  and soft-denied at runtime.
+
+### Changed
+
+- Schema-v2 `EnvironmentManifest` / `HarnessManifest` are now
+  `EnvironmentDefinition` / `HarnessDefinition`. `Environment.definition()`
+  replaces `.manifest()`. Harness packages dump the `definition` key and still
+  load the 0.10 `manifest` key.
+- A Harness wraps the Agent-side LLM. Environment native actions stay on the
+  Trial request. The Environment may only subtract harness tools; restricted or
+  unknown harness tools return feedback and the Trial continues.
+
+### Migration
+
+- Rename `manifest:` to `definition:` in `harness.yaml` and hosted harness
+  payloads. The loader warns once on the old key.
+- Replace `resolve_trial_harness_stamp` / `HarnessStamp` with
+  `resolve_trial_harness_grant` / `HarnessGrant`.
+- Move deterministic `required_artifacts` into `evidence.artifacts` (the old
+  field remains a load alias).
+
 ## [0.10.0] - 2026-09-10
 
 ### Added

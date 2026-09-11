@@ -49,7 +49,7 @@ def test_environment_compiles_exact_manifest() -> None:
         secrets=(SecretReference(name="DATABASE_URL"),),
         metadata={"owner": "evals"},
     )
-    manifest = environment.manifest()
+    manifest = environment.definition()
     assert manifest.name == "counter"
     assert manifest.revision == "1.2.0"
     assert manifest.overview == "A stateful counter."

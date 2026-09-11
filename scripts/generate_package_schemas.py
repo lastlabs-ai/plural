@@ -15,8 +15,8 @@ from plural.domain import (
     AgentVerifier,
     BenchmarkDefinition,
     DeterministicVerifier,
-    EnvironmentManifest,
-    HarnessManifest,
+    EnvironmentDefinition,
+    HarnessDefinition,
     HarnessPackage,
     HumanVerifier,
     JobSpec,
@@ -31,12 +31,12 @@ from plural.domain import (
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "src" / "plural" / "schemas" / "packages"
 MODELS: tuple[type[BaseModel], ...] = (
-    EnvironmentManifest,
+    EnvironmentDefinition,
     TaskDefinition,
     DeterministicVerifier,
     AgentVerifier,
     HumanVerifier,
-    HarnessManifest,
+    HarnessDefinition,
     HarnessPackage,
     AgentDefinition,
     BenchmarkDefinition,

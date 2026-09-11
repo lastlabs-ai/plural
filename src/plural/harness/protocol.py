@@ -31,6 +31,7 @@ class HarnessRunRequest(ProtocolModel):
     workspace: str = "/workspace"
     granted_capabilities: tuple[str, ...] = ()
     denied_capabilities: tuple[str, ...] = ()
+    capability_denials: tuple[dict[str, str], ...] = ()
 
 
 class HarnessEvent(ProtocolModel):
@@ -70,9 +71,8 @@ class HarnessProtocolError(ValueError):
 
 
 def environment_payload_for_harness(environment: dict[str, Any]) -> dict[str, Any]:
-    """Return the public environment payload a stamped harness may see."""
+    """Return the Environment payload a harness may see, including world actions."""
     payload = dict(environment)
-    payload.pop("actions", None)
     payload.pop("commands", None)
     return payload
 

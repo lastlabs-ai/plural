@@ -7,7 +7,7 @@ audience: all
 ---
 # Write a schema-v2 Environment
 
-An `EnvironmentManifest` is an immutable revision of the world in which a
+An `EnvironmentDefinition` is an immutable revision of the world in which a
 Trial runs. It owns:
 
 - overview and readme;
@@ -38,7 +38,7 @@ class SupportEnvironment(Environment[SupportObservation, SupportState]):
         """Look up an order."""
         return {"order_id": order_id, "status": self.state.order_status}
 
-environment = SupportEnvironment().manifest()
+environment = SupportEnvironment().definition()
 ```
 
 The digest covers the canonical revision and source digest. Changing runtime,

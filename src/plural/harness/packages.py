@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from plural.domain import (
     FileDeclaration,
     HarnessCapability,
-    HarnessManifest,
+    HarnessDefinition,
     HarnessPackage,
     PackageSource,
 )
@@ -37,14 +37,14 @@ class HarnessRecipe(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str
-    manifest: HarnessManifest
+    definition: HarnessDefinition
     install: tuple[tuple[str, ...], ...]
     adapter_source: str
     notes: str
 
 
 def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> HarnessPackage:
-    manifest = HarnessManifest(
+    definition = HarnessDefinition(
         name=profile,
         revision="1.0.0",
         description=f"Plural first-party {profile} harness profile.",
@@ -69,7 +69,7 @@ def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> Harnes
     source = Path(__file__).parent
     digest = tree_digest(source)
     return HarnessPackage(
-        manifest=manifest,
+        definition=definition,
         source=PackageSource(
             kind="local",
             uri=str(source),
@@ -105,8 +105,8 @@ def _declared(
     auth_modes: tuple[str, ...] = ("environment",),
     secret_names: tuple[str, ...] = (),
     requirements: tuple[str, ...] = (),
-) -> HarnessManifest:
-    return HarnessManifest(
+) -> HarnessDefinition:
+    return HarnessDefinition(
         name=name,
         implementation="declared",
         capabilities=capabilities,
@@ -151,21 +151,21 @@ DECLARED_HARNESSES = {
 ADAPTER_RECIPES = {
     "claude-code": HarnessRecipe(
         name="claude-code",
-        manifest=DECLARED_HARNESSES["claude-code"],
+        definition=DECLARED_HARNESSES["claude-code"],
         install=(("npm", "install", "--global", "@anthropic-ai/claude-code"),),
         adapter_source=str(Path(__file__).with_name("vendor_adapter.py")),
         notes="Declared-only in this release; Plural ships only the protocol adapter source.",
     ),
     "codex": HarnessRecipe(
         name="codex",
-        manifest=DECLARED_HARNESSES["codex"],
+        definition=DECLARED_HARNESSES["codex"],
         install=(("npm", "install", "--global", "@openai/codex"),),
         adapter_source=str(Path(__file__).with_name("vendor_adapter.py")),
         notes="Declared-only in this release; Plural ships only the protocol adapter source.",
     ),
     "hermes-agent": HarnessRecipe(
         name="hermes-agent",
-        manifest=DECLARED_HARNESSES["hermes"],
+        definition=DECLARED_HARNESSES["hermes"],
         install=(("pip", "install", "hermes-agent"),),
         adapter_source=str(Path(__file__).with_name("vendor_adapter.py")),
         notes="Declared-only in this release; Plural ships only the protocol adapter source.",

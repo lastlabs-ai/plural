@@ -12,10 +12,10 @@ from plural import (
     Client,
     DeterministicVerifier,
     Environment,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     ErrorCode,
     HarnessBinding,
-    HarnessManifest,
+    HarnessDefinition,
     HarnessPackage,
     Job,
     JobLock,
@@ -54,7 +54,7 @@ def main() -> None:
     assert env.name == "x"
     assert len(ds) == 1
     package = HarnessPackage(
-        manifest=HarnessManifest(
+        definition=HarnessDefinition(
             name="h",
             implementation="runnable",
             command=("python", "harness.py"),
@@ -63,7 +63,7 @@ def main() -> None:
     )
     binding = HarnessBinding.from_package(package)
     _ = binding
-    manifest = EnvironmentManifest(name="x")
+    manifest = EnvironmentDefinition(name="x")
     verifier = DeterministicVerifier(name="v", command=("python", "-c", "pass"))
     task_definition = TaskDefinition(
         task_id="1",

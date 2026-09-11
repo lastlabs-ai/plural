@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import Field, model_validator
 
 from plural.common import FrozenModel, RoutingSpec, content_hash
+from plural.evidence import EvidenceContract
 from plural.sandbox.models import NetworkMode, ResourceRequirements
 
 
@@ -52,10 +53,34 @@ class DeterministicVerifier(FrozenModel):
     revision: str = Field(default="0.1.0", min_length=1)
     command: tuple[str, ...] = Field(min_length=1)
     runtime: VerifierRuntime = Field(default_factory=VerifierRuntime)
-    required_artifacts: tuple[str, ...] = ()
+    evidence: EvidenceContract = Field(default_factory=EvidenceContract)
     result_path: str = "verifier-result.json"
     evidence_required: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_required_artifacts(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "required_artifacts" in value:
+            payload = dict(value)
+            artifacts = payload.pop("required_artifacts")
+            evidence = payload.get("evidence")
+            if isinstance(evidence, EvidenceContract):
+                if not evidence.artifacts:
+                    payload["evidence"] = evidence.model_copy(
+                        update={"artifacts": tuple(artifacts)}
+                    )
+            else:
+                merged = dict(evidence or {})
+                merged.setdefault("artifacts", artifacts)
+                payload["evidence"] = merged
+            return payload
+        return value
+
+    @property
+    def required_artifacts(self) -> tuple[str, ...]:
+        """Artifact names the verifier must see."""
+        return self.evidence.artifacts
 
     @property
     def content_hash(self) -> str:
@@ -77,6 +102,7 @@ class AgentVerifier(FrozenModel):
     runtime: VerifierRuntime = Field(
         default_factory=lambda: VerifierRuntime(network=NetworkMode.FULL)
     )
+    evidence: EvidenceContract = Field(default_factory=EvidenceContract)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
@@ -94,6 +120,7 @@ class HumanVerifier(FrozenModel):
     revision: str = Field(default="0.1.0", min_length=1)
     rubric: tuple[RubricCriterion, ...] = Field(min_length=1)
     instructions: str = ""
+    evidence: EvidenceContract = Field(default_factory=EvidenceContract)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
@@ -118,6 +145,7 @@ class WeightedVerifier(FrozenModel):
 __all__ = [
     "AgentVerifier",
     "DeterministicVerifier",
+    "EvidenceContract",
     "HumanVerifier",
     "RubricCriterion",
     "VerifierDefinition",

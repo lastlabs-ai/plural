@@ -6,7 +6,7 @@ from plural import (
     BenchmarkDefinition,
     BenchmarkJobSource,
     DeterministicVerifier,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     JobSpec,
     TaskDefinition,
     WeightedVerifier,
@@ -17,7 +17,7 @@ tasks = tuple(
     TaskDefinition(
         task_id=name,
         instructions=prompt,
-        environment=EnvironmentManifest(name=f"{name}-environment"),
+        environment=EnvironmentDefinition(name=f"{name}-environment"),
         verifiers=(WeightedVerifier(verifier=verifier),),
     )
     for name, prompt in (

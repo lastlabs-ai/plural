@@ -14,14 +14,14 @@ from plural import (
     AgentBinding,
     AgentDefinition,
     DeterministicVerifier,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     JobSpec,
     TaskDefinition,
     TaskJobSource,
     WeightedVerifier,
 )
 
-environment = EnvironmentManifest(name="offline")
+environment = EnvironmentDefinition(name="offline")
 verifier = DeterministicVerifier(
     name="correct",
     command=("python", "verify.py"),

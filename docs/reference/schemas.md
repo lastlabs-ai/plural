@@ -10,8 +10,8 @@ audience: all
 Plural packages these deterministic schemas under
 `plural/schemas/packages/`:
 
-- `EnvironmentManifest.schema.json`
-- `HarnessManifest.schema.json` and `HarnessPackage.schema.json`
+- `EnvironmentDefinition.schema.json`
+- `HarnessDefinition.schema.json` and `HarnessPackage.schema.json`
 - `AgentDefinition.schema.json`
 - `TaskDefinition.schema.json`
 - `DeterministicVerifier.schema.json`, `AgentVerifier.schema.json`, and

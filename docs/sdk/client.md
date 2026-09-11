@@ -149,7 +149,7 @@ attempt information when comparing results.
 `Client(max_retries=...)` configures request retries. `max_cost_usd` is the
 router's estimated per-request cost guard, not a benchmark-wide spending account or an
 independent meter for external harnesses. Package limits are documented
-[separately](../reference/manifests.md).
+[separately](../reference/definitions.md).
 
 ## Handle errors
 

@@ -16,7 +16,7 @@ from plural import (
     BenchmarkDefinition,
     BenchmarkJobSource,
     DeterministicVerifier,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     EnvironmentRuntime,
     JobSpec,
     NetworkMode,
@@ -25,7 +25,7 @@ from plural import (
     WeightedVerifier,
 )
 
-environment = EnvironmentManifest(
+environment = EnvironmentDefinition(
     name="support",
     revision="1.0.0",
     overview="A network-isolated order support runtime.",

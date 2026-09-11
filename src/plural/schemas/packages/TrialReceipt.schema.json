@@ -103,9 +103,9 @@
       "title": "HarnessCapability",
       "type": "string"
     },
-    "HarnessStamp": {
+    "HarnessGrant": {
       "additionalProperties": false,
-      "description": "Per-Trial harness compatibility evidence.",
+      "description": "Effective harness tool policy for one Trial.\n\nComputed when an Agent binds to a Task Environment. The Environment may\nonly subtract harness tools; it does not own or wrap the model.",
       "properties": {
         "declared": {
           "items": {
@@ -152,7 +152,7 @@
         "granted",
         "denied"
       ],
-      "title": "HarnessStamp",
+      "title": "HarnessGrant",
       "type": "object"
     },
     "JobMode": {
@@ -213,10 +213,10 @@
       "title": "Harness Digest",
       "type": "string"
     },
-    "harness_stamp": {
+    "harness_grant": {
       "anyOf": [
         {
-          "$ref": "#/$defs/HarnessStamp"
+          "$ref": "#/$defs/HarnessGrant"
         },
         {
           "type": "null"

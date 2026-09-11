@@ -1,11 +1,11 @@
 ---
-route: /docs/reference/manifests
-title: "Manifest field reference"
+route: /docs/reference/definitions
+title: "Definition field reference"
 order: 450
-description: "All schema-v2 models are frozen, reject unknown fields, and use schemaversion: \"2\" where present. Generated JSON Schemas are the exact validation authority."
+description: "All schema-v2 models are frozen, reject unknown fields, and use schema_version: \"2\" where present. Generated JSON Schemas are the exact validation authority."
 audience: all
 ---
-# Manifest field reference
+# Definition field reference
 
 All schema-v2 models are frozen, reject unknown fields, and use `schema_version: "2"`
 where present. Generated JSON Schemas are the exact validation authority.
@@ -18,7 +18,7 @@ where present. Generated JSON Schemas are the exact validation authority.
 - `trusted`: deprecated migration field; never bypasses integrity/unsafe checks.
 - `unsafe_local`: explicit unsigned local opt-in; invalid for remote kinds.
 
-## `HarnessManifest` and `HarnessPackage`
+## `HarnessDefinition` and `HarnessPackage`
 
 - `schema_version`, `name`, `revision`, `description`.
 - `protocol`: `plural-harness-v1` or `acp`.
@@ -35,12 +35,12 @@ where present. Generated JSON Schemas are the exact validation authority.
   artifact.
 - `outputs`, `artifacts`: exact `FileDeclaration` values (`path`, `required`,
   `media_type`).
-- `HarnessPackage.manifest` and `.source`: complete package. `content_hash` and
-  `package_id` are derived.
+- `HarnessPackage.definition` and `.source`: complete package. `content_hash` and
+  `package_id` are derived. Load still accepts the 0.10 key `manifest`.
 
 `HarnessBinding` contains `name`, `revision`, and required digest.
 
-## `EnvironmentManifest`
+## `EnvironmentDefinition`
 
 - `schema_version`, `name`, `revision`, `description`, `overview`, `readme`,
   and `metadata`.
@@ -53,17 +53,20 @@ where present. Generated JSON Schemas are the exact validation authority.
 - optional `source`.
 
 Tasks, Verifiers, and Job mode are intentionally absent.
+`Environment.definition()` compiles a Python Environment class.
 
 ## `VerifierDefinition` and `TaskDefinition`
 
 A Verifier is a discriminated `deterministic`, `agent`, or `human` revision.
-Deterministic and agent Verifiers own their runtime and network policy. Human
-Verifiers own a rubric and instructions and yield `awaiting_review` until a
-review is submitted.
+Every kind carries an `EvidenceContract` (`artifacts`, `observation_paths`,
+`state_paths`, `include_hidden_state`). Deterministic and agent Verifiers own
+their runtime and network policy. Human Verifiers own a rubric and
+instructions and yield `awaiting_review` until a review is submitted.
 
 A Task owns `task_id`, `revision`, `instructions`, `info`, and `metadata`. It
 embeds one exact Environment revision and one or more `WeightedVerifier`
-revisions. Weighted successful rewards aggregate in a stable declared order.
+revisions. Pin-time rejects a Verifier whose evidence paths are absent from
+the Environment schemas.
 
 ## `BenchmarkDefinition`
 
@@ -74,11 +77,11 @@ Environments.
 ## `AgentDefinition`
 
 - `schema_version`, `name`, `revision`, `model`, `instructions`, and metadata.
-- `routing`: provider, ordered fallbacks, temperature, and maximum tokens.
+- `routing`: provider, fallbacks, temperature, and maximum tokens.
 - optional exact Harness binding/package, authentication mode, and secret grants.
 
-An Agent never owns an Environment. Harness compatibility is resolved and
-stamped against the Task's Environment for each Trial.
+An Agent never owns an Environment. Harness tool policy (`HarnessGrant`) is
+resolved against the Task's Environment for each Trial.
 
 ## `JobFile` and `JobSpec`
 
@@ -90,39 +93,16 @@ Resolved `JobSpec` embeds a `TaskJobSource` or `BenchmarkJobSource` and Agent
 bindings. It owns scheduling and retry policy only; each selected Task's
 Environment owns its runtime.
 
-`RetryPolicy` fields are non-negative `max_retries` and initial/max backoff,
-multiplier at least 1, and `retryable_codes`. Defaults retry rate limits,
-provider unavailability, timeout, and runtime unavailability.
-
-`EnvironmentRuntime` fields include provider and placement, mutually exclusive
-image/snapshot/declarative image, Docker build context, resources, network and
-allowlist, timeout, target set, persistence, compose, read-only root, and
-unsafe-local opt-in.
-
-`DeclarativeImage` has `base`, `pip_packages`, process `environment`, and
-optional `workdir`.
-
 ## Planning, Trials, and receipts
 
 `TrialSpec` contains Job, Agent, Task, one-based attempt, exact
-Environment/Harness bindings, and the Environment's runtime provider.
-`trial_id` is derived independently of retries.
+Environment/Harness bindings, the per-Trial `harness_grant`, and the
+Environment's runtime provider. `trial_id` is derived independently of retries.
 
 Each retry appends a `TrialExecution` with its own execution index. Jobs and
 executions append monotonic `ProgressEvent` records. Human results use
 `awaiting_review`.
 
-`JobLock` records job/spec IDs and the complete revision graph needed to replay
-the plan.
-
-`TrialReceipt` records Trial/Job/retry/attempt identity; Environment, Benchmark,
+`TrialReceipt` records Trial/Job/retry/attempt identity; Environment,
 Agent, Harness, Runtime, image, task, trace, artifact and verifier hashes;
-effective capabilities/policy; UTC timestamps;
-timings; Environment source/instruction/command/limit/policy provenance; and
-`trust`, currently only `self_reported`.
-
-`TrialResult` is `succeeded`, `failed`, `cancelled`, or `awaiting_review`, with
-receipt, weighted Verifier results, optional aggregate reward/scores/trace, and
-stable error details. In train mode, exact TITO records are validated and stored
-as hashed artifacts; eval mode disables TITO and Rewarders while retaining final
-verification.
+the grant; UTC timestamps; and `trust`, currently only `self_reported`.

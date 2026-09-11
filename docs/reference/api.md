@@ -14,7 +14,7 @@ The entries below document the actual public classes and methods.
 
 `Client.create(x)` and `Client.update(x)` support the hosted object types
 implemented by the connected deployment. Canonical local execution uses
-schema-v2 `EnvironmentManifest`, `AgentDefinition`, Task/Verifier revisions,
+schema-v2 `EnvironmentDefinition`, `AgentDefinition`, Task/Verifier revisions,
 and Task-or-Benchmark `JobSpec` values.
 
 ::: plural.client.Client
@@ -39,7 +39,7 @@ and Task-or-Benchmark `JobSpec` values.
 
 ## Package and execution domain
 
-The canonical domain contains EnvironmentManifest, AgentDefinition,
+The canonical domain contains EnvironmentDefinition, AgentDefinition,
 first-class Task and Verifier revisions, cross-Environment
 BenchmarkDefinition, discriminated Job sources, Trial/TrialExecution,
 ProgressEvent, and exact TITORecord. The generated schemas are the

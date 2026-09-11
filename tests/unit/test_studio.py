@@ -13,7 +13,7 @@ from plural import (
     BenchmarkJobSource,
     Client,
     DeterministicVerifier,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     JobSpec,
     TaskDefinition,
     WeightedVerifier,
@@ -73,7 +73,7 @@ def test_publish_environment_parent_and_revision(tmp_path: Path) -> None:
         return_value=httpx.Response(200, json={"id": "env_rev_1"})
     )
     result = _client(tmp_path).environments.push(
-        EnvironmentManifest(name="World", overview="Runtime world")
+        EnvironmentDefinition(name="World", overview="Runtime world")
     )
     assert result["id"] == "env_rev_1"
     assert json.loads(parent.calls.last.request.content)["slug"] == "world"
@@ -90,7 +90,7 @@ def test_publish_task_and_agent_revision_references(tmp_path: Path) -> None:
     task = TaskDefinition(
         task_id="case-1",
         instructions="Solve it.",
-        environment=EnvironmentManifest(name="World"),
+        environment=EnvironmentDefinition(name="World"),
         verifiers=(WeightedVerifier(verifier=verifier, weight=2),),
     )
     for collection, slug, parent_id in (
@@ -135,7 +135,7 @@ def test_submit_job_and_transition_cancel(tmp_path: Path) -> None:
     task = TaskDefinition(
         task_id="case-1",
         instructions="Solve it.",
-        environment=EnvironmentManifest(name="World"),
+        environment=EnvironmentDefinition(name="World"),
         verifiers=(
             WeightedVerifier(
                 verifier=DeterministicVerifier(name="correct", command=("python", "verify.py"))

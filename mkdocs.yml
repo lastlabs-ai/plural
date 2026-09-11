@@ -109,7 +109,8 @@ nav:
   - Concepts:
       - Environment lifecycle: concepts/environment.md
       - Native actions: concepts/native-actions.md
-      - Harness stamping: concepts/harness-stamping.md
+      - Harness and Environment policy: concepts/harness-policy.md
+      - Evidence contract: concepts/evidence-contract.md
       - Execution capabilities: concepts/execution-capabilities.md
       - Jobs, Tasks, and Trials: concepts/execution.md
       - Observability: concepts/observability.md
@@ -125,7 +126,7 @@ nav:
       - Known limitations: reference/limitations.md
   - Reference:
       - SDK and CLI coverage: reference/feature-map.md
-      - Manifest fields: reference/manifests.md
+      - Definition fields: reference/definitions.md
       - Package JSON schemas: reference/schemas.md
       - Trace JSON schema: reference/trace-schema.md
       - Capability table: reference/capabilities.md

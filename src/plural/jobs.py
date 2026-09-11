@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
 
 from plural.agents import AgentBinding, AgentDefinition
 from plural.common import (
@@ -19,7 +19,7 @@ from plural.common import (
     content_hash,
     stable_id,
 )
-from plural.environments.manifest import EnvironmentIdentity, EnvironmentManifest, HarnessStamp
+from plural.environments.definition import EnvironmentDefinition, EnvironmentIdentity, HarnessGrant
 from plural.sandbox.models import NetworkMode
 from plural.tasks import BenchmarkDefinition, TaskDefinition
 
@@ -237,10 +237,10 @@ _NETWORK_NONE_DENIALS = frozenset(
 _NETWORK_RESTRICTED_DENIALS = frozenset({HarnessCapability.WEB_SEARCH, HarnessCapability.BROWSER})
 
 
-def resolve_trial_harness_stamp(
-    environment: EnvironmentManifest,
+def resolve_trial_harness_grant(
+    environment: EnvironmentDefinition,
     agent: AgentDefinition,
-) -> HarnessStamp | None:
+) -> HarnessGrant | None:
     """Resolve Agent Harness compatibility against one Trial Environment.
 
     Returns:
@@ -252,8 +252,8 @@ def resolve_trial_harness_stamp(
         return None
     if package is None:
         raise ValueError(f"Agent {agent.name!r} harness requires an executable package")
-    if package.manifest.implementation != "runnable":
-        raise ValueError(f"Harness {package.manifest.name!r} is declared but not runnable")
+    if package.definition.implementation != "runnable":
+        raise ValueError(f"Harness {package.definition.name!r} is declared but not runnable")
     if HarnessBinding.from_package(package) != binding:
         raise ValueError("Agent Harness package does not match binding")
     allowed = set(environment.harness_policy.allowed_harnesses)
@@ -261,7 +261,7 @@ def resolve_trial_harness_stamp(
         raise ValueError(
             f"Harness {binding.name!r} is not allowed by Environment {environment.name!r}"
         )
-    declared = package.manifest.capabilities
+    declared = package.definition.capabilities
     denied: set[HarnessCapability] = set()
     reasons: dict[str, str] = {}
 
@@ -284,7 +284,7 @@ def resolve_trial_harness_stamp(
             deny(capability, "Environment network=restricted")
     if environment.runtime.read_only_root:
         deny(HarnessCapability.FILE_EDIT, "Environment read_only_root")
-    return HarnessStamp(
+    return HarnessGrant(
         environment=environment.identity,
         harness=binding,
         declared=declared,
@@ -322,7 +322,7 @@ class JobSpec(FrozenModel):
                     f"Environment {task.environment.name!r} provider is not enforceable: {reason}"
                 )
             for agent in self.agents:
-                resolve_trial_harness_stamp(task.environment, agent.agent)
+                resolve_trial_harness_grant(task.environment, agent.agent)
         return self
 
     @property
@@ -365,7 +365,7 @@ class JobSpec(FrozenModel):
                 environment=task.environment.identity,
                 verifier_digests=tuple(item.verifier.content_hash for item in task.verifiers),
                 harness=agent.harness,
-                harness_stamp=resolve_trial_harness_stamp(task.environment, agent.agent),
+                harness_grant=resolve_trial_harness_grant(task.environment, agent.agent),
                 mode=self.mode,
                 runtime_provider=task.environment.runtime.provider,
                 placement=task.environment.runtime.placement,
@@ -408,10 +408,14 @@ class TrialSpec(FrozenModel):
     environment: EnvironmentIdentity
     verifier_digests: tuple[str, ...]
     harness: HarnessBinding | None = None
-    harness_stamp: HarnessStamp | None = None
+    harness_grant: HarnessGrant | None = Field(
+        default=None, validation_alias=AliasChoices("harness_grant", "harness_stamp")
+    )
     mode: JobMode
     runtime_provider: str
     placement: dict[str, str] = Field(default_factory=dict)
+
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
     @property
     def trial_id(self) -> str:
@@ -469,6 +473,8 @@ class JobPlan(FrozenModel):
 class TrialReceipt(FrozenModel):
     """Immutable TrialExecution provenance."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
     trial_id: str
     job_id: str
     execution_id: int = Field(default=0, ge=0)
@@ -479,7 +485,9 @@ class TrialReceipt(FrozenModel):
     verifier_digests: tuple[str, ...]
     agent_digest: str
     harness_digest: str = ""
-    harness_stamp: HarnessStamp | None = None
+    harness_grant: HarnessGrant | None = Field(
+        default=None, validation_alias=AliasChoices("harness_grant", "harness_stamp")
+    )
     mode: JobMode
     runtime_provider: str
     placement: dict[str, str] = Field(default_factory=dict)
@@ -548,5 +556,5 @@ __all__ = [
     "TrialSpec",
     "TrialStatus",
     "VerifierResult",
-    "resolve_trial_harness_stamp",
+    "resolve_trial_harness_grant",
 ]

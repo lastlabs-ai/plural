@@ -1,5 +1,42 @@
 {
   "$defs": {
+    "EvidenceContract": {
+      "additionalProperties": false,
+      "description": "What a Verifier needs from the Environment and Trial artifacts.",
+      "properties": {
+        "artifacts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "include_hidden_state": {
+          "default": false,
+          "title": "Include Hidden State",
+          "type": "boolean"
+        },
+        "observation_paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Observation Paths",
+          "type": "array"
+        },
+        "state_paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "State Paths",
+          "type": "array"
+        }
+      },
+      "title": "EvidenceContract",
+      "type": "object"
+    },
     "NetworkMode": {
       "description": "Requested sandbox network policy.",
       "enum": [
@@ -129,6 +166,9 @@
       "title": "Command",
       "type": "array"
     },
+    "evidence": {
+      "$ref": "#/$defs/EvidenceContract"
+    },
     "evidence_required": {
       "default": true,
       "title": "Evidence Required",
@@ -149,14 +189,6 @@
       "minLength": 1,
       "title": "Name",
       "type": "string"
-    },
-    "required_artifacts": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "title": "Required Artifacts",
-      "type": "array"
     },
     "result_path": {
       "default": "verifier-result.json",

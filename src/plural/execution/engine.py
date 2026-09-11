@@ -35,6 +35,7 @@ from plural.domain import (
     VerifierRuntime,
     content_hash,
 )
+from plural.evidence import environment_view, first_json_mapping
 from plural.execution.policy import (
     ProjectPolicy,
     resolve_effective_policy,
@@ -122,7 +123,7 @@ def _package_for(agent: AgentBinding, task: TaskDefinition) -> HarnessPackage:
             f"Agent {agent.name!r} has no executable Harness package",
         )
     package = factory()
-    if package.manifest.revision != agent.harness.revision:
+    if package.definition.revision != agent.harness.revision:
         raise ExecutionFailure(ErrorCode.CONFIGURATION, "built-in Harness revision mismatch")
     return package
 
@@ -142,7 +143,7 @@ def _harness_environment(
     secrets = {name: environ[name] for name in names}
     configured = {
         name: environ[name]
-        for name in package.manifest.environment_names
+        for name in package.definition.environment_names
         if environ.get(name) is not None
     }
     return {**configured, **secrets}, secrets
@@ -156,7 +157,7 @@ def _redact_bytes(value: bytes, secrets: Mapping[str, str]) -> bytes:
     return output
 
 
-def _environment_payload(task: TaskDefinition, *, stamped: bool) -> dict[str, Any]:
+def _environment_payload(task: TaskDefinition) -> dict[str, Any]:
     environment = task.environment
     properties = environment.observation_schema.get("properties", {})
     observation = {
@@ -164,7 +165,7 @@ def _environment_payload(task: TaskDefinition, *, stamped: bool) -> dict[str, An
         for name, schema in properties.items()
         if isinstance(schema, dict) and "default" in schema
     }
-    payload: dict[str, Any] = {
+    return {
         "name": environment.name,
         "overview": environment.overview,
         "observation": observation,
@@ -173,10 +174,28 @@ def _environment_payload(task: TaskDefinition, *, stamped: bool) -> dict[str, An
         "guardrails": [item.model_dump(mode="json") for item in environment.guardrails],
         "resources": [item.model_dump(mode="json") for item in environment.resources],
         "workspace": "/workspace/environment",
+        "actions": [item.model_dump(mode="json") for item in environment.actions],
     }
-    if not stamped:
-        payload["actions"] = [item.model_dump(mode="json") for item in environment.actions]
-    return payload
+
+
+async def _optional_json(
+    provider: Any,
+    handle: Any,
+    path: str,
+    *,
+    root: str,
+) -> dict[str, Any]:
+    try:
+        files = await provider.download_files(handle, (path,), root=root)
+    except (FileNotFoundError, KeyError, OSError):
+        return {}
+    if not files:
+        return {}
+    try:
+        value = json.loads(files[0].data)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _requirements(task: TaskDefinition, package: HarnessPackage) -> SandboxRequirements:
@@ -215,11 +234,11 @@ def _validate_tito(
     package: HarnessPackage,
     artifacts: Sequence[DownloadedFile],
 ) -> ArtifactReference:
-    path = package.manifest.tito_path
-    if not package.manifest.supports_tito or path is None:
+    path = package.definition.tito_path
+    if not package.definition.supports_tito or path is None:
         raise ExecutionFailure(
             ErrorCode.TITO_UNSUPPORTED,
-            f"Harness {package.manifest.name!r} cannot provide exact TITO capture",
+            f"Harness {package.definition.name!r} cannot provide exact TITO capture",
         )
     artifact = next((item for item in artifacts if item.path == path), None)
     if artifact is None:
@@ -294,6 +313,8 @@ class Trial:
         verifier_stdout = b""
         verifier_stderr = b""
         artifacts: tuple[DownloadedFile, ...] = ()
+        environment_state: dict[str, Any] = {}
+        environment_observation: dict[str, Any] = {}
         trace_id: str | None = None
         verifier_results: tuple[VerifierResult, ...] = ()
         tito: ArtifactReference | None = None
@@ -335,19 +356,22 @@ class Trial:
                         "instructions": agent.agent.instructions,
                         "routing": agent.routing.model_dump(mode="json", exclude_none=True),
                     },
-                    environment=_environment_payload(task, stamped=agent.harness is not None),
+                    environment=_environment_payload(task),
                     mode=self.job_spec.mode.value,
                     capture_tito=self.job_spec.mode is JobMode.TRAIN,
                     workspace="/workspace/harness",
                     granted_capabilities=tuple(
-                        sorted(item.value for item in self.spec.harness_stamp.granted)
+                        sorted(item.value for item in self.spec.harness_grant.granted)
                     )
-                    if self.spec.harness_stamp
+                    if self.spec.harness_grant
                     else (),
                     denied_capabilities=tuple(
-                        sorted(item.value for item in self.spec.harness_stamp.denied)
+                        sorted(item.value for item in self.spec.harness_grant.denied)
                     )
-                    if self.spec.harness_stamp
+                    if self.spec.harness_grant
+                    else (),
+                    capability_denials=self.spec.harness_grant.capability_denials
+                    if self.spec.harness_grant
                     else (),
                 )
                 self.store.emit(
@@ -356,11 +380,20 @@ class Trial:
                     "running",
                     trial_id=self.spec.trial_id,
                     execution_id=execution_id,
-                    data={"task_id": task.task_id, "mode": self.job_spec.mode.value},
+                    data={
+                        "task_id": task.task_id,
+                        "mode": self.job_spec.mode.value,
+                        "capability_denials": list(request.capability_denials),
+                    },
+                    message=(
+                        "Environment denied harness tools; Trial continues"
+                        if request.capability_denials
+                        else ""
+                    ),
                 )
                 execution = await HarnessRunner(provider).run(
                     handle,
-                    package.manifest,
+                    package.definition,
                     request,
                     env=harness_env,
                     timeout_seconds=min(
@@ -374,6 +407,12 @@ class Trial:
                 paths = tuple(dict.fromkeys((*execution.output_paths, *execution.artifact_paths)))
                 artifacts = await provider.download_artifacts(
                     handle, paths, root="/workspace/harness"
+                )
+                environment_state = await _optional_json(
+                    provider, handle, "state.json", root="/workspace/environment"
+                )
+                environment_observation = await _optional_json(
+                    provider, handle, "observation.json", root="/workspace/environment"
                 )
             finally:
                 self._active.pop((provider.name, handle.sandbox_id), None)
@@ -393,7 +432,10 @@ class Trial:
                 execution_id=execution_id,
             )
             verifier_results, verifier_stdout, verifier_stderr = await self._run_verifiers(
-                artifacts, trace_id
+                artifacts,
+                trace_id,
+                observation=environment_observation,
+                state=environment_state,
             )
             all_results = (*rewarder_results, *verifier_results)
             awaiting = any(item.status == "awaiting_review" for item in verifier_results)
@@ -504,7 +546,7 @@ class Trial:
 
     async def _preflight_harness(self, provider: SandboxProvider, package: HarnessPackage) -> None:
         agent = self.agent
-        manifest = package.manifest
+        manifest = package.definition
         if manifest.implementation != "runnable":
             raise ExecutionFailure(ErrorCode.CONFIGURATION, "Harness is not runnable")
         if not any(fnmatch.fnmatchcase(agent.model, item) for item in manifest.supported_models):
@@ -521,7 +563,7 @@ class Trial:
         resolve_effective_policy(
             environment=self.task.environment,
             agent=agent.agent,
-            stamp=self.spec.harness_stamp,
+            grant=self.spec.harness_grant,
             project=self.project_policy,
             provider=declared,
             requested_target=self.task.environment.runtime.requested_target,
@@ -597,6 +639,9 @@ class Trial:
         self,
         artifacts: Sequence[DownloadedFile],
         trace_id: str | None,
+        *,
+        observation: Mapping[str, Any] | None = None,
+        state: Mapping[str, Any] | None = None,
     ) -> tuple[tuple[VerifierResult, ...], bytes, bytes]:
         results: list[VerifierResult] = []
         stdout = bytearray()
@@ -643,6 +688,8 @@ class Trial:
                 trace_id=trace_id,
                 evidence_required=evidence_required,
                 verifier=verifier,
+                observation=observation,
+                state=state,
             )
             results.append(result)
             stdout.extend(out)
@@ -662,6 +709,8 @@ class Trial:
         trace_id: str | None,
         evidence_required: bool,
         verifier: VerifierDefinition | None = None,
+        observation: Mapping[str, Any] | None = None,
+        state: Mapping[str, Any] | None = None,
     ) -> tuple[VerifierResult, bytes, bytes]:
         provider = self.provider_for(runtime.provider)
         requirements = sandbox_requirements_for(
@@ -672,10 +721,24 @@ class Trial:
         handle = await provider.create(requirements)
         self._active[(provider.name, handle.sandbox_id)] = handle
         try:
+            view_observation = first_json_mapping(
+                artifacts, ("final-observation.json", "observation.json")
+            ) or dict(observation or {})
+            view_state = dict(state or {})
+            if not view_state:
+                view_state = first_json_mapping(artifacts, ("final-state.json", "state.json"))
+            contract = getattr(verifier, "evidence", None)
             payload: dict[str, Any] = {
                 "task": self.task.public_payload,
                 "trace_id": trace_id,
                 "artifacts": [item.path for item in artifacts],
+                "environment_view": environment_view(
+                    contract,
+                    observation=view_observation,
+                    state=view_state,
+                )
+                if contract is not None
+                else {"observation": {}, "state": {}},
             }
             if isinstance(verifier, AgentVerifier):
                 payload["agent_verifier"] = verifier.model_dump(mode="json")
@@ -757,7 +820,7 @@ class Trial:
             verifier_digests=self.spec.verifier_digests,
             agent_digest=agent.content_hash,
             harness_digest=self.spec.harness.digest if self.spec.harness else "",
-            harness_stamp=self.spec.harness_stamp,
+            harness_grant=self.spec.harness_grant,
             mode=self.job_spec.mode,
             runtime_provider=self.task.environment.runtime.provider,
             placement=self.task.environment.runtime.placement,
@@ -1124,7 +1187,7 @@ class Job:
                 verifier_digests=trial.verifier_digests,
                 agent_digest=agent.content_hash,
                 harness_digest=trial.harness.digest if trial.harness else "",
-                harness_stamp=trial.harness_stamp,
+                harness_grant=trial.harness_grant,
                 mode=self.spec.mode,
                 runtime_provider=task.environment.runtime.provider,
                 placement=task.environment.runtime.placement,

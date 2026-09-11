@@ -1,4 +1,4 @@
-"""Schema-v2 Environment manifest, runtime, and policy declarations."""
+"""Schema-v2 Environment definition, runtime, and policy declarations."""
 
 from __future__ import annotations
 
@@ -209,8 +209,12 @@ class HarnessPolicy(FrozenModel):
     denied_capabilities: frozenset[HarnessCapability] = frozenset()
 
 
-class HarnessStamp(FrozenModel):
-    """Per-Trial harness compatibility evidence."""
+class HarnessGrant(FrozenModel):
+    """Effective harness tool policy for one Trial.
+
+    Computed when an Agent binds to a Task Environment. The Environment may
+    only subtract harness tools; it does not own or wrap the model.
+    """
 
     environment: EnvironmentIdentity
     harness: HarnessBinding
@@ -218,6 +222,17 @@ class HarnessStamp(FrozenModel):
     granted: frozenset[HarnessCapability]
     denied: frozenset[HarnessCapability]
     denial_reasons: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def capability_denials(self) -> tuple[dict[str, str], ...]:
+        """Denied harness tools with the Environment reason for each."""
+        return tuple(
+            {
+                "capability": capability.value,
+                "reason": self.denial_reasons.get(capability.value, "Environment policy"),
+            }
+            for capability in sorted(self.denied, key=lambda item: item.value)
+        )
 
 
 class ExecutionLimits(FrozenModel):
@@ -228,7 +243,7 @@ class ExecutionLimits(FrozenModel):
     max_cost_usd: float | None = Field(default=None, gt=0)
 
 
-class EnvironmentManifest(FrozenModel):
+class EnvironmentDefinition(FrozenModel):
     """Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent."""
 
     schema_version: Literal["2"] = "2"
@@ -265,7 +280,7 @@ class EnvironmentManifest(FrozenModel):
         return value
 
     @model_validator(mode="after")
-    def _unique_names(self) -> EnvironmentManifest:
+    def _unique_names(self) -> EnvironmentDefinition:
         for label, values in (
             ("action", self.actions),
             ("resource", self.resources),
@@ -292,13 +307,13 @@ class EnvironmentManifest(FrozenModel):
 
 __all__ = [
     "EnvironmentIdentity",
-    "EnvironmentManifest",
+    "EnvironmentDefinition",
     "EnvironmentResource",
     "EnvironmentRuntime",
     "ExecutionLimits",
     "Guardrail",
     "HarnessPolicy",
-    "HarnessStamp",
+    "HarnessGrant",
     "NativeAction",
     "RewarderDefinition",
     "SecretReference",

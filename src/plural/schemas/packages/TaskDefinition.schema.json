@@ -4,6 +4,9 @@
       "additionalProperties": false,
       "description": "Model-judge verifier with its own runtime and connectivity policy.",
       "properties": {
+        "evidence": {
+          "$ref": "#/$defs/EvidenceContract"
+        },
         "instructions": {
           "minLength": 1,
           "title": "Instructions",
@@ -143,6 +146,9 @@
           "title": "Command",
           "type": "array"
         },
+        "evidence": {
+          "$ref": "#/$defs/EvidenceContract"
+        },
         "evidence_required": {
           "default": true,
           "title": "Evidence Required",
@@ -163,14 +169,6 @@
           "minLength": 1,
           "title": "Name",
           "type": "string"
-        },
-        "required_artifacts": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Required Artifacts",
-          "type": "array"
         },
         "result_path": {
           "default": "verifier-result.json",
@@ -200,7 +198,7 @@
       "title": "DeterministicVerifier",
       "type": "object"
     },
-    "EnvironmentManifest": {
+    "EnvironmentDefinition": {
       "additionalProperties": false,
       "description": "Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent.",
       "properties": {
@@ -315,7 +313,7 @@
       "required": [
         "name"
       ],
-      "title": "EnvironmentManifest",
+      "title": "EnvironmentDefinition",
       "type": "object"
     },
     "EnvironmentResource": {
@@ -528,6 +526,43 @@
       "title": "EnvironmentRuntime",
       "type": "object"
     },
+    "EvidenceContract": {
+      "additionalProperties": false,
+      "description": "What a Verifier needs from the Environment and Trial artifacts.",
+      "properties": {
+        "artifacts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "include_hidden_state": {
+          "default": false,
+          "title": "Include Hidden State",
+          "type": "boolean"
+        },
+        "observation_paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Observation Paths",
+          "type": "array"
+        },
+        "state_paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "State Paths",
+          "type": "array"
+        }
+      },
+      "title": "EvidenceContract",
+      "type": "object"
+    },
     "ExecutionLimits": {
       "additionalProperties": false,
       "description": "Environment execution limits.",
@@ -691,6 +726,9 @@
       "additionalProperties": false,
       "description": "Human review verifier.",
       "properties": {
+        "evidence": {
+          "$ref": "#/$defs/EvidenceContract"
+        },
         "instructions": {
           "default": "",
           "title": "Instructions",
@@ -1186,7 +1224,7 @@
   "description": "First-class Task revision pinned to one Environment and Verifiers.",
   "properties": {
     "environment": {
-      "$ref": "#/$defs/EnvironmentManifest"
+      "$ref": "#/$defs/EnvironmentDefinition"
     },
     "info": {
       "default": null,

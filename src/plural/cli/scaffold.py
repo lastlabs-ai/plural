@@ -16,7 +16,7 @@ from plural.domain import (
     BenchmarkDefinition,
     BenchmarkJobSource,
     DeterministicVerifier,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     EnvironmentRuntime,
     HarnessBinding,
     HarnessPackage,
@@ -109,7 +109,7 @@ def _create(path: Path, payload: Any, *, force: bool) -> Path:
 def scaffold_environment(directory: Path, name: str, *, force: bool = False) -> list[Path]:
     """Create a standalone schema-v2 Environment package."""
     directory.mkdir(parents=True, exist_ok=True)
-    manifest = EnvironmentManifest(
+    manifest = EnvironmentDefinition(
         name=name,
         overview="A typed runtime world with declared actions and observable state.",
         runtime=EnvironmentRuntime(),
@@ -201,7 +201,7 @@ def scaffold_harness(directory: Path, name: str, *, force: bool = False) -> list
     """Create a runnable standalone Harness package."""
     directory.mkdir(parents=True, exist_ok=True)
     package = {
-        "manifest": {
+        "definition": {
             "schema_version": "2",
             "name": name,
             "revision": "0.1.0",
@@ -297,11 +297,11 @@ def scaffold_job(
     )
 
 
-def load_environment(path: Path) -> EnvironmentManifest:
-    """Load one canonical Environment manifest and lock its local source."""
+def load_environment(path: Path) -> EnvironmentDefinition:
+    """Load one canonical Environment definition and lock its local source."""
     source = _target(path, "environment.yaml")
     payload = read_yaml(source)
-    environment = EnvironmentManifest.model_validate(payload)
+    environment = EnvironmentDefinition.model_validate(payload)
     root = source.parent.resolve()
     return environment.model_copy(
         update={
@@ -396,10 +396,23 @@ def load_job(path: Path) -> JobSpec:
     )
 
 
+_LEGACY_HARNESS_KEY_WARNED = False
+
+
 def load_harness(path: Path) -> HarnessPackage:
     """Load and lock a local Harness package."""
+    global _LEGACY_HARNESS_KEY_WARNED
     source = _target(path, "harness.yaml").resolve()
     payload = read_yaml(source)
+    if "manifest" in payload and "definition" not in payload and not _LEGACY_HARNESS_KEY_WARNED:
+        import warnings
+
+        warnings.warn(
+            "harness.yaml key 'manifest' is deprecated; use 'definition'",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        _LEGACY_HARNESS_KEY_WARNED = True
     package_source = payload.get("source")
     if isinstance(package_source, dict) and package_source.get("kind") == "local":
         root = Path(str(package_source.get("uri", "."))).expanduser()
@@ -428,7 +441,7 @@ def load_harness_reference(
 def generate_schemas(directory: Path) -> list[Path]:
     """Generate canonical schema-v2 JSON schemas."""
     models: tuple[type[BaseModel], ...] = (
-        EnvironmentManifest,
+        EnvironmentDefinition,
         TaskDefinition,
         DeterministicVerifier,
         AgentVerifier,

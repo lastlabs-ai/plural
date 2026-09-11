@@ -11,7 +11,9 @@ audience: all
 | --- | --- |
 | **Environment** | Revisioned actions, typed hidden state/observation, Rewarders, resources, secrets, and runtime placement. |
 | **Native action** | Environment-owned action that returns an observation. |
-| **Harness** | Prebuilt loop that can be stamped onto an environment. |
+| **Harness** | Agent-side wrapper around the LLM (instructions, tools, loop). |
+| **HarnessGrant** | Per-Trial tool policy: granted and denied harness capabilities. |
+| **EvidenceContract** | Paths and artifacts a Verifier needs from an Environment. |
 | **Stamp** | Per-Trial compatibility and capability result for a Harness against a Task's Environment. |
 | **Model** | The LLM. |
 | **AgentDefinition** | Revisioned model, instructions, routing, and optional Harness; never Environment-bound. |

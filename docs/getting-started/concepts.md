@@ -18,12 +18,14 @@ observation and state schemas, guardrails, resources, and the
 **runtime** (container, network policy, compute, and which targets may run
 it). Native actions act in the environment and return observations.
 
-A **harness** is a prebuilt agent loop that can be **stamped** onto an
-environment. The environment subtracts capabilities the harness may not
-use. A stamped harness never receives native actions. Four reference
-harnesses (`hermes`, `claude-code`, `codex`, `cursor`) ship as `declared`
-manifests only. The only runnable executor in this release is the native
-path.
+A **harness** wraps the LLM. It belongs to the Agent: extra instructions,
+tools, skills, and the loop that decides what to do. Claude Code, Codex,
+Hermes, and Cursor are harnesses. An Environment may forbid harness tools
+(no public internet → no web search). That is a ceiling, not ownership.
+Restricted or unknown harness tools return feedback and the Trial continues.
+Four reference harnesses (`hermes`, `claude-code`, `codex`, `cursor`) ship
+as `declared` definitions only. The only runnable executor in this release
+is the native path.
 
 A **model** is the LLM. An **AgentDefinition** owns its model, instructions,
 routing, and optional Harness. It is not bound to an Environment.
@@ -42,16 +44,17 @@ state transitions; a human Verifier moves a Trial to `awaiting_review`.
 ## The four invariants
 
 1. The environment owns native actions.
-2. A stamped harness cannot take a native action, and the environment
-   restricts what it can do.
-3. Agents are Environment-independent; compatibility is stamped per Trial.
+2. The Agent (model + optional harness) runs inside the Task Environment.
+   Environment actions stay available. The Environment may only subtract
+   harness tools; denied tools are soft-denied and the Trial continues.
+3. Agents are Environment-independent; tool policy is computed per Trial.
 4. Unsatisfiable execution requirements fail before any sandbox is created.
    Effective permissions are the intersection of provider capability,
    project policy, environment constraints, harness requirements, and the
    agent request.
 
 See [execution capabilities](../concepts/execution-capabilities.md) and
-[harness stamping](../concepts/harness-stamping.md).
+[Harness and Environment policy](../concepts/harness-policy.md).
 
 ## Choose one starting path
 
@@ -63,14 +66,14 @@ Run the Job through the durable scheduler. Follow the
 
 ### Package execution
 
-Configure `EnvironmentManifest`, standalone Verifier and Task revisions, an
+Configure `EnvironmentDefinition`, standalone Verifier and Task revisions, an
 optional `HarnessPackage`, `AgentDefinition`, and optionally
 `BenchmarkDefinition`. A `JobSpec` selects a Task or Benchmark. Start with the
 [CLI walkthrough](../tutorials/cli-walkthrough.md).
 
 The native path (`AgentDefinition.harness is None`) exposes Environment actions to
-the model via `native.actions.v1` or `native.chat.v1`. Stamped declared
-harnesses are refused at preflight.
+the model via `native.actions.v1` or `native.chat.v1`. Declared vendor
+harnesses are refused at preflight until a runnable wrapper exists.
 
 ### Hosted objects in Plural Intel
 

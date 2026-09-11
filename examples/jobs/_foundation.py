@@ -10,7 +10,7 @@ from plural import (
     BenchmarkDefinition,
     BenchmarkJobSource,
     DeterministicVerifier,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     EnvironmentRuntime,
     ExecutionTarget,
     HarnessBinding,
@@ -46,7 +46,7 @@ def build_job(
     )
     binding = HarnessBinding.from_package(package)
     isolated = provider != "local"
-    environment = EnvironmentManifest(
+    environment = EnvironmentDefinition(
         name="offline-example",
         revision="1.0.0",
         overview="A deterministic offline execution runtime.",

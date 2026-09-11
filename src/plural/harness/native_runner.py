@@ -72,19 +72,20 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
     }
     if profile in _ACTION_PROFILES and not actions:
         raise ValueError(f"{profile} requires at least one environment native action")
-    prompt = _prompt(request, environment)
+    denials = _denials(request)
+    prompt = _prompt(request, environment, denials)
+    system = str(agent.get("instructions") or "").strip()
+    if denials:
+        system = "\n\n".join(part for part in (system, _denial_text(denials)) if part)
     messages: list[dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": str(agent.get("instructions") or "").strip(),
-        },
+        {"role": "system", "content": system},
         {"role": "user", "content": prompt},
     ]
     tools = [
         {
             "type": "function",
             "function": {
-                "name": name,
+                "name": f"environment.{name}",
                 "description": str(action.get("description") or name),
                 "parameters": action.get("parameters")
                 or {"type": "object", "additionalProperties": True},
@@ -131,7 +132,7 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
             final_message = message
             break
         for call in calls:
-            observation = _run_action(call, actions, environment, deadline)
+            observation = _dispatch_tool(call, actions, environment, denials, deadline)
             messages.append(observation)
             trajectory.append({"turn": turn, "observation": observation})
     if final_message is None:
@@ -201,19 +202,74 @@ def _model_call(
     return payload
 
 
-def _run_action(
+def _denials(request: dict[str, Any]) -> list[dict[str, str]]:
+    raw = request.get("capability_denials") or []
+    denials: list[dict[str, str]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict) and item.get("capability"):
+                denials.append(
+                    {
+                        "capability": str(item["capability"]),
+                        "reason": str(item.get("reason") or "Environment policy"),
+                    }
+                )
+    for name in request.get("denied_capabilities") or []:
+        if not any(item["capability"] == str(name) for item in denials):
+            denials.append({"capability": str(name), "reason": "Environment policy"})
+    return denials
+
+
+def _denial_text(denials: list[dict[str, str]]) -> str:
+    lines = ["These harness tools are unavailable in this Environment:"]
+    for item in denials:
+        lines.append(f"- `{item['capability']}` is unavailable because {item['reason']}.")
+    return "\n".join(lines)
+
+
+def _tool_observation(call: dict[str, Any], name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "role": "tool",
+        "tool_call_id": str(call.get("id") or name),
+        "content": json.dumps(payload)[:100_000],
+    }
+
+
+def _dispatch_tool(
     call: Any,
     actions: dict[str, dict[str, Any]],
     environment: dict[str, Any],
+    denials: list[dict[str, str]],
     deadline: float,
 ) -> dict[str, Any]:
     if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
         raise ValueError("model emitted an invalid action call")
     function = call["function"]
     name = str(function.get("name") or "")
-    declaration = actions.get(name)
-    if declaration is None:
-        raise ValueError(f"model requested undeclared environment action {name!r}")
+    denied = {item["capability"]: item["reason"] for item in denials}
+    if name.startswith("harness."):
+        tool = name.removeprefix("harness.")
+        reason = denied.get(tool, "unknown harness tool")
+        return _tool_observation(call, name, {"error": "denied", "reason": reason, "tool": name})
+    action_name = name.removeprefix("environment.") if name.startswith("environment.") else name
+    if action_name not in actions:
+        return _tool_observation(
+            call,
+            name,
+            {"error": "denied", "reason": f"unknown tool {name!r}", "tool": name},
+        )
+    return _run_action(call, action_name, actions, environment, deadline)
+
+
+def _run_action(
+    call: dict[str, Any],
+    name: str,
+    actions: dict[str, dict[str, Any]],
+    environment: dict[str, Any],
+    deadline: float,
+) -> dict[str, Any]:
+    function = call["function"]
+    declaration = actions[name]
     raw_arguments = function.get("arguments") or "{}"
     arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
     remaining = deadline - time.monotonic()
@@ -258,17 +314,27 @@ def _response_message(response: dict[str, Any]) -> dict[str, Any]:
     return dict(message)
 
 
-def _prompt(request: dict[str, Any], environment: dict[str, Any]) -> str:
+def _prompt(
+    request: dict[str, Any],
+    environment: dict[str, Any],
+    denials: list[dict[str, str]],
+) -> str:
     task = _mapping(request.get("task"), "task")
-    return json.dumps(
-        {
-            "instructions": task.get("instructions"),
-            "task_info": task.get("info"),
-            "metadata": task.get("metadata", {}),
-            "observation": environment.get("observation"),
+    payload = {
+        "instructions": task.get("instructions"),
+        "task_info": task.get("info"),
+        "metadata": task.get("metadata", {}),
+        "observation": environment.get("observation"),
+        "tools": {
+            "environment": [
+                str(item.get("name"))
+                for item in environment.get("actions") or []
+                if isinstance(item, dict) and item.get("name")
+            ],
+            "harness_denied": denials,
         },
-        sort_keys=True,
-    )
+    }
+    return json.dumps(payload, sort_keys=True)
 
 
 def _mapping(value: Any, name: str) -> dict[str, Any]:

@@ -14,13 +14,13 @@ from pydantic import Field
 
 from plural.domain import (
     AgentDefinition,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     EnvironmentRuntime,
     ExecutionTarget,
     FrozenModel,
     HarnessCapability,
+    HarnessGrant,
     HarnessPolicy,
-    HarnessStamp,
     VerifierRuntime,
 )
 from plural.sandbox.models import (
@@ -140,7 +140,7 @@ def _cap_resources(
 
 
 def sandbox_requirements_for(
-    environment: EnvironmentManifest,
+    environment: EnvironmentDefinition,
     *,
     network: NetworkMode | None = None,
     resources: ResourceRequirements | None = None,
@@ -187,9 +187,9 @@ def sandbox_requirements_for(
 
 def resolve_effective_policy(
     *,
-    environment: EnvironmentManifest,
+    environment: EnvironmentDefinition,
     agent: AgentDefinition,
-    stamp: HarnessStamp | None,
+    grant: HarnessGrant | None,
     project: ProjectPolicy,
     provider: ProviderCapabilities,
     requested_target: ExecutionTarget,
@@ -264,14 +264,14 @@ def resolve_effective_policy(
             f"is not enforceable by provider '{provider.provider}'"
         )
 
-    granted: frozenset[HarnessCapability] = stamp.granted if stamp is not None else frozenset()
-    if stamp is not None:
+    granted: frozenset[HarnessCapability] = grant.granted if grant is not None else frozenset()
+    if grant is not None:
         if agent.harness is None:
             raise CapabilityError(
-                "harness stamp required by agent does not match a native AgentDefinition"
+                "harness grant required by agent does not match a native AgentDefinition"
             )
         if project.allowed_harness_capabilities is not None:
-            blocked = stamp.granted - project.allowed_harness_capabilities
+            blocked = grant.granted - project.allowed_harness_capabilities
             if blocked:
                 for capability in sorted(blocked, key=lambda item: item.value):
                     denials.append(
@@ -281,10 +281,10 @@ def resolve_effective_policy(
                             reason="not in project allowed_harness_capabilities",
                         )
                     )
-                granted = stamp.granted & project.allowed_harness_capabilities
+                granted = grant.granted & project.allowed_harness_capabilities
             if not granted:
                 raise CapabilityError(
-                    f"harness {stamp.harness.name} required by agent "
+                    f"harness {grant.harness.name} required by agent "
                     f"has no granted capabilities after project policy"
                 )
 
@@ -299,10 +299,10 @@ def resolve_effective_policy(
     )
 
 
-def policy_case_environment(payload: dict[str, Any]) -> EnvironmentManifest:
+def policy_case_environment(payload: dict[str, Any]) -> EnvironmentDefinition:
     """Build a minimal environment from a shared policy fixture case."""
     runtime = payload.get("runtime") or {}
-    return EnvironmentManifest(
+    return EnvironmentDefinition(
         name=str(payload.get("name") or "env"),
         runtime=EnvironmentRuntime.model_validate(runtime),
         actions=tuple(payload.get("actions") or ()),
@@ -311,9 +311,9 @@ def policy_case_environment(payload: dict[str, Any]) -> EnvironmentManifest:
 
 
 def policy_case_agent(
-    environment: EnvironmentManifest,
+    environment: EnvironmentDefinition,
     payload: dict[str, Any],
-    stamp: HarnessStamp | None,
+    grant: HarnessGrant | None,
 ) -> AgentDefinition:
     """Build a minimal Agent from a shared policy fixture case."""
     harness = payload.get("harness")

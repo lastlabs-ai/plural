@@ -231,6 +231,6 @@
   "required": [
     "name"
   ],
-  "title": "HarnessManifest",
+  "title": "HarnessDefinition",
   "type": "object"
 }

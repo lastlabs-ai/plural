@@ -1,5 +1,42 @@
 {
   "$defs": {
+    "EvidenceContract": {
+      "additionalProperties": false,
+      "description": "What a Verifier needs from the Environment and Trial artifacts.",
+      "properties": {
+        "artifacts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "include_hidden_state": {
+          "default": false,
+          "title": "Include Hidden State",
+          "type": "boolean"
+        },
+        "observation_paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Observation Paths",
+          "type": "array"
+        },
+        "state_paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "State Paths",
+          "type": "array"
+        }
+      },
+      "title": "EvidenceContract",
+      "type": "object"
+    },
     "NetworkMode": {
       "description": "Requested sandbox network policy.",
       "enum": [
@@ -212,6 +249,9 @@
   "additionalProperties": false,
   "description": "Model-judge verifier with its own runtime and connectivity policy.",
   "properties": {
+    "evidence": {
+      "$ref": "#/$defs/EvidenceContract"
+    },
     "instructions": {
       "minLength": 1,
       "title": "Instructions",

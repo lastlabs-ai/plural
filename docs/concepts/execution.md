@@ -24,7 +24,7 @@ A **Verifier** is deterministic, agent, or human, and deterministic/agent
 Verifiers declare runtime and connectivity independently from the Environment.
 
 A **HarnessPackage** declares implementation (`declared` or `runnable`),
-capabilities, and a command. A **HarnessStamp** is resolved per Trial against
+capabilities, and a command. A **HarnessGrant** is resolved per Trial against
 that Task's Environment.
 
 An **AgentDefinition** owns model, instructions, routing, and an optional

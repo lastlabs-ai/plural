@@ -108,7 +108,7 @@ async def test_scaffold_build_publish_add_and_docker_execution(tmp_path: Path) -
         await provider.upload_bundle(handle, source, root="/workspace/harness")
         execution = await HarnessRunner(provider).run(
             handle,
-            package.manifest,
+            package.definition,
             HarnessRunRequest(
                 request_id="docker-flow",
                 task={"task_id": "smoke", "input": "run"},

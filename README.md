@@ -122,11 +122,11 @@ boundaries](https://lastlabs-ai.github.io/plural/operations/security/), and
 
 ```python
 from plural import (
-    AgentBinding, AgentDefinition, DeterministicVerifier, EnvironmentManifest,
+    AgentBinding, AgentDefinition, DeterministicVerifier, EnvironmentDefinition,
     JobSpec, TaskDefinition, TaskJobSource, WeightedVerifier,
 )
 
-environment = EnvironmentManifest(name="support-triage")
+environment = EnvironmentDefinition(name="support-triage")
 verifier = DeterministicVerifier(name="correct", command=("python", "verify.py"))
 task = TaskDefinition(
     task_id="support-1",

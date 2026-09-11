@@ -45,7 +45,7 @@ client.close()
 | [`jobs/`](jobs/) | Packages, local/Docker/Daytona Jobs, attempts, events, and Studio revisions |
 
 Each Environment notebook covers typed state/observation, actions, runtime
-placement, and compiling an immutable `EnvironmentManifest`.
+placement, and compiling an immutable `EnvironmentDefinition`.
 
 The two [benchmarking flows](benchmarking/README.md) are also offline:
 

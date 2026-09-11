@@ -101,7 +101,7 @@ from the command tree and checked for drift.
 
 ## Reference and operations
 
-- [Python API](api.md), [manifest fields](manifests.md), [package schemas](schemas.md),
+- [Python API](api.md), [definition fields](definitions.md), [package schemas](schemas.md),
   [trace schema](trace-schema.md), and [glossary](glossary.md).
 - [CI evaluations](../guides/ci.md).
 - [Security and trust](../operations/security.md),

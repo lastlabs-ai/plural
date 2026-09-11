@@ -12,9 +12,8 @@ from pydantic import BaseModel
 
 from plural.common import PackageSource
 from plural.environments.action_registry import action, function_schema, iter_env_actions
-from plural.environments.fingerprint import callable_implementation_digest
-from plural.environments.manifest import (
-    EnvironmentManifest,
+from plural.environments.definition import (
+    EnvironmentDefinition,
     EnvironmentResource,
     EnvironmentRuntime,
     ExecutionLimits,
@@ -24,6 +23,7 @@ from plural.environments.manifest import (
     RewarderDefinition,
     SecretReference,
 )
+from plural.environments.fingerprint import callable_implementation_digest
 from plural.environments.types import Observation, ObsT, State, StateT
 
 _REWARDER_ATTR = "__plural_rewarder__"
@@ -78,7 +78,7 @@ def _json_snapshot(value: Any) -> Any:
 
 
 class Environment(Generic[ObsT, StateT]):
-    """Compile typed Python declarations into one ``EnvironmentManifest``.
+    """Compile typed Python declarations into one ``EnvironmentDefinition``.
 
     This class is authoring-only. It has no Task collection, model loop,
     Verifier phase or episode lifecycle.
@@ -193,14 +193,14 @@ class Environment(Generic[ObsT, StateT]):
                 )
         return tuple(declarations)
 
-    def manifest(self) -> EnvironmentManifest:
+    def definition(self) -> EnvironmentDefinition:
         """Compile exactly one canonical Environment revision.
 
         Returns:
-            The immutable manifest used by Jobs and hosted publication.
+            The immutable definition used by Jobs and hosted publication.
         """
         observation_type, state_type = self._declared_types()
-        return EnvironmentManifest(
+        return EnvironmentDefinition(
             name=self.name,
             revision=self.revision,
             description=self.description,

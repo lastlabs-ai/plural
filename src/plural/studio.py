@@ -27,7 +27,7 @@ from plural.foundation import (
     AgentDefinition,
     BenchmarkDefinition,
     DeterministicVerifier,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     HarnessPackage,
     HumanVerifier,
     JobSpec,
@@ -191,11 +191,11 @@ class RevisionResourceAPI(Generic[T]):
         return self.publish_revision(resource_id, revision_id)
 
 
-class EnvironmentsAPI(RevisionResourceAPI[EnvironmentManifest]):
+class EnvironmentsAPI(RevisionResourceAPI[EnvironmentDefinition]):
     collection = "environments"
-    model_type = EnvironmentManifest
+    model_type = EnvironmentDefinition
 
-    def _publish_payload(self, value: EnvironmentManifest, **references: Any) -> JsonObject:
+    def _publish_payload(self, value: EnvironmentDefinition, **references: Any) -> JsonObject:
         del references
         return _dump(value, exclude={"name", "description"})
 
@@ -263,7 +263,7 @@ class HarnessesAPI(RevisionResourceAPI[HarnessPackage]):
 
     @staticmethod
     def _name(value: HarnessPackage) -> str:
-        return value.manifest.name
+        return value.definition.name
 
     def _publish_payload(self, value: HarnessPackage, **references: Any) -> JsonObject:
         del references
@@ -569,20 +569,20 @@ class Studio:
                         yield value
 
 
-def environment_manifest(environment: Any) -> JsonObject:
-    """Serialize a Python Environment compiler or EnvironmentManifest."""
-    value = environment.manifest() if hasattr(environment, "manifest") else environment
-    if not isinstance(value, EnvironmentManifest):
-        raise InvalidRequestError("environment must compile to EnvironmentManifest")
+def environment_definition(environment: Any) -> JsonObject:
+    """Serialize a Python Environment compiler or EnvironmentDefinition."""
+    value = environment.definition() if hasattr(environment, "definition") else environment
+    if not isinstance(value, EnvironmentDefinition):
+        raise InvalidRequestError("environment must compile to EnvironmentDefinition")
     return _dump(value)
 
 
 def create_object(client: Client, obj: Any, **references: Any) -> JsonObject:
     """Publish one canonical revision or ingest one Trace."""
     studio = Studio(client)
-    if hasattr(obj, "manifest") and callable(obj.manifest):
-        obj = obj.manifest()
-    if isinstance(obj, EnvironmentManifest):
+    if hasattr(obj, "definition") and callable(obj.definition):
+        obj = obj.definition()
+    if isinstance(obj, EnvironmentDefinition):
         return studio.environments.push(obj)
     if isinstance(obj, TaskDefinition):
         return studio.tasks.push(obj, **references)
@@ -625,7 +625,7 @@ __all__ = [
     "TrialsAPI",
     "VerifiersAPI",
     "create_object",
-    "environment_manifest",
+    "environment_definition",
     "push_object",
     "slugify",
     "studio_base_url",

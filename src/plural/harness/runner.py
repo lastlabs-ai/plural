@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
 
-from plural.domain import HarnessManifest
+from plural.domain import HarnessDefinition
 from plural.harness.protocol import (
     HarnessEvent,
     HarnessProtocolError,
@@ -51,18 +51,18 @@ class HarnessRunner:
     async def run(
         self,
         handle: SandboxHandle,
-        manifest: HarnessManifest,
+        definition: HarnessDefinition,
         request: HarnessRunRequest,
         *,
         env: dict[str, str] | None = None,
         timeout_seconds: float | None = None,
     ) -> HarnessExecution:
         """Execute and enforce protocol and declared-output boundaries."""
-        if manifest.healthcheck is not None:
+        if definition.healthcheck is not None:
             health = await self.provider.exec(
                 handle,
                 ExecRequest(
-                    command=manifest.healthcheck,
+                    command=definition.healthcheck,
                     cwd=request.workspace,
                     env=env or {},
                     timeout_seconds=min(timeout_seconds or 30, 30),
@@ -72,9 +72,9 @@ class HarnessRunner:
                 raise HarnessProtocolError("harness healthcheck failed")
         request_payload = encode_request(request)
         stdin: bytes | None = request_payload
-        command = manifest.command
-        if manifest.protocol == "acp":
-            if manifest.protocol_adapter != "acp-client-v1":
+        command = definition.command
+        if definition.protocol == "acp":
+            if definition.protocol_adapter != "acp-client-v1":
                 raise HarnessProtocolError(
                     "ACP execution requires protocol_adapter='acp-client-v1'"
                 )
@@ -84,7 +84,7 @@ class HarnessRunner:
                 (FileUpload(path=".plural/acp_adapter.py", data=adapter, mode=0o644),),
                 root=request.workspace,
             )
-            command = ("python", ".plural/acp_adapter.py", "--", *manifest.command)
+            command = ("python", ".plural/acp_adapter.py", "--", *definition.command)
         if self.provider.name == "daytona":
             request_path = ".plural/request.jsonl"
             workspace = _validated_workspace(request.workspace)
@@ -145,8 +145,8 @@ class HarnessRunner:
                 stdout=result.stdout,
                 stderr=result.stderr,
             )
-        declared_outputs = {item.path: item for item in manifest.outputs}
-        declared_artifacts = {item.path: item for item in manifest.artifacts}
+        declared_outputs = {item.path: item for item in definition.outputs}
+        declared_artifacts = {item.path: item for item in definition.artifacts}
         output_paths = tuple(dict.fromkeys(terminal.outputs))
         artifact_paths = tuple(dict.fromkeys(terminal.artifacts))
         _validate_declared("output", output_paths, declared_outputs)

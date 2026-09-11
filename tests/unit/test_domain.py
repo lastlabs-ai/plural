@@ -9,12 +9,12 @@ from plural.domain import (
     BenchmarkDefinition,
     BenchmarkJobSource,
     DeterministicVerifier,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     EnvironmentRuntime,
     ExecutionTarget,
     HarnessBinding,
     HarnessCapability,
-    HarnessManifest,
+    HarnessDefinition,
     HarnessPackage,
     JobMode,
     JobSpec,
@@ -23,7 +23,7 @@ from plural.domain import (
     TaskJobSource,
     TITORecord,
     WeightedVerifier,
-    resolve_trial_harness_stamp,
+    resolve_trial_harness_grant,
 )
 from plural.sandbox import NetworkMode
 
@@ -32,7 +32,7 @@ def verifier(name: str = "exact") -> DeterministicVerifier:
     return DeterministicVerifier(name=name, command=("python", "verify.py"))
 
 
-def task(name: str, environment: EnvironmentManifest) -> TaskDefinition:
+def task(name: str, environment: EnvironmentDefinition) -> TaskDefinition:
     return TaskDefinition(
         task_id=name,
         instructions=f"Solve {name}.",
@@ -45,13 +45,15 @@ def task(name: str, environment: EnvironmentManifest) -> TaskDefinition:
 def test_v2_environment_rejects_v1_owned_fields() -> None:
     for field in ("tasks", "verifier", "mode"):
         with pytest.raises(ValidationError, match="cannot own"):
-            EnvironmentManifest.model_validate({"schema_version": "2", "name": "world", field: []})
+            EnvironmentDefinition.model_validate(
+                {"schema_version": "2", "name": "world", field: []}
+            )
     with pytest.raises(ValidationError, match="schema-v1 Environment"):
-        EnvironmentManifest.model_validate({"schema_version": "1", "name": "world"})
+        EnvironmentDefinition.model_validate({"schema_version": "1", "name": "world"})
 
 
 def test_task_pins_environment_and_weighted_verifiers() -> None:
-    environment = EnvironmentManifest(name="world")
+    environment = EnvironmentDefinition(name="world")
     value = task("one", environment)
     assert value.environment.identity == environment.identity
     assert value.verifiers[0].weight == 1
@@ -60,7 +62,7 @@ def test_task_pins_environment_and_weighted_verifiers() -> None:
 
 def test_agent_is_not_environment_bound_and_stamp_is_per_trial() -> None:
     package = HarnessPackage(
-        manifest=HarnessManifest(
+        definition=HarnessDefinition(
             name="web",
             implementation="runnable",
             command=("python", "run.py"),
@@ -74,23 +76,23 @@ def test_agent_is_not_environment_bound_and_stamp_is_per_trial() -> None:
         harness=HarnessBinding.from_package(package),
         harness_package=package,
     )
-    isolated = EnvironmentManifest(name="isolated")
-    open_environment = EnvironmentManifest(
+    isolated = EnvironmentDefinition(name="isolated")
+    open_environment = EnvironmentDefinition(
         name="open",
         runtime=EnvironmentRuntime(network=NetworkMode.FULL),
     )
-    isolated_stamp = resolve_trial_harness_stamp(isolated, agent)
-    open_stamp = resolve_trial_harness_stamp(open_environment, agent)
-    assert isolated_stamp is not None
-    assert open_stamp is not None
-    assert HarnessCapability.WEB_SEARCH in isolated_stamp.denied
-    assert HarnessCapability.WEB_SEARCH in open_stamp.granted
+    isolated_grant = resolve_trial_harness_grant(isolated, agent)
+    open_grant = resolve_trial_harness_grant(open_environment, agent)
+    assert isolated_grant is not None
+    assert open_grant is not None
+    assert HarnessCapability.WEB_SEARCH in isolated_grant.denied
+    assert HarnessCapability.WEB_SEARCH in open_grant.granted
     assert "environment" not in AgentDefinition.model_json_schema()["properties"]
 
 
 def test_cross_environment_benchmark_plans_agent_task_attempts() -> None:
-    first = EnvironmentManifest(name="first")
-    second = EnvironmentManifest(
+    first = EnvironmentDefinition(name="first")
+    second = EnvironmentDefinition(
         name="second",
         runtime=EnvironmentRuntime(
             provider="daytona",
@@ -124,7 +126,7 @@ def test_cross_environment_benchmark_plans_agent_task_attempts() -> None:
 
 
 def test_task_job_and_retry_do_not_change_trial_identity() -> None:
-    selected = task("one", EnvironmentManifest(name="world"))
+    selected = task("one", EnvironmentDefinition(name="world"))
     base = JobSpec(
         source=TaskJobSource(task=selected),
         agents=(AgentBinding(agent=AgentDefinition(name="one", model="test/one")),),

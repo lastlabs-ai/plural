@@ -78,7 +78,7 @@ def validate_hosted_graph(
                 f"Agent {agent.name!r} requires its exact harness_package for hosted sync"
             )
         if spec.mode is JobMode.TRAIN and (
-            agent.harness_package is None or not agent.harness_package.manifest.supports_tito
+            agent.harness_package is None or not agent.harness_package.definition.supports_tito
         ):
             raise ValueError("Train mode requires every selected Agent harness to support TITO")
 

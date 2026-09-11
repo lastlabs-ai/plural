@@ -2,32 +2,32 @@
 
 from plural.environments.action_registry import action
 from plural.environments.dataset import TraceDataset, TraceFilter
-from plural.environments.env import Environment, rewarder
-from plural.environments.manifest import (
+from plural.environments.definition import (
+    EnvironmentDefinition,
     EnvironmentIdentity,
-    EnvironmentManifest,
     EnvironmentResource,
     EnvironmentRuntime,
     ExecutionLimits,
     Guardrail,
+    HarnessGrant,
     HarnessPolicy,
-    HarnessStamp,
     NativeAction,
     RewarderDefinition,
     SecretReference,
 )
+from plural.environments.env import Environment, rewarder
 from plural.environments.types import Observation, State, hidden
 
 __all__ = [
     "Environment",
     "EnvironmentIdentity",
-    "EnvironmentManifest",
+    "EnvironmentDefinition",
     "EnvironmentResource",
     "EnvironmentRuntime",
     "ExecutionLimits",
     "Guardrail",
     "HarnessPolicy",
-    "HarnessStamp",
+    "HarnessGrant",
     "NativeAction",
     "Observation",
     "RewarderDefinition",

@@ -171,7 +171,7 @@ class FileDeclaration(FrozenModel):
         return safe_relative_path(value)
 
 
-class HarnessManifest(FrozenModel):
+class HarnessDefinition(FrozenModel):
     """Versioned executable harness contract."""
 
     schema_version: Literal["2"] = "2"
@@ -214,7 +214,7 @@ class HarnessManifest(FrozenModel):
         return value
 
     @model_validator(mode="after")
-    def _valid_manifest(self) -> HarnessManifest:
+    def _valid_definition(self) -> HarnessDefinition:
         if self.protocol == "acp" and self.protocol_adapter != "acp-client-v1":
             raise ValueError("protocol='acp' requires protocol_adapter='acp-client-v1'")
         if self.protocol != "acp" and self.protocol_adapter is not None:
@@ -232,10 +232,21 @@ class HarnessManifest(FrozenModel):
 
 
 class HarnessPackage(FrozenModel):
-    """Content-addressed harness manifest and source."""
+    """Content-addressed harness definition and source."""
 
-    manifest: HarnessManifest
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+    definition: HarnessDefinition = Field(validation_alias=AliasChoices("definition", "manifest"))
     source: PackageSource
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_manifest_key(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "definition" not in value and "manifest" in value:
+            payload = dict(value)
+            payload["definition"] = payload.pop("manifest")
+            return payload
+        return value
 
     @property
     def content_hash(self) -> str:
@@ -270,8 +281,8 @@ class HarnessBinding(FrozenModel):
             The pinned Harness binding.
         """
         return cls(
-            name=package.manifest.name,
-            revision=package.manifest.revision,
+            name=package.definition.name,
+            revision=package.definition.revision,
             digest=package.source.digest or package.content_hash,
         )
 
@@ -292,7 +303,7 @@ __all__ = [
     "FrozenModel",
     "HarnessBinding",
     "HarnessCapability",
-    "HarnessManifest",
+    "HarnessDefinition",
     "HarnessPackage",
     "PackageSource",
     "RoutingSpec",

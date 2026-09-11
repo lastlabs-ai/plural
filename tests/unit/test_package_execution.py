@@ -13,13 +13,13 @@ from plural.domain import (
     BenchmarkDefinition,
     BenchmarkJobSource,
     DeterministicVerifier,
-    EnvironmentManifest,
+    EnvironmentDefinition,
     EnvironmentRuntime,
     ErrorCode,
     ExecutionTarget,
     FileDeclaration,
     HarnessBinding,
-    HarnessManifest,
+    HarnessDefinition,
     HarnessPackage,
     HumanVerifier,
     JobMode,
@@ -184,7 +184,7 @@ def exact_verifier(provider: str) -> DeterministicVerifier:
 
 def make_task(name: str, provider: str) -> TaskDefinition:
     target = ExecutionTarget.REMOTE if provider == "remote" else ExecutionTarget.DOCKER
-    environment = EnvironmentManifest(
+    environment = EnvironmentDefinition(
         name=f"env-{name}",
         runtime=EnvironmentRuntime(provider=provider, targets=frozenset({target})),
     )
@@ -225,7 +225,7 @@ async def test_cross_environment_scheduler_uses_each_runtime_and_bounds_concurre
 
 
 async def test_human_verifier_yields_awaiting_review(tmp_path: Path) -> None:
-    environment = EnvironmentManifest(name="review")
+    environment = EnvironmentDefinition(name="review")
     task = TaskDefinition(
         task_id="review-me",
         instructions="Write an answer",
@@ -284,7 +284,7 @@ async def test_train_persists_validated_tito_as_hashed_artifact(
     source.mkdir()
     (source / "run.py").write_text("pass\n", encoding="utf-8")
     package = HarnessPackage(
-        manifest=HarnessManifest(
+        definition=HarnessDefinition(
             name="tito",
             implementation="runnable",
             command=("python", "run.py"),

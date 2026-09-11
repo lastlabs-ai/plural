@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from plural.domain import ExecutionTarget, HarnessStamp
+from plural.domain import ExecutionTarget, HarnessGrant
 from plural.execution.policy import (
     ProjectPolicy,
     policy_case_agent,
@@ -30,7 +30,7 @@ def test_resolve_effective_policy_cases(case: dict) -> None:
     if stamp_payload is not None:
         stamp_payload = dict(stamp_payload)
         stamp_payload["environment"] = environment.identity.model_dump(mode="json")
-        stamp = HarnessStamp.model_validate(stamp_payload)
+        stamp = HarnessGrant.model_validate(stamp_payload)
     agent = policy_case_agent(environment, case.get("template") or {}, stamp)
     provider = ProviderCapabilities.model_validate(case["provider"])
     project = ProjectPolicy.model_validate(case["project"])
@@ -40,7 +40,7 @@ def test_resolve_effective_policy_cases(case: dict) -> None:
             resolve_effective_policy(
                 environment=environment,
                 agent=agent,
-                stamp=stamp,
+                grant=stamp,
                 project=project,
                 provider=provider,
                 requested_target=target,
@@ -51,7 +51,7 @@ def test_resolve_effective_policy_cases(case: dict) -> None:
     policy = resolve_effective_policy(
         environment=environment,
         agent=agent,
-        stamp=stamp,
+        grant=stamp,
         project=project,
         provider=provider,
         requested_target=target,

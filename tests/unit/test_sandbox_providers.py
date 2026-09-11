@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from plural.domain import HarnessManifest
+from plural.domain import HarnessDefinition
 from plural.harness import HarnessRunner, HarnessRunRequest
 from plural.sandbox import (
     CapabilityError,
@@ -196,7 +196,7 @@ async def test_daytona_harness_request_redirect_matches_custom_workspace() -> No
 
     await HarnessRunner(provider).run(
         handle,
-        HarnessManifest(name="test", command=("python", "harness.py")),
+        HarnessDefinition(name="test", command=("python", "harness.py")),
         request,
     )
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import plural
 from plural.agents import AgentBinding, AgentDefinition
 from plural.agents.models import AgentDefinition as ModelAgentDefinition
-from plural.environments.manifest import EnvironmentManifest
+from plural.environments.definition import EnvironmentDefinition
 from plural.jobs import JobSpec, TaskJobSource
 from plural.tasks import TaskDefinition
 from plural.verifiers import DeterministicVerifier, WeightedVerifier
@@ -26,7 +26,7 @@ def test_agent_contract_preserves_package_and_models_imports() -> None:
 
 
 def test_job_contract_consumes_focused_domain_modules() -> None:
-    environment = EnvironmentManifest(name="world")
+    environment = EnvironmentDefinition(name="world")
     verifier = DeterministicVerifier(name="exact", command=("python", "verify.py"))
     task = TaskDefinition(
         task_id="hello",

@@ -7,7 +7,8 @@ from typing import Any, Literal
 from pydantic import Field, model_validator
 
 from plural.common import FrozenModel, content_hash, stable_id
-from plural.environments.manifest import EnvironmentManifest
+from plural.environments.definition import EnvironmentDefinition
+from plural.evidence import validate_evidence_contract
 from plural.verifiers import WeightedVerifier
 
 
@@ -18,10 +19,26 @@ class TaskDefinition(FrozenModel):
     task_id: str = Field(min_length=1)
     revision: str = Field(default="0.1.0", min_length=1)
     instructions: str = Field(min_length=1)
-    environment: EnvironmentManifest
+    environment: EnvironmentDefinition
     verifiers: tuple[WeightedVerifier, ...] = Field(min_length=1)
     info: Any = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _evidence_fits_environment(self) -> TaskDefinition:
+        errors: list[str] = []
+        for binding in self.verifiers:
+            errors.extend(
+                validate_evidence_contract(
+                    self.environment.name,
+                    self.environment.observation_schema,
+                    self.environment.state_schema,
+                    binding.verifier.evidence,
+                )
+            )
+        if errors:
+            raise ValueError("; ".join(errors))
+        return self
 
     @property
     def public_payload(self) -> dict[str, Any]:

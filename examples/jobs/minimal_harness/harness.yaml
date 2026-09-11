@@ -1,4 +1,4 @@
-manifest:
+definition:
   schema_version: "2"
   name: example-harness
   revision: 0.1.0
