@@ -9,7 +9,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel
 
-from plural import Agent, Benchmark, Environment, Job, Task
+from plural import Agent, Benchmark, Environment, Harness, HarnessOutput, Job, Task
 from plural.domain import (
     AgentDefinition,
     AgentVerifier,
@@ -17,7 +17,6 @@ from plural.domain import (
     DeterministicVerifier,
     EnvironmentDefinition,
     EnvironmentRuntime,
-    HarnessPackage,
     HumanVerifier,
     JobSpec,
     PackageSource,
@@ -26,7 +25,7 @@ from plural.domain import (
     VerifierDefinition,
 )
 from plural.harness.retrieval import package_from_archive, tree_digest
-from plural.project import Resolver
+from plural.project import Resolver, public_schema
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -150,29 +149,27 @@ def scaffold_task(
 
 
 def scaffold_harness(directory: Path, name: str, *, force: bool = False) -> list[Path]:
-    """Create a runnable standalone Harness package."""
+    """Create a runnable standalone Harness."""
     directory.mkdir(parents=True, exist_ok=True)
-    package = {
-        "definition": {
-            "schema_version": "2",
-            "name": name,
-            "revision": "0.1.0",
-            "implementation": "runnable",
-            "command": ["python", "harness.py", "native.chat.v1"],
-            "capabilities": ["shell"],
-            "secret_names": ["PLURAL_API_KEY", "OPENAI_API_KEY"],
-            "environment_names": [
-                "PLURAL_GATEWAY_URL",
-                "OPENAI_BASE_URL",
-                "PLURAL_ALLOW_NO_AUTH",
-            ],
-            "outputs": [{"path": "result.json"}],
-            "artifacts": [{"path": "trajectory.jsonl"}],
-            "trajectory_path": "trajectory.jsonl",
-        },
-        "source": {"kind": "local", "uri": ".", "unsafe_local": True},
+    harness = {
+        "kind": "harness",
+        "name": name,
+        "version": "0.1.0",
+        "description": "Custom Agent interaction loop.",
+        "command": ["python", "harness.py", "chat"],
+        "source": ".",
+        "capabilities": ["shell"],
+        "secrets": ["PLURAL_API_KEY", "OPENAI_API_KEY"],
+        "environment": [
+            "PLURAL_GATEWAY_URL",
+            "OPENAI_BASE_URL",
+            "PLURAL_ALLOW_NO_AUTH",
+        ],
+        "outputs": [{"path": "result.json"}],
+        "artifacts": [{"path": "trajectory.jsonl"}],
+        "trajectory": "trajectory.jsonl",
     }
-    manifest = _create(directory / "harness.yaml", package, force=force)
+    config = _create(directory / "harness.yaml", harness, force=force)
     runner = directory / "harness.py"
     if runner.exists() and not force:
         raise FileExistsError(f"{runner} already exists; pass --force to replace it")
@@ -180,7 +177,7 @@ def scaffold_harness(directory: Path, name: str, *, force: bool = False) -> list
         (Path(__file__).parents[1] / "harness" / "native_runner.py").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
-    return [manifest, runner]
+    return [config, runner]
 
 
 def scaffold_agent(
@@ -200,15 +197,17 @@ def scaffold_agent(
         if harness_path is not None
         else None
     )
-    agent = {
+    agent: dict[str, Any] = {
         "kind": "agent",
         "name": name,
         "version": "0.1.0",
         "model": model,
-        "harness": package.model_dump(mode="json") if package else None,
         "secret_names": list(secret_names),
     }
-    return _create(_target(path, "agent.yaml"), agent, force=force)
+    target = _target(path, "agent.yaml")
+    if package is not None:
+        agent["harness"] = yaml.safe_load(Resolver(root=target.parent).dumps(package))
+    return _create(target, agent, force=force)
 
 
 def scaffold_benchmark(
@@ -343,31 +342,13 @@ def load_job(path: Path) -> JobSpec:
     return value.spec
 
 
-_LEGACY_HARNESS_KEY_WARNED = False
-
-
-def load_harness(path: Path) -> HarnessPackage:
-    """Load and lock a local Harness package."""
-    global _LEGACY_HARNESS_KEY_WARNED
+def load_harness(path: Path) -> Harness:
+    """Load and lock a local Harness."""
     source = _target(path, "harness.yaml").resolve()
-    payload = read_yaml(source)
-    if "manifest" in payload and "definition" not in payload and not _LEGACY_HARNESS_KEY_WARNED:
-        import warnings
-
-        warnings.warn(
-            "harness.yaml key 'manifest' is deprecated; use 'definition'",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        _LEGACY_HARNESS_KEY_WARNED = True
-    package_source = payload.get("source")
-    if isinstance(package_source, dict) and package_source.get("kind") == "local":
-        root = Path(str(package_source.get("uri", "."))).expanduser()
-        if not root.is_absolute():
-            root = (source.parent / root).resolve()
-        package_source["uri"] = str(root)
-        package_source["digest"] = tree_digest(root)
-    return HarnessPackage.model_validate(payload)
+    value = Resolver(root=source.parent).load(source.name)
+    if not isinstance(value, Harness):
+        raise TypeError(f"{source} is not a Harness")
+    return value
 
 
 def load_harness_reference(
@@ -375,20 +356,41 @@ def load_harness_reference(
     *,
     digest: str | None = None,
     cache_root: Path | None = None,
-) -> HarnessPackage:
+) -> Harness:
     """Load a local Harness or immutable archive."""
     path = Path(reference).expanduser()
     if path.exists() and (path.is_dir() or path.suffix in {".yaml", ".yml"}):
         return load_harness(path)
     if digest is None:
         raise ValueError("archive Harness references require --digest")
-    return package_from_archive(reference, digest, cache_root=cache_root)
+    package = package_from_archive(reference, digest, cache_root=cache_root)
+    definition = package.definition
+    return Harness(
+        name=definition.name,
+        version=definition.revision,
+        description=definition.description,
+        command=definition.command,
+        source=reference,
+        digest=digest,
+        requirements=definition.requirements,
+        capabilities=definition.capabilities,
+        models=definition.supported_models,
+        auth=definition.auth_modes,
+        secrets=definition.secret_names,
+        environment=definition.environment_names,
+        healthcheck=definition.healthcheck,
+        outputs=tuple(HarnessOutput(**item.model_dump()) for item in definition.outputs),
+        artifacts=tuple(HarnessOutput(**item.model_dump()) for item in definition.artifacts),
+        trajectory=definition.trajectory_path,
+        tito=definition.tito_path,
+    )
 
 
 def generate_schemas(directory: Path) -> list[Path]:
     """Generate schemas from public SDK models with plain names."""
     models: tuple[tuple[str, type[BaseModel]], ...] = (
         ("Environment", EnvironmentDefinition),
+        ("Harness", Harness),
         ("Task", Task),
         ("DeterministicVerifier", DeterministicVerifier),
         ("AgentVerifier", AgentVerifier),
@@ -399,7 +401,7 @@ def generate_schemas(directory: Path) -> list[Path]:
     directory.mkdir(parents=True, exist_ok=True)
     output = []
     for name, model in models:
-        schema = model.model_json_schema()
+        schema = public_schema(model)
         schema["title"] = name
         path = directory / f"{name}.schema.json"
         path.write_text(

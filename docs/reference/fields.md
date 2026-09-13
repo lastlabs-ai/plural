@@ -17,6 +17,7 @@ These are the public SDK fields used by Python and YAML. JSON Schema alone does 
 ## Find a contract
 
 - [Environment](#environment)
+- [Harness](#harness)
 - [Task](#task)
 - [DeterministicVerifier](#deterministicverifier)
 - [AgentVerifier](#agentverifier)
@@ -30,16 +31,12 @@ These are the public SDK fields used by Python and YAML. JSON Schema alone does 
 - [EvidenceContract](#evidencecontract)
 - [ExecutionLimits](#executionlimits)
 - [ExecutionTarget](#executiontarget)
-- [FileDeclaration](#filedeclaration)
 - [Guardrail](#guardrail)
-- [HarnessBinding](#harnessbinding)
 - [HarnessCapability](#harnesscapability)
-- [HarnessDefinition](#harnessdefinition)
-- [HarnessPackage](#harnesspackage)
+- [HarnessOutput](#harnessoutput)
 - [HarnessPolicy](#harnesspolicy)
 - [NativeAction](#nativeaction)
 - [NetworkMode](#networkmode)
-- [PackageSource](#packagesource)
 - [ResourceRequirements](#resourcerequirements)
 - [RewarderDefinition](#rewarderdefinition)
 - [RubricCriterion](#rubriccriterion)
@@ -67,7 +64,28 @@ Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent.
 - **`harness_policy`** — `HarnessPolicy`; optional.
 - **`limits`** — `ExecutionLimits`; optional.
 - **`metadata`** — `object`; optional.
-- **`source`** — `PackageSource | null`; optional. Default: `null`.
+
+## Harness
+
+An executable Agent interaction strategy.
+
+- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
+- **`version`** — `string`; optional. Default: `"0.1.0"`.
+- **`description`** — `string`; optional. Default: `""`.
+- **`command`** — `array of string`; required. Constraints: `{"minItems": 1}`.
+- **`source`** — `string`; optional. Default: `"."`.
+- **`digest`** — `string | null`; optional. Default: `null`.
+- **`requirements`** — `array of string`; optional. Default: `[]`.
+- **`capabilities`** — `array of HarnessCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
+- **`models`** — `array of string`; optional. Default: `["*"]`.
+- **`auth`** — `array of "environment" | "api_key" | "oauth" | "none"`; optional. Default: `["environment"]`.
+- **`secrets`** — `array of string`; optional. Default: `[]`.
+- **`environment`** — `array of string`; optional. Default: `[]`.
+- **`healthcheck`** — `array of string | null`; optional. Default: `null`.
+- **`outputs`** — `array of HarnessOutput`; optional. Default: `[]`.
+- **`artifacts`** — `array of HarnessOutput`; optional. Default: `[]`.
+- **`trajectory`** — `string | null`; optional. Default: `null`.
+- **`tito`** — `string | null`; optional. Default: `null`.
 
 ## Task
 
@@ -146,7 +164,7 @@ A catalog-backed model and its optional execution harness.
 - **`fallback_models`** — `array of string`; optional. Default: `[]`.
 - **`temperature`** — `number | null`; optional. Default: `null`.
 - **`max_tokens`** — `integer | null`; optional. Default: `null`.
-- **`harness`** — `HarnessPackage | null`; optional. Default: `null`.
+- **`harness`** — `Harness | null`; optional. Default: `null`.
 - **`auth_mode`** — `"environment" | "api_key" | "oauth" | "none"`; optional. Default: `"environment"`.
 - **`secret_names`** — `array of string`; optional. Default: `[]`.
 - **`metadata`** — `object`; optional.
@@ -236,28 +254,12 @@ Execution isolation class.
 Allowed values: `"local" | "docker" | "remote"`.
 
 
-## FileDeclaration
-
-A file emitted or consumed by a package.
-
-- **`path`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`required`** — `boolean`; optional. Default: `true`.
-- **`media_type`** — `string`; optional. Default: `"application/octet-stream"`.
-
 ## Guardrail
 
 A plain-language Environment rule.
 
 - **`name`** — `string`; optional. Default: `""`.
 - **`rule`** — `string`; required. Constraints: `{"minLength": 1}`.
-
-## HarnessBinding
-
-Exact harness revision.
-
-- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`revision`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`digest`** — `string`; required.
 
 ## HarnessCapability
 
@@ -266,44 +268,20 @@ A capability requested by an agent harness.
 Allowed values: `"shell" | "file_read" | "file_edit" | "code_execution" | "web_search" | "browser" | "network_fetch" | "mcp" | "subagents" | "persistence"`.
 
 
-## HarnessDefinition
+## HarnessOutput
 
-Versioned executable harness contract.
+One file produced by a Harness.
 
-- **`schema_version`** — `"2"`; optional. Default: `"2"`.
-- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`revision`** — `string`; optional. Default: `"0.1.0"`. Constraints: `{"minLength": 1}`.
-- **`description`** — `string`; optional. Default: `""`.
-- **`protocol`** — `"plural-harness-v1" | "acp"`; optional. Default: `"plural-harness-v1"`.
-- **`protocol_adapter`** — `"acp-client-v1" | null`; optional. Default: `null`.
-- **`implementation`** — `"declared" | "runnable"`; optional. Default: `"declared"`.
-- **`command`** — `array of string`; optional. Default: `[]`.
-- **`requirements`** — `array of string`; optional. Default: `[]`.
-- **`capabilities`** — `array of HarnessCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
-- **`supported_models`** — `array of string`; optional. Default: `["*"]`.
-- **`auth_modes`** — `array of "environment" | "api_key" | "oauth" | "none"`; optional. Default: `["environment"]`.
-- **`secret_names`** — `array of string`; optional. Default: `[]`.
-- **`environment_names`** — `array of string`; optional. Default: `[]`.
-- **`healthcheck`** — `array of string | null`; optional. Default: `null`.
-- **`trajectory_path`** — `string | null`; optional. Default: `null`.
-- **`outputs`** — `array of FileDeclaration`; optional. Default: `[]`.
-- **`artifacts`** — `array of FileDeclaration`; optional. Default: `[]`.
-- **`supports_tito`** — `boolean`; optional. Default: `false`.
-- **`tito_path`** — `string | null`; optional. Default: `null`.
-
-## HarnessPackage
-
-Content-addressed harness definition and source.
-
-- **`definition`** — `HarnessDefinition`; required.
-- **`source`** — `PackageSource`; required.
+- **`path`** — `string`; required. Constraints: `{"minLength": 1}`.
+- **`required`** — `boolean`; optional. Default: `true`.
+- **`media_type`** — `string`; optional. Default: `"application/octet-stream"`.
 
 ## HarnessPolicy
 
 Environment ceiling for a Trial's optional Agent harness.
 
 - **`mode`** — `"allow_all" | "allowlist"`; optional. Default: `"allow_all"`.
-- **`allowed_harnesses`** — `array of HarnessBinding`; optional. Default: `[]`.
+- **`allowed_harnesses`** — `array of string`; optional. Default: `[]`.
 - **`allowed_capabilities`** — `array of HarnessCapability | null`; optional. Default: `null`.
 - **`denied_capabilities`** — `array of HarnessCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
 
@@ -326,16 +304,6 @@ Requested sandbox network policy.
 
 Allowed values: `"none" | "restricted" | "full"`.
 
-
-## PackageSource
-
-Immutable package source.
-
-- **`kind`** — `"local" | "oci" | "archive"`; required.
-- **`uri`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`digest`** — `string | null`; optional. Default: `null`.
-- **`trusted`** — `boolean`; optional. Default: `false`.
-- **`unsafe_local`** — `boolean`; optional. Default: `false`.
 
 ## ResourceRequirements
 

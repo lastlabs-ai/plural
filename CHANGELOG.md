@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-09-13
+
+### Fixed
+
+- Replace leaked advanced Harness internals with one plain public `Harness`
+  value whose executable source is locked and compiled only inside execution.
+- Keep Harness and Agent YAML, CLI scaffolds, generated schemas, and current
+  documentation free of internal transport and content-lock structures.
+
 ## [0.12.0] - 2026-09-13
 
 ### Added
@@ -457,7 +466,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.12.0
 [0.8.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.8.0
 [0.7.4]: https://github.com/lastlabs-ai/plural/releases/tag/v0.7.4
 [0.7.3]: https://github.com/lastlabs-ai/plural/releases/tag/v0.7.3

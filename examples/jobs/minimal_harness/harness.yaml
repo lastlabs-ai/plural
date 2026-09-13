@@ -1,20 +1,14 @@
-definition:
-  schema_version: "2"
-  name: example-harness
-  revision: 0.1.0
-  description: Offline protocol example.
-  protocol: plural-harness-v1
-  implementation: runnable
-  command: [python, harness.py]
-  capabilities: [shell]
-  auth_modes: [none]
-  outputs:
-    - {path: result.json, required: true, media_type: application/json}
-  artifacts:
-    - {path: evidence.txt, required: true, media_type: text/plain}
-    - {path: trajectory.jsonl, required: true, media_type: application/jsonl}
-  trajectory_path: trajectory.jsonl
-source:
-  kind: local
-  uri: .
-  unsafe_local: true
+kind: harness
+name: example-harness
+version: 0.1.0
+description: Offline custom Harness example.
+command: [python, harness.py]
+source: .
+capabilities: [shell]
+auth: [none]
+outputs:
+  - {path: result.json, required: true, media_type: application/json}
+artifacts:
+  - {path: evidence.txt, required: true, media_type: text/plain}
+  - {path: trajectory.jsonl, required: true, media_type: application/jsonl}
+trajectory: trajectory.jsonl

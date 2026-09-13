@@ -9,8 +9,9 @@ from typer.testing import CliRunner
 
 from plural.cli.main import app
 from plural.cli.scaffold import read_yaml, scaffold_environment, scaffold_harness, write_yaml
-from plural.harness import HarnessRunner, HarnessRunRequest
+from plural.harness.protocol import HarnessRunRequest
 from plural.harness.retrieval import materialize_package, package_from_archive
+from plural.harness.runner import HarnessRunner
 from plural.sandbox import (
     DockerProvider,
     ExecRequest,
@@ -57,23 +58,23 @@ async def test_scaffold_build_publish_add_and_docker_execution(tmp_path: Path) -
     harness = tmp_path / "harness"
     scaffold_environment(environment, "docker-flow")
     scaffold_harness(harness, "docker-flow")
-    package_yaml = read_yaml(harness / "harness.yaml")
-    package_yaml["manifest"].update(
+    harness_yaml = read_yaml(harness / "harness.yaml")
+    harness_yaml.update(
         {
             "command": ["python", "smoke.py"],
             "capabilities": [],
-            "secret_names": [],
-            "environment_names": [],
-            "auth_modes": ["none"],
+            "secrets": [],
+            "environment": [],
+            "auth": ["none"],
         }
     )
-    write_yaml(harness / "harness.yaml", package_yaml)
+    write_yaml(harness / "harness.yaml", harness_yaml)
     (harness / "smoke.py").write_text(
         "import json,sys\n"
         "json.loads(sys.stdin.readline())\n"
         "open('result.json','w').write('{}\\n')\n"
         "open('trajectory.jsonl','w').write('{}\\n')\n"
-        "print(json.dumps({'protocol':'plural-harness-v1','type':'result',"
+        "print(json.dumps({'type':'result',"
         "'status':'succeeded','outputs':['result.json'],"
         "'artifacts':['trajectory.jsonl']}),flush=True)\n",
         encoding="utf-8",

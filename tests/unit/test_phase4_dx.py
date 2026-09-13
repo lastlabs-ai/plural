@@ -8,10 +8,9 @@ from pathlib import Path
 import yaml
 from typer.testing import CliRunner
 
-from plural import Agent, Benchmark, Environment, HarnessPackage, Job, PackageSource, Task
+from plural import Agent, Benchmark, Environment, Harness, Job, Task
 from plural.catalog import ModelCatalog, ModelEndpoint, ModelSpec
 from plural.cli.main import app
-from plural.common import HarnessDefinition
 from plural.project import CatalogContext, Resolver, dump, load
 from plural.verifiers import DeterministicVerifier
 
@@ -23,6 +22,9 @@ STALE_PUBLIC_API = re.compile(
 SERIALIZATION_INTERNAL = re.compile(
     r"\b[A-Za-z_]\w*(?:Definition|Binding)\b"
     r"|\bWeightedVerifier\b|\bnative_(?:actions|chat)_v1\b"
+    r"|\bschema_version\b|\bprotocol_adapter\b|\bprotocol\b"
+    r"|\bdefinition\b|\bbinding\b|\bpackage\b|_v1\b",
+    re.IGNORECASE,
 )
 
 
@@ -108,18 +110,16 @@ def test_python_reference_and_environment_packaging(tmp_path: Path) -> None:
 
 def test_advanced_job_yaml_hides_nested_harness_protocol_names(tmp_path: Path) -> None:
     *_values, original = graph()
-    package = HarnessPackage(
-        definition=HarnessDefinition(
-            name="custom",
-            version="1.0.0",
-            implementation="runnable",
-            command=("python", "harness.py"),
-        ),
-        source=PackageSource(kind="local", uri=str(tmp_path), unsafe_local=True),
+    (tmp_path / "harness.py").write_text("print('ok')\n")
+    harness = Harness(
+        name="custom",
+        version="1.0.0",
+        command=("python", "harness.py"),
+        source=str(tmp_path),
     )
     job = Job(
         original.source,
-        agents=[Agent(model="openai/gpt-5.6-luna", harness=package)],
+        agents=[Agent(model="openai/gpt-5.6-luna", harness=harness)],
     )
     path = dump(job, tmp_path / "advanced-job.yaml")
     emitted = path.read_text(encoding="utf-8")

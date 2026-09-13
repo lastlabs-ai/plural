@@ -205,9 +205,22 @@ class HarnessPolicy(FrozenModel):
     """Environment ceiling for a Trial's optional Agent harness."""
 
     mode: Literal["allow_all", "allowlist"] = "allow_all"
-    allowed_harnesses: tuple[HarnessBinding, ...] = ()
+    allowed_harnesses: tuple[str, ...] = ()
     allowed_capabilities: frozenset[HarnessCapability] | None = None
     denied_capabilities: frozenset[HarnessCapability] = frozenset()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _public_harness_names(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        allowed = payload.get("allowed_harnesses")
+        if isinstance(allowed, (list, tuple)):
+            payload["allowed_harnesses"] = tuple(
+                item.name if isinstance(item, HarnessBinding) else str(item) for item in allowed
+            )
+        return payload
 
 
 class HarnessGrant(FrozenModel):
@@ -264,7 +277,10 @@ class EnvironmentDefinition(FrozenModel):
     harness_policy: HarnessPolicy = Field(default_factory=HarnessPolicy)
     limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    source: PackageSource | None = None
+    source: PackageSource | None = Field(
+        default=None,
+        json_schema_extra={"x-internal": True},
+    )
 
     @model_validator(mode="before")
     @classmethod

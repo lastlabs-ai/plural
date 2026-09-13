@@ -3,13 +3,15 @@
 import json
 from pathlib import Path
 
-from plural import Agent, Benchmark, Task
+from plural import Agent, Benchmark, Harness, Task
 from plural.environments.definition import EnvironmentDefinition
+from plural.project import public_schema
 from plural.verifiers import AgentVerifier, DeterministicVerifier, HumanVerifier
 
 root = Path(__file__).resolve().parents[1] / "docs"
 models = [
     ("Environment", EnvironmentDefinition),
+    ("Harness", Harness),
     ("Task", Task),
     ("DeterministicVerifier", DeterministicVerifier),
     ("AgentVerifier", AgentVerifier),
@@ -20,7 +22,7 @@ models = [
 schemas = {}
 nested = {}
 for name, model in models:
-    schema = model.model_json_schema()
+    schema = public_schema(model)
     schema["title"] = name
     schemas[name] = schema
     nested.update(schema.get("$defs", {}))

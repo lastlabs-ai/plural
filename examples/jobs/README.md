@@ -1,4 +1,4 @@
-# Package execution examples
+# Harness execution examples
 
 Run from the repository root:
 
@@ -19,8 +19,8 @@ without rerunning successful Trials. `06` prints the canonical schema-v2 Job
 graph for a compatible hosted API—the same graph an authenticated `plural run`
 synchronizes before submitting and watching its hosted Job.
 
-`minimal_harness/` is a complete `plural-harness-v1` package. It reads one
+`minimal_harness/` is a complete custom Harness. It reads one
 request, writes one result plus evidence/trajectory artifacts, and emits one
-terminal event. `_foundation.py` builds first-class Task and Verifier revisions,
-an Environment-independent AgentDefinition, a Benchmark source, and an
+terminal event. `_foundation.py` builds first-class Task and Verifier versions,
+an Environment-independent Agent, a Benchmark source, and an
 Environment-routed Job.

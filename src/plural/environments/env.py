@@ -83,8 +83,8 @@ def _json_snapshot(value: Any) -> Any:
 class Environment(Generic[ObsT, StateT]):
     """A Task-bound world with a Gymnasium ``reset`` / ``step`` episode API.
 
-    Compile typed declarations into one ``EnvironmentDefinition``. A Task pins
-    one Environment revision. The Job or Harness constructs this instance for
+    Compile typed declarations into one immutable execution view. A Task pins
+    one Environment version. The Job or Harness constructs this instance for
     that Task, calls :meth:`reset`, then applies Agent moves with :meth:`step`.
     ``reset`` and ``step`` are not Agent-facing ``@action`` tools.
     """
@@ -117,7 +117,6 @@ class Environment(Generic[ObsT, StateT]):
         harness_policy: HarnessPolicy | None = None,
         limits: ExecutionLimits | None = None,
         metadata: dict[str, Any] | None = None,
-        source: PackageSource | None = None,
         state: StateT | None = None,
         observation: ObsT | None = None,
         info: Any = None,
@@ -143,7 +142,7 @@ class Environment(Generic[ObsT, StateT]):
         self.harness_policy = harness_policy or HarnessPolicy()
         self.limits = limits or ExecutionLimits()
         self.metadata = deepcopy(type(self).metadata) if metadata is None else deepcopy(metadata)
-        self.source = source
+        self.source: PackageSource | None = None
         self._adapter_command: tuple[str, ...] | None = None
         self._package_root: Path | None = None
         self._compiled_definition: EnvironmentDefinition | None = None
@@ -279,9 +278,9 @@ class Environment(Generic[ObsT, StateT]):
             harness_policy=definition.harness_policy,
             limits=definition.limits,
             metadata=definition.metadata,
-            source=definition.source,
             reset_command=definition.reset_command,
         )
+        environment.source = definition.source
         environment._compiled_definition = definition
         return environment
 

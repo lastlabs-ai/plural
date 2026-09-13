@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from plural.domain import HarnessDefinition
-from plural.harness import HarnessRunner, HarnessRunRequest
+from plural.harness.protocol import HarnessRunRequest
+from plural.harness.runner import HarnessRunner
 from plural.sandbox import (
     CapabilityError,
     DaytonaProvider,

@@ -11,6 +11,7 @@ from plural import (
     DeterministicVerifier,
     Environment,
     ErrorCode,
+    Harness,
     Job,
     JobPlan,
     JobResult,
@@ -42,6 +43,7 @@ def main() -> None:
     assert msg.role == "user"
     assert env.name == "x"
     assert len(ds) == 1
+    harness = Harness(name="custom", command=("python", "runner.py"))
     verifier = DeterministicVerifier(name="v", check=("python", "-c", "pass"))
     task = Task(
         name="1",
@@ -57,6 +59,7 @@ def main() -> None:
     agent = Agent(
         name="a",
         model="openai/gpt-5.6-luna",
+        harness=harness,
     )
     plan: JobPlan = Job(
         benchmark,

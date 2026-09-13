@@ -168,6 +168,19 @@ def package_from_archive(
     payload = yaml.safe_load((root / "harness.yaml").read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("harness.yaml must contain a mapping")
+    if payload.get("kind") == "harness" or not ({"definition", "manifest"} & payload.keys()):
+        from plural.harness.models import Harness
+
+        public_payload = dict(payload)
+        public_payload.pop("kind", None)
+        public_payload["source"] = str(root)
+        public = Harness.model_validate(public_payload)
+        return HarnessPackage.model_validate(
+            {
+                "definition": public._package().definition,
+                "source": {"kind": "archive", "uri": uri, "digest": digest},
+            }
+        )
     payload["source"] = {"kind": "archive", "uri": uri, "digest": digest}
     package = HarnessPackage.model_validate(payload)
     return package

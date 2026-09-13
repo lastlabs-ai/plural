@@ -32,6 +32,7 @@ algorithms consume its records but are not part of its public domain model.
 | Environment | `Environment` | `environment` | `environments` | name, version, content hash |
 | Runtime | `Runtime` | nested | nested | content hash |
 | Agent | `Agent` | `agent` | `agents` | name, version, content hash |
+| Harness | `Harness` | `harness` | `harness` | name, version, content hash |
 | Verifier | `DeterministicVerifier`, `AgentVerifier`, `HumanVerifier` | `verifier` | `verifiers` | name, version, content hash |
 | Task | `Task` | `task` | `tasks` | name, version, content hash |
 | Benchmark | `Benchmark` | `benchmark` | `benchmarks` | name, required semantic version, content hash |

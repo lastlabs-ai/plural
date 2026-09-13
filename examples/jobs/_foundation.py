@@ -19,7 +19,6 @@ from plural import (
     Task,
 )
 from plural.cli.scaffold import load_harness
-from plural.harness import tree_digest
 from plural.verifiers import DeterministicVerifier, VerifierRuntime
 
 ROOT = Path(__file__).parent
@@ -44,10 +43,7 @@ def build_job(
     Returns:
         A planned Job ready for local execution.
     """
-    loaded = load_harness(HARNESS)
-    package = loaded.model_copy(
-        update={"source": loaded.source.model_copy(update={"digest": tree_digest(HARNESS)})}
-    )
+    harness = load_harness(HARNESS)
     isolated = provider != "local"
     environment = Environment(
         name="offline-example",
@@ -90,7 +86,7 @@ def build_job(
     agent = context.agent(
         name="offline-agent",
         model="offline/deterministic",
-        harness=package,
+        harness=harness,
         auth_mode="none",
     )
     return Job(

@@ -17,6 +17,7 @@ from plural.common import (
     semantic_version,
     stable_id,
 )
+from plural.harness.models import Harness
 
 
 @lru_cache(maxsize=1)
@@ -35,7 +36,7 @@ class Agent(FrozenModel):
     fallback_models: tuple[str, ...] = ()
     temperature: float | None = None
     max_tokens: int | None = Field(default=None, gt=0)
-    harness: HarnessPackage | None = None
+    harness: Harness | None = None
     auth_mode: Literal["environment", "api_key", "oauth", "none"] = "environment"
     secret_names: tuple[str, ...] = ()
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -92,7 +93,7 @@ class Agent(FrozenModel):
     @property
     def harness_binding(self) -> HarnessBinding | None:
         """Internal content-addressed binding derived from ``harness``."""
-        return HarnessBinding.from_package(self.harness) if self.harness else None
+        return HarnessBinding.from_package(self.harness._package()) if self.harness else None
 
     @property
     def content_hash(self) -> str:
@@ -110,14 +111,15 @@ class Agent(FrozenModel):
         Returns:
             The internal immutable execution definition.
         """
+        harness_package = self.harness._package() if self.harness else None
         return AgentDefinition(
             name=self.name,
             revision=self.version,
             model=self.model,
             instructions=self.instructions,
             routing=self.routing,
-            harness=self.harness_binding,
-            harness_package=self.harness,
+            harness=(HarnessBinding.from_package(harness_package) if harness_package else None),
+            harness_package=harness_package,
             auth_mode=self.auth_mode,
             secret_names=self.secret_names,
             metadata=self.metadata,

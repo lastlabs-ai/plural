@@ -1,4 +1,4 @@
-"""Credential-free example implementation of plural-harness-v1."""
+"""Credential-free custom Harness example."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ Path("trajectory.jsonl").write_text(
 print(
     json.dumps(
         {
-            "protocol": "plural-harness-v1",
             "type": "result",
             "status": "succeeded",
             "outputs": ["result.json"],

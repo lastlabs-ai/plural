@@ -35,3 +35,19 @@ agent = context.agent(model="project/model")
 The context is passed to project loaders and Job planning. It never mutates a
 global registry, so ordinary `Agent(model="...")` continues to validate against
 the bundled catalog.
+
+For a custom interaction loop, attach one plain Harness:
+
+```python
+from plural import Agent, Harness
+
+harness = Harness(
+    name="support-loop",
+    command=["python", "harness.py"],
+    source="harness",
+)
+agent = Agent(model="openai/gpt-5.6-luna", harness=harness)
+```
+
+See [Harnesses](harnesses.md) for capabilities, named credential references,
+outputs, artifacts, and training metadata.

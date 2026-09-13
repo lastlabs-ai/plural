@@ -22,8 +22,8 @@ def _local_command(command: list[Any]) -> list[str]:
     return resolved
 
 
-_CHAT_PROFILES = {"native.chat.v1"}
-_ACTION_PROFILES = {"native.actions.v1"}
+_CHAT_PROFILES = {"chat", "native.chat.v1"}
+_ACTION_PROFILES = {"actions", "native.actions.v1"}
 
 
 def main() -> None:

@@ -37,6 +37,7 @@ def test_packaged_schemas_are_valid_json_schemas() -> None:
         "DeterministicVerifier.schema.json",
         "Environment.schema.json",
         "HumanVerifier.schema.json",
+        "Harness.schema.json",
         "Job.schema.json",
         "Task.schema.json",
     }

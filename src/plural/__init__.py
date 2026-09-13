@@ -11,8 +11,6 @@ from plural.common import (
     ErrorCode,
     ExecutionTarget,
     HarnessCapability,
-    HarnessPackage,
-    PackageSource,
     content_hash,
     stable_id,
 )
@@ -48,6 +46,7 @@ from plural.errors import (
     is_retryable,
 )
 from plural.execution import JobStore, Trial
+from plural.harness import Harness, HarnessOutput
 from plural.jobs import (
     AgentAggregate,
     ArtifactManifest,
@@ -158,8 +157,9 @@ __all__ = [
     "ExecutionLimits",
     "ExecutionStatus",
     "ExecutionTarget",
+    "Harness",
     "HarnessCapability",
-    "HarnessPackage",
+    "HarnessOutput",
     "HarnessPolicy",
     "HumanVerifier",
     "InvalidRequestError",
@@ -177,7 +177,6 @@ __all__ = [
     "NotFoundError",
     "Observation",
     "Outcome",
-    "PackageSource",
     "Plural",
     "PluralError",
     "ProgressEvent",

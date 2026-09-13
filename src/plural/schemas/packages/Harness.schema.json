@@ -1,0 +1,211 @@
+{
+  "$defs": {
+    "HarnessCapability": {
+      "description": "A capability requested by an agent harness.",
+      "enum": [
+        "shell",
+        "file_read",
+        "file_edit",
+        "code_execution",
+        "web_search",
+        "browser",
+        "network_fetch",
+        "mcp",
+        "subagents",
+        "persistence"
+      ],
+      "title": "HarnessCapability",
+      "type": "string"
+    },
+    "HarnessOutput": {
+      "additionalProperties": false,
+      "description": "One file produced by a Harness.",
+      "properties": {
+        "media_type": {
+          "default": "application/octet-stream",
+          "title": "Media Type",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "HarnessOutput",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "An executable Agent interaction strategy.",
+  "properties": {
+    "artifacts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/HarnessOutput"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "auth": {
+      "default": [
+        "environment"
+      ],
+      "items": {
+        "enum": [
+          "environment",
+          "api_key",
+          "oauth",
+          "none"
+        ],
+        "type": "string"
+      },
+      "title": "Auth",
+      "type": "array"
+    },
+    "capabilities": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/HarnessCapability"
+      },
+      "title": "Capabilities",
+      "type": "array",
+      "uniqueItems": true
+    },
+    "command": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Command",
+      "type": "array"
+    },
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "digest": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Digest"
+    },
+    "environment": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Environment",
+      "type": "array"
+    },
+    "healthcheck": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Healthcheck"
+    },
+    "models": {
+      "default": [
+        "*"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "title": "Models",
+      "type": "array"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "outputs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/HarnessOutput"
+      },
+      "title": "Outputs",
+      "type": "array"
+    },
+    "requirements": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Requirements",
+      "type": "array"
+    },
+    "secrets": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Secrets",
+      "type": "array"
+    },
+    "source": {
+      "default": ".",
+      "title": "Source",
+      "type": "string"
+    },
+    "tito": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tito"
+    },
+    "trajectory": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trajectory"
+    },
+    "version": {
+      "default": "0.1.0",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "command"
+  ],
+  "title": "Harness",
+  "type": "object"
+}

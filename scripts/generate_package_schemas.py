@@ -9,14 +9,16 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from plural import Agent, Benchmark, Task
+from plural import Agent, Benchmark, Harness, Task
 from plural.environments.definition import EnvironmentDefinition
+from plural.project import public_schema
 from plural.verifiers import AgentVerifier, DeterministicVerifier, HumanVerifier
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "src" / "plural" / "schemas" / "packages"
 MODELS: tuple[tuple[str, type[BaseModel]], ...] = (
     ("Environment", EnvironmentDefinition),
+    ("Harness", Harness),
     ("Task", Task),
     ("DeterministicVerifier", DeterministicVerifier),
     ("AgentVerifier", AgentVerifier),
@@ -47,7 +49,7 @@ def rendered_schemas() -> dict[Path, str]:
     """Return every expected public schema and canonical contents."""
     rendered: dict[Path, str] = {}
     for name, model in MODELS:
-        schema = model.model_json_schema()
+        schema = public_schema(model)
         schema["title"] = name
         rendered[OUTPUT / f"{name}.schema.json"] = (
             json.dumps(schema, indent=2, sort_keys=True) + "\n"

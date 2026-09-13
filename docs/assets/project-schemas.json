@@ -341,33 +341,6 @@
         "title": "Guardrail",
         "type": "object"
       },
-      "HarnessBinding": {
-        "additionalProperties": false,
-        "description": "Exact harness revision.",
-        "properties": {
-          "name": {
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "revision": {
-            "minLength": 1,
-            "title": "Revision",
-            "type": "string"
-          },
-          "digest": {
-            "title": "Digest",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "revision",
-          "digest"
-        ],
-        "title": "HarnessBinding",
-        "type": "object"
-      },
       "HarnessCapability": {
         "description": "A capability requested by an agent harness.",
         "enum": [
@@ -401,7 +374,7 @@
           "allowed_harnesses": {
             "default": [],
             "items": {
-              "$ref": "#/$defs/HarnessBinding"
+              "type": "string"
             },
             "title": "Allowed Harnesses",
             "type": "array"
@@ -504,54 +477,6 @@
         ],
         "title": "NetworkMode",
         "type": "string"
-      },
-      "PackageSource": {
-        "additionalProperties": false,
-        "description": "Immutable package source.",
-        "properties": {
-          "kind": {
-            "enum": [
-              "local",
-              "oci",
-              "archive"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "uri": {
-            "minLength": 1,
-            "title": "Uri",
-            "type": "string"
-          },
-          "digest": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Digest"
-          },
-          "trusted": {
-            "default": false,
-            "title": "Trusted",
-            "type": "boolean"
-          },
-          "unsafe_local": {
-            "default": false,
-            "title": "Unsafe Local",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "kind",
-          "uri"
-        ],
-        "title": "PackageSource",
-        "type": "object"
       },
       "ResourceRequirements": {
         "additionalProperties": false,
@@ -799,23 +724,223 @@
         "additionalProperties": true,
         "title": "Metadata",
         "type": "object"
-      },
-      "source": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/PackageSource"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null
       }
     },
     "required": [
       "name"
     ],
     "title": "Environment",
+    "type": "object"
+  },
+  "Harness": {
+    "$defs": {
+      "HarnessCapability": {
+        "description": "A capability requested by an agent harness.",
+        "enum": [
+          "shell",
+          "file_read",
+          "file_edit",
+          "code_execution",
+          "web_search",
+          "browser",
+          "network_fetch",
+          "mcp",
+          "subagents",
+          "persistence"
+        ],
+        "title": "HarnessCapability",
+        "type": "string"
+      },
+      "HarnessOutput": {
+        "additionalProperties": false,
+        "description": "One file produced by a Harness.",
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "media_type": {
+            "default": "application/octet-stream",
+            "title": "Media Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "HarnessOutput",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "An executable Agent interaction strategy.",
+    "properties": {
+      "name": {
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "version": {
+        "default": "0.1.0",
+        "title": "Version",
+        "type": "string"
+      },
+      "description": {
+        "default": "",
+        "title": "Description",
+        "type": "string"
+      },
+      "command": {
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "title": "Command",
+        "type": "array"
+      },
+      "source": {
+        "default": ".",
+        "title": "Source",
+        "type": "string"
+      },
+      "digest": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Digest"
+      },
+      "requirements": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Requirements",
+        "type": "array"
+      },
+      "capabilities": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/HarnessCapability"
+        },
+        "title": "Capabilities",
+        "type": "array",
+        "uniqueItems": true
+      },
+      "models": {
+        "default": [
+          "*"
+        ],
+        "items": {
+          "type": "string"
+        },
+        "title": "Models",
+        "type": "array"
+      },
+      "auth": {
+        "default": [
+          "environment"
+        ],
+        "items": {
+          "enum": [
+            "environment",
+            "api_key",
+            "oauth",
+            "none"
+          ],
+          "type": "string"
+        },
+        "title": "Auth",
+        "type": "array"
+      },
+      "secrets": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Secrets",
+        "type": "array"
+      },
+      "environment": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Environment",
+        "type": "array"
+      },
+      "healthcheck": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Healthcheck"
+      },
+      "outputs": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/HarnessOutput"
+        },
+        "title": "Outputs",
+        "type": "array"
+      },
+      "artifacts": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/HarnessOutput"
+        },
+        "title": "Artifacts",
+        "type": "array"
+      },
+      "trajectory": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Trajectory"
+      },
+      "tito": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Tito"
+      }
+    },
+    "required": [
+      "name",
+      "command"
+    ],
+    "title": "Harness",
     "type": "object"
   },
   "Task": {
@@ -2090,9 +2215,192 @@
   },
   "Agent": {
     "$defs": {
-      "FileDeclaration": {
+      "Harness": {
         "additionalProperties": false,
-        "description": "A file emitted or consumed by a package.",
+        "description": "An executable Agent interaction strategy.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "command": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Command",
+            "type": "array"
+          },
+          "source": {
+            "default": ".",
+            "title": "Source",
+            "type": "string"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Digest"
+          },
+          "requirements": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Requirements",
+            "type": "array"
+          },
+          "capabilities": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/HarnessCapability"
+            },
+            "title": "Capabilities",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "models": {
+            "default": [
+              "*"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "auth": {
+            "default": [
+              "environment"
+            ],
+            "items": {
+              "enum": [
+                "environment",
+                "api_key",
+                "oauth",
+                "none"
+              ],
+              "type": "string"
+            },
+            "title": "Auth",
+            "type": "array"
+          },
+          "secrets": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Secrets",
+            "type": "array"
+          },
+          "environment": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Environment",
+            "type": "array"
+          },
+          "healthcheck": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Healthcheck"
+          },
+          "outputs": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/HarnessOutput"
+            },
+            "title": "Outputs",
+            "type": "array"
+          },
+          "artifacts": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/HarnessOutput"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "trajectory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Trajectory"
+          },
+          "tito": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tito"
+          }
+        },
+        "required": [
+          "name",
+          "command"
+        ],
+        "title": "Harness",
+        "type": "object"
+      },
+      "HarnessCapability": {
+        "description": "A capability requested by an agent harness.",
+        "enum": [
+          "shell",
+          "file_read",
+          "file_edit",
+          "code_execution",
+          "web_search",
+          "browser",
+          "network_fetch",
+          "mcp",
+          "subagents",
+          "persistence"
+        ],
+        "title": "HarnessCapability",
+        "type": "string"
+      },
+      "HarnessOutput": {
+        "additionalProperties": false,
+        "description": "One file produced by a Harness.",
         "properties": {
           "path": {
             "minLength": 1,
@@ -2113,281 +2421,7 @@
         "required": [
           "path"
         ],
-        "title": "FileDeclaration",
-        "type": "object"
-      },
-      "HarnessCapability": {
-        "description": "A capability requested by an agent harness.",
-        "enum": [
-          "shell",
-          "file_read",
-          "file_edit",
-          "code_execution",
-          "web_search",
-          "browser",
-          "network_fetch",
-          "mcp",
-          "subagents",
-          "persistence"
-        ],
-        "title": "HarnessCapability",
-        "type": "string"
-      },
-      "HarnessDefinition": {
-        "additionalProperties": false,
-        "description": "Versioned executable harness contract.",
-        "properties": {
-          "schema_version": {
-            "const": "2",
-            "default": "2",
-            "title": "Schema Version",
-            "type": "string"
-          },
-          "name": {
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "revision": {
-            "default": "0.1.0",
-            "minLength": 1,
-            "title": "Revision",
-            "type": "string"
-          },
-          "description": {
-            "default": "",
-            "title": "Description",
-            "type": "string"
-          },
-          "protocol": {
-            "default": "plural-harness-v1",
-            "enum": [
-              "plural-harness-v1",
-              "acp"
-            ],
-            "title": "Protocol",
-            "type": "string"
-          },
-          "protocol_adapter": {
-            "anyOf": [
-              {
-                "const": "acp-client-v1",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Protocol Adapter"
-          },
-          "implementation": {
-            "default": "declared",
-            "enum": [
-              "declared",
-              "runnable"
-            ],
-            "title": "Implementation",
-            "type": "string"
-          },
-          "command": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Command",
-            "type": "array"
-          },
-          "requirements": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Requirements",
-            "type": "array"
-          },
-          "capabilities": {
-            "default": [],
-            "items": {
-              "$ref": "#/$defs/HarnessCapability"
-            },
-            "title": "Capabilities",
-            "type": "array",
-            "uniqueItems": true
-          },
-          "supported_models": {
-            "default": [
-              "*"
-            ],
-            "items": {
-              "type": "string"
-            },
-            "title": "Supported Models",
-            "type": "array"
-          },
-          "auth_modes": {
-            "default": [
-              "environment"
-            ],
-            "items": {
-              "enum": [
-                "environment",
-                "api_key",
-                "oauth",
-                "none"
-              ],
-              "type": "string"
-            },
-            "title": "Auth Modes",
-            "type": "array"
-          },
-          "secret_names": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Secret Names",
-            "type": "array"
-          },
-          "environment_names": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Environment Names",
-            "type": "array"
-          },
-          "healthcheck": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Healthcheck"
-          },
-          "trajectory_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Trajectory Path"
-          },
-          "outputs": {
-            "default": [],
-            "items": {
-              "$ref": "#/$defs/FileDeclaration"
-            },
-            "title": "Outputs",
-            "type": "array"
-          },
-          "artifacts": {
-            "default": [],
-            "items": {
-              "$ref": "#/$defs/FileDeclaration"
-            },
-            "title": "Artifacts",
-            "type": "array"
-          },
-          "supports_tito": {
-            "default": false,
-            "title": "Supports Tito",
-            "type": "boolean"
-          },
-          "tito_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tito Path"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "HarnessDefinition",
-        "type": "object"
-      },
-      "HarnessPackage": {
-        "additionalProperties": false,
-        "description": "Content-addressed harness definition and source.",
-        "properties": {
-          "definition": {
-            "$ref": "#/$defs/HarnessDefinition"
-          },
-          "source": {
-            "$ref": "#/$defs/PackageSource"
-          }
-        },
-        "required": [
-          "definition",
-          "source"
-        ],
-        "title": "HarnessPackage",
-        "type": "object"
-      },
-      "PackageSource": {
-        "additionalProperties": false,
-        "description": "Immutable package source.",
-        "properties": {
-          "kind": {
-            "enum": [
-              "local",
-              "oci",
-              "archive"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "uri": {
-            "minLength": 1,
-            "title": "Uri",
-            "type": "string"
-          },
-          "digest": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Digest"
-          },
-          "trusted": {
-            "default": false,
-            "title": "Trusted",
-            "type": "boolean"
-          },
-          "unsafe_local": {
-            "default": false,
-            "title": "Unsafe Local",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "kind",
-          "uri"
-        ],
-        "title": "PackageSource",
+        "title": "HarnessOutput",
         "type": "object"
       }
     },
@@ -2462,7 +2496,7 @@
       "harness": {
         "anyOf": [
           {
-            "$ref": "#/$defs/HarnessPackage"
+            "$ref": "#/$defs/Harness"
           },
           {
             "type": "null"

@@ -44,16 +44,10 @@ from plural.execution.policy import (
     sandbox_requirements_for,
 )
 from plural.execution.store import JobStore
-from plural.harness import (
-    BUILTIN_PROFILES,
-    HarnessExecutionError,
-    HarnessProtocolError,
-    HarnessRunner,
-    HarnessRunRequest,
-    native_actions_v1,
-    native_chat_v1,
-)
+from plural.harness.packages import BUILTIN_PROFILES, native_actions_v1, native_chat_v1
+from plural.harness.protocol import HarnessProtocolError, HarnessRunRequest
 from plural.harness.retrieval import materialize_package, retrieve_archive, tree_digest
+from plural.harness.runner import HarnessExecutionError, HarnessRunner
 from plural.sandbox import (
     CapabilityError,
     DownloadedFile,

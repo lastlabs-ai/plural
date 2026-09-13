@@ -16,12 +16,13 @@ from typing import Any, TypeGuard, cast
 from uuid import uuid4
 
 import yaml
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from plural.agents import Agent
 from plural.catalog import ModelCatalog, ModelSpec
 from plural.environments import Environment
 from plural.environments.definition import EnvironmentDefinition
+from plural.harness import Harness
 from plural.jobs import Job
 from plural.tasks import Benchmark, Task
 from plural.verifiers import (
@@ -30,8 +31,16 @@ from plural.verifiers import (
     VerifierDefinition,
 )
 
-ProjectObject = Agent | Environment[Any, Any] | Verifier | Task | Benchmark | Job
+ProjectObject = Agent | Harness | Environment[Any, Any] | Verifier | Task | Benchmark | Job
 _VERIFIER_ADAPTER: TypeAdapter[VerifierDefinition] = TypeAdapter(VerifierDefinition)
+_INTERNAL_SCHEMA_TYPES = frozenset(
+    {
+        "HarnessBinding",
+        "HarnessDefinition",
+        "HarnessPackage",
+        "PackageSource",
+    }
+)
 
 
 class CatalogContext:
@@ -218,7 +227,21 @@ class Resolver:
         else:
             kind = str(payload.pop("kind", "") or _infer_kind(payload))
         if kind == "agent":
+            harness_value = payload.get("harness")
+            if harness_value is not None:
+                harness = self._resolve_nested(harness_value, base)
+                if not isinstance(harness, Harness):
+                    raise TypeError("Agent harness must resolve to a Harness")
+                payload["harness"] = harness
             return Agent.model_validate(payload, context={"catalog": self.catalog})
+        if kind == "harness":
+            source_text = str(payload.get("source", "."))
+            if "://" not in source_text:
+                path = Path(source_text).expanduser()
+                payload["source"] = str(
+                    path.resolve() if path.is_absolute() else (base / path).resolve()
+                )
+            return Harness.model_validate(payload)
         if kind == "verifier":
             return _VERIFIER_ADAPTER.validate_python(payload, context={"catalog": self.catalog})
         if kind == "environment":
@@ -245,7 +268,8 @@ class Resolver:
                 agents.append(agent)
             return Job(source, agents=agents, catalog=self.catalog, **payload)
         raise ValueError(
-            "project YAML requires kind: agent, environment, verifier, task, benchmark, or job"
+            "project YAML requires kind: agent, harness, environment, verifier, task, "
+            "benchmark, or job"
         )
 
     def _resolve_nested(self, value: Any, base: Path) -> ProjectObject:
@@ -287,7 +311,12 @@ class Resolver:
 
     def _dump_object(self, value: ProjectObject, base: Path) -> dict[str, Any]:
         if isinstance(value, Agent):
-            return {"kind": "agent", **_public_data(value.model_dump(mode="json"))}
+            payload = _public_data(value.model_dump(mode="json", exclude={"harness"}))
+            if value.harness is not None:
+                payload["harness"] = self._dump_harness(value.harness, base)
+            return {"kind": "agent", **payload}
+        if isinstance(value, Harness):
+            return self._dump_harness(value, base)
         if isinstance(value, Verifier):
             return cast(dict[str, Any], _public_data(value.model_dump(mode="json")))
         if isinstance(value, Environment):
@@ -332,13 +361,20 @@ class Resolver:
             }
         raise TypeError(f"cannot serialize {type(value).__name__}")
 
+    def _dump_harness(self, harness: Harness, base: Path) -> dict[str, Any]:
+        payload = _public_data(harness.model_dump(mode="json", exclude_none=True))
+        source = harness.source
+        if "://" not in source:
+            payload["source"] = _relative(Path(source).expanduser().resolve(), base)
+        return {"kind": "harness", **payload}
+
     def _dump_environment_value(self, value: Any, base: Path) -> dict[str, Any]:
         if isinstance(value, Environment):
             return self._dump_environment(value, base)
         if isinstance(value, EnvironmentDefinition):
             return {
                 "kind": "environment",
-                **_public_data(value.model_dump(mode="json")),
+                **_public_data(value.model_dump(mode="json", exclude={"source"})),
             }
         raise TypeError("Task environment is not a public Environment")
 
@@ -346,7 +382,9 @@ class Resolver:
         if type(environment) is Environment or environment._compiled_definition is not None:
             return {
                 "kind": "environment",
-                **_public_data(environment.definition().model_dump(mode="json")),
+                **_public_data(
+                    environment.definition().model_dump(mode="json", exclude={"source"})
+                ),
             }
         source_file = environment._python_source or inspect.getsourcefile(type(environment))
         if source_file is None:
@@ -424,6 +462,39 @@ def dumps(value: ProjectObject) -> str:
     return Resolver().dumps(value)
 
 
+def public_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Return a JSON Schema containing only public authoring fields.
+
+    Returns:
+        A detached schema safe for generated public references.
+    """
+    schema = model.model_json_schema()
+
+    def clean(value: Any) -> None:
+        if isinstance(value, dict):
+            properties = value.get("properties")
+            if isinstance(properties, dict):
+                for key in tuple(properties):
+                    item = properties[key]
+                    if isinstance(item, dict) and item.pop("x-internal", False):
+                        properties.pop(key)
+                required = value.get("required")
+                if isinstance(required, list):
+                    value["required"] = [key for key in required if key in properties]
+            definitions = value.get("$defs")
+            if isinstance(definitions, dict):
+                for name in _INTERNAL_SCHEMA_TYPES:
+                    definitions.pop(name, None)
+            for item in value.values():
+                clean(item)
+        elif isinstance(value, list):
+            for item in value:
+                clean(item)
+
+    clean(schema)
+    return schema
+
+
 def _read_mapping(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(path)
@@ -458,6 +529,8 @@ def _infer_kind(payload: Mapping[str, Any]) -> str:
         return "task"
     if "model" in payload and "check" not in payload and "criteria" not in payload:
         return "agent"
+    if "command" in payload and ("source" in payload or "capabilities" in payload):
+        return "harness"
     if "check" in payload or payload.get("kind") in {"deterministic", "agent", "human"}:
         return "verifier"
     if "runtime" in payload or "actions" in payload or "python" in payload:
@@ -466,7 +539,7 @@ def _infer_kind(payload: Mapping[str, Any]) -> str:
 
 
 def _is_project_object(value: object) -> TypeGuard[ProjectObject]:
-    return isinstance(value, (Agent, Environment, Verifier, Task, Benchmark, Job))
+    return isinstance(value, (Agent, Harness, Environment, Verifier, Task, Benchmark, Job))
 
 
 def _jsonable(value: Any) -> Any:
@@ -485,7 +558,15 @@ def _public_data(value: Any) -> Any:
     if isinstance(value, dict):
         result: dict[str, Any] = {}
         for key, item in value.items():
-            if key == "schema_version":
+            if key in {
+                "schema_version",
+                "protocol",
+                "protocol_adapter",
+                "definition",
+                "manifest",
+                "binding",
+                "package",
+            }:
                 continue
             public_key = "version" if key == "revision" else str(key)
             if public_key in result:
@@ -513,4 +594,5 @@ __all__ = [
     "dump",
     "dumps",
     "load",
+    "public_schema",
 ]

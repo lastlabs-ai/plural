@@ -551,7 +551,7 @@ def harness_init(
     name: str = typer.Option("harness", "--name"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
-    """Create a Harness package."""
+    """Create a custom Harness."""
     try:
         created = scaffold_harness(path, name, force=force)
     except (OSError, ValueError, FileExistsError) as exc:
@@ -562,8 +562,8 @@ def harness_init(
 @harness_app.command("validate")
 def harness_validate(path: Path = typer.Argument(Path("."))) -> None:
     """Validate and lock a Harness."""
-    package = _validated(load_harness, path)
-    _emit({"valid": True, "digest": package.content_hash})
+    harness = _validated(load_harness, path)
+    _emit({"valid": True, "digest": harness.content_hash})
 
 
 @harness_app.command("show")
@@ -576,7 +576,7 @@ def harness_show(path: Path = typer.Argument(Path("."))) -> None:
 def harness_push(path: Path = typer.Argument(Path("."))) -> None:
     """Publish a Harness parent and immutable revision."""
     with _client() as client:
-        _emit(client.harnesses.push(_validated(load_harness, path)))
+        _emit(client.harnesses.push(_validated(load_harness, path)._package()))
 
 
 @harness_app.command("publish")

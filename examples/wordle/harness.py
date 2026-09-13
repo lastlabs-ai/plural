@@ -40,7 +40,6 @@ Path("trajectory.jsonl").write_text("".join(json.dumps(item) + "\n" for item in 
 print(
     json.dumps(
         {
-            "protocol": "plural-harness-v1",
             "type": "result",
             "status": "succeeded",
             "outputs": ["result.json"],

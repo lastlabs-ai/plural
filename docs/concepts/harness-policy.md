@@ -34,22 +34,25 @@ Environment has no public internet."
 Hard-fail only if a denied capability is **successfully performed**.
 Harness stdout still must not smuggle scores or rewards.
 
-## Declared versus runnable
+## Built-in versus custom
 
-`HarnessDefinition.implementation` is `declared` or `runnable`. Declared
-harnesses have no command. They can be registered, granted, referenced by
-an Agent, and rendered in the UI. They cannot execute a Trial.
+Omit `Agent.harness` to use Plural's built-in interaction loop. Set it to one
+plain `Harness` value when you need a custom executable:
 
-This release ships four declared definitions — `hermes`, `claude-code`,
-`codex`, `cursor` — and one runnable executor: the native runner
-(`native.chat.v1`, `native.actions.v1`). Vendor subprocess loops attach
-later without changing ownership.
+```python
+from plural import Agent, Harness
 
-A job that names a declared harness fails at preflight:
-
+harness = Harness(
+    name="research-loop",
+    command=["python", "harness.py"],
+    source="harness",
+    capabilities=["web_search"],
+)
+agent = Agent(model="openai/gpt-5.6-luna", harness=harness)
 ```
-harness <name> is declared but not runnable
-```
+
+Plural locks the executable source and execution details internally before a
+Trial starts.
 
 ## How a grant is computed
 

@@ -145,9 +145,8 @@ def _training_benchmark_graph(tmp_path: Path) -> tuple[Path, Path]:
     scaffold_harness(harness, "training-harness")
     harness_yaml = harness / "harness.yaml"
     payload = yaml.safe_load(harness_yaml.read_text(encoding="utf-8"))
-    payload["definition"]["supports_tito"] = True
-    payload["definition"]["tito_path"] = "tito.jsonl"
-    payload["definition"]["artifacts"].append({"path": "tito.jsonl"})
+    payload["tito"] = "tito.jsonl"
+    payload["artifacts"].append({"path": "tito.jsonl"})
     harness_yaml.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     scaffold_agent(
         agent,

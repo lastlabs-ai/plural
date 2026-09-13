@@ -21,10 +21,7 @@ TARGETS = [
     "plural.environments.env.action",
     "plural.environments.env.rewarder",
     "plural.environments.types",
-    "plural.harness.protocol",
-    "plural.harness.runner",
-    "plural.harness.packages",
-    "plural.harness.retrieval",
+    "plural.harness.models",
     "plural.sandbox.base.SandboxProvider",
     "plural.sandbox.models",
     "plural.sandbox.registry.ProviderRegistry",
@@ -33,7 +30,6 @@ TARGETS = [
     "plural.sandbox.daytona.DaytonaProvider",
     "plural.cli.config",
     "plural.cli.auth",
-    "plural.studio",
     "plural.routing.policies",
     "plural.environments.export.hf.to_huggingface_records",
     "plural.environments.export.verifiers.to_verifiers_trace",
@@ -46,7 +42,6 @@ TARGETS = [
     "plural.tracing.redaction",
     "plural.providers.base",
     "plural.errors",
-    "plural.cli.scaffold",
 ]
 
 
@@ -111,7 +106,7 @@ def _emit(name, value):
         if not issubclass(value, BaseModel):
             lines.extend(["```python", name + _signature(value), "```", ""])
         for member, raw in value.__dict__.items():
-            if member.startswith("_"):
+            if member.startswith("_") or member == "definition":
                 continue
             fn = raw.__func__ if isinstance(raw, (classmethod, staticmethod)) else raw
             if not inspect.isfunction(fn):
@@ -146,5 +141,5 @@ for name in TARGETS:
             _emit(getattr(item, "__module__", name) + "." + getattr(item, "__name__", key), item)
     else:
         _emit(name, value)
-(ROOT / "docs/reference/api.md").write_text("\n".join(lines) + "\n")
+(ROOT / "docs/reference/api.md").write_text("\n".join(lines).rstrip() + "\n")
 print(f"Generated API documentation for {len(seen)} public symbols.")

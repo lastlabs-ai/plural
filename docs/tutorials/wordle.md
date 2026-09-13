@@ -31,5 +31,5 @@ The short files each own one concept:
 `advanced.py` separately demonstrates a custom Harness, Agent and Human
 Verifiers, and a Rewarder so the beginner graph stays small.
 
-Python and YAML produce equal Job plans and hashes. No beginner file imports an
-internal definition, binding, action manifest, runtime alias, or native profile.
+Python and YAML produce equal Job plans and hashes. Beginner files use only the
+plain public evaluation concepts.

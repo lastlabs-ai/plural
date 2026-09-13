@@ -351,7 +351,7 @@ def resolve_trial_harness_grant(
     if HarnessBinding.from_package(package) != binding:
         raise ValueError("Agent Harness package does not match binding")
     allowed = set(environment.harness_policy.allowed_harnesses)
-    if environment.harness_policy.mode == "allowlist" and binding not in allowed:
+    if environment.harness_policy.mode == "allowlist" and binding.name not in allowed:
         raise ValueError(
             f"Harness {binding.name!r} is not allowed by Environment {environment.name!r}"
         )

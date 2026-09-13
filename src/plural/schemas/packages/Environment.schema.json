@@ -340,33 +340,6 @@
       "title": "Guardrail",
       "type": "object"
     },
-    "HarnessBinding": {
-      "additionalProperties": false,
-      "description": "Exact harness revision.",
-      "properties": {
-        "digest": {
-          "title": "Digest",
-          "type": "string"
-        },
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "revision": {
-          "minLength": 1,
-          "title": "Revision",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "revision",
-        "digest"
-      ],
-      "title": "HarnessBinding",
-      "type": "object"
-    },
     "HarnessCapability": {
       "description": "A capability requested by an agent harness.",
       "enum": [
@@ -407,7 +380,7 @@
         "allowed_harnesses": {
           "default": [],
           "items": {
-            "$ref": "#/$defs/HarnessBinding"
+            "type": "string"
           },
           "title": "Allowed Harnesses",
           "type": "array"
@@ -503,54 +476,6 @@
       ],
       "title": "NetworkMode",
       "type": "string"
-    },
-    "PackageSource": {
-      "additionalProperties": false,
-      "description": "Immutable package source.",
-      "properties": {
-        "digest": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Digest"
-        },
-        "kind": {
-          "enum": [
-            "local",
-            "oci",
-            "archive"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "trusted": {
-          "default": false,
-          "title": "Trusted",
-          "type": "boolean"
-        },
-        "unsafe_local": {
-          "default": false,
-          "title": "Unsafe Local",
-          "type": "boolean"
-        },
-        "uri": {
-          "minLength": 1,
-          "title": "Uri",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "uri"
-      ],
-      "title": "PackageSource",
-      "type": "object"
     },
     "ResourceRequirements": {
       "additionalProperties": false,
@@ -788,17 +713,6 @@
       },
       "title": "Secrets",
       "type": "array"
-    },
-    "source": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/PackageSource"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
     },
     "state_schema": {
       "additionalProperties": true,
