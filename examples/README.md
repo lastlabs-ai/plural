@@ -43,6 +43,7 @@ client.close()
 | [`environment/`](environment/) | Canonical typed Environment authoring notebooks |
 | [`benchmarking/`](benchmarking/) | Cross-Environment `BenchmarkDefinition` Jobs |
 | [`jobs/`](jobs/) | Packages, local/Docker/Daytona Jobs, attempts, events, and Studio revisions |
+| [`wordle/`](wordle/) | Environment, Task, Verifier, Agent, and Job in three files |
 
 Each Environment notebook covers typed state/observation, actions, runtime
 placement, and compiling an immutable `EnvironmentDefinition`.

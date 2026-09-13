@@ -1,82 +1,32 @@
-"""Schema-v2 package scaffolding, loading, and generated schemas."""
+"""Compatibility scaffolds around the public project serializer."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
+from plural import Agent, Benchmark, Environment, Job, Task
 from plural.domain import (
-    AgentBinding,
     AgentDefinition,
     AgentVerifier,
     BenchmarkDefinition,
-    BenchmarkJobSource,
     DeterministicVerifier,
     EnvironmentDefinition,
     EnvironmentRuntime,
-    HarnessBinding,
     HarnessPackage,
     HumanVerifier,
-    JobMode,
     JobSpec,
     PackageSource,
     RubricCriterion,
     TaskDefinition,
-    TaskJobSource,
     VerifierDefinition,
-    WeightedVerifier,
 )
 from plural.harness.retrieval import package_from_archive, tree_digest
-
-
-class StrictFile(BaseModel):
-    """Strict immutable path-reference file."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-class TaskFile(StrictFile):
-    """Authoring file for one Task revision."""
-
-    schema_version: Literal["2"] = "2"
-    task_id: str
-    revision: str = "0.1.0"
-    instructions: str
-    environment: Path
-    verifiers: tuple[Path, ...] = Field(min_length=1)
-    verifier_weights: tuple[float, ...] = ()
-    info: Any = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class BenchmarkFile(StrictFile):
-    """Authoring file for a cross-Environment Benchmark."""
-
-    schema_version: Literal["2"] = "2"
-    name: str
-    revision: str = "0.1.0"
-    tasks: tuple[Path, ...] = Field(min_length=1)
-    primary_metric: str = "reward"
-    description: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class JobFile(StrictFile):
-    """Path-based Job selecting a Benchmark or Task."""
-
-    schema_version: Literal["2"] = "2"
-    source_kind: Literal["benchmark", "task"]
-    source: Path
-    agents: tuple[Path, ...] = Field(min_length=1)
-    mode: JobMode = JobMode.EVAL
-    attempts: int = Field(default=1, ge=1)
-    concurrency: int = Field(default=1, ge=1)
-    per_runtime_concurrency: int = Field(default=1, ge=1)
-    priority: int = 0
+from plural.project import Resolver
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -107,16 +57,16 @@ def _create(path: Path, payload: Any, *, force: bool) -> Path:
 
 
 def scaffold_environment(directory: Path, name: str, *, force: bool = False) -> list[Path]:
-    """Create a standalone schema-v2 Environment package."""
+    """Create a small public Environment package."""
     directory.mkdir(parents=True, exist_ok=True)
-    manifest = EnvironmentDefinition(
-        name=name,
-        overview="A typed runtime world with declared actions and observable state.",
-        runtime=EnvironmentRuntime(),
-    )
     environment_yaml = _create(
         directory / "environment.yaml",
-        manifest.model_dump(mode="json", exclude={"source"}),
+        {
+            "kind": "environment",
+            "name": name,
+            "overview": "A typed runtime world with declared actions and observable state.",
+            "runtime": EnvironmentRuntime().model_dump(mode="json"),
+        },
         force=force,
     )
     environment_py = directory / "environment.py"
@@ -126,7 +76,7 @@ def scaffold_environment(directory: Path, name: str, *, force: bool = False) -> 
         "from plural import Environment\n\n\n"
         "class ProjectEnvironment(Environment):\n"
         f'    name = "{name}"\n'
-        '    revision = "0.1.0"\n',
+        '    version = "0.1.0"\n',
         encoding="utf-8",
     )
     dockerfile = directory / "Dockerfile"
@@ -150,14 +100,14 @@ def scaffold_verifier(
     if kind == "deterministic":
         verifier: VerifierDefinition = DeterministicVerifier(
             name=name,
-            command=("python", "verify.py"),
+            check=("python", "verify.py"),
         )
     elif kind == "agent":
         verifier = AgentVerifier(
             name=name,
-            model="openai/gpt-4.1-mini",
+            model="openai/gpt-5.6-luna",
             instructions="Score the submitted result against the rubric.",
-            rubric=(
+            criteria=(
                 RubricCriterion(
                     name="correct",
                     description="The answer is correct.",
@@ -168,7 +118,7 @@ def scaffold_verifier(
         verifier = HumanVerifier(
             name=name,
             instructions="Review the result.",
-            rubric=(
+            criteria=(
                 RubricCriterion(
                     name="correct",
                     description="The answer is correct.",
@@ -187,13 +137,15 @@ def scaffold_task(
     force: bool = False,
 ) -> Path:
     """Create a standalone Task file with revision references."""
-    task = TaskFile(
-        task_id=task_id,
-        instructions="Complete the task described in info.",
-        environment=environment_path,
-        verifiers=verifier_paths,
-        info={"prompt": "Replace this example."},
-    )
+    task = {
+        "kind": "task",
+        "name": task_id,
+        "version": "0.1.0",
+        "instructions": "Complete the task described in info.",
+        "environment": str(environment_path),
+        "verifiers": [str(item) for item in verifier_paths],
+        "info": {"prompt": "Replace this example."},
+    }
     return _create(_target(path, "task.yaml"), task, force=force)
 
 
@@ -248,13 +200,14 @@ def scaffold_agent(
         if harness_path is not None
         else None
     )
-    agent = AgentDefinition(
-        name=name,
-        model=model,
-        harness=HarnessBinding.from_package(package) if package else None,
-        harness_package=package,
-        secret_names=secret_names,
-    )
+    agent = {
+        "kind": "agent",
+        "name": name,
+        "version": "0.1.0",
+        "model": model,
+        "harness": package.model_dump(mode="json") if package else None,
+        "secret_names": list(secret_names),
+    }
     return _create(_target(path, "agent.yaml"), agent, force=force)
 
 
@@ -266,12 +219,17 @@ def scaffold_benchmark(
     force: bool = False,
     **_: Any,
 ) -> Path:
-    """Create a cross-Environment Benchmark reference file."""
+    """Create a public Benchmark reference file."""
     if not task_paths:
-        raise ValueError("schema-v2 Benchmark requires at least one --task")
+        raise ValueError("Benchmark requires at least one --task")
     return _create(
         _target(path, "benchmark.yaml"),
-        BenchmarkFile(name=name, tasks=task_paths),
+        {
+            "kind": "benchmark",
+            "name": name,
+            "version": "0.1.0",
+            "tasks": [str(item) for item in task_paths],
+        },
         force=force,
     )
 
@@ -286,22 +244,28 @@ def scaffold_job(
     benchmark_path: Path | None = None,
     **_: Any,
 ) -> Path:
-    """Create a path-based Job."""
+    """Create a public path-based Job."""
     source = source_path or benchmark_path
     if source is None:
         raise ValueError("Job requires a Task or Benchmark source")
     return _create(
         _target(path, "job.yaml"),
-        JobFile(source_kind=source_kind, source=source, agents=agent_paths),
+        {
+            "kind": "job",
+            "source": str(source),
+            "agents": [str(item) for item in agent_paths],
+        },
         force=force,
     )
 
 
 def load_environment(path: Path) -> EnvironmentDefinition:
-    """Load one canonical Environment definition and lock its local source."""
+    """Compatibility adapter from the public loader to the engine definition."""
     source = _target(path, "environment.yaml")
-    payload = read_yaml(source)
-    environment = EnvironmentDefinition.model_validate(payload)
+    value = Resolver(root=source.parent).load(source.name)
+    if not isinstance(value, Environment):
+        raise TypeError(f"{source} is not an Environment")
+    environment = value.definition()
     root = source.parent.resolve()
     return environment.model_copy(
         update={
@@ -316,14 +280,27 @@ def load_environment(path: Path) -> EnvironmentDefinition:
 
 
 def load_verifier(path: Path) -> VerifierDefinition:
-    """Load one discriminated Verifier."""
-    adapter = Annotated[
-        DeterministicVerifier | AgentVerifier | HumanVerifier,
-        Field(discriminator="kind"),
-    ]
-    from pydantic import TypeAdapter
+    """Load one discriminated Verifier.
 
-    return TypeAdapter(adapter).validate_python(read_yaml(_target(path, "verifier.yaml")))
+    A deterministic ``python script.py`` command next to the YAML is inlined so
+    the Job sandbox can run the same file you edit.
+    """
+    source = _target(path, "verifier.yaml")
+    verifier = Resolver(root=source.parent).load(source.name)
+    if not isinstance(verifier, (DeterministicVerifier, AgentVerifier, HumanVerifier)):
+        raise TypeError(f"{source} is not a Verifier")
+    if (
+        isinstance(verifier, DeterministicVerifier)
+        and len(verifier.command) >= 2
+        and Path(verifier.command[0]).name in {"python", "python3"}
+        and str(verifier.command[-1]).endswith(".py")
+    ):
+        script = _resolve(source.parent, Path(verifier.command[-1]))
+        if script.is_file():
+            return verifier.model_copy(
+                update={"command": ("python", "-c", script.read_text(encoding="utf-8"))}
+            )
+    return verifier
 
 
 def _resolve(base: Path, value: Path) -> Path:
@@ -331,69 +308,39 @@ def _resolve(base: Path, value: Path) -> Path:
 
 
 def load_task(path: Path) -> TaskDefinition:
-    """Resolve one Task and all pinned revision dependencies."""
+    """Compatibility adapter from the public loader to the engine definition."""
     source = _target(path, "task.yaml")
-    config = TaskFile.model_validate(read_yaml(source))
-    weights = config.verifier_weights or tuple(1.0 for _ in config.verifiers)
-    if len(weights) != len(config.verifiers):
-        raise ValueError("verifier_weights must match verifiers")
-    return TaskDefinition(
-        task_id=config.task_id,
-        revision=config.revision,
-        instructions=config.instructions,
-        environment=load_environment(_resolve(source.parent, config.environment)),
-        verifiers=tuple(
-            WeightedVerifier(
-                verifier=load_verifier(_resolve(source.parent, verifier)),
-                weight=weight,
-            )
-            for verifier, weight in zip(config.verifiers, weights, strict=True)
-        ),
-        info=config.info,
-        metadata=config.metadata,
-    )
+    value = Resolver(root=source.parent).load(source.name)
+    if not isinstance(value, Task):
+        raise TypeError(f"{source} is not a Task")
+    return value._definition()
 
 
 def load_benchmark(path: Path) -> BenchmarkDefinition:
-    """Resolve a cross-Environment Benchmark."""
+    """Compatibility adapter from the public loader to the engine definition."""
     source = _target(path, "benchmark.yaml")
-    config = BenchmarkFile.model_validate(read_yaml(source))
-    return BenchmarkDefinition(
-        name=config.name,
-        revision=config.revision,
-        tasks=tuple(load_task(_resolve(source.parent, task)) for task in config.tasks),
-        primary_metric=config.primary_metric,
-        description=config.description,
-        metadata=config.metadata,
-    )
+    value = Resolver(root=source.parent).load(source.name)
+    if not isinstance(value, Benchmark):
+        raise TypeError(f"{source} is not a Benchmark")
+    return value._definition()
 
 
 def load_agent(path: Path) -> AgentDefinition:
-    """Load an Agent revision."""
-    return AgentDefinition.model_validate(read_yaml(_target(path, "agent.yaml")))
+    """Compatibility adapter from the public loader to the engine definition."""
+    source = _target(path, "agent.yaml")
+    value = Resolver(root=source.parent).load(source.name)
+    if not isinstance(value, Agent):
+        raise TypeError(f"{source} is not an Agent")
+    return value._definition()
 
 
 def load_job(path: Path) -> JobSpec:
-    """Resolve one path-based schema-v2 Job."""
+    """Compatibility adapter from the public loader to the engine spec."""
     source = _target(path, "job.yaml")
-    config = JobFile.model_validate(read_yaml(source))
-    resolved_source = _resolve(source.parent, config.source)
-    job_source = (
-        TaskJobSource(task=load_task(resolved_source))
-        if config.source_kind == "task"
-        else BenchmarkJobSource(benchmark=load_benchmark(resolved_source))
-    )
-    return JobSpec(
-        source=job_source,
-        agents=tuple(
-            AgentBinding(agent=load_agent(_resolve(source.parent, item))) for item in config.agents
-        ),
-        mode=config.mode,
-        attempts=config.attempts,
-        concurrency=config.concurrency,
-        per_runtime_concurrency=config.per_runtime_concurrency,
-        priority=config.priority,
-    )
+    value = Resolver(root=source.parent).load(source.name)
+    if not isinstance(value, Job):
+        raise TypeError(f"{source} is not a Job")
+    return value.spec
 
 
 _LEGACY_HARNESS_KEY_WARNED = False
@@ -439,33 +386,53 @@ def load_harness_reference(
 
 
 def generate_schemas(directory: Path) -> list[Path]:
-    """Generate canonical schema-v2 JSON schemas."""
-    models: tuple[type[BaseModel], ...] = (
-        EnvironmentDefinition,
-        TaskDefinition,
-        DeterministicVerifier,
-        AgentVerifier,
-        HumanVerifier,
-        AgentDefinition,
-        BenchmarkDefinition,
-        JobSpec,
+    """Generate schemas from public SDK models with plain names."""
+    models: tuple[tuple[str, type[BaseModel]], ...] = (
+        ("Environment", EnvironmentDefinition),
+        ("Task", Task),
+        ("DeterministicVerifier", DeterministicVerifier),
+        ("AgentVerifier", AgentVerifier),
+        ("HumanVerifier", HumanVerifier),
+        ("Agent", Agent),
+        ("Benchmark", Benchmark),
     )
     directory.mkdir(parents=True, exist_ok=True)
     output = []
-    for model in models:
-        path = directory / f"{model.__name__}.schema.json"
+    for name, model in models:
+        schema = model.model_json_schema()
+        schema["title"] = name
+        path = directory / f"{name}.schema.json"
         path.write_text(
-            json.dumps(model.model_json_schema(), indent=2, sort_keys=True) + "\n",
+            json.dumps(schema, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         output.append(path)
+    job_path = directory / "Job.schema.json"
+    job_path.write_text(
+        json.dumps(
+            {
+                "title": "Job",
+                "type": "object",
+                "required": ["source", "agents"],
+                "properties": {
+                    "source": {},
+                    "agents": {"type": "array", "minItems": 1},
+                    "mode": {"enum": ["eval", "train"], "default": "eval"},
+                    "attempts": {"type": "integer", "minimum": 1, "default": 1},
+                    "concurrency": {"type": "integer", "minimum": 1, "default": 1},
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    output.append(job_path)
     return output
 
 
 __all__ = [
-    "BenchmarkFile",
-    "JobFile",
-    "TaskFile",
     "generate_schemas",
     "load_agent",
     "load_benchmark",

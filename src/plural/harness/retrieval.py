@@ -22,10 +22,22 @@ MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
 def tree_digest(root: Path) -> str:
     """Hash a package tree by relative path and bytes."""
+    ignore_file = root.resolve() / ".pluralignore"
+    ignored = (
+        {
+            line.strip().removeprefix("./")
+            for line in ignore_file.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        if ignore_file.is_file()
+        else set()
+    )
     digest = hashlib.sha256()
     for path in sorted(root.resolve().rglob("*")):
         relative = path.relative_to(root.resolve())
         if any(part in {".git", ".plural", "__pycache__"} for part in relative.parts):
+            continue
+        if relative.as_posix() in ignored:
             continue
         if path.is_symlink():
             raise ValueError(f"package contains a symlink: {relative}")

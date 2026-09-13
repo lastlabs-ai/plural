@@ -1,8 +1,8 @@
 ---
 route: /docs/concepts/observability
-title: "Observability"
+title: Observability
 order: 910
-description: "This page moved to Traces. Open that guide for the current walkthrough and examples."
+description: This page moved to Traces. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

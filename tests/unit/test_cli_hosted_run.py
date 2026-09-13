@@ -40,7 +40,14 @@ class _Publisher:
                 },
             )
         )
-        return {"id": revision_id, "status": "published"}
+        record = {"id": revision_id, "status": "published"}
+        if self.kind == "environment":
+            record["environment_id"] = f"environment_parent_{self.count}"
+        return record
+
+    def stamp_harness(self, **payload: Any) -> dict[str, Any]:
+        self.calls.append(("harness-evidence", payload))
+        return {"id": "stamp_1", "compatible": True}
 
 
 class _Jobs:
@@ -102,7 +109,7 @@ def _task_graph(tmp_path: Path) -> tuple[Path, Path]:
         environment_path=environment,
         verifier_paths=(verifier,),
     )
-    scaffold_agent(agent, name="candidate", model="test/model")
+    scaffold_agent(agent, name="candidate", model="openai/gpt-5.6-luna")
     return task, agent
 
 
@@ -145,7 +152,7 @@ def _training_benchmark_graph(tmp_path: Path) -> tuple[Path, Path]:
     scaffold_agent(
         agent,
         name="candidate",
-        model="test/model",
+        model="openai/gpt-5.6-luna",
         harness_path=harness,
     )
     return benchmark, agent
@@ -161,7 +168,7 @@ def test_run_task_syncs_exact_ids_and_watches_by_default(
 
     result = CliRunner().invoke(
         cli_main.app,
-        ["run", str(task), "--agent", str(agent), "--mode", "eval"],
+        ["run", str(task), "--agent", str(agent), "--mode", "eval", "--hosted"],
     )
 
     assert result.exit_code == 0, result.output
@@ -208,6 +215,7 @@ def test_run_mixed_benchmark_deduplicates_dependencies_and_preserves_train_mode(
             "--idempotency-key",
             "release-42",
             "--no-watch",
+            "--hosted",
         ],
     )
 
@@ -221,6 +229,8 @@ def test_run_mixed_benchmark_deduplicates_dependencies_and_preserves_train_mode(
         "task",
         "benchmark",
         "agent",
+        "harness-evidence",
+        "harness-evidence",
         "job",
     ]
     assert client.verifiers.count == 1
@@ -235,7 +245,7 @@ def test_run_mixed_benchmark_deduplicates_dependencies_and_preserves_train_mode(
         "task_revision_2",
     ]
     assert client.calls[7][1]["references"]["harness_revision_id"] == "harness_revision_1"
-    job_call = client.calls[8][1]
+    job_call = client.calls[10][1]
     assert job_call["source_revision_id"] == "benchmark_revision_1"
     assert job_call["agent_revision_ids"] == ("agent_revision_1",)
     assert job_call["idempotency_key"] == "release-42"
@@ -252,7 +262,7 @@ def test_run_json_uses_job_watch_json_lines_rendering(
 
     result = CliRunner().invoke(
         cli_main.app,
-        ["run", str(task), "--agent", str(agent), "--json"],
+        ["run", str(task), "--agent", str(agent), "--json", "--hosted"],
     )
 
     assert result.exit_code == 0, result.output
@@ -278,7 +288,7 @@ def test_invalid_hosted_graph_fails_before_client_or_writes(
     monkeypatch.setattr(cli_main, "_client", client)
     result = CliRunner().invoke(
         cli_main.app,
-        ["run", str(task), "--agent", str(agent), "--mode", "train"],
+        ["run", str(task), "--agent", str(agent), "--mode", "train", "--hosted"],
     )
 
     assert result.exit_code == 2
@@ -291,7 +301,7 @@ class _OfflineResult(BaseModel):
     job_id: str = "local_job"
 
 
-def test_offline_and_private_keep_execution_local(
+def test_local_default_offline_and_private_keep_execution_local(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
@@ -299,25 +309,29 @@ def test_offline_and_private_keep_execution_local(
     stores: list[Path] = []
 
     class OfflineJob:
-        def __init__(self, _: Any, *, store: Any) -> None:
+        def __init__(self, _: Any, *, store: Any, catalog: Any) -> None:
+            del catalog
             stores.append(store.root)
 
         async def run(self) -> _OfflineResult:
             return _OfflineResult()
 
-    monkeypatch.setattr(cli_main, "Job", OfflineJob)
+    monkeypatch.setattr(cli_main, "JobRunner", OfflineJob)
     monkeypatch.setattr(
         cli_main,
         "_client",
         lambda: (_ for _ in ()).throw(AssertionError("hosted client opened")),
     )
     runner = CliRunner()
-    for flag in ("--offline", "--private"):
+    for flag in (None, "--offline", "--private"):
+        args = ["run", str(task), "--agent", str(agent)]
+        if flag is not None:
+            args.append(flag)
         result = runner.invoke(
             cli_main.app,
-            ["run", str(task), "--agent", str(agent), flag],
+            args,
         )
         assert result.exit_code == 0, result.output
         assert json.loads(result.stdout)["job_id"] == "local_job"
 
-    assert stores == [tmp_path / ".plural" / "jobs"] * 2
+    assert stores == [tmp_path / ".plural" / "jobs"] * 3

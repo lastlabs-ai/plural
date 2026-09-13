@@ -1,80 +1,70 @@
 ---
 route: /docs/getting-started
-title: "Getting started"
+title: Getting started
 order: 20
-description: "Install Plural, scaffold an Environment, Task, Verifier, Agent, and Job, then run the Job offline. No account required."
+description: Build one public evaluation graph in Python, export the same graph to YAML, and run it locally from the CLI.
 audience: all
 nav: true
 nav_group: Start
-outcome: You have a local Job that ran against files you can open.
+outcome: You can author, validate, inspect, export, and dry-run a Job.
 ---
 # Getting started
 
-You need Python 3.10 or newer. Docker is optional until you isolate a run. You can finish this page without an account or API key.
+Install Plural and create a project:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install plural
-plural --help
+pip install plural
+plural init word-game
+cd word-game
 ```
 
-If you use `uv`, `uv add plural` and `uv run plural --help` do the same work.
+Plural has seven plain concepts: Environment, Runtime, Agent, Verifier, Task,
+Benchmark, and Job. Python defines their semantics.
 
-```mermaid
-flowchart LR
-  env[environment]
-  verifier[verifier.yaml]
-  task[task.yaml]
-  harness[harness]
-  agent[agent.yaml]
-  job[job.yaml]
-  env --> task
-  verifier --> task
-  harness --> agent
-  task --> job
-  agent --> job
+```python
+from plural import Agent, Benchmark, Environment, Job, Task
+from plural.verifiers import DeterministicVerifier
+
+environment = Environment(name="word-game")
+verifier = DeterministicVerifier(name="solved", check="python verify.py")
+task = Task(
+    name="easy",
+    instructions="Solve the puzzle.",
+    environment=environment,
+    verifiers=[verifier],
+)
+benchmark = Benchmark(name="word-game", version="1.0.0", tasks=[task])
+agent = Agent(model="openai/gpt-5.6-luna")
+job = Job(benchmark, agents=[agent])
 ```
 
-## Scaffold a tiny project
+Export and reload the exact graph:
 
-These commands create the same filenames Wordle uses, filled with placeholders you edit.
+```python
+from plural.project import dump, load
+
+dump(job, "job.yaml")
+assert load("job.yaml").plan == job.plan
+```
+
+Every CLI entry loads those same public objects:
 
 ```bash
-plural env init environment --name tickets
-plural verifier init verifier.yaml --name correct --kind deterministic
-plural task init task.yaml --id ticket-1 \
-  --environment environment --verifier verifier.yaml
-plural harness init harness --name ticket-loop
-plural agent init agent.yaml --name candidate \
-  --model openai/gpt-4.1-mini --harness harness
-plural job init job.yaml --source task.yaml --source-kind task --agent agent.yaml
-```
-
-Open `environment/environment.yaml`. That file is the world: actions, runtime, network, limits. Open `task.yaml`. That file pins the Environment and the Verifier. Open `agent.yaml`. That file is not bound to the Environment.
-
-`plural verifier init` writes a deterministic Verifier that runs `python verify.py`. Add `verify.py` next to `verifier.yaml`. When you run the Job, Plural inlines that file so the sandbox can execute it.
-
-## Run it on your machine
-
-```bash
-plural env validate environment
-plural task validate task.yaml
-plural run job.yaml --offline
-```
-
-`--offline` keeps execution and the durable log local under `.plural/jobs`. `--dry-run` plans Trial identities without launching anything.
-
-## When you want hosted
-
-Create a project in Plural Intel, then:
-
-```bash
-export PLURAL_API_KEY=...
-plural auth login
+plural validate job.yaml
+plural inspect job.yaml
+plural run job.yaml --dry-run
 plural run job.yaml
 ```
 
-The same files publish as revisions and submit a hosted Job. A project-scoped key only sees that project.
+The default run is local. Use `--hosted` only when you intend to synchronize
+and submit the graph to hosted Plural.
 
-What this unlocks: every later page is an edit to one of these files. [Environments](project/environments.md) is where you replace the placeholder world with yours.
+Python object references are first-class:
+
+```bash
+plural validate project.py:job
+plural export project.py:job --output job.yaml
+```
+
+Continue with the [Wordle tutorial](tutorials/wordle.md) or read each concept
+under Project and Running.

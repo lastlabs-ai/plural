@@ -107,59 +107,6 @@
       "title": "ResourceRequirements",
       "type": "object"
     },
-    "RoutingSpec": {
-      "additionalProperties": false,
-      "description": "Portable model routing configuration.",
-      "properties": {
-        "fallback_models": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Fallback Models",
-          "type": "array"
-        },
-        "max_tokens": {
-          "anyOf": [
-            {
-              "exclusiveMinimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Max Tokens"
-        },
-        "provider": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Provider"
-        },
-        "temperature": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Temperature"
-        }
-      },
-      "title": "RoutingSpec",
-      "type": "object"
-    },
     "RubricCriterion": {
       "additionalProperties": false,
       "description": "One deterministic human or agent rubric criterion.",
@@ -249,8 +196,28 @@
   "additionalProperties": false,
   "description": "Model-judge verifier with its own runtime and connectivity policy.",
   "properties": {
+    "criteria": {
+      "items": {
+        "$ref": "#/$defs/RubricCriterion"
+      },
+      "minItems": 1,
+      "title": "Criteria",
+      "type": "array"
+    },
     "evidence": {
       "$ref": "#/$defs/EvidenceContract"
+    },
+    "fallback_models": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Fallback Models",
+      "type": "array"
+    },
+    "info": {
+      "default": null,
+      "title": "Info"
     },
     "instructions": {
       "minLength": 1,
@@ -278,38 +245,38 @@
       "title": "Name",
       "type": "string"
     },
-    "revision": {
-      "default": "0.1.0",
-      "minLength": 1,
-      "title": "Revision",
-      "type": "string"
-    },
-    "routing": {
-      "$ref": "#/$defs/RoutingSpec"
-    },
-    "rubric": {
-      "items": {
-        "$ref": "#/$defs/RubricCriterion"
-      },
-      "minItems": 1,
-      "title": "Rubric",
-      "type": "array"
+    "provider": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provider"
     },
     "runtime": {
       "$ref": "#/$defs/VerifierRuntime"
     },
-    "schema_version": {
-      "const": "2",
-      "default": "2",
-      "title": "Schema Version",
+    "version": {
+      "default": "0.1.0",
+      "title": "Version",
       "type": "string"
+    },
+    "weight": {
+      "default": 1,
+      "exclusiveMinimum": 0,
+      "title": "Weight",
+      "type": "number"
     }
   },
   "required": [
     "name",
+    "criteria",
     "model",
-    "instructions",
-    "rubric"
+    "instructions"
   ],
   "title": "AgentVerifier",
   "type": "object"

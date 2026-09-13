@@ -1,8 +1,8 @@
 ---
 route: /docs/guides/redact-pii
-title: "Redact Pii"
+title: Redact Pii
 order: 929
-description: "This page moved to Integrations. Open that guide for the current walkthrough and examples."
+description: This page moved to Integrations. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

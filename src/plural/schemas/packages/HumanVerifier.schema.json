@@ -79,8 +79,20 @@
   "additionalProperties": false,
   "description": "Human review verifier.",
   "properties": {
+    "criteria": {
+      "items": {
+        "$ref": "#/$defs/RubricCriterion"
+      },
+      "minItems": 1,
+      "title": "Criteria",
+      "type": "array"
+    },
     "evidence": {
       "$ref": "#/$defs/EvidenceContract"
+    },
+    "info": {
+      "default": null,
+      "title": "Info"
     },
     "instructions": {
       "default": "",
@@ -103,30 +115,21 @@
       "title": "Name",
       "type": "string"
     },
-    "revision": {
+    "version": {
       "default": "0.1.0",
-      "minLength": 1,
-      "title": "Revision",
+      "title": "Version",
       "type": "string"
     },
-    "rubric": {
-      "items": {
-        "$ref": "#/$defs/RubricCriterion"
-      },
-      "minItems": 1,
-      "title": "Rubric",
-      "type": "array"
-    },
-    "schema_version": {
-      "const": "2",
-      "default": "2",
-      "title": "Schema Version",
-      "type": "string"
+    "weight": {
+      "default": 1,
+      "exclusiveMinimum": 0,
+      "title": "Weight",
+      "type": "number"
     }
   },
   "required": [
     "name",
-    "rubric"
+    "criteria"
   ],
   "title": "HumanVerifier",
   "type": "object"

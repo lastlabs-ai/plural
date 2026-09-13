@@ -52,6 +52,44 @@ def test_v2_environment_rejects_v1_owned_fields() -> None:
         EnvironmentDefinition.model_validate({"schema_version": "1", "name": "world"})
 
 
+def test_task_state_is_validated_and_kept_off_the_public_payload() -> None:
+    environment = EnvironmentDefinition(
+        name="wordle",
+        state_schema={
+            "type": "object",
+            "properties": {
+                "secret": {"type": "string", "x-plural-hidden": True},
+                "remaining": {"type": "integer", "default": 6},
+            },
+        },
+    )
+    with pytest.raises(ValidationError, match="expected string, got integer"):
+        TaskDefinition(
+            task_id="hard-01",
+            instructions="Guess.",
+            environment=environment,
+            verifiers=(WeightedVerifier(verifier=verifier()),),
+            state={"secret": 1},
+        )
+    with pytest.raises(ValidationError, match="field is not on this Environment state"):
+        TaskDefinition(
+            task_id="hard-01",
+            instructions="Guess.",
+            environment=environment,
+            verifiers=(WeightedVerifier(verifier=verifier()),),
+            state={"leftover": True},
+        )
+    value = TaskDefinition(
+        task_id="hard-01",
+        instructions="Guess.",
+        environment=environment,
+        verifiers=(WeightedVerifier(verifier=verifier()),),
+        state={"secret": "heart"},
+    )
+    assert value.state == {"secret": "heart"}
+    assert "secret" not in value.public_payload
+
+
 def test_task_pins_environment_and_weighted_verifiers() -> None:
     environment = EnvironmentDefinition(name="world")
     value = task("one", environment)

@@ -1,8 +1,8 @@
 ---
 route: /docs/concepts/dataset
-title: "Dataset"
+title: Dataset
 order: 902
-description: "This page moved to Traces. Open that guide for the current walkthrough and examples."
+description: This page moved to Traces. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

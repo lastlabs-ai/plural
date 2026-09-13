@@ -1,13 +1,7 @@
-"""Shortcut: ``uv run python examples/wordle/run.py --secret crane``."""
+"""Run the same public Job used by job.yaml."""
 
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from examples.environment.wordle.run import main
+from job import job
 
 if __name__ == "__main__":
-    main()
+    result = job.run()
+    print(f"{result.job_id}: {result.status}")

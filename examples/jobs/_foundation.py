@@ -1,27 +1,26 @@
-"""Shared builders for credential-free package execution examples."""
+"""Shared builders for credential-free public Job examples."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from plural import (
-    AgentBinding,
-    AgentDefinition,
-    BenchmarkDefinition,
-    BenchmarkJobSource,
-    DeterministicVerifier,
-    EnvironmentDefinition,
-    EnvironmentRuntime,
+    Benchmark,
+    CatalogContext,
+    Environment,
+    EvidenceContract,
     ExecutionTarget,
-    HarnessBinding,
-    JobSpec,
+    Job,
+    JobStore,
+    ModelCatalog,
+    ModelSpec,
     NetworkMode,
-    TaskDefinition,
-    VerifierRuntime,
-    WeightedVerifier,
+    Runtime,
+    Task,
 )
 from plural.cli.scaffold import load_harness
 from plural.harness import tree_digest
+from plural.verifiers import DeterministicVerifier, VerifierRuntime
 
 ROOT = Path(__file__).parent
 HARNESS = ROOT / "minimal_harness"
@@ -38,19 +37,23 @@ def build_job(
     provider: str = "local",
     attempts: int = 1,
     concurrency: int = 1,
-) -> JobSpec:
-    """Build a complete immutable job around the example harness."""
+    store: JobStore | None = None,
+) -> Job:
+    """Build a complete public Job around the example Harness.
+
+    Returns:
+        A planned Job ready for local execution.
+    """
     loaded = load_harness(HARNESS)
     package = loaded.model_copy(
         update={"source": loaded.source.model_copy(update={"digest": tree_digest(HARNESS)})}
     )
-    binding = HarnessBinding.from_package(package)
     isolated = provider != "local"
-    environment = EnvironmentDefinition(
+    environment = Environment(
         name="offline-example",
-        revision="1.0.0",
+        version="1.0.0",
         overview="A deterministic offline execution runtime.",
-        runtime=EnvironmentRuntime(
+        runtime=Runtime(
             provider=provider,
             image="python:3.12-slim" if provider in {"docker", "daytona"} else None,
             network=NetworkMode.NONE if isolated else NetworkMode.FULL,
@@ -64,41 +67,38 @@ def build_job(
     )
     verifier = DeterministicVerifier(
         name="evidence-present",
-        command=("python", "-c", VERIFY),
+        check=("python", "-c", VERIFY),
         runtime=VerifierRuntime(
             provider=provider,
             image="python:3.12-slim" if provider in {"docker", "daytona"} else None,
             network=NetworkMode.NONE if isolated else NetworkMode.FULL,
         ),
-        required_artifacts=("evidence.txt",),
+        evidence=EvidenceContract(artifacts=("evidence.txt",)),
     )
     tasks = tuple(
-        TaskDefinition(
-            task_id=task_id,
+        Task(
+            name=task_id,
             instructions=f"Return a deterministic response for {value}.",
             info={"value": value},
             environment=environment,
-            verifiers=(WeightedVerifier(verifier=verifier),),
+            verifiers=(verifier,),
         )
         for task_id, value in (("one", "hello"), ("two", "world"))
     )
-    benchmark = BenchmarkDefinition(
-        name="offline-smoke",
-        tasks=tasks,
+    benchmark = Benchmark(name="offline-smoke", version="1.0.0", tasks=tasks)
+    context = CatalogContext(ModelCatalog(entries=[ModelSpec(id="offline/deterministic")]))
+    agent = context.agent(
+        name="offline-agent",
+        model="offline/deterministic",
+        harness=package,
+        auth_mode="none",
     )
-    agent = AgentBinding(
-        agent=AgentDefinition(
-            name="offline-agent",
-            model="offline/deterministic",
-            harness=binding,
-            harness_package=package,
-            auth_mode="none",
-        )
-    )
-    return JobSpec(
-        source=BenchmarkJobSource(benchmark=benchmark),
+    return Job(
+        benchmark,
         agents=(agent,),
         attempts=attempts,
         concurrency=concurrency,
         per_runtime_concurrency=concurrency,
+        catalog=context.catalog,
+        store=store,
     )

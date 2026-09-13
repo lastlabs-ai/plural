@@ -214,7 +214,8 @@ def test_native_actions_executes_only_declared_actions(
     assert result["response"] == "complete"
     assert result["turns"] == 2
     assert result["cost_usd"] == 0.02
-    assert '"seen": 7' in trajectory[1]["observation"]["content"]
+    tool = next(item for item in trajectory if item.get("role") == "tool")
+    assert '"seen": 7' in tool["content"]
 
 
 def test_vendor_adapter_invokes_installed_cli_and_translates(

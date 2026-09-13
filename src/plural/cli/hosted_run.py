@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
-from plural.jobs import BenchmarkJobSource, JobMode, JobSpec, TaskJobSource
+from plural.jobs import (
+    BenchmarkJobSource,
+    JobMode,
+    JobSpec,
+    TaskJobSource,
+    resolve_trial_harness_grant,
+)
 from plural.tasks import TaskDefinition
 
 if TYPE_CHECKING:
@@ -54,8 +60,45 @@ def _publish(
     value: Any,
     kind: str,
     **references: Any,
-) -> str:
-    return _revision_id(api.publish(value, **references), kind)
+) -> dict[str, Any]:
+    record = api.publish(value, **references)
+    _revision_id(record, kind)
+    return record
+
+
+def _stamp_compatible_harnesses(
+    client: Any,
+    spec: JobSpec,
+    *,
+    environment_records: dict[str, dict[str, Any]],
+    harness_ids: dict[str, str],
+) -> None:
+    """Record a compatible stamp for each published Environment/Harness pair."""
+    seen: set[tuple[str, str]] = set()
+    for task in spec.tasks:
+        environment = environment_records[task.environment.content_hash]
+        environment_id = environment.get("environment_id")
+        revision_id = environment.get("id")
+        if not isinstance(environment_id, str) or not isinstance(revision_id, str):
+            raise ValueError("published Environment revision omitted parent id")
+        for binding in spec.agents:
+            package = binding.agent.harness_package
+            if package is None:
+                continue
+            pair = (revision_id, harness_ids[package.content_hash])
+            if pair in seen:
+                continue
+            seen.add(pair)
+            grant = resolve_trial_harness_grant(task.environment, binding.agent)
+            client.environments.stamp_harness(
+                environment_id=environment_id,
+                revision_id=revision_id,
+                harness_revision_id=pair[1],
+                compatible=True,
+                evidence=(
+                    grant.model_dump(mode="json") if grant is not None else {"kind": "native"}
+                ),
+            )
 
 
 def validate_hosted_graph(
@@ -122,11 +165,14 @@ def sync_and_submit(
         key=lambda agent: agent.content_hash,
     )
 
-    harness_ids = {
+    harness_records = {
         package.content_hash: _publish(client.harnesses, package, "Harness")
         for package in harnesses
     }
-    environment_ids = {
+    harness_ids = {
+        digest: _revision_id(record, "Harness") for digest, record in harness_records.items()
+    }
+    environment_records = {
         environment.content_hash: _publish(
             client.environments,
             environment,
@@ -134,29 +180,44 @@ def sync_and_submit(
         )
         for environment in environments
     }
+    environment_ids = {
+        digest: _revision_id(record, "Environment")
+        for digest, record in environment_records.items()
+    }
     verifier_ids = {
-        verifier.content_hash: _publish(client.verifiers, verifier, "Verifier")
+        verifier.content_hash: _revision_id(
+            _publish(client.verifiers, verifier, "Verifier"),
+            "Verifier",
+        )
         for verifier in verifiers
     }
     task_ids = {
-        task.content_hash: _publish(
-            client.tasks,
-            task,
+        task.content_hash: _revision_id(
+            _publish(
+                client.tasks,
+                task,
+                "Task",
+                environment_revision_id=environment_ids[task.environment.content_hash],
+                verifier_revision_ids=[
+                    verifier_ids[weighted.verifier.content_hash] for weighted in task.verifiers
+                ],
+            ),
             "Task",
-            environment_revision_id=environment_ids[task.environment.content_hash],
-            verifier_revision_ids=[
-                verifier_ids[weighted.verifier.content_hash] for weighted in task.verifiers
-            ],
         )
         for task in unique_tasks
     }
 
     if isinstance(spec.source, BenchmarkJobSource):
-        source_revision_id = _publish(
-            client.benchmarks,
-            spec.source.benchmark,
+        source_revision_id = _revision_id(
+            _publish(
+                client.benchmarks,
+                spec.source.benchmark,
+                "Benchmark",
+                task_revision_ids=[
+                    task_ids[task.content_hash] for task in spec.source.benchmark.tasks
+                ],
+            ),
             "Benchmark",
-            task_revision_ids=[task_ids[task.content_hash] for task in spec.source.benchmark.tasks],
         )
     elif isinstance(spec.source, TaskJobSource):
         source_revision_id = task_ids[spec.source.task.content_hash]
@@ -164,19 +225,28 @@ def sync_and_submit(
         raise ValueError("unsupported hosted Job source")
 
     agent_ids = {
-        agent.content_hash: _publish(
-            client.agents,
-            agent,
-            "Agent",
-            harness_revision_id=(
-                harness_ids[agent.harness_package.content_hash]
-                if agent.harness_package is not None
-                else None
+        agent.content_hash: _revision_id(
+            _publish(
+                client.agents,
+                agent,
+                "Agent",
+                harness_revision_id=(
+                    harness_ids[agent.harness_package.content_hash]
+                    if agent.harness_package is not None
+                    else None
+                ),
             ),
+            "Agent",
         )
         for agent in agents
     }
     exact_agent_ids = tuple(agent_ids[binding.agent.content_hash] for binding in spec.agents)
+    _stamp_compatible_harnesses(
+        client,
+        spec,
+        environment_records=environment_records,
+        harness_ids=harness_ids,
+    )
     job = client.jobs.submit(
         spec,
         source_revision_id=source_revision_id,

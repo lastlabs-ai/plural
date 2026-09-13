@@ -1,0 +1,14 @@
+kind: agent
+model: openai/gpt-5.6-luna
+name: concise
+version: 0.1.0
+provider: null
+instructions: Complete the task using the available actions. Be concise.
+fallback_models: []
+temperature: null
+max_tokens: null
+harness: null
+auth_mode: environment
+secret_names:
+- OPENAI_API_KEY
+metadata: {}

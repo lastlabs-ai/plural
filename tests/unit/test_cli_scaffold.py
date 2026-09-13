@@ -8,93 +8,48 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 from plural.cli.main import app
-from plural.cli.scaffold import (
-    load_agent,
-    load_benchmark,
-    load_environment,
-    load_job,
-    load_task,
-    load_verifier,
-    scaffold_agent,
-    scaffold_benchmark,
-    scaffold_environment,
-    scaffold_job,
-    scaffold_task,
-    scaffold_verifier,
-)
 
 
-def project(tmp_path: Path) -> tuple[Path, Path]:
-    environment = tmp_path / "environment"
-    verifier = tmp_path / "verifier.yaml"
-    task = tmp_path / "task.yaml"
-    benchmark = tmp_path / "benchmark.yaml"
-    agent = tmp_path / "agent.yaml"
-    scaffold_environment(environment, "world")
-    scaffold_verifier(verifier, name="exact")
-    scaffold_task(
-        task,
-        task_id="one",
-        environment_path=environment,
-        verifier_paths=(verifier,),
-    )
-    scaffold_benchmark(benchmark, name="suite", task_paths=(task,))
-    scaffold_agent(agent, name="candidate", model="test/model")
-    job = scaffold_job(
-        tmp_path / "job.yaml",
-        source_path=benchmark,
-        source_kind="benchmark",
-        agent_paths=(agent,),
-    )
-    return job, agent
-
-
-def test_scaffolds_separate_v2_packages_and_resolves_graph(tmp_path: Path) -> None:
-    job, _ = project(tmp_path)
-    environment = load_environment(tmp_path / "environment")
-    verifier = load_verifier(tmp_path / "verifier.yaml")
-    task = load_task(tmp_path / "task.yaml")
-    benchmark = load_benchmark(tmp_path / "benchmark.yaml")
-    spec = load_job(job)
-    assert environment.schema_version == "2"
-    assert verifier.kind == "deterministic"
-    assert task.environment.identity == environment.identity
-    assert benchmark.tasks[0].content_hash == task.content_hash
-    assert spec.plan().trial_count == 1
-
-
-def test_agent_yaml_has_no_environment_binding(tmp_path: Path) -> None:
-    _, agent_path = project(tmp_path)
-    agent = load_agent(agent_path)
-    assert agent.name == "candidate"
-    assert "environment" not in agent.model_dump()
-
-
-def test_cli_help_exposes_v2_objects_and_watch() -> None:
-    runner = CliRunner()
-    result = runner.invoke(app, ["--help"])
+def test_cli_help_leads_with_public_object_commands() -> None:
+    result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ("env", "task", "verifier", "agent", "benchmark", "review"):
+    for command in ("init", "validate", "inspect", "export", "run", "models", "benchmarks", "auth"):
         assert command in result.stdout
     root = get_command(app)
     assert isinstance(root, TyperGroup)
-    job = root.commands["job"]
-    assert isinstance(job, TyperGroup)
-    watch = job.commands["watch"]
-    assert any("--json" in parameter.opts for parameter in watch.params)
+    for compatibility_group in ("env", "task", "verifier", "agent", "harness", "benchmark"):
+        assert root.commands[compatibility_group].hidden
+    assert "watch" in root.commands["job"].commands
 
 
-def test_direct_benchmark_dry_run_supports_mode_attempts(tmp_path: Path) -> None:
-    _, agent = project(tmp_path)
+def test_init_creates_python_first_project(tmp_path: Path) -> None:
+    result = CliRunner().invoke(app, ["init", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "project.py").is_file()
+    assert (tmp_path / "project.yaml").read_text().startswith("kind: job")
+    validated = CliRunner().invoke(app, ["validate", str(tmp_path / "project.yaml")])
+    assert validated.exit_code == 0, validated.output
+
+
+def test_direct_benchmark_dry_run_supports_overrides(tmp_path: Path) -> None:
+    project = tmp_path / "project.py"
+    project.write_text(
+        "from plural import Agent, Benchmark, Environment, Task\n"
+        "from plural.verifiers import DeterministicVerifier\n"
+        "environment = Environment(name='world')\n"
+        "verifier = DeterministicVerifier(name='done', check='python verify.py')\n"
+        "task = Task(name='one', instructions='Do it', environment=environment, "
+        "verifiers=[verifier])\n"
+        "benchmark = Benchmark(name='suite', version='1.0.0', tasks=[task])\n"
+        "agent = Agent(model='openai/gpt-5.6-luna')\n"
+    )
     result = CliRunner().invoke(
         app,
         [
             "run",
-            str(tmp_path / "benchmark.yaml"),
+            f"{project}:benchmark",
             "--agent",
-            str(agent),
-            "--mode",
-            "eval",
+            f"{project}:agent",
             "--attempts",
             "3",
             "--concurrency",
@@ -102,19 +57,19 @@ def test_direct_benchmark_dry_run_supports_mode_attempts(tmp_path: Path) -> None
             "--dry-run",
         ],
     )
-    assert result.exit_code == 0, result.stderr
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["mode"] == "eval"
     assert payload["trial_count"] == 3
     assert payload["runtimes"] == ["docker"]
 
 
-def test_v1_environment_gets_clear_migration_error(tmp_path: Path) -> None:
+def test_old_environment_manifest_gets_clean_break_error(tmp_path: Path) -> None:
     path = tmp_path / "environment.yaml"
     path.write_text(
         "schema_version: '1'\nname: old\ntasks: []\nverifier: null\n",
         encoding="utf-8",
     )
-    result = CliRunner().invoke(app, ["env", "validate", str(path)])
+    result = CliRunner().invoke(app, ["validate", str(path)])
     assert result.exit_code == 2
     assert "schema-v1 Environment is unsupported" in result.stderr

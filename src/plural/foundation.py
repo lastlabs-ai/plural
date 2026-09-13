@@ -36,8 +36,12 @@ from plural.environments.definition import (
     SecretReference,
 )
 from plural.jobs import (
+    AgentAggregate,
+    ArtifactManifest,
+    ArtifactManifestEntry,
     ArtifactReference,
     BenchmarkJobSource,
+    BenchmarkPin,
     ExecutionStatus,
     JobLock,
     JobMode,
@@ -45,6 +49,7 @@ from plural.jobs import (
     JobResult,
     JobSource,
     JobSpec,
+    ModelResolution,
     ProgressEvent,
     RetryPolicy,
     TaskJobSource,
@@ -70,10 +75,14 @@ from plural.verifiers import (
 )
 
 __all__ = [
+    "AgentAggregate",
     "AgentBinding",
     "AgentDefinition",
     "AgentVerifier",
+    "ArtifactManifest",
+    "ArtifactManifestEntry",
     "ArtifactReference",
+    "BenchmarkPin",
     "BenchmarkDefinition",
     "BenchmarkJobSource",
     "DeterministicVerifier",
@@ -102,6 +111,7 @@ __all__ = [
     "JobResult",
     "JobSource",
     "JobSpec",
+    "ModelResolution",
     "NativeAction",
     "PackageSource",
     "ProgressEvent",

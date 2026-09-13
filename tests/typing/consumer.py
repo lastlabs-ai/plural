@@ -5,39 +5,28 @@ from __future__ import annotations
 from typing import Any
 
 from plural import (
-    AgentBinding,
-    AgentDefinition,
-    BenchmarkDefinition,
-    BenchmarkJobSource,
+    Agent,
+    Benchmark,
     Client,
     DeterministicVerifier,
     Environment,
-    EnvironmentDefinition,
     ErrorCode,
-    HarnessBinding,
-    HarnessDefinition,
-    HarnessPackage,
     Job,
-    JobLock,
     JobPlan,
     JobResult,
-    JobSpec,
     JobStore,
     Message,
     ModelCatalog,
     NetworkMode,
-    PackageSource,
     RetryPolicy,
     SandboxProvider,
-    TaskDefinition,
+    Task,
     Trace,
     TraceDataset,
     Trial,
     TrialReceipt,
     TrialResult,
-    TrialSpec,
     Usage,
-    WeightedVerifier,
 )
 
 
@@ -47,48 +36,34 @@ def main() -> None:
     usage: Usage = Usage.from_counts(1, 1)
     msg: Message = Message(role="user", content="hi")
     trace: Trace = Trace(trace_id="t")
-    env: Environment[Any, Any] = Environment(name="x", revision="0.1.0")
+    env: Environment[Any, Any] = Environment(name="x", version="0.1.0")
     ds: TraceDataset = TraceDataset.from_traces("d", [trace])
     assert usage.total_tokens == 2
     assert msg.role == "user"
     assert env.name == "x"
     assert len(ds) == 1
-    package = HarnessPackage(
-        definition=HarnessDefinition(
-            name="h",
-            implementation="runnable",
-            command=("python", "harness.py"),
-        ),
-        source=PackageSource(kind="local", uri=".", unsafe_local=True),
-    )
-    binding = HarnessBinding.from_package(package)
-    _ = binding
-    manifest = EnvironmentDefinition(name="x")
-    verifier = DeterministicVerifier(name="v", command=("python", "-c", "pass"))
-    task_definition = TaskDefinition(
-        task_id="1",
+    verifier = DeterministicVerifier(name="v", check=("python", "-c", "pass"))
+    task = Task(
+        name="1",
         instructions="Say hi.",
-        environment=manifest,
-        verifiers=(WeightedVerifier(verifier=verifier),),
+        environment=env,
+        verifiers=(verifier,),
     )
-    definition = BenchmarkDefinition(
+    benchmark = Benchmark(
         name="b",
-        tasks=(task_definition,),
+        version="1.0.0",
+        tasks=(task,),
     )
-    agent = AgentBinding(
-        agent=AgentDefinition(
-            name="a",
-            model="openai/model",
-        )
+    agent = Agent(
+        name="a",
+        model="openai/gpt-5.6-luna",
     )
-    plan: JobPlan = JobSpec(
-        source=BenchmarkJobSource(benchmark=definition),
+    plan: JobPlan = Job(
+        benchmark,
         agents=(agent,),
-    ).plan()
+    ).plan
     assert plan.trial_count == 1
-    trial: TrialSpec = plan.trials[0]
-    lock: JobLock = plan.lock
-    runtime_provider: str = trial.runtime_provider
+    runtime_provider: str = plan.trials[0].runtime_provider
     retry: RetryPolicy = RetryPolicy()
     verifier_definition: DeterministicVerifier = verifier
     _ = (
@@ -101,7 +76,6 @@ def main() -> None:
         TrialReceipt,
         TrialResult,
         ErrorCode,
-        lock,
         runtime_provider,
         retry,
         verifier_definition,

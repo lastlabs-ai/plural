@@ -1,45 +1,35 @@
-"""Plan an Agent routing comparison on one revisioned Task."""
+"""Plan an Agent routing comparison on one Task."""
 
-from plural import (
-    AgentBinding,
-    AgentDefinition,
-    BenchmarkDefinition,
-    BenchmarkJobSource,
-    DeterministicVerifier,
-    EnvironmentDefinition,
-    JobSpec,
-    RoutingSpec,
-    TaskDefinition,
-    WeightedVerifier,
-)
+from plural import Agent, Benchmark, Environment, Job, Task
+from plural.verifiers import DeterministicVerifier
 
-environment = EnvironmentDefinition(name="routing-world")
-verifier = DeterministicVerifier(name="correct", command=("python", "verify.py"))
-task = TaskDefinition(
-    task_id="route-request",
+environment = Environment(name="routing-world")
+verifier = DeterministicVerifier(name="correct", check=("python", "verify.py"))
+task = Task(
+    name="route-request",
     instructions="Answer the request.",
     environment=environment,
-    verifiers=(WeightedVerifier(verifier=verifier),),
+    verifiers=(verifier,),
 )
-benchmark = BenchmarkDefinition(name="routing-comparison", tasks=(task,))
+benchmark = Benchmark(name="routing-comparison", version="1.0.0", tasks=(task,))
 agents = (
-    AgentDefinition(
+    Agent(
         name="primary-only",
-        model="openai/gpt-4.1-mini",
+        model="openai/gpt-5.6-luna",
     ),
-    AgentDefinition(
+    Agent(
         name="with-fallback",
-        model="openai/gpt-4.1-mini",
-        routing=RoutingSpec(fallback_models=("anthropic/claude-sonnet-4",)),
+        model="openai/gpt-5.6-luna",
+        fallback_models=("anthropic/claude-haiku-4-5",),
     ),
 )
-spec = JobSpec(
-    source=BenchmarkJobSource(benchmark=benchmark),
-    agents=tuple(AgentBinding(agent=agent) for agent in agents),
+job = Job(
+    benchmark,
+    agents=agents,
     attempts=3,
     concurrency=4,
 )
 
-plan = spec.plan()
+plan = job.plan
 assert plan.trial_count == 6
 print(plan.model_dump_json(indent=2))

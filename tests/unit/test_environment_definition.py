@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from plural import (
     Environment,
-    EnvironmentResource,
-    EnvironmentRuntime,
     Observation,
-    SecretReference,
+    Resource,
+    Runtime,
+    Secret,
     State,
     action,
     hidden,
@@ -24,7 +24,7 @@ class CounterObservation(Observation):
 
 class CounterEnvironment(Environment[CounterObservation, CounterState]):
     name = "counter"
-    revision = "1.2.0"
+    version = "1.2.0"
     overview = "A stateful counter."
     readme = "# Counter"
 
@@ -44,14 +44,14 @@ class CounterEnvironment(Environment[CounterObservation, CounterState]):
 
 def test_environment_compiles_exact_manifest() -> None:
     environment = CounterEnvironment(
-        runtime=EnvironmentRuntime(provider="docker"),
-        resources=(EnvironmentResource(kind="data", name="orders"),),
-        secrets=(SecretReference(name="DATABASE_URL"),),
+        runtime=Runtime(provider="docker"),
+        resources=(Resource(kind="data", name="orders"),),
+        secrets=(Secret(name="DATABASE_URL"),),
         metadata={"owner": "evals"},
     )
     manifest = environment.definition()
     assert manifest.name == "counter"
-    assert manifest.revision == "1.2.0"
+    assert manifest.version == "1.2.0"
     assert manifest.overview == "A stateful counter."
     assert manifest.readme == "# Counter"
     assert manifest.actions[0].name == "increment"
@@ -67,6 +67,8 @@ def test_environment_compiles_exact_manifest() -> None:
     assert "verifier" not in dumped
     assert "mode" not in dumped
     assert "instructions" not in dumped
+    assert "schema_version" not in dumped
+    assert "revision" not in dumped
 
 
 def test_snapshots_are_json_safe_and_detached() -> None:
@@ -77,6 +79,37 @@ def test_snapshots_are_json_safe_and_detached() -> None:
     observation["count"] = 99
     assert environment.state.count == 0
     assert environment.observation.count == 0
+
+
+def test_reset_and_step_follow_gymnasium() -> None:
+    environment = CounterEnvironment()
+    observation, info = environment.reset()
+    assert observation.count == 0
+    assert info == {}
+    observation, reward, terminated, truncated, info = environment.step(
+        {"name": "increment", "amount": 2}
+    )
+    assert observation.count == 2
+    assert environment.state.count == 2
+    assert reward == 0
+    assert terminated is False
+    assert truncated is False
+    assert info == {}
+    assert [item.name for item in environment.definition().actions] == ["increment"]
+
+
+def test_reset_cannot_be_an_action() -> None:
+    class Broken(Environment):
+        @action
+        def reset(self) -> dict[str, str]:
+            return {}
+
+    try:
+        Broken().definition()
+    except TypeError as exc:
+        assert "episode API" in str(exc)
+    else:
+        raise AssertionError("reset @action was compiled")
 
 
 def test_rewarder_signature_is_enforced() -> None:

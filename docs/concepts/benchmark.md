@@ -1,8 +1,8 @@
 ---
 route: /docs/concepts/benchmark
-title: "Benchmark"
+title: Benchmark
 order: 901
-description: "This page moved to Benchmarks. Open that guide for the current walkthrough and examples."
+description: This page moved to Benchmarks. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

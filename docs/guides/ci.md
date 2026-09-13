@@ -1,8 +1,8 @@
 ---
 route: /docs/guides/ci
-title: "Ci"
+title: Ci
 order: 920
-description: "This page moved to Integrations. Open that guide for the current walkthrough and examples."
+description: This page moved to Integrations. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

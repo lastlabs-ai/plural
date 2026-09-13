@@ -1,8 +1,8 @@
 ---
 route: /docs/guides/add-provider
-title: "Add Provider"
+title: Add Provider
 order: 916
-description: "This page moved to Integrations. Open that guide for the current walkthrough and examples."
+description: This page moved to Integrations. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

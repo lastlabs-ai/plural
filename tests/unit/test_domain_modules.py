@@ -1,44 +1,46 @@
 from __future__ import annotations
 
 import plural
-from plural.agents import AgentBinding, AgentDefinition
-from plural.agents.models import AgentDefinition as ModelAgentDefinition
-from plural.environments.definition import EnvironmentDefinition
-from plural.jobs import JobSpec, TaskJobSource
-from plural.tasks import TaskDefinition
-from plural.verifiers import DeterministicVerifier, WeightedVerifier
+from plural import Agent, Benchmark, Environment, Job, Runtime, Task
+from plural.verifiers import DeterministicVerifier, Verifier
 
 
-def test_task_contract_is_available_from_focused_module() -> None:
-    assert TaskDefinition is plural.TaskDefinition
-    assert TaskDefinition.__module__ == "plural.tasks"
+def test_plain_domain_contracts_are_top_level() -> None:
+    assert Agent is plural.Agent
+    assert Benchmark is plural.Benchmark
+    assert Environment is plural.Environment
+    assert Job is plural.Job
+    assert Runtime is plural.Runtime
+    assert Task is plural.Task
+    assert Verifier is plural.Verifier
 
 
-def test_verifier_contract_is_available_from_focused_module() -> None:
-    assert WeightedVerifier is plural.WeightedVerifier
-    assert WeightedVerifier.__module__ == "plural.verifiers"
+def test_internal_contract_names_are_not_top_level() -> None:
+    assert not {
+        "AgentBinding",
+        "AgentDefinition",
+        "BenchmarkDefinition",
+        "EnvironmentDefinition",
+        "JobSpec",
+        "TaskDefinition",
+        "VerifierDefinition",
+        "WeightedVerifier",
+        "native_actions_v1",
+        "native_chat_v1",
+    } & set(plural.__all__)
 
 
-def test_agent_contract_preserves_package_and_models_imports() -> None:
-    assert AgentDefinition is plural.AgentDefinition
-    assert AgentDefinition is ModelAgentDefinition
-    assert AgentDefinition.__module__ == "plural.agents.models"
-
-
-def test_job_contract_consumes_focused_domain_modules() -> None:
-    environment = EnvironmentDefinition(name="world")
-    verifier = DeterministicVerifier(name="exact", command=("python", "verify.py"))
-    task = TaskDefinition(
-        task_id="hello",
+def test_job_contract_plans_public_objects() -> None:
+    environment = Environment(name="world")
+    verifier = DeterministicVerifier(name="exact", check="python verify.py")
+    task = Task(
+        name="hello",
         instructions="Say hello.",
         environment=environment,
-        verifiers=(WeightedVerifier(verifier=verifier),),
+        verifiers=(verifier,),
     )
-    spec = JobSpec(
-        source=TaskJobSource(task=task),
-        agents=(AgentBinding(agent=AgentDefinition(name="candidate", model="test/model")),),
-    )
+    agent = Agent(model="openai/gpt-5.6-luna")
+    job = Job(task, agents=(agent,))
 
-    assert JobSpec is plural.JobSpec
-    assert JobSpec.__module__ == "plural.jobs"
-    assert spec.plan().trial_count == 1
+    assert job.plan.trial_count == 1
+    assert job.plan().trial_count == 1

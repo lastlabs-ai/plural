@@ -12,6 +12,11 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from pydantic_core import to_jsonable_python
 
 SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+SEMANTIC_VERSION_PATTERN = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 _UNORDERED_KEYS = frozenset(
     {
         "allowed_capabilities",
@@ -76,6 +81,17 @@ def content_hash(value: Any) -> str:
 def stable_id(prefix: str, value: Any) -> str:
     """Return a compact deterministic identifier."""
     return f"{prefix}_{content_hash(value).removeprefix('sha256:')[:24]}"
+
+
+def semantic_version(value: str) -> str:
+    """Validate an ordinary semantic version.
+
+    Returns:
+        The unchanged semantic version.
+    """
+    if SEMANTIC_VERSION_PATTERN.fullmatch(value) is None:
+        raise ValueError("version must be a semantic version such as '1.0.0'")
+    return value
 
 
 class FrozenModel(BaseModel):
@@ -308,7 +324,9 @@ __all__ = [
     "PackageSource",
     "RoutingSpec",
     "SHA256_PATTERN",
+    "SEMANTIC_VERSION_PATTERN",
     "canonical_json",
     "content_hash",
+    "semantic_version",
     "stable_id",
 ]

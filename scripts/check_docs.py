@@ -102,9 +102,7 @@ def _metadata(source: Path, text: str, failures: list[str]) -> dict[str, object]
     elif nav:
         group = metadata.get("nav_group")
         if not isinstance(group, str) or group not in NAV_GROUPS:
-            failures.append(
-                f"{shown}: nav_group must be one of {', '.join(sorted(NAV_GROUPS))}"
-            )
+            failures.append(f"{shown}: nav_group must be one of {', '.join(sorted(NAV_GROUPS))}")
     return metadata
 
 
@@ -126,7 +124,13 @@ def _nav_parity(documents: dict[str, dict[str, object]], failures: list[str]) ->
     actual = set()
     for path, meta in documents.items():
         if meta.get("nav") is True:
-            actual.add((str(meta.get("nav_group") or ""), str(meta.get("route") or ""), path.relative_to(DOCS)))
+            actual.add(
+                (
+                    str(meta.get("nav_group") or ""),
+                    str(meta.get("route") or ""),
+                    path.relative_to(DOCS),
+                )
+            )
     if actual != expected:
         missing = sorted(expected - actual)
         extra = sorted(actual - expected)

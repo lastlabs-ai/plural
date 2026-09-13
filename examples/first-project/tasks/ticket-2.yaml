@@ -1,0 +1,110 @@
+kind: task
+name: ticket-2
+version: 0.1.0
+instructions: Read the open ticket, categorize it correctly, then give a brief final
+  confirmation. Stop after categorization.
+goals: []
+info:
+  ticket_id: ticket-2
+metadata:
+  split: evaluation
+environment:
+  kind: environment
+  python: ../environment/world.py:SupportQueue
+  name: support-queue
+  version: 0.1.0
+  description: ''
+  overview: Read a ticket, then assign billing, technical, or account.
+  readme: ''
+  resources: []
+  runtime:
+    provider: local
+    placement: {}
+    image: null
+    snapshot: null
+    declarative_image: null
+    build_context: null
+    dockerfile: null
+    network: full
+    network_allowlist: []
+    resources:
+      cpu: null
+      memory_mb: null
+      pids: null
+      disk_mb: null
+    read_only_root: false
+    targets:
+    - local
+    persistent: false
+    compose: false
+    extra_capabilities: []
+    timeout_seconds: 300.0
+    allow_unsafe_local: true
+  secrets: []
+  guardrails: []
+  harness_policy:
+    mode: allow_all
+    allowed_harnesses: []
+    allowed_capabilities: null
+    denied_capabilities: []
+  limits:
+    max_turns: 6
+    max_seconds: 120.0
+    max_cost_usd: null
+  metadata: {}
+  reset_command:
+  - python
+  - commands.py
+  - reset
+  package:
+    command:
+    - python
+    - commands.py
+    source: ../environment
+    digest: sha256:724a2a682a771b89c74c5c0704dfa7a32248310ae87b9e6a5a54f112175b6c51
+verifiers:
+- name: correct-category
+  version: 0.1.0
+  info: null
+  criteria: []
+  evidence:
+    artifacts: []
+    state_paths:
+    - expected
+    observation_paths:
+    - category
+    - done
+    include_hidden_state: true
+  weight: 1.0
+  metadata: {}
+  kind: deterministic
+  check:
+  - python
+  - -c
+  - "\"\"\"Check the actual final Environment state, not the model's final claim.\"\
+    \"\"\n\nimport json\nfrom pathlib import Path\n\npayload = json.loads(Path(\"\
+    .plural/verifier-input.json\").read_text())\nview = payload[\"environment_view\"\
+    ]\nobservation = view[\"observation\"]\nstate = view[\"state\"]\ncorrect = observation[\"\
+    done\"] and observation[\"category\"] == state[\"expected\"]\nreward = float(correct)\n\
+    Path(\"verifier-result.json\").write_text(\n    json.dumps(\n        {\n     \
+    \       \"reward\": reward,\n            \"scores\": {\"correct\": reward},\n\
+    \            \"evidence\": [f\"category={observation['category']}\", f\"correct={correct}\"\
+    ],\n            \"feedback\": \"Correct category.\"\n            if correct\n\
+    \            else \"Incorrect or incomplete categorization.\",\n        }\n  \
+    \  )\n    + \"\\n\"\n)\n"
+  runtime:
+    provider: local
+    image: null
+    network: full
+    network_allowlist: []
+    resources:
+      cpu: null
+      memory_mb: null
+      pids: null
+      disk_mb: null
+    timeout_seconds: 60.0
+  result_path: verifier-result.json
+  evidence_required: true
+resources: []
+initial_state: {}
+reset_options: {}

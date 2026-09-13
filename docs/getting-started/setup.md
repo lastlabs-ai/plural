@@ -1,8 +1,8 @@
 ---
 route: /docs/getting-started/setup
-title: "Setup"
+title: Setup
 order: 915
-description: "This page moved to Getting started. Open that guide for the current walkthrough and examples."
+description: This page moved to Getting started. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

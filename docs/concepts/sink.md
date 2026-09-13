@@ -1,8 +1,8 @@
 ---
 route: /docs/concepts/sink
-title: "Sink"
+title: Sink
 order: 912
-description: "This page moved to Integrations. Open that guide for the current walkthrough and examples."
+description: This page moved to Integrations. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

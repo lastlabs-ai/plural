@@ -3,6 +3,7 @@
 from plural.environments.action_registry import action
 from plural.environments.dataset import TraceDataset, TraceFilter
 from plural.environments.definition import (
+    Action,
     EnvironmentDefinition,
     EnvironmentIdentity,
     EnvironmentResource,
@@ -12,13 +13,17 @@ from plural.environments.definition import (
     HarnessGrant,
     HarnessPolicy,
     NativeAction,
+    Resource,
     RewarderDefinition,
+    Runtime,
+    Secret,
     SecretReference,
 )
 from plural.environments.env import Environment, rewarder
 from plural.environments.types import Observation, State, hidden
 
 __all__ = [
+    "Action",
     "Environment",
     "EnvironmentIdentity",
     "EnvironmentDefinition",
@@ -31,6 +36,9 @@ __all__ = [
     "NativeAction",
     "Observation",
     "RewarderDefinition",
+    "Resource",
+    "Runtime",
+    "Secret",
     "SecretReference",
     "State",
     "TraceDataset",

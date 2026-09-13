@@ -1,8 +1,8 @@
 ---
 route: /docs/sdk/hosted-advanced
-title: "Hosted Advanced"
+title: Hosted Advanced
 order: 941
-description: "This page moved to Getting started. Open that guide for the current walkthrough and examples."
+description: This page moved to Getting started. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

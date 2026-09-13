@@ -1,8 +1,8 @@
 ---
 route: /docs/guides/migrate-openrouter
-title: "Migrate Openrouter"
+title: Migrate Openrouter
 order: 925
-description: "This page moved to Integrations. Open that guide for the current walkthrough and examples."
+description: This page moved to Integrations. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

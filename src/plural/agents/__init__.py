@@ -1,5 +1,5 @@
-"""First-class schema-v2 Agent contracts."""
+"""Agent authoring and internal execution contracts."""
 
-from plural.agents.models import AgentBinding, AgentDefinition, RoutingSpec
+from plural.agents.models import Agent, AgentBinding, AgentDefinition, RoutingSpec
 
-__all__ = ["AgentBinding", "AgentDefinition", "RoutingSpec"]
+__all__ = ["Agent", "AgentBinding", "AgentDefinition", "RoutingSpec"]

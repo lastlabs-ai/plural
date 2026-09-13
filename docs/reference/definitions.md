@@ -2,108 +2,41 @@
 route: /docs/reference/definitions
 title: "Definitions"
 order: 200
-description: "Field-level reference for Environment, Task, Verifier, Agent, Benchmark, and Job objects. Generated JSON Schemas are the validation authority."
+description: "Reference for the seven public evaluation objects and their shared Python, YAML, and CLI semantics."
 audience: all
 nav: true
 nav_group: Reference
 ---
 # Definitions
 
-Models are frozen and reject unknown fields. Generated JSON Schemas are the validation authority.
+Public models reject unknown fields and use ordinary semantic versions.
+Environment, Agent, Verifier, and Task default to `0.1.0`; Benchmark requires an
+explicit version.
 
-## `PackageSource`
+## Objects
 
-- `kind`: `local`, `archive`, or `oci`.
-- `uri`: non-empty path/URL/reference.
-- `digest`: optional only for local; otherwise `sha256:` plus 64 lowercase hex.
-- `trusted`: deprecated migration field; never bypasses integrity/unsafe checks.
-- `unsafe_local`: explicit unsigned local opt-in; invalid for remote kinds.
+- `Environment`: world, Runtime, actions, resources, limits, and rendering.
+- `Runtime`: isolation, image, compute, filesystem, network, secrets, placement.
+- `Agent`: model, provider, instructions, optional Harness, metadata.
+- `Verifier`: information, criteria, evidence, runtime, weight, check behavior.
+- `Task`: instructions, Environment, Verifiers, resources, initial state.
+- `Benchmark`: name, version, ordered Tasks, primary metric, metadata.
+- `Job`: source, Agents, mode, attempts, concurrency, retry policy.
 
-## `HarnessDefinition` and `HarnessPackage`
+## Serialization
 
-- `schema_version`, `name`, `revision`, `description`.
-- `protocol`: `plural-harness-v1` or `acp`.
-- `protocol_adapter`: must be `acp-client-v1` exactly when protocol is ACP.
-- `entrypoint`: optional metadata; execution uses `command`.
-- `implementation`: `declared` or `runnable`. Declared harnesses have no command.
-- `command`: required argv only when `implementation` is `runnable`.
-- `requirements`, `capabilities` (`HarnessCapability` values), `supported_models`.
-- `auth_modes`: any of `environment`, `api_key`, `oauth`, `none`.
-- `secret_names`: secrets an Agent may grant.
-- `environment_names`: non-secret process environment names passed when set.
-- `healthcheck`: optional argv run before the harness.
-- `trajectory_path`: optional path that must also be declared and emitted as an
-  artifact.
-- `outputs`, `artifacts`: exact `FileDeclaration` values (`path`, `required`,
-  `media_type`).
-- `HarnessPackage.definition` and `.source`: complete package. `content_hash` and
-  `package_id` are derived.
+`plural.project.Resolver` is the only resolver. It accepts YAML files and
+`path.py:object` references. `load`, `dump`, and `dumps` are convenience
+functions over the same implementation.
 
-`HarnessBinding` contains `name`, `revision`, and required digest.
+YAML field names, defaults, and nesting match public constructors. Resolved
+Python and YAML graphs preserve content hashes and plans.
 
-## `EnvironmentDefinition`
+## Catalog context
 
-- `schema_version`, `name`, `revision`, `description`, `overview`, `readme`,
-  and `metadata`.
-- unique native `actions`, typed `observation_schema`, and hidden
-  `state_schema`.
-- train-only `rewarders`, plus `guardrails`, `resources`, and named `secrets`.
-- `runtime`: the Environment-owned provider, placement, image/build,
-  network, resources, targets, persistence, compose, and local opt-in.
-- `harness_policy` and execution `limits`.
-- optional `source`.
+`CatalogContext` carries an effective `ModelCatalog` to Agent factories,
+Verifier factories, loaders, CLI commands, and Job planning. It never changes
+global state.
 
-Tasks, Verifiers, and Job mode are intentionally absent.
-`Environment.definition()` compiles a Python Environment class.
-
-## `VerifierDefinition` and `TaskDefinition`
-
-A Verifier is a discriminated `deterministic`, `agent`, or `human` revision.
-Every kind carries an `EvidenceContract` (`artifacts`, `observation_paths`,
-`state_paths`, `include_hidden_state`). Deterministic and agent Verifiers own
-their runtime and network policy. Human Verifiers own a rubric and
-instructions and yield `awaiting_review` until a review is submitted.
-
-A Task owns `task_id`, `revision`, `instructions`, `info`, and `metadata`. It
-embeds one exact Environment revision and one or more `WeightedVerifier`
-revisions. Pin-time rejects a Verifier whose evidence paths are absent from
-the Environment schemas.
-
-## `BenchmarkDefinition`
-
-A Benchmark owns `name`, `revision`, description, primary metric, metadata, and
-an ordered unique list of complete Task revisions. Those Tasks may pin different
-Environments.
-
-## `AgentDefinition`
-
-- `schema_version`, `name`, `revision`, `model`, `instructions`, and metadata.
-- `routing`: provider, fallbacks, temperature, and maximum tokens.
-- optional exact Harness binding/package, authentication mode, and secret grants.
-
-An Agent never owns an Environment. Harness tool policy (`HarnessGrant`) is
-resolved against the Task's Environment for each Trial.
-
-## `JobFile` and `JobSpec`
-
-`JobFile` has a discriminated `source_kind` (`task` or `benchmark`), one source
-path, Agent paths, `mode`, `attempts`, global concurrency,
-`per_runtime_concurrency`, and priority. Paths resolve relative to the Job file.
-
-Resolved `JobSpec` embeds a `TaskJobSource` or `BenchmarkJobSource` and Agent
-bindings. It owns scheduling and retry policy only; each selected Task's
-Environment owns its runtime.
-
-## Planning, Trials, and receipts
-
-`TrialSpec` contains Job, Agent, Task, one-based attempt, exact
-Environment/Harness bindings, the per-Trial `harness_grant`, and the
-Environment's runtime provider. `trial_id` is derived independently of retries.
-
-Each retry appends a `TrialExecution` with its own execution index. Jobs and
-executions append monotonic `ProgressEvent` records. Human results use
-`awaiting_review`.
-
-`TrialReceipt` records Trial/Job/retry/attempt identity; Environment,
-Agent, Harness, Runtime, image, task, trace, artifact and verifier hashes;
-the grant; UTC timestamps; and `trust`, currently only `self_reported`.
+Generated schema files use plain public names such as `Agent.schema.json`,
+`Task.schema.json`, and `Job.schema.json`.

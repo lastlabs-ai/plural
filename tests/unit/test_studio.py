@@ -6,12 +6,12 @@ from pathlib import Path
 import httpx
 import respx
 
-from plural import (
+from plural import Client
+from plural.domain import (
     AgentBinding,
     AgentDefinition,
     BenchmarkDefinition,
     BenchmarkJobSource,
-    Client,
     DeterministicVerifier,
     EnvironmentDefinition,
     JobSpec,
@@ -35,6 +35,27 @@ def _client(tmp_path: Path) -> Client:
 def test_studio_base_url() -> None:
     assert studio_base_url("https://api.example.com/v1") == BASE
     assert studio_base_url("https://api.example.com") == BASE
+
+
+@respx.mock
+def test_stamp_harness_posts_compatible_evidence(tmp_path: Path) -> None:
+    route = respx.post(f"{BASE}/environments/env_1/revisions/env_rev_1/harness-evidence").mock(
+        return_value=httpx.Response(200, json={"id": "stamp_1", "compatible": True})
+    )
+
+    result = _client(tmp_path).environments.stamp_harness(
+        environment_id="env_1",
+        revision_id="env_rev_1",
+        harness_revision_id="harness_rev_1",
+        evidence={"kind": "context_truncation"},
+    )
+
+    assert result["id"] == "stamp_1"
+    assert json.loads(route.calls.last.request.content) == {
+        "harness_revision_id": "harness_rev_1",
+        "compatible": True,
+        "evidence": {"kind": "context_truncation"},
+    }
 
 
 @respx.mock

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
 
-from plural.agents import AgentBinding, AgentDefinition
+from plural.agents import Agent, AgentBinding, AgentDefinition
+from plural.catalog import ModelCatalog
 from plural.common import (
     SHA256_PATTERN,
     ErrorCode,
@@ -21,7 +24,7 @@ from plural.common import (
 )
 from plural.environments.definition import EnvironmentDefinition, EnvironmentIdentity, HarnessGrant
 from plural.sandbox.models import NetworkMode
-from plural.tasks import BenchmarkDefinition, TaskDefinition
+from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
 
 
 class RetryPolicy(FrozenModel):
@@ -70,6 +73,55 @@ class BenchmarkJobSource(FrozenModel):
 
 
 JobSource = Annotated[TaskJobSource | BenchmarkJobSource, Field(discriminator="kind")]
+
+
+def _task_pin(task: TaskDefinition) -> TaskPin:
+    return TaskPin(name=task.task_id, version=task.revision, content_hash=task.content_hash)
+
+
+def _benchmark_pin(source: JobSource) -> BenchmarkPin | None:
+    if not isinstance(source, BenchmarkJobSource):
+        return None
+    benchmark = source.benchmark
+    return BenchmarkPin(
+        name=benchmark.name,
+        version=benchmark.revision,
+        content_hash=benchmark.content_hash,
+    )
+
+
+def _resolve_model(agent: AgentBinding, catalog: ModelCatalog) -> ModelResolution:
+    model = catalog.get(agent.model)
+    if model is None:
+        provider = agent.routing.provider or agent.model.partition("/")[0]
+        upstream_id = agent.model.partition("/")[2] or agent.model
+        return ModelResolution(
+            catalog_model_id=agent.model,
+            provider=provider,
+            endpoint=f"{provider}:unknown",
+            upstream_id=upstream_id,
+            catalog_updated_at=catalog.updated_at,
+        )
+    endpoints = model.ordered_endpoints()
+    if agent.routing.provider is not None:
+        endpoint = next(
+            (item for item in endpoints if item.provider == agent.routing.provider),
+            None,
+        )
+        if endpoint is None:
+            raise ValueError(
+                f"provider {agent.routing.provider!r} is not a catalog endpoint "
+                f"for model {agent.model!r}"
+            )
+    else:
+        endpoint = endpoints[0]
+    return ModelResolution(
+        catalog_model_id=agent.model,
+        provider=endpoint.provider,
+        endpoint=f"{endpoint.provider}:{endpoint.region}",
+        upstream_id=endpoint.upstream_id,
+        catalog_updated_at=catalog.updated_at,
+    )
 
 
 class JobMode(str, Enum):
@@ -200,6 +252,48 @@ class ArtifactReference(FrozenModel):
         if SHA256_PATTERN.fullmatch(value) is None:
             raise ValueError("digest must be sha256:<64 lowercase hex characters>")
         return value
+
+
+class ArtifactManifestEntry(FrozenModel):
+    """One content-addressed file in an execution artifact directory."""
+
+    path: str = Field(min_length=1)
+    sha256: str
+    media_type: str = Field(min_length=1)
+    size: int = Field(ge=0)
+    role: str | None = None
+
+    @field_validator("sha256")
+    @classmethod
+    def _sha256(cls, value: str) -> str:
+        if SHA256_PATTERN.fullmatch(value) is None:
+            raise ValueError("sha256 must be sha256:<64 lowercase hex characters>")
+        return value
+
+
+class ArtifactManifest(FrozenModel):
+    """Stable manifest for the files persisted under ``artifacts/``."""
+
+    schema_version: Literal["1"] = "1"
+    artifacts: tuple[ArtifactManifestEntry, ...] = ()
+
+
+class BenchmarkPin(FrozenModel):
+    """Exact Benchmark revision audited by a Job."""
+
+    name: str
+    version: str
+    content_hash: str
+
+
+class ModelResolution(FrozenModel):
+    """Catalog model and endpoint selected at planning time."""
+
+    catalog_model_id: str
+    provider: str
+    endpoint: str
+    upstream_id: str
+    catalog_updated_at: str | None = None
 
 
 class VerifierResult(FrozenModel):
@@ -348,12 +442,18 @@ class JobSpec(FrozenModel):
             },
         )
 
-    def plan(self) -> JobPlan:
+    def plan(self, catalog: ModelCatalog | None = None) -> JobPlan:
         """Expand Agent x Task x attempt and freeze per-Trial compatibility.
 
         Returns:
             The deterministic Trial plan and revision lock.
         """
+        effective_catalog = catalog or ModelCatalog()
+        benchmark = _benchmark_pin(self.source)
+        task_pins = tuple(_task_pin(task) for task in self.tasks)
+        resolutions = {
+            agent.agent_id: _resolve_model(agent, effective_catalog) for agent in self.agents
+        }
         trials = tuple(
             TrialSpec(
                 job_id=self.job_id,
@@ -361,7 +461,10 @@ class JobSpec(FrozenModel):
                 agent_name=agent.name,
                 task_id=task.task_id,
                 task_digest=task.content_hash,
+                task_pin=_task_pin(task),
+                benchmark=benchmark,
                 attempt=attempt,
+                model=resolutions[agent.agent_id],
                 environment=task.environment.identity,
                 verifier_digests=tuple(item.verifier.content_hash for item in task.verifiers),
                 harness=agent.harness,
@@ -382,6 +485,9 @@ class JobSpec(FrozenModel):
                 if isinstance(self.source, TaskJobSource)
                 else self.source.benchmark.content_hash
             ),
+            benchmark=benchmark,
+            task_pins=task_pins,
+            model_resolutions=tuple(resolutions[agent.agent_id] for agent in self.agents),
             task_digests=tuple(task.content_hash for task in self.tasks),
             environment_digests=tuple(task.environment.content_hash for task in self.tasks),
             verifier_digests=tuple(
@@ -404,7 +510,10 @@ class TrialSpec(FrozenModel):
     agent_name: str
     task_id: str
     task_digest: str
+    task_pin: TaskPin
+    benchmark: BenchmarkPin | None = None
     attempt: int = Field(ge=1)
+    model: ModelResolution
     environment: EnvironmentIdentity
     verifier_digests: tuple[str, ...]
     harness: HarnessBinding | None = None
@@ -448,6 +557,9 @@ class JobLock(FrozenModel):
     job_id: str
     spec_hash: str
     source_digest: str
+    benchmark: BenchmarkPin | None = None
+    task_pins: tuple[TaskPin, ...]
+    model_resolutions: tuple[ModelResolution, ...]
     task_digests: tuple[str, ...]
     environment_digests: tuple[str, ...]
     verifier_digests: tuple[str, ...]
@@ -469,6 +581,10 @@ class JobPlan(FrozenModel):
         """Number of independent Trials."""
         return len(self.trials)
 
+    def __call__(self) -> JobPlan:
+        """Return this plan, allowing property and legacy call-style access."""
+        return self
+
 
 class TrialReceipt(FrozenModel):
     """Immutable TrialExecution provenance."""
@@ -481,6 +597,9 @@ class TrialReceipt(FrozenModel):
     retry_count: int = Field(default=0, ge=0)
     attempt: int = Field(default=1, ge=1)
     task_digest: str
+    task_pin: TaskPin
+    benchmark: BenchmarkPin | None = None
+    model: ModelResolution
     environment_digest: str
     verifier_digests: tuple[str, ...]
     agent_digest: str
@@ -498,7 +617,8 @@ class TrialReceipt(FrozenModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     timings: dict[str, float] = Field(default_factory=dict)
-    trust: Literal["self_reported"] = "self_reported"
+    cost_usd: float | None = Field(default=None, ge=0)
+    trust: Literal["self_reported", "imported_unverified"] = "self_reported"
 
     @property
     def receipt_hash(self) -> str:
@@ -527,25 +647,140 @@ class TrialResult(FrozenModel):
         return self
 
 
+class AgentAggregate(FrozenModel):
+    """Minimal leaderboard row for one exact Agent revision."""
+
+    agent_name: str
+    agent_digest: str
+    model_id: str
+    count: int = Field(ge=0)
+    successes: int = Field(ge=0)
+    mean_reward: float | None = None
+    total_cost: float | None = None
+    mean_latency_seconds: float | None = None
+
+
 class JobResult(FrozenModel):
-    """Collected Trial outcomes."""
+    """Collected Trial outcomes and optional Benchmark leaderboard."""
 
     job_id: str
     plan_hash: str
     status: Literal["succeeded", "failed", "cancelled", "awaiting_review"]
     trials: tuple[TrialResult, ...]
+    benchmark: BenchmarkPin | None = None
+    aggregates: tuple[AgentAggregate, ...] = ()
+
+
+class Job:
+    """Simple public runner for a Task or Benchmark and catalog-backed Agents."""
+
+    def __init__(
+        self,
+        source: Task | Benchmark,
+        agents: Sequence[Agent],
+        *,
+        mode: JobMode = JobMode.EVAL,
+        attempts: int = 1,
+        concurrency: int = 1,
+        per_runtime_concurrency: int = 1,
+        priority: int = 0,
+        retry: RetryPolicy | None = None,
+        provider: Any = None,
+        providers: Mapping[str, Any] | None = None,
+        registry: Any = None,
+        store: Any = None,
+        environ: Mapping[str, str] | None = None,
+        progress: Any = None,
+        project_policy: Any = None,
+        catalog: ModelCatalog | None = None,
+    ) -> None:
+        if not isinstance(source, (Task, Benchmark)):
+            raise TypeError("Job source must be a Task or Benchmark")
+        if not agents:
+            raise ValueError("Job requires at least one Agent")
+        if any(not isinstance(agent, Agent) for agent in agents):
+            raise TypeError("Job agents must be Agent instances")
+        self.source = source
+        self.agents = tuple(agents)
+        job_source: JobSource
+        if isinstance(source, Task):
+            job_source = TaskJobSource(task=source._definition())
+        else:
+            job_source = BenchmarkJobSource(benchmark=source._definition())
+        self.spec = JobSpec(
+            source=job_source,
+            agents=tuple(AgentBinding(agent=agent._definition()) for agent in self.agents),
+            mode=mode,
+            attempts=attempts,
+            concurrency=concurrency,
+            per_runtime_concurrency=per_runtime_concurrency,
+            priority=priority,
+            retry=retry or RetryPolicy(),
+        )
+        self.catalog = catalog or ModelCatalog()
+        self.plan = self.spec.plan(self.catalog)
+        self._runner_options = {
+            "provider": provider,
+            "providers": providers,
+            "store": store,
+            "environ": environ,
+            "progress": progress,
+            "project_policy": project_policy,
+            "catalog": self.catalog,
+        }
+        if registry is not None:
+            self._runner_options["registry"] = registry
+        self._runner_options = {
+            key: value for key, value in self._runner_options.items() if value is not None
+        }
+
+    @property
+    def content_hash(self) -> str:
+        """Stable hash of this resolved public Job configuration."""
+        return self.spec.content_hash
+
+    async def run_async(self, *, resume: bool = False) -> JobResult:
+        """Execute this Job without blocking the caller's event loop.
+
+        Returns:
+            The collected Trial outcomes.
+        """
+        from plural.execution.engine import Job as JobRunner
+
+        return await JobRunner(self.spec, **self._runner_options).run(resume=resume)
+
+    def run(self, *, resume: bool = False) -> JobResult:
+        """Execute synchronously when no event loop is already running.
+
+        Returns:
+            The collected Trial outcomes.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.run_async(resume=resume))
+        raise RuntimeError(
+            "Job.run() cannot be called inside a running event loop; "
+            "use 'await job.run_async()' instead"
+        )
 
 
 __all__ = [
+    "AgentAggregate",
+    "ArtifactManifest",
+    "ArtifactManifestEntry",
     "ArtifactReference",
+    "BenchmarkPin",
     "BenchmarkJobSource",
     "ExecutionStatus",
+    "Job",
     "JobLock",
     "JobMode",
     "JobPlan",
     "JobResult",
     "JobSource",
     "JobSpec",
+    "ModelResolution",
     "ProgressEvent",
     "RetryPolicy",
     "TITORecord",

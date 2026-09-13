@@ -15,8 +15,8 @@ The entries below document the public classes and methods.
 
 `Client.create(x)` and `Client.update(x)` support the hosted object types
 implemented by the connected deployment. Canonical local execution uses
-`EnvironmentDefinition`, `AgentDefinition`, Task/Verifier revisions,
-and Task-or-Benchmark `JobSpec` values.
+the same public Environment, Agent, Task, Verifier, Benchmark, and Job objects
+used by YAML and the CLI.
 
 ::: plural.client.Client
 
@@ -38,17 +38,34 @@ and Task-or-Benchmark `JobSpec` values.
 
 ::: plural.tracing.resources.trace_json_schema
 
-## Package and execution domain
+## Public evaluation domain
 
-The canonical domain contains EnvironmentDefinition, AgentDefinition,
-first-class Task and Verifier revisions, cross-Environment
-BenchmarkDefinition, discriminated Job sources, Trial/TrialExecution,
-ProgressEvent, and exact TITORecord. The generated schemas are the
-serialization authority.
+These are the public Python semantics and the source for generated YAML
+schemas.
 
-::: plural.domain
+::: plural.agents.models.Agent
 
-::: plural.execution.engine.Job
+::: plural.environments.env.Environment
+
+::: plural.tasks.Task
+
+::: plural.tasks.Benchmark
+
+::: plural.verifiers.DeterministicVerifier
+
+::: plural.verifiers.AgentVerifier
+
+::: plural.verifiers.HumanVerifier
+
+::: plural.jobs.Job
+
+::: plural.project.Resolver
+
+## Internal execution contracts
+
+The runner, durable store, Trial records, retry records, and verifier output
+types below are implementation contracts. They are not authoring APIs and do
+not define a second YAML format.
 
 ::: plural.execution.engine.Trial
 
@@ -154,6 +171,6 @@ serialization authority.
 
 ::: plural.errors
 
-## Local package loading
+## Public project loading
 
-::: plural.cli.scaffold
+::: plural.project

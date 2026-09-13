@@ -1,8 +1,8 @@
 ---
 route: /docs/operations/security
-title: "Security"
+title: Security
 order: 934
-description: "This page moved to Getting started. Open that guide for the current walkthrough and examples."
+description: This page moved to Getting started. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

@@ -14,6 +14,7 @@ Examples:
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Mapping
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -347,13 +348,48 @@ class ModelCatalog:
         True
     """
 
-    def __init__(self, path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        path: str | Path | None = None,
+        *,
+        entries: Iterable[ModelSpec | Mapping[str, Any]] = (),
+        include_bundled: bool = True,
+    ) -> None:
         self._models: dict[str, ModelSpec] = {}
         self._updated_at: str | None = None
-        if path is None:
-            self.load_bundled()
-        else:
+        if path is not None:
             self.load_path(Path(path))
+        elif include_bundled:
+            self.load_bundled()
+        self.add(*entries)
+
+    def add(self, *entries: ModelSpec | Mapping[str, Any]) -> ModelCatalog:
+        """Add explicit project entries and return this effective catalog.
+
+        Project entries replace bundled entries with the same stable model ID.
+        The catalog is intentionally passed explicitly; no process-global
+        registration is performed.
+
+        Returns:
+            This catalog, for convenient construction.
+        """
+        for entry in entries:
+            spec = entry if isinstance(entry, ModelSpec) else ModelSpec.model_validate(entry)
+            self._models[spec.id] = spec.model_copy(deep=True)
+        return self
+
+    def with_entries(self, *entries: ModelSpec | Mapping[str, Any]) -> ModelCatalog:
+        """Return an independent catalog extended with project entries.
+
+        Returns:
+            A copy containing the effective bundled and project entries.
+        """
+        catalog = ModelCatalog(include_bundled=False)
+        catalog._updated_at = self._updated_at
+        catalog._models = {
+            model_id: spec.model_copy(deep=True) for model_id, spec in self._models.items()
+        }
+        return catalog.add(*entries)
 
     @property
     def updated_at(self) -> str | None:

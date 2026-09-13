@@ -1,0 +1,41 @@
+{
+  "properties": {
+    "agents": {
+      "minItems": 1,
+      "type": "array"
+    },
+    "attempts": {
+      "default": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "concurrency": {
+      "default": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "mode": {
+      "default": "eval",
+      "enum": [
+        "eval",
+        "train"
+      ]
+    },
+    "per_runtime_concurrency": {
+      "default": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "priority": {
+      "default": 0,
+      "type": "integer"
+    },
+    "source": {}
+  },
+  "required": [
+    "source",
+    "agents"
+  ],
+  "title": "Job",
+  "type": "object"
+}

@@ -1,0 +1,3131 @@
+{
+  "Environment": {
+    "$defs": {
+      "Capability": {
+        "description": "Individual controls a provider can enforce.",
+        "enum": [
+          "image",
+          "build",
+          "resources",
+          "network_none",
+          "network_allowlist",
+          "upload",
+          "download",
+          "timeout",
+          "cancel",
+          "persistence",
+          "compose",
+          "read_only_root",
+          "working_directory",
+          "environment",
+          "log_capture"
+        ],
+        "title": "Capability",
+        "type": "string"
+      },
+      "DeclarativeImage": {
+        "additionalProperties": false,
+        "description": "Portable subset of Daytona's declarative image builder.",
+        "properties": {
+          "base": {
+            "minLength": 1,
+            "title": "Base",
+            "type": "string"
+          },
+          "pip_packages": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Pip Packages",
+            "type": "array"
+          },
+          "environment": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Environment",
+            "type": "object"
+          },
+          "workdir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workdir"
+          }
+        },
+        "required": [
+          "base"
+        ],
+        "title": "DeclarativeImage",
+        "type": "object"
+      },
+      "EnvironmentResource": {
+        "additionalProperties": false,
+        "description": "Data or application supplied by an Environment.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "data",
+              "application",
+              "file"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
+          },
+          "uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Uri"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Digest"
+          },
+          "content_type": {
+            "default": "",
+            "title": "Content Type",
+            "type": "string"
+          },
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "title": "EnvironmentResource",
+        "type": "object"
+      },
+      "EnvironmentRuntime": {
+        "additionalProperties": false,
+        "description": "Immutable Environment-owned provider, placement, network, and compute.",
+        "properties": {
+          "provider": {
+            "default": "docker",
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "placement": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Placement",
+            "type": "object"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image"
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Snapshot"
+          },
+          "declarative_image": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DeclarativeImage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "build_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Build Context"
+          },
+          "dockerfile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Dockerfile"
+          },
+          "network": {
+            "$ref": "#/$defs/NetworkMode",
+            "default": "none"
+          },
+          "network_allowlist": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Network Allowlist",
+            "type": "array"
+          },
+          "resources": {
+            "$ref": "#/$defs/ResourceRequirements"
+          },
+          "read_only_root": {
+            "default": false,
+            "title": "Read Only Root",
+            "type": "boolean"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/$defs/ExecutionTarget"
+            },
+            "title": "Targets",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "persistent": {
+            "default": false,
+            "title": "Persistent",
+            "type": "boolean"
+          },
+          "compose": {
+            "default": false,
+            "title": "Compose",
+            "type": "boolean"
+          },
+          "extra_capabilities": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/Capability"
+            },
+            "title": "Extra Capabilities",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "timeout_seconds": {
+            "default": 300,
+            "exclusiveMinimum": 0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          },
+          "allow_unsafe_local": {
+            "default": false,
+            "title": "Allow Unsafe Local",
+            "type": "boolean"
+          }
+        },
+        "title": "EnvironmentRuntime",
+        "type": "object"
+      },
+      "ExecutionLimits": {
+        "additionalProperties": false,
+        "description": "Environment execution limits.",
+        "properties": {
+          "max_turns": {
+            "default": 8,
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Turns",
+            "type": "integer"
+          },
+          "max_seconds": {
+            "default": 120,
+            "exclusiveMinimum": 0,
+            "title": "Max Seconds",
+            "type": "number"
+          },
+          "max_cost_usd": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Cost Usd"
+          }
+        },
+        "title": "ExecutionLimits",
+        "type": "object"
+      },
+      "ExecutionTarget": {
+        "description": "Execution isolation class.",
+        "enum": [
+          "local",
+          "docker",
+          "remote"
+        ],
+        "title": "ExecutionTarget",
+        "type": "string"
+      },
+      "Guardrail": {
+        "additionalProperties": false,
+        "description": "A plain-language Environment rule.",
+        "properties": {
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "rule": {
+            "minLength": 1,
+            "title": "Rule",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule"
+        ],
+        "title": "Guardrail",
+        "type": "object"
+      },
+      "HarnessBinding": {
+        "additionalProperties": false,
+        "description": "Exact harness revision.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "revision": {
+            "minLength": 1,
+            "title": "Revision",
+            "type": "string"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "revision",
+          "digest"
+        ],
+        "title": "HarnessBinding",
+        "type": "object"
+      },
+      "HarnessCapability": {
+        "description": "A capability requested by an agent harness.",
+        "enum": [
+          "shell",
+          "file_read",
+          "file_edit",
+          "code_execution",
+          "web_search",
+          "browser",
+          "network_fetch",
+          "mcp",
+          "subagents",
+          "persistence"
+        ],
+        "title": "HarnessCapability",
+        "type": "string"
+      },
+      "HarnessPolicy": {
+        "additionalProperties": false,
+        "description": "Environment ceiling for a Trial's optional Agent harness.",
+        "properties": {
+          "mode": {
+            "default": "allow_all",
+            "enum": [
+              "allow_all",
+              "allowlist"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "allowed_harnesses": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/HarnessBinding"
+            },
+            "title": "Allowed Harnesses",
+            "type": "array"
+          },
+          "allowed_capabilities": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/HarnessCapability"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Allowed Capabilities"
+          },
+          "denied_capabilities": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/HarnessCapability"
+            },
+            "title": "Denied Capabilities",
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "title": "HarnessPolicy",
+        "type": "object"
+      },
+      "NativeAction": {
+        "additionalProperties": false,
+        "description": "An action owned by an Environment.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "kind": {
+            "default": "command",
+            "enum": [
+              "command",
+              "python"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "command": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Command",
+            "type": "array"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "title": "Parameters",
+            "type": "object"
+          },
+          "observation_schema": {
+            "additionalProperties": true,
+            "title": "Observation Schema",
+            "type": "object"
+          },
+          "mutates_state": {
+            "default": true,
+            "title": "Mutates State",
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "default": 30,
+            "exclusiveMinimum": 0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "NativeAction",
+        "type": "object"
+      },
+      "NetworkMode": {
+        "description": "Requested sandbox network policy.",
+        "enum": [
+          "none",
+          "restricted",
+          "full"
+        ],
+        "title": "NetworkMode",
+        "type": "string"
+      },
+      "PackageSource": {
+        "additionalProperties": false,
+        "description": "Immutable package source.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "local",
+              "oci",
+              "archive"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "uri": {
+            "minLength": 1,
+            "title": "Uri",
+            "type": "string"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Digest"
+          },
+          "trusted": {
+            "default": false,
+            "title": "Trusted",
+            "type": "boolean"
+          },
+          "unsafe_local": {
+            "default": false,
+            "title": "Unsafe Local",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "uri"
+        ],
+        "title": "PackageSource",
+        "type": "object"
+      },
+      "ResourceRequirements": {
+        "additionalProperties": false,
+        "description": "Optional compute limits.",
+        "properties": {
+          "cpu": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cpu"
+          },
+          "memory_mb": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Mb"
+          },
+          "pids": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pids"
+          },
+          "disk_mb": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disk Mb"
+          }
+        },
+        "title": "ResourceRequirements",
+        "type": "object"
+      },
+      "RewarderDefinition": {
+        "additionalProperties": false,
+        "description": "A train-only state-transition rewarder.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "kind": {
+            "default": "command",
+            "enum": [
+              "command",
+              "python"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "command": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Command",
+            "type": "array"
+          },
+          "implementation_digest": {
+            "default": "",
+            "title": "Implementation Digest",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "timeout_seconds": {
+            "default": 30,
+            "exclusiveMinimum": 0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RewarderDefinition",
+        "type": "object"
+      },
+      "SecretReference": {
+        "additionalProperties": false,
+        "description": "A named secret injected by a runtime without embedding its value.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "target": {
+            "default": "environment",
+            "enum": [
+              "environment",
+              "harness",
+              "verifier"
+            ],
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SecretReference",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent.",
+    "properties": {
+      "name": {
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "version": {
+        "default": "0.1.0",
+        "title": "Version",
+        "type": "string"
+      },
+      "description": {
+        "default": "",
+        "title": "Description",
+        "type": "string"
+      },
+      "overview": {
+        "default": "",
+        "title": "Overview",
+        "type": "string"
+      },
+      "readme": {
+        "default": "",
+        "title": "Readme",
+        "type": "string"
+      },
+      "actions": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/NativeAction"
+        },
+        "title": "Actions",
+        "type": "array"
+      },
+      "reset_command": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Reset Command",
+        "type": "array"
+      },
+      "observation_schema": {
+        "additionalProperties": true,
+        "title": "Observation Schema",
+        "type": "object"
+      },
+      "state_schema": {
+        "additionalProperties": true,
+        "title": "State Schema",
+        "type": "object"
+      },
+      "rewarders": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/RewarderDefinition"
+        },
+        "title": "Rewarders",
+        "type": "array"
+      },
+      "guardrails": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/Guardrail"
+        },
+        "title": "Guardrails",
+        "type": "array"
+      },
+      "resources": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/EnvironmentResource"
+        },
+        "title": "Resources",
+        "type": "array"
+      },
+      "runtime": {
+        "$ref": "#/$defs/EnvironmentRuntime"
+      },
+      "secrets": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/SecretReference"
+        },
+        "title": "Secrets",
+        "type": "array"
+      },
+      "harness_policy": {
+        "$ref": "#/$defs/HarnessPolicy"
+      },
+      "limits": {
+        "$ref": "#/$defs/ExecutionLimits"
+      },
+      "metadata": {
+        "additionalProperties": true,
+        "title": "Metadata",
+        "type": "object"
+      },
+      "source": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PackageSource"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "Environment",
+    "type": "object"
+  },
+  "Task": {
+    "$defs": {
+      "AgentVerifier": {
+        "additionalProperties": false,
+        "description": "Model-judge verifier with its own runtime and connectivity policy.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          },
+          "info": {
+            "default": null,
+            "title": "Info"
+          },
+          "criteria": {
+            "items": {
+              "$ref": "#/$defs/RubricCriterion"
+            },
+            "minItems": 1,
+            "title": "Criteria",
+            "type": "array"
+          },
+          "evidence": {
+            "$ref": "#/$defs/EvidenceContract"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "kind": {
+            "const": "agent",
+            "default": "agent",
+            "title": "Kind",
+            "type": "string"
+          },
+          "model": {
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "instructions": {
+            "minLength": 1,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Provider"
+          },
+          "fallback_models": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Fallback Models",
+            "type": "array"
+          },
+          "runtime": {
+            "$ref": "#/$defs/VerifierRuntime"
+          }
+        },
+        "required": [
+          "name",
+          "criteria",
+          "model",
+          "instructions"
+        ],
+        "title": "AgentVerifier",
+        "type": "object"
+      },
+      "DeterministicVerifier": {
+        "additionalProperties": false,
+        "description": "Deterministic command verifier.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          },
+          "info": {
+            "default": null,
+            "title": "Info"
+          },
+          "criteria": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/RubricCriterion"
+            },
+            "title": "Criteria",
+            "type": "array"
+          },
+          "evidence": {
+            "$ref": "#/$defs/EvidenceContract"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "kind": {
+            "const": "deterministic",
+            "default": "deterministic",
+            "title": "Kind",
+            "type": "string"
+          },
+          "check": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Check",
+            "type": "array"
+          },
+          "runtime": {
+            "$ref": "#/$defs/VerifierRuntime"
+          },
+          "result_path": {
+            "default": "verifier-result.json",
+            "title": "Result Path",
+            "type": "string"
+          },
+          "evidence_required": {
+            "default": true,
+            "title": "Evidence Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "check"
+        ],
+        "title": "DeterministicVerifier",
+        "type": "object"
+      },
+      "EnvironmentResource": {
+        "additionalProperties": false,
+        "description": "Data or application supplied by an Environment.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "data",
+              "application",
+              "file"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
+          },
+          "uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Uri"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Digest"
+          },
+          "content_type": {
+            "default": "",
+            "title": "Content Type",
+            "type": "string"
+          },
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "title": "EnvironmentResource",
+        "type": "object"
+      },
+      "EvidenceContract": {
+        "additionalProperties": false,
+        "description": "What a Verifier needs from the Environment and Trial artifacts.",
+        "properties": {
+          "artifacts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "state_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "State Paths",
+            "type": "array"
+          },
+          "observation_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Observation Paths",
+            "type": "array"
+          },
+          "include_hidden_state": {
+            "default": false,
+            "title": "Include Hidden State",
+            "type": "boolean"
+          }
+        },
+        "title": "EvidenceContract",
+        "type": "object"
+      },
+      "HumanVerifier": {
+        "additionalProperties": false,
+        "description": "Human review verifier.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          },
+          "info": {
+            "default": null,
+            "title": "Info"
+          },
+          "criteria": {
+            "items": {
+              "$ref": "#/$defs/RubricCriterion"
+            },
+            "minItems": 1,
+            "title": "Criteria",
+            "type": "array"
+          },
+          "evidence": {
+            "$ref": "#/$defs/EvidenceContract"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "kind": {
+            "const": "human",
+            "default": "human",
+            "title": "Kind",
+            "type": "string"
+          },
+          "instructions": {
+            "default": "",
+            "title": "Instructions",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "criteria"
+        ],
+        "title": "HumanVerifier",
+        "type": "object"
+      },
+      "NetworkMode": {
+        "description": "Requested sandbox network policy.",
+        "enum": [
+          "none",
+          "restricted",
+          "full"
+        ],
+        "title": "NetworkMode",
+        "type": "string"
+      },
+      "ResourceRequirements": {
+        "additionalProperties": false,
+        "description": "Optional compute limits.",
+        "properties": {
+          "cpu": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cpu"
+          },
+          "memory_mb": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Mb"
+          },
+          "pids": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pids"
+          },
+          "disk_mb": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disk Mb"
+          }
+        },
+        "title": "ResourceRequirements",
+        "type": "object"
+      },
+      "RubricCriterion": {
+        "additionalProperties": false,
+        "description": "One deterministic human or agent rubric criterion.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "min_score": {
+            "default": 0,
+            "title": "Min Score",
+            "type": "number"
+          },
+          "max_score": {
+            "default": 1,
+            "title": "Max Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "RubricCriterion",
+        "type": "object"
+      },
+      "VerifierRuntime": {
+        "additionalProperties": false,
+        "description": "Verifier-owned runtime and connectivity, independent of the Environment.",
+        "properties": {
+          "provider": {
+            "default": "docker",
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image"
+          },
+          "network": {
+            "$ref": "#/$defs/NetworkMode",
+            "default": "none"
+          },
+          "network_allowlist": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Network Allowlist",
+            "type": "array"
+          },
+          "resources": {
+            "$ref": "#/$defs/ResourceRequirements"
+          },
+          "timeout_seconds": {
+            "default": 60,
+            "exclusiveMinimum": 0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "title": "VerifierRuntime",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "One versioned unit of work in a Python-authored Environment.",
+    "properties": {
+      "name": {
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "version": {
+        "default": "0.1.0",
+        "title": "Version",
+        "type": "string"
+      },
+      "instructions": {
+        "minLength": 1,
+        "title": "Instructions",
+        "type": "string"
+      },
+      "goals": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Goals",
+        "type": "array"
+      },
+      "info": {
+        "default": null,
+        "title": "Info"
+      },
+      "metadata": {
+        "additionalProperties": true,
+        "title": "Metadata",
+        "type": "object"
+      },
+      "environment": {
+        "title": "Environment"
+      },
+      "verifiers": {
+        "items": {
+          "discriminator": {
+            "mapping": {
+              "agent": "#/$defs/AgentVerifier",
+              "deterministic": "#/$defs/DeterministicVerifier",
+              "human": "#/$defs/HumanVerifier"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DeterministicVerifier"
+            },
+            {
+              "$ref": "#/$defs/AgentVerifier"
+            },
+            {
+              "$ref": "#/$defs/HumanVerifier"
+            }
+          ]
+        },
+        "minItems": 1,
+        "title": "Verifiers",
+        "type": "array"
+      },
+      "resources": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/EnvironmentResource"
+        },
+        "title": "Resources",
+        "type": "array"
+      },
+      "initial_state": {
+        "additionalProperties": true,
+        "title": "Initial State",
+        "type": "object"
+      },
+      "reset_options": {
+        "additionalProperties": true,
+        "title": "Reset Options",
+        "type": "object"
+      }
+    },
+    "required": [
+      "name",
+      "instructions",
+      "environment",
+      "verifiers"
+    ],
+    "title": "Task",
+    "type": "object"
+  },
+  "DeterministicVerifier": {
+    "$defs": {
+      "EvidenceContract": {
+        "additionalProperties": false,
+        "description": "What a Verifier needs from the Environment and Trial artifacts.",
+        "properties": {
+          "artifacts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "state_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "State Paths",
+            "type": "array"
+          },
+          "observation_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Observation Paths",
+            "type": "array"
+          },
+          "include_hidden_state": {
+            "default": false,
+            "title": "Include Hidden State",
+            "type": "boolean"
+          }
+        },
+        "title": "EvidenceContract",
+        "type": "object"
+      },
+      "NetworkMode": {
+        "description": "Requested sandbox network policy.",
+        "enum": [
+          "none",
+          "restricted",
+          "full"
+        ],
+        "title": "NetworkMode",
+        "type": "string"
+      },
+      "ResourceRequirements": {
+        "additionalProperties": false,
+        "description": "Optional compute limits.",
+        "properties": {
+          "cpu": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cpu"
+          },
+          "memory_mb": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Mb"
+          },
+          "pids": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pids"
+          },
+          "disk_mb": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disk Mb"
+          }
+        },
+        "title": "ResourceRequirements",
+        "type": "object"
+      },
+      "RubricCriterion": {
+        "additionalProperties": false,
+        "description": "One deterministic human or agent rubric criterion.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "min_score": {
+            "default": 0,
+            "title": "Min Score",
+            "type": "number"
+          },
+          "max_score": {
+            "default": 1,
+            "title": "Max Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "RubricCriterion",
+        "type": "object"
+      },
+      "VerifierRuntime": {
+        "additionalProperties": false,
+        "description": "Verifier-owned runtime and connectivity, independent of the Environment.",
+        "properties": {
+          "provider": {
+            "default": "docker",
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image"
+          },
+          "network": {
+            "$ref": "#/$defs/NetworkMode",
+            "default": "none"
+          },
+          "network_allowlist": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Network Allowlist",
+            "type": "array"
+          },
+          "resources": {
+            "$ref": "#/$defs/ResourceRequirements"
+          },
+          "timeout_seconds": {
+            "default": 60,
+            "exclusiveMinimum": 0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "title": "VerifierRuntime",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Deterministic command verifier.",
+    "properties": {
+      "name": {
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "version": {
+        "default": "0.1.0",
+        "title": "Version",
+        "type": "string"
+      },
+      "info": {
+        "default": null,
+        "title": "Info"
+      },
+      "criteria": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/RubricCriterion"
+        },
+        "title": "Criteria",
+        "type": "array"
+      },
+      "evidence": {
+        "$ref": "#/$defs/EvidenceContract"
+      },
+      "weight": {
+        "default": 1,
+        "exclusiveMinimum": 0,
+        "title": "Weight",
+        "type": "number"
+      },
+      "metadata": {
+        "additionalProperties": true,
+        "title": "Metadata",
+        "type": "object"
+      },
+      "kind": {
+        "const": "deterministic",
+        "default": "deterministic",
+        "title": "Kind",
+        "type": "string"
+      },
+      "check": {
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "title": "Check",
+        "type": "array"
+      },
+      "runtime": {
+        "$ref": "#/$defs/VerifierRuntime"
+      },
+      "result_path": {
+        "default": "verifier-result.json",
+        "title": "Result Path",
+        "type": "string"
+      },
+      "evidence_required": {
+        "default": true,
+        "title": "Evidence Required",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "name",
+      "check"
+    ],
+    "title": "DeterministicVerifier",
+    "type": "object"
+  },
+  "AgentVerifier": {
+    "$defs": {
+      "EvidenceContract": {
+        "additionalProperties": false,
+        "description": "What a Verifier needs from the Environment and Trial artifacts.",
+        "properties": {
+          "artifacts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "state_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "State Paths",
+            "type": "array"
+          },
+          "observation_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Observation Paths",
+            "type": "array"
+          },
+          "include_hidden_state": {
+            "default": false,
+            "title": "Include Hidden State",
+            "type": "boolean"
+          }
+        },
+        "title": "EvidenceContract",
+        "type": "object"
+      },
+      "NetworkMode": {
+        "description": "Requested sandbox network policy.",
+        "enum": [
+          "none",
+          "restricted",
+          "full"
+        ],
+        "title": "NetworkMode",
+        "type": "string"
+      },
+      "ResourceRequirements": {
+        "additionalProperties": false,
+        "description": "Optional compute limits.",
+        "properties": {
+          "cpu": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cpu"
+          },
+          "memory_mb": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Mb"
+          },
+          "pids": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pids"
+          },
+          "disk_mb": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disk Mb"
+          }
+        },
+        "title": "ResourceRequirements",
+        "type": "object"
+      },
+      "RubricCriterion": {
+        "additionalProperties": false,
+        "description": "One deterministic human or agent rubric criterion.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "min_score": {
+            "default": 0,
+            "title": "Min Score",
+            "type": "number"
+          },
+          "max_score": {
+            "default": 1,
+            "title": "Max Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "RubricCriterion",
+        "type": "object"
+      },
+      "VerifierRuntime": {
+        "additionalProperties": false,
+        "description": "Verifier-owned runtime and connectivity, independent of the Environment.",
+        "properties": {
+          "provider": {
+            "default": "docker",
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image"
+          },
+          "network": {
+            "$ref": "#/$defs/NetworkMode",
+            "default": "none"
+          },
+          "network_allowlist": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Network Allowlist",
+            "type": "array"
+          },
+          "resources": {
+            "$ref": "#/$defs/ResourceRequirements"
+          },
+          "timeout_seconds": {
+            "default": 60,
+            "exclusiveMinimum": 0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "title": "VerifierRuntime",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Model-judge verifier with its own runtime and connectivity policy.",
+    "properties": {
+      "name": {
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "version": {
+        "default": "0.1.0",
+        "title": "Version",
+        "type": "string"
+      },
+      "info": {
+        "default": null,
+        "title": "Info"
+      },
+      "criteria": {
+        "items": {
+          "$ref": "#/$defs/RubricCriterion"
+        },
+        "minItems": 1,
+        "title": "Criteria",
+        "type": "array"
+      },
+      "evidence": {
+        "$ref": "#/$defs/EvidenceContract"
+      },
+      "weight": {
+        "default": 1,
+        "exclusiveMinimum": 0,
+        "title": "Weight",
+        "type": "number"
+      },
+      "metadata": {
+        "additionalProperties": true,
+        "title": "Metadata",
+        "type": "object"
+      },
+      "kind": {
+        "const": "agent",
+        "default": "agent",
+        "title": "Kind",
+        "type": "string"
+      },
+      "model": {
+        "minLength": 1,
+        "title": "Model",
+        "type": "string"
+      },
+      "instructions": {
+        "minLength": 1,
+        "title": "Instructions",
+        "type": "string"
+      },
+      "provider": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Provider"
+      },
+      "fallback_models": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Fallback Models",
+        "type": "array"
+      },
+      "runtime": {
+        "$ref": "#/$defs/VerifierRuntime"
+      }
+    },
+    "required": [
+      "name",
+      "criteria",
+      "model",
+      "instructions"
+    ],
+    "title": "AgentVerifier",
+    "type": "object"
+  },
+  "HumanVerifier": {
+    "$defs": {
+      "EvidenceContract": {
+        "additionalProperties": false,
+        "description": "What a Verifier needs from the Environment and Trial artifacts.",
+        "properties": {
+          "artifacts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "state_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "State Paths",
+            "type": "array"
+          },
+          "observation_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Observation Paths",
+            "type": "array"
+          },
+          "include_hidden_state": {
+            "default": false,
+            "title": "Include Hidden State",
+            "type": "boolean"
+          }
+        },
+        "title": "EvidenceContract",
+        "type": "object"
+      },
+      "RubricCriterion": {
+        "additionalProperties": false,
+        "description": "One deterministic human or agent rubric criterion.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "min_score": {
+            "default": 0,
+            "title": "Min Score",
+            "type": "number"
+          },
+          "max_score": {
+            "default": 1,
+            "title": "Max Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "RubricCriterion",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Human review verifier.",
+    "properties": {
+      "name": {
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "version": {
+        "default": "0.1.0",
+        "title": "Version",
+        "type": "string"
+      },
+      "info": {
+        "default": null,
+        "title": "Info"
+      },
+      "criteria": {
+        "items": {
+          "$ref": "#/$defs/RubricCriterion"
+        },
+        "minItems": 1,
+        "title": "Criteria",
+        "type": "array"
+      },
+      "evidence": {
+        "$ref": "#/$defs/EvidenceContract"
+      },
+      "weight": {
+        "default": 1,
+        "exclusiveMinimum": 0,
+        "title": "Weight",
+        "type": "number"
+      },
+      "metadata": {
+        "additionalProperties": true,
+        "title": "Metadata",
+        "type": "object"
+      },
+      "kind": {
+        "const": "human",
+        "default": "human",
+        "title": "Kind",
+        "type": "string"
+      },
+      "instructions": {
+        "default": "",
+        "title": "Instructions",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "criteria"
+    ],
+    "title": "HumanVerifier",
+    "type": "object"
+  },
+  "Agent": {
+    "$defs": {
+      "FileDeclaration": {
+        "additionalProperties": false,
+        "description": "A file emitted or consumed by a package.",
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "media_type": {
+            "default": "application/octet-stream",
+            "title": "Media Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "FileDeclaration",
+        "type": "object"
+      },
+      "HarnessCapability": {
+        "description": "A capability requested by an agent harness.",
+        "enum": [
+          "shell",
+          "file_read",
+          "file_edit",
+          "code_execution",
+          "web_search",
+          "browser",
+          "network_fetch",
+          "mcp",
+          "subagents",
+          "persistence"
+        ],
+        "title": "HarnessCapability",
+        "type": "string"
+      },
+      "HarnessDefinition": {
+        "additionalProperties": false,
+        "description": "Versioned executable harness contract.",
+        "properties": {
+          "schema_version": {
+            "const": "2",
+            "default": "2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "revision": {
+            "default": "0.1.0",
+            "minLength": 1,
+            "title": "Revision",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "protocol": {
+            "default": "plural-harness-v1",
+            "enum": [
+              "plural-harness-v1",
+              "acp"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "protocol_adapter": {
+            "anyOf": [
+              {
+                "const": "acp-client-v1",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Protocol Adapter"
+          },
+          "implementation": {
+            "default": "declared",
+            "enum": [
+              "declared",
+              "runnable"
+            ],
+            "title": "Implementation",
+            "type": "string"
+          },
+          "command": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Command",
+            "type": "array"
+          },
+          "requirements": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Requirements",
+            "type": "array"
+          },
+          "capabilities": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/HarnessCapability"
+            },
+            "title": "Capabilities",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "supported_models": {
+            "default": [
+              "*"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Models",
+            "type": "array"
+          },
+          "auth_modes": {
+            "default": [
+              "environment"
+            ],
+            "items": {
+              "enum": [
+                "environment",
+                "api_key",
+                "oauth",
+                "none"
+              ],
+              "type": "string"
+            },
+            "title": "Auth Modes",
+            "type": "array"
+          },
+          "secret_names": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Secret Names",
+            "type": "array"
+          },
+          "environment_names": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Environment Names",
+            "type": "array"
+          },
+          "healthcheck": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Healthcheck"
+          },
+          "trajectory_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Trajectory Path"
+          },
+          "outputs": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/FileDeclaration"
+            },
+            "title": "Outputs",
+            "type": "array"
+          },
+          "artifacts": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/FileDeclaration"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "supports_tito": {
+            "default": false,
+            "title": "Supports Tito",
+            "type": "boolean"
+          },
+          "tito_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tito Path"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "HarnessDefinition",
+        "type": "object"
+      },
+      "HarnessPackage": {
+        "additionalProperties": false,
+        "description": "Content-addressed harness definition and source.",
+        "properties": {
+          "definition": {
+            "$ref": "#/$defs/HarnessDefinition"
+          },
+          "source": {
+            "$ref": "#/$defs/PackageSource"
+          }
+        },
+        "required": [
+          "definition",
+          "source"
+        ],
+        "title": "HarnessPackage",
+        "type": "object"
+      },
+      "PackageSource": {
+        "additionalProperties": false,
+        "description": "Immutable package source.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "local",
+              "oci",
+              "archive"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "uri": {
+            "minLength": 1,
+            "title": "Uri",
+            "type": "string"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Digest"
+          },
+          "trusted": {
+            "default": false,
+            "title": "Trusted",
+            "type": "boolean"
+          },
+          "unsafe_local": {
+            "default": false,
+            "title": "Unsafe Local",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "uri"
+        ],
+        "title": "PackageSource",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "A catalog-backed model and its optional execution harness.",
+    "properties": {
+      "model": {
+        "minLength": 1,
+        "title": "Model",
+        "type": "string"
+      },
+      "name": {
+        "default": "",
+        "title": "Name",
+        "type": "string"
+      },
+      "version": {
+        "default": "0.1.0",
+        "title": "Version",
+        "type": "string"
+      },
+      "provider": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Provider"
+      },
+      "instructions": {
+        "default": "",
+        "title": "Instructions",
+        "type": "string"
+      },
+      "fallback_models": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Fallback Models",
+        "type": "array"
+      },
+      "temperature": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Temperature"
+      },
+      "max_tokens": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Max Tokens"
+      },
+      "harness": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/HarnessPackage"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "auth_mode": {
+        "default": "environment",
+        "enum": [
+          "environment",
+          "api_key",
+          "oauth",
+          "none"
+        ],
+        "title": "Auth Mode",
+        "type": "string"
+      },
+      "secret_names": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Secret Names",
+        "type": "array"
+      },
+      "metadata": {
+        "additionalProperties": true,
+        "title": "Metadata",
+        "type": "object"
+      }
+    },
+    "required": [
+      "model"
+    ],
+    "title": "Agent",
+    "type": "object"
+  },
+  "Benchmark": {
+    "$defs": {
+      "AgentVerifier": {
+        "additionalProperties": false,
+        "description": "Model-judge verifier with its own runtime and connectivity policy.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          },
+          "info": {
+            "default": null,
+            "title": "Info"
+          },
+          "criteria": {
+            "items": {
+              "$ref": "#/$defs/RubricCriterion"
+            },
+            "minItems": 1,
+            "title": "Criteria",
+            "type": "array"
+          },
+          "evidence": {
+            "$ref": "#/$defs/EvidenceContract"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "kind": {
+            "const": "agent",
+            "default": "agent",
+            "title": "Kind",
+            "type": "string"
+          },
+          "model": {
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "instructions": {
+            "minLength": 1,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Provider"
+          },
+          "fallback_models": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Fallback Models",
+            "type": "array"
+          },
+          "runtime": {
+            "$ref": "#/$defs/VerifierRuntime"
+          }
+        },
+        "required": [
+          "name",
+          "criteria",
+          "model",
+          "instructions"
+        ],
+        "title": "AgentVerifier",
+        "type": "object"
+      },
+      "DeterministicVerifier": {
+        "additionalProperties": false,
+        "description": "Deterministic command verifier.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          },
+          "info": {
+            "default": null,
+            "title": "Info"
+          },
+          "criteria": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/RubricCriterion"
+            },
+            "title": "Criteria",
+            "type": "array"
+          },
+          "evidence": {
+            "$ref": "#/$defs/EvidenceContract"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "kind": {
+            "const": "deterministic",
+            "default": "deterministic",
+            "title": "Kind",
+            "type": "string"
+          },
+          "check": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Check",
+            "type": "array"
+          },
+          "runtime": {
+            "$ref": "#/$defs/VerifierRuntime"
+          },
+          "result_path": {
+            "default": "verifier-result.json",
+            "title": "Result Path",
+            "type": "string"
+          },
+          "evidence_required": {
+            "default": true,
+            "title": "Evidence Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "check"
+        ],
+        "title": "DeterministicVerifier",
+        "type": "object"
+      },
+      "EnvironmentResource": {
+        "additionalProperties": false,
+        "description": "Data or application supplied by an Environment.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "data",
+              "application",
+              "file"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
+          },
+          "uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Uri"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Digest"
+          },
+          "content_type": {
+            "default": "",
+            "title": "Content Type",
+            "type": "string"
+          },
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "title": "EnvironmentResource",
+        "type": "object"
+      },
+      "EvidenceContract": {
+        "additionalProperties": false,
+        "description": "What a Verifier needs from the Environment and Trial artifacts.",
+        "properties": {
+          "artifacts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "state_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "State Paths",
+            "type": "array"
+          },
+          "observation_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Observation Paths",
+            "type": "array"
+          },
+          "include_hidden_state": {
+            "default": false,
+            "title": "Include Hidden State",
+            "type": "boolean"
+          }
+        },
+        "title": "EvidenceContract",
+        "type": "object"
+      },
+      "HumanVerifier": {
+        "additionalProperties": false,
+        "description": "Human review verifier.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          },
+          "info": {
+            "default": null,
+            "title": "Info"
+          },
+          "criteria": {
+            "items": {
+              "$ref": "#/$defs/RubricCriterion"
+            },
+            "minItems": 1,
+            "title": "Criteria",
+            "type": "array"
+          },
+          "evidence": {
+            "$ref": "#/$defs/EvidenceContract"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "kind": {
+            "const": "human",
+            "default": "human",
+            "title": "Kind",
+            "type": "string"
+          },
+          "instructions": {
+            "default": "",
+            "title": "Instructions",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "criteria"
+        ],
+        "title": "HumanVerifier",
+        "type": "object"
+      },
+      "NetworkMode": {
+        "description": "Requested sandbox network policy.",
+        "enum": [
+          "none",
+          "restricted",
+          "full"
+        ],
+        "title": "NetworkMode",
+        "type": "string"
+      },
+      "ResourceRequirements": {
+        "additionalProperties": false,
+        "description": "Optional compute limits.",
+        "properties": {
+          "cpu": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cpu"
+          },
+          "memory_mb": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Mb"
+          },
+          "pids": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pids"
+          },
+          "disk_mb": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disk Mb"
+          }
+        },
+        "title": "ResourceRequirements",
+        "type": "object"
+      },
+      "RubricCriterion": {
+        "additionalProperties": false,
+        "description": "One deterministic human or agent rubric criterion.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Weight",
+            "type": "number"
+          },
+          "min_score": {
+            "default": 0,
+            "title": "Min Score",
+            "type": "number"
+          },
+          "max_score": {
+            "default": 1,
+            "title": "Max Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "RubricCriterion",
+        "type": "object"
+      },
+      "Task": {
+        "additionalProperties": false,
+        "description": "One versioned unit of work in a Python-authored Environment.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          },
+          "instructions": {
+            "minLength": 1,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "goals": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Goals",
+            "type": "array"
+          },
+          "info": {
+            "default": null,
+            "title": "Info"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "environment": {
+            "title": "Environment"
+          },
+          "verifiers": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "agent": "#/$defs/AgentVerifier",
+                  "deterministic": "#/$defs/DeterministicVerifier",
+                  "human": "#/$defs/HumanVerifier"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/DeterministicVerifier"
+                },
+                {
+                  "$ref": "#/$defs/AgentVerifier"
+                },
+                {
+                  "$ref": "#/$defs/HumanVerifier"
+                }
+              ]
+            },
+            "minItems": 1,
+            "title": "Verifiers",
+            "type": "array"
+          },
+          "resources": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/EnvironmentResource"
+            },
+            "title": "Resources",
+            "type": "array"
+          },
+          "initial_state": {
+            "additionalProperties": true,
+            "title": "Initial State",
+            "type": "object"
+          },
+          "reset_options": {
+            "additionalProperties": true,
+            "title": "Reset Options",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "instructions",
+          "environment",
+          "verifiers"
+        ],
+        "title": "Task",
+        "type": "object"
+      },
+      "VerifierRuntime": {
+        "additionalProperties": false,
+        "description": "Verifier-owned runtime and connectivity, independent of the Environment.",
+        "properties": {
+          "provider": {
+            "default": "docker",
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image"
+          },
+          "network": {
+            "$ref": "#/$defs/NetworkMode",
+            "default": "none"
+          },
+          "network_allowlist": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Network Allowlist",
+            "type": "array"
+          },
+          "resources": {
+            "$ref": "#/$defs/ResourceRequirements"
+          },
+          "timeout_seconds": {
+            "default": 60,
+            "exclusiveMinimum": 0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "title": "VerifierRuntime",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "A semantic version that pins an ordered set of Tasks.",
+    "properties": {
+      "name": {
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "version": {
+        "title": "Version",
+        "type": "string"
+      },
+      "tasks": {
+        "items": {
+          "$ref": "#/$defs/Task"
+        },
+        "minItems": 1,
+        "title": "Tasks",
+        "type": "array"
+      },
+      "primary_metric": {
+        "default": "reward",
+        "title": "Primary Metric",
+        "type": "string"
+      },
+      "description": {
+        "default": "",
+        "title": "Description",
+        "type": "string"
+      },
+      "metadata": {
+        "additionalProperties": true,
+        "title": "Metadata",
+        "type": "object"
+      }
+    },
+    "required": [
+      "name",
+      "version",
+      "tasks"
+    ],
+    "title": "Benchmark",
+    "type": "object"
+  }
+}

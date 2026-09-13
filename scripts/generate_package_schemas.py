@@ -1,72 +1,68 @@
-"""Generate deterministic JSON Schemas for the package/CLI foundation."""
+"""Generate deterministic JSON Schemas from public SDK models."""
 
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel
 
-from plural.cli.config import CLIConfig, ResolvedContext
-from plural.cli.scaffold import JobFile
-from plural.domain import (
-    AgentDefinition,
-    AgentVerifier,
-    BenchmarkDefinition,
-    DeterministicVerifier,
-    EnvironmentDefinition,
-    HarnessDefinition,
-    HarnessPackage,
-    HumanVerifier,
-    JobSpec,
-    ProgressEvent,
-    TaskDefinition,
-    TITORecord,
-    TrialExecution,
-    TrialReceipt,
-    TrialSpec,
-)
+from plural import Agent, Benchmark, Task
+from plural.environments.definition import EnvironmentDefinition
+from plural.verifiers import AgentVerifier, DeterministicVerifier, HumanVerifier
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "src" / "plural" / "schemas" / "packages"
-MODELS: tuple[type[BaseModel], ...] = (
-    EnvironmentDefinition,
-    TaskDefinition,
-    DeterministicVerifier,
-    AgentVerifier,
-    HumanVerifier,
-    HarnessDefinition,
-    HarnessPackage,
-    AgentDefinition,
-    BenchmarkDefinition,
-    JobFile,
-    JobSpec,
-    TrialSpec,
-    TrialExecution,
-    TrialReceipt,
-    ProgressEvent,
-    TITORecord,
-    CLIConfig,
-    ResolvedContext,
+MODELS: tuple[tuple[str, type[BaseModel]], ...] = (
+    ("Environment", EnvironmentDefinition),
+    ("Task", Task),
+    ("DeterministicVerifier", DeterministicVerifier),
+    ("AgentVerifier", AgentVerifier),
+    ("HumanVerifier", HumanVerifier),
+    ("Agent", Agent),
+    ("Benchmark", Benchmark),
 )
 
 
-def rendered_schemas() -> dict[Path, str]:
-    """Return every expected schema path and canonical contents."""
+def _job_schema() -> dict[str, Any]:
     return {
-        OUTPUT / f"{model.__name__}.schema.json": (
-            json.dumps(model.model_json_schema(), indent=2, sort_keys=True) + "\n"
-        )
-        for model in MODELS
+        "title": "Job",
+        "type": "object",
+        "required": ["source", "agents"],
+        "properties": {
+            "source": {},
+            "agents": {"type": "array", "minItems": 1},
+            "mode": {"enum": ["eval", "train"], "default": "eval"},
+            "attempts": {"type": "integer", "minimum": 1, "default": 1},
+            "concurrency": {"type": "integer", "minimum": 1, "default": 1},
+            "per_runtime_concurrency": {"type": "integer", "minimum": 1, "default": 1},
+            "priority": {"type": "integer", "default": 0},
+        },
     }
+
+
+def rendered_schemas() -> dict[Path, str]:
+    """Return every expected public schema and canonical contents."""
+    rendered: dict[Path, str] = {}
+    for name, model in MODELS:
+        schema = model.model_json_schema()
+        schema["title"] = name
+        rendered[OUTPUT / f"{name}.schema.json"] = (
+            json.dumps(schema, indent=2, sort_keys=True) + "\n"
+        )
+    rendered[OUTPUT / "Job.schema.json"] = (
+        json.dumps(_job_schema(), indent=2, sort_keys=True) + "\n"
+    )
+    return rendered
 
 
 def main() -> int:
     """Write schemas, or report drift without modifying files.
 
     Returns:
-        Zero when schemas are current or written, otherwise one.
+        Zero when current or written, otherwise one.
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")

@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 
 from plural.catalog.models import ModelCatalog
-from plural.config import DEFAULT_SETTINGS
+from plural.config import DEFAULT_SETTINGS, resolve_gateway_url
 from plural.errors import ConfigurationError
 from plural.providers.anthropic import AnthropicProvider
 from plural.providers.azure import AzureOpenAIProvider
@@ -257,7 +257,7 @@ class Client:
             )
         self._providers = provider_map
         self.api_key = api_key
-        self.base_url = base_url or DEFAULT_SETTINGS.gateway_base_url
+        self.base_url = resolve_gateway_url(base_url)
         from plural.studio import Studio
 
         self.studio = Studio(self)
@@ -356,7 +356,7 @@ class Client:
         if api_key:
             result["plural"] = OpenAICompatible(
                 api_key=api_key,
-                base_url=base_url or DEFAULT_SETTINGS.gateway_base_url,
+                base_url=resolve_gateway_url(base_url),
                 name="plural",
                 default_headers=default_headers,
                 strip_model_prefix=False,

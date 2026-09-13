@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-13
+
+### Added
+
+- Plain public `Environment`, `Runtime`, `Agent`, `Task`, `Benchmark`, `Job`,
+  and `Verifier` APIs with one catalog-backed model field and one optional
+  Agent harness.
+- Lossless Python/YAML project serialization, explicit project model catalogs,
+  and local-first `init`, `validate`, `inspect`, `export`, `run`, `models`, and
+  `benchmarks` CLI workflows.
+- Immutable semantic Benchmark versions, ordered Task pins, structured diffs,
+  dependency exports, and per-Agent leaderboard aggregates.
+- Normalized Job/Trial/execution bundles with artifact manifests, model and
+  Benchmark provenance, provider-neutral trajectories, and Mercor imports.
+
+### Changed
+
+- Python SDK objects now define all field names, defaults, validation, YAML,
+  generated schemas, CLI behavior, and hosted payloads.
+- Runtime retries are stored under `trials/{trial_id}/executions/{id}` while
+  preserving read-only support for existing local `attempts` directories.
+- Native chat/action harness selection is inferred when an Agent omits its
+  harness; protocol versions remain internal.
+
+### Removed
+
+- Public `*Definition`, `*Binding`, `WeightedVerifier`, `TaskFile`,
+  `BenchmarkFile`, `JobFile`, and `native_*_v1` authoring APIs.
+- Hosted-by-default beginner execution and the parallel SDK/YAML/CLI domain
+  models.
+
 ## [0.11.0] - 2026-09-11
 
 ### Added

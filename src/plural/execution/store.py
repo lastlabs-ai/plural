@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
+import shutil
 import tempfile
 import time
 from collections.abc import Iterable, Mapping
@@ -14,6 +16,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from plural.domain import (
+    ArtifactManifest,
+    ArtifactManifestEntry,
     ErrorCode,
     JobLock,
     JobPlan,
@@ -193,7 +197,10 @@ class JobStore:
         selected = json.loads(selected_path.read_text(encoding="utf-8"))
         if not isinstance(selected, dict) or not isinstance(selected.get("execution_id"), int):
             raise ValueError("invalid selected execution pointer")
-        path = root / "attempts" / str(selected["execution_id"]) / "result.json"
+        execution_root = root / "executions" / str(selected["execution_id"])
+        if not execution_root.exists():
+            execution_root = root / "attempts" / str(selected["execution_id"])
+        path = execution_root / "result.json"
         result = TrialResult.model_validate_json(path.read_text(encoding="utf-8"))
         receipt_path = path.with_name("receipt.json")
         persisted_receipt = type(result.receipt).model_validate_json(
@@ -201,6 +208,8 @@ class JobStore:
         )
         if persisted_receipt != result.receipt:
             raise ValueError("selected execution receipt/result mismatch")
+        if result.receipt.execution_id != selected["execution_id"]:
+            raise ValueError("selected execution id mismatch")
         self._validate_result_ownership(trial, result)
         if result.status != "succeeded":
             raise ValueError("selected execution is not successful")
@@ -210,11 +219,14 @@ class JobStore:
 
     def next_execution_id(self, trial: TrialSpec) -> int:
         """Return the next monotonic execution ID for a trial."""
-        root = self.trial_path(trial) / "attempts"
-        if not root.exists():
-            return 0
+        trial_root = self.trial_path(trial)
         identifiers = [
-            int(path.name) for path in root.iterdir() if path.is_dir() and path.name.isdigit()
+            int(path.name)
+            for name in ("executions", "attempts")
+            for root in (trial_root / name,)
+            if root.exists()
+            for path in root.iterdir()
+            if path.is_dir() and path.name.isdigit()
         ]
         return max(identifiers, default=-1) + 1
 
@@ -228,7 +240,7 @@ class JobStore:
             output.append(TrialResult.model_validate_json(path.read_text(encoding="utf-8")))
         return tuple(output)
 
-    def write_trial_attempt(
+    def write_trial_execution(
         self,
         trial: TrialSpec,
         execution_id: int,
@@ -242,21 +254,51 @@ class JobStore:
     ) -> Path:
         """Append one immutable execution and update the selected result."""
         self._validate_result_ownership(trial, result)
-        attempt = self.trial_path(trial) / "attempts" / str(execution_id)
-        attempt.mkdir(parents=True, exist_ok=False)
-        logs = attempt / "logs"
-        logs.mkdir(parents=True, exist_ok=True)
-        self._write_bytes(logs / "stdout.log", stdout)
-        self._write_bytes(logs / "stderr.log", stderr)
-        self._write_bytes(logs / "verifier.stdout.log", verifier_stdout)
-        self._write_bytes(logs / "verifier.stderr.log", verifier_stderr)
-        artifact_root = attempt / "artifacts"
+        if result.receipt.execution_id != execution_id:
+            raise ValueError("execution id does not match its receipt")
+        entries: list[ArtifactManifestEntry] = []
+        unique: dict[str, DownloadedFile] = {}
         for artifact in artifacts:
             relative = safe_relative_path(artifact.path)
-            destination = artifact_root / relative
-            self._write_bytes(destination, artifact.data)
-        self._write_model(attempt / "receipt.json", result.receipt)
-        self._write_model(attempt / "result.json", result)
+            unique[relative] = artifact
+        executions = self.trial_path(trial) / "executions"
+        executions.mkdir(parents=True, exist_ok=True)
+        execution = executions / str(execution_id)
+        if execution.exists():
+            raise FileExistsError(execution)
+        temporary = Path(tempfile.mkdtemp(prefix=f".{execution_id}.", dir=executions))
+        try:
+            logs = temporary / "logs"
+            logs.mkdir()
+            self._write_bytes(logs / "stdout.log", stdout)
+            self._write_bytes(logs / "stderr.log", stderr)
+            self._write_bytes(logs / "verifier.stdout.log", verifier_stdout)
+            self._write_bytes(logs / "verifier.stderr.log", verifier_stderr)
+            artifact_root = temporary / "artifacts"
+            artifact_root.mkdir()
+            for artifact_name, artifact in sorted(unique.items()):
+                relative_path = Path(artifact_name)
+                destination = artifact_root / relative_path
+                self._write_bytes(destination, artifact.data)
+                entries.append(
+                    ArtifactManifestEntry(
+                        path=relative_path.as_posix(),
+                        sha256=artifact.digest,
+                        media_type=_media_type(relative_path),
+                        size=len(artifact.data),
+                        role=_artifact_role(relative_path),
+                    )
+                )
+            self._write_model(
+                artifact_root / "manifest.json",
+                ArtifactManifest(artifacts=tuple(entries)),
+            )
+            self._write_model(temporary / "receipt.json", result.receipt)
+            self._write_model(temporary / "result.json", result)
+            temporary.replace(execution)
+        except BaseException:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
         trial_root = self.trial_path(trial)
         if result.status == "succeeded":
             self._write_bytes(
@@ -273,7 +315,7 @@ class JobStore:
             )
         if result.status == "succeeded" or not (trial_root / "selected.json").exists():
             self._write_model(trial_root / "result.json", result)
-        return attempt
+        return execution
 
     def write_job_result(self, result: JobResult) -> Path:
         """Atomically publish the aggregate result."""
@@ -301,7 +343,33 @@ class JobStore:
             (canonical_json(dict(submission)) + "\n").encode(),
         )
         self._write_model(destination / "result.json", result)
-        self._write_model(self.trial_path(trial) / "result.json", result)
+        trial_root = self.trial_path(trial)
+        execution_root = trial_root / "executions" / str(result.receipt.execution_id)
+        if not execution_root.exists():
+            execution_root = trial_root / "attempts" / str(result.receipt.execution_id)
+        receipt_path = execution_root / "receipt.json"
+        if not receipt_path.exists():
+            raise ValueError("reviewed execution receipt is missing")
+        persisted_receipt = type(result.receipt).model_validate_json(
+            receipt_path.read_text(encoding="utf-8")
+        )
+        if persisted_receipt != result.receipt:
+            raise ValueError("review result receipt does not match its execution")
+        self._write_model(execution_root / "result.json", result)
+        self._write_model(trial_root / "result.json", result)
+        if result.status == "succeeded":
+            self._write_bytes(
+                trial_root / "selected.json",
+                (
+                    canonical_json(
+                        {
+                            "execution_id": result.receipt.execution_id,
+                            "receipt_hash": result.receipt.receipt_hash,
+                        }
+                    )
+                    + "\n"
+                ).encode(),
+            )
         return destination
 
     def read_job_result(self, job_id: str) -> JobResult | None:
@@ -338,7 +406,18 @@ class JobStore:
             or receipt.harness_digest != (trial.harness.digest if trial.harness is not None else "")
             or lock.job_id != trial.job_id
             or receipt.task_digest != trial.task_digest
+            or receipt.task_pin != trial.task_pin
+            or receipt.benchmark != trial.benchmark
+            or receipt.model != trial.model
+            or receipt.verifier_digests != trial.verifier_digests
+            or receipt.harness_grant != trial.harness_grant
+            or receipt.mode != trial.mode
+            or receipt.runtime_provider != trial.runtime_provider
+            or receipt.placement != trial.placement
             or receipt.task_digest not in lock.task_digests
+            or receipt.task_pin not in lock.task_pins
+            or receipt.model not in lock.model_resolutions
+            or receipt.benchmark != lock.benchmark
             or receipt.environment_digest not in lock.environment_digests
             or receipt.agent_digest not in lock.agent_digests
             or (bool(receipt.harness_digest) and receipt.harness_digest not in lock.harness_digests)
@@ -361,6 +440,32 @@ class JobStore:
         except BaseException:
             temporary.unlink(missing_ok=True)
             raise
+
+
+def _media_type(path: Path) -> str:
+    if path.suffix == ".jsonl":
+        return "application/x-ndjson"
+    guessed, _ = mimetypes.guess_type(path.name)
+    return guessed or "application/octet-stream"
+
+
+def _artifact_role(path: Path) -> str | None:
+    name = path.as_posix().lower()
+    if name in {"state.json", "final-state.json"}:
+        return "state"
+    if name in {"observation.json", "final-observation.json"}:
+        return "observation"
+    if name in {"view.json", "rendering.json"}:
+        return "rendering"
+    if name == "result.json":
+        return "output"
+    if "trajectory" in name:
+        return "trajectory"
+    if name == "verifier-results.json" or name.startswith("verifier/"):
+        return "verifier_evidence"
+    if "tito" in name:
+        return "training"
+    return None
 
 
 def redact_mapping(values: Mapping[str, Any], secret_values: Iterable[str]) -> dict[str, Any]:

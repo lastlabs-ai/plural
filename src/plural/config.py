@@ -9,6 +9,8 @@ Examples:
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -35,3 +37,25 @@ class Settings(BaseModel):
 
 
 DEFAULT_SETTINGS = Settings()
+
+
+def resolve_gateway_url(
+    explicit: str | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve the hosted gateway URL.
+
+    Prefer an explicit constructor value, then ``PLURAL_GATEWAY_URL``, then
+    ``PLURAL_API_URL``, then the production default.
+
+    Returns:
+        The gateway base URL without a trailing slash.
+    """
+    env = os.environ if environ is None else environ
+    raw = (
+        explicit
+        or env.get("PLURAL_GATEWAY_URL")
+        or env.get("PLURAL_API_URL")
+        or DEFAULT_SETTINGS.gateway_base_url
+    )
+    return raw.rstrip("/")

@@ -1,0 +1,53 @@
+kind: environment
+python: world.py:SupportQueue
+name: support-queue
+version: 0.1.0
+description: ''
+overview: Read a ticket, then assign billing, technical, or account.
+readme: ''
+resources: []
+runtime:
+  provider: local
+  placement: {}
+  image: null
+  snapshot: null
+  declarative_image: null
+  build_context: null
+  dockerfile: null
+  network: full
+  network_allowlist: []
+  resources:
+    cpu: null
+    memory_mb: null
+    pids: null
+    disk_mb: null
+  read_only_root: false
+  targets:
+  - local
+  persistent: false
+  compose: false
+  extra_capabilities: []
+  timeout_seconds: 300.0
+  allow_unsafe_local: true
+secrets: []
+guardrails: []
+harness_policy:
+  mode: allow_all
+  allowed_harnesses: []
+  allowed_capabilities: null
+  denied_capabilities: []
+limits:
+  max_turns: 6
+  max_seconds: 120.0
+  max_cost_usd: null
+metadata: {}
+reset_command:
+- python
+- commands.py
+- reset
+package:
+  command:
+  - python
+  - commands.py
+  source: .
+  digest: sha256:724a2a682a771b89c74c5c0704dfa7a32248310ae87b9e6a5a54f112175b6c51

@@ -1,9 +1,10 @@
-"""Schema-v2 Plural CLI."""
+"""Plural SDK/YAML/CLI entry point."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any, Literal, NoReturn
 
@@ -11,7 +12,10 @@ import typer
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from plural.agents import AgentBinding
+from plural.agents import Agent
+from plural.catalog import ModelCatalog
+from plural.cli.auth import AuthClient
+from plural.cli.config import default_credential_store, resolve_context
 from plural.cli.hosted_run import sync_and_submit, validate_hosted_graph
 from plural.cli.scaffold import (
     generate_schemas,
@@ -31,27 +35,29 @@ from plural.cli.scaffold import (
     scaffold_verifier,
 )
 from plural.client import Client
+from plural.config import resolve_gateway_url
 from plural.errors import PluralError
-from plural.execution import Job, JobStore
-from plural.jobs import (
-    BenchmarkJobSource,
-    JobMode,
-    JobSpec,
-    TaskJobSource,
-)
+from plural.execution import JobRunner, JobStore
+from plural.jobs import Job as PublicJob
+from plural.jobs import JobMode
+from plural.project import CatalogContext, Resolver
+from plural.tasks import Benchmark, Task
 
 app = typer.Typer(
     name="plural",
-    help="Author and run schema-v2 Plural revision graphs.",
+    help="Define environments, evaluate agents, and inspect reproducible results.",
     no_args_is_help=True,
 )
-env_app = typer.Typer(help="Manage Environment revisions.")
-task_app = typer.Typer(help="Manage Task revisions.")
-verifier_app = typer.Typer(help="Manage Verifier revisions.")
-agent_app = typer.Typer(help="Manage Environment-independent Agent revisions.")
-harness_app = typer.Typer(help="Manage Harness revisions.")
-benchmark_app = typer.Typer(help="Manage cross-Environment Benchmarks.")
-job_app = typer.Typer(help="Manage durable Jobs and event streams.")
+env_app = typer.Typer(help="Compatibility Environment commands.")
+task_app = typer.Typer(help="Compatibility Task commands.")
+verifier_app = typer.Typer(help="Compatibility Verifier commands.")
+agent_app = typer.Typer(help="Compatibility Agent commands.")
+harness_app = typer.Typer(help="Advanced Harness commands.")
+benchmark_app = typer.Typer(help="Compatibility Benchmark commands.")
+models_app = typer.Typer(help="List and inspect the effective model catalog.")
+benchmarks_app = typer.Typer(help="Inspect, compare, and export Benchmarks.")
+auth_app = typer.Typer(help="Authenticate with hosted Plural services.")
+job_app = typer.Typer(help="Advanced durable Job and event commands.")
 trial_app = typer.Typer(help="Inspect and watch Trials.")
 review_app = typer.Typer(help="Inspect and submit human reviews.")
 for name, group in (
@@ -61,6 +67,12 @@ for name, group in (
     ("agent", agent_app),
     ("harness", harness_app),
     ("benchmark", benchmark_app),
+):
+    app.add_typer(group, name=name, hidden=True)
+for name, group in (
+    ("models", models_app),
+    ("benchmarks", benchmarks_app),
+    ("auth", auth_app),
     ("job", job_app),
     ("trial", trial_app),
     ("review", review_app),
@@ -92,13 +104,44 @@ def _error(message: str) -> NoReturn:
 def _validated(loader: Any, path: Path) -> Any:
     try:
         return loader(path)
-    except (OSError, ValueError, ValidationError, json.JSONDecodeError) as exc:
+    except (OSError, TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
+        _error(str(exc))
+
+
+def _catalog(path: Path | None) -> ModelCatalog:
+    return CatalogContext.from_file(path).catalog if path is not None else ModelCatalog()
+
+
+def _project_resolver(reference: str, catalog: Path | None = None) -> Resolver:
+    path_text = reference.rsplit(":", 1)[0] if ".py:" in reference else reference
+    source = Path(path_text).expanduser()
+    root = source.resolve().parent if source.parent != Path("") else Path.cwd()
+    return Resolver(root=root, catalog=_catalog(catalog))
+
+
+def _load_public(reference: str, catalog: Path | None = None) -> Any:
+    resolver = _project_resolver(reference, catalog)
+    path = Path(reference.rsplit(":", 1)[0])
+    local = path.name
+    if ":" in reference:
+        local += ":" + reference.rsplit(":", 1)[1]
+    try:
+        return resolver.load(local)
+    except (OSError, TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
         _error(str(exc))
 
 
 def _client() -> Client:
     try:
-        return Client()
+        ctx = resolve_context(credentials=default_credential_store())
+        if not ctx.api_key:
+            raise PluralError("not authenticated; run `plural auth login` or set PLURAL_API_KEY")
+        gateway = os.environ.get("PLURAL_GATEWAY_URL") or ctx.api_url
+        return Client(
+            api_key=ctx.api_key,
+            base_url=resolve_gateway_url(gateway),
+            project=ctx.project,
+        )
     except (OSError, ValueError, PluralError) as exc:
         _error(str(exc))
 
@@ -123,6 +166,184 @@ def _emit_event(event: Any, *, json_events: bool) -> None:
     except (TypeError, ValueError):
         sequence_text = str(sequence)
     typer.echo(f"{sequence_text} {str(status):<16}{target} {message}".rstrip())
+
+
+@app.command("init")
+def init(
+    path: Path = typer.Argument(Path("."), help="Project directory."),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    """Create a small Python-first evaluation project."""
+    path.mkdir(parents=True, exist_ok=True)
+    project_py = path / "project.py"
+    project_yaml = path / "project.yaml"
+    if not force and (project_py.exists() or project_yaml.exists()):
+        _error("project files already exist; pass --force to replace them")
+    project_py.write_text(
+        "from plural import Agent, Benchmark, Environment, Job, Task\n"
+        "from plural.verifiers import DeterministicVerifier\n\n"
+        'environment = Environment(name="example")\n'
+        'verifier = DeterministicVerifier(name="complete", check="python verify.py")\n'
+        'task = Task(name="example", instructions="Complete the task.", '
+        "environment=environment, verifiers=[verifier])\n"
+        'benchmark = Benchmark(name="example", version="1.0.0", tasks=[task])\n'
+        'agent = Agent(model="openai/gpt-5.6-luna")\n'
+        "job = Job(benchmark, agents=[agent])\n",
+        encoding="utf-8",
+    )
+    project_yaml.write_text(
+        "kind: job\nsource: project.py:benchmark\nagents:\n  - project.py:agent\n",
+        encoding="utf-8",
+    )
+    _emit({"created": [str(project_py), str(project_yaml)]})
+
+
+@app.command("validate")
+def validate(
+    reference: str = typer.Argument(..., metavar="REF"),
+    catalog: Path | None = typer.Option(None, "--catalog"),
+) -> None:
+    """Load and validate any Python or YAML project object."""
+    value = _load_public(reference, catalog)
+    _emit(
+        {
+            "valid": True,
+            "type": type(value).__name__,
+            "content_hash": getattr(value, "content_hash", None),
+        }
+    )
+
+
+@app.command("inspect")
+def inspect_project(
+    reference: str = typer.Argument(..., metavar="REF"),
+    catalog: Path | None = typer.Option(None, "--catalog"),
+    output_format: Literal["json", "yaml"] = typer.Option("yaml", "--format"),
+) -> None:
+    """Show the fully resolved public object graph."""
+    value = _load_public(reference, catalog)
+    resolver = _project_resolver(reference, catalog)
+    payload = yaml.safe_load(resolver.dumps(value))
+    _emit(payload, output_format)
+
+
+@app.command("export")
+def export_project(
+    reference: str = typer.Argument(..., metavar="REF"),
+    output: Path = typer.Option(..., "--output", "-o"),
+    catalog: Path | None = typer.Option(None, "--catalog"),
+) -> None:
+    """Export the resolved graph as canonical public YAML."""
+    value = _load_public(reference, catalog)
+    try:
+        Resolver(root=output.resolve().parent, catalog=_catalog(catalog)).dump(value, output.name)
+    except (OSError, TypeError, ValueError) as exc:
+        _error(str(exc))
+    _emit({"output": str(output), "content_hash": getattr(value, "content_hash", None)})
+
+
+@models_app.command("list")
+def models_list(catalog: Path | None = typer.Option(None, "--catalog")) -> None:
+    """List models in the effective bundled plus project catalog."""
+    _emit(
+        [
+            {
+                "id": model.id,
+                "name": model.name,
+                "providers": model.host_providers(),
+            }
+            for model in sorted(_catalog(catalog).models(), key=lambda item: item.id)
+        ]
+    )
+
+
+@models_app.command("show")
+def models_show(
+    model_id: str,
+    catalog: Path | None = typer.Option(None, "--catalog"),
+) -> None:
+    """Show one effective catalog model."""
+    try:
+        _emit(_catalog(catalog).require(model_id))
+    except PluralError as exc:
+        _error(str(exc))
+
+
+@benchmarks_app.command("show")
+def benchmarks_show(
+    reference: str = typer.Argument(..., metavar="REF"),
+    catalog: Path | None = typer.Option(None, "--catalog"),
+) -> None:
+    """Show one resolved Benchmark."""
+    value = _load_public(reference, catalog)
+    if not isinstance(value, Benchmark):
+        _error(f"{reference} is not a Benchmark")
+    _emit(value.export())
+
+
+@benchmarks_app.command("diff")
+def benchmarks_diff(
+    before: str,
+    after: str,
+    catalog: Path | None = typer.Option(None, "--catalog"),
+) -> None:
+    """Compare two resolved Benchmark versions."""
+    first = _load_public(before, catalog)
+    second = _load_public(after, catalog)
+    if not isinstance(first, Benchmark) or not isinstance(second, Benchmark):
+        _error("benchmarks diff requires two Benchmark references")
+    _emit(first.diff(second))
+
+
+@benchmarks_app.command("export")
+def benchmarks_export(
+    reference: str = typer.Argument(..., metavar="REF"),
+    output: Path = typer.Option(..., "--output", "-o"),
+    catalog: Path | None = typer.Option(None, "--catalog"),
+) -> None:
+    """Write a Benchmark and its pinned dependency graph."""
+    value = _load_public(reference, catalog)
+    if not isinstance(value, Benchmark):
+        _error(f"{reference} is not a Benchmark")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        yaml.safe_dump(value.export(), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    _emit({"output": str(output), "content_hash": value.content_hash})
+
+
+@auth_app.command("login")
+def auth_login(no_browser: bool = typer.Option(False, "--no-browser")) -> None:
+    """Authenticate using the hosted device flow."""
+    context = resolve_context(credentials=default_credential_store())
+    store = default_credential_store()
+    try:
+        with AuthClient(context.api_url) as client:
+            _device, tokens = client.login(
+                no_browser=no_browser,
+                on_device=lambda device: typer.echo(
+                    f"Open {device.verification_uri} and enter {device.user_code}"
+                ),
+            )
+        store.set(context.profile, tokens.credential())
+    except (OSError, ValueError, PluralError) as exc:
+        _error(str(exc))
+    _emit({"authenticated": True, "profile": context.profile})
+
+
+@auth_app.command("logout")
+def auth_logout() -> None:
+    """Remove stored credentials for the active profile."""
+    context = resolve_context(credentials=default_credential_store())
+    default_credential_store().delete(context.profile)
+    _emit({"authenticated": False, "profile": context.profile})
+
+
+@auth_app.command("status")
+def auth_status() -> None:
+    """Show local authentication context without exposing secrets."""
+    _emit(resolve_context(credentials=default_credential_store()).redacted())
 
 
 @env_app.command("init")
@@ -511,23 +732,23 @@ def job_watch(
 
 @app.command("run")
 def run(
-    source: Path = typer.Argument(..., help="Task, Benchmark, or Job YAML."),
-    agent: list[Path] = typer.Option(None, "--agent", "-a"),
+    source: str = typer.Argument(..., metavar="REF", help="Task, Benchmark, or Job reference."),
+    agent: list[str] = typer.Option(None, "--agent", "-a", help="Agent reference; repeatable."),
     mode: JobMode | None = typer.Option(None, "--mode"),
     attempts: int | None = typer.Option(None, "--attempts", min=1),
     concurrency: int | None = typer.Option(None, "--concurrency", min=1),
     per_runtime_concurrency: int | None = typer.Option(None, "--per-runtime-concurrency", min=1),
     dry_run: bool = typer.Option(False, "--dry-run"),
-    offline: bool = typer.Option(
+    hosted: bool = typer.Option(
         False,
-        "--offline",
-        "--private",
-        help="Keep execution and its durable log local.",
+        "--hosted",
+        help="Explicitly synchronize and submit to hosted Plural.",
     ),
+    offline: bool = typer.Option(False, "--offline", "--private", hidden=True),
     watch: bool = typer.Option(
         True,
         "--watch/--no-watch",
-        help="Follow hosted Job events after submission.",
+        help="Follow hosted Job events after explicit submission.",
     ),
     json_events: bool = typer.Option(
         False,
@@ -537,41 +758,53 @@ def run(
     idempotency_key: str | None = typer.Option(None, "--idempotency-key"),
     name: str = typer.Option("Job", "--name"),
     output_format: Literal["json", "yaml"] = typer.Option("json", "--format"),
+    catalog: Path | None = typer.Option(None, "--catalog"),
 ) -> None:
-    """Synchronize and run a hosted Job, or execute explicitly offline."""
+    """Run locally by default; use --hosted for explicit remote submission."""
+    del offline
     try:
-        raw = yaml.safe_load(source.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            raise ValueError("source must be a YAML mapping")
-        if "source_kind" in raw:
-            spec = load_job(source)
+        value = _load_public(source, catalog)
+        effective_catalog = _catalog(catalog)
+        loaded_agents = tuple(
+            candidate
+            for item in agent or ()
+            if isinstance((candidate := _load_public(item, catalog)), Agent)
+        )
+        if len(loaded_agents) != len(agent or ()):
+            raise TypeError("--agent references must resolve to Agent objects")
+        if isinstance(value, PublicJob):
+            selected_agents = loaded_agents or value.agents
+            spec = value.spec
+            job = PublicJob(
+                value.source,
+                agents=selected_agents,
+                mode=mode or spec.mode,
+                attempts=attempts or spec.attempts,
+                concurrency=concurrency or spec.concurrency,
+                per_runtime_concurrency=(per_runtime_concurrency or spec.per_runtime_concurrency),
+                priority=spec.priority,
+                retry=spec.retry,
+                catalog=effective_catalog,
+            )
+        elif isinstance(value, (Task, Benchmark)):
+            if not loaded_agents:
+                raise ValueError("Task and Benchmark runs require at least one --agent")
+            job = PublicJob(
+                value,
+                agents=loaded_agents,
+                mode=mode or JobMode.EVAL,
+                attempts=attempts or 1,
+                concurrency=concurrency or 1,
+                per_runtime_concurrency=per_runtime_concurrency or 1,
+                catalog=effective_catalog,
+            )
         else:
-            if not agent:
-                raise ValueError("direct Task/Benchmark runs require at least one --agent")
-            bindings = tuple(AgentBinding(agent=load_agent(path)) for path in agent)
-            if "task_id" in raw:
-                job_source: Any = TaskJobSource(task=load_task(source))
-            elif "tasks" in raw:
-                job_source = BenchmarkJobSource(benchmark=load_benchmark(source))
-            else:
-                raise ValueError("source is not a schema-v2 Task, Benchmark, or Job")
-            spec = JobSpec(source=job_source, agents=bindings)
-        updates: dict[str, Any] = {}
-        if agent:
-            updates["agents"] = tuple(AgentBinding(agent=load_agent(path)) for path in agent)
-        if mode is not None:
-            updates["mode"] = mode
-        if attempts is not None:
-            updates["attempts"] = attempts
-        if concurrency is not None:
-            updates["concurrency"] = concurrency
-        if per_runtime_concurrency is not None:
-            updates["per_runtime_concurrency"] = per_runtime_concurrency
-        if updates:
-            spec = spec.model_copy(update=updates)
-        plan = spec.plan()
-        validate_hosted_graph(spec)
-    except (OSError, ValueError, ValidationError, json.JSONDecodeError) as exc:
+            raise TypeError("run requires a Task, Benchmark, or Job")
+        spec = job.spec
+        plan = job.plan
+        if hosted:
+            validate_hosted_graph(spec)
+    except (OSError, TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
         _error(str(exc))
     if dry_run:
         _emit(
@@ -589,7 +822,7 @@ def run(
             output_format,
         )
         return
-    if not offline:
+    if hosted:
         try:
             with _client() as client:
                 submission = sync_and_submit(
@@ -609,9 +842,10 @@ def run(
             return
         except (OSError, ValueError, PluralError) as exc:
             _error(str(exc))
-    storage = JobStore(source.resolve().parent / ".plural" / "jobs")
+    source_path = Path(source.rsplit(":", 1)[0]).expanduser().resolve()
+    storage = JobStore(source_path.parent / ".plural" / "jobs")
     try:
-        result = asyncio.run(Job(spec, store=storage).run())
+        result = asyncio.run(JobRunner(spec, store=storage, catalog=job.catalog).run())
     except (OSError, ValueError, RuntimeError, KeyError) as exc:
         _error(str(exc))
     _emit(result, output_format)
@@ -730,7 +964,7 @@ def review_submit(
                 "CLI --score supports one-criterion rubrics; use the Python API "
                 "Job.submit_review() for multiple criteria"
             )
-        Job(spec, store=storage).submit_review(
+        JobRunner(spec, store=storage).submit_review(
             trial_id,
             verifier,
             {human.rubric[0].name: score},
@@ -776,7 +1010,7 @@ def review_hosted_submit(
 
 @app.command("schemas")
 def schemas(path: Path = typer.Argument(Path("schemas"))) -> None:
-    """Generate canonical schema-v2 references."""
+    """Generate schemas from the public SDK models."""
     _emit({"generated": [str(item) for item in generate_schemas(path)]})
 
 

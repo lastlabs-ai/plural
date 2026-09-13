@@ -30,7 +30,16 @@ def test_cli_reference_does_not_drift() -> None:
 
 def test_packaged_schemas_are_valid_json_schemas() -> None:
     paths = sorted((ROOT / "src" / "plural" / "schemas" / "packages").glob("*.json"))
-    assert len(paths) == 18
+    assert {path.name for path in paths} == {
+        "Agent.schema.json",
+        "AgentVerifier.schema.json",
+        "Benchmark.schema.json",
+        "DeterministicVerifier.schema.json",
+        "Environment.schema.json",
+        "HumanVerifier.schema.json",
+        "Job.schema.json",
+        "Task.schema.json",
+    }
     for path in paths:
         schema = json.loads(path.read_text(encoding="utf-8"))
         validator_for(schema).check_schema(schema)

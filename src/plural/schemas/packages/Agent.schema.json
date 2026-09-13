@@ -26,33 +26,6 @@
       "title": "FileDeclaration",
       "type": "object"
     },
-    "HarnessBinding": {
-      "additionalProperties": false,
-      "description": "Exact harness revision.",
-      "properties": {
-        "digest": {
-          "title": "Digest",
-          "type": "string"
-        },
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "revision": {
-          "minLength": 1,
-          "title": "Revision",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "revision",
-        "digest"
-      ],
-      "title": "HarnessBinding",
-      "type": "object"
-    },
     "HarnessCapability": {
       "description": "A capability requested by an agent harness.",
       "enum": [
@@ -326,63 +299,10 @@
       ],
       "title": "PackageSource",
       "type": "object"
-    },
-    "RoutingSpec": {
-      "additionalProperties": false,
-      "description": "Portable model routing configuration.",
-      "properties": {
-        "fallback_models": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Fallback Models",
-          "type": "array"
-        },
-        "max_tokens": {
-          "anyOf": [
-            {
-              "exclusiveMinimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Max Tokens"
-        },
-        "provider": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Provider"
-        },
-        "temperature": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Temperature"
-        }
-      },
-      "title": "RoutingSpec",
-      "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "Revisioned Agent independent of any Environment.",
+  "description": "A catalog-backed model and its optional execution harness.",
   "properties": {
     "auth_mode": {
       "default": "environment",
@@ -395,18 +315,15 @@
       "title": "Auth Mode",
       "type": "string"
     },
-    "harness": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/HarnessBinding"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
+    "fallback_models": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Fallback Models",
+      "type": "array"
     },
-    "harness_package": {
+    "harness": {
       "anyOf": [
         {
           "$ref": "#/$defs/HarnessPackage"
@@ -422,6 +339,19 @@
       "title": "Instructions",
       "type": "string"
     },
+    "max_tokens": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Tokens"
+    },
     "metadata": {
       "additionalProperties": true,
       "title": "Metadata",
@@ -433,24 +363,21 @@
       "type": "string"
     },
     "name": {
-      "minLength": 1,
+      "default": "",
       "title": "Name",
       "type": "string"
     },
-    "revision": {
-      "default": "0.1.0",
-      "minLength": 1,
-      "title": "Revision",
-      "type": "string"
-    },
-    "routing": {
-      "$ref": "#/$defs/RoutingSpec"
-    },
-    "schema_version": {
-      "const": "2",
-      "default": "2",
-      "title": "Schema Version",
-      "type": "string"
+    "provider": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provider"
     },
     "secret_names": {
       "default": [],
@@ -459,12 +386,28 @@
       },
       "title": "Secret Names",
       "type": "array"
+    },
+    "temperature": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Temperature"
+    },
+    "version": {
+      "default": "0.1.0",
+      "title": "Version",
+      "type": "string"
     }
   },
   "required": [
-    "name",
     "model"
   ],
-  "title": "AgentDefinition",
+  "title": "Agent",
   "type": "object"
 }

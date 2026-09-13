@@ -14,6 +14,7 @@ from plural.common import (
     HarnessCapability,
     PackageSource,
     content_hash,
+    semantic_version,
 )
 from plural.sandbox.models import (
     Capability,
@@ -246,13 +247,13 @@ class ExecutionLimits(FrozenModel):
 class EnvironmentDefinition(FrozenModel):
     """Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent."""
 
-    schema_version: Literal["2"] = "2"
     name: str = Field(min_length=1)
-    revision: str = Field(default="0.1.0", min_length=1)
+    version: str = "0.1.0"
     description: str = ""
     overview: str = ""
     readme: str = ""
     actions: tuple[NativeAction, ...] = ()
+    reset_command: tuple[str, ...] = ()
     observation_schema: dict[str, Any] = Field(default_factory=dict)
     state_schema: dict[str, Any] = Field(default_factory=dict)
     rewarders: tuple[RewarderDefinition, ...] = ()
@@ -277,10 +278,16 @@ class EnvironmentDefinition(FrozenModel):
             stale = {"tasks", "verifier", "mode", "context"} & set(value)
             if stale:
                 raise ValueError("schema-v2 Environment cannot own " + ", ".join(sorted(stale)))
+            payload = dict(value)
+            payload.pop("schema_version", None)
+            if "version" not in payload and "revision" in payload:
+                payload["version"] = payload.pop("revision")
+            return payload
         return value
 
     @model_validator(mode="after")
     def _unique_names(self) -> EnvironmentDefinition:
+        semantic_version(self.version)
         for label, values in (
             ("action", self.actions),
             ("resource", self.resources),
@@ -293,6 +300,16 @@ class EnvironmentDefinition(FrozenModel):
         return self
 
     @property
+    def revision(self) -> str:
+        """Compatibility version name used by execution and hosted internals."""
+        return self.version
+
+    @property
+    def schema_version(self) -> Literal["2"]:
+        """Internal protocol compatibility without public serialization."""
+        return "2"
+
+    @property
     def content_hash(self) -> str:
         """Stable Environment revision digest."""
         payload = self.model_dump(mode="json", exclude={"source"})
@@ -302,10 +319,17 @@ class EnvironmentDefinition(FrozenModel):
     @property
     def identity(self) -> EnvironmentIdentity:
         """Exact identity represented by this revision."""
-        return EnvironmentIdentity(name=self.name, revision=self.revision, digest=self.content_hash)
+        return EnvironmentIdentity(name=self.name, revision=self.version, digest=self.content_hash)
+
+
+Action = NativeAction
+Resource = EnvironmentResource
+Runtime = EnvironmentRuntime
+Secret = SecretReference
 
 
 __all__ = [
+    "Action",
     "EnvironmentIdentity",
     "EnvironmentDefinition",
     "EnvironmentResource",
@@ -316,5 +340,8 @@ __all__ = [
     "HarnessGrant",
     "NativeAction",
     "RewarderDefinition",
+    "Resource",
+    "Runtime",
+    "Secret",
     "SecretReference",
 ]

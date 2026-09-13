@@ -199,6 +199,31 @@ class EnvironmentsAPI(RevisionResourceAPI[EnvironmentDefinition]):
         del references
         return _dump(value, exclude={"name", "description"})
 
+    def stamp_harness(
+        self,
+        *,
+        environment_id: str,
+        revision_id: str,
+        harness_revision_id: str,
+        compatible: bool = True,
+        evidence: dict[str, Any] | None = None,
+    ) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                (
+                    f"/environments/{quote(environment_id)}/revisions/"
+                    f"{quote(revision_id)}/harness-evidence"
+                ),
+                json={
+                    "harness_revision_id": harness_revision_id,
+                    "compatible": compatible,
+                    "evidence": evidence or {},
+                },
+            ),
+        )
+
 
 class TasksAPI(RevisionResourceAPI[TaskDefinition]):
     collection = "tasks"

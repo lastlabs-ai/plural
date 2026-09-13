@@ -1,70 +1,30 @@
-"""Plural routing, tracing, and canonical schema-v2 execution."""
+"""Plural environments, evaluation, routing, and tracing."""
 
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
+from plural.agents import Agent
 from plural.catalog import ModelCatalog, ModelSpec, estimate_cost
 from plural.client import Client, Plural
-from plural.domain import (
-    AgentBinding,
-    AgentDefinition,
-    AgentVerifier,
-    ArtifactReference,
-    BenchmarkDefinition,
-    BenchmarkJobSource,
-    DeterministicVerifier,
-    EnvironmentDefinition,
-    EnvironmentIdentity,
-    EnvironmentResource,
-    EnvironmentRuntime,
+from plural.common import (
     ErrorCode,
-    EvidenceContract,
-    ExecutionLimits,
-    ExecutionStatus,
     ExecutionTarget,
-    FileDeclaration,
-    Guardrail,
-    HarnessBinding,
     HarnessCapability,
-    HarnessDefinition,
-    HarnessGrant,
     HarnessPackage,
-    HarnessPolicy,
-    HumanVerifier,
-    JobLock,
-    JobMode,
-    JobPlan,
-    JobResult,
-    JobSource,
-    JobSpec,
-    NativeAction,
     PackageSource,
-    ProgressEvent,
-    RetryPolicy,
-    RewarderDefinition,
-    RoutingSpec,
-    RubricCriterion,
-    SecretReference,
-    TaskDefinition,
-    TaskJobSource,
-    TITORecord,
-    TrialExecution,
-    TrialReceipt,
-    TrialResult,
-    TrialSpec,
-    TrialStatus,
-    VerifierDefinition,
-    VerifierResult,
-    VerifierRuntime,
-    WeightedVerifier,
     content_hash,
-    resolve_trial_harness_grant,
     stable_id,
 )
 from plural.environments import (
+    Action,
     Environment,
+    ExecutionLimits,
+    HarnessPolicy,
     Observation,
+    Resource,
+    Runtime,
+    Secret,
     State,
     TraceDataset,
     TraceFilter,
@@ -87,8 +47,40 @@ from plural.errors import (
     TimeoutError,
     is_retryable,
 )
-from plural.execution import Job, JobStore, Trial
-from plural.harness import native_actions_v1, native_chat_v1
+from plural.execution import JobStore, Trial
+from plural.jobs import (
+    AgentAggregate,
+    ArtifactManifest,
+    ArtifactManifestEntry,
+    ArtifactReference,
+    ExecutionStatus,
+    Job,
+    JobMode,
+    JobPlan,
+    JobResult,
+    ProgressEvent,
+    RetryPolicy,
+    TITORecord,
+    TrialExecution,
+    TrialReceipt,
+    TrialResult,
+    TrialSpec,
+    TrialStatus,
+    VerifierResult,
+)
+from plural.project import (
+    CatalogContext,
+    Resolver,
+)
+from plural.project import (
+    dump as dump_project,
+)
+from plural.project import (
+    dumps as dumps_project,
+)
+from plural.project import (
+    load as load_project,
+)
 from plural.sandbox import (
     Capability,
     DaytonaProvider,
@@ -101,6 +93,12 @@ from plural.sandbox import (
     SandboxRequirements,
 )
 from plural.studio import Studio
+from plural.tasks import (
+    Benchmark,
+    BenchmarkDiff,
+    Task,
+    TaskPin,
+)
 from plural.tracing import (
     JSONLSink,
     Outcome,
@@ -112,7 +110,17 @@ from plural.tracing import (
     TraceKind,
     TraceWriter,
 )
+from plural.trajectory import Trajectory, TrajectoryEvent, normalize_trajectory
 from plural.types import ChatRequest, ChatResponse, Message, Tool, Usage
+from plural.verifiers import (
+    AgentVerifier,
+    DeterministicVerifier,
+    EvidenceContract,
+    HumanVerifier,
+    RubricCriterion,
+    Verifier,
+    VerifierRuntime,
+)
 
 try:
     __version__ = version("plural")
@@ -120,15 +128,19 @@ except PackageNotFoundError:
     __version__ = "0.0.0"
 
 __all__ = [
-    "AgentBinding",
-    "AgentDefinition",
+    "Action",
+    "Agent",
+    "AgentAggregate",
     "AgentVerifier",
+    "ArtifactManifest",
+    "ArtifactManifestEntry",
     "ArtifactReference",
     "AuthenticationError",
-    "BenchmarkDefinition",
-    "BenchmarkJobSource",
+    "Benchmark",
+    "BenchmarkDiff",
     "BudgetExceededError",
     "Capability",
+    "CatalogContext",
     "ChatRequest",
     "ChatResponse",
     "Client",
@@ -142,38 +154,25 @@ __all__ = [
     "EvidenceContract",
     "DockerProvider",
     "Environment",
-    "EnvironmentIdentity",
-    "EnvironmentDefinition",
-    "EnvironmentResource",
-    "EnvironmentRuntime",
     "ErrorCode",
     "ExecutionLimits",
     "ExecutionStatus",
     "ExecutionTarget",
-    "FileDeclaration",
-    "Guardrail",
-    "HarnessBinding",
     "HarnessCapability",
-    "HarnessDefinition",
     "HarnessPackage",
     "HarnessPolicy",
-    "HarnessGrant",
     "HumanVerifier",
     "InvalidRequestError",
     "JSONLSink",
     "Job",
-    "JobLock",
     "JobMode",
     "JobPlan",
     "JobResult",
-    "JobSource",
-    "JobSpec",
     "JobStore",
     "LocalProvider",
     "Message",
     "ModelCatalog",
     "ModelSpec",
-    "NativeAction",
     "NetworkMode",
     "NotFoundError",
     "Observation",
@@ -186,20 +185,21 @@ __all__ = [
     "ProviderUnavailable",
     "RateLimitError",
     "Redactor",
+    "Resource",
+    "Resolver",
     "RetryPolicy",
-    "RewarderDefinition",
-    "RoutingSpec",
+    "Runtime",
     "RubricCriterion",
     "SQLiteSink",
     "Sampler",
     "SandboxProvider",
     "SandboxRequirements",
-    "SecretReference",
+    "Secret",
     "State",
     "Studio",
     "TITORecord",
-    "TaskDefinition",
-    "TaskJobSource",
+    "Task",
+    "TaskPin",
     "TimeoutError",
     "Tool",
     "Trace",
@@ -208,6 +208,8 @@ __all__ = [
     "TraceFilter",
     "TraceKind",
     "TraceWriter",
+    "Trajectory",
+    "TrajectoryEvent",
     "Trial",
     "TrialExecution",
     "TrialReceipt",
@@ -215,19 +217,19 @@ __all__ = [
     "TrialSpec",
     "TrialStatus",
     "Usage",
-    "VerifierDefinition",
+    "Verifier",
     "VerifierResult",
     "VerifierRuntime",
-    "WeightedVerifier",
     "__version__",
     "action",
     "content_hash",
+    "dump_project",
+    "dumps_project",
     "estimate_cost",
     "hidden",
     "is_retryable",
-    "native_actions_v1",
-    "native_chat_v1",
-    "resolve_trial_harness_grant",
+    "load_project",
+    "normalize_trajectory",
     "rewarder",
     "stable_id",
 ]

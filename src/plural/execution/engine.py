@@ -15,7 +15,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from plural.catalog import ModelCatalog
 from plural.domain import (
+    AgentAggregate,
     AgentBinding,
     AgentVerifier,
     ArtifactReference,
@@ -64,6 +66,8 @@ from plural.sandbox import (
     SandboxRequirements,
     default_registry,
 )
+from plural.tasks import validate_task_state
+from plural.trajectory import normalize_trajectory
 
 
 class VerifierOutput(BaseModel):
@@ -175,6 +179,7 @@ def _environment_payload(task: TaskDefinition) -> dict[str, Any]:
         "resources": [item.model_dump(mode="json") for item in environment.resources],
         "workspace": "/workspace/environment",
         "actions": [item.model_dump(mode="json") for item in environment.actions],
+        "reset_command": list(environment.reset_command),
     }
 
 
@@ -228,6 +233,65 @@ def _artifact_reference(file: DownloadedFile, media_type: str) -> ArtifactRefere
         media_type=media_type,
         size_bytes=len(file.data),
     )
+
+
+def _json_artifact(path: str, value: Any) -> DownloadedFile:
+    return DownloadedFile(
+        path=path,
+        data=(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+    )
+
+
+def _with_artifact(
+    artifacts: Sequence[DownloadedFile],
+    artifact: DownloadedFile,
+) -> tuple[DownloadedFile, ...]:
+    return (*tuple(item for item in artifacts if item.path != artifact.path), artifact)
+
+
+def _trajectory_source(artifacts: Sequence[DownloadedFile]) -> DownloadedFile | None:
+    return next(
+        (
+            item
+            for item in artifacts
+            if Path(item.path).name in {"trajectory.json", "trajectory.jsonl"}
+            and item.path != "trajectory.normalized.json"
+        ),
+        None,
+    )
+
+
+def _normalized_trajectory_artifact(
+    artifacts: Sequence[DownloadedFile],
+) -> DownloadedFile | None:
+    source = _trajectory_source(artifacts)
+    if source is None:
+        return None
+    try:
+        normalized = normalize_trajectory(source.data)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return None
+    return _json_artifact("trajectory.normalized.json", normalized.model_dump(mode="json"))
+
+
+def _trajectory_cost(artifacts: Sequence[DownloadedFile]) -> float | None:
+    source = _trajectory_source(artifacts)
+    if source is None:
+        return None
+    try:
+        trajectory = normalize_trajectory(source.data)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return None
+    values = []
+    for event in trajectory.events:
+        if event.kind != "cost":
+            continue
+        for key in ("cost_usd", "total_cost", "cost"):
+            value = event.payload.get(key)
+            if isinstance(value, (int, float)) and math.isfinite(value) and value >= 0:
+                values.append(float(value))
+                break
+    return sum(values) if values else None
 
 
 def _validate_tito(
@@ -315,9 +379,11 @@ class Trial:
         artifacts: tuple[DownloadedFile, ...] = ()
         environment_state: dict[str, Any] = {}
         environment_observation: dict[str, Any] = {}
+        environment_view_doc: dict[str, Any] = {}
         trace_id: str | None = None
         verifier_results: tuple[VerifierResult, ...] = ()
         tito: ArtifactReference | None = None
+        cost_usd: float | None = None
         heartbeat = asyncio.create_task(self._heartbeat(execution_id))
         self.store.emit(
             self.spec.job_id,
@@ -410,10 +476,34 @@ class Trial:
                 )
                 environment_state = await _optional_json(
                     provider, handle, "state.json", root="/workspace/environment"
-                )
+                ) or await _optional_json(provider, handle, "state.json", root="/workspace/harness")
                 environment_observation = await _optional_json(
                     provider, handle, "observation.json", root="/workspace/environment"
+                ) or await _optional_json(
+                    provider, handle, "observation.json", root="/workspace/harness"
                 )
+                environment_view_doc = await _optional_json(
+                    provider, handle, "view.json", root="/workspace/environment"
+                ) or await _optional_json(provider, handle, "view.json", root="/workspace/harness")
+                if environment_state:
+                    artifacts = _with_artifact(
+                        artifacts,
+                        _json_artifact("state.json", environment_state),
+                    )
+                if environment_observation:
+                    artifacts = _with_artifact(
+                        artifacts,
+                        _json_artifact("observation.json", environment_observation),
+                    )
+                if environment_view_doc:
+                    artifacts = _with_artifact(
+                        artifacts,
+                        _json_artifact("view.json", environment_view_doc),
+                    )
+                normalized_trajectory = _normalized_trajectory_artifact(artifacts)
+                if normalized_trajectory is not None:
+                    artifacts = _with_artifact(artifacts, normalized_trajectory)
+                cost_usd = _trajectory_cost(artifacts)
             finally:
                 self._active.pop((provider.name, handle.sandbox_id), None)
                 await provider.destroy(handle)
@@ -438,6 +528,13 @@ class Trial:
                 state=environment_state,
             )
             all_results = (*rewarder_results, *verifier_results)
+            artifacts = _with_artifact(
+                artifacts,
+                _json_artifact(
+                    "verifier-results.json",
+                    [item.model_dump(mode="json") for item in all_results],
+                ),
+            )
             awaiting = any(item.status == "awaiting_review" for item in verifier_results)
             reward, scores = _aggregate(task, all_results)
             status: Literal["succeeded", "awaiting_review"] = (
@@ -451,6 +548,7 @@ class Trial:
                 trace_id=trace_id,
                 tito=tito,
                 timings={"total_seconds": time.monotonic() - clock},
+                cost_usd=cost_usd,
             )
             result = TrialResult(
                 status=status,
@@ -475,6 +573,7 @@ class Trial:
                 trace_id=trace_id,
                 tito=tito,
                 timings={"total_seconds": time.monotonic() - clock},
+                cost_usd=cost_usd,
             )
             result = TrialResult(
                 status="cancelled" if code is ErrorCode.CANCELLED else "failed",
@@ -486,7 +585,7 @@ class Trial:
                     :1000
                 ],
             )
-        self.store.write_trial_attempt(
+        self.store.write_trial_execution(
             self.spec,
             execution_id,
             result,
@@ -593,6 +692,23 @@ class Trial:
         if source.digest is not None and tree_digest(root) != source.digest:
             raise ValueError("Environment source lock mismatch")
         await provider.upload_bundle(handle, root, root="/workspace/environment")
+        if self.task.state:
+            validate_task_state(
+                task_id=self.task.task_id,
+                environment_name=self.task.environment.name,
+                state=self.task.state,
+                state_schema=self.task.environment.state_schema,
+            )
+            await provider.upload_files(
+                handle,
+                (
+                    FileUpload(
+                        path="state.json",
+                        data=(json.dumps(self.task.state, sort_keys=True) + "\n").encode(),
+                    ),
+                ),
+                root="/workspace/environment",
+            )
 
     async def _run_rewarders(
         self,
@@ -807,6 +923,7 @@ class Trial:
         trace_id: str | None,
         tito: ArtifactReference | None,
         timings: dict[str, float],
+        cost_usd: float | None,
     ) -> TrialReceipt:
         agent = self.agent
         return TrialReceipt(
@@ -816,6 +933,9 @@ class Trial:
             retry_count=retry,
             attempt=self.spec.attempt,
             task_digest=self.task.content_hash,
+            task_pin=self.spec.task_pin,
+            benchmark=self.spec.benchmark,
+            model=self.spec.model,
             environment_digest=self.task.environment.content_hash,
             verifier_digests=self.spec.verifier_digests,
             agent_digest=agent.content_hash,
@@ -831,6 +951,7 @@ class Trial:
             started_at=started,
             completed_at=datetime.now(timezone.utc),
             timings=timings,
+            cost_usd=cost_usd,
         )
 
 
@@ -863,6 +984,35 @@ def _aggregate(
     return reward, scores
 
 
+def _agent_aggregates(
+    spec: JobSpec,
+    results: Sequence[TrialResult],
+) -> tuple[AgentAggregate, ...]:
+    rows: list[AgentAggregate] = []
+    for agent in spec.agents:
+        selected = [item for item in results if item.receipt.agent_digest == agent.content_hash]
+        rewards = [item.reward for item in selected if item.reward is not None]
+        costs = [item.receipt.cost_usd for item in selected if item.receipt.cost_usd is not None]
+        latencies = [
+            item.receipt.timings["total_seconds"]
+            for item in selected
+            if "total_seconds" in item.receipt.timings
+        ]
+        rows.append(
+            AgentAggregate(
+                agent_name=agent.name,
+                agent_digest=agent.content_hash,
+                model_id=agent.model,
+                count=len(selected),
+                successes=sum(item.status == "succeeded" for item in selected),
+                mean_reward=sum(rewards) / len(rewards) if rewards else None,
+                total_cost=sum(costs) if costs else None,
+                mean_latency_seconds=sum(latencies) / len(latencies) if latencies else None,
+            )
+        )
+    return tuple(rows)
+
+
 class Job:
     """Bounded async Job scheduler across Environment-owned runtimes."""
 
@@ -877,9 +1027,11 @@ class Job:
         environ: Mapping[str, str] | None = None,
         progress: Callable[[TrialSpec, TrialResult], None] | None = None,
         project_policy: ProjectPolicy | None = None,
+        catalog: ModelCatalog | None = None,
     ) -> None:
         self.spec = spec
-        self.plan = spec.plan()
+        self.catalog = catalog or ModelCatalog()
+        self.plan = spec.plan(self.catalog)
         self._provider_override = provider
         self._providers = dict(providers or {})
         self.registry = registry
@@ -1021,6 +1173,8 @@ class Job:
             plan_hash=content_hash(self.plan),
             status=status,
             trials=ordered,
+            benchmark=self.plan.lock.benchmark,
+            aggregates=_agent_aggregates(self.spec, ordered),
         )
         self.store.write_job_result(result)
         self.store.emit(
@@ -1122,7 +1276,13 @@ class Job:
             job_status = "cancelled"
         else:
             job_status = "succeeded"
-        updated = aggregate.model_copy(update={"status": job_status, "trials": updated_trials})
+        updated = aggregate.model_copy(
+            update={
+                "status": job_status,
+                "trials": updated_trials,
+                "aggregates": _agent_aggregates(self.spec, updated_trials),
+            }
+        )
         self.store.write_review(
             trial_spec,
             verifier_name,
@@ -1183,6 +1343,9 @@ class Job:
                 execution_id=self.store.next_execution_id(trial),
                 attempt=trial.attempt,
                 task_digest=trial.task_digest,
+                task_pin=trial.task_pin,
+                benchmark=trial.benchmark,
+                model=trial.model,
                 environment_digest=task.environment.content_hash,
                 verifier_digests=trial.verifier_digests,
                 agent_digest=agent.content_hash,
@@ -1195,7 +1358,7 @@ class Job:
                 completed_at=now,
             ),
         )
-        self.store.write_trial_attempt(
+        self.store.write_trial_execution(
             trial,
             result.receipt.execution_id,
             result,

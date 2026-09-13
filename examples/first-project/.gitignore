@@ -1,0 +1,4 @@
+__pycache__/
+.plural/
+environment/state.json
+environment/observation.json

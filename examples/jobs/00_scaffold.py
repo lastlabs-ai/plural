@@ -1,8 +1,7 @@
-"""Scaffold Environment, Verifier, Task, Harness, Agent, Benchmark, and Job."""
+"""Scaffold and validate a Python-first public Job project."""
 
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
 
@@ -21,46 +20,7 @@ def call(*args: str) -> str:
 
 with tempfile.TemporaryDirectory(prefix="plural-scaffold-") as temporary:
     root = Path(temporary)
-    environment = root / "environment"
-    verifier = root / "verifier.yaml"
-    task = root / "task.yaml"
-    harness = root / "harness"
-    benchmark = root / "benchmark.yaml"
-    agent = root / "agent.yaml"
-    job = root / "job.yaml"
-    call("env", "init", str(environment), "--name", "offline")
-    call("verifier", "init", str(verifier), "--name", "offline-check")
-    call(
-        "task",
-        "init",
-        str(task),
-        "--id",
-        "offline-task",
-        "--environment",
-        str(environment),
-        "--verifier",
-        str(verifier),
-    )
-    call("harness", "init", str(harness), "--name", "offline-loop")
-    call("benchmark", "init", str(benchmark), "--task", str(task))
-    call(
-        "agent",
-        "init",
-        str(agent),
-        "--model",
-        "offline/model",
-        "--harness",
-        str(harness),
-    )
-    call(
-        "job",
-        "init",
-        str(job),
-        "--source",
-        str(benchmark),
-        "--agent",
-        str(agent),
-    )
-    plan = json.loads(call("run", str(job), "--dry-run"))
-    assert plan["trial_count"] == 1
-    print(f"scaffolded and planned {plan['job_id']}")
+    call("init", str(root))
+    call("validate", str(root / "project.yaml"))
+    call("inspect", str(root / "project.py") + ":job")
+    print(f"scaffolded and validated {root / 'project.yaml'}")

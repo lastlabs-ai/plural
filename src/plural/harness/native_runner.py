@@ -41,7 +41,7 @@ def main() -> None:
         encoding="utf-8",
     )
     Path("trajectory.jsonl").write_text(
-        "".join(json.dumps(item, sort_keys=True) + "\n" for item in trajectory),
+        json.dumps({"messages": trajectory}, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     _emit(
@@ -65,14 +65,17 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
     max_seconds = float(limits.get("max_seconds", 120))
     max_cost = limits.get("max_cost_usd")
     deadline = time.monotonic() + max_seconds
-    actions = {
+    declared = {
         str(item["name"]): item
         for item in environment.get("actions", [])
         if isinstance(item, dict) and item.get("name")
     }
+    actions = {name: item for name, item in declared.items() if name not in {"reset", "step"}}
     if profile in _ACTION_PROFILES and not actions:
         raise ValueError(f"{profile} requires at least one environment native action")
     denials = _denials(request)
+    trajectory: list[dict[str, Any]] = []
+    _reset_episode(request, environment, declared, trajectory)
     prompt = _prompt(request, environment, denials)
     system = str(agent.get("instructions") or "").strip()
     if denials:
@@ -85,7 +88,7 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
         {
             "type": "function",
             "function": {
-                "name": f"environment.{name}",
+                "name": name,
                 "description": str(action.get("description") or name),
                 "parameters": action.get("parameters")
                 or {"type": "object", "additionalProperties": True},
@@ -93,10 +96,9 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
         }
         for name, action in actions.items()
     ]
-    trajectory: list[dict[str, Any]] = []
     total_cost = 0.0
     final_message: dict[str, Any] | None = None
-    for turn in range(1, max_turns + 1):
+    for _turn in range(1, max_turns + 1):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError(f"{profile} exceeded max_seconds={max_seconds}")
@@ -117,24 +119,13 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
         total_cost += float(cost or 0)
         if max_cost is not None and total_cost > float(max_cost):
             raise RuntimeError(f"{profile} exceeded max_cost_usd={max_cost}")
-        trajectory.append(
-            {
-                "turn": turn,
-                "model": response.get("model", agent.get("model")),
-                "message": message,
-                "usage": usage,
-                "cumulative_cost_usd": total_cost,
-            }
-        )
         messages.append(message)
         calls = message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
         if profile in _CHAT_PROFILES or not calls:
             final_message = message
             break
         for call in calls:
-            observation = _dispatch_tool(call, actions, environment, denials, deadline)
-            messages.append(observation)
-            trajectory.append({"turn": turn, "observation": observation})
+            messages.append(_dispatch_tool(call, actions, environment, denials, deadline))
     if final_message is None:
         raise RuntimeError(f"{profile} reached max_turns={max_turns} without a final response")
     trace_id = str(uuid4())
@@ -144,11 +135,11 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
             "task_id": _mapping(request.get("task"), "task").get("task_id"),
             "response": final_message.get("content"),
             "model": agent.get("model"),
-            "turns": len([item for item in trajectory if "message" in item]),
+            "turns": len([item for item in messages if item.get("role") == "assistant"]),
             "cost_usd": total_cost,
             "trace_id": trace_id,
         },
-        trajectory,
+        messages,
         trace_id,
     )
 
@@ -348,6 +339,57 @@ def _workspace_path(path: str) -> str:
     if root and path.startswith("/"):
         return str(Path(root) / path.removeprefix("/"))
     return path
+
+
+def _reset_episode(
+    request: dict[str, Any],
+    environment: dict[str, Any],
+    declared: dict[str, dict[str, Any]],
+    trajectory: list[dict[str, Any]],
+) -> None:
+    workspace = Path(_workspace_path(str(environment.get("workspace") or "/workspace/environment")))
+    workspace.mkdir(parents=True, exist_ok=True)
+    task = _mapping(request.get("task"), "task")
+    (workspace / "task.json").write_text(json.dumps(task, sort_keys=True) + "\n", encoding="utf-8")
+    command = [str(item) for item in environment.get("reset_command") or ()]
+    if not command:
+        reset = declared.get("reset") or {}
+        command = [str(item) for item in reset.get("command") or ()]
+    if not command:
+        return
+    completed = subprocess.run(
+        _local_command(command),
+        input=b"{}",
+        cwd=str(workspace),
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if key in {"PATH", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT"}
+        },
+        capture_output=True,
+        timeout=float((declared.get("reset") or {}).get("timeout_seconds") or 30),
+        check=False,
+    )
+    if completed.returncode != 0:
+        error = completed.stderr.decode(errors="replace")[:1000]
+        raise RuntimeError(f"environment reset failed: {error or completed.returncode}")
+    observation_path = workspace / "observation.json"
+    if observation_path.exists():
+        observation = json.loads(observation_path.read_text(encoding="utf-8"))
+        if isinstance(observation, dict):
+            environment["observation"] = observation
+    else:
+        raw = completed.stdout.decode(errors="replace").strip()
+        observation = json.loads(raw) if raw else {}
+        if isinstance(observation, dict):
+            environment["observation"] = observation
+    trajectory.append(
+        {
+            "turn": 0,
+            "type": "reset",
+            "observation": environment.get("observation"),
+        }
+    )
 
 
 def _emit(value: dict[str, Any]) -> None:

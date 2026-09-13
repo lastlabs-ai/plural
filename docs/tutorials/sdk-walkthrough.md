@@ -1,8 +1,8 @@
 ---
 route: /docs/tutorials/sdk-walkthrough
-title: "Sdk Walkthrough"
+title: Sdk Walkthrough
 order: 945
-description: "This page moved to Getting started. Open that guide for the current walkthrough and examples."
+description: This page moved to Getting started. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

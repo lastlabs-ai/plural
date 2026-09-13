@@ -1,124 +1,70 @@
 ---
 route: /docs/operations/troubleshooting
-title: "Troubleshooting"
+title: Troubleshooting
 order: 260
-description: "Install, hosted access, runtime, and Job failures. Activate the environment where you installed Plural, or use uv run plural."
+description: Find the failing stage and resolve installation, policy, execution, or scoring problems.
 audience: all
 nav: false
+outcome: You can diagnose a run without confusing a runtime failure with a low score.
 ---
 # Troubleshooting
 
-## Setup and hosted access
+Start by identifying the stage that failed: installation, graph validation, runtime preflight, Agent execution, scoring, or review. Retrying a configuration error rarely helps.
 
-**`plural` is not found.** Activate the virtual environment where you installed
-Plural, or use `uv run plural`. Check `python -m pip show plural` in the same
-environment. See [setup](../getting-started/setup.md).
+## The command is missing or belongs to an older version
 
-**CLI login works, but `Client()` says no providers are configured.** The SDK
-does not read the CLI credential store. Export `PLURAL_API_KEY` or pass
-`api_key=`. For BYOK, pass `providers={...}` explicitly.
+Activate the environment where you installed the current source checkout. Run `python -m pip show plural` and `plural --help`. These docs use schema-v2 authoring commands; the public PyPI release can lag behind the checkout. Follow [Getting started](../getting-started.md) to install the matching source.
 
-**I can call a model, but cannot fetch project objects.** Direct provider keys
-do not authorize Plural Intel. Supply a Plural API key and, for an account key,
-a project ID. Verify the SDK `base_url` separately from CLI `--api-url` and the
-harness's `PLURAL_GATEWAY_URL`.
+## A YAML field is rejected
 
-**`auth status` is successful, but the job cannot call a model.** The external
-harness needs a granted secret name in its agent configuration and that secret's
-value in the process environment. Stored device login is not automatically
-forwarded. Confirm the harness endpoint and model ID too.
+Definitions reject unknown fields. Environment cannot own `tasks`, `verifier`, or `mode`. Task has `instructions`, not a separate `goal` field. Eval/train mode belongs on Job. See the [definition reference](../reference/definitions.md) and [migration guide](../migration/v1.md).
 
-**Create returns a conflict.** The slug already exists in this project. Fetch
-it and intentionally update it, or choose a new name. A failed update should
-not automatically fall back to creating a second object.
+## A referenced file cannot be found
 
-**A fetched environment has no `rollout` method.** Hosted environment reads
-return metadata dictionaries. Install the author's source to run locally, or
-restore complete package definitions and matching sources when supplied. See
-[object retrieval](../guides/push-to-plural.md).
+Paths in Task, Benchmark, and Job files resolve relative to the file that contains them. Check the containing directory and filename. An absolute path on your laptop is not automatically available in a remote sandbox.
 
-**`agent list` does not show my Intel agents.** The CLI lists local configuration
-files. Use `client.agents.list()` for hosted agents. `org list` and `project list`
-currently report unsupported backend functionality; use known project IDs.
+## A verifier evidence path fails validation
 
-## SDK results and traces
+Check the Environment's observation/state schema for the exact property. Use supported object paths and explicitly permit hidden state on the Verifier. Required artifact names are checked when the Trial produces artifacts, not inferred from schema properties.
 
-**Score is missing or zero.** No Verifier means no quality score. Zero means
-the configured check did not award credit, not necessarily an execution
-failure. Do not apply exact-answer verification to unlabeled production work
-without changing how that case is evaluated.
+## The runtime cannot enforce a policy
 
-**Trace content is blank.** Content capture is off by default. For approved
-synthetic/debug data, set `capture_content=True`. Close/flush the client before
-reading newly queued traces. A sampled-out trace will not be in the sink.
+Run `plural providers doctor`. The local provider cannot block networking or enforce resource limits. The built-in Docker provider does not support restricted network allowlists. A cloud target cannot consume a local Docker build context. Use a provider that supports the requirements; do not silently weaken the policy.
 
-**Late labels did not update JSONL.** JSONL is append-only. Use SQLite for
-persistent label updates by ID; flush pending trace writes before attaching a
-label to an already-written record.
+## The model cannot authenticate or connect
 
-**A Trace dataset hash is stale.** Keep the JSONL file with its manifest and
-save a new snapshot after intentional changes. Trace datasets are analysis
-outputs, not Task or Benchmark Job sources.
+The native Harness needs its declared secret granted on the Agent and supplied to the execution process. CLI device login does not automatically forward credentials to the model subprocess. Check the selected model ID and endpoint: a direct provider may accept a different ID from a multi-provider gateway.
 
-**A custom environment cannot be copied for comparison.** Supply
-`environment_factory=` or implement `spawn()` when your environment constructor
-needs extra arguments or registered closures capture mutable state.
+`OPENAI_BASE_URL` configures the native compatible model endpoint; `PLURAL_GATEWAY_URL` takes precedence when set. Model connectivity is separate from the hosted project API endpoint. `--offline` does not block network requests.
 
-## Package execution
+## The native loop stops at its turn limit
 
-Start with package validation, a dry run, and provider health:
+Read the trajectory. The model may be repeating an invalid action or failing to produce a final response. Fix the action feedback and Task stopping instructions before simply raising the budget. The support starter resets the Environment for the Task, then needs categorize and a final confirmation.
 
-```bash
-plural env validate environment
-plural harness validate harness
-plural verifier validate verifier.yaml
-plural task validate task.yaml
-plural benchmark validate benchmark.yaml
-plural run job.yaml --dry-run
-```
+## The verifier script or result is missing
 
-Common failures:
+`plural verifier init` writes a definition, not its implementation. Supply the script. A neighboring `python script.py` command can be inlined by the loader, but imported modules and data files are not automatically bundled. The scorer must write its declared result path as valid JSON and include evidence when required.
 
-- **Revision identity is stale** — the Environment, Task, Verifier, Agent, or
-  Harness changed. Recreate dependent revision files and then the Job source.
-- **Harness source lock mismatch** — package files changed after binding.
-  Rebuild/publish, add the new digest to the Environment, and recreate Agents.
-- **`lock_incompatible`** — the same job ID/store contains a different complete
-  config or lock. Do not edit stored files; use the original config or create a
-  newly identified Job.
-- **Local execution refused** — set provider `local`, `network: full`, and
-  `allow_unsafe_local: true` on a trusted Environment, or use an isolated
-  provider.
-- **Missing declared harness secrets** — export every Agent-granted name. Do
-  not add undeclared names to the Agent; add them to the package manifest and
-  regenerate the binding.
-- **Runtime unavailable/capability error** — install the optional dependency,
-  start Docker, configure Daytona, or remove a requirement
-  only if the security policy truly permits it.
-- **Docker build/image failure** — verify the Environment Dockerfile works for
-  UID 65532 and the harness command exists in/uploaded to the image. Daytona
-  declarative images and snapshots cannot be used by Docker.
-- **Restricted network rejected** — Docker/local do not implement allowlists;
-  Daytona requires a non-empty domain/CIDR allowlist.
-- **Harness protocol failure** — stdout must contain only valid protocol JSON
-  lines ending in exactly one terminal event; logs belong on stderr. Result
-  paths must be declared and created.
-- **Evidence missing/verifier failed** — the harness omitted a required
-  artifact, the verifier did not write its configured result path, emitted
-  non-finite values/no evidence, timed out, or exited nonzero.
-- **Resume does not rerun success** — expected behavior. Successful Trial IDs
-  are reused; retries target non-successful Trials.
-- **Regrade refused** — every Trial needs a successful source receipt and
-  pinned Verifier revisions.
-- **Cancellation appears delayed** — in-process callers should invoke
-  `await job.cancel()`; cancellation is not a CLI command.
-- **Auth fails or expires** — confirm `--api-url`, use `--no-browser` when
-  appropriate, and verify the service implements the documented device
-  endpoints. Hosted publication/sync can refresh stored device credentials, but there is
-  no general background refresh loop. Reauthenticate when auth checks expire.
+## Execution succeeded but reward is zero
 
-Process exit `1` means a run returned at least one non-success Trial. Exit `2`
-means usage/validation/configuration or another handled command error. Inspect
-the JSON `error_code`, persisted attempt logs, receipt effective policy, and
-provider diagnostics; avoid posting unredacted artifacts or config directories
-in bug reports.
+That can be a legitimate evaluation outcome. Inspect the final state and verifier feedback. A correctly executed agent can still choose the wrong category. Preserve zero-scoring completed Trials in your comparison.
+
+## A review is pending
+
+Use `plural review list JOB_ID` for local Jobs or `plural review hosted-list` for hosted assignments. Submit all required rubric criteria in their declared ranges. A pending human score withholds the final reward; it is not a runtime timeout.
+
+## Train mode reports unsupported TITO
+
+The selected Harness cannot supply exact token capture. Use eval mode for ordinary transcripts, or implement the required token record and artifact contract in a compatible Harness. Do not fabricate token data or enable `supports_tito` without the implementation.
+
+## A Harness digest no longer matches
+
+The package changed after its Agent binding was created, or the wrong source was materialized. Rebuild the intended package and update the binding deliberately. Keep generated files out of the source tree. Do not bypass integrity checks to make a stale comparison run.
+
+## Local results do not appear in Plural Intel
+
+A local store and a hosted Job are separate. A trace ID alone does not upload the trace or artifacts. Use the supported synchronization or hosted submission workflow, with materializable sources, project credentials, and policy-compatible runtimes.
+
+## There is no deterministic replay
+
+Reading a stored trajectory is different from rerunning a model or external service. Revisions identify the experiment; they cannot guarantee identical model outputs or remote system state. See [Traces](../running/traces.md).

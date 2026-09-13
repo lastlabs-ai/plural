@@ -45,6 +45,8 @@ def _walk(command: object, path: tuple[str, ...] = ()) -> list[tuple[str, str]]:
     commands = getattr(command, "commands", None)
     if isinstance(commands, dict):
         for name in sorted(commands):
+            if getattr(commands[name], "hidden", False):
+                continue
             rows.extend(_walk(commands[name], (*path, name)))
     return rows
 
@@ -59,12 +61,14 @@ def render() -> str:
         "---",
         "route: /docs/reference/cli-commands",
         'title: "Generated CLI command reference"',
-        "order: 510",
+        "order: 210",
         (
             'description: "Generated reference for every Plural CLI command '
             'and option exposed by the Typer application."'
         ),
         "audience: all",
+        "nav: true",
+        "nav_group: Reference",
         "---",
         "",
         "# Generated CLI command reference",

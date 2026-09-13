@@ -1,8 +1,8 @@
 ---
 route: /docs/concepts/routing
-title: "Routing"
+title: Routing
 order: 911
-description: "This page moved to Integrations. Open that guide for the current walkthrough and examples."
+description: This page moved to Integrations. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

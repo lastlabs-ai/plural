@@ -107,6 +107,44 @@
       "title": "ResourceRequirements",
       "type": "object"
     },
+    "RubricCriterion": {
+      "additionalProperties": false,
+      "description": "One deterministic human or agent rubric criterion.",
+      "properties": {
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "max_score": {
+          "default": 1,
+          "title": "Max Score",
+          "type": "number"
+        },
+        "min_score": {
+          "default": 0,
+          "title": "Min Score",
+          "type": "number"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "weight": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Weight",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "RubricCriterion",
+      "type": "object"
+    },
     "VerifierRuntime": {
       "additionalProperties": false,
       "description": "Verifier-owned runtime and connectivity, independent of the Environment.",
@@ -158,12 +196,20 @@
   "additionalProperties": false,
   "description": "Deterministic command verifier.",
   "properties": {
-    "command": {
+    "check": {
       "items": {
         "type": "string"
       },
       "minItems": 1,
-      "title": "Command",
+      "title": "Check",
+      "type": "array"
+    },
+    "criteria": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RubricCriterion"
+      },
+      "title": "Criteria",
       "type": "array"
     },
     "evidence": {
@@ -173,6 +219,10 @@
       "default": true,
       "title": "Evidence Required",
       "type": "boolean"
+    },
+    "info": {
+      "default": null,
+      "title": "Info"
     },
     "kind": {
       "const": "deterministic",
@@ -195,25 +245,24 @@
       "title": "Result Path",
       "type": "string"
     },
-    "revision": {
-      "default": "0.1.0",
-      "minLength": 1,
-      "title": "Revision",
-      "type": "string"
-    },
     "runtime": {
       "$ref": "#/$defs/VerifierRuntime"
     },
-    "schema_version": {
-      "const": "2",
-      "default": "2",
-      "title": "Schema Version",
+    "version": {
+      "default": "0.1.0",
+      "title": "Version",
       "type": "string"
+    },
+    "weight": {
+      "default": 1,
+      "exclusiveMinimum": 0,
+      "title": "Weight",
+      "type": "number"
     }
   },
   "required": [
     "name",
-    "command"
+    "check"
   ],
   "title": "DeterministicVerifier",
   "type": "object"

@@ -1,8 +1,8 @@
 ---
 route: /docs/concepts/execution
-title: "Execution"
+title: Execution
 order: 906
-description: "This page moved to Jobs. Open that guide for the current walkthrough and examples."
+description: This page moved to Jobs. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---

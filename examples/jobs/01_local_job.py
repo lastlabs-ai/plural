@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import tempfile
 from pathlib import Path
 
 from _foundation import build_job
 
-from plural import Job, JobStore
+from plural import JobStore
 
 with tempfile.TemporaryDirectory(prefix="plural-local-job-") as temporary:
-    spec = build_job()
-    result = asyncio.run(Job(spec, store=JobStore(Path(temporary))).run())
+    job = build_job(store=JobStore(Path(temporary)))
+    result = job.run()
     assert len(result.trials) == 2
     assert all(trial.status == "succeeded" for trial in result.trials)
     assert all(trial.reward == 1.0 for trial in result.trials)

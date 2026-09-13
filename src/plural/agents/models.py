@@ -2,18 +2,126 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationInfo, model_validator
 
+from plural.catalog import ModelCatalog
 from plural.common import (
     FrozenModel,
     HarnessBinding,
     HarnessPackage,
     RoutingSpec,
     content_hash,
+    semantic_version,
     stable_id,
 )
+
+
+@lru_cache(maxsize=1)
+def _bundled_catalog() -> ModelCatalog:
+    return ModelCatalog()
+
+
+class Agent(FrozenModel):
+    """A catalog-backed model and its optional execution harness."""
+
+    model: str = Field(min_length=1)
+    name: str = ""
+    version: str = "0.1.0"
+    provider: str | None = None
+    instructions: str = ""
+    fallback_models: tuple[str, ...] = ()
+    temperature: float | None = None
+    max_tokens: int | None = Field(default=None, gt=0)
+    harness: HarnessPackage | None = None
+    auth_mode: Literal["environment", "api_key", "oauth", "none"] = "environment"
+    secret_names: tuple[str, ...] = ()
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_public_agent(self, info: ValidationInfo) -> Agent:
+        context = info.context if isinstance(info.context, dict) else {}
+        catalog = context.get("catalog") or _bundled_catalog()
+        if not isinstance(catalog, ModelCatalog):
+            raise TypeError("catalog validation context must be a ModelCatalog")
+        selected = catalog.get(self.model)
+        if selected is None:
+            raise ValueError(
+                f"model {self.model!r} is not registered in the effective ModelCatalog"
+            )
+        if self.provider is not None and self.provider not in selected.host_providers():
+            raise ValueError(
+                f"provider {self.provider!r} is not a catalog endpoint for model {self.model!r}"
+            )
+        unknown_fallbacks = [model for model in self.fallback_models if catalog.get(model) is None]
+        if unknown_fallbacks:
+            raise ValueError(
+                "fallback models are not registered in the effective ModelCatalog: "
+                + ", ".join(repr(model) for model in unknown_fallbacks)
+            )
+        semantic_version(self.version)
+        if not self.name:
+            object.__setattr__(self, "name", self.model.rsplit("/", 1)[-1])
+        if self.auth_mode == "api_key" and not self.secret_names:
+            raise ValueError("api_key auth_mode requires a secret name")
+        if self.auth_mode == "none" and self.secret_names:
+            raise ValueError("none auth_mode cannot declare secrets")
+        return self
+
+    @classmethod
+    def from_catalog(cls, catalog: ModelCatalog, **fields: Any) -> Agent:
+        """Create an Agent against an explicit effective catalog.
+
+        Returns:
+            A validated Agent without changing process-global state.
+        """
+        return cls.model_validate(fields, context={"catalog": catalog})
+
+    @property
+    def routing(self) -> RoutingSpec:
+        """Internal routing representation used by the execution engine."""
+        return RoutingSpec(
+            provider=self.provider,
+            fallback_models=self.fallback_models,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+
+    @property
+    def harness_binding(self) -> HarnessBinding | None:
+        """Internal content-addressed binding derived from ``harness``."""
+        return HarnessBinding.from_package(self.harness) if self.harness else None
+
+    @property
+    def content_hash(self) -> str:
+        """Stable Agent version digest."""
+        return content_hash(self)
+
+    @property
+    def agent_id(self) -> str:
+        """Stable Agent identifier."""
+        return stable_id("agt", self)
+
+    def _definition(self) -> AgentDefinition:
+        """Compile this Agent into the current execution contract.
+
+        Returns:
+            The internal immutable execution definition.
+        """
+        return AgentDefinition(
+            name=self.name,
+            revision=self.version,
+            model=self.model,
+            instructions=self.instructions,
+            routing=self.routing,
+            harness=self.harness_binding,
+            harness_package=self.harness,
+            auth_mode=self.auth_mode,
+            secret_names=self.secret_names,
+            metadata=self.metadata,
+        )
 
 
 class AgentDefinition(FrozenModel):
@@ -109,4 +217,4 @@ class AgentBinding(FrozenModel):
         return content_hash(self)
 
 
-__all__ = ["AgentBinding", "AgentDefinition", "RoutingSpec"]
+__all__ = ["Agent", "AgentBinding", "AgentDefinition", "RoutingSpec"]

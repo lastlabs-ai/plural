@@ -1,0 +1,137 @@
+kind: job
+source:
+  kind: benchmark
+  name: wordle
+  version: 1.0.0
+  tasks:
+  - kind: task
+    name: easy-01
+    version: 0.1.0
+    instructions: 'Guess the hidden five-letter word from: crane, slate, audio, point,
+      heart. Call guess one word at a time and stop when solved.'
+    goals: []
+    info:
+      task_id: easy-01
+    metadata: {}
+    environment:
+      kind: environment
+      python: wordle.py:Wordle
+      name: wordle
+      version: 0.1.0
+      description: ''
+      overview: Guess a hidden five-letter word in six tries.
+      readme: ''
+      resources: []
+      runtime:
+        provider: local
+        placement: {}
+        image: null
+        snapshot: null
+        declarative_image: null
+        build_context: null
+        dockerfile: null
+        network: full
+        network_allowlist: []
+        resources:
+          cpu: null
+          memory_mb: null
+          pids: null
+          disk_mb: null
+        read_only_root: false
+        targets:
+        - local
+        persistent: false
+        compose: false
+        extra_capabilities: []
+        timeout_seconds: 300.0
+        allow_unsafe_local: true
+      secrets: []
+      guardrails: []
+      harness_policy:
+        mode: allow_all
+        allowed_harnesses: []
+        allowed_capabilities: null
+        denied_capabilities: []
+      limits:
+        max_turns: 8
+        max_seconds: 120.0
+        max_cost_usd: null
+      metadata: {}
+      reset_command:
+      - python
+      - commands.py
+      - reset
+      package:
+        command:
+        - python
+        - commands.py
+        source: .
+        digest: sha256:ad9b06d2a2b327930e29d403226549deca18ae9ab73eed003aa9ad842fbc6fcd
+    verifiers:
+    - name: solved
+      version: 0.1.0
+      info: null
+      criteria: []
+      evidence:
+        artifacts: []
+        state_paths:
+        - solved
+        - guesses
+        observation_paths:
+        - solved
+        - text
+        include_hidden_state: false
+      weight: 1.0
+      metadata: {}
+      kind: deterministic
+      check:
+      - python
+      - verify.py
+      runtime:
+        provider: docker
+        image: null
+        network: none
+        network_allowlist: []
+        resources:
+          cpu: null
+          memory_mb: null
+          pids: null
+          disk_mb: null
+        timeout_seconds: 60.0
+      result_path: verifier-result.json
+      evidence_required: true
+    resources: []
+    initial_state: {}
+    reset_options: {}
+  primary_metric: reward
+  description: ''
+  metadata: {}
+agents:
+- kind: agent
+  model: openai/gpt-5.6-luna
+  name: gpt-5.6-luna
+  version: 0.1.0
+  provider: null
+  instructions: Play Wordle with the guess action. Stop as soon as the board is solved.
+  fallback_models: []
+  temperature: null
+  max_tokens: null
+  harness: null
+  auth_mode: environment
+  secret_names: []
+  metadata: {}
+mode: eval
+attempts: 1
+concurrency: 1
+per_runtime_concurrency: 1
+priority: 0
+retry:
+  max_retries: 0
+  initial_backoff_seconds: 0.25
+  max_backoff_seconds: 10.0
+  multiplier: 2.0
+  retryable_codes:
+  - rate_limited
+  - provider_unavailable
+  - timeout
+  - runtime_unavailable

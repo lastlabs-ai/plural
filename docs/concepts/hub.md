@@ -1,8 +1,8 @@
 ---
 route: /docs/concepts/hub
-title: "Hub"
+title: Hub
 order: 908
-description: "This page moved to Integrations. Open that guide for the current walkthrough and examples."
+description: This page moved to Integrations. Open that guide for the current walkthrough and examples.
 audience: all
 nav: false
 ---
