@@ -49,8 +49,12 @@ class Agent(FrozenModel):
             raise TypeError("catalog validation context must be a ModelCatalog")
         selected = catalog.get(self.model)
         if selected is None:
+            nearby = catalog.suggest(self.model)
+            hint = f" Nearby catalog IDs: {', '.join(nearby)}." if nearby else ""
             raise ValueError(
-                f"model {self.model!r} is not registered in the effective ModelCatalog"
+                f"Cannot create Agent {self.name or self.model!r}.\n"
+                f"model {self.model!r} is not registered in the effective ModelCatalog.{hint}\n"
+                "Use a bundled catalog ID or register the model with CatalogContext."
             )
         if self.provider is not None and self.provider not in selected.host_providers():
             raise ValueError(

@@ -1,9 +1,9 @@
 """Plan an Agent routing comparison on one Task."""
 
-from plural import Agent, Benchmark, Environment, Job, Task
+from plural import Agent, Benchmark, Environment, Job, Runtime, Task
 from plural.verifiers import DeterministicVerifier
 
-environment = Environment(name="routing-world")
+environment = Environment(name="routing-world", runtime=Runtime.docker())
 verifier = DeterministicVerifier(name="correct", check=("python", "verify.py"))
 task = Task(
     name="route-request",

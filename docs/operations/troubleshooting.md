@@ -14,7 +14,7 @@ Start by identifying the stage that failed: installation, graph validation, runt
 
 ## The command is missing or belongs to another version
 
-Activate the environment where Plural 0.12.1 is installed. Run
+Activate the environment where Plural is installed. Run
 `python -m pip show plural` and `plural --help`, then compare with the
 [generated CLI reference](../reference/cli-commands.md).
 
@@ -28,9 +28,14 @@ See the generated [field catalog](../reference/fields.md).
 
 Paths in Task, Benchmark, and Job files resolve relative to the file that contains them. Check the containing directory and filename. An absolute path on your laptop is not automatically available in a remote sandbox.
 
-## A verifier evidence path fails validation
+## A verifier fails at bind time or scoring
 
-Check the Environment's observation/state schema for the exact property. Use supported object paths and explicitly permit hidden state on the Verifier. Required artifact names are checked when the Trial produces artifacts, not inferred from schema properties.
+Constructing `Task(..., environment=..., verifiers=...)` fails unless the
+Environment is packaged and each DeterministicVerifier `check` is a function
+(or a resolvable `path.py:object` / command) that accepts an `Episode`. The
+function receives the full final observation, State, trajectory, artifacts,
+and usage. If the function returns the wrong shape, the Trial fails closed
+with a message that names the Verifier and the expected `VerifierOutput`.
 
 ## The runtime cannot enforce a policy
 
@@ -41,7 +46,10 @@ Use a provider that supports the requirements; do not weaken policy silently.
 
 ## The model cannot authenticate or connect
 
-The native Harness needs its declared secret granted on the Agent and supplied to the execution process. CLI device login does not automatically forward credentials to the model subprocess. Check the selected model ID and endpoint: a direct provider may accept a different ID from a multi-provider gateway.
+Live Jobs need `Job(..., client=Client())` or `api_key=`. After
+`plural auth login`, `plural run` injects an authenticated Client. Check the
+selected model ID and endpoint: a direct provider may accept a different ID
+from a multi-provider gateway.
 
 `OPENAI_BASE_URL` configures the native compatible model endpoint; `PLURAL_GATEWAY_URL` takes precedence when set. Model connectivity is separate from the hosted project API endpoint. `--offline` does not block network requests.
 

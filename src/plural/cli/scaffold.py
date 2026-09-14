@@ -72,10 +72,11 @@ def scaffold_environment(directory: Path, name: str, *, force: bool = False) -> 
     if environment_py.exists() and not force:
         raise FileExistsError(f"{environment_py} already exists; pass --force to replace it")
     environment_py.write_text(
-        "from plural import Environment\n\n\n"
+        "from plural import Environment, Runtime\n\n\n"
         "class ProjectEnvironment(Environment):\n"
         f'    name = "{name}"\n'
-        '    version = "0.1.0"\n',
+        '    version = "0.1.0"\n\n\n'
+        "environment = ProjectEnvironment(runtime=Runtime.docker())\n",
         encoding="utf-8",
     )
     dockerfile = directory / "Dockerfile"

@@ -8,8 +8,6 @@ from plural import (
     Benchmark,
     CatalogContext,
     Environment,
-    EvidenceContract,
-    ExecutionTarget,
     Job,
     JobStore,
     ModelCatalog,
@@ -49,16 +47,12 @@ def build_job(
         name="offline-example",
         version="1.0.0",
         overview="A deterministic offline execution runtime.",
-        runtime=Runtime(
-            provider=provider,
-            image="python:3.12-slim" if provider in {"docker", "daytona"} else None,
-            network=NetworkMode.NONE if isolated else NetworkMode.FULL,
-            targets=frozenset(
-                {ExecutionTarget.LOCAL, ExecutionTarget.DOCKER, ExecutionTarget.REMOTE}
-                if provider == "local"
-                else {ExecutionTarget.DOCKER, ExecutionTarget.REMOTE}
-            ),
-            allow_unsafe_local=provider == "local",
+        runtime=(
+            Runtime.local()
+            if provider == "local"
+            else Runtime.docker(network=NetworkMode.NO_NETWORK)
+            if provider == "docker"
+            else Runtime.daytona(network=NetworkMode.NO_NETWORK)
         ),
     )
     verifier = DeterministicVerifier(
@@ -67,9 +61,8 @@ def build_job(
         runtime=VerifierRuntime(
             provider=provider,
             image="python:3.12-slim" if provider in {"docker", "daytona"} else None,
-            network=NetworkMode.NONE if isolated else NetworkMode.FULL,
+            network=NetworkMode.NO_NETWORK if isolated else NetworkMode.PUBLIC,
         ),
-        evidence=EvidenceContract(artifacts=("evidence.txt",)),
     )
     tasks = tuple(
         Task(

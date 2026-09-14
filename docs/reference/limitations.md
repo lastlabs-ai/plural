@@ -34,8 +34,7 @@ Known gaps:
   access to their paths and URIs.
 - Package command execution serializes and pins Task `reset_options` but does
   not yet forward them to the reset adapter.
-- Command Verifiers receive all captured artifacts; `EvidenceContract` is not
-  an artifact ACL.
+- Command Verifiers receive all captured artifacts; isolate untrusted scorers.
 - Job native runners call OpenAI-compatible `/chat/completions`. The Client
   adapters for Anthropic, Google, Bedrock, and Azure native APIs are separate
   and are not used by Job execution.

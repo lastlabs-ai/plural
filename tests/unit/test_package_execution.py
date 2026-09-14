@@ -18,7 +18,6 @@ from plural.domain import (
     EnvironmentDefinition,
     EnvironmentRuntime,
     ErrorCode,
-    EvidenceContract,
     ExecutionTarget,
     FileDeclaration,
     HarnessBinding,
@@ -235,7 +234,6 @@ def exact_verifier(provider: str) -> DeterministicVerifier:
     return DeterministicVerifier(
         name=f"exact-{provider}",
         command=("python", "verify.py"),
-        required_artifacts=("result.json",),
         runtime=VerifierRuntime(provider=provider),
     )
 
@@ -305,12 +303,7 @@ async def test_agent_verifier_scores_configured_criteria_with_contracted_evidenc
                 description="The answer is correct and concise.",
             ),
         ),
-        evidence=EvidenceContract(
-            observation_paths=("text",),
-            state_paths=("step",),
-            artifacts=("result.json",),
-        ),
-        runtime=VerifierRuntime(provider="docker", network=NetworkMode.FULL),
+        runtime=VerifierRuntime(provider="docker", network=NetworkMode.PUBLIC),
     )
     task = TaskDefinition(
         task_id="judge-me",

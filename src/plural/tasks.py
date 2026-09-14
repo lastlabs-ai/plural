@@ -10,8 +10,7 @@ from pydantic import Field, model_validator
 from plural.common import FrozenModel, content_hash, semantic_version, stable_id
 from plural.environments.definition import EnvironmentDefinition, EnvironmentResource
 from plural.environments.env import Environment
-from plural.evidence import validate_evidence_contract
-from plural.verifiers import VerifierDefinition, WeightedVerifier
+from plural.verifiers import DeterministicVerifier, VerifierDefinition, WeightedVerifier
 
 
 def _json_type_name(value: Any) -> str:
@@ -63,32 +62,111 @@ def validate_task_state(
     """
     if state is None:
         return {}
-    header = f"Task {task_id!r} state is invalid for Environment {environment_name!r}:"
     if not isinstance(state, dict):
-        raise ValueError(f"{header}\n  - state must be an object, got {_json_type_name(state)}")
+        raise ValueError(
+            f"Cannot create Task {task_id!r} on Environment {environment_name!r}.\n"
+            f"initial_state must be an object, got {_json_type_name(state)}."
+        )
     properties = state_schema.get("properties")
     fields = properties if isinstance(properties, dict) else {}
+    unknown = [key for key in state if not isinstance(fields.get(key), dict)]
     errors: list[str] = []
+    if unknown:
+        errors.append(
+            "initial_state has fields the Environment State does not define: "
+            + ", ".join(repr(key) for key in unknown)
+            + "."
+        )
     for key, value in state.items():
         spec = fields.get(key)
         if not isinstance(spec, dict):
-            errors.append(f"  - {key!r}: field is not on this Environment state")
             continue
         expected = _schema_types(spec)
         actual = _json_type_name(value)
         if expected and actual not in expected and not (value is None and "null" in expected):
-            errors.append(f"  - {key!r}: expected {' or '.join(sorted(expected))}, got {actual}")
+            errors.append(
+                f"initial_state {key!r} expected {' or '.join(sorted(expected))}, got {actual}."
+            )
     required = state_schema.get("required")
     if isinstance(required, list):
         for key in required:
             spec = fields.get(key)
             if key in state or not isinstance(spec, dict) or "default" in spec:
                 continue
-            errors.append(f"  - {key!r}: required by this Environment state")
+            errors.append(f"initial_state is missing required State field {key!r}.")
     if errors:
-        # Hidden fields are already type-only; values are never interpolated.
-        raise ValueError(header + "\n" + "\n".join(errors))
+        available = ", ".join(sorted(fields)) if fields else "(none)"
+        raise ValueError(
+            f"Cannot create Task {task_id!r} on Environment {environment_name!r}.\n"
+            + "\n".join(errors)
+            + f"\n{environment_name} State fields: {available}"
+        )
     return {str(key): value for key, value in state.items()}
+
+
+def _task_bind_errors(task: Task) -> list[str]:
+    errors: list[str] = []
+    environment = task.environment
+    env_name = getattr(environment, "name", None) or "unknown"
+    header = f"Cannot create Task {task.name!r} on Environment {env_name!r}."
+    if not isinstance(environment, (Environment, EnvironmentDefinition, Mapping)):
+        errors.append(
+            f"Cannot create Task {task.name!r}.\n"
+            "environment must be an Environment instance.\n"
+            f"Got {type(environment).__name__}."
+        )
+        return errors
+    definition = (
+        environment.definition()
+        if isinstance(environment, Environment)
+        else environment
+        if isinstance(environment, EnvironmentDefinition)
+        else None
+    )
+    if (
+        isinstance(environment, Environment)
+        and environment._actions()
+        and environment.source is None
+    ):
+        errors.append(
+            f"Cannot create Task {task.name!r}.\n"
+            f"Environment {environment.name!r} is not packaged, so a Job cannot "
+            "execute its actions.\n"
+            "Package it before binding:\n"
+            f"  environment = {type(environment).__name__}(runtime=Runtime.docker())"
+            '.package(("python", "commands.py"))'
+        )
+    if not task.verifiers:
+        errors.append(
+            f"{header}\nA Task needs at least one Verifier that scores the completed Episode."
+        )
+    for verifier in task.verifiers:
+        if isinstance(verifier, DeterministicVerifier):
+            check = verifier.check
+            if not (
+                callable(check)
+                or (isinstance(check, dict) and check.get("python"))
+                or (isinstance(check, tuple) and check)
+            ):
+                errors.append(
+                    f"{header}\n"
+                    f"Verifier {verifier.name!r} check must be a function that accepts an Episode\n"
+                    "(observation, state, trajectory, artifacts, usage).\n"
+                    f"Got: {type(check).__name__}. Define it like:\n"
+                    "  def solved(episode: Episode) -> VerifierOutput: ...\n"
+                    "  DeterministicVerifier(name='solved', check=solved)"
+                )
+    if definition is not None:
+        try:
+            validate_task_state(
+                task_id=task.name,
+                environment_name=definition.name,
+                state=task.initial_state,
+                state_schema=definition.state_schema,
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+    return errors
 
 
 class Task(FrozenModel):
@@ -123,25 +201,9 @@ class Task(FrozenModel):
     @model_validator(mode="after")
     def _validate_task(self) -> Task:
         semantic_version(self.version)
-        environment = self._environment_definition()
-        errors: list[str] = []
-        for verifier in self.verifiers:
-            errors.extend(
-                validate_evidence_contract(
-                    environment.name,
-                    environment.observation_schema,
-                    environment.state_schema,
-                    verifier.evidence,
-                )
-            )
+        errors = _task_bind_errors(self)
         if errors:
-            raise ValueError("; ".join(errors))
-        validate_task_state(
-            task_id=self.name,
-            environment_name=environment.name,
-            state=self.initial_state,
-            state_schema=environment.state_schema,
-        )
+            raise ValueError("\n".join(errors))
         return self
 
     def _environment_definition(self) -> EnvironmentDefinition:
@@ -152,7 +214,11 @@ class Task(FrozenModel):
             return environment.definition()
         if isinstance(environment, Mapping):
             return EnvironmentDefinition.model_validate(environment)
-        raise ValueError("environment must be an Environment instance")
+        raise ValueError(
+            f"Cannot create Task {self.name!r}.\n"
+            "environment must be an Environment instance.\n"
+            f"Got {type(environment).__name__}."
+        )
 
     @property
     def task_id(self) -> str:
@@ -248,19 +314,7 @@ class TaskDefinition(FrozenModel):
     reset_options: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _evidence_fits_environment(self) -> TaskDefinition:
-        errors: list[str] = []
-        for binding in self.verifiers:
-            errors.extend(
-                validate_evidence_contract(
-                    self.environment.name,
-                    self.environment.observation_schema,
-                    self.environment.state_schema,
-                    binding.verifier.evidence,
-                )
-            )
-        if errors:
-            raise ValueError("; ".join(errors))
+    def _state_fits_environment(self) -> TaskDefinition:
         validate_task_state(
             task_id=self.task_id,
             environment_name=self.environment.name,

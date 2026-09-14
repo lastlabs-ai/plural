@@ -3,24 +3,21 @@
 from pathlib import Path
 
 from environment.world import SupportQueue
+from verifiers.correct import correct_category
 
 from plural import (
     Agent,
     Benchmark,
-    EvidenceContract,
     ExecutionLimits,
-    ExecutionTarget,
     Job,
     Resource,
     Runtime,
     Task,
 )
 from plural.project import dump
-from plural.sandbox import NetworkMode
-from plural.verifiers import DeterministicVerifier, VerifierRuntime
+from plural.verifiers import DeterministicVerifier
 
 ROOT = Path(__file__).resolve().parent
-VERIFY = (ROOT / "verifiers" / "correct.py").read_text(encoding="utf-8")
 
 environment = SupportQueue(
     resources=(
@@ -31,25 +28,11 @@ environment = SupportQueue(
             content_type="text/markdown",
         ),
     ),
-    runtime=Runtime(
-        provider="local",
-        network=NetworkMode.FULL,
-        targets=frozenset({ExecutionTarget.LOCAL}),
-        allow_unsafe_local=True,
-    ),
+    runtime=Runtime.local(),
     limits=ExecutionLimits(max_turns=6, max_seconds=120),
 ).package(("python", "commands.py"), source=ROOT / "environment")
 
-verifier = DeterministicVerifier(
-    name="correct-category",
-    check=("python", "-c", VERIFY),
-    runtime=VerifierRuntime(provider="local", network="full"),
-    evidence=EvidenceContract(
-        observation_paths=("category", "draft_reply", "status", "done"),
-        state_paths=("expected",),
-        include_hidden_state=True,
-    ),
-)
+verifier = DeterministicVerifier(name="correct-category", check=correct_category)
 
 tasks = tuple(
     Task(
@@ -74,7 +57,6 @@ agents = tuple(
         model="openai/gpt-5.6-luna",
         name=name,
         instructions=instructions,
-        secret_names=("OPENAI_API_KEY",),
     )
     for name, instructions in (
         (

@@ -44,7 +44,7 @@ routing policies. Preserve actual endpoint, cost, latency, and trace evidence.
   [Runtime](../project/runtime.md).
 - `daytona`: optional remote adapter installed through `plural[daytona]`.
 
-Daytona is implemented in 0.12.1. Blaxel is not bundled or registered. A Blaxel
+Daytona is implemented. Blaxel is not bundled or registered. A Blaxel
 team—or any future partner—can implement the plugin contract below without
 being described as generally available before that package ships and passes
 conformance.

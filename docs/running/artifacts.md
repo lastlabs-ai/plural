@@ -48,28 +48,12 @@ appends a directory; it does not overwrite the failed execution. A Human
 review advances selected execution, Trial, and Job result projections while
 leaving that captured evidence unchanged.
 
-## Evidence contracts
+## Episode scoring
 
-A Verifier selects State and Observation fields and required artifact names:
-
-```python
-from plural import EvidenceContract
-
-evidence = EvidenceContract(
-    observation_paths=("status", "draft_reply"),
-    state_paths=("expected",),
-    include_hidden_state=True,
-    artifacts=("trajectory.jsonl",),
-)
-```
-
-Task validation checks schema paths. Execution checks required artifact names
-for deterministic Verifiers. Missing runtime values may still be absent, so
-the scorer must fail explicitly when required content is missing.
-
-The filtered `environment_view` is not an artifact ACL: command Verifiers
-currently receive all captured artifacts in their scoring workspace. Isolate
-untrusted scoring code with its own `VerifierRuntime`.
+A Verifier function receives the completed Episode: final Observation, full
+State, trajectory, artifacts, and usage. Command Verifiers currently receive
+all captured artifacts in their scoring workspace. Isolate untrusted scoring
+code with its own `VerifierRuntime`.
 
 ## Logs, secrets, and trust
 
@@ -103,7 +87,7 @@ print(record.provenance)
 
 Imported receipts are marked `imported_unverified`; import does not upgrade
 their trust. There is no general CLI command that imports arbitrary run
-directories in 0.12.1.
+directories.
 
 Write analyses and exports as new derived files. Never edit a captured
 artifact and retain its old manifest or receipt.

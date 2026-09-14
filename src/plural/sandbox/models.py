@@ -17,11 +17,31 @@ class SandboxModel(BaseModel):
 
 
 class NetworkMode(str, Enum):
-    """Requested sandbox network policy."""
+    """Requested sandbox network policy.
 
-    NONE = "none"
-    RESTRICTED = "restricted"
-    FULL = "full"
+    Harbor names are canonical. Legacy Plural names remain aliases.
+    """
+
+    PUBLIC = "public"
+    NO_NETWORK = "no-network"
+    ALLOWLIST = "allowlist"
+    FULL = "public"
+    NONE = "no-network"
+    RESTRICTED = "allowlist"
+
+    @classmethod
+    def _missing_(cls, value: object) -> NetworkMode | None:
+        if not isinstance(value, str):
+            return None
+        aliases = {
+            "public": cls.PUBLIC,
+            "full": cls.PUBLIC,
+            "no-network": cls.NO_NETWORK,
+            "none": cls.NO_NETWORK,
+            "allowlist": cls.ALLOWLIST,
+            "restricted": cls.ALLOWLIST,
+        }
+        return aliases.get(value.strip().lower())
 
 
 class Capability(str, Enum):
@@ -64,12 +84,22 @@ class ResourceRequirements(SandboxModel):
     memory_mb: int | None = Field(default=None, gt=0)
     pids: int | None = Field(default=None, gt=0)
     disk_mb: int | None = Field(default=None, gt=0)
+    storage_mb: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _storage_alias(self) -> ResourceRequirements:
+        if self.storage_mb is not None and self.disk_mb is None:
+            object.__setattr__(self, "disk_mb", self.storage_mb)
+        elif self.disk_mb is not None and self.storage_mb is None:
+            object.__setattr__(self, "storage_mb", self.disk_mb)
+        return self
 
     @property
     def configured(self) -> bool:
         """Return whether any resource limit was requested."""
         return any(
-            value is not None for value in (self.cpu, self.memory_mb, self.pids, self.disk_mb)
+            value is not None
+            for value in (self.cpu, self.memory_mb, self.pids, self.disk_mb, self.storage_mb)
         )
 
 
@@ -92,7 +122,7 @@ class SandboxRequirements(SandboxModel):
     build_context: str | None = None
     dockerfile: str | None = None
     resources: ResourceRequirements = Field(default_factory=ResourceRequirements)
-    network: NetworkMode = NetworkMode.NONE
+    network: NetworkMode = NetworkMode.PUBLIC
     network_allowlist: tuple[str, ...] = ()
     timeout_seconds: float | None = Field(default=None, gt=0)
     persistent: bool = False
@@ -101,8 +131,8 @@ class SandboxRequirements(SandboxModel):
 
     @model_validator(mode="after")
     def _network_shape(self) -> SandboxRequirements:
-        if self.network_allowlist and self.network is not NetworkMode.RESTRICTED:
-            raise ValueError("network_allowlist requires network='restricted'")
+        if self.network_allowlist and self.network is not NetworkMode.ALLOWLIST:
+            raise ValueError("network_allowlist requires network='allowlist'")
         sources = (
             self.image is not None,
             self.snapshot is not None,

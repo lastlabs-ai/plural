@@ -168,7 +168,6 @@ try:
                     "max_score": 2,
                 }
             ],
-            "evidence": {"observation_paths": ["issue", "category", "draft_reply"]},
             "weight": 0.5,
         }
         (root / "verifiers/review.yaml").write_text(yaml.safe_dump(human))

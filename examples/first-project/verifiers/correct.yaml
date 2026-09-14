@@ -2,46 +2,22 @@ name: correct-category
 version: 0.1.0
 info: null
 criteria: []
-evidence:
-  artifacts: []
-  state_paths:
-  - expected
-  observation_paths:
-  - category
-  - draft_reply
-  - status
-  - done
-  include_hidden_state: true
 weight: 1.0
 metadata: {}
 kind: deterministic
-check:
-- python
-- -c
-- "\"\"\"Check the actual final Environment state, not the model's final claim.\"\"\
-  \"\n\nimport json\nfrom pathlib import Path\n\npayload = json.loads(Path(\".plural/verifier-input.json\"\
-  ).read_text())\nview = payload[\"environment_view\"]\nobservation = view[\"observation\"\
-  ]\nstate = view[\"state\"]\ncorrect = (\n    observation[\"done\"]\n    and observation[\"\
-  category\"] == state[\"expected\"]\n    and bool(observation[\"draft_reply\"].strip())\n\
-  )\nreward = float(correct)\nPath(\"verifier-result.json\").write_text(\n    json.dumps(\n\
-  \        {\n            \"reward\": reward,\n            \"scores\": {\n       \
-  \         \"correct_category\": reward,\n                \"response_drafted\": float(bool(observation[\"\
-  draft_reply\"])),\n            },\n            \"evidence\": [\n               \
-  \ f\"status={observation['status']}\",\n                f\"category={observation['category']}\"\
-  ,\n                f\"correct={correct}\",\n            ],\n            \"feedback\"\
-  : \"Correct category and a response was drafted.\"\n            if correct\n   \
-  \         else \"The ticket was not resolved with the correct category and a response.\"\
-  ,\n        }\n    )\n    + \"\\n\"\n)\n"
 runtime:
-  provider: local
+  provider: docker
   image: null
-  network: full
+  network: public
   network_allowlist: []
   resources:
     cpu: null
     memory_mb: null
     pids: null
     disk_mb: null
+    storage_mb: null
   timeout_seconds: 60.0
 result_path: verifier-result.json
 evidence_required: true
+check:
+  python: correct.py:correct_category

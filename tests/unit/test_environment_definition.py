@@ -8,14 +8,13 @@ from plural import (
     Secret,
     State,
     action,
-    hidden,
     rewarder,
 )
 
 
 class CounterState(State):
     count: int = 0
-    answer: str = hidden("secret")
+    answer: str = "secret"
 
 
 class CounterObservation(Observation):
@@ -44,7 +43,7 @@ class CounterEnvironment(Environment[CounterObservation, CounterState]):
 
 def test_environment_compiles_exact_manifest() -> None:
     environment = CounterEnvironment(
-        runtime=Runtime(provider="docker"),
+        runtime=Runtime.docker(),
         resources=(Resource(kind="data", name="orders"),),
         secrets=(Secret(name="DATABASE_URL"),),
         metadata={"owner": "evals"},
@@ -58,7 +57,8 @@ def test_environment_compiles_exact_manifest() -> None:
     assert manifest.actions[0].kind == "python"
     assert manifest.rewarders[0].name == "progress"
     assert manifest.rewarders[0].weight == 2
-    assert manifest.state_schema["properties"]["answer"]["x-plural-hidden"] is True
+    assert manifest.state_schema["properties"]["answer"]["type"] == "string"
+    assert "x-plural-hidden" not in manifest.state_schema["properties"]["answer"]
     assert manifest.observation_schema["properties"]["count"]["type"] == "integer"
     assert manifest.resources[0].name == "orders"
     assert manifest.secrets[0].name == "DATABASE_URL"
@@ -72,7 +72,7 @@ def test_environment_compiles_exact_manifest() -> None:
 
 
 def test_snapshots_are_json_safe_and_detached() -> None:
-    environment = CounterEnvironment()
+    environment = CounterEnvironment(runtime=Runtime.docker())
     state = environment.state_snapshot()
     observation = environment.observation_snapshot()
     state["count"] = 99
@@ -82,7 +82,7 @@ def test_snapshots_are_json_safe_and_detached() -> None:
 
 
 def test_reset_and_step_follow_gymnasium() -> None:
-    environment = CounterEnvironment()
+    environment = CounterEnvironment(runtime=Runtime.docker())
     observation, info = environment.reset()
     assert observation.count == 0
     assert info == {}
@@ -105,7 +105,7 @@ def test_reset_cannot_be_an_action() -> None:
             return {}
 
     try:
-        Broken().definition()
+        Broken(runtime=Runtime.docker()).definition()
     except TypeError as exc:
         assert "episode API" in str(exc)
     else:

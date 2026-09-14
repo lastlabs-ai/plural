@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from plural import Environment, Observation, State, action, hidden
+from plural import Environment, Observation, State, action
 
 
 class QueueObservation(Observation):
@@ -20,7 +20,7 @@ class QueueState(State):
     ticket_id: str = ""
     customer_tier: str = ""
     issue: str = ""
-    expected: str = hidden(default="")
+    expected: str = ""
     policy: str = ""
     category: str = ""
     draft_reply: str = ""

@@ -245,6 +245,13 @@ class Client:
         )
         if api_key is None and providers is None:
             api_key = os.environ.get("PLURAL_API_KEY") or os.environ.get("ENROUTE_API_KEY")
+            if not api_key:
+                try:
+                    from plural.cli.config import default_credential_store, resolve_context
+
+                    api_key = resolve_context(credentials=default_credential_store()).api_key
+                except (OSError, ValueError):
+                    api_key = None
         provider_map = self._build_providers(
             api_key=api_key,
             providers=providers,
@@ -253,7 +260,10 @@ class Client:
         )
         if not provider_map:
             raise ConfigurationError(
-                "no providers configured; pass api_key=... / PLURAL_API_KEY or providers={...}"
+                "Cannot create Client.\n"
+                "No Plural API key or provider map was found.\n"
+                "Run `plural auth login`, export PLURAL_API_KEY, or pass "
+                "Client(api_key=...) / Client(providers={...})."
             )
         self._providers = provider_map
         self.api_key = api_key

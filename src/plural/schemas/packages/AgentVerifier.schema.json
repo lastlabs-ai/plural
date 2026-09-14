@@ -1,48 +1,14 @@
 {
   "$defs": {
-    "EvidenceContract": {
-      "additionalProperties": false,
-      "description": "What a Verifier needs from the Environment and Trial artifacts.",
-      "properties": {
-        "artifacts": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Artifacts",
-          "type": "array"
-        },
-        "include_hidden_state": {
-          "default": false,
-          "title": "Include Hidden State",
-          "type": "boolean"
-        },
-        "observation_paths": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Observation Paths",
-          "type": "array"
-        },
-        "state_paths": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "State Paths",
-          "type": "array"
-        }
-      },
-      "title": "EvidenceContract",
-      "type": "object"
-    },
     "NetworkMode": {
-      "description": "Requested sandbox network policy.",
+      "description": "Requested sandbox network policy.\n\nHarbor names are canonical. Legacy Plural names remain aliases.",
       "enum": [
-        "none",
-        "restricted",
-        "full"
+        "public",
+        "no-network",
+        "allowlist",
+        "public",
+        "no-network",
+        "allowlist"
       ],
       "title": "NetworkMode",
       "type": "string"
@@ -102,6 +68,19 @@
           ],
           "default": null,
           "title": "Pids"
+        },
+        "storage_mb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Storage Mb"
         }
       },
       "title": "ResourceRequirements",
@@ -109,7 +88,7 @@
     },
     "RubricCriterion": {
       "additionalProperties": false,
-      "description": "One deterministic human or agent rubric criterion.",
+      "description": "One Agent or Human rubric criterion.",
       "properties": {
         "description": {
           "minLength": 1,
@@ -147,7 +126,7 @@
     },
     "VerifierRuntime": {
       "additionalProperties": false,
-      "description": "Verifier-owned runtime and connectivity, independent of the Environment.",
+      "description": "Verifier-owned runtime, independent of the Environment.",
       "properties": {
         "image": {
           "anyOf": [
@@ -163,7 +142,7 @@
         },
         "network": {
           "$ref": "#/$defs/NetworkMode",
-          "default": "none"
+          "default": "public"
         },
         "network_allowlist": {
           "default": [],
@@ -203,9 +182,6 @@
       "minItems": 1,
       "title": "Criteria",
       "type": "array"
-    },
-    "evidence": {
-      "$ref": "#/$defs/EvidenceContract"
     },
     "fallback_models": {
       "default": [],

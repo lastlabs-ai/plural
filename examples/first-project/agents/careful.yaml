@@ -8,6 +8,5 @@ fallback_models: []
 temperature: null
 max_tokens: null
 auth_mode: environment
-secret_names:
-- OPENAI_API_KEY
+secret_names: []
 metadata: {}

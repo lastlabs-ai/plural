@@ -29,7 +29,6 @@ These schemas describe resolved object values, not Python references, source mat
 - [DeclarativeImage](#declarativeimage)
 - [Resource](#resource)
 - [Runtime](#runtime)
-- [EvidenceContract](#evidencecontract)
 - [ExecutionLimits](#executionlimits)
 - [ExecutionTarget](#executiontarget)
 - [Guardrail](#guardrail)
@@ -106,17 +105,16 @@ One versioned unit of work in a Python-authored Environment.
 
 ## DeterministicVerifier
 
-Deterministic command verifier.
+Function or command that scores a completed Episode.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
 - **`info`** — `JSON value`; optional. Default: `null`.
 - **`criteria`** — `array of RubricCriterion`; optional. Default: `[]`.
-- **`evidence`** — `EvidenceContract`; optional.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
 - **`kind`** — `"deterministic"`; optional. Default: `"deterministic"`.
-- **`check`** — `array of string`; required. Constraints: `{"minItems": 1}`.
+- **`check`** — `JSON value`; required.
 - **`runtime`** — `VerifierRuntime`; optional.
 - **`result_path`** — `string`; optional. Default: `"verifier-result.json"`.
 - **`evidence_required`** — `boolean`; optional. Default: `true`.
@@ -129,7 +127,6 @@ Model-judge verifier with its own runtime and connectivity policy.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
 - **`info`** — `JSON value`; optional. Default: `null`.
 - **`criteria`** — `array of RubricCriterion`; required. Constraints: `{"minItems": 1}`.
-- **`evidence`** — `EvidenceContract`; optional.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
 - **`kind`** — `"agent"`; optional. Default: `"agent"`.
@@ -147,7 +144,6 @@ Human review verifier.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
 - **`info`** — `JSON value`; optional. Default: `null`.
 - **`criteria`** — `array of RubricCriterion`; required. Constraints: `{"minItems": 1}`.
-- **`evidence`** — `EvidenceContract`; optional.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
 - **`kind`** — `"human"`; optional. Default: `"human"`.
@@ -211,7 +207,7 @@ Data or application supplied by an Environment.
 
 ## Runtime
 
-Immutable Environment-owned provider, placement, network, and compute.
+Where an Environment runs: Docker, a trusted local process, or Daytona.
 
 - **`provider`** — `string`; optional. Default: `"docker"`. Constraints: `{"minLength": 1}`.
 - **`placement`** — `object`; optional.
@@ -220,7 +216,7 @@ Immutable Environment-owned provider, placement, network, and compute.
 - **`declarative_image`** — `DeclarativeImage | null`; optional. Default: `null`.
 - **`build_context`** — `string | null`; optional. Default: `null`.
 - **`dockerfile`** — `string | null`; optional. Default: `null`.
-- **`network`** — `NetworkMode`; optional. Default: `"none"`.
+- **`network`** — `NetworkMode`; optional. Default: `"public"`.
 - **`network_allowlist`** — `array of string`; optional. Default: `[]`.
 - **`resources`** — `ResourceRequirements`; optional.
 - **`read_only_root`** — `boolean`; optional. Default: `false`.
@@ -229,16 +225,8 @@ Immutable Environment-owned provider, placement, network, and compute.
 - **`compose`** — `boolean`; optional. Default: `false`.
 - **`extra_capabilities`** — `array of Capability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
 - **`timeout_seconds`** — `number`; optional. Default: `300`. Constraints: `{"exclusiveMinimum": 0}`.
+- **`build_timeout_sec`** — `number`; optional. Default: `600`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`allow_unsafe_local`** — `boolean`; optional. Default: `false`.
-
-## EvidenceContract
-
-What a Verifier needs from the Environment and Trial artifacts.
-
-- **`artifacts`** — `array of string`; optional. Default: `[]`.
-- **`state_paths`** — `array of string`; optional. Default: `[]`.
-- **`observation_paths`** — `array of string`; optional. Default: `[]`.
-- **`include_hidden_state`** — `boolean`; optional. Default: `false`.
 
 ## ExecutionLimits
 
@@ -303,7 +291,7 @@ An action owned by an Environment.
 
 Requested sandbox network policy.
 
-Allowed values: `"none" | "restricted" | "full"`.
+Allowed values: `"public" | "no-network" | "allowlist" | "public" | "no-network" | "allowlist"`.
 
 
 ## ResourceRequirements
@@ -314,6 +302,7 @@ Optional compute limits.
 - **`memory_mb`** — `integer | null`; optional. Default: `null`.
 - **`pids`** — `integer | null`; optional. Default: `null`.
 - **`disk_mb`** — `integer | null`; optional. Default: `null`.
+- **`storage_mb`** — `integer | null`; optional. Default: `null`.
 
 ## Rewarder
 
@@ -329,7 +318,7 @@ A train-only state-transition rewarder.
 
 ## RubricCriterion
 
-One deterministic human or agent rubric criterion.
+One Agent or Human rubric criterion.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`description`** — `string`; required. Constraints: `{"minLength": 1}`.
@@ -347,11 +336,11 @@ A named secret target declaration; package execution does not inject it yet.
 
 ## VerifierRuntime
 
-Verifier-owned runtime and connectivity, independent of the Environment.
+Verifier-owned runtime, independent of the Environment.
 
 - **`provider`** — `string`; optional. Default: `"docker"`. Constraints: `{"minLength": 1}`.
 - **`image`** — `string | null`; optional. Default: `null`.
-- **`network`** — `NetworkMode`; optional. Default: `"none"`.
+- **`network`** — `NetworkMode`; optional. Default: `"public"`.
 - **`network_allowlist`** — `array of string`; optional. Default: `[]`.
 - **`resources`** — `ResourceRequirements`; optional.
 - **`timeout_seconds`** — `number`; optional. Default: `60`. Constraints: `{"exclusiveMinimum": 0}`.

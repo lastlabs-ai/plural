@@ -180,9 +180,9 @@ def init(
     if not force and (project_py.exists() or project_yaml.exists()):
         _error("project files already exist; pass --force to replace them")
     project_py.write_text(
-        "from plural import Agent, Benchmark, Environment, Job, Task\n"
+        "from plural import Agent, Benchmark, Environment, Job, Runtime, Task\n"
         "from plural.verifiers import DeterministicVerifier\n\n"
-        'environment = Environment(name="example")\n'
+        'environment = Environment(name="example", runtime=Runtime.docker())\n'
         'verifier = DeterministicVerifier(name="complete", check="python verify.py")\n'
         'task = Task(name="example", instructions="Complete the task.", '
         "environment=environment, verifiers=[verifier])\n"
@@ -756,12 +756,14 @@ def run(
         help="Render watched hosted events as JSON Lines.",
     ),
     idempotency_key: str | None = typer.Option(None, "--idempotency-key"),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="Bring-your-own OpenAI-compatible key."
+    ),
     name: str = typer.Option("Job", "--name"),
     output_format: Literal["json", "yaml"] = typer.Option("json", "--format"),
     catalog: Path | None = typer.Option(None, "--catalog"),
 ) -> None:
     """Run locally by default; use --hosted for explicit remote submission."""
-    del offline
     try:
         value = _load_public(source, catalog)
         effective_catalog = _catalog(catalog)
@@ -804,7 +806,36 @@ def run(
         plan = job.plan
         if hosted:
             validate_hosted_graph(spec)
-    except (OSError, TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
+        if api_key:
+            job.api_key = api_key
+        needs_login = (
+            not dry_run
+            and not hosted
+            and not offline
+            and job.client is None
+            and job.api_key is None
+        )
+        if needs_login:
+            ctx = resolve_context(credentials=default_credential_store())
+            if not ctx.api_key:
+                raise PluralError(
+                    "Cannot run this Job.\n"
+                    "Not authenticated. Run `plural auth login` or pass `--api-key`."
+                )
+            gateway = os.environ.get("PLURAL_GATEWAY_URL") or ctx.api_url
+            job.client = Client(
+                api_key=ctx.api_key,
+                base_url=resolve_gateway_url(gateway),
+                project=ctx.project,
+            )
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        ValidationError,
+        json.JSONDecodeError,
+        PluralError,
+    ) as exc:
         _error(str(exc))
     if dry_run:
         _emit(
@@ -845,7 +876,14 @@ def run(
     source_path = Path(source.rsplit(":", 1)[0]).expanduser().resolve()
     storage = JobStore(source_path.parent / ".plural" / "jobs")
     try:
-        result = asyncio.run(JobRunner(spec, store=storage, catalog=job.catalog).run())
+        result = asyncio.run(
+            JobRunner(
+                spec,
+                store=storage,
+                catalog=job.catalog,
+                environ=job._credential_environ(),
+            ).run()
+        )
     except (OSError, ValueError, RuntimeError, KeyError) as exc:
         _error(str(exc))
     _emit(result, output_format)

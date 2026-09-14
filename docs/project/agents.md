@@ -21,15 +21,16 @@ agent = Agent(
     name="careful",
     version="1.0.0",
     instructions="Use the available actions and be concise.",
-    secret_names=("OPENAI_API_KEY",),
 )
 ```
 
 `name` defaults to the final segment of `model`; `version` defaults to `0.1.0`.
 Optional fields include `provider`, `fallback_models`, `temperature`,
 `max_tokens`, `auth_mode`, `secret_names`, `metadata`, and `harness`.
-Every `secret_names` grant must be declared by the selected Harness; execution
-fails closed before forwarding an undeclared name.
+Model authentication lives on the Job (`client=Client()` or `api_key=`), not
+on the Agent. `secret_names` is only for extra application secrets declared
+by a custom Harness; execution fails closed before forwarding an undeclared
+name.
 
 Models are stable IDs in the effective `ModelCatalog`. Bundled models and
 provider preferences validate at construction. Project entries use an explicit

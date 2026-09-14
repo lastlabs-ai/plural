@@ -308,9 +308,8 @@ def test_local_default_offline_and_private_keep_execution_local(
     stores: list[Path] = []
 
     class OfflineJob:
-        def __init__(self, _: Any, *, store: Any, catalog: Any) -> None:
-            del catalog
-            stores.append(store.root)
+        def __init__(self, _: Any, **kwargs: Any) -> None:
+            stores.append(kwargs["store"].root)
 
         async def run(self) -> _OfflineResult:
             return _OfflineResult()
@@ -323,7 +322,7 @@ def test_local_default_offline_and_private_keep_execution_local(
     )
     runner = CliRunner()
     for flag in (None, "--offline", "--private"):
-        args = ["run", str(task), "--agent", str(agent)]
+        args = ["run", str(task), "--agent", str(agent), "--api-key", "test"]
         if flag is not None:
             args.append(flag)
         result = runner.invoke(

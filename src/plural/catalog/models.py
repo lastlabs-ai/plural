@@ -451,6 +451,30 @@ class ModelCatalog:
         """
         return list(self._models.values())
 
+    def ids(self) -> list[str]:
+        """Return registered model IDs in catalog order."""
+        return [spec.id for spec in self._models.values()]
+
+    def suggest(self, model_id: str, *, limit: int = 5) -> list[str]:
+        """Return nearby catalog IDs for an unknown model.
+
+        Args:
+            model_id: The ID the caller tried to use.
+            limit: Maximum suggestions.
+
+        Returns:
+            Close catalog IDs, or a short prefix of the catalog.
+        """
+        import difflib
+
+        known = self.ids()
+        close = difflib.get_close_matches(model_id, known, n=limit, cutoff=0.4)
+        if close:
+            return close
+        needle = model_id.lower()
+        contains = [item for item in known if needle in item.lower() or item.lower() in needle]
+        return contains[:limit] or known[:limit]
+
     def get(self, model_id: str) -> ModelSpec | None:
         """Look up a model by id.
 

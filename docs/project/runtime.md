@@ -10,28 +10,29 @@ outcome: You can select a runtime that can enforce your Environment requirements
 ---
 # Runtime
 
-`Environment.runtime` says where the Agent Harness and Environment execute.
-It is part of the Environment hash, so changing it changes every Task pin that
-uses that Environment. Each deterministic or Agent Verifier has a separate
-`VerifierRuntime`.
+`Environment.runtime` is required. It says where the Agent Harness and
+Environment execute. The provider is part of the Environment hash, so changing
+it changes every Task pin that uses that Environment. Each deterministic or
+Agent Verifier has a separate `VerifierRuntime`.
 
 ```python
-from plural import ExecutionTarget, Runtime
-from plural.sandbox import NetworkMode
+from plural import Runtime
 
-runtime = Runtime(
-    provider="docker",
-    image="python:3.12-slim",
-    network=NetworkMode.NONE,
-    targets=frozenset({ExecutionTarget.DOCKER}),
-    timeout_seconds=180,
-)
+Runtime.docker()                          # python:3.12-slim, public network
+Runtime.docker(image="my-org/eval:1")
+Runtime.docker(dockerfile="Dockerfile", build_context=".")
+Runtime.local()                           # trusted subprocess
+Runtime.daytona(image="python:3.12-slim") # requires plural[daytona]
 ```
+
+Harbor defaults on `Runtime` are `provider="docker"`, `network="public"`,
+`image="python:3.12-slim"`, and `build_timeout_sec=600`. Optional `cpus`,
+`memory_mb`, and `storage_mb` map onto `resources`. `allowed_hosts` is the
+allowlist field (`network_allowlist` remains an alias).
 
 ## Provider and target
 
-Plural 0.12.1 registers `local`, `docker`, and `daytona`. There is no built-in
-provider named `current`, `remote`, or `blaxel`. `local`, `docker`, and
+Plural registers `local`, `docker`, and `daytona`. `local`, `docker`, and
 `remote` are target classes; a provider implements one. `daytona` maps to
 `remote`. Unknown provider names can come from installed plugins, but
 registration alone does not prove capability or hosted availability.
@@ -41,81 +42,68 @@ must reject any requested control the selected provider cannot enforce.
 
 ## Trusted local execution
 
-```yaml
-runtime:
-  provider: local
-  network: full
-  allow_unsafe_local: true
-  targets: [local]
-  timeout_seconds: 180.0
+```python
+environment = Environment(name="dev", runtime=Runtime.local())
 ```
 
 `local` runs a subprocess in a temporary workspace on the current machine. It
 is not in-process execution and not a sandbox. It supports scoped upload and
 download, argv execution, environment values, logs, timeout, and cancellation.
 It cannot enforce image, OS, compute, network, read-only-root, persistence, or
-compose requirements. `network` must be `full`, `targets` must include `local`,
-and `allow_unsafe_local=True` is mandatory.
+compose requirements.
 
-Use it only for trusted development code.
+`Runtime.local()` sets `allow_unsafe_local=True` and `targets` that include
+`local`. Use it only for trusted development code.
 
 ## Docker: image, OS, build, and filesystem
 
-```yaml
-runtime:
-  provider: docker
-  image: python:3.12-slim
-  network: none
-  targets: [docker]
-  timeout_seconds: 180
-  resources:
-    cpu: 2
-    memory_mb: 2048
-    pids: 256
-  read_only_root: true
+```python
+Runtime.docker(
+    image="python:3.12-slim",
+    network="no-network",
+    cpus=2,
+    memory_mb=2048,
+)
 ```
 
 The image defines OS userspace and installed dependencies; there is no `os`
 field. Pin an immutable image digest for reproducibility. Alternatively,
-`build_context` plus optional `dockerfile` builds locally. A remote provider
-cannot consume that local context. `image`, `snapshot`, and
-`declarative_image` are mutually exclusive.
+`dockerfile` plus `build_context` builds locally. A remote provider cannot
+consume that local context. `image`, `snapshot`, and `declarative_image` are
+mutually exclusive.
 
 Docker uses a fresh container, drops Linux capabilities, sets
 `no-new-privileges`, uses an unprivileged user, and creates a scoped workspace.
 `read_only_root` makes the container root read-only while the workspace remains
-writable. The built-in adapter supports CPU, memory, and PID controls but
-rejects `disk_mb`, persistence, compose, and restricted network allowlists.
-The Docker daemon remains a trusted host boundary.
+writable.
 
 ## Network
 
-- `none`: block outbound network.
-- `full`: permit outbound network.
-- `restricted`: permit only `network_allowlist`; valid only on providers that
-  advertise and enforce allowlisting.
+Harbor names are canonical:
 
-The native model loop runs inside this Runtime, so model API calls need network
-access. `plural run` being local does not make those calls offline.
+- `public`: permit outbound network.
+- `no-network`: block outbound network.
+- `allowlist`: permit only `allowed_hosts`.
 
-Docker supports `none` and `full`. Daytona supports all three; restricted
-Daytona networking requires a nonempty all-domain or all-CIDR allowlist.
+Legacy aliases `full`, `none`, and `restricted` still parse.
 
-```yaml
-runtime:
-  provider: daytona
-  targets: [remote]
-  network: restricted
-  network_allowlist: [api.openai.com]
-  timeout_seconds: 180.0
+The native model loop runs inside this Runtime, so model API calls need
+network. Agent judges also need network unless the author sets
+`network="no-network"`. `plural run` being local does not make those calls
+offline.
+
+```python
+Runtime.daytona(
+    image="python:3.12-slim",
+    network="allowlist",
+    allowed_hosts=("api.openai.com",),
+)
 ```
 
 ## Daytona and remote providers
 
-Daytona support is implemented but optional:
-
 ```bash
-python -m pip install "plural[daytona]==0.12.1"
+python -m pip install "plural[daytona]==0.13.0"
 export DAYTONA_API_KEY=...
 ```
 
@@ -124,16 +112,9 @@ network blocking/allowlisting; upload/download; timeout/cancel; environment;
 working directory; and logs. It rejects local build contexts, PID/disk limits,
 stdin execution, persistence, compose, and read-only root.
 
-Daytona is the only named remote sandbox integration bundled in 0.12.1.
-Daytona, Blaxel, or another partner can also ship an independent
+Daytona is the bundled remote sandbox. A partner can also ship an independent
 `SandboxProvider` plugin through the `plural.sandbox_providers` entry-point
-group. Blaxel is an extension path, not a completed integration in this
-release.
-
-Every partner implementation must provide clean create/upload/exec/download/
-cancel/destroy lifecycle behavior, truthful `capabilities()` and `doctor()`
-reports, scoped paths, captured logs, idempotent cleanup, and fail-closed
-preflight. Unsupported policy must never degrade silently.
+group.
 
 Inspect provider health programmatically:
 
@@ -149,52 +130,23 @@ for report in reports:
 ## Files, resources, secrets, and persistence
 
 Environment and Harness source bundles are uploaded into scoped workspaces.
-Only declared outputs and artifacts are downloaded before teardown. An authored
-`Resource` is a hashed object descriptor; it is not automatically a secret or
-an arbitrary host mount.
+Only declared outputs and artifacts are downloaded before teardown.
 
-Declare secret references, never values:
+Declare secret references, never values. Package Job execution treats
+Environment secret references as metadata. Harness `secrets` declares allowed
+names and Agent `secret_names` grants extra application secrets, not model
+authentication. Job `client=` or `api_key=` injects model credentials.
 
-```yaml
-secrets:
-  - name: SUPPORT_API_TOKEN
-    required: true
-    target: environment
-```
-
-Targets are `environment`, `harness`, and `verifier`, but package Job execution
-in 0.12.1 treats Environment secret references as metadata: it does not resolve
-required or optional values, inject them into any target, or use them as a
-redaction list. A reference also does not provision a vault.
-
-Harness credentials use a separate executable path. Harness `secrets` declares
-allowed names and Agent `secret_names` grants a subset; undeclared grants fail
-before forwarding. Values come from the execution process. Agent Verifiers
-receive only their supported model endpoint variables. Deterministic
-Verifiers receive no Environment secret injection. Keep values out of YAML,
-metadata, resources, observations, logs, and artifacts.
-
-`persistent=True` requests provider-backed persistence; it does not mean “keep
-the local temp directory.” None of the three built-ins advertises persistence
-in 0.12.1, so the request fails preflight.
+`persistent=True` requests provider-backed persistence; none of the three
+built-ins advertises persistence, so the request fails preflight.
 
 ## Compute, placement, and limits
 
-`resources` contains optional `cpu`, `memory_mb`, `pids`, and `disk_mb`.
-`placement` carries provider-specific string hints. `extra_capabilities`
-requires additional provider controls. `runtime.timeout_seconds` limits Runtime
-operations; Environment `limits` separately cap turns, elapsed episode time,
-and optional cost.
-
-Custom Harnesses must cooperate with turn and cost limits. Plural cannot
-independently meter arbitrary external behavior.
-
-## Effective security boundary
-
-Execution proceeds only when the Environment Runtime, optional Harness grant,
-project policy, target class, and provider capabilities agree. Provider
-preflight is a guarantee to reject unsupported controls, not proof against a
-malicious provider or compromised host.
+`resources` contains optional `cpu`, `memory_mb`, `pids`, `disk_mb`, and
+`storage_mb`. `placement` carries provider-specific string hints.
+`runtime.timeout_seconds` limits Runtime operations; `build_timeout_sec`
+limits image builds. Environment `limits` separately cap turns, elapsed
+episode time, and optional cost.
 
 See [Security](../operations/security.md) and
 [provider extensions](../reference/integrations.md#sandbox-provider-extensions).

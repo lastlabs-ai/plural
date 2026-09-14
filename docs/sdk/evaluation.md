@@ -15,14 +15,13 @@ Python constructors are the semantic source for YAML and CLI.
 
 ```python
 from pathlib import Path
-from plural import Agent, Benchmark, Job, Task
+from plural import Agent, Benchmark, Client, Episode, Job, Task, VerifierOutput
 from plural.verifiers import DeterministicVerifier
 
-verify = Path("verify.py").read_text(encoding="utf-8")
-verifier = DeterministicVerifier(
-    name="resolved",
-    check=("python", "-c", verify),
-)
+def resolved(episode: Episode) -> VerifierOutput:
+    return VerifierOutput(reward=float(bool(episode.observation.get("done"))))
+
+verifier = DeterministicVerifier(name="resolved", check=resolved)
 task = Task(
     name="ticket-1",
     instructions="Resolve the support ticket.",
@@ -37,9 +36,8 @@ benchmark = Benchmark(
 agent = Agent(
     model="openai/gpt-5.6-luna",
     instructions="Use the available actions.",
-    secret_names=("OPENAI_API_KEY",),
 )
-job = Job(benchmark, agents=(agent,))
+job = Job(benchmark, agents=(agent,), client=Client())
 ```
 
 Environment, Agent, Harness, Verifier, and Task versions default to `0.1.0`.

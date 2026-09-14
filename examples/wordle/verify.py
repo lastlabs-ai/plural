@@ -1,16 +1,13 @@
-import json
-from pathlib import Path
+from plural import Episode, VerifierOutput
 
-payload = json.loads(Path(".plural/verifier-input.json").read_text())
-view = payload["environment_view"]
-solved = bool(view["observation"].get("solved") or view["state"].get("solved"))
-Path("verifier-result.json").write_text(
-    json.dumps(
-        {
-            "reward": float(solved),
-            "scores": {"solved": float(solved)},
-            "evidence": [view["observation"].get("text", "")],
-        }
+
+def solved(episode: Episode) -> VerifierOutput:
+    guesses = episode.state.get("guesses") or []
+    return VerifierOutput(
+        reward=float(bool(episode.observation.get("solved"))),
+        scores={
+            "guesses": float(len(guesses)),
+            "tokens": float(episode.usage.total_tokens or 0),
+        },
+        evidence=[f"{len(guesses)} guesses"],
     )
-    + "\n"
-)

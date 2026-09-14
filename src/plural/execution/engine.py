@@ -37,7 +37,7 @@ from plural.domain import (
     VerifierRuntime,
     content_hash,
 )
-from plural.evidence import environment_view, first_json_mapping
+from plural.evidence import first_json_mapping
 from plural.execution.policy import (
     ProjectPolicy,
     resolve_effective_policy,
@@ -62,6 +62,7 @@ from plural.sandbox import (
 )
 from plural.tasks import validate_task_state
 from plural.trajectory import normalize_trajectory
+from plural.verifiers import DeterministicVerifier, Episode, EpisodeUsage
 
 
 class VerifierOutput(BaseModel):
@@ -131,22 +132,36 @@ def _harness_environment(
     package: HarnessPackage,
     environ: Mapping[str, str],
 ) -> tuple[dict[str, str], dict[str, str]]:
-    names = {*agent.secret_names}
-    allowed = set(package.definition.secret_names)
-    undeclared = sorted(names - allowed)
+    orchestrated = {
+        name
+        for name in (
+            "PLURAL_API_KEY",
+            "OPENAI_API_KEY",
+            "PLURAL_GATEWAY_URL",
+            "OPENAI_BASE_URL",
+            "PLURAL_ALLOW_NO_AUTH",
+        )
+        if environ.get(name)
+    }
+    names = {*agent.secret_names, *orchestrated}
+    undeclared = sorted(set(agent.secret_names) - set(package.definition.secret_names))
     if undeclared:
         raise ExecutionFailure(
             ErrorCode.CONFIGURATION,
             f"Agent {agent.name!r} grants secrets not declared by Harness "
-            f"{package.definition.name!r}: {undeclared!r}",
+            f"{package.definition.name!r}: {undeclared!r}.\n"
+            "List extra app secrets on the Harness, or omit them from Agent.secret_names.\n"
+            "Model authentication is supplied by Job(client=...) or Job(api_key=...), "
+            "not Agent.secret_names.",
         )
-    missing = [name for name in names if not environ.get(name)]
+    missing = [name for name in agent.secret_names if not environ.get(name)]
     if missing:
         raise ExecutionFailure(
             ErrorCode.AUTHENTICATION,
-            f"missing declared Harness secrets: {missing!r}",
+            f"Agent {agent.name!r} is missing declared secrets: {missing!r}.\n"
+            "Export those names in the process environment before Job.run().",
         )
-    secrets = {name: environ[name] for name in names}
+    secrets = {name: environ[name] for name in names if environ.get(name)}
     configured = {
         name: environ[name]
         for name in package.definition.environment_names
@@ -828,6 +843,26 @@ class Trial:
                     )
                 )
                 continue
+            if isinstance(verifier, DeterministicVerifier) and verifier.checker is not None:
+                episode = self._episode(artifacts, observation=observation, state=state)
+                try:
+                    output = verifier.invoke(episode).model_dump(mode="json")
+                    parsed = VerifierOutput.model_validate(output).validated_finite()
+                except ValueError as exc:
+                    raise ExecutionFailure(ErrorCode.VERIFIER_FAILED, str(exc)) from exc
+                results.append(
+                    VerifierResult(
+                        verifier_name=verifier.name,
+                        verifier_digest=verifier.content_hash,
+                        kind="deterministic",
+                        status="succeeded",
+                        reward=parsed.reward,
+                        scores=parsed.scores,
+                        evidence=parsed.evidence,
+                        feedback=parsed.feedback,
+                    )
+                )
+                continue
             if isinstance(verifier, AgentVerifier):
                 command: tuple[str, ...] = (
                     "python",
@@ -840,13 +875,6 @@ class Trial:
                 command = verifier.command
                 result_path = verifier.result_path
                 evidence_required = verifier.evidence_required
-                present = {item.path for item in artifacts}
-                missing = set(verifier.required_artifacts) - present
-                if missing:
-                    raise ExecutionFailure(
-                        ErrorCode.EVIDENCE_MISSING,
-                        f"required Verifier artifacts are missing: {sorted(missing)!r}",
-                    )
             result, out, err = await self._run_score_command(
                 name=verifier.name,
                 digest=verifier.content_hash,
@@ -865,6 +893,44 @@ class Trial:
             stdout.extend(out)
             stderr.extend(err)
         return tuple(results), bytes(stdout), bytes(stderr)
+
+    def _episode(
+        self,
+        artifacts: Sequence[DownloadedFile],
+        *,
+        observation: Mapping[str, Any] | None = None,
+        state: Mapping[str, Any] | None = None,
+    ) -> Episode:
+        view_observation = first_json_mapping(
+            artifacts, ("final-observation.json", "observation.json")
+        ) or dict(observation or {})
+        view_state = dict(state or {}) or first_json_mapping(
+            artifacts, ("final-state.json", "state.json")
+        )
+        trajectory: list[Any] = []
+        for item in artifacts:
+            if item.path in {"trajectory.normalized.json", "trajectory.jsonl", "trajectory.json"}:
+                try:
+                    text = item.data.decode()
+                    if item.path.endswith(".jsonl"):
+                        trajectory = [
+                            json.loads(line) for line in text.splitlines() if line.strip()
+                        ]
+                    else:
+                        parsed = json.loads(text)
+                        trajectory = parsed if isinstance(parsed, list) else [parsed]
+                except (UnicodeDecodeError, ValueError):
+                    continue
+                break
+        return Episode(
+            observation=view_observation,
+            state=view_state,
+            trajectory=trajectory,
+            artifacts={item.path: item.path for item in artifacts},
+            usage=EpisodeUsage(
+                cost_usd=getattr(self, "_last_cost", None),
+            ),
+        )
 
     async def _run_score_command(
         self,
@@ -897,29 +963,28 @@ class Trial:
             view_state = dict(state or {})
             if not view_state:
                 view_state = first_json_mapping(artifacts, ("final-state.json", "state.json"))
-            contract = getattr(verifier, "evidence", None)
+            episode = self._episode(artifacts, observation=view_observation, state=view_state)
             payload: dict[str, Any] = {
                 "task": self.task.public_payload,
                 "trace_id": trace_id,
                 "artifacts": [item.path for item in artifacts],
-                "environment_view": environment_view(
-                    contract,
-                    observation=view_observation,
-                    state=view_state,
-                )
-                if contract is not None
-                else {"observation": {}, "state": {}},
+                "episode": episode.model_dump(mode="json"),
+                "environment_view": {
+                    "observation": episode.observation,
+                    "state": episode.state,
+                },
             }
             if isinstance(verifier, AgentVerifier):
                 payload["agent_verifier"] = verifier.model_dump(mode="json")
                 payload["judge_input"] = {
                     "task": self.task.public_payload,
                     "trace_id": trace_id,
+                    "episode": payload["episode"],
                     "environment_view": payload["environment_view"],
                     "final": _final_evidence(artifacts),
                     "requested_artifacts": _bounded_artifact_evidence(
                         artifacts,
-                        verifier.evidence.artifacts,
+                        tuple(item.path for item in artifacts),
                     ),
                 }
             uploads = [

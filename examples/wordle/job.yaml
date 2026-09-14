@@ -10,8 +10,7 @@ source:
     instructions: 'Guess the hidden five-letter word from: crane, slate, audio, point,
       heart. Call guess one word at a time and stop when solved.'
     goals: []
-    info:
-      task_id: easy-01
+    info: null
     metadata: {}
     environment:
       kind: environment
@@ -30,13 +29,14 @@ source:
         declarative_image: null
         build_context: null
         dockerfile: null
-        network: full
+        network: public
         network_allowlist: []
         resources:
           cpu: null
           memory_mb: null
           pids: null
           disk_mb: null
+          storage_mb: null
         read_only_root: false
         targets:
         - local
@@ -44,6 +44,7 @@ source:
         compose: false
         extra_capabilities: []
         timeout_seconds: 300.0
+        build_timeout_sec: 600.0
         allow_unsafe_local: true
       secrets: []
       guardrails: []
@@ -66,49 +67,34 @@ source:
         - python
         - commands.py
         source: .
-        digest: sha256:274854d2216c6d891b74414215cc0e737e4296719304c2f296b3b1b87a681876
+        digest: sha256:96c27efe2094ff5f07c832c797bf2933a0b59a896dd6386bb279a1020ff9baeb
     verifiers:
     - name: solved
       version: 0.1.0
       info: null
       criteria: []
-      evidence:
-        artifacts: []
-        state_paths:
-        - solved
-        - guesses
-        observation_paths:
-        - solved
-        - text
-        include_hidden_state: false
       weight: 1.0
       metadata: {}
       kind: deterministic
-      check:
-      - python
-      - -c
-      - "import json\nfrom pathlib import Path\n\npayload = json.loads(Path(\".plural/verifier-input.json\"\
-        ).read_text())\nview = payload[\"environment_view\"]\nsolved = bool(view[\"\
-        observation\"].get(\"solved\") or view[\"state\"].get(\"solved\"))\nPath(\"\
-        verifier-result.json\").write_text(\n    json.dumps(\n        {\n        \
-        \    \"reward\": float(solved),\n            \"scores\": {\"solved\": float(solved)},\n\
-        \            \"evidence\": [view[\"observation\"].get(\"text\", \"\")],\n\
-        \        }\n    )\n    + \"\\n\"\n)\n"
       runtime:
         provider: docker
         image: null
-        network: none
+        network: public
         network_allowlist: []
         resources:
           cpu: null
           memory_mb: null
           pids: null
           disk_mb: null
+          storage_mb: null
         timeout_seconds: 60.0
       result_path: verifier-result.json
       evidence_required: true
+      check:
+        python: verify.py:solved
     resources: []
-    initial_state: {}
+    initial_state:
+      secret: slate
     reset_options: {}
   primary_metric: reward
   description: ''
@@ -124,8 +110,7 @@ agents:
   temperature: null
   max_tokens: null
   auth_mode: environment
-  secret_names:
-  - OPENAI_API_KEY
+  secret_names: []
   metadata: {}
 mode: eval
 attempts: 1

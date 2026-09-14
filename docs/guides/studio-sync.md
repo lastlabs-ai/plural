@@ -52,7 +52,7 @@ plural trial watch TRIAL_ID --job JOB_ID --json
 
 `--offline` and `--private` remain compatibility aliases for the same local behavior.
 
-Events are sanitized; secret values, hidden Environment state, and giant TITO
+Events are sanitized; secret values, Environment State, and giant TITO
 payloads are excluded. Artifact references include digest, media type, and size.
 
 ## Hosted compatibility

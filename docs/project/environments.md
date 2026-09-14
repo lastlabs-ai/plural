@@ -15,14 +15,14 @@ State and Observation, actions, Runtime, resources, limits, rendering, and
 optional Rewarders. It does not own Tasks, Verifiers, Agents, or Job mode.
 
 ```python
-from plural import Environment, Observation, State, action, hidden
+from plural import Environment, Observation, Runtime, State, action
 
 class Board(Observation):
     text: str = ""
     solved: bool = False
 
 class Game(State):
-    answer: str = hidden("")
+    answer: str = ""
     guesses: int = 0
 
 class Puzzle(Environment[Board, Game]):
@@ -37,9 +37,10 @@ class Puzzle(Environment[Board, Game]):
         return self.observation
 ```
 
-`State` persists world data. `Observation` is the projection sent to the Agent.
-`hidden(...)` marks evaluator-only State in the generated schema; do not copy
-those values into an Observation, action result, model message, or artifact.
+`State` is internal by definition and is never sent to the Agent.
+`Observation` is the only agent-visible surface. Do not copy State values into
+an Observation, action result, or model message. Verifiers receive the full
+final State on the Episode.
 
 Implement the Gymnasium-shaped lifecycle when defaults are insufficient:
 
@@ -63,7 +64,7 @@ Python methods are authoring declarations. Package them with a command adapter
 that receives the action name in argv and JSON parameters on stdin:
 
 ```python
-environment = Puzzle(runtime=runtime).package(
+environment = Puzzle(runtime=Runtime.docker()).package(
     ("python", "commands.py"),
     source="environment",
 )

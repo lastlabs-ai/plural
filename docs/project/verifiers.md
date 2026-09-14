@@ -1,128 +1,58 @@
 ---
 route: /docs/project/verifiers
-title: "Verifiers"
-order: 50
-description: "Score completed Trials with deterministic commands, model judges, or human review using one evidence contract."
+title: Verifiers
+order: 55
+description: Score a completed Episode with a function, a model judge, or a human rubric.
 audience: all
 nav: true
 nav_group: Build
-outcome: You can attach deterministic, Agent, and Human Verifiers to Tasks.
+outcome: You can attach a Verifier that scores the full final episode.
 ---
 # Verifiers
 
-Verifiers assess completed Trials. They do not run the Environment transition
-loop and are separate from train-mode Rewarders. Every Task needs at least one.
-
-## Deterministic Verifier
-
-Use deterministic code when success can be computed from state or artifacts.
-It is fastest, cheapest, and easiest to audit.
+A Verifier scores one completed Episode. The function sees the final
+Observation, the full internal State, the trajectory, artifacts, and usage.
+State is never shown to the Agent.
 
 ```python
-from pathlib import Path
-from plural import EvidenceContract
-from plural.verifiers import DeterministicVerifier, VerifierRuntime
+from plural import DeterministicVerifier, Episode, VerifierOutput
 
-verify = Path("verifiers/correct.py").read_text(encoding="utf-8")
-correct = DeterministicVerifier(
-    name="correct-category",
-    check=("python", "-c", verify),
-    evidence=EvidenceContract(
-        observation_paths=("category", "done"),
-        state_paths=("expected",),
-        include_hidden_state=True,
-    ),
-    runtime=VerifierRuntime(provider="docker", network="none"),
-)
+def solved(episode: Episode) -> VerifierOutput:
+    guesses = episode.state.get("guesses") or []
+    return VerifierOutput(
+        reward=float(bool(episode.observation.get("solved"))),
+        scores={"guesses": float(len(guesses)), "tokens": float(episode.usage.total_tokens or 0)},
+        evidence=[f"{len(guesses)} guesses"],
+    )
+
+verifier = DeterministicVerifier(name="solved", check=solved)
 ```
 
-The command must write `result_path` (`verifier-result.json` by default) with a
-finite `reward`, optional `scores`, nonempty `evidence` when
-`evidence_required=True`, and optional `feedback`. Declare required artifact
-paths through `evidence.artifacts`.
+YAML stores a resolvable reference or a command:
 
-## Agent Verifier
-
-Use a model judge for semantic quality that code cannot capture reliably:
-
-```python
-from plural import AgentVerifier, RubricCriterion
-
-judge = AgentVerifier(
-    name="response-quality",
-    model="openai/gpt-5.6-luna",
-    instructions="Score only from the supplied ticket and response.",
-    criteria=(
-        RubricCriterion(
-            name="helpful",
-            description="The response gives a correct, actionable next step.",
-            min_score=0,
-            max_score=4,
-        ),
-    ),
-)
+```yaml
+kind: deterministic
+name: solved
+check:
+  python: verify.py:solved
 ```
 
-An Agent Verifier has its own catalog-backed `model`, optional `provider` and
-`fallback_models`, instructions, criteria, and Runtime (network is `full` by
-default). Its judge prompt includes the Task, final Harness result, contracted
-`environment_view`, and bounded UTF-8 content or names for artifacts requested
-by its evidence contract. It must return the normal finite `VerifierOutput`
-shape with evidence. Calibrate it on known good and bad cases, pin it like any
-other Verifier, and avoid letting it see answer keys it does not need.
+A command argv remains valid for existing command verifiers.
 
-## Human Verifier
+## Bind time
 
-Use Human review for subjective, high-stakes, policy, or calibration decisions:
+`Task(..., environment=env, verifiers=[verifier])` fails unless the Environment
+can run and each Verifier `check` is a callable, a `path.py:object` reference,
+or a command. The error names the Task, the Environment, the Verifier, the
+rule, and the fix.
 
-```python
-from plural import HumanVerifier, RubricCriterion
+## When to use which kind
 
-review = HumanVerifier(
-    name="policy-review",
-    instructions="Check policy compliance and customer safety.",
-    criteria=(
-        RubricCriterion(
-            name="compliance",
-            description="The response follows the current support policy.",
-            min_score=0,
-            max_score=2,
-        ),
-    ),
-)
-```
+- **DeterministicVerifier** — a function or command over the Episode. Use this
+  when the score is exact.
+- **AgentVerifier** — a catalog model that judges the Episode against criteria.
+  Agent judges receive the same Episode. They need network unless you set
+  `network="no-network"`.
+- **HumanVerifier** — a rubric for a person to score after the Trial.
 
-A Human Verifier pauses the Trial at `awaiting_review`. The submission is
-appended later. It leaves receipts, logs, manifests, and artifact bytes
-unchanged while execution, Trial, and Job result projections advance.
-
-## Criteria, evidence, and weighting
-
-Each `RubricCriterion` has `name`, `description`, `weight=1`,
-`min_score=0`, and `max_score=1`. Criterion weights normalize scores within a
-human review. Verifier `weight=1` controls the weighted average final Trial
-reward.
-
-`EvidenceContract` can select:
-
-- `observation_paths`: Agent-visible final fields.
-- `state_paths`: internal final fields.
-- `include_hidden_state`: explicit permission for hidden selected State.
-- `artifacts`: exact required output paths for a deterministic Verifier, or
-  artifact names and bounded readable prompt content for an Agent Verifier.
-
-Paths are JSON Pointers; `category` and `/category` are equivalent. Only
-selected State/Observation fields enter `environment_view`, but all captured
-artifacts are currently staged in the command Verifier workspace. The contract
-is not a filesystem ACL, arbitrary artifact safety boundary, or reviewer
-authorization policy.
-
-Put Verifiers directly on a Task:
-
-```python
-task = Task(..., verifiers=[correct])
-```
-
-Prefer deterministic checks for objective facts, use Agent judges for bounded
-semantic rubrics, and reserve Human review for judgments worth the latency.
-Require evidence that another person can use to explain the score.
+Verifier Runtime defaults to a public network, independent of the Environment.

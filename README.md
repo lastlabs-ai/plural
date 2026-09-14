@@ -1,6 +1,6 @@
 # Plural
 
-Plural 0.12.1 is a Python SDK and CLI for building reproducible agent
+Plural 0.13.0 is a Python SDK and CLI for building reproducible agent
 evaluations and keeping the evidence behind every score.
 
 ## Evaluation in seven objects
@@ -19,7 +19,7 @@ losslessly, and the CLI uses the same resolver and defaults.
 ## Install
 
 ```bash
-pip install "plural==0.12.1"
+pip install "plural==0.13.0"
 ```
 
 ## First evaluation

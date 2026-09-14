@@ -84,7 +84,7 @@ The downstream workflow chooses eligible Trials, preserves revision and score pr
 
 After updating the agent, run the held-out Benchmark in eval mode with the same scoring and runtime policy. Compare scores alongside completeness and behavior in the traces, not just a training reward curve.
 
-Plural 0.12.1 intentionally does not implement SFT, DPO, PPO, GRPO, rollout
+Plural intentionally does not implement SFT, DPO, PPO, GRPO, rollout
 optimization, gradient updates, checkpoint storage, or deployment. It provides
 versioned tasks, exact capture contracts, evidence, and evaluation before and
 after an external training system.

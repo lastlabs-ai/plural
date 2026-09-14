@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 from typer.testing import CliRunner
 
-from plural import Agent, Benchmark, Environment, Harness, Job, Task
+from plural import Agent, Benchmark, Environment, Harness, Job, Runtime, Task
 from plural.catalog import ModelCatalog, ModelEndpoint, ModelSpec
 from plural.cli.main import app
 from plural.project import CatalogContext, Resolver, dump, load
@@ -29,7 +29,7 @@ SERIALIZATION_INTERNAL = re.compile(
 
 
 def graph() -> tuple[Environment, DeterministicVerifier, Task, Benchmark, Agent, Job]:
-    environment = Environment(name="world", version="1.0.0")
+    environment = Environment(name="world", version="1.0.0", runtime=Runtime.docker())
     verifier = DeterministicVerifier(name="done", check="python verify.py")
     task = Task(
         name="case",
@@ -80,13 +80,13 @@ def test_public_docs_and_examples_do_not_regress_to_internal_authoring_api() -> 
 def test_python_reference_and_environment_packaging(tmp_path: Path) -> None:
     (tmp_path / ".pluralignore").write_text("task.yaml\n")
     (tmp_path / "world.py").write_text(
-        "from plural import Environment, action\n\n"
+        "from plural import Environment, Runtime, action\n\n"
         "class World(Environment):\n"
         "    name = 'packaged'\n\n"
         "    @action\n"
         "    def answer(self, value: str) -> str:\n"
         "        return value\n\n"
-        "world = World().package(('python', 'adapter.py'))\n"
+        "world = World(runtime=Runtime.docker()).package(('python', 'adapter.py'))\n"
     )
     (tmp_path / "adapter.py").write_text("print('{}')\n")
     resolver = Resolver(root=tmp_path)

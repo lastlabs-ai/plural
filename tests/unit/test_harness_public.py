@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 import plural
-from plural import Agent, Environment, Harness, HarnessCapability, HarnessOutput, Job, Task
+from plural import Agent, Environment, Harness, HarnessCapability, HarnessOutput, Job, Runtime, Task
 from plural.cli.main import app
 from plural.project import dump, load
 from plural.verifiers import DeterministicVerifier
@@ -43,7 +43,7 @@ def _job(harness: Harness) -> Job:
     task = Task(
         name="case",
         instructions="Complete the case.",
-        environment=Environment(name="world"),
+        environment=Environment(name="world", runtime=Runtime.docker()),
         verifiers=(DeterministicVerifier(name="done", check="python verify.py"),),
     )
     return Job(

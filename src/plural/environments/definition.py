@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 
 from plural.common import (
     SHA256_PATTERN,
@@ -109,7 +109,7 @@ class RewarderDefinition(FrozenModel):
 
 
 class EnvironmentRuntime(FrozenModel):
-    """Immutable Environment-owned provider, placement, network, and compute."""
+    """Where an Environment runs: Docker, a trusted local process, or Daytona."""
 
     provider: str = Field(default="docker", min_length=1)
     placement: dict[str, str] = Field(default_factory=dict)
@@ -118,8 +118,11 @@ class EnvironmentRuntime(FrozenModel):
     declarative_image: DeclarativeImage | None = None
     build_context: str | None = None
     dockerfile: str | None = None
-    network: NetworkMode = NetworkMode.NONE
-    network_allowlist: tuple[str, ...] = ()
+    network: NetworkMode = NetworkMode.PUBLIC
+    network_allowlist: tuple[str, ...] = Field(
+        default=(),
+        validation_alias=AliasChoices("network_allowlist", "allowed_hosts"),
+    )
     resources: ResourceRequirements = Field(default_factory=ResourceRequirements)
     read_only_root: bool = False
     targets: frozenset[ExecutionTarget] = Field(
@@ -129,12 +132,45 @@ class EnvironmentRuntime(FrozenModel):
     compose: bool = False
     extra_capabilities: frozenset[Capability] = frozenset()
     timeout_seconds: float = Field(default=300, gt=0)
+    build_timeout_sec: float = Field(default=600, gt=0)
     allow_unsafe_local: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _convenience_resources(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        resources = dict(payload.get("resources") or {})
+        for source, target in (
+            ("cpus", "cpu"),
+            ("memory_mb", "memory_mb"),
+            ("storage_mb", "storage_mb"),
+        ):
+            if source in payload and target not in resources:
+                resources[target] = payload.pop(source)
+        if "allowed_hosts" in payload and "network_allowlist" not in payload:
+            payload["network_allowlist"] = payload.pop("allowed_hosts")
+        if resources:
+            payload["resources"] = resources
+        return payload
 
     @model_validator(mode="after")
     def _valid_runtime(self) -> EnvironmentRuntime:
-        if self.network_allowlist and self.network is not NetworkMode.RESTRICTED:
-            raise ValueError("network_allowlist requires network='restricted'")
+        if self.network_allowlist and self.network is not NetworkMode.ALLOWLIST:
+            raise ValueError(
+                "Cannot create Runtime.\n"
+                f"allowed_hosts is set ({list(self.network_allowlist)!r}) but "
+                f"network={self.network.value!r}.\n"
+                "Set network='allowlist' (Harbor name) or network='restricted' "
+                "(legacy alias), or remove allowed_hosts."
+            )
+        if self.network is NetworkMode.ALLOWLIST and not self.network_allowlist:
+            raise ValueError(
+                "Cannot create Runtime.\n"
+                "network='allowlist' requires at least one host in allowed_hosts.\n"
+                "Example: Runtime.docker(network='allowlist', allowed_hosts=('api.openai.com',))"
+            )
         if (
             sum(
                 (
@@ -145,13 +181,117 @@ class EnvironmentRuntime(FrozenModel):
             )
             > 1
         ):
-            raise ValueError("image, snapshot, and declarative_image are mutually exclusive")
+            raise ValueError(
+                "Cannot create Runtime.\n"
+                "image, snapshot, and declarative_image are mutually exclusive.\n"
+                "Pick one image source, or use Runtime.docker(dockerfile=..., build_context=...)."
+            )
         target = self.requested_target
         if target is ExecutionTarget.LOCAL and not self.allow_unsafe_local:
-            raise ValueError("provider='local' requires allow_unsafe_local=true")
+            raise ValueError(
+                "Cannot create Runtime.\n"
+                "provider='local' runs a trusted subprocess on this machine and is not a sandbox.\n"
+                "Use Runtime.local() or pass allow_unsafe_local=True, network='public', "
+                "and targets that include 'local'."
+            )
         if target not in self.targets:
-            raise ValueError("runtime provider target must be declared in targets")
+            declared = sorted(item.value for item in self.targets)
+            raise ValueError(
+                "Cannot create Runtime.\n"
+                f"provider={self.provider!r} maps to target {target.value!r}, "
+                f"but targets={declared}.\n"
+                f"Add {target.value!r} to targets, or use Runtime.{self.provider}()."
+            )
         return self
+
+    @classmethod
+    def docker(
+        cls,
+        *,
+        image: str | None = "python:3.12-slim",
+        dockerfile: str | None = None,
+        build_context: str | None = None,
+        network: NetworkMode | str = NetworkMode.PUBLIC,
+        allowed_hosts: tuple[str, ...] = (),
+        cpus: float | None = None,
+        memory_mb: int | None = None,
+        storage_mb: int | None = None,
+        **fields: Any,
+    ) -> EnvironmentRuntime:
+        """Docker Runtime with Harbor defaults: public network and a pinned image.
+
+        Returns:
+            A Docker Runtime.
+        """
+        if dockerfile is not None:
+            image = None
+            fields.setdefault("build_context", build_context or ".")
+            fields["dockerfile"] = dockerfile
+        if allowed_hosts:
+            fields["network_allowlist"] = allowed_hosts
+        if any(item is not None for item in (cpus, memory_mb, storage_mb)):
+            fields["resources"] = ResourceRequirements(
+                cpu=cpus,
+                memory_mb=memory_mb,
+                storage_mb=storage_mb,
+            )
+        return cls(
+            provider="docker",
+            image=image,
+            network=NetworkMode(network) if not isinstance(network, NetworkMode) else network,
+            targets=frozenset({ExecutionTarget.DOCKER, ExecutionTarget.REMOTE}),
+            **fields,
+        )
+
+    @classmethod
+    def local(
+        cls,
+        *,
+        network: NetworkMode | str = NetworkMode.PUBLIC,
+        **fields: Any,
+    ) -> EnvironmentRuntime:
+        """Trusted local subprocess Runtime. Not a sandbox.
+
+        Returns:
+            A local Runtime.
+        """
+        return cls(
+            provider="local",
+            image=None,
+            network=NetworkMode(network) if not isinstance(network, NetworkMode) else network,
+            targets=frozenset({ExecutionTarget.LOCAL}),
+            allow_unsafe_local=True,
+            **fields,
+        )
+
+    @classmethod
+    def daytona(
+        cls,
+        *,
+        image: str | None = "python:3.12-slim",
+        network: NetworkMode | str = NetworkMode.PUBLIC,
+        allowed_hosts: tuple[str, ...] = (),
+        **fields: Any,
+    ) -> EnvironmentRuntime:
+        """Daytona remote sandbox Runtime. Requires ``plural[daytona]``.
+
+        Returns:
+            A Daytona Runtime.
+        """
+        if allowed_hosts:
+            fields["network_allowlist"] = allowed_hosts
+        return cls(
+            provider="daytona",
+            image=image,
+            network=NetworkMode(network) if not isinstance(network, NetworkMode) else network,
+            targets=frozenset({ExecutionTarget.REMOTE}),
+            **fields,
+        )
+
+    @property
+    def allowed_hosts(self) -> tuple[str, ...]:
+        """Harbor name for the network allowlist."""
+        return self.network_allowlist
 
     @property
     def requested_target(self) -> ExecutionTarget:

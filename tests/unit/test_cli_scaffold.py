@@ -34,9 +34,9 @@ def test_init_creates_python_first_project(tmp_path: Path) -> None:
 def test_direct_benchmark_dry_run_supports_overrides(tmp_path: Path) -> None:
     project = tmp_path / "project.py"
     project.write_text(
-        "from plural import Agent, Benchmark, Environment, Task\n"
+        "from plural import Agent, Benchmark, Environment, Runtime, Task\n"
         "from plural.verifiers import DeterministicVerifier\n"
-        "environment = Environment(name='world')\n"
+        "environment = Environment(name='world', runtime=Runtime.docker())\n"
         "verifier = DeterministicVerifier(name='done', check='python verify.py')\n"
         "task = Task(name='one', instructions='Do it', environment=environment, "
         "verifiers=[verifier])\n"

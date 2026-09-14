@@ -1,4 +1,4 @@
-"""Typed visible Observation and hidden-capable State models."""
+"""Typed agent-visible Observation and internal State models."""
 
 from __future__ import annotations
 
@@ -7,51 +7,16 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field
 
-HIDDEN_SCHEMA_KEY = "x-plural-hidden"
-
-
-def hidden(default: Any = ..., **kwargs: Any) -> Any:
-    """Mark a :class:`State` field as hidden from the agent.
-
-    The annotation is stored on the JSON Schema as ``x-plural-hidden`` so
-    studio can show a visibility column. Hidden fields still live on
-    ``env.state``; they must not be copied into an :class:`Observation`.
-
-    Args:
-        default: Field default, same as :func:`pydantic.Field`.
-        **kwargs: Other :func:`pydantic.Field` arguments.
-
-    Returns:
-        A Pydantic field with the hidden schema flag.
-    """
-    extra = kwargs.pop("json_schema_extra", None)
-    merged: dict[str, Any] = dict(extra) if isinstance(extra, dict) else {}
-    merged[HIDDEN_SCHEMA_KEY] = True
-    return Field(default, json_schema_extra=merged, **kwargs)
-
-
-def is_hidden_schema_field(spec: Any) -> bool:
-    """Return whether a JSON Schema property is marked hidden.
-
-    Args:
-        spec: One property schema from ``model_json_schema``.
-
-    Returns:
-        ``True`` when the field carries ``x-plural-hidden``.
-    """
-    return isinstance(spec, dict) and spec.get(HIDDEN_SCHEMA_KEY) is True
-
 
 class Observation(BaseModel):
     """What the agent can observe after an action.
 
-    This is the agent-visible projection of :class:`State`, not the
-    Environment itself.
+    This is the only Environment surface sent to the Agent. Internal State is
+    never copied here automatically.
 
-    Subclass this with typed fields. The JSON Schema of the subclass is
-    the observation contract hosted with the environment. Implement
-    :meth:`render` when the prompt should not be a raw dump of the
-    fields.
+    Subclass this with typed fields. The JSON Schema of the subclass is the
+    observation contract hosted with the environment. Implement :meth:`render`
+    when the prompt should not be a raw dump of the fields.
 
     Attributes:
         text: Default rendered view. Structured subclasses may ignore this.
@@ -81,19 +46,18 @@ class Observation(BaseModel):
 
 
 class State(BaseModel):
-    """Persistent environment state for the episode.
+    """Persistent internal Environment state for the episode.
 
-    Nested models on this class are durable internal structures. Mark secrets
-    and evaluator-only facts with :func:`hidden`; only Observation is visible
-    to the Agent.
+    State is never sent to the Agent. Only :class:`Observation` is visible.
+    Verifiers receive the final State on :class:`~plural.verifiers.Episode`.
 
     Attributes:
         seed: Optional deterministic seed.
         metadata: Extra internal fields that do not need a typed attribute.
     """
 
-    seed: int | None = hidden(
-        None,
+    seed: int | None = Field(
+        default=None,
         description="Optional RNG seed from the task.",
     )
     metadata: dict[str, Any] = Field(

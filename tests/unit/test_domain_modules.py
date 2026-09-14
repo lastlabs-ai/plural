@@ -31,7 +31,7 @@ def test_internal_contract_names_are_not_top_level() -> None:
 
 
 def test_job_contract_plans_public_objects() -> None:
-    environment = Environment(name="world")
+    environment = Environment(name="world", runtime=Runtime.docker())
     verifier = DeterministicVerifier(name="exact", check="python verify.py")
     task = Task(
         name="hello",

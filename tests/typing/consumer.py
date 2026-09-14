@@ -20,6 +20,7 @@ from plural import (
     ModelCatalog,
     NetworkMode,
     RetryPolicy,
+    Runtime,
     SandboxProvider,
     Task,
     Trace,
@@ -37,7 +38,7 @@ def main() -> None:
     usage: Usage = Usage.from_counts(1, 1)
     msg: Message = Message(role="user", content="hi")
     trace: Trace = Trace(trace_id="t")
-    env: Environment[Any, Any] = Environment(name="x", version="0.1.0")
+    env: Environment[Any, Any] = Environment(name="x", version="0.1.0", runtime=Runtime.docker())
     ds: TraceDataset = TraceDataset.from_traces("d", [trace])
     assert usage.total_tokens == 2
     assert msg.role == "user"

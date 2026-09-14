@@ -803,7 +803,7 @@ plural.tracing.resources.trace_json_schema() -> 'dict[str, Any]'
 Simple public runner for a Task or Benchmark and catalog-backed Agents.
 
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: 'int' = 1, per_runtime_concurrency: 'int' = 1, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: 'int' = 1, per_runtime_concurrency: 'int' = 1, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None) -> 'None'
 ```
 
 ### plural.Job.run_async
@@ -1390,13 +1390,12 @@ plural.rewarder(fn: 'Callable[..., float] | None' = None, *, name: 'str | None' 
 What the agent can observe after an action.
 
 ```text
-This is the agent-visible projection of :class:`State`, not the
-Environment itself.
+This is the only Environment surface sent to the Agent. Internal State is
+never copied here automatically.
 
-Subclass this with typed fields. The JSON Schema of the subclass is
-the observation contract hosted with the environment. Implement
-:meth:`render` when the prompt should not be a raw dump of the
-fields.
+Subclass this with typed fields. The JSON Schema of the subclass is the
+observation contract hosted with the environment. Implement :meth:`render`
+when the prompt should not be a raw dump of the fields.
 
 Attributes:
     text: Default rendered view. Structured subclasses may ignore this.
@@ -1418,12 +1417,11 @@ Returns:
 
 ## plural.environments.types.State
 
-Persistent environment state for the episode.
+Persistent internal Environment state for the episode.
 
 ```text
-Nested models on this class are durable internal structures. Mark secrets
-and evaluator-only facts with :func:`hidden`; only Observation is visible
-to the Agent.
+State is never sent to the Agent. Only :class:`Observation` is visible.
+Verifiers receive the final State on :class:`~plural.verifiers.Episode`.
 
 Attributes:
     seed: Optional deterministic seed.
@@ -1446,27 +1444,6 @@ Returns:
 plural.environments.types.as_text(value: 'Any') -> 'str'
 ```
 
-## plural.environments.types.hidden
-
-Mark a :class:`State` field as hidden from the agent.
-
-```text
-The annotation is stored on the JSON Schema as ``x-plural-hidden`` so
-studio can show a visibility column. Hidden fields still live on
-``env.state``; they must not be copied into an :class:`Observation`.
-
-Args:
-    default: Field default, same as :func:`pydantic.Field`.
-    **kwargs: Other :func:`pydantic.Field` arguments.
-
-Returns:
-    A Pydantic field with the hidden schema flag.
-```
-
-```python
-plural.environments.types.hidden(default: 'Any' = Ellipsis, **kwargs: 'Any') -> 'Any'
-```
-
 ## plural.environments.types.is_empty_observation
 
 Return whether ``value`` has nothing for the policy to read.
@@ -1481,22 +1458,6 @@ Returns:
 
 ```python
 plural.environments.types.is_empty_observation(value: 'Any') -> 'bool'
-```
-
-## plural.environments.types.is_hidden_schema_field
-
-Return whether a JSON Schema property is marked hidden.
-
-```text
-Args:
-    spec: One property schema from ``model_json_schema``.
-
-Returns:
-    ``True`` when the field carries ``x-plural-hidden``.
-```
-
-```python
-plural.environments.types.is_hidden_schema_field(spec: 'Any') -> 'bool'
 ```
 
 ## plural.environments.types.serialize_observation
@@ -2194,6 +2155,31 @@ Return all model specs.
 ```text
 Returns:
     A list of :class:`ModelSpec` entries.
+```
+
+### plural.ModelCatalog.ids
+
+```python
+ids(self) -> 'list[str]'
+```
+
+Return registered model IDs in catalog order.
+
+### plural.ModelCatalog.suggest
+
+```python
+suggest(self, model_id: 'str', *, limit: 'int' = 5) -> 'list[str]'
+```
+
+Return nearby catalog IDs for an unknown model.
+
+```text
+Args:
+    model_id: The ID the caller tried to use.
+    limit: Maximum suggestions.
+
+Returns:
+    Close catalog IDs, or a short prefix of the catalog.
 ```
 
 ### plural.ModelCatalog.get

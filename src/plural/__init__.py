@@ -27,7 +27,6 @@ from plural.environments import (
     TraceDataset,
     TraceFilter,
     action,
-    hidden,
     rewarder,
 )
 from plural.errors import (
@@ -114,10 +113,12 @@ from plural.types import ChatRequest, ChatResponse, Message, Tool, Usage
 from plural.verifiers import (
     AgentVerifier,
     DeterministicVerifier,
-    EvidenceContract,
+    Episode,
+    EpisodeUsage,
     HumanVerifier,
     RubricCriterion,
     Verifier,
+    VerifierOutput,
     VerifierRuntime,
 )
 
@@ -150,8 +151,9 @@ __all__ = [
     "DaytonaProvider",
     "DeclarativeImage",
     "DeterministicVerifier",
-    "EvidenceContract",
     "DockerProvider",
+    "Episode",
+    "EpisodeUsage",
     "Environment",
     "ErrorCode",
     "ExecutionLimits",
@@ -217,6 +219,7 @@ __all__ = [
     "TrialStatus",
     "Usage",
     "Verifier",
+    "VerifierOutput",
     "VerifierResult",
     "VerifierRuntime",
     "__version__",
@@ -225,7 +228,6 @@ __all__ = [
     "dump_project",
     "dumps_project",
     "estimate_cost",
-    "hidden",
     "is_retryable",
     "load_project",
     "normalize_trajectory",

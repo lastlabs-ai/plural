@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import random
 from typing import Any
 
 from pydantic import Field
 
-from plural import Environment, Observation, State, action, hidden
+from plural import Environment, Observation, State, action
 
 WORDS = ("crane", "slate", "audio", "point", "heart")
-SECRETS = {"easy-01": "slate"}
 
 
 class Board(Observation):
@@ -20,7 +20,7 @@ class Board(Observation):
 
 
 class Game(State):
-    secret: str = hidden("")
+    secret: str = ""
     remaining: int = 6
     solved: bool = False
     guesses: list[str] = Field(default_factory=list)
@@ -46,17 +46,14 @@ class Wordle(Environment[Board, Game]):
     overview = "Guess a hidden five-letter word in six tries."
     reset_command = ("python", "commands.py", "reset")
 
-    def __init__(self, *, secret: str | None = None, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        info = self.info if isinstance(self.info, dict) else {}
-        self._secret = secret or SECRETS[str(info.get("task_id") or "easy-01")]
-
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[Board, dict[str, Any]]:
-        del options
         super().reset(seed=seed)
-        self.state = Game(secret=self._secret, remaining=6, seed=self.state.seed)
+        secret = (options or {}).get("secret") or self.state.secret
+        if not secret:
+            secret = random.Random(self.state.seed).choice(WORDS)
+        self.state = Game(secret=secret, remaining=6, seed=self.state.seed)
         self.observation = Board(text="empty board · 6 left", remaining=6)
         return self.observation, {}
 

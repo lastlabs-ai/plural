@@ -83,6 +83,6 @@ Reading a stored episode does not rerun the model. Re-executing the Task creates
 
 Selected traces can become datasets or training examples. Preserve their Task provenance, scoring status, and data permissions. Ordinary message transcripts cannot substitute for the exact token records required by train mode. See [Training](training.md) and [Production to dataset](../guides/production-to-dataset.md).
 
-Treat captured files according to their contents. Hidden schema fields are not automatically scrubbed from every custom artifact, log, or model message. The [evidence guide](../project/evidence.md) explains the boundaries.
+Treat captured files according to their contents. Hidden schema fields are not automatically scrubbed from every custom artifact, log, or model message. The [verifiers guide](../project/verifiers.md) explains Episode scoring boundaries.
 
 If the episode needs a human score, continue to [Reviews](reviews.md).

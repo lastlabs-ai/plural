@@ -6,6 +6,8 @@ from pathlib import Path
 
 from world import QueueState, SupportQueue
 
+from plural import Runtime
+
 
 def task_ticket_id() -> str | None:
     if not Path("task.json").exists():
@@ -15,7 +17,7 @@ def task_ticket_id() -> str | None:
     return info.get("ticket_id") or task.get("task_id")
 
 
-world = SupportQueue(ticket_id=task_ticket_id())
+world = SupportQueue(ticket_id=task_ticket_id(), runtime=Runtime.local())
 if Path("state.json").exists():
     world.state = QueueState.model_validate_json(Path("state.json").read_text())
     world.observe()

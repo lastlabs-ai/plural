@@ -21,13 +21,14 @@ runtime:
   declarative_image: null
   build_context: null
   dockerfile: null
-  network: full
+  network: public
   network_allowlist: []
   resources:
     cpu: null
     memory_mb: null
     pids: null
     disk_mb: null
+    storage_mb: null
   read_only_root: false
   targets:
   - local
@@ -35,6 +36,7 @@ runtime:
   compose: false
   extra_capabilities: []
   timeout_seconds: 300.0
+  build_timeout_sec: 600.0
   allow_unsafe_local: true
 secrets: []
 guardrails: []
@@ -57,4 +59,4 @@ package:
   - python
   - commands.py
   source: .
-  digest: sha256:b1b269a4a46f925a29dfb6ced5920848e7716859a99cffc7fa4fafcf4a59c6a3
+  digest: sha256:84efc94232c10bf8807f58a15d3b3d8cefbc0da09b0f8fbf7be0a69e47a6c9fe

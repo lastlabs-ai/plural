@@ -1,12 +1,4 @@
-from plural import ExecutionTarget, Runtime
-from plural.sandbox import NetworkMode
+from plural import Runtime
 from wordle import Wordle
 
-environment = Wordle(
-    runtime=Runtime(
-        provider="local",
-        network=NetworkMode.FULL,
-        targets=frozenset({ExecutionTarget.LOCAL}),
-        allow_unsafe_local=True,
-    )
-).package(("python", "commands.py"))
+environment = Wordle(runtime=Runtime.local()).package(("python", "commands.py"))

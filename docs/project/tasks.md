@@ -47,8 +47,8 @@ Environment; put case-specific facts in `info`, `initial_state`, or Task
 resources. State what “done” means and tell the Agent when to stop.
 
 Avoid leaking expected answers through `instructions`, `info`, observations,
-or broadly readable files. Keep evaluator-only truth in hidden State or
-isolated Verifier data. Never put credentials in Task fields.
+or broadly readable files. Keep evaluator-only truth in State or isolated
+Verifier data. Never put credentials in Task fields.
 
 Task content identity includes the resolved Environment and Verifier hashes.
 Changing any field, Environment source/runtime, or Verifier changes the Task

@@ -27,6 +27,7 @@ from plural.jobs import Job
 from plural.tasks import Benchmark, Task
 from plural.verifiers import (
     AgentVerifier,
+    DeterministicVerifier,
     Verifier,
     VerifierDefinition,
 )
@@ -201,7 +202,9 @@ class Resolver:
             for part in object_path.split("."):
                 value = getattr(value, part)
             if inspect.isclass(value) and issubclass(value, Environment):
-                value = value()
+                value._python_source = source
+                value._python_object = object_path
+                return cast(ProjectObject, value)
             if isinstance(value, Environment):
                 value._python_source = source
                 value._python_object = object_path
@@ -243,6 +246,7 @@ class Resolver:
                 )
             return Harness.model_validate(payload)
         if kind == "verifier":
+            payload = _resolve_verifier_check(payload, base)
             return _VERIFIER_ADAPTER.validate_python(payload, context={"catalog": self.catalog})
         if kind == "environment":
             return self._load_environment(payload, base)
@@ -266,7 +270,20 @@ class Resolver:
                 if not isinstance(agent, Agent):
                     raise TypeError("Job agents must resolve to Agent objects")
                 agents.append(agent)
-            return Job(source, agents=agents, catalog=self.catalog, **payload)
+            allowed = {
+                "mode",
+                "attempts",
+                "concurrency",
+                "per_runtime_concurrency",
+                "priority",
+                "retry",
+            }
+            return Job(
+                source,
+                agents=agents,
+                catalog=self.catalog,
+                **{key: payload[key] for key in allowed if key in payload},
+            )
         raise ValueError(
             "project YAML requires kind: agent, harness, environment, verifier, task, "
             "benchmark, or job"
@@ -287,15 +304,24 @@ class Resolver:
         if python_ref is None:
             return Environment.from_config(**payload)
         reference = str(python_ref)
-        environment = Resolver(root=base, catalog=self.catalog).load(reference)
-        if not isinstance(environment, Environment):
-            raise TypeError(f"{reference} did not resolve to an Environment")
-        if payload:
-            python_source = environment._python_source
-            python_object = environment._python_object
-            environment = type(environment)(**payload)
+        loaded = Resolver(root=base, catalog=self.catalog).load(reference)
+        if inspect.isclass(loaded) and issubclass(loaded, Environment):
+            ctor = dict(payload)
+            python_source = getattr(loaded, "_python_source", None)
+            python_object = getattr(loaded, "_python_object", None)
+            environment = loaded(**ctor)
             environment._python_source = python_source
             environment._python_object = python_object
+        elif isinstance(loaded, Environment):
+            environment = loaded
+            if payload:
+                python_source = environment._python_source
+                python_object = environment._python_object
+                environment = type(environment)(**payload)
+                environment._python_source = python_source
+                environment._python_object = python_object
+        else:
+            raise TypeError(f"{reference} did not resolve to an Environment")
         if package is not None:
             if not isinstance(package, Mapping) or "command" not in package:
                 raise ValueError("environment package requires command")
@@ -318,7 +344,7 @@ class Resolver:
         if isinstance(value, Harness):
             return self._dump_harness(value, base)
         if isinstance(value, Verifier):
-            return cast(dict[str, Any], _public_data(value.model_dump(mode="json")))
+            return self._dump_verifier(value, base)
         if isinstance(value, Environment):
             return self._dump_environment(value, base)
         if isinstance(value, Task):
@@ -360,6 +386,30 @@ class Resolver:
                 "retry": _public_data(spec.retry.model_dump(mode="json")),
             }
         raise TypeError(f"cannot serialize {type(value).__name__}")
+
+    def _dump_verifier(self, value: Verifier, base: Path) -> dict[str, Any]:
+        exclude = {"check"} if isinstance(value, DeterministicVerifier) else set()
+        payload = _public_data(value.model_dump(mode="json", exclude=exclude or None))
+        if isinstance(value, DeterministicVerifier):
+            check = value.check
+            if callable(check):
+                source = inspect.getsourcefile(check)
+                qualname = getattr(check, "__qualname__", getattr(check, "__name__", "check"))
+                if source:
+                    payload["check"] = {
+                        "python": f"{_relative(Path(source).resolve(), base)}:{qualname}",
+                    }
+                else:
+                    payload["check"] = {
+                        "python": f"{getattr(check, '__module__', 'verify')}:{qualname}",
+                    }
+            elif isinstance(check, dict):
+                payload["check"] = _jsonable(check)
+            elif isinstance(check, tuple):
+                payload["check"] = list(check)
+            else:
+                payload["check"] = check
+        return cast(dict[str, Any], payload)
 
     def _dump_harness(self, harness: Harness, base: Path) -> dict[str, Any]:
         payload = _public_data(harness.model_dump(mode="json", exclude_none=True))
@@ -536,6 +586,44 @@ def _infer_kind(payload: Mapping[str, Any]) -> str:
     if "runtime" in payload or "actions" in payload or "python" in payload:
         return "environment"
     return ""
+
+
+def _import_callable(source: Path, object_path: str) -> Any:
+    module_name = f"_plural_check_{uuid4().hex}"
+    spec = importlib.util.spec_from_file_location(module_name, source)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot import Verifier check {source}:{object_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    sys.path.insert(0, str(source.parent))
+    try:
+        spec.loader.exec_module(module)
+        value: Any = module
+        for part in object_path.split("."):
+            value = getattr(value, part)
+    finally:
+        sys.path.pop(0)
+        sys.modules.pop(module_name, None)
+    if not callable(value):
+        raise TypeError(f"{source}:{object_path} is not a callable Verifier check")
+    return value
+
+
+def _resolve_verifier_check(payload: dict[str, Any], base: Path) -> dict[str, Any]:
+    check = payload.get("check")
+    if not (isinstance(check, dict) and check.get("python")):
+        return payload
+    reference = str(check["python"])
+    if ":" not in reference:
+        return payload
+    source_text, object_path = reference.rsplit(":", 1)
+    source = Path(source_text).expanduser()
+    path = source if source.is_absolute() else (base / source)
+    if not path.exists():
+        return payload
+    resolved = dict(payload)
+    resolved["check"] = _import_callable(path.resolve(), object_path)
+    return resolved
 
 
 def _is_project_object(value: object) -> TypeGuard[ProjectObject]:

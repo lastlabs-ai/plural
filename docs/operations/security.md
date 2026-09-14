@@ -24,18 +24,16 @@ provider bug or malicious implementation.
 
 ## Separate information
 
-State is internal; Observation is Agent-visible. `hidden(...)` marks State
-fields for schema-aware filtering, but does not stop colocated code from
-reading a file or process memory. Use separate processes, minimal staged files,
+State is internal; Observation is Agent-visible. Colocated code can still
+read a file or process memory. Use separate processes, minimal staged files,
 and Runtime controls for actual isolation.
 
-Verifier `EvidenceContract` limits the standard Environment view. Command
-Verifiers currently receive all captured artifacts, so isolate untrusted
+Verifiers receive the full final Episode, including State. Isolate untrusted
 Verifier code and avoid capturing secrets.
 
 ## Handle secrets
 
-Environment secret targets are metadata in package Job execution in 0.12.1;
+Environment secret targets are metadata in package Job execution;
 requiredness and target injection are not enforced. Do not rely on them to
 supply Environment, Harness, or Verifier credentials.
 

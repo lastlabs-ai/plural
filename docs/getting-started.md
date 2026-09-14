@@ -10,10 +10,10 @@ outcome: You can author, validate, inspect, export, and dry-run a Job.
 ---
 # Getting started
 
-Plural 0.12.1 requires Python 3.10 or newer:
+Plural 0.13.0 requires Python 3.10 or newer:
 
 ```bash
-python -m pip install "plural==0.12.1"
+python -m pip install "plural==0.13.0"
 plural init support-eval
 cd support-eval
 ```
@@ -21,25 +21,16 @@ cd support-eval
 Open the generated Python project. Its essential graph is:
 
 ```python
-from pathlib import Path
-from plural import Agent, Benchmark, Environment, ExecutionTarget, Job, Runtime, Task
-from plural import NetworkMode
+from plural import Agent, Benchmark, Client, Environment, Episode, Job, Runtime, Task
+from plural import VerifierOutput
 from plural.verifiers import DeterministicVerifier
 
-environment = Environment(
-    name="support-queue",
-    runtime=Runtime(
-        provider="docker",
-        image="python:3.12-slim",
-        network=NetworkMode.FULL,
-        targets=frozenset({ExecutionTarget.DOCKER}),
-    ),
-)
-verify = Path("verify.py").read_text(encoding="utf-8")
-verifier = DeterministicVerifier(
-    name="resolved",
-    check=("python", "-c", verify),
-)
+environment = Environment(name="support-queue", runtime=Runtime.docker())
+
+def resolved(episode: Episode) -> VerifierOutput:
+    return VerifierOutput(reward=float(bool(episode.observation.get("done"))))
+
+verifier = DeterministicVerifier(name="resolved", check=resolved)
 task = Task(
     name="ticket-1",
     instructions="Resolve the support ticket.",
@@ -47,16 +38,16 @@ task = Task(
     verifiers=[verifier],
 )
 benchmark = Benchmark(name="support", version="1.0.0", tasks=[task])
-agent = Agent(
-    model="openai/gpt-5.6-luna",
-    secret_names=("OPENAI_API_KEY",),
-)
-job = Job(benchmark, agents=[agent])
+agent = Agent(model="openai/gpt-5.6-luna")
+job = Job(benchmark, agents=[agent], client=Client())
 ```
 
 This is the golden flow throughout the docs: Environment → Verifier → Task →
 Benchmark → Agent → Job. Python constructors define field names, defaults, and
 validation. YAML stores the same objects and the CLI resolves them.
+
+`Runtime.docker()`, `Runtime.local()`, and `Runtime.daytona()` are the beginner
+Runtime API. Harbor defaults are a public network and `python:3.12-slim`.
 
 ## Validate before execution
 
@@ -68,45 +59,23 @@ plural run job.yaml --dry-run
 ```
 
 `--dry-run` resolves catalog entries, locks object hashes, checks
-Agent–Environment compatibility, and expands Trials. It does not call a model.
+Agent–Environment compatibility, and expands Trials. It does not call a model
+and does not need credentials.
 
-The scaffold is a planning skeleton, not a complete scorer. Add executable
-Environment and Verifier implementations before removing `--dry-run`. A live
-native run also needs an OpenAI-compatible endpoint credential explicitly
-granted by the Agent:
+A live run needs Plural or a bring-your-own key on the Job, not on the Agent:
 
 ```bash
-export OPENAI_API_KEY=...
+plural auth login
 plural run job.yaml
 ```
 
-That command calls a model and may incur provider charges. The Docker Runtime
-above permits network access; use a more restrictive policy when your endpoint
-supports it. To use Plural Gateway instead, grant `PLURAL_API_KEY`, set
-`PLURAL_GATEWAY_URL`, and supply that value in the execution environment.
-
-Local is the orchestration default; it does not mean offline networking or
-unsafe local processes. The Environment's `runtime.provider` decides where
-execution happens. Hosted synchronization is always explicit:
-
-```bash
-plural run job.yaml --hosted
+```python
+Job(task, agents=[agent], client=Client())
+Job(task, agents=[agent], api_key="sk-...")
 ```
 
-## Use the complete starter
+`Agent.secret_names` is only for extra application secrets declared by a custom
+Harness. Model authentication is injected by the Job.
 
-The repository's support project contains an executable Environment adapter,
-deterministic Verifier, three Tasks, two Agents, and generated YAML:
-
-```bash
-cd examples/first-project
-python build.py
-plural validate job.yaml
-plural run benchmark.yaml \
-  --agent agents/careful.yaml \
-  --agent agents/concise.yaml \
-  --dry-run
-```
-
-Continue with [Core concepts](getting-started/concepts.md), then the
-[support queue tutorial](tutorials/support-queue.md).
+After `plural auth login`, `Client()` reads the stored key. Export
+`PLURAL_API_KEY` if you prefer the environment.

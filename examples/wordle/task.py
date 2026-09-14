@@ -10,7 +10,7 @@ task = Task(
         f"Guess the hidden five-letter word from: {', '.join(WORDS)}. "
         "Call guess one word at a time and stop when solved."
     ),
-    info={"task_id": "easy-01"},
     environment=environment,
     verifiers=[solved],
+    initial_state={"secret": "slate"},
 )

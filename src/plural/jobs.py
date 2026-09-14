@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import Enum
@@ -693,15 +694,35 @@ class Job:
         progress: Any = None,
         project_policy: Any = None,
         catalog: ModelCatalog | None = None,
+        client: Any = None,
+        api_key: str | None = None,
     ) -> None:
         if not isinstance(source, (Task, Benchmark)):
-            raise TypeError("Job source must be a Task or Benchmark")
+            raise TypeError(
+                "Cannot create Job.\n"
+                "source must be a Task or Benchmark.\n"
+                f"Got {type(source).__name__}."
+            )
         if not agents:
-            raise ValueError("Job requires at least one Agent")
+            raise ValueError(
+                "Cannot create Job.\n"
+                "A Job needs at least one Agent to run against the Task or Benchmark."
+            )
         if any(not isinstance(agent, Agent) for agent in agents):
-            raise TypeError("Job agents must be Agent instances")
+            raise TypeError(
+                "Cannot create Job.\nagents must be Agent instances created from a catalog model."
+            )
+        if client is not None and api_key:
+            raise ValueError(
+                "Cannot create Job.\n"
+                "Pass client=Client() or api_key=..., not both.\n"
+                "Client uses your Plural login. api_key is a bring-your-own "
+                "OpenAI-compatible key."
+            )
         self.source = source
         self.agents = tuple(agents)
+        self.client = client
+        self.api_key = api_key
         job_source: JobSource
         if isinstance(source, Task):
             job_source = TaskJobSource(task=source._definition())
@@ -734,6 +755,40 @@ class Job:
             key: value for key, value in self._runner_options.items() if value is not None
         }
 
+    def _credential_environ(self) -> dict[str, str]:
+        current = dict(self._runner_options.get("environ") or os.environ)
+        if (
+            self._runner_options.get("provider") is not None
+            or self._runner_options.get("providers") is not None
+        ):
+            return current
+        if self.client is not None:
+            key = getattr(self.client, "api_key", None)
+            if not key:
+                raise ValueError(
+                    "Cannot run Job.\n"
+                    "client= was passed but the Client has no API key.\n"
+                    "Run `plural auth login`, export PLURAL_API_KEY, or "
+                    "construct Client(api_key=...)."
+                )
+            current.setdefault("PLURAL_API_KEY", str(key))
+            gateway = getattr(self.client, "base_url", None)
+            if gateway:
+                current.setdefault("PLURAL_GATEWAY_URL", str(gateway))
+            return current
+        if self.api_key:
+            current.setdefault("OPENAI_API_KEY", self.api_key)
+            return current
+        if current.get("PLURAL_API_KEY") or current.get("OPENAI_API_KEY"):
+            return current
+        raise ValueError(
+            "Cannot run Job.\n"
+            "A live model call needs Plural or a bring-your-own key.\n"
+            "SDK:  Job(task, agents=[agent], client=Client())\n"
+            "SDK:  Job(task, agents=[agent], api_key='...')\n"
+            "CLI:  plural auth login && plural run job.yaml"
+        )
+
     @property
     def content_hash(self) -> str:
         """Stable hash of this resolved public Job configuration."""
@@ -747,7 +802,9 @@ class Job:
         """
         from plural.execution.engine import Job as JobRunner
 
-        return await JobRunner(self.spec, **self._runner_options).run(resume=resume)
+        options = dict(self._runner_options)
+        options["environ"] = self._credential_environ()
+        return await JobRunner(self.spec, **options).run(resume=resume)
 
     def run(self, *, resume: bool = False) -> JobResult:
         """Execute synchronously when no event loop is already running.

@@ -24,7 +24,7 @@ The primary workflow is evaluation:
 
 Those records can inform routing after the evaluation is trustworthy. Train
 mode can also capture exact TITO records and Rewarder signals for a downstream
-trainer. Plural 0.12.1 does not implement optimization algorithms or update
+trainer. Plural does not implement optimization algorithms or update
 model weights.
 
 ## Start here

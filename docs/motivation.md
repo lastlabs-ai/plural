@@ -25,7 +25,7 @@ flowchart TB
   agentB --> score
 ```
 
-An **Environment** is the place an episode happens. It owns actions, hidden state, what the Agent may see, and where the Trial runs. You cannot rewrite it from the Agent side.
+An **Environment** is the place an episode happens. It owns actions, State (never shown to the Agent), Observation (the only agent-visible surface), and where the Trial runs. You cannot rewrite it from the Agent side.
 
 A **Task** is one piece of work in that world: instructions, public info, one pinned Environment revision, and weighted **Verifiers**. The Verifiers decide if the episode counted. They are not the Agent, and they are not the world.
 

@@ -24,7 +24,7 @@ plural review submit JOB_ID TRIAL_ID \
 ```
 
 The local CLI `--score` form supports a Human Verifier with one criterion.
-Plural 0.12.1 does not expose a supported public package API for submitting
+Plural does not expose a supported public package API for submitting
 multiple local criterion scores.
 
 Each criterion score must fall within its `min_score` and `max_score`. Plural

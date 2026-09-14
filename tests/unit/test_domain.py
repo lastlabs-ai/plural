@@ -71,7 +71,7 @@ def test_task_state_is_validated_and_kept_off_the_public_payload() -> None:
             verifiers=(WeightedVerifier(verifier=verifier()),),
             state={"secret": 1},
         )
-    with pytest.raises(ValidationError, match="field is not on this Environment state"):
+    with pytest.raises(ValidationError, match="does not define: 'leftover'"):
         TaskDefinition(
             task_id="hard-01",
             instructions="Guess.",
@@ -114,7 +114,10 @@ def test_agent_is_not_environment_bound_and_stamp_is_per_trial() -> None:
         harness=HarnessBinding.from_package(package),
         harness_package=package,
     )
-    isolated = EnvironmentDefinition(name="isolated")
+    isolated = EnvironmentDefinition(
+        name="isolated",
+        runtime=EnvironmentRuntime(network=NetworkMode.NO_NETWORK),
+    )
     open_environment = EnvironmentDefinition(
         name="open",
         runtime=EnvironmentRuntime(network=NetworkMode.FULL),

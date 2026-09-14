@@ -23,6 +23,8 @@ plural export project.py:job --output job.yaml
 plural run job.yaml --dry-run
 ```
 
+A live run needs `plural auth login` or `--api-key`. Dry-run does not.
+
 A new scaffold still needs executable Environment and Verifier
 implementations. The [support queue tutorial](../tutorials/support-queue.md)
 provides both before its first live run.

@@ -26,7 +26,7 @@ temperature: null
 max_tokens: null
 harness: null
 auth_mode: environment
-secret_names: [OPENAI_API_KEY]
+secret_names: []
 metadata: {}
 ```
 
@@ -109,5 +109,5 @@ The resolver also supports inline nested objects and `{ref: path}` or
 so each authored object can be reviewed and versioned independently.
 
 Use only the object and field names shown in this guide and the generated field
-catalog. Implementation and migration records are not part of the 0.12.1
+catalog. Implementation and migration records are not part of the public
 authoring graph.

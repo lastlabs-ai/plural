@@ -7,18 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **0.13.0 break.** `Environment.runtime` is required. Harbor defaults are a
+  public network and `python:3.12-slim`. Use `Runtime.docker()`,
+  `Runtime.local()`, or `Runtime.daytona()`.
+- Deterministic verifiers are functions over an `Episode`. `EvidenceContract`
+  is removed. State is always agent-invisible; `hidden()` is gone.
+- Live Jobs require `client=Client()` or `api_key=`. Model auth is not
+  `Agent.secret_names`. CLI live runs need `plural auth login` or `--api-key`.
+
 ### Added
 
 - Reorganize documentation into a concise path from the first evaluation
-  through Runtime providers, versioning, evidence, and RL data capture.
+  through Runtime providers, versioning, and RL data capture.
 - Add end-to-end support queue and Wordle tutorials plus dedicated Python,
   CLI, and YAML guides.
 
 ### Fixed
 
-- Pass resolved model identifiers to native Harness execution and use the
-  configured evidence contract when running Agent Verifiers.
+- Pass resolved model identifiers to native Harness execution.
 - Reject Agent secret grants that are not declared by the selected Harness.
+- Fail-closed Task, Runtime, Agent, and Job errors name the object, the rule,
+  and the fix.
 
 ## [0.12.1] - 2026-09-13
 

@@ -11,7 +11,7 @@ outcome: You can follow Python, YAML, and CLI parity in a complete local example
 # Wordle
 
 `examples/wordle` is the compact puzzle counterpart to the support queue. A
-hidden answer stays in State; the Agent sees only marks and remaining guesses.
+secret stays on State; the Agent sees only marks and remaining guesses.
 
 ## Build and validate
 
@@ -33,12 +33,16 @@ The short files each own one concept:
 
 `Wordle.guess(word)` is the only Agent action. `reset()` chooses the task-bound
 secret and `terminated()` stops on success or six guesses. The deterministic
-Verifier reads final solved status from its declared evidence view.
+Verifier function reads `episode.observation["solved"]`, `episode.state["guesses"]`,
+and `episode.usage`.
 
-`agent.py` explicitly grants `OPENAI_API_KEY` to the native Harness. Supply
-that value, then run:
+Pin a word with `Task(..., initial_state={"secret": "crane"})`. Omit it and
+the Environment picks a seeded random secret from the dictionary.
+
+A live run needs `plural auth login` or `--api-key`:
 
 ```bash
+plural auth login
 plural run job.py:job
 ```
 

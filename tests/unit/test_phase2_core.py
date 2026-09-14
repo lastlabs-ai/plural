@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 import plural
-from plural import Agent, Benchmark, Environment, Harness, Job, Task
+from plural import Agent, Benchmark, Environment, Harness, Job, Runtime, Task
 from plural.verifiers import (
     AgentVerifier,
     DeterministicVerifier,
@@ -28,7 +28,7 @@ def task(name: str, *, version: str = "0.1.0") -> Task:
         version=version,
         instructions=f"Solve {name}.",
         goals=("Return the correct answer.",),
-        environment=Environment(name="world", version="1.0.0"),
+        environment=Environment(name="world", version="1.0.0", runtime=Runtime.docker()),
         verifiers=(solved(weight=2),),
         initial_state={},
         reset_options={"seed": 7},
@@ -116,7 +116,7 @@ def test_verifier_contract_uses_check_criteria_and_catalog_models() -> None:
 
 
 def test_task_compiles_python_environment_and_attaches_verifiers_directly() -> None:
-    environment = Environment(name="world", version="1.2.3")
+    environment = Environment(name="world", version="1.2.3", runtime=Runtime.docker())
     verifier = solved(weight=2)
     value = Task(
         name="case-1",

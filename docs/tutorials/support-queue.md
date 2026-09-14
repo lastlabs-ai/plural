@@ -2,7 +2,7 @@
 route: /docs/tutorials/support-queue
 title: Support queue tutorial
 order: 150
-description: Build and evaluate a realistic customer-support workflow with typed actions, hidden truth, deterministic evidence, multiple Agents, and review variants.
+description: Build and evaluate a realistic customer-support workflow with typed actions, internal State, Episode scoring, multiple Agents, and review variants.
 audience: all
 nav: true
 nav_group: Tutorials
@@ -41,7 +41,7 @@ def draft_response(self, message: str) -> dict: ...
 def resolve(self) -> dict: ...
 ```
 
-The expected category lives in hidden State. The Agent sees the ticket and
+The expected category lives on State. The Agent sees the ticket and
 applicable policy through Observation, but not the answer key. `view()` creates
 a compact operator rendering. `policy.md` is represented as an authored
 Environment Resource and packaged with the source. The Resource itself is
@@ -57,15 +57,13 @@ rendering.
 The deterministic Verifier requests only the fields it needs:
 
 ```python
-verifier = DeterministicVerifier(
-    name="correct-category",
-    check=("python", "-c", VERIFY),
-    evidence=EvidenceContract(
-        observation_paths=("category", "draft_reply", "status", "done"),
-        state_paths=("expected",),
-        include_hidden_state=True,
-    ),
-)
+def correct_category(episode: Episode) -> VerifierOutput:
+    done = bool(episode.observation.get("done"))
+    match = episode.observation.get("category") == episode.state.get("expected")
+    drafted = bool(str(episode.observation.get("draft_reply") or "").strip())
+    return VerifierOutput(reward=float(done and match and drafted))
+
+verifier = DeterministicVerifier(name="correct-category", check=correct_category)
 ```
 
 It checks resolved status, category equality, and a nonempty response. This is
@@ -73,7 +71,7 @@ stronger than grading the Agent's final claim.
 
 ## 3. Run multiple Agents
 
-Configure `OPENAI_API_KEY`, then run the three-Task Benchmark against two
+Run `plural auth login`, then run the three-Task Benchmark against two
 catalog-backed Agents:
 
 ```bash

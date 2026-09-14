@@ -4,18 +4,10 @@ import json
 import sys
 from pathlib import Path
 
+from plural import Runtime
 from wordle import Board, Game, Wordle
 
-
-def task_id() -> str:
-    if not Path("task.json").exists():
-        return "easy-01"
-    task = json.loads(Path("task.json").read_text())
-    info = task.get("info") if isinstance(task.get("info"), dict) else {}
-    return str(info.get("task_id") or task.get("task_id") or "easy-01")
-
-
-world = Wordle(info={"task_id": task_id()})
+world = Wordle(runtime=Runtime.local())
 if Path("state.json").exists():
     world.state = Game.model_validate_json(Path("state.json").read_text())
 if Path("observation.json").exists():

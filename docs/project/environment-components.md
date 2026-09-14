@@ -38,21 +38,20 @@ episode, the Harness asks the model for a move, and `step()` applies it.
 State is durable internal truth. Observation is the Agent-visible projection:
 
 ```python
-from plural import Observation, State, hidden
+from plural import Observation, State
 
 class TicketView(Observation):
     issue: str = ""
     status: str = "open"
 
 class TicketState(State):
-    expected_team: str = hidden("")
+    expected_team: str = ""
     issue: str = ""
     status: str = "open"
 ```
 
-The hidden marker is schema metadata. It prevents accidental inclusion through
-the standard evidence path unless a Verifier opts in; it is not filesystem or
-process isolation. Never put credentials in State.
+State is never sent to the Agent. Observation is the only visible surface.
+Never put credentials in State.
 
 Override `Observation.render()` to produce policy-facing text. Override
 `Environment.view()` to produce a JSON operator display. Persisted
@@ -62,7 +61,7 @@ Override `Observation.render()` to produce policy-facing text. Override
 
 `reset(seed=..., options=...)` returns `(observation, info)`. A Task can supply
 `initial_state` and `reset_options`; initial State is schema-checked while
-reset behavior remains Environment code. Plural 0.12.1 serializes and hashes
+reset behavior remains Environment code. Plural serializes and hashes
 `reset_options`, but the package command adapter does not yet forward them to
 `reset`; use Task info or initial State in that path.
 
@@ -84,7 +83,7 @@ def progress(previous_state, current_state, action, result) -> float:
 ```
 
 Rewarders conceptually describe state-transition credit and run only in train
-mode. In 0.12.1, package Jobs can execute command Rewarders during final
+mode. Package Jobs can execute command Rewarders during final
 scoring; decorated Python Rewarders are recorded by implementation digest but
 are not executable from a package Job. A compatible in-process integration
 must invoke transition Rewarders itself. Do not present this declaration as a

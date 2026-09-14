@@ -1,6 +1,6 @@
 """Plan a model comparison across Tasks and Environments."""
 
-from plural import Agent, Benchmark, Environment, Job, Task
+from plural import Agent, Benchmark, Environment, Job, Runtime, Task
 from plural.verifiers import DeterministicVerifier
 
 verifier = DeterministicVerifier(name="correct", check=("python", "verify.py"))
@@ -8,7 +8,7 @@ tasks = tuple(
     Task(
         name=name,
         instructions=prompt,
-        environment=Environment(name=f"{name}-environment"),
+        environment=Environment(name=f"{name}-environment", runtime=Runtime.docker()),
         verifiers=(verifier,),
     )
     for name, prompt in (

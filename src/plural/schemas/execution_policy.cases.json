@@ -103,7 +103,7 @@
           "network_none"
         ]
       },
-      "error_contains": "cannot enforce network=none required by environment 'support-triage' is not enforceable by target 'local'"
+      "error_contains": "cannot enforce network=no-network required by environment 'support-triage' is not enforceable by target 'local'"
     },
     {
       "id": "project_blocks_harness_capabilities",

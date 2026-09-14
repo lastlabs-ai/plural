@@ -501,6 +501,8 @@ Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
 │ --json                                                           Render watched hosted events as │
 │                                                                  JSON Lines.                     │
 │ --idempotency-key                            <str>                                               │
+│ --api-key                                    <str>               Bring-your-own                  │
+│                                                                  OpenAI-compatible key.          │
 │ --name                                       <str>               [default: Job]                  │
 │ --format                                     <json|yaml>         [default: json]                 │
 │ --catalog                                    <path>                                              │

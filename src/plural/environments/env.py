@@ -136,7 +136,18 @@ class Environment(Generic[ObsT, StateT]):
         self.overview = type(self).overview if overview is None else overview
         self.readme = type(self).readme if readme is None else readme
         self.resources = resources
-        self.runtime = runtime or EnvironmentRuntime()
+        if runtime is None:
+            raise ValueError(
+                f"Cannot create Environment {self.name!r}.\n"
+                "runtime is required and says where the Agent and Environment execute.\n"
+                "Use a Harbor-style preset:\n"
+                "  Environment(..., runtime=Runtime.docker())\n"
+                "  Environment(..., runtime=Runtime.local())\n"
+                "  Environment(..., runtime=Runtime.daytona())"
+            )
+        if isinstance(runtime, Mapping):
+            runtime = EnvironmentRuntime.model_validate(runtime)
+        self.runtime = runtime
         self.secrets = secrets
         self.guardrails = guardrails
         self.harness_policy = harness_policy or HarnessPolicy()
