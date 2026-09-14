@@ -81,7 +81,7 @@ class EnvironmentResource(FrozenModel):
 
 
 class SecretReference(FrozenModel):
-    """A named secret injected by a runtime without embedding its value."""
+    """A named secret target declaration; package execution does not inject it yet."""
 
     name: str = Field(min_length=1)
     required: bool = True

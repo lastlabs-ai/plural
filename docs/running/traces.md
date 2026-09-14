@@ -4,8 +4,7 @@ title: Traces and Trials
 order: 90
 description: Follow actions, observations, artifacts, and scores back to the exact run.
 audience: all
-nav: true
-nav_group: Running
+nav: false
 outcome: You can inspect a recorded episode and separate execution failures from performance failures.
 ---
 # Traces and Trials

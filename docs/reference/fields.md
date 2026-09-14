@@ -2,15 +2,16 @@
 route: /docs/reference/fields
 title: "Field catalog"
 order: 205
-description: "Every authoring and execution field, generated from the current Plural models."
+description: "Post-resolution constructor schemas generated from the current Plural models."
 audience: all
-nav: false
+nav: true
+nav_group: Reference
 ---
 # Field catalog
 
-Use this catalog after the conceptual guides. It is generated from the executable Pydantic models, including nested types. Required fields have no usable default. Custom cross-field validators also apply; the [definition guide](definitions.md) explains the important relationships.
+Use this catalog after the conceptual guides. It is generated from the post-resolution Pydantic constructor models, including nested types. Required fields have no usable default. Custom cross-field validators also apply.
 
-These are the public SDK fields used by Python and YAML. JSON Schema alone does not describe every runtime capability check or side effect.
+These schemas describe resolved object values, not Python references, source materialization, runtime capability checks, or side effects. The imperative public `Job` constructor is omitted because it is not a Pydantic model; use the [Jobs guide](../running/jobs.md) and [Python SDK guide](../sdk/evaluation.md) for its source, Agent, mode, attempt, concurrency, retry, planning, and run arguments. Methods and Client request types belong in the API reference.
 
 [Download the complete schemas](../assets/project-schemas.json).
 
@@ -26,8 +27,8 @@ These are the public SDK fields used by Python and YAML. JSON Schema alone does 
 - [Benchmark](#benchmark)
 - [Capability](#capability)
 - [DeclarativeImage](#declarativeimage)
-- [EnvironmentResource](#environmentresource)
-- [EnvironmentRuntime](#environmentruntime)
+- [Resource](#resource)
+- [Runtime](#runtime)
 - [EvidenceContract](#evidencecontract)
 - [ExecutionLimits](#executionlimits)
 - [ExecutionTarget](#executiontarget)
@@ -35,12 +36,12 @@ These are the public SDK fields used by Python and YAML. JSON Schema alone does 
 - [HarnessCapability](#harnesscapability)
 - [HarnessOutput](#harnessoutput)
 - [HarnessPolicy](#harnesspolicy)
-- [NativeAction](#nativeaction)
+- [Action](#action)
 - [NetworkMode](#networkmode)
 - [ResourceRequirements](#resourcerequirements)
-- [RewarderDefinition](#rewarderdefinition)
+- [Rewarder](#rewarder)
 - [RubricCriterion](#rubriccriterion)
-- [SecretReference](#secretreference)
+- [Secret](#secret)
 - [VerifierRuntime](#verifierruntime)
 
 ## Environment
@@ -52,15 +53,15 @@ Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent.
 - **`description`** — `string`; optional. Default: `""`.
 - **`overview`** — `string`; optional. Default: `""`.
 - **`readme`** — `string`; optional. Default: `""`.
-- **`actions`** — `array of NativeAction`; optional. Default: `[]`.
+- **`actions`** — `array of Action`; optional. Default: `[]`.
 - **`reset_command`** — `array of string`; optional. Default: `[]`.
 - **`observation_schema`** — `object`; optional.
 - **`state_schema`** — `object`; optional.
-- **`rewarders`** — `array of RewarderDefinition`; optional. Default: `[]`.
+- **`rewarders`** — `array of Rewarder`; optional. Default: `[]`.
 - **`guardrails`** — `array of Guardrail`; optional. Default: `[]`.
-- **`resources`** — `array of EnvironmentResource`; optional. Default: `[]`.
-- **`runtime`** — `EnvironmentRuntime`; optional.
-- **`secrets`** — `array of SecretReference`; optional. Default: `[]`.
+- **`resources`** — `array of Resource`; optional. Default: `[]`.
+- **`runtime`** — `Runtime`; optional.
+- **`secrets`** — `array of Secret`; optional. Default: `[]`.
 - **`harness_policy`** — `HarnessPolicy`; optional.
 - **`limits`** — `ExecutionLimits`; optional.
 - **`metadata`** — `object`; optional.
@@ -99,7 +100,7 @@ One versioned unit of work in a Python-authored Environment.
 - **`metadata`** — `object`; optional.
 - **`environment`** — `JSON value`; required.
 - **`verifiers`** — `array of DeterministicVerifier | AgentVerifier | HumanVerifier`; required. Constraints: `{"minItems": 1}`.
-- **`resources`** — `array of EnvironmentResource`; optional. Default: `[]`.
+- **`resources`** — `array of Resource`; optional. Default: `[]`.
 - **`initial_state`** — `object`; optional.
 - **`reset_options`** — `object`; optional.
 
@@ -196,7 +197,7 @@ Portable subset of Daytona's declarative image builder.
 - **`environment`** — `object`; optional.
 - **`workdir`** — `string | null`; optional. Default: `null`.
 
-## EnvironmentResource
+## Resource
 
 Data or application supplied by an Environment.
 
@@ -208,7 +209,7 @@ Data or application supplied by an Environment.
 - **`content_type`** — `string`; optional. Default: `""`.
 - **`config`** — `object`; optional.
 
-## EnvironmentRuntime
+## Runtime
 
 Immutable Environment-owned provider, placement, network, and compute.
 
@@ -285,7 +286,7 @@ Environment ceiling for a Trial's optional Agent harness.
 - **`allowed_capabilities`** — `array of HarnessCapability | null`; optional. Default: `null`.
 - **`denied_capabilities`** — `array of HarnessCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
 
-## NativeAction
+## Action
 
 An action owned by an Environment.
 
@@ -314,7 +315,7 @@ Optional compute limits.
 - **`pids`** — `integer | null`; optional. Default: `null`.
 - **`disk_mb`** — `integer | null`; optional. Default: `null`.
 
-## RewarderDefinition
+## Rewarder
 
 A train-only state-transition rewarder.
 
@@ -336,9 +337,9 @@ One deterministic human or agent rubric criterion.
 - **`min_score`** — `number`; optional. Default: `0`.
 - **`max_score`** — `number`; optional. Default: `1`.
 
-## SecretReference
+## Secret
 
-A named secret injected by a runtime without embedding its value.
+A named secret target declaration; package execution does not inject it yet.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`required`** — `boolean`; optional. Default: `true`.

@@ -595,7 +595,7 @@
       },
       "SecretReference": {
         "additionalProperties": false,
-        "description": "A named secret injected by a runtime without embedding its value.",
+        "description": "A named secret target declaration; package execution does not inject it yet.",
         "properties": {
           "name": {
             "minLength": 1,

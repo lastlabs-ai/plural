@@ -1,11 +1,18 @@
 kind: environment
 python: world.py:SupportQueue
 name: support-queue
-version: 0.1.0
+version: 1.0.0
 description: ''
-overview: Read a ticket, then assign billing, technical, or account.
+overview: Inspect a customer ticket, categorize it, draft a reply, and resolve it.
 readme: ''
-resources: []
+resources:
+- kind: data
+  name: support-policy
+  path: policy.md
+  uri: null
+  digest: null
+  content_type: text/markdown
+  config: {}
 runtime:
   provider: local
   placement: {}
@@ -50,4 +57,4 @@ package:
   - python
   - commands.py
   source: .
-  digest: sha256:724a2a682a771b89c74c5c0704dfa7a32248310ae87b9e6a5a54f112175b6c51
+  digest: sha256:b1b269a4a46f925a29dfb6ced5920848e7716859a99cffc7fa4fafcf4a59c6a3

@@ -14,7 +14,9 @@ nav_group: Reference
 - **State:** the world's internal data, including fields not meant for the agent.
 - **Native action:** an operation implemented by the Environment.
 - **Runtime:** the execution machine and its dependencies, connectivity, and limits.
-- **Provider:** an implementation of runtime execution or model access; distinguish these two uses.
+- **SandboxProvider:** an implementation of Runtime lifecycle and controls.
+- **Model provider:** an endpoint implementation that answers model requests.
+- **Resource:** authored Environment or Task input metadata; not a run output.
 - **Task:** instructions and public information pinned to one Environment and one or more Verifiers.
 - **Verifier:** a deterministic, agent, or human scorer attached to a Task.
 - **Evidence contract:** the artifact requirements and observation/state paths requested by a Verifier.
@@ -25,12 +27,13 @@ nav_group: Reference
 - **Job:** the selected Task or Benchmark, Agents, mode, attempts, and scheduling configuration.
 - **Trial:** one Agent × one Task × one planned attempt.
 - **Execution:** one actual execution of a Trial, including a retry after failure.
-- **Trace:** captured episode behavior. The exact format depends on the tracing integration.
+- **Trajectory:** normalized episode messages, actions, observations, and related events.
+- **Trace:** a tracing-SDK or hosted observability record; not every trajectory is a Trace.
 - **Artifact:** a captured output file, identified by path and content hash.
 - **Receipt:** the Trial's recorded identities, runtime, timing, and integrity information.
 - **Review:** a person's scoring submission for a pending human Verifier.
 - **Reward:** the scalar quality signal produced by a Verifier or learning integration.
 - **Rewarder:** an Environment-declared learning signal, used by supported train execution paths.
 - **TITO:** exact tokens in and tokens out, with aligned provenance for training.
-- **Revision:** a named version of an authored object; its digest identifies resolved content.
+- **Version:** a semantic version of an authored object; its content hash identifies resolved content.
 - **Leaderboard:** a comparison derived from Agent results on a Benchmark under a stated aggregation rule.

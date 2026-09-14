@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 import plural
@@ -80,6 +81,16 @@ def test_harness_and_agent_yaml_roundtrip_preserves_hash_and_plan(tmp_path: Path
     assert isinstance(restored_job, Job)
     assert restored_job.content_hash == job.content_hash
     assert restored_job.plan == job.plan
+
+
+def test_public_agent_rejects_secret_not_declared_by_harness(tmp_path: Path) -> None:
+    harness = _harness(tmp_path / "runner")
+    with pytest.raises(ValueError, match="not declared by Harness"):
+        Agent(
+            model="openai/gpt-5.6-luna",
+            harness=harness,
+            secret_names=("ANTHROPIC_API_KEY",),
+        )
 
 
 def test_harness_cli_scaffold_and_validate_are_plain(tmp_path: Path) -> None:

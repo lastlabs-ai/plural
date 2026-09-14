@@ -11,6 +11,7 @@ from plural import (
     ExecutionLimits,
     ExecutionTarget,
     Job,
+    Resource,
     Runtime,
     Task,
 )
@@ -22,6 +23,14 @@ ROOT = Path(__file__).resolve().parent
 VERIFY = (ROOT / "verifiers" / "correct.py").read_text(encoding="utf-8")
 
 environment = SupportQueue(
+    resources=(
+        Resource(
+            kind="data",
+            name="support-policy",
+            path="policy.md",
+            content_type="text/markdown",
+        ),
+    ),
     runtime=Runtime(
         provider="local",
         network=NetworkMode.FULL,
@@ -36,7 +45,7 @@ verifier = DeterministicVerifier(
     check=("python", "-c", VERIFY),
     runtime=VerifierRuntime(provider="local", network="full"),
     evidence=EvidenceContract(
-        observation_paths=("category", "done"),
+        observation_paths=("category", "draft_reply", "status", "done"),
         state_paths=("expected",),
         include_hidden_state=True,
     ),
@@ -46,8 +55,12 @@ tasks = tuple(
     Task(
         name=ticket_id,
         instructions=(
-            "Read the open ticket, categorize it correctly, then give a brief "
-            "final confirmation. Stop after categorization."
+            "Inspect the open ticket, categorize it, draft a concise customer response, "
+            "then resolve it. Stop when the Environment reports done."
+        ),
+        goals=(
+            "Use the support policy returned by inspect_ticket.",
+            "Resolve the ticket only after categorizing it and drafting a response.",
         ),
         environment=environment,
         verifiers=[verifier],

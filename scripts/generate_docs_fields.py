@@ -1,6 +1,7 @@
 """Generate the docs field catalog from current executable package models."""
 
 import json
+import sys
 from pathlib import Path
 
 from plural import Agent, Benchmark, Harness, Task
@@ -21,6 +22,13 @@ models = [
 ]
 schemas = {}
 nested = {}
+DISPLAY_NAMES = {
+    "EnvironmentResource": "Resource",
+    "EnvironmentRuntime": "Runtime",
+    "NativeAction": "Action",
+    "RewarderDefinition": "Rewarder",
+    "SecretReference": "Secret",
+}
 for name, model in models:
     schema = public_schema(model)
     schema["title"] = name
@@ -33,19 +41,23 @@ body = [
     "route: /docs/reference/fields",
     'title: "Field catalog"',
     "order: 205",
-    'description: "Every authoring and execution field, generated from the current Plural models."',
+    'description: "Post-resolution constructor schemas generated from the current Plural models."',
     "audience: all",
-    "nav: false",
+    "nav: true",
+    "nav_group: Reference",
     "---",
     "# Field catalog",
     "",
     "Use this catalog after the conceptual guides. It is generated from the "
-    "executable Pydantic models, including nested types. Required fields have no "
-    "usable default. Custom cross-field validators also apply; the [definition "
-    "guide](definitions.md) explains the important relationships.",
+    "post-resolution Pydantic constructor models, including nested types. Required "
+    "fields have no usable default. Custom cross-field validators also apply.",
     "",
-    "These are the public SDK fields used by Python and YAML. JSON Schema alone "
-    "does not describe every runtime capability check or side effect.",
+    "These schemas describe resolved object values, not Python references, source "
+    "materialization, runtime capability checks, or side effects. The imperative "
+    "public `Job` constructor is omitted because it is not a Pydantic model; use "
+    "the [Jobs guide](../running/jobs.md) and [Python SDK guide](../sdk/evaluation.md) "
+    "for its source, Agent, mode, attempt, concurrency, retry, planning, and run "
+    "arguments. Methods and Client request types belong in the API reference.",
     "",
     "[Download the complete schemas](../assets/project-schemas.json).",
     "",
@@ -53,12 +65,14 @@ body = [
     "",
 ]
 for name in [*schemas, *sorted(nested)]:
-    body.append(f"- [{name}](#{name.lower()})")
+    shown = DISPLAY_NAMES.get(name, name)
+    body.append(f"- [{shown}](#{shown.lower()})")
 
 
 def _typ(p):
     if "$ref" in p:
-        return p["$ref"].split("/")[-1]
+        name = p["$ref"].split("/")[-1]
+        return DISPLAY_NAMES.get(name, name)
     if "anyOf" in p or "oneOf" in p:
         return " | ".join(_typ(x) for x in p.get("anyOf", p.get("oneOf", [])))
     if "const" in p:
@@ -71,7 +85,8 @@ def _typ(p):
 
 
 for name, schema in [*schemas.items(), *sorted(nested.items())]:
-    body.extend(["", f"## {name}", "", schema.get("description", "").split("\n\n")[0], ""])
+    shown = DISPLAY_NAMES.get(name, name)
+    body.extend(["", f"## {shown}", "", schema.get("description", "").split("\n\n")[0], ""])
     props = schema.get("properties", {})
     if not props:
         body.extend([f"Allowed values: `{_typ(schema)}`.", ""])
@@ -107,7 +122,17 @@ for name, schema in [*schemas.items(), *sorted(nested.items())]:
         )
         desc = " " + p["description"].replace("\n", " ") if p.get("description") else ""
         body.append(f"- **`{field}`** — `{_typ(p)}`; {state}.{default}{constraint}{desc}")
-(root / "reference/fields.md").write_text("\n".join(body) + "\n")
+fields_path = root / "reference/fields.md"
+fields_content = "\n".join(body) + "\n"
 (root / "assets").mkdir(exist_ok=True)
-(root / "assets/project-schemas.json").write_text(json.dumps(schemas, indent=2) + "\n")
+schemas_path = root / "assets/project-schemas.json"
+schemas_content = json.dumps(schemas, indent=2) + "\n"
+if "--check" in sys.argv:
+    if fields_path.read_text(encoding="utf-8") != fields_content:
+        raise SystemExit("Generated field documentation is stale.")
+    if schemas_path.read_text(encoding="utf-8") != schemas_content:
+        raise SystemExit("Generated documentation schemas are stale.")
+else:
+    fields_path.write_text(fields_content, encoding="utf-8")
+    schemas_path.write_text(schemas_content, encoding="utf-8")
 print(f"Generated {len(schemas) + len(nested)} contracts.")

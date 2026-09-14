@@ -1,32 +1,45 @@
 ---
 route: /docs/project/runtime
-title: Runtime and connectivity
+title: Runtime
 order: 35
-description: Choose local, Docker, or remote execution and declare enforceable network and resource policies.
+description: Choose where an Agent runs and declare image, compute, filesystem, network, persistence, placement, and current secret metadata.
 audience: all
-nav: false
+nav: true
+nav_group: Build
 outcome: You can select a runtime that can enforce your Environment requirements.
 ---
-# Runtime and connectivity
+# Runtime
 
-The runtime is the machine where the agent and Environment execute. It determines the operating system, installed dependencies, network access, and resource limits. This configuration lives on the **Environment**. Each deterministic or agent Verifier separately declares the machine and connectivity needed to score the run.
+`Environment.runtime` says where the Agent Harness and Environment execute.
+It is part of the Environment hash, so changing it changes every Task pin that
+uses that Environment. Each deterministic or Agent Verifier has a separate
+`VerifierRuntime`.
 
-Choose the runtime for the behavior you need. A local process is convenient for trusted development. A container gives you a reproducible userspace and enforceable isolation features. A remote sandbox moves execution to a provisioned machine.
+```python
+from plural import ExecutionTarget, Runtime
+from plural.sandbox import NetworkMode
 
-## Inspect available providers
-
-```bash
-plural providers list
-plural providers doctor
+runtime = Runtime(
+    provider="docker",
+    image="python:3.12-slim",
+    network=NetworkMode.NONE,
+    targets=frozenset({ExecutionTarget.DOCKER}),
+    timeout_seconds=180,
+)
 ```
 
-The built-in registry includes `local`, `docker`, and `daytona`. `remote` is an execution target category, not a built-in provider name you can use in place of `daytona`. Installed provider plugins can register additional names.
+## Provider and target
 
-A target describes the type of execution; a provider implements it. Listing a target in `targets` does not automatically switch to it when another provider fails. Plural checks requested features against provider capabilities and rejects combinations it cannot enforce.
+Plural 0.12.1 registers `local`, `docker`, and `daytona`. There is no built-in
+provider named `current`, `remote`, or `blaxel`. `local`, `docker`, and
+`remote` are target classes; a provider implements one. `daytona` maps to
+`remote`. Unknown provider names can come from installed plugins, but
+registration alone does not prove capability or hosted availability.
+
+Plural does not fall back between Runtime providers. Planning and preflight
+must reject any requested control the selected provider cannot enforce.
 
 ## Trusted local execution
-
-This Environment runtime matches the starter:
 
 ```yaml
 runtime:
@@ -34,16 +47,19 @@ runtime:
   network: full
   allow_unsafe_local: true
   targets: [local]
-  timeout_seconds: 180
+  timeout_seconds: 180.0
 ```
 
-The local provider runs processes on your machine. It does not enforce network isolation, filesystem isolation, container images, persistence, or resource limits. `network: none` and `network: restricted` are incompatible with local execution. Setting local opt-in acknowledges this development mode; it does not add isolation.
+`local` runs a subprocess in a temporary workspace on the current machine. It
+is not in-process execution and not a sandbox. It supports scoped upload and
+download, argv execution, environment values, logs, timeout, and cancellation.
+It cannot enforce image, OS, compute, network, read-only-root, persistence, or
+compose requirements. `network` must be `full`, `targets` must include `local`,
+and `allow_unsafe_local=True` is mandatory.
 
-Local execution is useful for stepping through actions and testing a trusted harness. Keep real credentials and unrelated files outside the example's needs.
+Use it only for trusted development code.
 
-## Docker and the operating system
-
-A minimal container runtime fragment is:
+## Docker: image, OS, build, and filesystem
 
 ```yaml
 runtime:
@@ -55,28 +71,35 @@ runtime:
   resources:
     cpu: 2
     memory_mb: 2048
-    disk_mb: 4096
+    pids: 256
+  read_only_root: true
 ```
 
-The image defines the operating system userspace and installed tools. There is no separate `os` field. Install dependencies in an image or build context before execution; a sandbox with `network: none` cannot download packages during the run. For a reproducible comparison, pin an image digest rather than relying on a moving tag.
+The image defines OS userspace and installed dependencies; there is no `os`
+field. Pin an immutable image digest for reproducibility. Alternatively,
+`build_context` plus optional `dockerfile` builds locally. A remote provider
+cannot consume that local context. `image`, `snapshot`, and
+`declarative_image` are mutually exclusive.
 
-Start with only the resource requirements your provider reports it can enforce. In particular, provider support for disk limits and other capabilities may differ; do not assume this fragment is portable to every Docker host.
+Docker uses a fresh container, drops Linux capabilities, sets
+`no-new-privileges`, uses an unprivileged user, and creates a scoped workspace.
+`read_only_root` makes the container root read-only while the workspace remains
+writable. The built-in adapter supports CPU, memory, and PID controls but
+rejects `disk_mb`, persistence, compose, and restricted network allowlists.
+The Docker daemon remains a trusted host boundary.
 
-For an Environment-specific image, `build_context` and `dockerfile` describe a local build. Remote providers cannot consume a local build context. Build and publish an image or use a supported snapshot/declarative image workflow when moving to a remote provider. `image`, `snapshot`, and `declarative_image` are mutually exclusive.
+## Network
 
-Changing the Environment runtime does not change its Verifiers. Update each Verifier runtime too if the complete experiment should run in containers.
+- `none`: block outbound network.
+- `full`: permit outbound network.
+- `restricted`: permit only `network_allowlist`; valid only on providers that
+  advertise and enforce allowlisting.
 
-## Network access
+The native model loop runs inside this Runtime, so model API calls need network
+access. `plural run` being local does not make those calls offline.
 
-There are three declared modes:
-
-- **`none`:** execution has no outbound network where the selected provider enforces it. Useful for offline puzzles, file transformations, and deterministic tests.
-- **`full`:** outbound network is permitted. Use it when the agent must call a model API or external tools, with the corresponding access policy.
-- **`restricted`:** only the configured destinations are allowed, on a provider that supports allowlisting. `network_allowlist` is valid only with this mode.
-
-The built-in Docker provider supports blocked or full networking; it does not advertise restricted networking. Daytona supports restricted networking through its adapter. A restricted request with no supported enforcement should fail, never silently become full access.
-
-For example, an Environment using Daytona can declare:
+Docker supports `none` and `full`. Daytona supports all three; restricted
+Daytona networking requires a nonempty all-domain or all-CIDR allowlist.
 
 ```yaml
 runtime:
@@ -84,29 +107,53 @@ runtime:
   targets: [remote]
   network: restricted
   network_allowlist: [api.openai.com]
-  timeout_seconds: 180
+  timeout_seconds: 180.0
 ```
 
-This is a connectivity fragment, not a complete cloud setup. Add the image or snapshot and dependencies required by your harness. The Daytona adapter accepts domain allowlists or CIDR lists; do not mix them in one list. Check the installed provider before running.
+## Daytona and remote providers
 
-A model API call made inside the runtime needs connectivity too. `--offline` does not block those calls; it selects local Job orchestration and storage. A locally orchestrated Job can still use Docker, Daytona, or a paid model API.
-
-## Daytona and other remote sandboxes
-
-Install the optional provider support from the current checkout:
+Daytona support is implemented but optional:
 
 ```bash
-python -m pip install -e '.[daytona]'
-plural providers doctor
+python -m pip install "plural[daytona]==0.12.1"
+export DAYTONA_API_KEY=...
 ```
 
-Run the installation in the package root. Supply Daytona credentials through your process environment, then use `provider: daytona`. See [Cloud providers](../guides/cloud-providers.md) for adapter setup. A local source directory is not automatically available on another machine; hosted execution needs a materializable package source and access to the selected runtime.
+The adapter supports image, snapshot, or `DeclarativeImage`; CPU and memory;
+network blocking/allowlisting; upload/download; timeout/cancel; environment;
+working directory; and logs. It rejects local build contexts, PID/disk limits,
+stdin execution, persistence, compose, and read-only root.
 
-For another cloud, implement the [sandbox provider interface](../guides/provider-plugins.md). Advertise only capabilities that the provider actually enforces.
+Daytona is the only named remote sandbox integration bundled in 0.12.1.
+Daytona, Blaxel, or another partner can also ship an independent
+`SandboxProvider` plugin through the `plural.sandbox_providers` entry-point
+group. Blaxel is an extension path, not a completed integration in this
+release.
 
-## Secrets and process configuration
+Every partner implementation must provide clean create/upload/exec/download/
+cancel/destroy lifecycle behavior, truthful `capabilities()` and `doctor()`
+reports, scoped paths, captured logs, idempotent cleanup, and fail-closed
+preflight. Unsupported policy must never degrade silently.
 
-The Environment declares secret names and their intended target:
+Inspect provider health programmatically:
+
+```python
+import asyncio
+from plural import ProviderRegistry
+
+reports = asyncio.run(ProviderRegistry().doctors(include_unavailable=True))
+for report in reports:
+    print(report.name, report.healthy, report.reason)
+```
+
+## Files, resources, secrets, and persistence
+
+Environment and Harness source bundles are uploaded into scoped workspaces.
+Only declared outputs and artifacts are downloaded before teardown. An authored
+`Resource` is a hashed object descriptor; it is not automatically a secret or
+an arbitrary host mount.
+
+Declare secret references, never values:
 
 ```yaml
 secrets:
@@ -115,22 +162,39 @@ secrets:
     target: environment
 ```
 
-The targets are `environment`, `harness`, and `verifier`. A declaration describes the requirement; the execution integration must supply the value to the correct process. Do not place secret values in YAML, Task metadata, resources, or recorded observations.
+Targets are `environment`, `harness`, and `verifier`, but package Job execution
+in 0.12.1 treats Environment secret references as metadata: it does not resolve
+required or optional values, inject them into any target, or use them as a
+redaction list. A reference also does not provision a vault.
 
-For a Harness, the package declares permitted `secret_names`, and the Agent grants the names it needs. The local runner reads granted values from its process environment. Non-secret configuration, such as a model gateway URL, uses the Harness's `environment_names`. See [Harnesses](harnesses.md) for the full contract.
+Harness credentials use a separate executable path. Harness `secrets` declares
+allowed names and Agent `secret_names` grants a subset; undeclared grants fail
+before forwarding. Values come from the execution process. Agent Verifiers
+receive only their supported model endpoint variables. Deterministic
+Verifiers receive no Environment secret injection. Keep values out of YAML,
+metadata, resources, observations, logs, and artifacts.
 
-Do not assume that merely naming an Environment secret provisions a vault, downloads a connector, or makes an arbitrary credential available in every runtime. Verify your provider's injection path with a non-sensitive test value before using it in a real project.
+`persistent=True` requests provider-backed persistence; it does not mean “keep
+the local temp directory.” None of the three built-ins advertises persistence
+in 0.12.1, so the request fails preflight.
 
-## Limits, placement, and policy
+## Compute, placement, and limits
 
-`runtime.timeout_seconds` limits runtime operations. Environment `limits` describe the episode budget: `max_turns`, `max_seconds`, and optional `max_cost_usd`. Custom harnesses must cooperate with the episode contract and enforce their loop's limits; declarations alone do not implement arbitrary stopping behavior.
+`resources` contains optional `cpu`, `memory_mb`, `pids`, and `disk_mb`.
+`placement` carries provider-specific string hints. `extra_capabilities`
+requires additional provider controls. `runtime.timeout_seconds` limits Runtime
+operations; Environment `limits` separately cap turns, elapsed episode time,
+and optional cost.
 
-`placement` carries provider placement hints. `persistent`, `compose`, `read_only_root`, and `extra_capabilities` request additional runtime behavior. Check provider support instead of assuming these settings work everywhere.
+Custom Harnesses must cooperate with turn and cost limits. Plural cannot
+independently meter arbitrary external behavior.
 
-For hosted execution, the project's execution policy sets an additional ceiling. The effective run must satisfy the Environment, Agent/Harness compatibility, project policy, and provider capabilities. A local opt-in does not override a hosted policy that forbids local execution.
+## Effective security boundary
 
-## Diagnose a runtime mismatch
+Execution proceeds only when the Environment Runtime, optional Harness grant,
+project policy, target class, and provider capabilities agree. Provider
+preflight is a guarantee to reject unsupported controls, not proof against a
+malicious provider or compromised host.
 
-If validation or preflight fails, read the named capability, then inspect `plural providers doctor`. Common causes are local execution with blocked networking, an unavailable Docker daemon, missing Daytona configuration, a local build context on a remote target, or a model endpoint omitted from an allowlist.
-
-Resolve the configuration mismatch before increasing retries. [Troubleshooting](../operations/troubleshooting.md) follows failures from planning through scoring.
+See [Security](../operations/security.md) and
+[provider extensions](../reference/integrations.md#sandbox-provider-extensions).

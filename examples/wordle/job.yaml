@@ -66,7 +66,7 @@ source:
         - python
         - commands.py
         source: .
-        digest: sha256:ad9b06d2a2b327930e29d403226549deca18ae9ab73eed003aa9ad842fbc6fcd
+        digest: sha256:274854d2216c6d891b74414215cc0e737e4296719304c2f296b3b1b87a681876
     verifiers:
     - name: solved
       version: 0.1.0
@@ -86,7 +86,14 @@ source:
       kind: deterministic
       check:
       - python
-      - verify.py
+      - -c
+      - "import json\nfrom pathlib import Path\n\npayload = json.loads(Path(\".plural/verifier-input.json\"\
+        ).read_text())\nview = payload[\"environment_view\"]\nsolved = bool(view[\"\
+        observation\"].get(\"solved\") or view[\"state\"].get(\"solved\"))\nPath(\"\
+        verifier-result.json\").write_text(\n    json.dumps(\n        {\n        \
+        \    \"reward\": float(solved),\n            \"scores\": {\"solved\": float(solved)},\n\
+        \            \"evidence\": [view[\"observation\"].get(\"text\", \"\")],\n\
+        \        }\n    )\n    + \"\\n\"\n)\n"
       runtime:
         provider: docker
         image: null
@@ -116,9 +123,9 @@ agents:
   fallback_models: []
   temperature: null
   max_tokens: null
-  harness: null
   auth_mode: environment
-  secret_names: []
+  secret_names:
+  - OPENAI_API_KEY
   metadata: {}
 mode: eval
 attempts: 1

@@ -2,17 +2,20 @@
 route: /docs/reference/api
 title: "API reference"
 order: 240
-description: "Python API signatures and documentation from the current source."
+description: "Supported public Python API signatures from the current source."
 audience: all
-nav: false
+nav: true
+nav_group: Reference
 ---
 # API reference
 
-Start with [the project walkthrough](../tutorials/first-project.md) for complete working code. Use the [field catalog](fields.md) for definition fields, defaults, and constraints. This reference is generated from the current package and is identical on both documentation surfaces.
+Start with [the support queue tutorial](../tutorials/support-queue.md) for complete working code. Use the [field catalog](fields.md) for definition fields, defaults, and constraints. This reference is generated from supported root APIs and public extension modules. Planner and executor implementation types such as `JobRunner`, `JobSpec`, and `TrialSpec` are intentionally omitted.
 
 Model constructors are described by their field contracts rather than duplicating long generated signatures. Methods below are defined on the listed class; ordinary inherited Pydantic methods are not repeated.
 
-## plural.client.Client
+`Client` provider adapters are the application inference API. Public `Job` native execution is a separate OpenAI-compatible chat-completions path.
+
+## plural.Client
 
 Unified client for routing, tracing, and (via other modules) environments.
 
@@ -53,10 +56,10 @@ Examples:
 ```
 
 ```python
-plural.client.Client(*, api_key: 'str | None' = None, providers: 'Mapping[str, str | Provider] | None' = None, base_url: 'str | None' = None, catalog: 'ModelCatalog | None' = None, policy: 'RoutingPolicy | None' = None, sink: 'Sink | None' = None, redactor: 'Redactor | None' = None, sampler: 'Sampler | None' = None, capture_content: 'bool | None' = None, max_retries: 'int' = 2, max_cost_usd: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, tags: 'dict[str, str] | None' = None, trace_dir: 'str | Path | None' = None, project: 'str | None' = None) -> 'None'
+plural.Client(*, api_key: 'str | None' = None, providers: 'Mapping[str, str | Provider] | None' = None, base_url: 'str | None' = None, catalog: 'ModelCatalog | None' = None, policy: 'RoutingPolicy | None' = None, sink: 'Sink | None' = None, redactor: 'Redactor | None' = None, sampler: 'Sampler | None' = None, capture_content: 'bool | None' = None, max_retries: 'int' = 2, max_cost_usd: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, tags: 'dict[str, str] | None' = None, trace_dir: 'str | Path | None' = None, project: 'str | None' = None) -> 'None'
 ```
 
-### plural.client.Client.is_authenticated
+### plural.Client.is_authenticated
 
 ```python
 is_authenticated(self) -> 'bool'
@@ -77,7 +80,7 @@ Raises:
     PluralError: If a transport error occurs while probing.
 ```
 
-### plural.client.Client.create
+### plural.Client.create
 
 ```python
 create(self, obj: 'Any', **kwargs: 'Any') -> 'dict[str, Any]'
@@ -95,7 +98,7 @@ Returns:
     The hosted record created by the studio API.
 ```
 
-### plural.client.Client.update
+### plural.Client.update
 
 ```python
 update(self, obj: 'Any', **kwargs: 'Any') -> 'dict[str, Any]'
@@ -112,7 +115,7 @@ Returns:
     The hosted record updated by the studio API.
 ```
 
-### plural.client.Client.push
+### plural.Client.push
 
 ```python
 push(self, obj: 'Any', **kwargs: 'Any') -> 'dict[str, Any]'
@@ -129,7 +132,7 @@ Returns:
     The hosted record created or updated by the studio API.
 ```
 
-### plural.client.Client.chat
+### plural.Client.chat
 
 ```python
 chat(self, *, model: 'str', messages: 'Sequence[Message | dict[str, Any]]', models: 'list[str] | None' = None, tools: 'Sequence[Tool | dict[str, Any]] | None' = None, temperature: 'float | None' = None, max_tokens: 'int | None' = None, metadata: 'dict[str, Any] | None' = None, tags: 'dict[str, str] | None' = None, write_trace: 'bool' = True, trace_context: 'TraceContext | None' = None, **kwargs: 'Any') -> 'ChatResponse'
@@ -155,7 +158,7 @@ Returns:
     Normalized :class:`~plural.types.ChatResponse`.
 ```
 
-### plural.client.Client.achat
+### plural.Client.achat
 
 ```python
 achat(self, *, model: 'str', messages: 'Sequence[Message | dict[str, Any]]', models: 'list[str] | None' = None, tools: 'Sequence[Tool | dict[str, Any]] | None' = None, temperature: 'float | None' = None, max_tokens: 'int | None' = None, metadata: 'dict[str, Any] | None' = None, tags: 'dict[str, str] | None' = None, write_trace: 'bool' = True, trace_context: 'TraceContext | None' = None, **kwargs: 'Any') -> 'ChatResponse'
@@ -181,7 +184,7 @@ Returns:
     Normalized chat response.
 ```
 
-### plural.client.Client.stream
+### plural.Client.stream
 
 ```python
 stream(self, *, model: 'str', messages: 'Sequence[Message | dict[str, Any]]', models: 'list[str] | None' = None, tags: 'dict[str, str] | None' = None, write_trace: 'bool' = True, trace_context: 'TraceContext | None' = None, **kwargs: 'Any') -> 'Iterator[StreamChunk]'
@@ -203,7 +206,7 @@ Yields:
     Stream chunks.
 ```
 
-### plural.client.Client.astream
+### plural.Client.astream
 
 ```python
 astream(self, *, model: 'str', messages: 'Sequence[Message | dict[str, Any]]', models: 'list[str] | None' = None, tags: 'dict[str, str] | None' = None, write_trace: 'bool' = True, trace_context: 'TraceContext | None' = None, **kwargs: 'Any') -> 'AsyncIterator[StreamChunk]'
@@ -225,7 +228,7 @@ Yields:
     Stream chunks.
 ```
 
-### plural.client.Client.label
+### plural.Client.label
 
 ```python
 label(self, trace_id: 'str', *, scores: 'dict[str, float] | None' = None, reward: 'float | None' = None, labels: 'dict[str, Any] | None' = None, feedback: 'str | None' = None) -> 'None'
@@ -242,7 +245,7 @@ Args:
     feedback: Free-form feedback.
 ```
 
-### plural.client.Client.flush
+### plural.Client.flush
 
 ```python
 flush(self) -> 'None'
@@ -250,7 +253,7 @@ flush(self) -> 'None'
 
 Flush pending traces.
 
-### plural.client.Client.close
+### plural.Client.close
 
 ```python
 close(self) -> 'None'
@@ -258,7 +261,7 @@ close(self) -> 'None'
 
 Flush traces and close providers.
 
-### plural.client.Client.aclose
+### plural.Client.aclose
 
 ```python
 aclose(self) -> 'None'
@@ -597,7 +600,7 @@ Returns:
 plural.types.text_content(message: 'Message') -> 'str'
 ```
 
-## plural.tracing.schema.Trace
+## plural.Trace
 
 A complete record of an LLM interaction or environment rollout.
 
@@ -630,7 +633,7 @@ Examples:
     '3.0.0'
 ```
 
-### plural.tracing.schema.Trace.add_llm
+### plural.Trace.add_llm
 
 ```python
 add_llm(self, *, request: 'ChatRequest | dict[str, Any] | None', response: 'ChatResponse | None', attempts: 'list[Attempt] | None' = None, error: 'str | None' = None) -> 'LLMCall'
@@ -649,7 +652,7 @@ Returns:
     The appended :class:`LLMCall`.
 ```
 
-### plural.tracing.schema.Trace.add_action
+### plural.Trace.add_action
 
 ```python
 add_action(self, name: 'str', arguments: 'dict[str, Any]', *, action_id: 'str | None' = None, tool_call_id: 'str | None' = None, source: 'ActionSource' = 'environment_native', observation: 'Any' = None, result: 'Any' = None, error: 'str | None' = None, latency_ms: 'float | None' = None) -> 'ActionStep'
@@ -657,7 +660,7 @@ add_action(self, name: 'str', arguments: 'dict[str, Any]', *, action_id: 'str | 
 
 Append an action step.
 
-### plural.tracing.schema.Trace.add_turn
+### plural.Trace.add_turn
 
 ```python
 add_turn(self, *, observation: 'Any' = None, model_context: 'ChatRequest | dict[str, Any] | None' = None, model_output: 'ChatResponse | None' = None, parsed_action: 'list[ParsedAction] | None' = None, actions: 'list[ActionStep] | None' = None, reward_events: 'list[RewardEvent] | None' = None, reasoning: 'list[ReasoningBlock] | None' = None, turn: 'int | None' = None) -> 'Turn'
@@ -665,7 +668,7 @@ add_turn(self, *, observation: 'Any' = None, model_context: 'ChatRequest | dict[
 
 Append a turn step for one model turn.
 
-### plural.tracing.schema.Trace.transitions
+### plural.Trace.transitions
 
 ```python
 transitions(self, *, source: "Literal['outcome', 'events', 'both']" = 'outcome') -> 'list[Transition]'
@@ -684,7 +687,7 @@ Returns:
     One :class:`Transition` per turn.
 ```
 
-### plural.tracing.schema.Trace.turns
+### plural.Trace.turns
 
 ```python
 turns(self) -> 'list[Turn]'
@@ -692,7 +695,7 @@ turns(self) -> 'list[Turn]'
 
 Return turn steps in order.
 
-### plural.tracing.schema.Trace.credit
+### plural.Trace.credit
 
 ```python
 credit(self, value: 'float', *, name: 'str' = 'late', reason: 'str | None' = None, turn_index: 'int | None' = None) -> 'RewardEvent | Outcome'
@@ -720,7 +723,7 @@ Raises:
     IndexError: If ``turn_index`` is out of range.
 ```
 
-### plural.tracing.schema.Trace.turn_rewards
+### plural.Trace.turn_rewards
 
 ```python
 turn_rewards(self, *, source: "Literal['outcome', 'events', 'both']" = 'outcome') -> 'list[float]'
@@ -728,7 +731,7 @@ turn_rewards(self, *, source: "Literal['outcome', 'events', 'both']" = 'outcome'
 
 Per-turn reward used as ``r_t`` before discounting.
 
-### plural.tracing.schema.Trace.returns
+### plural.Trace.returns
 
 ```python
 returns(self, gamma: 'float' = 1.0, *, source: "Literal['outcome', 'events', 'both']" = 'outcome') -> 'list[float]'
@@ -756,7 +759,7 @@ Examples:
     [0.9, 1.0]
 ```
 
-### plural.tracing.schema.Trace.label
+### plural.Trace.label
 
 ```python
 label(self, *, scores: 'dict[str, float] | None' = None, reward: 'float | None' = None, labels: 'dict[str, Any] | None' = None, feedback: 'str | None' = None) -> 'Outcome'
@@ -775,7 +778,7 @@ Returns:
     The updated :class:`Outcome`.
 ```
 
-## plural.tracing.schema.TraceContext
+## plural.TraceContext
 
 Lineage supplied by a caller when creating a child trace.
 
@@ -795,84 +798,254 @@ Raises:
 plural.tracing.resources.trace_json_schema() -> 'dict[str, Any]'
 ```
 
-## plural.execution.engine.Job
+## plural.Job
 
-Bounded async Job scheduler across Environment-owned runtimes.
-
-```python
-plural.execution.engine.Job(spec: 'JobSpec', *, provider: 'SandboxProvider | None' = None, providers: 'Mapping[str, SandboxProvider] | None' = None, registry: 'ProviderRegistry' = <configured default>, store: 'JobStore | None' = None, environ: 'Mapping[str, str] | None' = None, progress: 'Callable[[TrialSpec, TrialResult], None] | None' = None, project_policy: 'ProjectPolicy | None' = None, catalog: 'ModelCatalog | None' = None) -> 'None'
-```
-
-### plural.execution.engine.Job.cancel
+Simple public runner for a Task or Benchmark and catalog-backed Agents.
 
 ```python
-cancel(self) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: 'int' = 1, per_runtime_concurrency: 'int' = 1, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None) -> 'None'
 ```
 
-Request cancellation and stop active sandboxes.
-
-### plural.execution.engine.Job.preflight
+### plural.Job.run_async
 
 ```python
-preflight(self) -> 'None'
+run_async(self, *, resume: 'bool' = False) -> 'JobResult'
 ```
 
-Validate every Environment/Harness/Verifier runtime before launching.
+Execute this Job without blocking the caller's event loop.
 
-### plural.execution.engine.Job.run
+```text
+Returns:
+    The collected Trial outcomes.
+```
+
+### plural.Job.run
 
 ```python
 run(self, *, resume: 'bool' = False) -> 'JobResult'
 ```
 
-Execute all ready Trials with global and per-runtime bounds.
-
-### plural.execution.engine.Job.submit_review
-
-```python
-submit_review(self, trial_id: 'str', verifier_name: 'str', scores: 'Mapping[str, float]', *, feedback: 'str' = '') -> 'JobResult'
-```
-
-Resolve one pending Human Verifier and recompute deterministic aggregates.
+Execute synchronously when no event loop is already running.
 
 ```text
 Returns:
-    Updated durable Job result.
+    The collected Trial outcomes.
 ```
 
-## plural.execution.engine.Trial
+## plural.Benchmark
 
-One immutable Trial with append-only TrialExecutions.
+A semantic version that pins an ordered set of Tasks.
+
+### plural.Benchmark.diff
 
 ```python
-plural.execution.engine.Trial(spec: 'TrialSpec', *, job_spec: 'JobSpec', provider_for: 'Callable[[str], SandboxProvider]', store: 'JobStore', environ: 'Mapping[str, str]', project_policy: 'ProjectPolicy') -> 'None'
+diff(self, other: 'Benchmark') -> 'BenchmarkDiff'
 ```
 
-### plural.execution.engine.Trial.cancel
+Return the structured pin and configuration changes from this version.
+
+### plural.Benchmark.dependency_graph
 
 ```python
-cancel(self) -> 'None'
+dependency_graph(self) -> 'dict[str, Any]'
 ```
 
-Cancel all active sandboxes.
+Export the complete pinned graph in deterministic dependency order.
 
-### plural.execution.engine.Trial.run
+```text
+Returns:
+    Benchmark metadata and all pinned Task dependencies.
+```
+
+### plural.Benchmark.export
 
 ```python
-run(self, retry: 'int', execution_id: 'int') -> 'TrialResult'
+export(self) -> 'dict[str, Any]'
 ```
 
-Run one TrialExecution.
+Return the deterministic complete dependency graph.
 
-## plural.execution.store.JobStore
+## plural.project.CatalogContext
+
+Explicit factory for objects validated against an effective catalog.
+
+```python
+plural.project.CatalogContext(catalog: 'ModelCatalog | None' = None) -> 'None'
+```
+
+### plural.project.CatalogContext.from_file
+
+```python
+from_file(path: 'str | Path') -> 'CatalogContext'
+```
+
+Load project model entries from JSON or YAML.
+
+```text
+Returns:
+    A context containing bundled models plus explicit project entries.
+```
+
+### plural.project.CatalogContext.agent
+
+```python
+agent(self, **fields: 'Any') -> 'Agent'
+```
+
+Create an Agent against this effective catalog.
+
+```text
+Returns:
+    A validated Agent.
+```
+
+### plural.project.CatalogContext.agent_verifier
+
+```python
+agent_verifier(self, **fields: 'Any') -> 'AgentVerifier'
+```
+
+Create an AgentVerifier against this effective catalog.
+
+```text
+Returns:
+    A validated AgentVerifier.
+```
+
+### plural.project.CatalogContext.resolver
+
+```python
+resolver(self, root: 'str | Path | None' = None) -> 'Resolver'
+```
+
+Create a resolver carrying this catalog.
+
+```text
+Returns:
+    A public project resolver.
+```
+
+## plural.project.Resolver
+
+Resolve Python object references and public YAML object graphs.
+
+```python
+plural.project.Resolver(*, root: 'str | Path | None' = None, catalog: 'ModelCatalog | None' = None) -> 'None'
+```
+
+### plural.project.Resolver.load
+
+```python
+load(self, reference: 'str | Path', *, expected: 'type[Any] | tuple[type[Any], ...] | None' = None) -> 'ProjectObject'
+```
+
+Load one YAML file or ``path.py:object`` reference.
+
+```text
+Returns:
+    The resolved public SDK object.
+```
+
+### plural.project.Resolver.resolve
+
+```python
+resolve(self, value: 'Any', *, base: 'str | Path | None' = None) -> 'Any'
+```
+
+Resolve an inline object, reference, or already-created SDK object.
+
+```text
+Returns:
+    The corresponding public SDK object.
+```
+
+### plural.project.Resolver.dumps
+
+```python
+dumps(self, value: 'ProjectObject', *, base: 'str | Path | None' = None) -> 'str'
+```
+
+Serialize one public SDK graph to deterministic YAML.
+
+```text
+Returns:
+    YAML using public field names and defaults.
+```
+
+### plural.project.Resolver.dump
+
+```python
+dump(self, value: 'ProjectObject', path: 'str | Path') -> 'Path'
+```
+
+Write one public SDK graph as YAML.
+
+```text
+Returns:
+    The written path.
+```
+
+## plural.project.dump
+
+Serialize a public object graph to YAML.
+
+```text
+Returns:
+    The written path.
+```
+
+```python
+plural.project.dump(value: 'ProjectObject', path: 'str | Path') -> 'Path'
+```
+
+## plural.project.dumps
+
+Serialize a public object graph to YAML text.
+
+```text
+Returns:
+    The YAML text.
+```
+
+```python
+plural.project.dumps(value: 'ProjectObject') -> 'str'
+```
+
+## plural.project.load
+
+Load a public project object from YAML or Python.
+
+```text
+Returns:
+    The resolved object.
+```
+
+```python
+plural.project.load(reference: 'str | Path', *, catalog: 'ModelCatalog | None' = None, expected: 'type[Any] | tuple[type[Any], ...] | None' = None) -> 'ProjectObject'
+```
+
+## plural.project.public_schema
+
+Return a JSON Schema containing only public authoring fields.
+
+```text
+Returns:
+    A detached schema safe for generated public references.
+```
+
+```python
+plural.project.public_schema(model: 'type[BaseModel]') -> 'dict[str, Any]'
+```
+
+## plural.JobStore
 
 Crash-safe filesystem persistence for local execution.
 
 ```python
-plural.execution.store.JobStore(root: 'Path' = PosixPath('.plural/jobs')) -> 'None'
+plural.JobStore(root: 'Path' = PosixPath('.plural/jobs')) -> 'None'
 ```
 
-### plural.execution.store.JobStore.job_path
+### plural.JobStore.job_path
 
 ```python
 job_path(self, job_id: 'str') -> 'Path'
@@ -880,7 +1053,7 @@ job_path(self, job_id: 'str') -> 'Path'
 
 Return a validated job directory.
 
-### plural.execution.store.JobStore.initialize
+### plural.JobStore.initialize
 
 ```python
 initialize(self, spec: 'JobSpec', plan: 'JobPlan') -> 'Path'
@@ -888,7 +1061,7 @@ initialize(self, spec: 'JobSpec', plan: 'JobPlan') -> 'Path'
 
 Create or validate a locked job directory.
 
-### plural.execution.store.JobStore.load_spec
+### plural.JobStore.load_spec
 
 ```python
 load_spec(self, job_id: 'str') -> 'JobSpec'
@@ -896,7 +1069,7 @@ load_spec(self, job_id: 'str') -> 'JobSpec'
 
 Load a persisted job config.
 
-### plural.execution.store.JobStore.load_lock
+### plural.JobStore.load_lock
 
 ```python
 load_lock(self, job_id: 'str') -> 'JobLock'
@@ -904,7 +1077,7 @@ load_lock(self, job_id: 'str') -> 'JobLock'
 
 Load a persisted reproducibility lock.
 
-### plural.execution.store.JobStore.list_jobs
+### plural.JobStore.list_jobs
 
 ```python
 list_jobs(self) -> 'tuple[dict[str, Any], ...]'
@@ -912,7 +1085,7 @@ list_jobs(self) -> 'tuple[dict[str, Any], ...]'
 
 List stored jobs without accepting partial files as results.
 
-### plural.execution.store.JobStore.emit
+### plural.JobStore.emit
 
 ```python
 emit(self, job_id: 'str', event_type: 'str', status: 'str', *, trial_id: 'str | None' = None, execution_id: 'int | None' = None, message: 'str' = '', data: 'Mapping[str, Any] | None' = None, secret_values: 'Iterable[str]' = ()) -> 'ProgressEvent'
@@ -920,7 +1093,7 @@ emit(self, job_id: 'str', event_type: 'str', status: 'str', *, trial_id: 'str | 
 
 Append one monotonic, sanitized progress event.
 
-### plural.execution.store.JobStore.events
+### plural.JobStore.events
 
 ```python
 events(self, job_id: 'str', *, after: 'int' = 0, follow: 'bool' = False, poll_interval: 'float' = 0.1) -> 'Iterable[ProgressEvent]'
@@ -928,7 +1101,7 @@ events(self, job_id: 'str', *, after: 'int' = 0, follow: 'bool' = False, poll_in
 
 Yield events after a sequence cursor, optionally following updates.
 
-### plural.execution.store.JobStore.request_cancel
+### plural.JobStore.request_cancel
 
 ```python
 request_cancel(self, job_id: 'str') -> 'None'
@@ -936,7 +1109,7 @@ request_cancel(self, job_id: 'str') -> 'None'
 
 Atomically create a cancellation marker.
 
-### plural.execution.store.JobStore.clear_cancel
+### plural.JobStore.clear_cancel
 
 ```python
 clear_cancel(self, job_id: 'str') -> 'None'
@@ -944,7 +1117,7 @@ clear_cancel(self, job_id: 'str') -> 'None'
 
 Clear a prior cancellation marker before explicit resume.
 
-### plural.execution.store.JobStore.cancel_requested
+### plural.JobStore.cancel_requested
 
 ```python
 cancel_requested(self, job_id: 'str') -> 'bool'
@@ -952,7 +1125,7 @@ cancel_requested(self, job_id: 'str') -> 'bool'
 
 Return whether cancellation was requested.
 
-### plural.execution.store.JobStore.trial_path
+### plural.JobStore.trial_path
 
 ```python
 trial_path(self, trial: 'TrialSpec | str', job_id: 'str | None' = None) -> 'Path'
@@ -960,7 +1133,7 @@ trial_path(self, trial: 'TrialSpec | str', job_id: 'str | None' = None) -> 'Path
 
 Return a validated trial directory.
 
-### plural.execution.store.JobStore.successful_result
+### plural.JobStore.successful_result
 
 ```python
 successful_result(self, trial: 'TrialSpec') -> 'TrialResult | None'
@@ -968,7 +1141,7 @@ successful_result(self, trial: 'TrialSpec') -> 'TrialResult | None'
 
 Return a successful persisted trial result, if present.
 
-### plural.execution.store.JobStore.next_execution_id
+### plural.JobStore.next_execution_id
 
 ```python
 next_execution_id(self, trial: 'TrialSpec') -> 'int'
@@ -976,7 +1149,7 @@ next_execution_id(self, trial: 'TrialSpec') -> 'int'
 
 Return the next monotonic execution ID for a trial.
 
-### plural.execution.store.JobStore.trial_results
+### plural.JobStore.trial_results
 
 ```python
 trial_results(self, job_id: 'str') -> 'tuple[TrialResult, ...]'
@@ -984,7 +1157,7 @@ trial_results(self, job_id: 'str') -> 'tuple[TrialResult, ...]'
 
 Load all complete trial results in lexical order.
 
-### plural.execution.store.JobStore.write_trial_execution
+### plural.JobStore.write_trial_execution
 
 ```python
 write_trial_execution(self, trial: 'TrialSpec', execution_id: 'int', result: 'TrialResult', *, stdout: 'bytes' = b'', stderr: 'bytes' = b'', artifacts: 'Iterable[DownloadedFile]' = (), verifier_stdout: 'bytes' = b'', verifier_stderr: 'bytes' = b'') -> 'Path'
@@ -992,7 +1165,7 @@ write_trial_execution(self, trial: 'TrialSpec', execution_id: 'int', result: 'Tr
 
 Append one immutable execution and update the selected result.
 
-### plural.execution.store.JobStore.write_job_result
+### plural.JobStore.write_job_result
 
 ```python
 write_job_result(self, result: 'JobResult') -> 'Path'
@@ -1000,7 +1173,7 @@ write_job_result(self, result: 'JobResult') -> 'Path'
 
 Atomically publish the aggregate result.
 
-### plural.execution.store.JobStore.write_review
+### plural.JobStore.write_review
 
 ```python
 write_review(self, trial: 'TrialSpec', verifier_name: 'str', submission: 'Mapping[str, Any]', result: 'TrialResult') -> 'Path'
@@ -1008,7 +1181,7 @@ write_review(self, trial: 'TrialSpec', verifier_name: 'str', submission: 'Mappin
 
 Append one immutable human review and publish its resolved Trial result.
 
-### plural.execution.store.JobStore.read_job_result
+### plural.JobStore.read_job_result
 
 ```python
 read_job_result(self, job_id: 'str') -> 'JobResult | None'
@@ -1016,7 +1189,7 @@ read_job_result(self, job_id: 'str') -> 'JobResult | None'
 
 Load the aggregate result when complete.
 
-### plural.execution.store.JobStore.write_sync_state
+### plural.JobStore.write_sync_state
 
 ```python
 write_sync_state(self, job_id: 'str', state: 'Mapping[str, Any]') -> 'Path'
@@ -1024,7 +1197,7 @@ write_sync_state(self, job_id: 'str', state: 'Mapping[str, Any]') -> 'Path'
 
 Persist replay-safe hosted upload metadata without credentials.
 
-### plural.execution.store.JobStore.read_sync_state
+### plural.JobStore.read_sync_state
 
 ```python
 read_sync_state(self, job_id: 'str') -> 'dict[str, Any] | None'
@@ -1032,7 +1205,7 @@ read_sync_state(self, job_id: 'str') -> 'dict[str, Any] | None'
 
 Read hosted upload metadata when a prior sync was registered.
 
-## plural.environments.env.Environment
+## plural.Environment
 
 A Task-bound world with a Gymnasium ``reset`` / ``step`` episode API.
 
@@ -1044,10 +1217,10 @@ that Task, calls :meth:`reset`, then applies Agent moves with :meth:`step`.
 ```
 
 ```python
-plural.environments.env.Environment(*, name: 'str | None' = None, version: 'str | None' = None, revision: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'tuple[EnvironmentResource, ...]' = (), runtime: 'EnvironmentRuntime | None' = None, secrets: 'tuple[SecretReference, ...]' = (), guardrails: 'tuple[Guardrail, ...]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, metadata: 'dict[str, Any] | None' = None, state: 'StateT | None' = None, observation: 'ObsT | None' = None, info: 'Any' = None, reset_command: 'tuple[str, ...] | None' = None) -> 'None'
+plural.Environment(*, name: 'str | None' = None, version: 'str | None' = None, revision: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'tuple[EnvironmentResource, ...]' = (), runtime: 'EnvironmentRuntime | None' = None, secrets: 'tuple[SecretReference, ...]' = (), guardrails: 'tuple[Guardrail, ...]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, metadata: 'dict[str, Any] | None' = None, state: 'StateT | None' = None, observation: 'ObsT | None' = None, info: 'Any' = None, reset_command: 'tuple[str, ...] | None' = None) -> 'None'
 ```
 
-### plural.environments.env.Environment.observation_snapshot
+### plural.Environment.observation_snapshot
 
 ```python
 observation_snapshot(self) -> 'Any'
@@ -1055,7 +1228,7 @@ observation_snapshot(self) -> 'Any'
 
 Return a detached, JSON-safe agent-visible observation.
 
-### plural.environments.env.Environment.state_snapshot
+### plural.Environment.state_snapshot
 
 ```python
 state_snapshot(self) -> 'Any'
@@ -1063,7 +1236,7 @@ state_snapshot(self) -> 'Any'
 
 Return a detached, JSON-safe internal state snapshot.
 
-### plural.environments.env.Environment.view
+### plural.Environment.view
 
 ```python
 view(self) -> 'dict[str, Any]'
@@ -1076,7 +1249,7 @@ Returns:
     A JSON-safe view. Empty means Intel falls back to the observation.
 ```
 
-### plural.environments.env.Environment.persist
+### plural.Environment.persist
 
 ```python
 persist(self, directory: 'str | Path' = '.') -> 'None'
@@ -1084,7 +1257,7 @@ persist(self, directory: 'str | Path' = '.') -> 'None'
 
 Write ``state.json``, ``observation.json``, and ``view.json``.
 
-### plural.environments.env.Environment.package
+### plural.Environment.package
 
 ```python
 package(self, command: 'str | tuple[str, ...]', *, source: 'str | Path | None' = None) -> 'Environment[ObsT, StateT]'
@@ -1101,7 +1274,7 @@ Returns:
     This Environment, ready to place directly on a Task.
 ```
 
-### plural.environments.env.Environment.from_config
+### plural.Environment.from_config
 
 ```python
 from_config(**fields: 'Any') -> 'Environment[Any, Any]'
@@ -1117,7 +1290,7 @@ Returns:
     An Environment backed by the validated serialized configuration.
 ```
 
-### plural.environments.env.Environment.reset
+### plural.Environment.reset
 
 ```python
 reset(self, *, seed: 'int | None' = None, options: 'dict[str, Any] | None' = None) -> 'tuple[ObsT, dict[str, Any]]'
@@ -1136,7 +1309,7 @@ Returns:
     The initial observation and reset information.
 ```
 
-### plural.environments.env.Environment.step
+### plural.Environment.step
 
 ```python
 step(self, action: 'Any' = None, /, **kwargs: 'Any') -> 'tuple[ObsT, float, bool, bool, dict[str, Any]]'
@@ -1154,7 +1327,7 @@ Returns:
     Observation, reward, terminal flags, and step information.
 ```
 
-### plural.environments.env.Environment.terminated
+### plural.Environment.terminated
 
 ```python
 terminated(self) -> 'bool'
@@ -1162,7 +1335,7 @@ terminated(self) -> 'bool'
 
 Return whether the episode reached a Task success or failure state.
 
-### plural.environments.env.Environment.truncated
+### plural.Environment.truncated
 
 ```python
 truncated(self) -> 'bool'
@@ -1170,7 +1343,7 @@ truncated(self) -> 'bool'
 
 Return whether the episode ended on a budget or external stop.
 
-### plural.environments.env.Environment.reward
+### plural.Environment.reward
 
 ```python
 reward(self, previous_state: 'Any', current_state: 'Any', action: 'Mapping[str, Any]', result: 'Any') -> 'float'
@@ -1178,7 +1351,7 @@ reward(self, previous_state: 'Any', current_state: 'Any', action: 'Mapping[str, 
 
 Return the step reward. Default is ``0``.
 
-## plural.environments.env.action
+## plural.action
 
 Mark an :class:`~plural.environments.env.Environment` method as a native action.
 
@@ -1192,10 +1365,10 @@ Returns:
 ```
 
 ```python
-plural.environments.env.action(fn: 'Callable[..., Any] | None' = None, *, name: 'str | None' = None) -> 'Any'
+plural.action(fn: 'Callable[..., Any] | None' = None, *, name: 'str | None' = None) -> 'Any'
 ```
 
-## plural.environments.env.rewarder
+## plural.rewarder
 
 Declare a train-only state-transition rewarder.
 
@@ -1209,7 +1382,7 @@ Returns:
 ```
 
 ```python
-plural.environments.env.rewarder(fn: 'Callable[..., float] | None' = None, *, name: 'str | None' = None, weight: 'float' = 1, timeout_seconds: 'float' = 30) -> 'Any'
+plural.rewarder(fn: 'Callable[..., float] | None' = None, *, name: 'str | None' = None, weight: 'float' = 1, timeout_seconds: 'float' = 30) -> 'Any'
 ```
 
 ## plural.environments.types.Observation
@@ -1342,23 +1515,19 @@ Returns:
 plural.environments.types.serialize_observation(value: 'Any') -> 'Any'
 ```
 
-## plural.harness.models.Harness
+## plural.Harness
 
 An executable Agent interaction strategy.
 
-## plural.harness.models.HarnessOutput
-
-One file produced by a Harness.
-
-## plural.sandbox.base.SandboxProvider
+## plural.SandboxProvider
 
 Async lifecycle provider, separate from environment tool runtimes.
 
 ```python
-plural.sandbox.base.SandboxProvider()
+plural.SandboxProvider()
 ```
 
-### plural.sandbox.base.SandboxProvider.capabilities
+### plural.SandboxProvider.capabilities
 
 ```python
 capabilities(self) -> 'ProviderCapabilities'
@@ -1366,7 +1535,7 @@ capabilities(self) -> 'ProviderCapabilities'
 
 Declare controls available in the current installation.
 
-### plural.sandbox.base.SandboxProvider.preflight
+### plural.SandboxProvider.preflight
 
 ```python
 preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
@@ -1374,7 +1543,7 @@ preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
 
 Fail before launch if any requested control is unavailable.
 
-### plural.sandbox.base.SandboxProvider.doctor
+### plural.SandboxProvider.doctor
 
 ```python
 doctor(self) -> 'ProviderDoctor'
@@ -1382,7 +1551,7 @@ doctor(self) -> 'ProviderDoctor'
 
 Return dependency, daemon, or credential health.
 
-### plural.sandbox.base.SandboxProvider.create
+### plural.SandboxProvider.create
 
 ```python
 create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
@@ -1390,7 +1559,7 @@ create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
 
 Create a fresh sandbox after successful preflight.
 
-### plural.sandbox.base.SandboxProvider.upload_files
+### plural.SandboxProvider.upload_files
 
 ```python
 upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, root: 'str' = '/workspace') -> 'None'
@@ -1398,7 +1567,7 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Upload validated files beneath a scoped workspace.
 
-### plural.sandbox.base.SandboxProvider.upload_bundle
+### plural.SandboxProvider.upload_bundle
 
 ```python
 upload_bundle(self, handle: 'SandboxHandle', bundle: 'Path', *, root: 'str' = '/workspace') -> 'None'
@@ -1406,7 +1575,7 @@ upload_bundle(self, handle: 'SandboxHandle', bundle: 'Path', *, root: 'str' = '/
 
 Upload a local directory without following symlinks.
 
-### plural.sandbox.base.SandboxProvider.exec
+### plural.SandboxProvider.exec
 
 ```python
 exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
@@ -1414,7 +1583,7 @@ exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
 
 Execute argv with cwd, env, timeout, stdin, and captured logs.
 
-### plural.sandbox.base.SandboxProvider.download_files
+### plural.SandboxProvider.download_files
 
 ```python
 download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace') -> 'tuple[DownloadedFile, ...]'
@@ -1422,7 +1591,7 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 
 Download exact declared files.
 
-### plural.sandbox.base.SandboxProvider.download_artifacts
+### plural.SandboxProvider.download_artifacts
 
 ```python
 download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace') -> 'tuple[DownloadedFile, ...]'
@@ -1430,7 +1599,7 @@ download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, roo
 
 Download declared artifact files.
 
-### plural.sandbox.base.SandboxProvider.cancel
+### plural.SandboxProvider.cancel
 
 ```python
 cancel(self, handle: 'SandboxHandle') -> 'None'
@@ -1438,7 +1607,7 @@ cancel(self, handle: 'SandboxHandle') -> 'None'
 
 Force cancellation of active work.
 
-### plural.sandbox.base.SandboxProvider.destroy
+### plural.SandboxProvider.destroy
 
 ```python
 destroy(self, handle: 'SandboxHandle') -> 'None'
@@ -1446,99 +1615,11 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 
 Idempotently delete the sandbox and scoped data.
 
-## plural.sandbox.models.Capability
-
-Individual controls a provider can enforce.
-
-```python
-plural.sandbox.models.Capability(*values)
-```
-
-## plural.sandbox.models.CapabilityError
-
-A requested control cannot be enforced.
-
-```python
-plural.sandbox.models.CapabilityError
-```
-
-## plural.sandbox.models.DeclarativeImage
-
-Portable subset of Daytona's declarative image builder.
-
-## plural.sandbox.models.DownloadedFile
-
-One file retrieved from a sandbox.
-
-## plural.sandbox.models.EffectiveSandboxPolicy
-
-Provider-confirmed requirements captured in receipts.
-
-## plural.sandbox.models.ExecRequest
-
-One argv-based process invocation.
-
-## plural.sandbox.models.ExecResult
-
-Captured process completion.
-
-## plural.sandbox.models.FileUpload
-
-One in-memory file copied into a sandbox.
-
-## plural.sandbox.models.NetworkMode
-
-Requested sandbox network policy.
-
-```python
-plural.sandbox.models.NetworkMode(*values)
-```
-
-## plural.sandbox.models.ProviderCapabilities
-
-Provider capability declaration used by preflight and runtime doctor.
-
-### plural.sandbox.models.ProviderCapabilities.supports
-
-```python
-supports(self, capability: 'Capability') -> 'bool'
-```
-
-Return whether a control is available.
-
-## plural.sandbox.models.ProviderDoctor
-
-Availability report safe for CLI output.
-
-## plural.sandbox.models.ProviderUnavailableError
-
-Provider dependency, daemon, or credentials are unavailable.
-
-```python
-plural.sandbox.models.ProviderUnavailableError
-```
-
-## plural.sandbox.models.ResourceRequirements
-
-Optional compute limits.
-
-## plural.sandbox.models.SandboxError
-
-Base sandbox lifecycle error.
-
-```python
-plural.sandbox.models.SandboxError
-```
-
-## plural.sandbox.models.SandboxHandle
-
-Opaque provider sandbox identity.
-
-## plural.sandbox.models.SandboxRequirements
+## plural.SandboxRequirements
 
 Controls required for one sandbox before it may launch.
 
-### plural.sandbox.models.SandboxRequirements.required_capabilities
+### plural.SandboxRequirements.required_capabilities
 
 ```python
 required_capabilities(self) -> 'frozenset[Capability]'
@@ -1546,39 +1627,15 @@ required_capabilities(self) -> 'frozenset[Capability]'
 
 Return the controls that must be enforceable.
 
-## plural.sandbox.models.SandboxTimeoutError
-
-A sandbox process exceeded its deadline.
-
-```python
-plural.sandbox.models.SandboxTimeoutError
-```
-
-## plural.sandbox.models.environment_required_capabilities
-
-Derive sandbox controls required by an environment runtime declaration.
-
-```python
-plural.sandbox.models.environment_required_capabilities(runtime: 'Any') -> 'frozenset[Capability]'
-```
-
-## plural.sandbox.models.safe_relative_path
-
-Validate and normalize a sandbox-relative path.
-
-```python
-plural.sandbox.models.safe_relative_path(value: 'str') -> 'str'
-```
-
-## plural.sandbox.registry.ProviderRegistry
+## plural.ProviderRegistry
 
 Resolve built-ins and installed provider plugins lazily.
 
 ```python
-plural.sandbox.registry.ProviderRegistry() -> 'None'
+plural.ProviderRegistry() -> 'None'
 ```
 
-### plural.sandbox.registry.ProviderRegistry.register
+### plural.ProviderRegistry.register
 
 ```python
 register(self, provider: 'SandboxProvider', *, replace: 'bool' = False) -> 'None'
@@ -1586,7 +1643,7 @@ register(self, provider: 'SandboxProvider', *, replace: 'bool' = False) -> 'None
 
 Register one concrete provider.
 
-### plural.sandbox.registry.ProviderRegistry.get
+### plural.ProviderRegistry.get
 
 ```python
 get(self, name: 'str') -> 'SandboxProvider'
@@ -1594,7 +1651,7 @@ get(self, name: 'str') -> 'SandboxProvider'
 
 Return a registered provider, loading plugins first.
 
-### plural.sandbox.registry.ProviderRegistry.doctors
+### plural.ProviderRegistry.doctors
 
 ```python
 doctors(self, *, include_unavailable: 'bool' = False) -> 'tuple[ProviderDoctor, ...]'
@@ -1602,7 +1659,7 @@ doctors(self, *, include_unavailable: 'bool' = False) -> 'tuple[ProviderDoctor, 
 
 Return dynamic provider reports in stable name order.
 
-## plural.sandbox.local.LocalProvider
+## plural.LocalProvider
 
 Run commands in temporary directories without isolation.
 
@@ -1613,10 +1670,10 @@ development workloads.
 ```
 
 ```python
-plural.sandbox.local.LocalProvider(*, base_dir: 'Path | None' = None) -> 'None'
+plural.LocalProvider(*, base_dir: 'Path | None' = None) -> 'None'
 ```
 
-### plural.sandbox.local.LocalProvider.capabilities
+### plural.LocalProvider.capabilities
 
 ```python
 capabilities(self) -> 'ProviderCapabilities'
@@ -1624,7 +1681,7 @@ capabilities(self) -> 'ProviderCapabilities'
 
 Declare local subprocess controls.
 
-### plural.sandbox.local.LocalProvider.doctor
+### plural.LocalProvider.doctor
 
 ```python
 doctor(self) -> 'ProviderDoctor'
@@ -1632,7 +1689,7 @@ doctor(self) -> 'ProviderDoctor'
 
 Report local execution availability without implying isolation.
 
-### plural.sandbox.local.LocalProvider.create
+### plural.LocalProvider.create
 
 ```python
 create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
@@ -1640,7 +1697,7 @@ create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
 
 Create a scoped temporary workspace.
 
-### plural.sandbox.local.LocalProvider.upload_files
+### plural.LocalProvider.upload_files
 
 ```python
 upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, root: 'str' = '/workspace') -> 'None'
@@ -1648,7 +1705,7 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Copy files into the temporary workspace.
 
-### plural.sandbox.local.LocalProvider.exec
+### plural.LocalProvider.exec
 
 ```python
 exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
@@ -1656,7 +1713,7 @@ exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
 
 Run an argv-only subprocess and kill it at timeout.
 
-### plural.sandbox.local.LocalProvider.download_files
+### plural.LocalProvider.download_files
 
 ```python
 download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace') -> 'tuple[DownloadedFile, ...]'
@@ -1664,7 +1721,7 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 
 Read exact declared regular files.
 
-### plural.sandbox.local.LocalProvider.cancel
+### plural.LocalProvider.cancel
 
 ```python
 cancel(self, handle: 'SandboxHandle') -> 'None'
@@ -1672,7 +1729,7 @@ cancel(self, handle: 'SandboxHandle') -> 'None'
 
 Kill the active subprocess, if any.
 
-### plural.sandbox.local.LocalProvider.destroy
+### plural.LocalProvider.destroy
 
 ```python
 destroy(self, handle: 'SandboxHandle') -> 'None'
@@ -1680,15 +1737,15 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 
 Kill active work and remove all scoped files.
 
-## plural.sandbox.docker.DockerProvider
+## plural.DockerProvider
 
 Create one locked-down Docker container per execution phase.
 
 ```python
-plural.sandbox.docker.DockerProvider(*, executable: 'str' = 'docker', default_image: 'str' = 'python:3.12-slim') -> 'None'
+plural.DockerProvider(*, executable: 'str' = 'docker', default_image: 'str' = 'python:3.12-slim') -> 'None'
 ```
 
-### plural.sandbox.docker.DockerProvider.capabilities
+### plural.DockerProvider.capabilities
 
 ```python
 capabilities(self) -> 'ProviderCapabilities'
@@ -1696,7 +1753,7 @@ capabilities(self) -> 'ProviderCapabilities'
 
 Declare Docker controls only when the daemon is reachable.
 
-### plural.sandbox.docker.DockerProvider.preflight
+### plural.DockerProvider.preflight
 
 ```python
 preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
@@ -1704,7 +1761,7 @@ preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
 
 Reject provider-specific image forms before launch.
 
-### plural.sandbox.docker.DockerProvider.doctor
+### plural.DockerProvider.doctor
 
 ```python
 doctor(self) -> 'ProviderDoctor'
@@ -1712,7 +1769,7 @@ doctor(self) -> 'ProviderDoctor'
 
 Detect the Docker CLI and daemon.
 
-### plural.sandbox.docker.DockerProvider.create
+### plural.DockerProvider.create
 
 ```python
 create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
@@ -1720,7 +1777,7 @@ create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
 
 Create and start a hardened, scoped container.
 
-### plural.sandbox.docker.DockerProvider.upload_files
+### plural.DockerProvider.upload_files
 
 ```python
 upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, root: 'str' = '/workspace') -> 'None'
@@ -1728,7 +1785,7 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Stream exact files into the writable workspace mount.
 
-### plural.sandbox.docker.DockerProvider.exec
+### plural.DockerProvider.exec
 
 ```python
 exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
@@ -1736,7 +1793,7 @@ exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
 
 Execute argv and capture logs, enforcing a host-side timeout.
 
-### plural.sandbox.docker.DockerProvider.download_files
+### plural.DockerProvider.download_files
 
 ```python
 download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace') -> 'tuple[DownloadedFile, ...]'
@@ -1744,7 +1801,7 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 
 Stream exact declared paths out and reject non-regular files.
 
-### plural.sandbox.docker.DockerProvider.cancel
+### plural.DockerProvider.cancel
 
 ```python
 cancel(self, handle: 'SandboxHandle') -> 'None'
@@ -1752,7 +1809,7 @@ cancel(self, handle: 'SandboxHandle') -> 'None'
 
 Kill the container to force all active processes to stop.
 
-### plural.sandbox.docker.DockerProvider.destroy
+### plural.DockerProvider.destroy
 
 ```python
 destroy(self, handle: 'SandboxHandle') -> 'None'
@@ -1760,15 +1817,15 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 
 Force-remove the container idempotently.
 
-## plural.sandbox.daytona.DaytonaProvider
+## plural.DaytonaProvider
 
 Execute in Daytona while keeping its SDK an optional import.
 
 ```python
-plural.sandbox.daytona.DaytonaProvider(*, adapter: 'DaytonaClientAdapter | None' = None, environ: 'Mapping[str, str] | None' = None) -> 'None'
+plural.DaytonaProvider(*, adapter: 'DaytonaClientAdapter | None' = None, environ: 'Mapping[str, str] | None' = None) -> 'None'
 ```
 
-### plural.sandbox.daytona.DaytonaProvider.capabilities
+### plural.DaytonaProvider.capabilities
 
 ```python
 capabilities(self) -> 'ProviderCapabilities'
@@ -1776,7 +1833,7 @@ capabilities(self) -> 'ProviderCapabilities'
 
 Declare controls implemented by the current Daytona SDK.
 
-### plural.sandbox.daytona.DaytonaProvider.preflight
+### plural.DaytonaProvider.preflight
 
 ```python
 preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
@@ -1784,7 +1841,7 @@ preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
 
 Reject Daytona controls whose SDK mapping is not enforceable.
 
-### plural.sandbox.daytona.DaytonaProvider.doctor
+### plural.DaytonaProvider.doctor
 
 ```python
 doctor(self) -> 'ProviderDoctor'
@@ -1792,7 +1849,7 @@ doctor(self) -> 'ProviderDoctor'
 
 Detect SDK and credential presence without exposing values.
 
-### plural.sandbox.daytona.DaytonaProvider.create
+### plural.DaytonaProvider.create
 
 ```python
 create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
@@ -1800,7 +1857,7 @@ create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
 
 Create a Daytona sandbox from image, snapshot, or defaults.
 
-### plural.sandbox.daytona.DaytonaProvider.upload_files
+### plural.DaytonaProvider.upload_files
 
 ```python
 upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, root: 'str' = '/workspace') -> 'None'
@@ -1808,7 +1865,7 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Upload exact in-memory files.
 
-### plural.sandbox.daytona.DaytonaProvider.exec
+### plural.DaytonaProvider.exec
 
 ```python
 exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
@@ -1816,7 +1873,7 @@ exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
 
 Execute through ``sandbox.process.exec``.
 
-### plural.sandbox.daytona.DaytonaProvider.download_files
+### plural.DaytonaProvider.download_files
 
 ```python
 download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace') -> 'tuple[DownloadedFile, ...]'
@@ -1824,7 +1881,7 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 
 Download exact declared files.
 
-### plural.sandbox.daytona.DaytonaProvider.cancel
+### plural.DaytonaProvider.cancel
 
 ```python
 cancel(self, handle: 'SandboxHandle') -> 'None'
@@ -1832,249 +1889,13 @@ cancel(self, handle: 'SandboxHandle') -> 'None'
 
 Delete the sandbox to force cancellation.
 
-### plural.sandbox.daytona.DaytonaProvider.destroy
+### plural.DaytonaProvider.destroy
 
 ```python
 destroy(self, handle: 'SandboxHandle') -> 'None'
 ```
 
 Idempotently delete the remote sandbox.
-
-## plural.cli.config.CLIConfig
-
-Persistent, non-secret CLI configuration.
-
-## plural.cli.config.CLIProfile
-
-One named CLI context.
-
-## plural.cli.config.Credential
-
-Secret tokens stored for one profile.
-
-### plural.cli.config.Credential.redacted
-
-```python
-redacted(self) -> 'dict[str, str | None]'
-```
-
-Return presence-only values safe for logs and machine output.
-
-## plural.cli.config.CredentialStore
-
-Minimal credential storage abstraction.
-
-```python
-plural.cli.config.CredentialStore(*args, **kwargs)
-```
-
-### plural.cli.config.CredentialStore.get
-
-```python
-get(self, profile: 'str') -> 'Credential | None'
-```
-
-Read credentials for a profile.
-
-### plural.cli.config.CredentialStore.set
-
-```python
-set(self, profile: 'str', credential: 'Credential') -> 'None'
-```
-
-Persist credentials for a profile.
-
-### plural.cli.config.CredentialStore.delete
-
-```python
-delete(self, profile: 'str') -> 'None'
-```
-
-Delete credentials for a profile.
-
-## plural.cli.config.FileCredentialStore
-
-0600 JSON credential fallback.
-
-```python
-plural.cli.config.FileCredentialStore(path: 'Path') -> 'None'
-```
-
-### plural.cli.config.FileCredentialStore.get
-
-```python
-get(self, profile: 'str') -> 'Credential | None'
-```
-
-Read and validate one profile's credential.
-
-### plural.cli.config.FileCredentialStore.set
-
-```python
-set(self, profile: 'str', credential: 'Credential') -> 'None'
-```
-
-Atomically save credentials with owner-only permissions.
-
-### plural.cli.config.FileCredentialStore.delete
-
-```python
-delete(self, profile: 'str') -> 'None'
-```
-
-Delete one profile without affecting others.
-
-## plural.cli.config.ResolvedContext
-
-Effective CLI context after flags > environment > config precedence.
-
-### plural.cli.config.ResolvedContext.redacted
-
-```python
-redacted(self) -> 'dict[str, Any]'
-```
-
-Return context safe for console output.
-
-## plural.cli.config.config_home
-
-Return the platform-aware Plural CLI config directory.
-
-```python
-plural.cli.config.config_home(environ: 'Mapping[str, str] | None' = None) -> 'Path'
-```
-
-## plural.cli.config.default_credential_store
-
-Build optional keyring plus secure file fallback storage.
-
-```python
-plural.cli.config.default_credential_store(path: 'Path | None' = None) -> 'CredentialStore'
-```
-
-## plural.cli.config.load_config
-
-Load config, returning defaults when the file does not exist.
-
-```python
-plural.cli.config.load_config(path: 'Path | None' = None) -> 'CLIConfig'
-```
-
-## plural.cli.config.resolve_context
-
-Resolve flags > environment > selected profile config.
-
-```python
-plural.cli.config.resolve_context(*, api_url: 'str | None' = None, organization: 'str | None' = None, project: 'str | None' = None, profile: 'str | None' = None, environ: 'Mapping[str, str] | None' = None, config: 'CLIConfig | None' = None, credentials: 'CredentialStore | None' = None) -> 'ResolvedContext'
-```
-
-## plural.cli.config.save_config
-
-Persist non-secret config as deterministic TOML.
-
-```python
-plural.cli.config.save_config(config: 'CLIConfig', path: 'Path | None' = None) -> 'Path'
-```
-
-## plural.cli.auth.AuthClient
-
-Synchronous client for future LastLabs device auth endpoints.
-
-```python
-plural.cli.auth.AuthClient(base_url: 'str', *, timeout: 'float' = 15.0, transport: 'httpx.BaseTransport | None' = None) -> 'None'
-```
-
-### plural.cli.auth.AuthClient.close
-
-```python
-close(self) -> 'None'
-```
-
-Close the underlying HTTP connection pool.
-
-### plural.cli.auth.AuthClient.device_start
-
-```python
-device_start(self) -> 'DeviceAuthorization'
-```
-
-Start a device authorization flow.
-
-### plural.cli.auth.AuthClient.device_poll
-
-```python
-device_poll(self, device_code: 'str') -> 'AuthTokens | None'
-```
-
-Poll once, returning ``None`` while user authorization is pending.
-
-### plural.cli.auth.AuthClient.login
-
-```python
-login(self, *, no_browser: 'bool' = False, open_browser: 'Callable[[str], Any]' = <function open at 0x10bf193a0>, on_device: 'Callable[[DeviceAuthorization], None] | None' = None, sleep: 'Callable[[float], None]' = <built-in function sleep>, monotonic: 'Callable[[], float]' = <built-in function monotonic>) -> 'tuple[DeviceAuthorization, AuthTokens]'
-```
-
-Complete device authorization without handling passwords.
-
-### plural.cli.auth.AuthClient.refresh
-
-```python
-refresh(self, refresh_token: 'str') -> 'AuthTokens'
-```
-
-Exchange a refresh token for new tokens.
-
-### plural.cli.auth.AuthClient.revoke
-
-```python
-revoke(self, credential: 'Credential') -> 'None'
-```
-
-Revoke available hosted tokens without exposing them.
-
-### plural.cli.auth.AuthClient.status
-
-```python
-status(self, credential: 'Credential') -> 'AuthStatus'
-```
-
-Return hosted authentication status.
-
-### plural.cli.auth.AuthClient.whoami
-
-```python
-whoami(self, credential: 'Credential') -> 'dict[str, Any]'
-```
-
-Return the authenticated account payload.
-
-## plural.cli.auth.AuthHTTPError
-
-Sanitized auth API error with a stable code.
-
-```python
-plural.cli.auth.AuthHTTPError(message: 'str', *, code: 'ErrorCode', status_code: 'int | None' = None) -> 'None'
-```
-
-## plural.cli.auth.AuthStatus
-
-Authentication status from the hosted service.
-
-## plural.cli.auth.AuthTokens
-
-Access and refresh tokens from device or refresh flow.
-
-### plural.cli.auth.AuthTokens.credential
-
-```python
-credential(self) -> 'Credential'
-```
-
-Convert the token response into stored credentials.
-
-## plural.cli.auth.DeviceAuthorization
-
-Device flow instructions returned by the service.
 
 ## plural.routing.policies.Explicit
 
@@ -2293,7 +2114,7 @@ Returns:
 plural.environments.export.verifiers.to_verifiers_trace(trace: 'Trace') -> 'dict[str, Any]'
 ```
 
-## plural.catalog.models.ModelCatalog
+## plural.ModelCatalog
 
 In-memory model catalog loaded from a bundled JSON snapshot.
 
@@ -2308,10 +2129,10 @@ Examples:
 ```
 
 ```python
-plural.catalog.models.ModelCatalog(path: 'str | Path | None' = None, *, entries: 'Iterable[ModelSpec | Mapping[str, Any]]' = (), include_bundled: 'bool' = True) -> 'None'
+plural.ModelCatalog(path: 'str | Path | None' = None, *, entries: 'Iterable[ModelSpec | Mapping[str, Any]]' = (), include_bundled: 'bool' = True) -> 'None'
 ```
 
-### plural.catalog.models.ModelCatalog.add
+### plural.ModelCatalog.add
 
 ```python
 add(self, *entries: 'ModelSpec | Mapping[str, Any]') -> 'ModelCatalog'
@@ -2328,7 +2149,7 @@ Returns:
     This catalog, for convenient construction.
 ```
 
-### plural.catalog.models.ModelCatalog.with_entries
+### plural.ModelCatalog.with_entries
 
 ```python
 with_entries(self, *entries: 'ModelSpec | Mapping[str, Any]') -> 'ModelCatalog'
@@ -2341,7 +2162,7 @@ Returns:
     A copy containing the effective bundled and project entries.
 ```
 
-### plural.catalog.models.ModelCatalog.load_bundled
+### plural.ModelCatalog.load_bundled
 
 ```python
 load_bundled(self) -> 'None'
@@ -2349,7 +2170,7 @@ load_bundled(self) -> 'None'
 
 Load the package-bundled catalog snapshot.
 
-### plural.catalog.models.ModelCatalog.load_path
+### plural.ModelCatalog.load_path
 
 ```python
 load_path(self, path: 'Path') -> 'None'
@@ -2362,7 +2183,7 @@ Args:
     path: Path to a JSON catalog file.
 ```
 
-### plural.catalog.models.ModelCatalog.models
+### plural.ModelCatalog.models
 
 ```python
 models(self) -> 'list[ModelSpec]'
@@ -2375,7 +2196,7 @@ Returns:
     A list of :class:`ModelSpec` entries.
 ```
 
-### plural.catalog.models.ModelCatalog.get
+### plural.ModelCatalog.get
 
 ```python
 get(self, model_id: 'str') -> 'ModelSpec | None'
@@ -2391,7 +2212,7 @@ Returns:
     The matching :class:`ModelSpec`, or ``None``.
 ```
 
-### plural.catalog.models.ModelCatalog.require
+### plural.ModelCatalog.require
 
 ```python
 require(self, model_id: 'str') -> 'ModelSpec'
@@ -2410,7 +2231,7 @@ Raises:
     NotFoundError: If the model is not in the catalog.
 ```
 
-### plural.catalog.models.ModelCatalog.refresh_from_openrouter
+### plural.ModelCatalog.refresh_from_openrouter
 
 ```python
 refresh_from_openrouter(self, url: 'str' = 'https://openrouter.ai/api/v1/models') -> 'int'
@@ -2430,7 +2251,7 @@ Note:
     tooling, not runtime hot paths.
 ```
 
-### plural.catalog.models.ModelCatalog.write_snapshot
+### plural.ModelCatalog.write_snapshot
 
 ```python
 write_snapshot(self, path: 'Path') -> 'None'
@@ -2443,7 +2264,7 @@ Args:
     path: Destination path.
 ```
 
-## plural.catalog.models.ModelSpec
+## plural.ModelSpec
 
 A catalog entry for a model.
 
@@ -2459,7 +2280,7 @@ Attributes:
     provider: Derived provider slug (author segment of ``id``).
 ```
 
-### plural.catalog.models.ModelSpec.ordered_endpoints
+### plural.ModelSpec.ordered_endpoints
 
 ```python
 ordered_endpoints(self) -> 'list[ModelEndpoint]'
@@ -2472,7 +2293,7 @@ Returns:
     Ordered endpoints, or a single implicit author host when none are listed.
 ```
 
-### plural.catalog.models.ModelSpec.host_providers
+### plural.ModelSpec.host_providers
 
 ```python
 host_providers(self) -> 'list[str]'
@@ -2480,7 +2301,7 @@ host_providers(self) -> 'list[str]'
 
 Return host slugs that can serve this model.
 
-### plural.catalog.models.ModelSpec.pricing_for
+### plural.ModelSpec.pricing_for
 
 ```python
 pricing_for(self, provider: 'str | None' = None, region: 'str | None' = None) -> 'ModelPricing | None'
@@ -2502,7 +2323,7 @@ Returns:
     Per-token pricing, or ``None``.
 ```
 
-## plural.catalog.models.estimate_cost
+## plural.estimate_cost
 
 Estimate USD cost for a usage record against a model spec.
 
@@ -2527,7 +2348,7 @@ Examples:
 ```
 
 ```python
-plural.catalog.models.estimate_cost(usage: 'Usage', spec: 'ModelSpec | None', *, provider: 'str | None' = None, region: 'str | None' = None) -> 'float | None'
+plural.estimate_cost(usage: 'Usage', spec: 'ModelSpec | None', *, provider: 'str | None' = None, region: 'str | None' = None) -> 'float | None'
 ```
 
 ## plural.catalog.sync.CatalogDiff
@@ -3004,7 +2825,7 @@ Args:
 plural.catalog.sync.write_catalog(document: 'Mapping[str, Any]', path: 'Path' = PosixPath('/Users/taylor/Projects/plural/src/plural/catalog/data/models.json')) -> 'None'
 ```
 
-## plural.tracing.writer.TraceWriter
+## plural.TraceWriter
 
 Background writer that applies redaction/sampling then sinks traces.
 
@@ -3017,10 +2838,10 @@ Args:
 ```
 
 ```python
-plural.tracing.writer.TraceWriter(sink: 'Sink', *, redactor: 'Redactor | None' = None, sampler: 'Sampler | None' = None, maxsize: 'int' = 1000) -> 'None'
+plural.TraceWriter(sink: 'Sink', *, redactor: 'Redactor | None' = None, sampler: 'Sampler | None' = None, maxsize: 'int' = 1000) -> 'None'
 ```
 
-### plural.tracing.writer.TraceWriter.record
+### plural.TraceWriter.record
 
 ```python
 record(self, trace: 'Trace') -> 'None'
@@ -3033,7 +2854,7 @@ Args:
     trace: Trace to record.
 ```
 
-### plural.tracing.writer.TraceWriter.label
+### plural.TraceWriter.label
 
 ```python
 label(self, trace_id: 'str', *, scores: 'dict[str, float] | None' = None, reward: 'float | None' = None, labels: 'dict[str, Any] | None' = None, feedback: 'str | None' = None) -> 'None'
@@ -3053,7 +2874,7 @@ Args:
     feedback: Free-form feedback.
 ```
 
-### plural.tracing.writer.TraceWriter.flush
+### plural.TraceWriter.flush
 
 ```python
 flush(self) -> 'None'
@@ -3061,7 +2882,7 @@ flush(self) -> 'None'
 
 Block until the queue is empty.
 
-### plural.tracing.writer.TraceWriter.close
+### plural.TraceWriter.close
 
 ```python
 close(self) -> 'None'
@@ -3298,7 +3119,7 @@ Returns:
 plural.tracing.sinks.traces_from_jsonl(path: 'str | Path') -> 'list[Trace]'
 ```
 
-## plural.tracing.redaction.Redactor
+## plural.Redactor
 
 Redact sensitive fields and patterns from traces.
 
@@ -3312,10 +3133,10 @@ Args:
 ```
 
 ```python
-plural.tracing.redaction.Redactor(*, fields: 'set[str] | None' = None, patterns: 'list[str] | None' = None, replacement: 'str' = '[REDACTED]', callables: 'list[Callable[[Trace], Trace]] | None' = None, drop_content: 'bool' = False) -> 'None'
+plural.Redactor(*, fields: 'set[str] | None' = None, patterns: 'list[str] | None' = None, replacement: 'str' = '[REDACTED]', callables: 'list[Callable[[Trace], Trace]] | None' = None, drop_content: 'bool' = False) -> 'None'
 ```
 
-### plural.tracing.redaction.Redactor.apply
+### plural.Redactor.apply
 
 ```python
 apply(self, trace: 'Trace') -> 'Trace'
@@ -3331,38 +3152,665 @@ Returns:
     A redacted deep copy.
 ```
 
-## plural.tracing.redaction.Sampler
+## plural.providers.anthropic.AnthropicProvider
 
-Decide whether a trace should be persisted.
-
-```text
-Args:
-    rate: Probability in ``[0, 1]`` that a trace is kept.
-    always_tags: Tags that force retention when present.
-```
-
-```python
-plural.tracing.redaction.Sampler(rate: 'float' = 1.0, *, always_tags: 'set[str] | None' = None) -> 'None'
-```
-
-### plural.tracing.redaction.Sampler.accept
-
-```python
-accept(self, trace: 'Trace') -> 'bool'
-```
-
-Return whether ``trace`` should be written.
+Adapter for Anthropic's Messages API.
 
 ```text
 Args:
-    trace: Candidate trace.
+    api_key: Anthropic API key.
+    base_url: API base URL.
+    timeout_s: Request timeout in seconds.
+    default_headers: Extra headers.
+    anthropic_version: Value for the ``anthropic-version`` header.
+```
+
+```python
+plural.providers.anthropic.AnthropicProvider(api_key: 'str', *, base_url: 'str | None' = None, timeout_s: 'float' = 60.0, default_headers: 'dict[str, str] | None' = None, anthropic_version: 'str' = '2023-06-01') -> 'None'
+```
+
+### plural.providers.anthropic.AnthropicProvider.chat
+
+```python
+chat(self, request: 'ChatRequest') -> 'ChatResponse'
+```
+
+Execute a non-streaming Messages API call.
+
+```text
+Args:
+    request: Normalized chat request.
 
 Returns:
-    ``True`` if the trace should be persisted.
+    Normalized chat response.
+```
+
+### plural.providers.anthropic.AnthropicProvider.stream
+
+```python
+stream(self, request: 'ChatRequest') -> 'Iterator[StreamChunk]'
+```
+
+Execute a streaming Messages API call.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Yields:
+    Normalized stream chunks.
+```
+
+### plural.providers.anthropic.AnthropicProvider.achat
+
+```python
+achat(self, request: 'ChatRequest') -> 'ChatResponse'
+```
+
+Async non-streaming Messages API call.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Returns:
+    Normalized chat response.
+```
+
+### plural.providers.anthropic.AnthropicProvider.astream
+
+```python
+astream(self, request: 'ChatRequest') -> 'AsyncIterator[StreamChunk]'
+```
+
+Async streaming Messages API call.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Yields:
+    Normalized stream chunks.
+```
+
+### plural.providers.anthropic.AnthropicProvider.close
+
+```python
+close(self) -> 'None'
+```
+
+Close the sync HTTP client.
+
+### plural.providers.anthropic.AnthropicProvider.aclose
+
+```python
+aclose(self) -> 'None'
+```
+
+Close the async HTTP client.
+
+## plural.providers.azure.AzureOpenAIProvider
+
+Azure OpenAI via the v1 chat completions route.
+
+```text
+Args:
+    api_key: Azure API key, or an Entra ID token when ``use_bearer_auth`` is set.
+    endpoint: Resource endpoint, such as ``https://acme.openai.azure.com``.
+    deployments: Maps model ids to deployment names. Both the full
+        ``author/slug`` and the bare slug are accepted as keys.
+    api_version: Optional explicit version, for opting into ``preview``.
+    use_bearer_auth: Send the credential as a bearer token for Entra ID.
+    base_url: Overrides ``endpoint`` entirely.
+    region: Serving region, recorded so billing can charge that region's rate.
+    name: Provider slug.
+    timeout_s: Request timeout in seconds.
+    default_headers: Extra headers.
+
+Raises:
+    ConfigurationError: If neither ``endpoint`` nor ``base_url`` is given.
 
 Examples:
-    >>> Sampler(rate=1.0).accept(Trace(trace_id="t"))
+    >>> provider = AzureOpenAIProvider(
+    ...     "key",
+    ...     endpoint="https://acme.openai.azure.com",
+    ...     deployments={"openai/gpt-5.6-sol": "sol-prod"},
+    ... )
+    >>> provider._model_id("openai/gpt-5.6-sol")
+    'sol-prod'
+    >>> provider.close()
+```
+
+```python
+plural.providers.azure.AzureOpenAIProvider(api_key: 'str', *, endpoint: 'str | None' = None, deployments: 'dict[str, str] | None' = None, api_version: 'str | None' = None, use_bearer_auth: 'bool' = False, base_url: 'str | None' = None, region: 'str' = 'us', name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None) -> 'None'
+```
+
+## plural.providers.openai_compatible.BasetenProvider
+
+Baseten Model APIs (OpenAI-compatible).
+
+```python
+plural.providers.openai_compatible.BasetenProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+```
+
+## plural.providers.bedrock.BedrockProvider
+
+Amazon Bedrock via the Converse and ConverseStream APIs.
+
+```text
+Args:
+    api_key: Bedrock API key sent as a bearer token. Omit when using IAM.
+    region: AWS region such as ``us-east-1``. Exposed as the coarse catalog
+        region via ``region``, since pricing varies by continent not by zone.
+    models: Maps catalog model ids to Bedrock model ids. Both the full
+        ``author/slug`` and the bare slug are accepted as keys.
+    access_key_id: AWS access key id, to sign with SigV4 instead.
+    secret_access_key: AWS secret access key.
+    session_token: Session token for temporary credentials.
+    base_url: Overrides the regional endpoint.
+    name: Provider slug.
+    timeout_s: Request timeout in seconds.
+    default_headers: Extra headers.
+
+Raises:
+    ConfigurationError: If no usable credentials are supplied.
+
+Examples:
+    >>> provider = BedrockProvider("key", region="us-east-1")
+    >>> provider.name, provider.aws_region, provider.region
+    ('bedrock', 'us-east-1', 'us')
+    >>> provider.close()
+```
+
+```python
+plural.providers.bedrock.BedrockProvider(api_key: 'str | None' = None, *, region: 'str' = 'us-east-1', models: 'dict[str, str] | None' = None, access_key_id: 'str | None' = None, secret_access_key: 'str | None' = None, session_token: 'str | None' = None, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None) -> 'None'
+```
+
+### plural.providers.bedrock.BedrockProvider.chat
+
+```python
+chat(self, request: 'ChatRequest') -> 'ChatResponse'
+```
+
+Execute a non-streaming Converse call.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Returns:
+    Normalized chat response.
+```
+
+### plural.providers.bedrock.BedrockProvider.stream
+
+```python
+stream(self, request: 'ChatRequest') -> 'Iterator[StreamChunk]'
+```
+
+Execute a streaming Converse call.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Yields:
+    Normalized stream chunks.
+```
+
+### plural.providers.bedrock.BedrockProvider.achat
+
+```python
+achat(self, request: 'ChatRequest') -> 'ChatResponse'
+```
+
+Async non-streaming Converse call.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Returns:
+    Normalized chat response.
+```
+
+### plural.providers.bedrock.BedrockProvider.astream
+
+```python
+astream(self, request: 'ChatRequest') -> 'AsyncIterator[StreamChunk]'
+```
+
+Async streaming Converse call.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Yields:
+    Normalized stream chunks.
+```
+
+### plural.providers.bedrock.BedrockProvider.close
+
+```python
+close(self) -> 'None'
+```
+
+Close the sync HTTP client.
+
+### plural.providers.bedrock.BedrockProvider.aclose
+
+```python
+aclose(self) -> 'None'
+```
+
+Close the async HTTP client.
+
+## plural.providers.openai_compatible.DeepSeekProvider
+
+DeepSeek OpenAI-compatible API.
+
+```python
+plural.providers.openai_compatible.DeepSeekProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+```
+
+## plural.providers.openai_compatible.FireworksProvider
+
+Fireworks AI OpenAI-compatible API.
+
+```python
+plural.providers.openai_compatible.FireworksProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+```
+
+## plural.providers.google.GoogleProvider
+
+Adapter for Google Gemini's generateContent API.
+
+```text
+Args:
+    api_key: Google AI Studio API key.
+    base_url: API base URL.
+    timeout_s: Request timeout in seconds.
+    default_headers: Extra headers.
+    include_thoughts: Whether to ask Gemini for its thought summaries.
+        Gemini reasons whether or not they are requested, and withholds them
+        unless asked, which makes a thinking model look like a stalled one.
+```
+
+```python
+plural.providers.google.GoogleProvider(api_key: 'str', *, base_url: 'str | None' = None, timeout_s: 'float' = 60.0, default_headers: 'dict[str, str] | None' = None, include_thoughts: 'bool' = True) -> 'None'
+```
+
+### plural.providers.google.GoogleProvider.chat
+
+```python
+chat(self, request: 'ChatRequest') -> 'ChatResponse'
+```
+
+Execute a non-streaming generateContent call.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Returns:
+    Normalized chat response.
+```
+
+### plural.providers.google.GoogleProvider.stream
+
+```python
+stream(self, request: 'ChatRequest') -> 'Iterator[StreamChunk]'
+```
+
+Execute a streaming generateContent call.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Yields:
+    Normalized stream chunks.
+```
+
+### plural.providers.google.GoogleProvider.achat
+
+```python
+achat(self, request: 'ChatRequest') -> 'ChatResponse'
+```
+
+Async non-streaming generateContent call.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Returns:
+    Normalized chat response.
+```
+
+### plural.providers.google.GoogleProvider.astream
+
+```python
+astream(self, request: 'ChatRequest') -> 'AsyncIterator[StreamChunk]'
+```
+
+Async streaming generateContent call.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Yields:
+    Normalized stream chunks.
+```
+
+### plural.providers.google.GoogleProvider.close
+
+```python
+close(self) -> 'None'
+```
+
+Close the sync HTTP client.
+
+### plural.providers.google.GoogleProvider.aclose
+
+```python
+aclose(self) -> 'None'
+```
+
+Close the async HTTP client.
+
+## plural.providers.openai_compatible.GroqProvider
+
+Groq OpenAI-compatible API.
+
+```python
+plural.providers.openai_compatible.GroqProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+```
+
+## plural.providers.openai_compatible.MetaProvider
+
+Meta Model API (OpenAI-compatible).
+
+```python
+plural.providers.openai_compatible.MetaProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+```
+
+## plural.providers.openai_compatible.MistralProvider
+
+Mistral OpenAI-compatible API.
+
+```python
+plural.providers.openai_compatible.MistralProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+```
+
+## plural.providers.openai_compatible.MoonshotProvider
+
+Moonshot / Kimi lab API.
+
+```python
+plural.providers.openai_compatible.MoonshotProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+```
+
+## plural.providers.openai_compatible.OpenAICompatible
+
+Base adapter for OpenAI Chat Completions-compatible APIs.
+
+```text
+Args:
+    api_key: Provider API key.
+    base_url: API base URL.
+    name: Provider slug used in traces and errors.
+    timeout_s: Request timeout in seconds.
+    default_headers: Extra headers.
+    organization: Optional OpenAI organization header.
+    strip_model_prefix: Whether to strip ``author/`` from model ids.
+```
+
+```python
+plural.providers.openai_compatible.OpenAICompatible(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+```
+
+### plural.providers.openai_compatible.OpenAICompatible.chat
+
+```python
+chat(self, request: 'ChatRequest') -> 'ChatResponse'
+```
+
+Execute a non-streaming chat completion.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Returns:
+    Normalized chat response.
+```
+
+### plural.providers.openai_compatible.OpenAICompatible.stream
+
+```python
+stream(self, request: 'ChatRequest') -> 'Iterator[StreamChunk]'
+```
+
+Execute a streaming chat completion.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Yields:
+    Normalized stream chunks.
+```
+
+### plural.providers.openai_compatible.OpenAICompatible.achat
+
+```python
+achat(self, request: 'ChatRequest') -> 'ChatResponse'
+```
+
+Async non-streaming chat completion.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Returns:
+    Normalized chat response.
+```
+
+### plural.providers.openai_compatible.OpenAICompatible.astream
+
+```python
+astream(self, request: 'ChatRequest') -> 'AsyncIterator[StreamChunk]'
+```
+
+Async streaming chat completion.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Yields:
+    Normalized stream chunks.
+```
+
+### plural.providers.openai_compatible.OpenAICompatible.close
+
+```python
+close(self) -> 'None'
+```
+
+Close the sync HTTP client.
+
+### plural.providers.openai_compatible.OpenAICompatible.aclose
+
+```python
+aclose(self) -> 'None'
+```
+
+Close the async HTTP client.
+
+## plural.providers.openai_compatible.OpenAIProvider
+
+Official OpenAI API, over whichever of its two endpoints fits the request.
+
+```text
+OpenAI serves the same models through two incompatible wire formats, and
+``/responses`` is now the larger one: ``/chat/completions`` rejects function
+tools for every current model and never reports reasoning. So requests go to
+:class:`~plural.providers.openai_responses.OpenAIResponsesProvider` by
+default. The one thing it cannot do is ``stop`` and ``seed``, which it
+rejects as unknown, so a request using either and needing nothing
+Responses-only stays on chat completions instead. Every request therefore
+lands on the endpoint that can serve all of it.
+
+Args:
+    api_key: OpenAI API key.
+    transport: ``"auto"`` picks per request as described above. ``"chat"``
+        and ``"responses"`` pin one endpoint, which is what to reach for when
+        fronting a proxy that speaks only one of them.
+    **kwargs: Forwarded to :class:`OpenAICompatible`.
+
+Examples:
+    >>> from plural.types import Message
+    >>> provider = OpenAIProvider("sk-test")
+    >>> hello = [Message(role="user", content="hi")]
+    >>> provider._delegate(ChatRequest(model="openai/gpt-5.6", messages=hello)) is not None
     True
+```
+
+```python
+plural.providers.openai_compatible.OpenAIProvider(api_key: 'str', *, transport: "Literal['auto', 'chat', 'responses']" = 'auto', **kwargs: 'Any') -> 'None'
+```
+
+### plural.providers.openai_compatible.OpenAIProvider.chat
+
+```python
+chat(self, request: 'ChatRequest') -> 'ChatResponse'
+```
+
+Execute a non-streaming chat completion on the fitting endpoint.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Returns:
+    Normalized chat response.
+```
+
+### plural.providers.openai_compatible.OpenAIProvider.achat
+
+```python
+achat(self, request: 'ChatRequest') -> 'ChatResponse'
+```
+
+Async variant of :meth:`chat`.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Returns:
+    Normalized chat response.
+```
+
+### plural.providers.openai_compatible.OpenAIProvider.stream
+
+```python
+stream(self, request: 'ChatRequest') -> 'Iterator[StreamChunk]'
+```
+
+Stream a chat completion from the fitting endpoint.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Yields:
+    Normalized stream chunks.
+```
+
+### plural.providers.openai_compatible.OpenAIProvider.astream
+
+```python
+astream(self, request: 'ChatRequest') -> 'AsyncIterator[StreamChunk]'
+```
+
+Async variant of :meth:`stream`.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Yields:
+    Normalized stream chunks.
+```
+
+### plural.providers.openai_compatible.OpenAIProvider.close
+
+```python
+close(self) -> 'None'
+```
+
+Close both endpoints' HTTP clients.
+
+### plural.providers.openai_compatible.OpenAIProvider.aclose
+
+```python
+aclose(self) -> 'None'
+```
+
+Close both endpoints' async HTTP clients.
+
+## plural.providers.openai_responses.OpenAIResponsesProvider
+
+OpenAI Responses API, normalized to the Chat Completions shape.
+
+```text
+Args:
+    api_key: OpenAI API key.
+    reasoning_summaries: Whether to ask for streamed reasoning summaries.
+        On by default, because a thinking model that emits nothing for ten
+        seconds is indistinguishable from a hung connection.
+    store: Whether to let OpenAI retain the response. Off by default to
+        match Chat Completions, which retains nothing.
+    **kwargs: Forwarded to :class:`OpenAICompatible`.
+
+Examples:
+    >>> provider = OpenAIResponsesProvider("sk-test")
+    >>> provider.endpoint_path
+    '/responses'
+```
+
+```python
+plural.providers.openai_responses.OpenAIResponsesProvider(api_key: 'str', *, reasoning_summaries: 'bool' = True, store: 'bool' = False, **kwargs: 'Any') -> 'None'
+```
+
+### plural.providers.openai_responses.OpenAIResponsesProvider.serves_exactly
+
+```python
+serves_exactly(request: 'ChatRequest') -> 'bool'
+```
+
+Whether this endpoint can honour every part of a request.
+
+```text
+Args:
+    request: Normalized chat request.
+
+Returns:
+    ``False`` when something would have to be dropped or adjusted, which
+    is what tells the OpenAI dispatcher to prefer Chat Completions.
+
+Examples:
+    >>> from plural.types import Message
+    >>> hello = [Message(role="user", content="hi")]
+    >>> req = ChatRequest(model="openai/gpt-5.6", messages=hello, seed=7)
+    >>> OpenAIResponsesProvider.serves_exactly(req)
+    False
 ```
 
 ## plural.providers.base.Provider
@@ -3445,152 +3893,36 @@ Attributes:
     organization: Optional organization id (OpenAI-style).
 ```
 
-## plural.providers.base.aiter_sse_lines
+## plural.providers.openai_compatible.QwenProvider
 
-Async variant of :func:`iter_sse_lines`.
-
-```text
-Args:
-    response: A streaming HTTP response.
-
-Yields:
-    JSON (or plain) data strings from ``data:`` lines.
-```
+Qwen via DashScope compatible-mode.
 
 ```python
-plural.providers.base.aiter_sse_lines(response: 'httpx.Response') -> 'AsyncIterator[str]'
+plural.providers.openai_compatible.QwenProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
 ```
 
-## plural.providers.base.araise_for_stream_status
+## plural.providers.openai_compatible.TogetherProvider
 
-Async variant of :func:`raise_for_stream_status`.
-
-```text
-Args:
-    response: The streaming HTTP response.
-    provider: Provider slug.
-    model: Model id if known.
-
-Raises:
-    PluralError: When the status code indicates failure.
-```
+Together AI OpenAI-compatible API.
 
 ```python
-plural.providers.base.araise_for_stream_status(response: 'httpx.Response', *, provider: 'str', model: 'str | None' = None) -> 'None'
+plural.providers.openai_compatible.TogetherProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
 ```
 
-## plural.providers.base.classify_http_error
+## plural.providers.openai_compatible.XAIProvider
 
-Map an HTTP error response to a classified :class:`PluralError`.
-
-```text
-Args:
-    status_code: HTTP status code.
-    body: Parsed or raw response body.
-    provider: Provider slug.
-    model: Model id if known.
-
-Returns:
-    A specific :class:`PluralError` subclass instance.
-
-Examples:
-    >>> err = classify_http_error(status_code=429, body={}, provider="openai")
-    >>> isinstance(err, RateLimitError)
-    True
-```
+xAI OpenAI-compatible API.
 
 ```python
-plural.providers.base.classify_http_error(*, status_code: 'int', body: 'Any', provider: 'str', model: 'str | None' = None) -> 'PluralError'
+plural.providers.openai_compatible.XAIProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
 ```
 
-## plural.providers.base.iter_sse_lines
+## plural.providers.openai_compatible.ZhipuProvider
 
-Yield data payloads from an SSE response.
-
-```text
-Args:
-    response: A streaming HTTP response.
-
-Yields:
-    JSON (or plain) data strings from ``data:`` lines.
-```
+Zhipu / Z.ai lab API.
 
 ```python
-plural.providers.base.iter_sse_lines(response: 'httpx.Response') -> 'Iterator[str]'
-```
-
-## plural.providers.base.map_transport_error
-
-Map httpx transport errors to plural errors.
-
-```text
-Args:
-    exc: The transport exception.
-    provider: Provider slug.
-    model: Model id if known.
-
-Returns:
-    A classified :class:`PluralError`.
-```
-
-```python
-plural.providers.base.map_transport_error(exc: 'Exception', *, provider: 'str', model: 'str | None' = None) -> 'PluralError'
-```
-
-## plural.providers.base.parse_json_or_text
-
-Parse a response body as JSON, falling back to text.
-
-```text
-Args:
-    response: The HTTP response.
-
-Returns:
-    Parsed JSON or the raw text body.
-```
-
-```python
-plural.providers.base.parse_json_or_text(response: 'httpx.Response') -> 'Any'
-```
-
-## plural.providers.base.raise_for_status
-
-Raise a classified error for non-success HTTP responses.
-
-```text
-Args:
-    response: The HTTP response.
-    provider: Provider slug.
-    model: Model id if known.
-
-Raises:
-    PluralError: When the status code indicates failure.
-```
-
-```python
-plural.providers.base.raise_for_status(response: 'httpx.Response', *, provider: 'str', model: 'str | None' = None) -> 'None'
-```
-
-## plural.providers.base.raise_for_stream_status
-
-Raise a classified error for a failed streaming response.
-
-```text
-A streaming response arrives with its body unread, and touching the body of
-an unread response raises from httpx instead of surfacing the host's error.
-Reading first is what turns a failed stream into a usable message.
-
-Args:
-    response: The streaming HTTP response.
-    provider: Provider slug.
-    model: Model id if known.
-
-Raises:
-    PluralError: When the status code indicates failure.
-```
-
-```python
-plural.providers.base.raise_for_stream_status(response: 'httpx.Response', *, provider: 'str', model: 'str | None' = None) -> 'None'
+plural.providers.openai_compatible.ZhipuProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
 ```
 
 ## plural.errors.AuthenticationError

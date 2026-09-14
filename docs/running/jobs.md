@@ -5,7 +5,7 @@ order: 80
 description: "Plan and run Agents against a Task or Benchmark locally by default, with explicit hosted submission."
 audience: all
 nav: true
-nav_group: Running
+nav_group: Run
 outcome: You can dry-run, execute, and inspect a reproducible Job.
 ---
 # Jobs
@@ -14,25 +14,66 @@ A Job owns a Task or Benchmark source, Agents, mode, attempts, concurrency, and
 retry policy.
 
 ```python
-from plural import Job
+from plural import Job, RetryPolicy
 
-job = Job(benchmark, agents=[agent], attempts=2)
+job = Job(
+    benchmark,
+    agents=[careful, concise],
+    attempts=2,
+    concurrency=4,
+    per_runtime_concurrency=2,
+    retry=RetryPolicy(max_retries=2),
+)
 print(job.plan.trial_count)
 result = job.run()
 ```
 
-The CLI loads the same Job:
+Defaults are `mode="eval"`, `attempts=1`, `concurrency=1`,
+`per_runtime_concurrency=1`, `priority=0`, and no retries. Retry backoff starts
+at 0.25 seconds, caps at 10 seconds, and doubles for rate limits, provider
+unavailability, timeouts, and Runtime unavailability.
+
+`attempts` creates independent Trials. `max_retries` creates additional
+executions of a failed Trial. Do not use retries to hide configuration,
+evidence, or policy errors.
+
+## Plan, run, resume
 
 ```bash
 plural validate job.py:job
 plural run job.py:job --dry-run
 plural run job.yaml
+plural job list
+plural job show JOB_ID
+plural job watch JOB_ID --follow
 ```
 
-Local execution is the default beginner path. Hosted synchronization and
-submission require `--hosted`.
+`job.plan` freezes Task and Benchmark pins, model endpoint resolutions,
+Environment/Verifier/Agent/Harness hashes, Runtime provider, mode, and the
+Agent × Task × attempt Trial expansion.
 
-Eval mode runs final Verifiers. Train mode may additionally run Environment
-Rewarders and capture exact training artifacts. Every Trial receipt records the
-pinned Task, Benchmark, Agent, model endpoint, Environment, Verifiers, and
-artifacts.
+`job.run(resume=True)` or the advanced resume command reuses only successful
+locked Trials and appends new executions where needed. A changed lock is
+rejected.
+
+Use `await job.run_async()` inside an existing event loop.
+
+## Local and hosted
+
+`plural run` executes with local orchestration and a store beside the source
+reference. The Environment can still select Docker or Daytona and call paid
+model APIs. `--hosted` explicitly synchronizes the graph and submits it to
+Plural Intel.
+
+Hosted execution needs materializable source, supported revision APIs,
+credentials, and policy-compatible Runtime providers. A successful local run
+does not imply the same graph can run hosted.
+
+## Evaluate before routing or training
+
+Eval mode runs final Verifiers and records quality, cost, latency, trajectory,
+and completeness evidence. Compare exact Agent and Benchmark pins. Only then
+use those records to choose routing policy for application traffic.
+
+Train mode keeps the final Verifiers and adds exact TITO and supported
+Rewarders. It is intentionally stricter; see [Training and RL](training.md).

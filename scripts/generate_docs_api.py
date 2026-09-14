@@ -3,44 +3,44 @@
 import importlib
 import inspect
 import re
+import sys
 from pathlib import Path
 
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = [
-    "plural.client.Client",
+    "plural.Client",
     "plural.types",
-    "plural.tracing.schema.Trace",
-    "plural.tracing.schema.TraceContext",
+    "plural.Trace",
+    "plural.TraceContext",
     "plural.tracing.resources.trace_json_schema",
-    "plural.execution.engine.Job",
-    "plural.execution.engine.Trial",
-    "plural.execution.store.JobStore",
-    "plural.environments.env.Environment",
-    "plural.environments.env.action",
-    "plural.environments.env.rewarder",
+    "plural.Job",
+    "plural.Benchmark",
+    "plural.project",
+    "plural.JobStore",
+    "plural.Environment",
+    "plural.action",
+    "plural.rewarder",
     "plural.environments.types",
-    "plural.harness.models",
-    "plural.sandbox.base.SandboxProvider",
-    "plural.sandbox.models",
-    "plural.sandbox.registry.ProviderRegistry",
-    "plural.sandbox.local.LocalProvider",
-    "plural.sandbox.docker.DockerProvider",
-    "plural.sandbox.daytona.DaytonaProvider",
-    "plural.cli.config",
-    "plural.cli.auth",
+    "plural.Harness",
+    "plural.SandboxProvider",
+    "plural.SandboxRequirements",
+    "plural.ProviderRegistry",
+    "plural.LocalProvider",
+    "plural.DockerProvider",
+    "plural.DaytonaProvider",
     "plural.routing.policies",
     "plural.environments.export.hf.to_huggingface_records",
     "plural.environments.export.verifiers.to_verifiers_trace",
-    "plural.catalog.models.ModelCatalog",
-    "plural.catalog.models.ModelSpec",
-    "plural.catalog.models.estimate_cost",
+    "plural.ModelCatalog",
+    "plural.ModelSpec",
+    "plural.estimate_cost",
     "plural.catalog.sync",
-    "plural.tracing.writer.TraceWriter",
+    "plural.TraceWriter",
     "plural.tracing.sinks",
-    "plural.tracing.redaction",
-    "plural.providers.base",
+    "plural.Redactor",
+    "plural.providers",
     "plural.errors",
 ]
 
@@ -58,7 +58,7 @@ def _signature(value):
         s = str(inspect.signature(value))
     except (ValueError, TypeError):
         return ""
-    s = re.sub(r"<[^<>]* object at 0x[0-9a-f]+>", "<configured default>", s)
+    s = re.sub(r"<[^<>]* at 0x[0-9a-f]+>", "<configured default>", s)
     return s
 
 
@@ -67,20 +67,25 @@ lines = [
     "route: /docs/reference/api",
     'title: "API reference"',
     "order: 240",
-    'description: "Python API signatures and documentation from the current source."',
+    'description: "Supported public Python API signatures from the current source."',
     "audience: all",
-    "nav: false",
+    "nav: true",
+    "nav_group: Reference",
     "---",
     "# API reference",
     "",
-    "Start with [the project walkthrough](../tutorials/first-project.md) for "
+    "Start with [the support queue tutorial](../tutorials/support-queue.md) for "
     "complete working code. Use the [field catalog](fields.md) for definition "
-    "fields, defaults, and constraints. This reference is generated from the "
-    "current package and is identical on both documentation surfaces.",
+    "fields, defaults, and constraints. This reference is generated from supported "
+    "root APIs and public extension modules. Planner and executor implementation "
+    "types such as `JobRunner`, `JobSpec`, and `TrialSpec` are intentionally omitted.",
     "",
     "Model constructors are described by their field contracts rather than "
     "duplicating long generated signatures. Methods below are defined on the "
     "listed class; ordinary inherited Pydantic methods are not repeated.",
+    "",
+    "`Client` provider adapters are the application inference API. Public `Job` "
+    "native execution is a separate OpenAI-compatible chat-completions path.",
     "",
 ]
 seen = set()
@@ -141,5 +146,11 @@ for name in TARGETS:
             _emit(getattr(item, "__module__", name) + "." + getattr(item, "__name__", key), item)
     else:
         _emit(name, value)
-(ROOT / "docs/reference/api.md").write_text("\n".join(lines).rstrip() + "\n")
+output = ROOT / "docs/reference/api.md"
+content = "\n".join(lines).rstrip() + "\n"
+if "--check" in sys.argv:
+    if output.read_text(encoding="utf-8") != content:
+        raise SystemExit("Generated API documentation is stale.")
+else:
+    output.write_text(content, encoding="utf-8")
 print(f"Generated API documentation for {len(seen)} public symbols.")

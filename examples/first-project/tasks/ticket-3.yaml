@@ -1,9 +1,11 @@
 kind: task
 name: ticket-3
 version: 0.1.0
-instructions: Read the open ticket, categorize it correctly, then give a brief final
-  confirmation. Stop after categorization.
-goals: []
+instructions: Inspect the open ticket, categorize it, draft a concise customer response,
+  then resolve it. Stop when the Environment reports done.
+goals:
+- Use the support policy returned by inspect_ticket.
+- Resolve the ticket only after categorizing it and drafting a response.
 info:
   ticket_id: ticket-3
 metadata:
@@ -12,11 +14,18 @@ environment:
   kind: environment
   python: ../environment/world.py:SupportQueue
   name: support-queue
-  version: 0.1.0
+  version: 1.0.0
   description: ''
-  overview: Read a ticket, then assign billing, technical, or account.
+  overview: Inspect a customer ticket, categorize it, draft a reply, and resolve it.
   readme: ''
-  resources: []
+  resources:
+  - kind: data
+    name: support-policy
+    path: policy.md
+    uri: null
+    digest: null
+    content_type: text/markdown
+    config: {}
   runtime:
     provider: local
     placement: {}
@@ -61,7 +70,7 @@ environment:
     - python
     - commands.py
     source: ../environment
-    digest: sha256:724a2a682a771b89c74c5c0704dfa7a32248310ae87b9e6a5a54f112175b6c51
+    digest: sha256:b1b269a4a46f925a29dfb6ced5920848e7716859a99cffc7fa4fafcf4a59c6a3
 verifiers:
 - name: correct-category
   version: 0.1.0
@@ -73,6 +82,8 @@ verifiers:
     - expected
     observation_paths:
     - category
+    - draft_reply
+    - status
     - done
     include_hidden_state: true
   weight: 1.0
@@ -84,14 +95,18 @@ verifiers:
   - "\"\"\"Check the actual final Environment state, not the model's final claim.\"\
     \"\"\n\nimport json\nfrom pathlib import Path\n\npayload = json.loads(Path(\"\
     .plural/verifier-input.json\").read_text())\nview = payload[\"environment_view\"\
-    ]\nobservation = view[\"observation\"]\nstate = view[\"state\"]\ncorrect = observation[\"\
-    done\"] and observation[\"category\"] == state[\"expected\"]\nreward = float(correct)\n\
+    ]\nobservation = view[\"observation\"]\nstate = view[\"state\"]\ncorrect = (\n\
+    \    observation[\"done\"]\n    and observation[\"category\"] == state[\"expected\"\
+    ]\n    and bool(observation[\"draft_reply\"].strip())\n)\nreward = float(correct)\n\
     Path(\"verifier-result.json\").write_text(\n    json.dumps(\n        {\n     \
-    \       \"reward\": reward,\n            \"scores\": {\"correct\": reward},\n\
-    \            \"evidence\": [f\"category={observation['category']}\", f\"correct={correct}\"\
-    ],\n            \"feedback\": \"Correct category.\"\n            if correct\n\
-    \            else \"Incorrect or incomplete categorization.\",\n        }\n  \
-    \  )\n    + \"\\n\"\n)\n"
+    \       \"reward\": reward,\n            \"scores\": {\n                \"correct_category\"\
+    : reward,\n                \"response_drafted\": float(bool(observation[\"draft_reply\"\
+    ])),\n            },\n            \"evidence\": [\n                f\"status={observation['status']}\"\
+    ,\n                f\"category={observation['category']}\",\n                f\"\
+    correct={correct}\",\n            ],\n            \"feedback\": \"Correct category\
+    \ and a response was drafted.\"\n            if correct\n            else \"The\
+    \ ticket was not resolved with the correct category and a response.\",\n     \
+    \   }\n    )\n    + \"\\n\"\n)\n"
   runtime:
     provider: local
     image: null

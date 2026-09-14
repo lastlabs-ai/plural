@@ -22,11 +22,14 @@ if Path("state.json").exists():
 name = sys.argv[1]
 if name == "reset":
     observation, _info = world.reset()
-elif name == "categorize":
+elif name in {"inspect_ticket", "categorize", "draft_response", "resolve"}:
     if not world.state.ticket_id:
         world.reset()
     try:
-        observation, _reward, _terminated, _truncated, _info = world.step(**json.load(sys.stdin))
+        parameters = json.load(sys.stdin)
+        observation, _reward, _terminated, _truncated, _info = world.step(
+            {"name": name, **parameters}
+        )
     except ValueError as error:
         observation = {"error": str(error), **world.observe()}
 else:

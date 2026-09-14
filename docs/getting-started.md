@@ -10,61 +10,103 @@ outcome: You can author, validate, inspect, export, and dry-run a Job.
 ---
 # Getting started
 
-Install Plural and create a project:
+Plural 0.12.1 requires Python 3.10 or newer:
 
 ```bash
-pip install plural
-plural init word-game
-cd word-game
+python -m pip install "plural==0.12.1"
+plural init support-eval
+cd support-eval
 ```
 
-Plural has seven plain concepts: Environment, Runtime, Agent, Verifier, Task,
-Benchmark, and Job. Python defines their semantics.
+Open the generated Python project. Its essential graph is:
 
 ```python
-from plural import Agent, Benchmark, Environment, Job, Task
+from pathlib import Path
+from plural import Agent, Benchmark, Environment, ExecutionTarget, Job, Runtime, Task
+from plural import NetworkMode
 from plural.verifiers import DeterministicVerifier
 
-environment = Environment(name="word-game")
-verifier = DeterministicVerifier(name="solved", check="python verify.py")
+environment = Environment(
+    name="support-queue",
+    runtime=Runtime(
+        provider="docker",
+        image="python:3.12-slim",
+        network=NetworkMode.FULL,
+        targets=frozenset({ExecutionTarget.DOCKER}),
+    ),
+)
+verify = Path("verify.py").read_text(encoding="utf-8")
+verifier = DeterministicVerifier(
+    name="resolved",
+    check=("python", "-c", verify),
+)
 task = Task(
-    name="easy",
-    instructions="Solve the puzzle.",
+    name="ticket-1",
+    instructions="Resolve the support ticket.",
     environment=environment,
     verifiers=[verifier],
 )
-benchmark = Benchmark(name="word-game", version="1.0.0", tasks=[task])
-agent = Agent(model="openai/gpt-5.6-luna")
+benchmark = Benchmark(name="support", version="1.0.0", tasks=[task])
+agent = Agent(
+    model="openai/gpt-5.6-luna",
+    secret_names=("OPENAI_API_KEY",),
+)
 job = Job(benchmark, agents=[agent])
 ```
 
-Export and reload the exact graph:
+This is the golden flow throughout the docs: Environment → Verifier → Task →
+Benchmark → Agent → Job. Python constructors define field names, defaults, and
+validation. YAML stores the same objects and the CLI resolves them.
 
-```python
-from plural.project import dump, load
-
-dump(job, "job.yaml")
-assert load("job.yaml").plan == job.plan
-```
-
-Every CLI entry loads those same public objects:
-
-```bash
-plural validate job.yaml
-plural inspect job.yaml
-plural run job.yaml --dry-run
-plural run job.yaml
-```
-
-The default run is local. Use `--hosted` only when you intend to synchronize
-and submit the graph to hosted Plural.
-
-Python object references are first-class:
+## Validate before execution
 
 ```bash
 plural validate project.py:job
+plural inspect project.py:job
 plural export project.py:job --output job.yaml
+plural run job.yaml --dry-run
 ```
 
-Continue with the [Wordle tutorial](tutorials/wordle.md) or read each concept
-under Project and Running.
+`--dry-run` resolves catalog entries, locks object hashes, checks
+Agent–Environment compatibility, and expands Trials. It does not call a model.
+
+The scaffold is a planning skeleton, not a complete scorer. Add executable
+Environment and Verifier implementations before removing `--dry-run`. A live
+native run also needs an OpenAI-compatible endpoint credential explicitly
+granted by the Agent:
+
+```bash
+export OPENAI_API_KEY=...
+plural run job.yaml
+```
+
+That command calls a model and may incur provider charges. The Docker Runtime
+above permits network access; use a more restrictive policy when your endpoint
+supports it. To use Plural Gateway instead, grant `PLURAL_API_KEY`, set
+`PLURAL_GATEWAY_URL`, and supply that value in the execution environment.
+
+Local is the orchestration default; it does not mean offline networking or
+unsafe local processes. The Environment's `runtime.provider` decides where
+execution happens. Hosted synchronization is always explicit:
+
+```bash
+plural run job.yaml --hosted
+```
+
+## Use the complete starter
+
+The repository's support project contains an executable Environment adapter,
+deterministic Verifier, three Tasks, two Agents, and generated YAML:
+
+```bash
+cd examples/first-project
+python build.py
+plural validate job.yaml
+plural run benchmark.yaml \
+  --agent agents/careful.yaml \
+  --agent agents/concise.yaml \
+  --dry-run
+```
+
+Continue with [Core concepts](getting-started/concepts.md), then the
+[support queue tutorial](tutorials/support-queue.md).

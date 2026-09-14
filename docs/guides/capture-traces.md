@@ -8,4 +8,6 @@ nav: false
 ---
 # Capture Traces
 
-Use the complete [client and sink examples](../reference/integrations.md#capture-application-traces) to capture application traces. For package Job records and artifacts, see [Traces and Trials](../running/traces.md).
+Use the complete [model client guide](../sdk/client.md) to capture application
+model calls. For package Job records and artifacts, see
+[Artifacts and evidence](../running/artifacts.md).

@@ -39,11 +39,17 @@ class ModelFixture(BaseHTTPRequestHandler):
         assert self.path == "/v1/chat/completions"
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         assert {t["function"]["name"] for t in request["tools"]} == {
+            "inspect_ticket",
             "categorize",
+            "draft_response",
+            "resolve",
         }
         task = json.loads(request["messages"][1]["content"])
         history = [m for m in request["messages"] if m["role"] == "tool"]
         if not history:
+            name = "inspect_ticket"
+            args = {}
+        elif len(history) == 1:
             name = "categorize"
             args = {
                 "category": "account"
@@ -52,6 +58,12 @@ class ModelFixture(BaseHTTPRequestHandler):
                     task["task_info"]["ticket_id"]
                 ]
             }
+        elif len(history) == 2:
+            name = "draft_response"
+            args = {"message": "Thanks for contacting support. We will help with this request."}
+        elif len(history) == 3:
+            name = "resolve"
+            args = {}
         else:
             name = None
             args = {}
@@ -156,7 +168,7 @@ try:
                     "max_score": 2,
                 }
             ],
-            "evidence": {"observation_paths": ["ticket", "category"]},
+            "evidence": {"observation_paths": ["issue", "category", "draft_reply"]},
             "weight": 0.5,
         }
         (root / "verifiers/review.yaml").write_text(yaml.safe_dump(human))

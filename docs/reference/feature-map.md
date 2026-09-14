@@ -59,7 +59,7 @@ names here describe the installed package, not proposed future convenience APIs.
   [OpenTelemetry](../guides/export-otel.md).
 - `Redactor`, `Sampler`, content retention: [redaction](../guides/redact-pii.md).
 - Hugging Face-style records and verifier-style traces:
-  [export API](api.md#datasets-and-export).
+  [API reference](api.md).
 
 ## Package authoring and execution
 

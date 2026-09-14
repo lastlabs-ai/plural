@@ -1,110 +1,95 @@
 # Plural
 
-Plural is a Python SDK for defining environments, evaluating agents, and
-keeping reproducible evidence.
+Plural 0.12.1 is a Python SDK and CLI for building reproducible agent
+evaluations and keeping the evidence behind every score.
 
-## Seven plain concepts
+## Evaluation in seven objects
 
-1. An **Environment** is the world an agent can act in.
-2. A **Runtime** says where that world runs.
-3. An **Agent** selects a catalog model and optional harness.
-4. A **Verifier** scores a completed trial.
-5. A **Task** combines instructions, one Environment, and Verifiers.
-6. A **Benchmark** pins an ordered set of Tasks.
-7. A **Job** runs Agents against a Task or Benchmark.
+1. **Environment** — world, actions, State, Observation, resources, and Runtime.
+2. **Verifier** — deterministic, Agent, or Human scoring.
+3. **Task** — instructions bound to one Environment and its Verifiers.
+4. **Benchmark** — immutable versioned Task pins.
+5. **Agent** — catalog model, instructions, and optional Harness.
+6. **Harness** — optional custom model interaction loop.
+7. **Job** — Agents × Tasks × attempts, with retries and evidence.
 
 Python is the semantic source of truth. YAML serializes the same objects
-losslessly, and the CLI loads those objects without a second configuration
-model.
+losslessly, and the CLI uses the same resolver and defaults.
 
 ## Install
 
 ```bash
-pip install plural
+pip install "plural==0.12.1"
 ```
 
 ## First evaluation
 
 ```python
-from plural import Agent, Benchmark, Environment, Job, Task
+from pathlib import Path
+from plural import Agent, Benchmark, Job, Task
 from plural.verifiers import DeterministicVerifier
 
-environment = Environment(name="support")
-verifier = DeterministicVerifier(name="complete", check="python verify.py")
+verify = Path("verify.py").read_text(encoding="utf-8")
+verifier = DeterministicVerifier(
+    name="resolved",
+    check=("python", "-c", verify),
+)
 task = Task(
     name="ticket-1",
     instructions="Resolve the support ticket.",
     environment=environment,
     verifiers=[verifier],
 )
-benchmark = Benchmark(name="support", version="1.0.0", tasks=[task])
-agent = Agent(model="openai/gpt-5.6-luna")
-job = Job(benchmark, agents=[agent])
+benchmark = Benchmark(name="support", version="1.0.0", tasks=(task,))
+agent = Agent(model="openai/gpt-5.6-luna", instructions="Use the available actions.")
+job = Job(benchmark, agents=(agent,))
 
 print(job.plan.trial_count)
 ```
 
-An `@action` Environment becomes executable with one packaging call:
+Here `environment` is a packaged `Environment` instance. Typed Python actions
+become executable with one packaging call:
 
 ```python
-environment = SupportQueue(runtime=runtime).package(("python", "commands.py"))
+environment = SupportQueue(runtime=runtime).package(
+    ("python", "commands.py"),
+    source="environment",
+)
 ```
 
-No `Definition`, `Binding`, protocol version, or hand-built action manifest is
-part of the beginner API.
-
-## Python, YAML, and CLI
-
-```python
-from plural.project import dump, load
-
-dump(job, "job.yaml")
-assert load("job.yaml").content_hash == job.content_hash
-```
+Validate and run the same graph:
 
 ```bash
-plural init
-plural validate job.py:job
+plural init support-eval
+cd support-eval
+plural validate project.py:job
+plural export project.py:job --output job.yaml
 plural inspect job.yaml
-plural export job.py:job --output job.yaml
 plural run job.yaml --dry-run
-plural run job.yaml
 ```
 
-Runs are local by default. Hosted submission is always explicit:
+After implementing the Environment and Verifier, `plural run job.yaml` uses
+local orchestration by default. The Environment Runtime still selects trusted
+local subprocess, Docker, Daytona, or an installed provider plugin. Hosted
+submission is explicit:
 
 ```bash
 plural run job.yaml --hosted
 ```
 
-Project model entries are explicit and never global:
-
-```python
-from plural import CatalogContext, ModelCatalog, ModelSpec
-
-context = CatalogContext(ModelCatalog(entries=[ModelSpec(id="project/model")]))
-agent = context.agent(model="project/model")
-```
-
-See the [getting started guide](docs/getting-started.md), the
-[Wordle example](examples/wordle/), and the
-[CLI reference](docs/reference/cli-commands.md).
+Start with the [documentation](docs/index.md), the executable
+[support queue](examples/first-project/), and [Wordle](examples/wordle/).
 
 ## Development
 
 ```bash
 uv sync --group dev --group docs
 uv run ruff check .
+uv run mypy --strict src/plural tests/typing/consumer.py
 uv run pytest
 uv run python scripts/check_docs.py
+uv run mkdocs build --strict
 ```
-
-## Clean break
-
-The public evaluation API no longer uses `*Definition`, `*Binding`,
-`WeightedVerifier`, `EnvironmentRuntime`, or `native_*_v1` names. Internal
-execution specs remain implementation details. Migrate public code to the
-seven concepts above; see [migration v1](docs/migration/v1.md).
 
 ## License
 

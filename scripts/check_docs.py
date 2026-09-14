@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import ast
 import re
+import shlex
 from pathlib import Path
 
 import yaml
+from typer.main import get_command
+
+from plural.cli.main import app
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
@@ -16,27 +21,48 @@ FRONTMATTER = re.compile(
     re.DOTALL,
 )
 HEADING = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
+ANY_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE)
 REQUIRED_FIELDS = frozenset({"route", "title", "order", "description", "audience", "nav"})
 AUDIENCES = frozenset({"all", "developers", "operators", "maintainers", "internal"})
-NAV_GROUPS = frozenset({"Start", "Project", "Running", "Tutorial", "Reference"})
+NAV_GROUPS = frozenset(
+    {"Start", "Build", "Run", "Interfaces", "Tutorials", "Operations", "Reference"}
+)
 PACKAGE_NAV = [
     ("Start", "/docs", "index.md"),
-    ("Start", "/docs/motivation", "motivation.md"),
     ("Start", "/docs/getting-started", "getting-started.md"),
-    ("Project", "/docs/project/environments", "project/environments.md"),
-    ("Project", "/docs/project/tasks", "project/tasks.md"),
-    ("Project", "/docs/project/verifiers", "project/verifiers.md"),
-    ("Project", "/docs/project/agents", "project/agents.md"),
-    ("Project", "/docs/project/benchmarks", "project/benchmarks.md"),
-    ("Running", "/docs/running/jobs", "running/jobs.md"),
-    ("Running", "/docs/running/traces", "running/traces.md"),
-    ("Running", "/docs/running/reviews", "running/reviews.md"),
-    ("Tutorial", "/docs/tutorials/wordle", "tutorials/wordle.md"),
-    ("Reference", "/docs/reference/definitions", "reference/definitions.md"),
+    ("Start", "/docs/getting-started/concepts", "getting-started/concepts.md"),
+    ("Build", "/docs/project/environments", "project/environments.md"),
+    ("Build", "/docs/project/runtime", "project/runtime.md"),
+    ("Build", "/docs/project/environment-components", "project/environment-components.md"),
+    ("Build", "/docs/project/tasks", "project/tasks.md"),
+    ("Build", "/docs/project/verifiers", "project/verifiers.md"),
+    ("Build", "/docs/project/agents", "project/agents.md"),
+    ("Build", "/docs/project/harnesses", "project/harnesses.md"),
+    ("Build", "/docs/project/benchmarks", "project/benchmarks.md"),
+    ("Build", "/docs/project/updating", "project/updating.md"),
+    ("Run", "/docs/running/jobs", "running/jobs.md"),
+    ("Run", "/docs/running/trials", "running/trials.md"),
+    ("Run", "/docs/running/artifacts", "running/artifacts.md"),
+    ("Run", "/docs/running/reviews", "running/reviews.md"),
+    ("Run", "/docs/running/training", "running/training.md"),
+    ("Interfaces", "/docs/sdk/evaluation", "sdk/evaluation.md"),
+    ("Interfaces", "/docs/cli/evaluation", "cli/evaluation.md"),
+    ("Interfaces", "/docs/interfaces/yaml", "interfaces/yaml.md"),
+    ("Tutorials", "/docs/tutorials/support-queue", "tutorials/support-queue.md"),
+    ("Tutorials", "/docs/tutorials/wordle", "tutorials/wordle.md"),
+    ("Operations", "/docs/reference/integrations", "reference/integrations.md"),
+    ("Operations", "/docs/operations/security", "operations/security.md"),
+    ("Operations", "/docs/operations/troubleshooting", "operations/troubleshooting.md"),
+    ("Operations", "/docs/reference/limitations", "reference/limitations.md"),
+    ("Reference", "/docs/reference/fields", "reference/fields.md"),
     ("Reference", "/docs/reference/cli-commands", "reference/cli-commands.md"),
     ("Reference", "/docs/reference/glossary", "reference/glossary.md"),
-    ("Reference", "/docs/reference/integrations", "reference/integrations.md"),
+    ("Reference", "/docs/reference/api", "reference/api.md"),
 ]
+FENCE = re.compile(r"^```(?P<language>[^\n]*)\n(?P<body>.*?)^```\s*$", re.MULTILINE | re.DOTALL)
+INTERNAL_AUTHORING = re.compile(
+    r"\b(?:[A-Za-z]+Definition|[A-Za-z]+Binding|schema_version|protocol|native_[a-z0-9_]*_v1)\b"
+)
 
 
 def intended_route(source: Path) -> str:
@@ -50,6 +76,20 @@ def intended_route(source: Path) -> str:
     if parts and parts[-1] == "index":
         parts.pop()
     return "/docs" + (f"/{'/'.join(parts)}" if parts else "")
+
+
+def _anchors(source: Path) -> set[str]:
+    text = source.read_text(encoding="utf-8")
+    output: set[str] = set()
+    counts: dict[str, int] = {}
+    for heading in ANY_HEADING.findall(text):
+        plain = re.sub(r"<[^>]+>", "", heading)
+        plain = re.sub(r"[^\w\s-]", "", plain.lower())
+        base = re.sub(r"[-\s]+", "-", plain).strip("-")
+        count = counts.get(base, 0)
+        counts[base] = count + 1
+        output.add(base if count == 0 else f"{base}_{count}")
+    return output
 
 
 def _metadata(source: Path, text: str, failures: list[str]) -> dict[str, object]:
@@ -142,10 +182,59 @@ def _nav_parity(documents: dict[str, dict[str, object]], failures: list[str]) ->
     mkdocs_text = MKDOCS.read_text(encoding="utf-8")
     nav_block = mkdocs_text.split("\nnav:\n", 1)[1]
     mkdocs_nav = yaml.safe_load("nav:\n" + nav_block)
-    listed = [item for item in _nav_paths(mkdocs_nav.get("nav")) if item != "reference/api.md"]
+    listed = _nav_paths(mkdocs_nav.get("nav"))
     expected_files = [relative for _, _, relative in PACKAGE_NAV]
     if listed != expected_files:
         failures.append(f"mkdocs.yml nav must match PACKAGE_NAV, got {listed}")
+
+
+def _check_snippets(source: Path, text: str, failures: list[str]) -> None:
+    shown = source.relative_to(ROOT)
+    for index, match in enumerate(FENCE.finditer(text), start=1):
+        language = match.group("language").strip().split(maxsplit=1)[0]
+        body = match.group("body")
+        if language == "python":
+            try:
+                ast.parse(body, filename=f"{shown} python fence {index}")
+            except SyntaxError as exc:
+                failures.append(f"{shown}: invalid Python fence {index} ({exc.msg})")
+        if language == "yaml":
+            try:
+                yaml.safe_load(body)
+            except yaml.YAMLError as exc:
+                failures.append(f"{shown}: invalid YAML fence {index} ({exc})")
+        if language in {"python", "yaml"}:
+            internal = INTERNAL_AUTHORING.search(body)
+            if internal:
+                failures.append(
+                    f"{shown}: internal authoring term {internal.group(0)!r} in fence {index}"
+                )
+        if language != "bash":
+            continue
+        for line in body.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("plural "):
+                continue
+            try:
+                tokens = shlex.split(stripped.removesuffix("\\").strip())
+            except ValueError:
+                continue
+            command = get_command(app)
+            consumed = ["plural"]
+            for token in tokens[1:]:
+                commands = getattr(command, "commands", None)
+                if not isinstance(commands, dict):
+                    break
+                if token not in commands:
+                    failures.append(
+                        f"{shown}: unknown CLI subcommand after {' '.join(consumed)!r} "
+                        f"in {stripped!r}"
+                    )
+                    break
+                command = commands[token]
+                consumed.append(token)
+            if len(consumed) == 1:
+                failures.append(f"{shown}: unknown CLI command in {stripped!r}")
 
 
 def main() -> int:
@@ -162,6 +251,12 @@ def main() -> int:
         text = source.read_text(encoding="utf-8")
         metadata = _metadata(source, text, failures)
         documents[source] = metadata
+        if metadata.get("nav") is True and source.name not in {
+            "api.md",
+            "cli-commands.md",
+            "fields.md",
+        }:
+            _check_snippets(source, text, failures)
         route = metadata.get("route")
         if isinstance(route, str):
             previous = routes.setdefault(route, source)
@@ -179,14 +274,18 @@ def main() -> int:
                     f"{previous.relative_to(ROOT)}"
                 )
         for raw in LINK.findall(text):
-            target = raw.split("#", 1)[0].strip()
-            if not target or target.startswith(("http://", "https://", "mailto:")):
+            target, _, anchor = raw.partition("#")
+            target = target.strip()
+            if target.startswith(("http://", "https://", "mailto:")):
                 continue
-            destination = (source.parent / target).resolve()
-            if target.endswith("/"):
-                destination /= "index.md"
-            if destination.is_dir():
-                destination /= "index.md"
+            if not target:
+                destination = source
+            else:
+                destination = (source.parent / target).resolve()
+                if target.endswith("/"):
+                    destination /= "index.md"
+                if destination.is_dir():
+                    destination /= "index.md"
             if not destination.exists():
                 shown = (
                     destination.relative_to(ROOT)
@@ -194,6 +293,8 @@ def main() -> int:
                     else destination
                 )
                 failures.append(f"{source.relative_to(ROOT)} -> {target} ({shown})")
+            elif anchor and destination.suffix == ".md" and anchor not in _anchors(destination):
+                failures.append(f"{source.relative_to(ROOT)} -> {raw} (missing anchor {anchor!r})")
     _nav_parity(documents, failures)
     if failures:
         print("Documentation validation failures:")

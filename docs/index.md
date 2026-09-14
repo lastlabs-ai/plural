@@ -1,44 +1,35 @@
 ---
 route: /docs
-title: "Know which model to use on your work"
+title: Plural
 order: 0
-description: "Plural runs models on your tasks, scores them the way you define success, and keeps that scoreboard so you can judge the next model the same way."
+description: Build reproducible agent evaluations, compare models on your work, and keep the evidence behind every score.
 audience: all
 nav: true
 nav_group: Start
-outcome: You can turn the work you care about into a scoreboard, then reuse it every time a new model ships.
+outcome: You understand the shortest path from a real task to auditable model evidence.
 ---
-# Know which model to use on your work
+# Plural
 
-A public ranking cannot tell you which model to put on your tickets, your checkout, or your policy. Those tasks are yours. Plural is how you measure models against them, keep the record, and pick one with evidence.
+Plural evaluates agents on work you define. It runs catalog-backed models in
+versioned Environments, scores completed Trials with your Verifiers, and keeps
+the trajectory, artifacts, logs, evidence, and exact object pins behind each
+result.
 
-When the next model ships, you do not start over. You run the same tasks, with the same definition of success, and you see what changed.
+The primary workflow is evaluation:
 
-```mermaid
-flowchart LR
-  tasks[Your_tasks]
-  score[Your_score]
-  models[Models]
-  job[Job]
-  pick[Which_to_use]
-  tasks --> job
-  score --> job
-  models --> job
-  job --> pick
-```
+1. Build an **Environment**, **Task**, and one or more **Verifiers**.
+2. Pin Tasks in a versioned **Benchmark**.
+3. Run catalog-backed **Agents** in a **Job**.
+4. Inspect Trial evidence and compare quality, cost, and latency.
 
-That scoreboard is four objects you will see on every later page.
+Those records can inform routing after the evaluation is trustworthy. Train
+mode can also capture exact TITO records and Rewarder signals for a downstream
+trainer. Plural 0.12.1 does not implement optimization algorithms or update
+model weights.
 
-1. A **Task** is one piece of work you care about.
-2. A **Verifier** is what counts as success on that work.
-3. An **Agent** is a model you want to try, plus the instructions it gets.
-4. A **Job** runs those Agents on those Tasks and writes a **Trace** you can inspect.
+## Start here
 
-Start here, then build the scoreboard, then run it.
-
-1. [Motivation](motivation.md) — why a public ranking is the wrong default.
-2. [Getting started](getting-started.md) — install and run a scored Job on your machine.
-3. [Environments](project/environments.md) through [Benchmarks](project/benchmarks.md) — the objects that make the scoreboard yours.
-4. [Jobs](running/jobs.md), [Traces](running/traces.md), and [Reviews](running/reviews.md) — how you compare and decide.
-
-When you want a complete worked example, walk [Wordle](tutorials/wordle.md). It uses the same filenames `plural env init` creates.
+Follow [Getting started](getting-started.md), then build the realistic
+[support queue tutorial](tutorials/support-queue.md). Use the Build and Run
+sections for each object and the generated references only when you need every
+field.

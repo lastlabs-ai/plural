@@ -1,48 +1,100 @@
 ---
 route: /docs/reference/integrations
-title: "Integrations"
+title: Providers and integrations
 order: 230
-description: "Providers, CI, OpenTelemetry, Studio sync, and bringing your own model gateway."
+description: Distinguish model endpoints from Runtime sandboxes and integrate Daytona, future partners, routing, tracing, CI, and Plural Intel accurately.
 audience: all
 nav: true
-nav_group: Reference
+nav_group: Operations
 ---
-# Integrations
+# Providers and integrations
 
-The story pages stay on the graph. This page is the leftover wiring.
+Plural uses two unrelated provider layers:
 
-## Model providers
+- a **model provider** answers model requests;
+- a **SandboxProvider** creates the Runtime where Agent and Verifier code runs.
 
-`Client` routes chat and completions through the configured gateway. Set `PLURAL_API_KEY` for Plural Intel, or point `OPENAI_BASE_URL` at OpenAI, Azure, Bedrock, Fireworks, or a local server. Optional extras: `plural[daytona]`, `plural[otel]`, `plural[keyring]`.
+## Model endpoints
 
-```bash
-export PLURAL_API_KEY=...
-plural auth login
+Agents and Agent Verifiers use stable IDs from the effective `ModelCatalog`.
+Catalog endpoint rows describe model resolution; they are not transport
+adapters and do not guarantee live access.
+
+Package Job native runners speak OpenAI-compatible `POST /chat/completions`.
+They send the catalog ID to `PLURAL_GATEWAY_URL`, or the resolved upstream ID
+to `OPENAI_BASE_URL` and default OpenAI. Anthropic, Google, Bedrock, and Azure
+native APIs are not directly executed by Job.
+
+`Client` is a separate application inference API with provider adapters for
+OpenAI, Anthropic, Google, Azure, Bedrock, and OpenAI-compatible services.
+Actual access depends on credentials, endpoint configuration, region, account
+entitlements, and current provider availability.
+
+Register private or partner endpoints as explicit project catalog entries.
+Never imply that a catalog row guarantees live access.
+
+For evaluation, avoid fallbacks when the objective is one model. For
+application routing after evaluation, `Client` supports ordered fallbacks and
+routing policies. Preserve actual endpoint, cost, latency, and trace evidence.
+
+## Built-in Runtime providers
+
+- `local`: trusted development subprocess; no isolation.
+- `docker`: local containers with the capability limits documented in
+  [Runtime](../project/runtime.md).
+- `daytona`: optional remote adapter installed through `plural[daytona]`.
+
+Daytona is implemented in 0.12.1. Blaxel is not bundled or registered. A Blaxel
+team—or any future partner—can implement the plugin contract below without
+being described as generally available before that package ships and passes
+conformance.
+
+## Sandbox provider extensions
+
+Subclass `SandboxProvider` and implement:
+
+- truthful `capabilities()` and `doctor()` reports;
+- fresh `create(requirements)`;
+- scoped `upload_files` and exact `download_files`;
+- argv-based `exec` with cwd, environment, timeout, and captured logs;
+- forceful `cancel` and idempotent `destroy`.
+
+Register in-process:
+
+```python
+from plural import ProviderRegistry
+from my_partner import PartnerProvider
+
+registry = ProviderRegistry()
+registry.register(PartnerProvider())
 ```
 
-A project-scoped key only sees that project. Account keys see what the account can see.
+Or publish an entry point:
 
-## CI
-
-Run the same Job you run locally:
-
-```bash
-plural run job.yaml --offline
+```toml
+[project.entry-points."plural.sandbox_providers"]
+partner = "my_partner:PartnerProvider"
 ```
 
-In a pipeline that should publish, set `PLURAL_API_KEY` and drop `--offline`. Treat the Job YAML as the contract: if `plural task validate` fails, the pin is wrong.
+The base preflight compares `SandboxRequirements.required_capabilities()` with
+the provider's declaration. Provider-specific preflight must also reject image
+forms, network policy, compute controls, stdin, persistence, compose, or
+filesystem behavior it cannot enforce. Never silently broaden network,
+filesystem, or credential access.
 
-## OpenTelemetry
+The provider must also map to the Environment's target and fit any hosted
+project policy. Plugin discovery alone is not a partner certification.
 
-Install `plural[otel]` and export traces to your collector when you already have an OTEL pipeline. Plural Traces stay the episode record. OTEL is a sink, not a replacement.
+## Plural Intel, CI, and OpenTelemetry
 
-## Studio sync
+`plural run job.yaml` is local. `plural run job.yaml --hosted` explicitly
+synchronizes and submits to Plural Intel. Hosted support depends on backend
+revision APIs, artifact transport, source materialization, and configured
+Runtime providers.
 
-`plural run job.yaml` without `--offline` publishes Harnesses, Environments, Verifiers, Tasks, an optional Benchmark, then Agents, and submits the Job. Local `source.uri` paths must be visible to the worker. Offline Jobs are the path when the runtime lives only on your machine.
+CI should validate and dry-run the same pinned Job, then execute only when
+credentials and costs are intentional.
 
-## Also
-
-- [CLI commands](cli-commands.md) — every flag.
-- [Definitions](definitions.md) — field lists.
-- [Limitations](limitations.md) — known gaps.
-- [Troubleshooting](../operations/troubleshooting.md) — failures and retries.
+Install `plural[otel]` to export tracing-SDK spans to an existing collector.
+OpenTelemetry is an observability sink, not the Job's artifact store or a
+replacement for Trial receipts.

@@ -4,8 +4,7 @@ title: "Definitions"
 order: 200
 description: "Reference for the seven public evaluation objects and their shared Python, YAML, and CLI semantics."
 audience: all
-nav: true
-nav_group: Reference
+nav: false
 ---
 # Definitions
 

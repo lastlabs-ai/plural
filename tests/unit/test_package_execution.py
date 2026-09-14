@@ -4,18 +4,21 @@ import asyncio
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from plural.domain import (
     AgentBinding,
     AgentDefinition,
+    AgentVerifier,
     BenchmarkDefinition,
     BenchmarkJobSource,
     DeterministicVerifier,
     EnvironmentDefinition,
     EnvironmentRuntime,
     ErrorCode,
+    EvidenceContract,
     ExecutionTarget,
     FileDeclaration,
     HarnessBinding,
@@ -34,12 +37,14 @@ from plural.domain import (
 )
 from plural.execution import JobRunner as Job
 from plural.execution import JobStore
+from plural.execution.engine import _bounded_artifact_evidence
 from plural.sandbox import (
     Capability,
     DownloadedFile,
     ExecRequest,
     ExecResult,
     FileUpload,
+    NetworkMode,
     ProviderCapabilities,
     ProviderDoctor,
     SandboxHandle,
@@ -109,6 +114,8 @@ class FakeProvider(SandboxProvider):
             if self.fail_first and self.harness_runs == 1:
                 return ExecResult(exit_code=2, stderr=b"temporary secret", duration_seconds=0.001)
             payload = json.loads(request.stdin)
+            assert payload["model_resolution"]["catalog_model_id"] == "test/model"
+            assert payload["model_resolution"]["upstream_id"] == "model"
             self.files[handle.sandbox_id]["result.json"] = b'{"answer": 42}'
             self.files[handle.sandbox_id]["trajectory.jsonl"] = (
                 b'{"turn": 1}\n{"type": "cost", "cost_usd": 0.01}\n'
@@ -179,6 +186,51 @@ class FakeProvider(SandboxProvider):
         return
 
 
+class JudgeProvider(FakeProvider):
+    """No-network provider that emulates an AgentVerifier model response."""
+
+    def __init__(self) -> None:
+        super().__init__("docker")
+        self.judge_input: dict[str, Any] | None = None
+
+    async def exec(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
+        if request.stdin is not None:
+            return await super().exec(handle, request)
+        payload = json.loads(self.files[handle.sandbox_id][".plural/verifier-input.json"])
+        verifier = payload["agent_verifier"]
+        self.judge_input = payload["judge_input"]
+        assert verifier["criteria"] == [
+            {
+                "name": "quality",
+                "description": "The answer is correct and concise.",
+                "weight": 1.0,
+                "min_score": 0.0,
+                "max_score": 1.0,
+            }
+        ]
+        assert self.judge_input["environment_view"] == {
+            "observation": {"text": "done"},
+            "state": {"step": 1},
+        }
+        requested = self.judge_input["requested_artifacts"]
+        assert requested[0]["name"] == "result.json"
+        assert json.loads(requested[0]["content"]) == {"answer": 42}
+        assert self.judge_input["final"]["name"] == "result.json"
+        self.files[handle.sandbox_id]["agent-verifier-result.json"] = json.dumps(
+            {
+                "reward": 0.8,
+                "scores": {"quality": 0.8},
+                "evidence": ["result.json answer=42", "observation.text=done"],
+                "feedback": "Correct and concise.",
+            }
+        ).encode()
+        return ExecResult(
+            exit_code=0,
+            stdout=b"judge used judge-secret",
+            duration_seconds=0.001,
+        )
+
+
 def exact_verifier(provider: str) -> DeterministicVerifier:
     return DeterministicVerifier(
         name=f"exact-{provider}",
@@ -186,6 +238,27 @@ def exact_verifier(provider: str) -> DeterministicVerifier:
         required_artifacts=("result.json",),
         runtime=VerifierRuntime(provider=provider),
     )
+
+
+def test_agent_verifier_artifact_evidence_is_requested_readable_and_bounded() -> None:
+    evidence = _bounded_artifact_evidence(
+        (
+            DownloadedFile(path="requested.txt", data=b"x" * 40_000),
+            DownloadedFile(path="unrequested.txt", data=b"do not disclose"),
+            DownloadedFile(path="binary.bin", data=b"\xff\xfe"),
+        ),
+        ("requested.txt", "binary.bin", "missing.txt"),
+    )
+
+    assert [item["name"] for item in evidence] == [
+        "requested.txt",
+        "binary.bin",
+        "missing.txt",
+    ]
+    assert len(evidence[0]["content"]) == 32_000
+    assert evidence[0]["truncated"] is True
+    assert evidence[1]["readable"] is False
+    assert evidence[2] == {"name": "missing.txt", "available": False}
 
 
 def make_task(name: str, provider: str) -> TaskDefinition:
@@ -201,6 +274,70 @@ def make_task(name: str, provider: str) -> TaskDefinition:
         verifiers=(WeightedVerifier(verifier=exact_verifier(provider)),),
         info={"question": name},
     )
+
+
+async def test_agent_verifier_scores_configured_criteria_with_contracted_evidence(
+    tmp_path: Path,
+) -> None:
+    provider = JudgeProvider()
+    environment = EnvironmentDefinition(
+        name="judge-world",
+        observation_schema={
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+        },
+        state_schema={
+            "type": "object",
+            "properties": {"step": {"type": "integer"}},
+        },
+        runtime=EnvironmentRuntime(
+            provider="docker",
+            targets=frozenset({ExecutionTarget.DOCKER}),
+        ),
+    )
+    verifier = AgentVerifier(
+        name="quality-judge",
+        model="openai/gpt-5.6-luna",
+        instructions="Judge only the supplied evidence.",
+        criteria=(
+            RubricCriterion(
+                name="quality",
+                description="The answer is correct and concise.",
+            ),
+        ),
+        evidence=EvidenceContract(
+            observation_paths=("text",),
+            state_paths=("step",),
+            artifacts=("result.json",),
+        ),
+        runtime=VerifierRuntime(provider="docker", network=NetworkMode.FULL),
+    )
+    task = TaskDefinition(
+        task_id="judge-me",
+        instructions="Return the answer.",
+        environment=environment,
+        verifiers=(WeightedVerifier(verifier=verifier),),
+    )
+    spec = JobSpec(
+        source=TaskJobSource(task=task),
+        agents=(AgentBinding(agent=AgentDefinition(name="agent", model="test/model")),),
+    )
+    store = JobStore(tmp_path / "jobs")
+    result = await Job(
+        spec,
+        provider=provider,
+        store=store,
+        environ={"OPENAI_API_KEY": "judge-secret"},
+    ).run()
+
+    assert result.status == "succeeded"
+    judged = result.trials[0].verifier_results[0]
+    assert judged.reward == 0.8
+    assert judged.scores == {"quality": 0.8}
+    assert judged.evidence == ("result.json answer=42", "observation.text=done")
+    execution = store.trial_path(spec.plan().trials[0]) / "executions/0"
+    assert "judge-secret" not in (execution / "logs/verifier.stdout.log").read_text()
+    assert "***" in (execution / "logs/verifier.stdout.log").read_text()
 
 
 async def test_cross_environment_scheduler_uses_each_runtime_and_bounds_concurrency(
@@ -265,6 +402,19 @@ async def test_human_verifier_yields_awaiting_review(tmp_path: Path) -> None:
     assert result.status == "awaiting_review"
     assert result.trials[0].status == "awaiting_review"
     assert result.trials[0].verifier_results[0].kind == "human"
+    trial = spec.plan().trials[0]
+    execution = job.store.trial_path(trial) / "executions/0"
+    immutable_before = {
+        relative: (execution / relative).read_bytes()
+        for relative in (
+            "receipt.json",
+            "logs/stdout.log",
+            "logs/stderr.log",
+            "artifacts/manifest.json",
+            "artifacts/result.json",
+        )
+    }
+    pending_projection = (execution / "result.json").read_bytes()
     resolved = job.submit_review(
         result.trials[0].receipt.trial_id,
         "human",
@@ -273,8 +423,16 @@ async def test_human_verifier_yields_awaiting_review(tmp_path: Path) -> None:
     )
     assert resolved.status == "succeeded"
     assert resolved.trials[0].reward == 1
-    trial = spec.plan().trials[0]
     assert job.store.successful_result(trial) == resolved.trials[0]
+    assert pending_projection != (execution / "result.json").read_bytes()
+    for relative, content in immutable_before.items():
+        assert (execution / relative).read_bytes() == content
+    with pytest.raises(ValueError, match="already submitted"):
+        job.submit_review(
+            result.trials[0].receipt.trial_id,
+            "human",
+            {"quality": 1},
+        )
 
 
 async def test_train_preflight_fails_when_exact_tito_is_unsupported(
@@ -334,6 +492,48 @@ async def test_train_persists_validated_tito_as_hashed_artifact(
     assert reference.size_bytes > 0
     trial = spec.plan().trials[0]
     assert (store.trial_path(trial) / "executions/0/artifacts/tito.jsonl").exists()
+
+
+async def test_agent_secret_grants_must_be_declared_by_selected_harness(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "harness"
+    source.mkdir()
+    (source / "run.py").write_text("pass\n", encoding="utf-8")
+    package = HarnessPackage(
+        definition=HarnessDefinition(
+            name="restricted",
+            implementation="runnable",
+            command=("python", "run.py"),
+            secret_names=("ALLOWED_API_KEY",),
+            outputs=(FileDeclaration(path="result.json"),),
+            artifacts=(FileDeclaration(path="trajectory.jsonl"),),
+        ),
+        source=PackageSource(kind="local", uri=str(source), unsafe_local=True),
+    )
+    agent = AgentDefinition(
+        name="agent",
+        model="test/model",
+        secret_names=("UNDECLARED_API_KEY",),
+        harness=HarnessBinding.from_package(package),
+        harness_package=package,
+    )
+    spec = JobSpec(
+        source=TaskJobSource(task=make_task("one", "docker")),
+        agents=(AgentBinding(agent=agent),),
+    )
+    provider = FakeProvider("docker")
+    result = await Job(
+        spec,
+        provider=provider,
+        store=JobStore(tmp_path / "jobs"),
+        environ={"UNDECLARED_API_KEY": "must-not-forward"},
+    ).run()
+
+    assert result.status == "failed"
+    assert result.trials[0].error_code == ErrorCode.CONFIGURATION
+    assert "not declared by Harness" in result.trials[0].error_message
+    assert provider.created == []
 
 
 async def test_retries_append_trial_executions_without_new_trial_identity(

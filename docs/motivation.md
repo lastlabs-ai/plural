@@ -4,8 +4,7 @@ title: "Why Plural exists"
 order: 10
 description: "You cannot buy a best model for your work. You author the world, pin the score, and compare Agents without rewriting either one."
 audience: all
-nav: true
-nav_group: Start
+nav: false
 outcome: You can explain why the world, the score, and the Agent are separate objects.
 ---
 # Why Plural exists

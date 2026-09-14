@@ -220,6 +220,52 @@ def test_native_actions_executes_only_declared_actions(
     assert '"seen": 7' in tool["content"]
 
 
+@pytest.mark.parametrize(
+    ("gateway", "expected"),
+    ((True, "catalog/model"), (False, "upstream-model")),
+)
+def test_native_runner_selects_gateway_catalog_or_direct_upstream_model(
+    gateway: bool,
+    expected: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("PLURAL_GATEWAY_URL", raising=False)
+    if gateway:
+        monkeypatch.setenv("PLURAL_GATEWAY_URL", "https://gateway.example/v1")
+    seen: list[str] = []
+
+    def model_call(**kwargs: object) -> dict[str, object]:
+        seen.append(str(kwargs["model"]))
+        return {"choices": [{"message": {"role": "assistant", "content": "complete"}}]}
+
+    monkeypatch.setattr(native_runner, "_model_call", model_call)
+    request = _request().model_copy(
+        update={
+            "agent": {"name": "agent", "model": "catalog/model", "routing": {}},
+            "environment": {
+                **_request().environment,
+                "workspace": str(tmp_path),
+            },
+            "model_resolution": {
+                "catalog_model_id": "catalog/model",
+                "provider": "direct",
+                "region": "us",
+                "upstream_id": "upstream-model",
+            },
+        }
+    )
+
+    result, _trajectory, _trace_id = native_runner._run(
+        "native.chat.v1",
+        request.model_dump(mode="json"),
+    )
+
+    assert seen == [expected]
+    assert result["model"] == expected
+    assert result["catalog_model"] == "catalog/model"
+
+
 def test_vendor_adapter_invokes_installed_cli_and_translates(
     tmp_path: Path,
     monkeypatch: object,

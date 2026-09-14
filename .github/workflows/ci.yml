@@ -26,6 +26,12 @@ jobs:
         run: uv run python scripts/generate_package_schemas.py --check
       - name: CLI reference
         run: uv run python scripts/generate_cli_reference.py --check
+      - name: Documentation fields
+        run: uv run python scripts/generate_docs_fields.py --check
+      - name: Documentation API
+        run: uv run python scripts/generate_docs_api.py --check
+      - name: Starter archive
+        run: uv run python scripts/sync_docs_starter.py --check
       - name: Ruff check
         run: uv run ruff check .
       - name: Ruff format
@@ -105,5 +111,5 @@ jobs:
         run: uv sync --group docs --group dev
       - name: MkDocs strict build
         run: uv run mkdocs build --strict
-      - name: Internal links
+      - name: Documentation contract
         run: uv run python scripts/check_docs.py

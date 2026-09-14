@@ -26,23 +26,44 @@ theme:
 plugins:
   - search
   - llmstxt:
-      markdown_description: Author an Environment, pin Tasks and Verifiers, run Agents, and read the Trace.
+      markdown_description: Build reproducible agent evaluations, run them, and inspect the evidence.
       sections:
         Start:
           - index.md
-          - motivation.md
           - getting-started.md
-        Project:
-          - project/*.md
-        Running:
-          - running/*.md
-        Tutorial:
+          - getting-started/concepts.md
+        Build:
+          - project/environments.md
+          - project/runtime.md
+          - project/environment-components.md
+          - project/tasks.md
+          - project/verifiers.md
+          - project/agents.md
+          - project/harnesses.md
+          - project/benchmarks.md
+          - project/updating.md
+        Run:
+          - running/jobs.md
+          - running/trials.md
+          - running/artifacts.md
+          - running/reviews.md
+          - running/training.md
+        Interfaces:
+          - sdk/evaluation.md
+          - cli/evaluation.md
+          - interfaces/yaml.md
+        Tutorials:
+          - tutorials/support-queue.md
           - tutorials/wordle.md
+        Operations:
+          - reference/integrations.md
+          - operations/security.md
+          - operations/troubleshooting.md
+          - reference/limitations.md
         Reference:
-          - reference/definitions.md
+          - reference/fields.md
           - reference/cli-commands.md
           - reference/glossary.md
-          - reference/integrations.md
           - reference/api.md
   - mkdocstrings:
       handlers:
@@ -73,23 +94,38 @@ markdown_extensions:
 nav:
   - Start:
       - Overview: index.md
-      - Motivation: motivation.md
       - Getting started: getting-started.md
-  - Project:
+      - Core concepts: getting-started/concepts.md
+  - Build:
       - Environments: project/environments.md
+      - Runtime: project/runtime.md
+      - Environment components: project/environment-components.md
       - Tasks: project/tasks.md
       - Verifiers: project/verifiers.md
       - Agents: project/agents.md
+      - Harnesses: project/harnesses.md
       - Benchmarks: project/benchmarks.md
-  - Running:
+      - Updating and versioning: project/updating.md
+  - Run:
       - Jobs: running/jobs.md
-      - Traces: running/traces.md
+      - Trials and trajectories: running/trials.md
+      - Artifacts and evidence: running/artifacts.md
       - Reviews: running/reviews.md
-  - Tutorial:
+      - Training and RL: running/training.md
+  - Interfaces:
+      - Python SDK: sdk/evaluation.md
+      - CLI: cli/evaluation.md
+      - YAML and serialization: interfaces/yaml.md
+  - Tutorials:
+      - Support queue: tutorials/support-queue.md
       - Wordle: tutorials/wordle.md
+  - Operations:
+      - Providers and integrations: reference/integrations.md
+      - Security: operations/security.md
+      - Troubleshooting: operations/troubleshooting.md
+      - Known limitations: reference/limitations.md
   - Reference:
-      - Definitions: reference/definitions.md
-      - CLI: reference/cli-commands.md
+      - Fields: reference/fields.md
+      - CLI commands: reference/cli-commands.md
       - Glossary: reference/glossary.md
-      - Integrations: reference/integrations.md
       - API: reference/api.md

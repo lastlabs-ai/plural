@@ -28,6 +28,14 @@ def test_cli_reference_does_not_drift() -> None:
     _check("generate_cli_reference.py")
 
 
+def test_generated_field_docs_do_not_drift() -> None:
+    _check("generate_docs_fields.py")
+
+
+def test_generated_api_docs_do_not_drift() -> None:
+    _check("generate_docs_api.py")
+
+
 def test_packaged_schemas_are_valid_json_schemas() -> None:
     paths = sorted((ROOT / "src" / "plural" / "schemas" / "packages").glob("*.json"))
     assert {path.name for path in paths} == {

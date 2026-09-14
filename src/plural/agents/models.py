@@ -69,6 +69,13 @@ class Agent(FrozenModel):
             raise ValueError("api_key auth_mode requires a secret name")
         if self.auth_mode == "none" and self.secret_names:
             raise ValueError("none auth_mode cannot declare secrets")
+        if self.harness is not None:
+            undeclared = sorted(set(self.secret_names) - set(self.harness.secrets))
+            if undeclared:
+                raise ValueError(
+                    f"Agent secret_names are not declared by Harness {self.harness.name!r}: "
+                    f"{undeclared!r}"
+                )
         return self
 
     @classmethod

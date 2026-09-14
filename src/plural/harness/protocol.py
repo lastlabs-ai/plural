@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 PROTOCOL_VERSION = "plural-harness-v1"
 FORBIDDEN_HARNESS_KEYS = frozenset({"score", "scores", "reward", "verifier", "expected", "actions"})
@@ -25,6 +25,7 @@ class HarnessRunRequest(ProtocolModel):
     request_id: str
     task: dict[str, Any]
     agent: dict[str, Any]
+    model_resolution: dict[str, Any] = Field(default_factory=dict)
     environment: dict[str, Any]
     mode: Literal["eval", "train"] = "eval"
     capture_tito: bool = False

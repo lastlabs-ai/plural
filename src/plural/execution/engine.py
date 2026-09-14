@@ -132,6 +132,14 @@ def _harness_environment(
     environ: Mapping[str, str],
 ) -> tuple[dict[str, str], dict[str, str]]:
     names = {*agent.secret_names}
+    allowed = set(package.definition.secret_names)
+    undeclared = sorted(names - allowed)
+    if undeclared:
+        raise ExecutionFailure(
+            ErrorCode.CONFIGURATION,
+            f"Agent {agent.name!r} grants secrets not declared by Harness "
+            f"{package.definition.name!r}: {undeclared!r}",
+        )
     missing = [name for name in names if not environ.get(name)]
     if missing:
         raise ExecutionFailure(
@@ -241,6 +249,57 @@ def _with_artifact(
     artifact: DownloadedFile,
 ) -> tuple[DownloadedFile, ...]:
     return (*tuple(item for item in artifacts if item.path != artifact.path), artifact)
+
+
+_MAX_JUDGE_ARTIFACT_BYTES = 32_000
+_MAX_JUDGE_ARTIFACT_TOTAL_BYTES = 128_000
+
+
+def _bounded_artifact_evidence(
+    artifacts: Sequence[DownloadedFile],
+    requested: Sequence[str],
+) -> tuple[dict[str, Any], ...]:
+    """Return bounded UTF-8 evidence for explicitly requested artifact paths."""
+    indexed = {item.path: item for item in artifacts}
+    remaining = _MAX_JUDGE_ARTIFACT_TOTAL_BYTES
+    output: list[dict[str, Any]] = []
+    for path in requested:
+        artifact = indexed.get(path)
+        if artifact is None:
+            output.append({"name": path, "available": False})
+            continue
+        limit = min(_MAX_JUDGE_ARTIFACT_BYTES, remaining)
+        chunk = artifact.data[:limit]
+        row: dict[str, Any] = {
+            "name": path,
+            "available": True,
+            "digest": artifact.digest,
+            "size_bytes": len(artifact.data),
+        }
+        try:
+            row["content"] = chunk.decode("utf-8")
+            row["truncated"] = len(chunk) < len(artifact.data)
+            remaining -= len(chunk)
+        except UnicodeDecodeError:
+            row["readable"] = False
+        output.append(row)
+    return tuple(output)
+
+
+def _final_evidence(artifacts: Sequence[DownloadedFile]) -> dict[str, Any] | None:
+    """Return one bounded final Harness output for a judging Verifier."""
+    final = next(
+        (
+            item
+            for name in ("result.json", "final-result.json", "output.json")
+            for item in artifacts
+            if item.path == name
+        ),
+        None,
+    )
+    if final is None:
+        return None
+    return _bounded_artifact_evidence((final,), (final.path,))[0]
 
 
 def _trajectory_source(artifacts: Sequence[DownloadedFile]) -> DownloadedFile | None:
@@ -416,6 +475,7 @@ class Trial:
                         "instructions": agent.agent.instructions,
                         "routing": agent.routing.model_dump(mode="json", exclude_none=True),
                     },
+                    model_resolution=self.spec.model.model_dump(mode="json"),
                     environment=_environment_payload(task),
                     mode=self.job_spec.mode.value,
                     capture_tito=self.job_spec.mode is JobMode.TRAIN,
@@ -775,7 +835,7 @@ class Trial:
                     _AGENT_VERIFIER_SCRIPT,
                 )
                 result_path = "agent-verifier-result.json"
-                evidence_required = False
+                evidence_required = True
             else:
                 command = verifier.command
                 result_path = verifier.result_path
@@ -852,20 +912,36 @@ class Trial:
             }
             if isinstance(verifier, AgentVerifier):
                 payload["agent_verifier"] = verifier.model_dump(mode="json")
+                payload["judge_input"] = {
+                    "task": self.task.public_payload,
+                    "trace_id": trace_id,
+                    "environment_view": payload["environment_view"],
+                    "final": _final_evidence(artifacts),
+                    "requested_artifacts": _bounded_artifact_evidence(
+                        artifacts,
+                        verifier.evidence.artifacts,
+                    ),
+                }
             uploads = [
                 FileUpload(path=".plural/verifier-input.json", data=json.dumps(payload).encode()),
                 *(FileUpload(path=f"artifacts/{item.path}", data=item.data) for item in artifacts),
             ]
             await provider.upload_files(handle, uploads)
+            verifier_env = self._verifier_env(verifier)
             execution = await provider.exec(
                 handle,
                 ExecRequest(
                     command=command,
                     cwd="/workspace",
-                    env=self._verifier_env(verifier),
+                    env=verifier_env,
                     timeout_seconds=runtime.timeout_seconds,
                 ),
             )
+            verifier_secrets = {
+                name: value for name, value in verifier_env.items() if name.endswith("_API_KEY")
+            }
+            verifier_stdout = _redact_bytes(execution.stdout, verifier_secrets)
+            verifier_stderr = _redact_bytes(execution.stderr, verifier_secrets)
             if execution.timed_out:
                 raise ExecutionFailure(ErrorCode.TIMEOUT, f"Verifier {name!r} timed out")
             if execution.exit_code != 0:
@@ -894,8 +970,8 @@ class Trial:
                     evidence=output.evidence,
                     feedback=output.feedback,
                 ),
-                execution.stdout,
-                execution.stderr,
+                verifier_stdout,
+                verifier_stderr,
             )
         finally:
             self._active.pop((provider.name, handle.sandbox_id), None)
@@ -1368,7 +1444,7 @@ class Job:
 
 
 _AGENT_VERIFIER_SCRIPT = r"""
-import json, os, urllib.request
+import json, math, os, urllib.request
 data = json.load(open(".plural/verifier-input.json"))
 spec = data["agent_verifier"]
 base = (
@@ -1376,16 +1452,37 @@ base = (
     or os.getenv("OPENAI_BASE_URL")
     or "https://api.openai.com/v1"
 ).rstrip("/")
+judge_input = data["judge_input"]
 prompt = json.dumps({
     "instructions": spec["instructions"],
-    "rubric": spec["rubric"],
-    "task": data["task"],
-    "trace_id": data.get("trace_id"),
+    "criteria": spec["criteria"],
+    "evidence_contract": spec["evidence"],
+    "evidence": judge_input,
+    "output_contract": {
+        "reward": "finite number",
+        "scores": "object mapping criterion names to finite numbers",
+        "evidence": "non-empty list of concise strings citing supplied evidence",
+        "feedback": "string",
+    },
 })
+schema = {
+    "type": "object",
+    "properties": {
+        "reward": {"type": "number"},
+        "scores": {"type": "object", "additionalProperties": {"type": "number"}},
+        "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "feedback": {"type": "string"},
+    },
+    "required": ["reward", "scores", "evidence", "feedback"],
+    "additionalProperties": False,
+}
 body = json.dumps({
     "model": spec["model"],
     "messages": [{"role": "user", "content": prompt}],
-    "response_format": {"type": "json_object"},
+    "response_format": {
+        "type": "json_schema",
+        "json_schema": {"name": "verifier_output", "strict": True, "schema": schema},
+    },
 }).encode()
 headers = {"Content-Type": "application/json"}
 key = os.getenv("PLURAL_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -1394,6 +1491,23 @@ req = urllib.request.Request(base + "/chat/completions", data=body, headers=head
 response = json.load(urllib.request.urlopen(req))
 content = response["choices"][0]["message"]["content"]
 result = json.loads(content)
+def finite_number(value):
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+if set(result) != {"reward", "scores", "evidence", "feedback"}:
+    raise ValueError("AgentVerifier output must match VerifierOutput fields exactly")
+if not finite_number(result["reward"]):
+    raise ValueError("AgentVerifier reward must be finite")
+if not isinstance(result["scores"], dict) or any(
+    not isinstance(name, str) or not finite_number(value)
+    for name, value in result["scores"].items()
+):
+    raise ValueError("AgentVerifier scores must map names to finite numbers")
+if not isinstance(result["evidence"], list) or not result["evidence"] or any(
+    not isinstance(item, str) for item in result["evidence"]
+):
+    raise ValueError("AgentVerifier evidence must be a non-empty list of strings")
+if not isinstance(result["feedback"], str):
+    raise ValueError("AgentVerifier feedback must be a string")
 json.dump(result, open("agent-verifier-result.json", "w"))
 """
 

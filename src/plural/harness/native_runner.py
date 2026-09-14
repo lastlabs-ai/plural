@@ -96,6 +96,8 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
         }
         for name, action in actions.items()
     ]
+    catalog_model = str(agent.get("model") or "")
+    execution_model = _execution_model(request, catalog_model)
     total_cost = 0.0
     final_message: dict[str, Any] | None = None
     for _turn in range(1, max_turns + 1):
@@ -103,7 +105,7 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
         if remaining <= 0:
             raise TimeoutError(f"{profile} exceeded max_seconds={max_seconds}")
         response = _model_call(
-            model=str(agent.get("model") or ""),
+            model=execution_model,
             routing=_mapping(agent.get("routing") or {}, "agent.routing"),
             messages=messages,
             tools=tools if profile in _ACTION_PROFILES else [],
@@ -134,7 +136,8 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
             "profile": profile,
             "task_id": _mapping(request.get("task"), "task").get("task_id"),
             "response": final_message.get("content"),
-            "model": agent.get("model"),
+            "model": execution_model,
+            "catalog_model": catalog_model,
             "turns": len([item for item in messages if item.get("role") == "assistant"]),
             "cost_usd": total_cost,
             "trace_id": trace_id,
@@ -142,6 +145,14 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
         messages,
         trace_id,
     )
+
+
+def _execution_model(request: dict[str, Any], catalog_model: str) -> str:
+    resolution = request.get("model_resolution")
+    resolved = resolution if isinstance(resolution, dict) else {}
+    if os.environ.get("PLURAL_GATEWAY_URL"):
+        return str(resolved.get("catalog_model_id") or catalog_model)
+    return str(resolved.get("upstream_id") or catalog_model)
 
 
 def _model_call(
