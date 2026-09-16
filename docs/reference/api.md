@@ -1042,7 +1042,7 @@ plural.project.public_schema(model: 'type[BaseModel]') -> 'dict[str, Any]'
 Crash-safe filesystem persistence for local execution.
 
 ```python
-plural.JobStore(root: 'Path' = PosixPath('.plural/jobs')) -> 'None'
+plural.JobStore(root: 'Path' = PosixPath('<default>')) -> 'None'
 ```
 
 ### plural.JobStore.job_path
@@ -2620,7 +2620,7 @@ Returns:
 ```
 
 ```python
-plural.catalog.sync.load_catalog(path: 'Path' = PosixPath('/Users/taylor/Projects/plural/src/plural/catalog/data/models.json')) -> 'dict[str, Any]'
+plural.catalog.sync.load_catalog(path: 'Path' = PosixPath('<default>')) -> 'dict[str, Any]'
 ```
 
 ## plural.catalog.sync.main
@@ -2813,7 +2813,7 @@ Args:
 ```
 
 ```python
-plural.catalog.sync.write_catalog(document: 'Mapping[str, Any]', path: 'Path' = PosixPath('/Users/taylor/Projects/plural/src/plural/catalog/data/models.json')) -> 'None'
+plural.catalog.sync.write_catalog(document: 'Mapping[str, Any]', path: 'Path' = PosixPath('<default>')) -> 'None'
 ```
 
 ## plural.TraceWriter

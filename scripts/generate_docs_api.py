@@ -59,6 +59,9 @@ def _signature(value):
     except (ValueError, TypeError):
         return ""
     s = re.sub(r"<[^<>]* at 0x[0-9a-f]+>", "<configured default>", s)
+    # Absolute paths in defaults (e.g. PosixPath('/.../models.json')) depend on
+    # where the source tree lives, so mask them to keep generated docs portable.
+    s = re.sub(r"\b(PosixPath|WindowsPath|Path)\('[^']*'\)", r"\1('<default>')", s)
     return s
 
 
