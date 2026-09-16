@@ -2,72 +2,79 @@
 route: /docs/getting-started/concepts
 title: Core concepts
 order: 10
-description: "The eight objects you use to evaluate agents: Environment, Runtime, Task, Verifier, Agent, Benchmark, Trial, and Job."
+description: "The eight objects you use to evaluate agents: Environment, Task, Verifier, Agent, Harness, Benchmark, Trial, and Job."
 audience: all
 nav: true
 nav_group: Start
 ---
 # Core concepts
 
-You author a world, a score, and the models you want to compare. Plural runs
-that graph and keeps the record.
+You author a world, a case, a score, and the models you want to compare.
+Plural runs that graph and keeps the record.
 
 ```mermaid
 flowchart LR
-  runtime[Runtime]
   env[Environment]
   ver[Verifier]
   task[Task]
-  bench[Benchmark]
   agent[Agent]
+  harness[Harness]
+  bench[Benchmark]
   job[Job]
   trial[Trial]
-  runtime --> env
   env --> task
   ver --> task
   task --> bench
-  bench --> job
+  harness --> agent
   agent --> job
+  bench --> job
+  task --> job
   job --> trial
 ```
 
+Runtime and Resources are nested inside the Environment, not separate objects.
+Rewarders are nested inside the Environment too, and they are not Verifiers:
+Rewarders emit a train-only signal, Verifiers score a finished Trial.
+
 ## Environment
 
-The Environment is the world the Agent is allowed to take action in. It has
-three spaces:
+The Environment is the world the Agent is allowed to take action in. It owns:
 
-- **Action space** — the actions the Agent may call.
-- **State space** — the internal variables that represent the world. The Agent
+- **Actions** — the operations the Agent may call.
+- **State** — the internal variables that represent the world. The Agent
   never sees State.
-- **Observation space** — what the Agent is allowed to see, usually returned by
+- **Observation** — what the Agent is allowed to see, usually returned by
   `reset` and by each action. You choose which facts appear here. Observation
   is not the whole State.
+- **Runtime** — where that world executes: the machine image, network
+  settings, and compute placement. Changing it changes the Environment hash.
+- **Resources** — the world's filesystem: files and data that are already
+  there, shared across Tasks.
+- **Rewarders** — optional train-only signals over state transitions. They
+  feed downstream training data; they never score an evaluation.
 
 These docs use the game Wordle as a running example, and a support-ticket
 queue when we need a second world. One Environment can host many Tasks: Wordle
 is the game; each secret word is a Task. The support queue is the desk; each
 ticket is a Task.
 
-Every Environment has a required **Runtime**: the machine image, network
-settings, and compute placement. The Environment can also declare secret
-*names*. Values are supplied at execution time; they are not stored on the
-Runtime object.
+The Environment can also declare secret *names*. Values are supplied at
+execution time; they are not stored on the object.
 
 See [Environments](../project/environments.md).
 
-## Runtime
+## Task
 
-Runtime says where that world executes. Changing it changes the Environment
-hash.
+A Task is one unit of work in an Environment. It has instructions, optional
+goals, one Environment, and one or more Verifiers. The Environment must be
+runnable and each Verifier must be able to score an Episode.
 
-- `Runtime.docker()` — container, public network, `python:3.12-slim`
-- `Runtime.local()` — trusted subprocess on your machine
-- `Runtime.daytona()` — remote workspace (`plural[daytona]`)
+You can set Environment State from the Task (`initial_state`) and attach
+case-specific files (Task resources). Task resources are staged for that Trial
+only, then discarded. Reusable world behavior stays on the Environment;
+case-specific facts belong on the Task.
 
-Local is easy to inspect. It is not a sandbox. Docker is the default when you
-want isolation.
-
-See [Runtime](../project/environments.md#runtime).
+See [Tasks](../project/tasks.md).
 
 ## Verifier
 
@@ -85,18 +92,6 @@ Three kinds:
 
 See [Verifiers](../project/verifiers.md).
 
-## Task
-
-A Task is one unit of work in an Environment. It has instructions, optional
-goals, one Environment, and one or more Verifiers. The Environment must be
-runnable and each Verifier must be able to score an Episode.
-
-You can set Environment State from the Task (`initial_state`) and attach
-temporary data (`info`, Task resources). Reusable world behavior stays on the
-Environment; case-specific facts belong on the Task.
-
-See [Tasks](../project/tasks.md).
-
 ## Agent
 
 An Agent is instructions, a catalog model, and an optional Harness. Omit the
@@ -110,6 +105,15 @@ under uncertainty. Model authentication lives on the Job (`client=` or
 
 See [Agents](../project/agents.md).
 
+## Harness
+
+A Harness is how the Agent manages context as it works in the Environment:
+the interaction loop plus the extra tools it may use. Omit it to use Plural's
+native loop. An Environment policy may subtract capabilities (for example,
+network access) from whatever the Harness requests.
+
+See [Harnesses](../project/harnesses.md).
+
 ## Benchmark
 
 A Benchmark is an immutable, versioned, ordered collection of Tasks. Agents
@@ -120,18 +124,6 @@ latency, cost, and how stable those scores are across attempts. Change a
 Task, Environment, or Verifier and mint a new Benchmark version.
 
 See [Benchmarks](../project/benchmarks.md).
-
-## Trial
-
-A Trial is one Agent × one Task × one planned attempt. A Job expands into
-Trials. A timeout can retry as another *execution* of the same Trial; the
-Trial identity does not change.
-
-Each execution records a trajectory, artifacts, logs, and a receipt. Final
-Verifiers write the score. A human Verifier pauses the Trial at
-`awaiting_review`.
-
-See [Trials](../running/trials.md).
 
 ## Job
 
@@ -146,6 +138,18 @@ for a downstream trainer. Neither mode updates model weights inside Plural.
 A live Job needs `Job(..., client=Client())` or `api_key=`. Dry-run does not.
 
 See [Jobs](../running/jobs.md).
+
+## Trial
+
+A Trial is one Agent × one Task × one planned attempt. A Job expands into
+Trials. A timeout can retry as another *execution* of the same Trial; the
+Trial identity does not change.
+
+Each execution records a trajectory, artifacts, logs, and a receipt. Final
+Verifiers write the score. A human Verifier pauses the Trial at
+`awaiting_review`.
+
+See [Trials](../running/trials.md).
 
 When you are ready to install and authenticate, open
 [Getting started](../getting-started.md).

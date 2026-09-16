@@ -1,12 +1,21 @@
-"""Plural environments, evaluation, routing, and tracing."""
+"""Plural environments, evaluation, routing, and tracing.
+
+Import order follows the authoring story: worlds, cases, scores, agents,
+then runs, then hosting and advanced machinery.
+"""
 
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
+# Authoring: worlds (Environment owns Runtime, Resources, Rewarders).
 from plural.agents import Agent
+
+# Hosting and models.
 from plural.catalog import ModelCatalog, ModelSpec, estimate_cost
 from plural.client import Client, Plural
+
+# Advanced: harness protocol, sandbox providers, tracing, errors, utilities.
 from plural.common import (
     ErrorCode,
     ExecutionTarget,
@@ -45,6 +54,8 @@ from plural.errors import (
     TimeoutError,
     is_retryable,
 )
+
+# Running: jobs, trials, and their results.
 from plural.execution import JobStore, Trial
 from plural.harness import (
     Harness,
@@ -74,19 +85,7 @@ from plural.jobs import (
     TrialStatus,
     VerifierResult,
 )
-from plural.project import (
-    CatalogContext,
-    Resolver,
-)
-from plural.project import (
-    dump as dump_project,
-)
-from plural.project import (
-    dumps as dumps_project,
-)
-from plural.project import (
-    load as load_project,
-)
+from plural.project import CatalogContext, Resolver, dump, dumps, load
 from plural.sandbox import (
     Capability,
     DaytonaProvider,
@@ -99,12 +98,7 @@ from plural.sandbox import (
     SandboxRequirements,
 )
 from plural.studio import Studio
-from plural.tasks import (
-    Benchmark,
-    BenchmarkDiff,
-    Task,
-    TaskPin,
-)
+from plural.tasks import Benchmark, BenchmarkDiff, Task, TaskPin
 from plural.tracing import (
     JSONLSink,
     Outcome,
@@ -136,83 +130,97 @@ except PackageNotFoundError:
     __version__ = "0.0.0"
 
 __all__ = [
+    # Authoring.
     "Action",
     "Agent",
-    "AgentAggregate",
     "AgentVerifier",
+    "Benchmark",
+    "CatalogContext",
+    "DeterministicVerifier",
+    "Environment",
+    "Episode",
+    "ExecutionLimits",
+    "Harness",
+    "HarnessPolicy",
+    "HumanVerifier",
+    "Observation",
+    "Resource",
+    "Resolver",
+    "RubricCriterion",
+    "Runtime",
+    "RuntimeVariable",
+    "Secret",
+    "State",
+    "Task",
+    "Verifier",
+    "VerifierOutput",
+    "action",
+    "dump",
+    "dumps",
+    "load",
+    "rewarder",
+    # Running.
+    "Job",
+    "JobMode",
+    "JobPlan",
+    "JobResult",
+    "JobStore",
+    "RetryPolicy",
+    "Trial",
+    "TrialResult",
+    # Hosting and models.
+    "Client",
+    "ModelCatalog",
+    "ModelSpec",
+    "Plural",
+    "Studio",
+    "estimate_cost",
+    # Advanced.
+    "AgentAggregate",
     "ArtifactManifest",
     "ArtifactManifestEntry",
     "ArtifactReference",
     "AuthenticationError",
-    "Benchmark",
     "BenchmarkDiff",
     "BudgetExceededError",
     "Capability",
-    "CatalogContext",
     "ChatRequest",
     "ChatResponse",
-    "Client",
     "ConfigurationError",
     "ConflictError",
     "ContentFilterError",
     "ContextLengthError",
     "DaytonaProvider",
     "DeclarativeImage",
-    "DeterministicVerifier",
     "DockerProvider",
-    "Episode",
     "EpisodeUsage",
-    "Environment",
     "ErrorCode",
-    "ExecutionLimits",
     "ExecutionStatus",
     "ExecutionTarget",
-    "Harness",
     "HarnessAgent",
     "HarnessCapability",
     "HarnessCompletion",
     "HarnessEnvironment",
-    "HarnessPolicy",
     "HarnessResult",
     "HarnessTask",
-    "HumanVerifier",
     "InvalidRequestError",
     "JSONLSink",
-    "Job",
-    "JobMode",
-    "JobPlan",
-    "JobResult",
-    "JobStore",
     "LocalProvider",
     "Message",
-    "ModelCatalog",
-    "ModelSpec",
     "NetworkMode",
     "NotFoundError",
-    "Observation",
     "Outcome",
-    "Plural",
     "PluralError",
     "ProgressEvent",
     "ProviderRegistry",
     "ProviderUnavailable",
     "RateLimitError",
     "Redactor",
-    "Resource",
-    "Resolver",
-    "RetryPolicy",
-    "Runtime",
-    "RuntimeVariable",
-    "RubricCriterion",
     "SQLiteSink",
     "Sampler",
     "SandboxProvider",
     "SandboxRequirements",
-    "Secret",
-    "State",
-    "Studio",
     "TITORecord",
-    "Task",
     "TaskPin",
     "TimeoutError",
     "Tool",
@@ -224,26 +232,16 @@ __all__ = [
     "TraceWriter",
     "Trajectory",
     "TrajectoryEvent",
-    "Trial",
     "TrialExecution",
     "TrialReceipt",
-    "TrialResult",
     "TrialSpec",
     "TrialStatus",
     "Usage",
-    "Verifier",
-    "VerifierOutput",
     "VerifierResult",
     "VerifierRuntime",
     "__version__",
-    "action",
     "content_hash",
-    "dump_project",
-    "dumps_project",
-    "estimate_cost",
     "is_retryable",
-    "load_project",
     "normalize_trajectory",
-    "rewarder",
     "stable_id",
 ]

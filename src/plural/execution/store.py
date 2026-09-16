@@ -7,6 +7,7 @@ import mimetypes
 import os
 import shutil
 import tempfile
+import threading
 import time
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
@@ -15,10 +16,10 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from plural.domain import (
+from plural.common import ErrorCode, canonical_json
+from plural.jobs import (
     ArtifactManifest,
     ArtifactManifestEntry,
-    ErrorCode,
     JobLock,
     JobPlan,
     JobResult,
@@ -26,7 +27,6 @@ from plural.domain import (
     ProgressEvent,
     TrialResult,
     TrialSpec,
-    canonical_json,
 )
 from plural.sandbox import DownloadedFile, safe_relative_path
 
@@ -36,6 +36,10 @@ class JobStore:
 
     def __init__(self, root: Path = Path(".plural/jobs")) -> None:
         self.root = root
+        # Serializes event sequence assignment across parallel Trials sharing
+        # one event loop or threads. Cross-process writers need a file lock;
+        # a single Job runner process is the supported topology.
+        self._emit_lock = threading.Lock()
 
     def job_path(self, job_id: str) -> Path:
         """Return a validated job directory."""
@@ -113,32 +117,33 @@ class JobStore:
     ) -> ProgressEvent:
         """Append one monotonic, sanitized progress event."""
         path = self.job_path(job_id) / "events.jsonl"
-        sequence = 1
-        if path.exists():
-            lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line]
-            if lines:
-                sequence = int(json.loads(lines[-1])["sequence"]) + 1
         sanitized = _sanitize_event_data(dict(data or {}), secret_values)
-        event = ProgressEvent.model_validate(
-            {
-                "sequence": sequence,
-                "timestamp": datetime.now(timezone.utc),
-                "job_id": job_id,
-                "type": event_type,
-                "status": status,
-                "trial_id": trial_id,
-                "execution_id": execution_id,
-                "message": redact_mapping({"value": message}, secret_values)["value"][:2000],
-                "data": sanitized,
-            }
-        )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
-        try:
-            os.write(descriptor, (canonical_json(event) + "\n").encode())
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        with self._emit_lock:
+            sequence = 1
+            if path.exists():
+                lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line]
+                if lines:
+                    sequence = int(json.loads(lines[-1])["sequence"]) + 1
+            event = ProgressEvent.model_validate(
+                {
+                    "sequence": sequence,
+                    "timestamp": datetime.now(timezone.utc),
+                    "job_id": job_id,
+                    "type": event_type,
+                    "status": status,
+                    "trial_id": trial_id,
+                    "execution_id": execution_id,
+                    "message": redact_mapping({"value": message}, secret_values)["value"][:2000],
+                    "data": sanitized,
+                }
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+            try:
+                os.write(descriptor, (canonical_json(event) + "\n").encode())
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
         return event
 
     def events(

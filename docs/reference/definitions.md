@@ -2,7 +2,7 @@
 route: /docs/reference/definitions
 title: "Definitions"
 order: 200
-description: "Reference for the seven public evaluation objects and their shared Python, YAML, and CLI semantics."
+description: "Reference for the eight public evaluation objects and their shared Python, YAML, and CLI semantics."
 audience: all
 nav: false
 ---
@@ -14,13 +14,20 @@ explicit version.
 
 ## Objects
 
-- `Environment`: world, Runtime, actions, resources, limits, and rendering.
-- `Runtime`: isolation, image, compute, filesystem, network, secrets, placement.
-- `Agent`: model, provider, instructions, optional Harness, metadata.
+Eight objects. Runtime, Resources, and Rewarders are nested inside the
+Environment; they are not top-level objects.
+
+- `Environment`: world, actions, state, observation, Runtime, resources,
+  rewarders, limits, and rendering.
+- `Task`: instructions, one Environment, Verifiers, task resources, initial
+  state.
 - `Verifier`: information, criteria, evidence, runtime, weight, check behavior.
-- `Task`: instructions, Environment, Verifiers, resources, initial state.
+- `Agent`: model, provider, instructions, optional Harness, metadata.
+- `Harness`: interaction loop and extra tools for one Agent, bounded by the
+  Environment's policy.
 - `Benchmark`: name, version, ordered Tasks, primary metric, metadata.
 - `Job`: source, Agents, mode, attempts, concurrency, retry policy.
+- `Trial`: one Agent × one Task × one planned attempt; Job output.
 
 ## Serialization
 

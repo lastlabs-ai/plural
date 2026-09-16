@@ -144,9 +144,8 @@ environment = TicketTriage(
     runtime=Runtime.local(),
     resources=[
         Resource(
+            "data/policy.md",
             kind="data",
-            name="support-policy",
-            path="data/policy.md",
             content_type="text/markdown",
         ),
     ],
@@ -163,12 +162,7 @@ task = Task(
         "expected": "billing",
     },
     resources=[
-        Resource(
-            kind="file",
-            name="invoice",
-            path="data/invoice.csv",
-            content_type="text/csv",
-        ),
+        Resource("data/invoice.csv", content_type="text/csv"),
     ],
     verifiers=[verifier],
 )
@@ -180,9 +174,9 @@ agent = Agent(
 job = Job(task, agents=[agent])
 ```
 
-The shared policy belongs to the Environment. The invoice describes an input for this Task. In this example, both files are packaged beneath the Environment's source directory. Reset reads the policy into the Observation; `read_invoice` exposes the attachment through an action.
+The shared policy belongs to the Environment. The invoice describes an input for this Task. In this example, both files are packaged beneath the Environment's source directory and staged automatically by the short `Resource("path")` form. Reset reads the policy into the Observation; `read_invoice` exposes the attachment through an action.
 
-These resources use the default `descriptor` delivery because the example code reads files from the Environment package. To stage files automatically, choose `inline`, `source`, or `resolver` delivery as described in [Environment resources](environments.md#resources). A URI alone does not fetch data.
+A URI alone does not fetch data. For data that must be resolved at launch, use `resolver` delivery as described in [Environment resources](environments.md#resources).
 
 This example uses one invoice. To support many cases, add a public case ID or resource name and have Environment code select the corresponding file. Package only the inputs that should be accessible together; a custom Harness with filesystem access may read other staged files.
 
@@ -192,10 +186,7 @@ Use an inline resource for a small case-specific attachment:
 
 ```python
 invoice = Resource(
-    kind="file",
-    name="invoice",
-    path="invoice.csv",
-    delivery="inline",
+    "invoice.csv",
     content="invoice_id,amount,currency\ninv-204,49.00,USD\n",
     content_type="text/csv",
 )

@@ -21,7 +21,7 @@ def runtime_values(
 ) -> tuple[dict[str, str], dict[str, str]]:
     values: dict[str, str] = {}
     secrets: dict[str, str] = {}
-    declarations = list(environment.runtime.variables) if target == "environment" else []
+    declarations: list[Any] = list(environment.runtime.variables) if target == "environment" else []
     declarations += [item for item in environment.secrets if item.target == target]
     for item in declarations:
         value = environ.get(item.name)

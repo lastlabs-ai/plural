@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import math
 import shlex
 from collections.abc import Callable, Mapping
 from functools import lru_cache
@@ -68,6 +69,16 @@ class VerifierOutput(FrozenModel):
     scores: dict[str, float] = Field(default_factory=dict)
     evidence: tuple[str, ...] = ()
     feedback: str = ""
+
+    def validated_finite(self) -> VerifierOutput:
+        """Reject non-finite scores.
+
+        Returns:
+            This output when all scores are finite.
+        """
+        if any(not math.isfinite(item) for item in (self.reward, *self.scores.values())):
+            raise ValueError("Verifier emitted non-finite scores")
+        return self
 
 
 class RubricCriterion(FrozenModel):

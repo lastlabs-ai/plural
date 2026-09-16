@@ -24,9 +24,7 @@ HEADING = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 ANY_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE)
 REQUIRED_FIELDS = frozenset({"route", "title", "order", "description", "audience", "nav"})
 AUDIENCES = frozenset({"all", "developers", "operators", "maintainers", "internal"})
-NAV_GROUPS = frozenset(
-    {"Start", "Build", "Run", "Interfaces", "Tutorials", "Operations"}
-)
+NAV_GROUPS = frozenset({"Start", "Build", "Run", "Interfaces", "Tutorials", "Operations"})
 PACKAGE_NAV = [
     ("Start", "/docs", "index.md"),
     ("Start", "/docs/getting-started/concepts", "getting-started/concepts.md"),

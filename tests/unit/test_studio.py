@@ -7,18 +7,12 @@ import httpx
 import respx
 
 from plural import Client
-from plural.domain import (
-    AgentBinding,
-    AgentDefinition,
-    BenchmarkDefinition,
-    BenchmarkJobSource,
-    DeterministicVerifier,
-    EnvironmentDefinition,
-    JobSpec,
-    TaskDefinition,
-    WeightedVerifier,
-)
+from plural.agents import AgentBinding, AgentDefinition
+from plural.environments.definition import EnvironmentDefinition
+from plural.jobs import BenchmarkJobSource, JobSpec
 from plural.studio import studio_base_url
+from plural.tasks import BenchmarkDefinition, TaskDefinition
+from plural.verifiers import DeterministicVerifier, WeightedVerifier
 
 BASE = "https://api.example.com/api/v1"
 

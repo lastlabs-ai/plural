@@ -13,30 +13,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
+from plural.agents import AgentBinding
 from plural.catalog import ModelCatalog
-from plural.domain import (
-    AgentAggregate,
-    AgentBinding,
-    AgentVerifier,
-    ArtifactReference,
-    ErrorCode,
-    HarnessPackage,
-    HumanVerifier,
-    JobMode,
-    JobResult,
-    JobSpec,
-    TaskDefinition,
-    TITORecord,
-    TrialReceipt,
-    TrialResult,
-    TrialSpec,
-    VerifierDefinition,
-    VerifierResult,
-    VerifierRuntime,
-    content_hash,
-)
+from plural.common import ErrorCode, HarnessPackage, content_hash
 from plural.evidence import first_json_mapping
 from plural.execution.inputs import ResourceResolver, resource_uploads, runtime_values
 from plural.execution.policy import (
@@ -44,11 +23,24 @@ from plural.execution.policy import (
     resolve_effective_policy,
     sandbox_requirements_for,
 )
+from plural.execution.scheduler import drain
 from plural.execution.store import JobStore
 from plural.harness.packages import BUILTIN_PROFILES, native_actions_v1, native_chat_v1
 from plural.harness.protocol import HarnessProtocolError, HarnessRunRequest
 from plural.harness.retrieval import materialize_package, retrieve_archive, tree_digest
 from plural.harness.runner import HarnessExecutionError, HarnessRunner
+from plural.jobs import (
+    AgentAggregate,
+    ArtifactReference,
+    JobMode,
+    JobResult,
+    JobSpec,
+    TITORecord,
+    TrialReceipt,
+    TrialResult,
+    TrialSpec,
+    VerifierResult,
+)
 from plural.sandbox import (
     CapabilityError,
     DownloadedFile,
@@ -61,26 +53,18 @@ from plural.sandbox import (
     SandboxRequirements,
     default_registry,
 )
-from plural.tasks import validate_task_state
+from plural.tasks import TaskDefinition, validate_task_state
 from plural.trajectory import normalize_trajectory
-from plural.verifiers import DeterministicVerifier, Episode, EpisodeUsage
-
-
-class VerifierOutput(BaseModel):
-    """Strict score document emitted by deterministic and agent Verifiers."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    reward: float
-    scores: dict[str, float] = Field(default_factory=dict)
-    evidence: tuple[str, ...] = ()
-    feedback: str = ""
-
-    def validated_finite(self) -> VerifierOutput:
-        """Reject non-finite scores."""
-        if any(not math.isfinite(item) for item in (self.reward, *self.scores.values())):
-            raise ValueError("Verifier emitted non-finite scores")
-        return self
+from plural.verifiers import (
+    AgentVerifier,
+    DeterministicVerifier,
+    Episode,
+    EpisodeUsage,
+    HumanVerifier,
+    VerifierDefinition,
+    VerifierOutput,
+    VerifierRuntime,
+)
 
 
 class ExecutionFailure(RuntimeError):
@@ -1180,7 +1164,7 @@ def _agent_aggregates(
     return tuple(rows)
 
 
-class Job:
+class JobRunner:
     """Bounded async Job scheduler across Environment-owned runtimes."""
 
     def __init__(
@@ -1328,7 +1312,7 @@ class Job:
                 if self.progress:
                     self.progress(trial_spec, result)
 
-        await asyncio.gather(*(execute(item) for item in self.plan.trials))
+        await drain(self.spec.concurrency, self.plan.trials, execute)
         ordered = tuple(results[item.trial_id] for item in self.plan.trials)
         status: Literal["succeeded", "failed", "cancelled", "awaiting_review"]
         if any(item.status == "awaiting_review" for item in ordered):
@@ -1613,4 +1597,4 @@ json.dump(result, open("agent-verifier-result.json", "w"))
 """
 
 
-__all__ = ["ExecutionFailure", "Job", "Trial", "VerifierOutput"]
+__all__ = ["ExecutionFailure", "JobRunner", "Trial", "VerifierOutput"]

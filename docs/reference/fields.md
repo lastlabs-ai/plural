@@ -41,6 +41,7 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [ResourceRequirements](#resourcerequirements)
 - [Rewarder](#rewarder)
 - [RubricCriterion](#rubriccriterion)
+- [RuntimeVariable](#runtimevariable)
 - [Secret](#secret)
 - [VerifierRuntime](#verifierruntime)
 
@@ -190,6 +191,10 @@ Data or application supplied by an Environment.
 - **`digest`** — `string | null`; optional. Default: `null`.
 - **`content_type`** — `string`; optional. Default: `""`.
 - **`config`** — `object`; optional.
+- **`description`** — `string`; optional. Default: `""`.
+- **`delivery`** — `"descriptor" | "source" | "inline" | "resolver"`; optional. Default: `"descriptor"`.
+- **`content`** — `string | null`; optional. Default: `null`.
+- **`resolver`** — `string | null`; optional. Default: `null`.
 
 ## Runtime
 
@@ -197,6 +202,7 @@ Where an Environment runs: Docker, a trusted local process, or Daytona.
 
 - **`provider`** — `string`; optional. Default: `"docker"`. Constraints: `{"minLength": 1}`.
 - **`placement`** — `object`; optional.
+- **`variables`** — `array of RuntimeVariable`; optional. Default: `[]`.
 - **`image`** — `string | null`; optional. Default: `null`.
 - **`snapshot`** — `string | null`; optional. Default: `null`.
 - **`declarative_image`** — `DeclarativeImage | null`; optional. Default: `null`.
@@ -304,13 +310,24 @@ One Agent or Human rubric criterion.
 - **`min_score`** — `number`; optional. Default: `0`.
 - **`max_score`** — `number`; optional. Default: `1`.
 
+## RuntimeVariable
+
+A launch-time variable declaration. Values are supplied to Job, never saved here.
+
+- **`name`** — `string`; required. Constraints: `{"pattern": "^[A-Z_][A-Z0-9_]*$"}`.
+- **`description`** — `string`; optional. Default: `""`.
+- **`required`** — `boolean`; optional. Default: `true`.
+- **`secret`** — `boolean`; optional. Default: `false`.
+- **`format`** — `"text" | "url" | "integer" | "json"`; optional. Default: `"text"`.
+
 ## Secret
 
-A named secret target declaration; package execution does not inject it yet.
+A named credential supplied when a Job runs, with an explicit execution target.
 
-- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
+- **`name`** — `string`; required. Constraints: `{"pattern": "^[A-Z_][A-Z0-9_]*$"}`.
 - **`required`** — `boolean`; optional. Default: `true`.
 - **`target`** — `"environment" | "harness" | "verifier"`; optional. Default: `"environment"`.
+- **`description`** — `string`; optional. Default: `""`.
 
 ## VerifierRuntime
 

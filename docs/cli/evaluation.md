@@ -115,6 +115,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ export      Export the resolved graph as canonical public YAML.                                  │
 │ run         Run locally by default; use --hosted for explicit remote submission.                 │
 │ schemas     Generate schemas from the public SDK models.                                         │
+│ env         Author, inspect, and publish Environments.                                           │
+│ task        Author, inspect, and publish Tasks.                                                  │
+│ verifier    Author, inspect, and publish Verifiers.                                              │
+│ agent       Author, inspect, and publish Agents.                                                 │
+│ benchmark   Author, inspect, and publish Benchmarks.                                             │
 │ models      List and inspect the effective model catalog.                                        │
 │ harness     List built-in Harnesses or author a custom one.                                      │
 │ benchmarks  Inspect, compare, and export Benchmarks.                                             │
@@ -122,6 +127,112 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ job         Advanced durable Job and event commands.                                             │
 │ trial       Inspect and watch Trials.                                                            │
 │ review      Inspect and submit human reviews.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent`
+
+```text
+
+ Usage: plural agent [OPTIONS] COMMAND [ARGS]...
+
+ Author, inspect, and publish Agents.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init      Create an Agent independent of Environment identity.                                   │
+│ validate  Validate an Agent.                                                                     │
+│ show      Show an Agent.                                                                         │
+│ push      Publish an Agent parent and immutable revision.                                        │
+│ publish   Publish an existing hosted Agent revision.                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent init`
+
+```text
+
+ Usage: plural agent init [OPTIONS] [path]
+
+ Create an Agent independent of Environment identity.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: agent.yaml]                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│    --name           <str>  [default: agent]                                                      │
+│ *  --model          <str>  [required]                                                            │
+│    --harness        <str>                                                                        │
+│    --force                                                                                       │
+│    --help                  Show this message and exit.                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent publish`
+
+```text
+
+ Usage: plural agent publish [OPTIONS] {resource_id} {revision_id}
+
+ Publish an existing hosted Agent revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    resource_id      <str>  [required]                                                          │
+│ *    revision_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent push`
+
+```text
+
+ Usage: plural agent push [OPTIONS] [path]
+
+ Publish an Agent parent and immutable revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: agent.yaml]                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --harness-revision-id        <str>                                                               │
+│ --help                              Show this message and exit.                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent show`
+
+```text
+
+ Usage: plural agent show [OPTIONS] [path]
+
+ Show an Agent.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: agent.yaml]                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent validate`
+
+```text
+
+ Usage: plural agent validate [OPTIONS] [path]
+
+ Validate an Agent.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: agent.yaml]                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -178,6 +289,111 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Show local authentication context without exposing secrets.
 
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark`
+
+```text
+
+ Usage: plural benchmark [OPTIONS] COMMAND [ARGS]...
+
+ Author, inspect, and publish Benchmarks.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init      Create a Benchmark selecting Task revisions across Environments.                       │
+│ validate  Validate a complete Benchmark revision graph.                                          │
+│ show      Show a resolved Benchmark.                                                             │
+│ push      Publish a cross-Environment Benchmark revision.                                        │
+│ publish   Publish an existing hosted Benchmark revision.                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark init`
+
+```text
+
+ Usage: plural benchmark init [OPTIONS] [path]
+
+ Create a Benchmark selecting Task revisions across Environments.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: benchmark.yaml]                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│    --name           <str>   [default: benchmark]                                                 │
+│ *  --task   -t      <path>  [required]                                                           │
+│    --force                                                                                       │
+│    --help                   Show this message and exit.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark publish`
+
+```text
+
+ Usage: plural benchmark publish [OPTIONS] {resource_id} {revision_id}
+
+ Publish an existing hosted Benchmark revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    resource_id      <str>  [required]                                                          │
+│ *    revision_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark push`
+
+```text
+
+ Usage: plural benchmark push [OPTIONS] [path]
+
+ Publish a cross-Environment Benchmark revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: benchmark.yaml]                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --task-revision-id        <str>  [required]                                                   │
+│    --help                           Show this message and exit.                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark show`
+
+```text
+
+ Usage: plural benchmark show [OPTIONS] [path]
+
+ Show a resolved Benchmark.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: benchmark.yaml]                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark validate`
+
+```text
+
+ Usage: plural benchmark validate [OPTIONS] [path]
+
+ Validate a complete Benchmark revision graph.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: benchmark.yaml]                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -251,6 +467,109 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --catalog        <path>                                                                          │
 │ --help                   Show this message and exit.                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env`
+
+```text
+
+ Usage: plural env [OPTIONS] COMMAND [ARGS]...
+
+ Author, inspect, and publish Environments.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init      Create a standalone Environment package.                                               │
+│ validate  Validate a canonical Environment.                                                      │
+│ show      Show a canonical Environment.                                                          │
+│ push      Publish an Environment parent and immutable revision.                                  │
+│ publish   Publish an existing hosted Environment revision.                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env init`
+
+```text
+
+ Usage: plural env init [OPTIONS] [path]
+
+ Create a standalone Environment package.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: .]                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --name         <str>  [default: environment]                                                     │
+│ --force                                                                                          │
+│ --help                Show this message and exit.                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env publish`
+
+```text
+
+ Usage: plural env publish [OPTIONS] {resource_id} {revision_id}
+
+ Publish an existing hosted Environment revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    resource_id      <str>  [required]                                                          │
+│ *    revision_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env push`
+
+```text
+
+ Usage: plural env push [OPTIONS] [path]
+
+ Publish an Environment parent and immutable revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: .]                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env show`
+
+```text
+
+ Usage: plural env show [OPTIONS] [path]
+
+ Show a canonical Environment.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: .]                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env validate`
+
+```text
+
+ Usage: plural env validate [OPTIONS] [path]
+
+ Validate a canonical Environment.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: .]                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -742,6 +1061,113 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
+### `plural task`
+
+```text
+
+ Usage: plural task [OPTIONS] COMMAND [ARGS]...
+
+ Author, inspect, and publish Tasks.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init      Create a Task pinned to an Environment and Verifiers.                                  │
+│ validate  Validate a complete Task revision graph.                                               │
+│ show      Show a resolved Task.                                                                  │
+│ push      Publish a Task revision with exact hosted dependencies.                                │
+│ publish   Publish an existing hosted Task revision.                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task init`
+
+```text
+
+ Usage: plural task init [OPTIONS] [path]
+
+ Create a Task pinned to an Environment and Verifiers.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: task.yaml]                                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│    --id                   <str>   [default: task]                                                │
+│ *  --environment  -e      <path>  [required]                                                     │
+│ *  --verifier     -v      <path>  [required]                                                     │
+│    --force                                                                                       │
+│    --help                         Show this message and exit.                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task publish`
+
+```text
+
+ Usage: plural task publish [OPTIONS] {resource_id} {revision_id}
+
+ Publish an existing hosted Task revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    resource_id      <str>  [required]                                                          │
+│ *    revision_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task push`
+
+```text
+
+ Usage: plural task push [OPTIONS] [path]
+
+ Publish a Task revision with exact hosted dependencies.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: task.yaml]                                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --environment-revision-id        <str>  [required]                                            │
+│ *  --verifier-revision-id           <str>  [required]                                            │
+│    --help                                  Show this message and exit.                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task show`
+
+```text
+
+ Usage: plural task show [OPTIONS] [path]
+
+ Show a resolved Task.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: task.yaml]                                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task validate`
+
+```text
+
+ Usage: plural task validate [OPTIONS] [path]
+
+ Validate a complete Task revision graph.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: task.yaml]                                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
 ### `plural trial`
 
 ```text
@@ -812,6 +1238,110 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --catalog        <path>                                                                          │
 │ --help                   Show this message and exit.                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier`
+
+```text
+
+ Usage: plural verifier [OPTIONS] COMMAND [ARGS]...
+
+ Author, inspect, and publish Verifiers.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init      Create a deterministic, agent, or human Verifier.                                      │
+│ validate  Validate a Verifier.                                                                   │
+│ show      Show a Verifier.                                                                       │
+│ push      Publish a Verifier parent and immutable revision.                                      │
+│ publish   Publish an existing hosted Verifier revision.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier init`
+
+```text
+
+ Usage: plural verifier init [OPTIONS] [path]
+
+ Create a deterministic, agent, or human Verifier.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: verifier.yaml]                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --name         <str>                        [default: verifier]                                  │
+│ --kind         <deterministic|agent|human>  [default: deterministic]                             │
+│ --force                                                                                          │
+│ --help                                      Show this message and exit.                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier publish`
+
+```text
+
+ Usage: plural verifier publish [OPTIONS] {resource_id} {revision_id}
+
+ Publish an existing hosted Verifier revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    resource_id      <str>  [required]                                                          │
+│ *    revision_id      <str>  [required]                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier push`
+
+```text
+
+ Usage: plural verifier push [OPTIONS] [path]
+
+ Publish a Verifier parent and immutable revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: verifier.yaml]                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier show`
+
+```text
+
+ Usage: plural verifier show [OPTIONS] [path]
+
+ Show a Verifier.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: verifier.yaml]                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier validate`
+
+```text
+
+ Usage: plural verifier validate [OPTIONS] [path]
+
+ Validate a Verifier.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  [default: verifier.yaml]                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 <!-- /generated-cli-reference -->

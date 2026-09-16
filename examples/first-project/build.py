@@ -20,14 +20,7 @@ from plural.verifiers import DeterministicVerifier
 ROOT = Path(__file__).resolve().parent
 
 environment = SupportQueue(
-    resources=(
-        Resource(
-            kind="data",
-            name="support-policy",
-            path="policy.md",
-            content_type="text/markdown",
-        ),
-    ),
+    resources=(Resource("policy.md", kind="data", content_type="text/markdown"),),
     runtime=Runtime.local(),
     limits=ExecutionLimits(max_turns=6, max_seconds=120),
 )

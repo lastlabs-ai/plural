@@ -90,7 +90,7 @@ alongside `achat`.
 ## Tools and structured answers
 
 A raw `client.chat(..., tools=...)` call declares tools; it does **not** execute
-their implementations. Use the [environment walkthrough](../tutorials/sdk-walkthrough.md)
+their implementations. Use the [support queue tutorial](../tutorials/support-queue.md)
 for an automatic tool loop, or dispatch returned tool calls yourself and append
 tool-result messages with matching call IDs.
 
@@ -119,7 +119,7 @@ with Client() as client:
 ```
 
 Provider translations, tool-call stream assembly, and reasoning fields are
-explained in [capabilities](../guides/capabilities.md). Supported combinations
+explained in [providers and integrations](../reference/integrations.md). Supported combinations
 vary; a normalized API does not make unsupported model features available.
 
 ## Choose models and routing behavior
@@ -140,7 +140,7 @@ uses that entry's pricing and is an estimate, not a provider invoice.
 For availability-oriented application traffic, `models=[...]` supplies fallback
 candidates alongside the primary `model`. `Client(policy=LeastCost())`, with
 `LeastCost` imported from `plural.routing`, chooses by the routing policy.
-See [routing](../concepts/routing.md) and [provider examples](../guides/routing-examples.md)
+See [providers and integrations](../reference/integrations.md)
 for ordered fallbacks, custom policies, and host selection.
 
 For a strict model evaluation, avoid fallback chains: a fallback measures a

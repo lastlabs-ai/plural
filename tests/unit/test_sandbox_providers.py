@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from plural.domain import HarnessDefinition
+from plural.common import HarnessDefinition
 from plural.harness.protocol import HarnessRunRequest
 from plural.harness.runner import HarnessRunner
 from plural.sandbox import (

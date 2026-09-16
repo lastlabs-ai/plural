@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from plural.domain import (
+from plural.common import (
     FileDeclaration,
     HarnessCapability,
     HarnessDefinition,

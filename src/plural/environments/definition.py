@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
@@ -71,7 +72,12 @@ class Guardrail(FrozenModel):
 
 
 class EnvironmentResource(FrozenModel):
-    """Data or application supplied by an Environment."""
+    """Data or application supplied by an Environment.
+
+    The short form ``Resource("policies/refunds.md")`` stages one file from
+    the Environment's source package. The mapping form keeps its explicit
+    ``delivery``.
+    """
 
     kind: Literal["data", "application", "file"]
     name: str = Field(min_length=1)
@@ -84,6 +90,31 @@ class EnvironmentResource(FrozenModel):
     delivery: Literal["descriptor", "source", "inline", "resolver"] = "descriptor"
     content: str | None = Field(default=None, max_length=1_048_576)
     resolver: str | None = None
+
+    def __init__(self, path: str | Mapping[str, Any] | None = None, /, **data: Any) -> None:
+        """Build a resource from a package path or a field mapping.
+
+        Args:
+            path: A relative file path inside the Environment's source
+                package (staged with ``delivery="source"`` by default), or a
+                full field mapping.
+            data: Field overrides. ``content=`` switches the short form to
+                ``delivery="inline"``; ``delivery=`` always wins when given.
+        """
+        if path is not None:
+            fields: dict[str, Any] = dict(path) if isinstance(path, Mapping) else {}
+            short_path = None if isinstance(path, Mapping) else str(path)
+            if short_path is not None:
+                fields.setdefault("path", short_path)
+                fields.setdefault("name", short_path)
+                fields.setdefault("kind", "file")
+                if "content" in data or "content" in fields:
+                    fields.setdefault("delivery", "inline")
+                else:
+                    fields.setdefault("delivery", "source")
+            fields.update(data)
+            data = fields
+        super().__init__(**data)
 
     @model_validator(mode="after")
     def _resource_delivery(self) -> EnvironmentResource:

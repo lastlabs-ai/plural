@@ -25,28 +25,19 @@ tasks:
     readme: ''
     resources:
     - kind: data
-      name: support-policy
+      name: policy.md
       path: policy.md
-      uri: null
-      digest: null
       content_type: text/markdown
       config: {}
+      description: ''
+      delivery: source
     runtime:
       provider: local
       placement: {}
-      image: null
-      snapshot: null
-      declarative_image: null
-      build_context: null
-      dockerfile: null
+      variables: []
       network: public
       network_allowlist: []
-      resources:
-        cpu: null
-        memory_mb: null
-        pids: null
-        disk_mb: null
-        storage_mb: null
+      resources: {}
       read_only_root: false
       targets:
       - local
@@ -61,32 +52,23 @@ tasks:
     harness_policy:
       mode: allow_all
       allowed_harnesses: []
-      allowed_capabilities: null
       denied_capabilities: []
     limits:
       max_turns: 6
       max_seconds: 120.0
-      max_cost_usd: null
     metadata: {}
   verifiers:
   - name: correct-category
     version: 0.1.0
-    info: null
     criteria: []
     weight: 1.0
     metadata: {}
     kind: deterministic
     runtime:
       provider: docker
-      image: null
       network: public
       network_allowlist: []
-      resources:
-        cpu: null
-        memory_mb: null
-        pids: null
-        disk_mb: null
-        storage_mb: null
+      resources: {}
       timeout_seconds: 60.0
     result_path: verifier-result.json
     evidence_required: true
@@ -118,28 +100,19 @@ tasks:
     readme: ''
     resources:
     - kind: data
-      name: support-policy
+      name: policy.md
       path: policy.md
-      uri: null
-      digest: null
       content_type: text/markdown
       config: {}
+      description: ''
+      delivery: source
     runtime:
       provider: local
       placement: {}
-      image: null
-      snapshot: null
-      declarative_image: null
-      build_context: null
-      dockerfile: null
+      variables: []
       network: public
       network_allowlist: []
-      resources:
-        cpu: null
-        memory_mb: null
-        pids: null
-        disk_mb: null
-        storage_mb: null
+      resources: {}
       read_only_root: false
       targets:
       - local
@@ -154,32 +127,23 @@ tasks:
     harness_policy:
       mode: allow_all
       allowed_harnesses: []
-      allowed_capabilities: null
       denied_capabilities: []
     limits:
       max_turns: 6
       max_seconds: 120.0
-      max_cost_usd: null
     metadata: {}
   verifiers:
   - name: correct-category
     version: 0.1.0
-    info: null
     criteria: []
     weight: 1.0
     metadata: {}
     kind: deterministic
     runtime:
       provider: docker
-      image: null
       network: public
       network_allowlist: []
-      resources:
-        cpu: null
-        memory_mb: null
-        pids: null
-        disk_mb: null
-        storage_mb: null
+      resources: {}
       timeout_seconds: 60.0
     result_path: verifier-result.json
     evidence_required: true
@@ -211,28 +175,19 @@ tasks:
     readme: ''
     resources:
     - kind: data
-      name: support-policy
+      name: policy.md
       path: policy.md
-      uri: null
-      digest: null
       content_type: text/markdown
       config: {}
+      description: ''
+      delivery: source
     runtime:
       provider: local
       placement: {}
-      image: null
-      snapshot: null
-      declarative_image: null
-      build_context: null
-      dockerfile: null
+      variables: []
       network: public
       network_allowlist: []
-      resources:
-        cpu: null
-        memory_mb: null
-        pids: null
-        disk_mb: null
-        storage_mb: null
+      resources: {}
       read_only_root: false
       targets:
       - local
@@ -247,32 +202,23 @@ tasks:
     harness_policy:
       mode: allow_all
       allowed_harnesses: []
-      allowed_capabilities: null
       denied_capabilities: []
     limits:
       max_turns: 6
       max_seconds: 120.0
-      max_cost_usd: null
     metadata: {}
   verifiers:
   - name: correct-category
     version: 0.1.0
-    info: null
     criteria: []
     weight: 1.0
     metadata: {}
     kind: deterministic
     runtime:
       provider: docker
-      image: null
       network: public
       network_allowlist: []
-      resources:
-        cpu: null
-        memory_mb: null
-        pids: null
-        disk_mb: null
-        storage_mb: null
+      resources: {}
       timeout_seconds: 60.0
     result_path: verifier-result.json
     evidence_required: true

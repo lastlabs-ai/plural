@@ -803,7 +803,7 @@ plural.tracing.resources.trace_json_schema() -> 'dict[str, Any]'
 Simple public runner for a Task or Benchmark and catalog-backed Agents.
 
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: 'int' = 1, per_runtime_concurrency: 'int' = 1, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: 'int' = 1, per_runtime_concurrency: 'int' = 1, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None) -> 'None'
 ```
 
 ### plural.Job.run_async
@@ -1217,7 +1217,7 @@ that Task, calls :meth:`reset`, then applies Agent moves with :meth:`step`.
 ```
 
 ```python
-plural.Environment(*, name: 'str | None' = None, version: 'str | None' = None, revision: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'tuple[EnvironmentResource, ...]' = (), runtime: 'EnvironmentRuntime | None' = None, secrets: 'tuple[SecretReference, ...]' = (), guardrails: 'tuple[Guardrail, ...]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, metadata: 'dict[str, Any] | None' = None, state: 'StateT | None' = None, observation: 'ObsT | None' = None, info: 'Any' = None, reset_command: 'tuple[str, ...] | None' = None) -> 'None'
+plural.Environment(*, name: 'str | None' = None, version: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'tuple[EnvironmentResource, ...] | list[EnvironmentResource]' = (), runtime: 'EnvironmentRuntime | None' = None, secrets: 'tuple[SecretReference, ...] | list[SecretReference]' = (), guardrails: 'tuple[Guardrail, ...] | list[Guardrail]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, metadata: 'dict[str, Any] | None' = None, state: 'StateT | None' = None, observation: 'ObsT | None' = None, info: 'Any' = None, reset_command: 'tuple[str, ...] | list[str] | None' = None) -> 'None'
 ```
 
 ### plural.Environment.observation_snapshot

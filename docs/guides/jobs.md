@@ -10,7 +10,7 @@ nav: false
 
 Start with the [complete CLI walkthrough](../tutorials/cli-walkthrough.md) to
 create the files used here, configure model credentials, and grant the harness
-secret. Add a [verifier](../tutorials/package-tools.md) before treating a job as
+secret. Add a [verifier](../project/verifiers.md) before treating a job as
 a scored evaluation. This page covers operations after your first run.
 
 ## Validate and inspect

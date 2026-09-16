@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from plural.domain import ExecutionTarget, HarnessGrant
+from plural.common import ExecutionTarget
+from plural.environments.definition import HarnessGrant
 from plural.execution.policy import (
     ProjectPolicy,
     policy_case_agent,

@@ -54,7 +54,11 @@ def _walk(command: object, path: tuple[str, ...] = ()) -> list[tuple[str, str]]:
 
 
 def render_commands() -> str:
-    """Render the generated command help sections."""
+    """Render the generated command help sections.
+
+    Returns:
+        The Markdown reference text for every CLI command.
+    """
     sections = [
         "This section is generated from the Typer application. "
         "Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.",
@@ -66,7 +70,11 @@ def render_commands() -> str:
 
 
 def splice(page: str, generated: str) -> str:
-    """Replace the generated region in the CLI guide."""
+    """Replace the generated region in the CLI guide.
+
+    Returns:
+        The guide page with the generated region spliced in.
+    """
     if BEGIN not in page or END not in page:
         raise RuntimeError(f"{OUTPUT} is missing {BEGIN} / {END} markers")
     before, remainder = page.split(BEGIN, 1)

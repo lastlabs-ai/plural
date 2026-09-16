@@ -67,7 +67,7 @@ A verifier failure may mean evidence was missing rather than that the agent perf
 
 ## Capture your own application
 
-Plural's tracing SDK can record model calls and application events outside a package Job. This is useful when moving from production behavior toward a repeatable evaluation. Start with [Capture traces](../guides/capture-traces.md), then consult the [trace schema](../reference/trace-schema.md) for the record format.
+Plural's tracing SDK can record model calls and application events outside a package Job. This is useful when moving from production behavior toward a repeatable evaluation. Export spans to an existing collector through [OpenTelemetry](../reference/integrations.md#plural-intel-ci-and-opentelemetry), and keep the [evaluation contract](../architecture/evaluation-contract.md) as the record-format reference.
 
 Capture useful evidence, not just final prose. Record tool inputs and outcomes, relevant observations, model identity, errors, and the artifacts needed by your scoring rule. Fields such as usage and latency depend on the integration actually recording them; do not infer them from an empty trace.
 
@@ -81,7 +81,7 @@ Use the Trial receipt to identify Environment, Task, Agent, Harness, and Verifie
 
 Reading a stored episode does not rerun the model. Re-executing the Task creates new behavior and may incur costs. Do not promise deterministic replay of remote services or stochastic models just because their earlier trace exists.
 
-Selected traces can become datasets or training examples. Preserve their Task provenance, scoring status, and data permissions. Ordinary message transcripts cannot substitute for the exact token records required by train mode. See [Training](training.md) and [Production to dataset](../guides/production-to-dataset.md).
+Selected traces can become datasets or training examples. Preserve their Task provenance, scoring status, and data permissions. Ordinary message transcripts cannot substitute for the exact token records required by train mode. See [Training](training.md).
 
 Treat captured files according to their contents. Hidden schema fields are not automatically scrubbed from every custom artifact, log, or model message. The [verifiers guide](../project/verifiers.md) explains Episode scoring boundaries.
 

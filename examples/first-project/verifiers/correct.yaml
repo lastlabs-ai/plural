@@ -1,21 +1,14 @@
 name: correct-category
 version: 0.1.0
-info: null
 criteria: []
 weight: 1.0
 metadata: {}
 kind: deterministic
 runtime:
   provider: docker
-  image: null
   network: public
   network_allowlist: []
-  resources:
-    cpu: null
-    memory_mb: null
-    pids: null
-    disk_mb: null
-    storage_mb: null
+  resources: {}
   timeout_seconds: 60.0
 result_path: verifier-result.json
 evidence_required: true

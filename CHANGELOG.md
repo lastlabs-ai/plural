@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-09-16
+
 ### Changed
 
 - **0.13.3 break.** Custom Harnesses are Python subclasses with one
@@ -501,7 +503,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.13.3...HEAD
+[0.13.3]: https://github.com/lastlabs-ai/plural/releases/tag/v0.13.3
+[0.12.1]: https://github.com/lastlabs-ai/plural/releases/tag/v0.12.1
 [0.12.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.12.0
 [0.8.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.8.0
 [0.7.4]: https://github.com/lastlabs-ai/plural/releases/tag/v0.7.4

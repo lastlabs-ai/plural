@@ -91,8 +91,6 @@ class Environment(Generic[ObsT, StateT]):
 
     name = "environment"
     version = "0.1.0"
-    # Compatibility for environments authored before the public version rename.
-    revision = "0.1.0"
     description = ""
     overview = ""
     readme = ""
@@ -106,36 +104,34 @@ class Environment(Generic[ObsT, StateT]):
         *,
         name: str | None = None,
         version: str | None = None,
-        revision: str | None = None,
         description: str | None = None,
         overview: str | None = None,
         readme: str | None = None,
-        resources: tuple[EnvironmentResource, ...] = (),
+        resources: tuple[EnvironmentResource, ...] | list[EnvironmentResource] = (),
         runtime: EnvironmentRuntime | None = None,
-        secrets: tuple[SecretReference, ...] = (),
-        guardrails: tuple[Guardrail, ...] = (),
+        secrets: tuple[SecretReference, ...] | list[SecretReference] = (),
+        guardrails: tuple[Guardrail, ...] | list[Guardrail] = (),
         harness_policy: HarnessPolicy | None = None,
         limits: ExecutionLimits | None = None,
         metadata: dict[str, Any] | None = None,
         state: StateT | None = None,
         observation: ObsT | None = None,
         info: Any = None,
-        reset_command: tuple[str, ...] | None = None,
+        reset_command: tuple[str, ...] | list[str] | None = None,
     ) -> None:
-        if version is not None and revision is not None and version != revision:
-            raise ValueError("version and revision cannot disagree")
         self.name = name or type(self).name
         declared_version = (
             type(self).__dict__.get("version")
             or type(self).__dict__.get("revision")
             or type(self).version
         )
-        self.version = version or revision or declared_version
+        self.version = version or declared_version
+        # Compatibility identity used by hosted internals.
         self.revision = self.version
         self.description = type(self).description if description is None else description
         self.overview = type(self).overview if overview is None else overview
         self.readme = type(self).readme if readme is None else readme
-        self.resources = resources
+        self.resources = tuple(resources)
         if runtime is None:
             raise ValueError(
                 f"Cannot create Environment {self.name!r}.\n"
@@ -148,8 +144,8 @@ class Environment(Generic[ObsT, StateT]):
         if isinstance(runtime, Mapping):
             runtime = EnvironmentRuntime.model_validate(runtime)
         self.runtime = runtime
-        self.secrets = secrets
-        self.guardrails = guardrails
+        self.secrets = tuple(secrets)
+        self.guardrails = tuple(guardrails)
         self.harness_policy = harness_policy or HarnessPolicy()
         self.limits = limits or ExecutionLimits()
         self.metadata = deepcopy(type(self).metadata) if metadata is None else deepcopy(metadata)
@@ -160,7 +156,9 @@ class Environment(Generic[ObsT, StateT]):
         self._python_source: Path | None = None
         self._python_object: str | None = None
         self.info = info
-        self.reset_command = type(self).reset_command if reset_command is None else reset_command
+        self.reset_command = (
+            type(self).reset_command if reset_command is None else tuple(reset_command)
+        )
         observation_type, state_type = self._declared_types()
         self.state = state if state is not None else cast(StateT, state_type())
         self.observation = (

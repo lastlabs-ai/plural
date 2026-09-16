@@ -11,7 +11,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from plural.cli.config import Credential
-from plural.domain import ErrorCode
+from plural.common import ErrorCode
 
 
 class AuthHTTPError(RuntimeError):

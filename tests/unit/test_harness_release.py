@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from plural.domain import FileDeclaration, HarnessDefinition
+from plural.common import FileDeclaration, HarnessDefinition
 from plural.harness import native_runner, vendor_adapter
 from plural.harness.protocol import HarnessRunRequest
 from plural.harness.retrieval import build_archive, package_from_archive, retrieve_archive

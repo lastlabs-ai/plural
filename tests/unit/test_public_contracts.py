@@ -3,29 +3,27 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from plural.domain import (
-    AgentBinding,
-    AgentDefinition,
-    BenchmarkDefinition,
-    BenchmarkJobSource,
-    DeterministicVerifier,
-    EnvironmentDefinition,
-    EnvironmentRuntime,
+from plural.agents import AgentBinding, AgentDefinition
+from plural.common import (
     ExecutionTarget,
     HarnessBinding,
     HarnessCapability,
     HarnessDefinition,
     HarnessPackage,
+    PackageSource,
+)
+from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
+from plural.jobs import (
+    BenchmarkJobSource,
     JobMode,
     JobSpec,
-    PackageSource,
-    TaskDefinition,
     TaskJobSource,
     TITORecord,
-    WeightedVerifier,
     resolve_trial_harness_grant,
 )
 from plural.sandbox import NetworkMode
+from plural.tasks import BenchmarkDefinition, TaskDefinition
+from plural.verifiers import DeterministicVerifier, WeightedVerifier
 
 
 def verifier(name: str = "exact") -> DeterministicVerifier:

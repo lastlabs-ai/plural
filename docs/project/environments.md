@@ -203,16 +203,27 @@ Resources are the files and data a Task can use. Environment resources are share
 
 Use relative file paths. Task files never replace shared files, even when their names match. Environment code reads the root from `PLURAL_RESOURCES_DIR`, then exposes the appropriate information through actions or observations. Files are not automatically included in the model's prompt.
 
+### The short form
+
+A file that already lives next to your Environment code needs one line. It is
+staged from the source package automatically:
+
+```python
+from plural import Resource
+
+policy = Resource("policies/refunds.md")
+```
+
+That is `kind="file"`, `delivery="source"`, with the name defaulting to the
+path. Pass `resources=[policy]` when creating the Environment.
+
 ### Saved text and configuration
 
 ```python
 from plural import Resource
 
 policy = Resource(
-    kind="file",
-    name="refund-policy",
-    path="policies/refunds.md",
-    delivery="inline",
+    "policies/refunds.md",
     content="Refund duplicate charges after confirming the invoice.",
     content_type="text/markdown",
 )
@@ -222,12 +233,13 @@ Pass `resources=[policy]` when creating the Environment. Plural calculates the c
 
 ### Packaged files
 
-Use `delivery="source"` to copy a file from the Environment's source package into the resource directory:
+The short form already stages a file from the Environment's source package
+into the resource directory. The explicit mapping form says the same thing:
 
 ```python
 policy = Resource(
     kind="file",
-    name="refund-policy",
+    name="policies/refunds.md",
     path="policies/refunds.md",
     delivery="source",
 )
@@ -299,7 +311,7 @@ job = Job(task, agents=[agent], environ={
 
 Required declarations must have a nonempty value. Supported formats are `text`, `url`, `integer`, and `json`. Set `required=False` for optional inputs. Values are injected into Environment reset and action commands; declarations never contain values. The Harness shares the runtime and can access these variables, so use trusted Harness code.
 
-Existing `Secret` references are also injected according to their `environment`, `harness`, or `verifier` target. Verifier credentials are supplied to the scoring process. Managed stdout and stderr redact declared secrets; Environment code must avoid writing credentials into observations or custom artifacts.
+Existing `Secret` references are also injected according to their `environment`, `harness`, or `verifier` target. Environment secret references as metadata declare names and targets only; values are supplied when the Job runs and are never stored on the Environment. Verifier credentials are supplied to the scoring process. Managed stdout and stderr redact declared secrets; Environment code must avoid writing credentials into observations or custom artifacts.
 
 Docker and Daytona connection credentials configure the run worker, separately from these Task variables. The UI shows the saved provider configuration; availability and capability checks happen when a run starts. Authenticate model calls through the Job's `client` or `api_key` parameter.
 

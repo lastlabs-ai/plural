@@ -765,6 +765,11 @@ class Job:
             or self._runner_options.get("providers") is not None
         ):
             return current
+        agents = getattr(self.spec, "agents", ())
+        if agents and all(binding.auth_mode == "none" for binding in agents):
+            # Credential-free Jobs never call a live model endpoint, so no
+            # Plural or provider key is required to run them.
+            return current
         if self.client is not None:
             key = getattr(self.client, "api_key", None)
             if not key:
@@ -803,7 +808,7 @@ class Job:
         Returns:
             The collected Trial outcomes.
         """
-        from plural.execution.engine import Job as JobRunner
+        from plural.execution.engine import JobRunner
 
         options = dict(self._runner_options)
         options["environ"] = self._credential_environ()

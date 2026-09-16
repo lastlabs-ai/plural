@@ -26,38 +26,31 @@ names here describe the installed package, not proposed future convenience APIs.
 - `Client` / `Plural`, `chat`, `achat`, `stream`, `astream`, closing/flushing,
   normalized requests/responses, errors, retries, tags, and catalog:
   [model client](../sdk/client.md).
-- Tool fragments, structured output, reasoning, and provider translations:
-  [capabilities](../guides/capabilities.md).
-- Routing policies, fallback order, least-cost selection, provider preference,
-  custom policies: [routing concepts](../concepts/routing.md).
-- OpenAI, Anthropic, Google, compatible hosts, BYOK, and custom in-process
-  providers: [routing examples](../guides/routing-examples.md).
-- Azure and AWS Bedrock: [cloud providers](../guides/cloud-providers.md).
-- Implement a provider: [provider guide](../guides/add-provider.md).
-- Migrate existing OpenRouter-style calls: [migration guide](../guides/migrate-openrouter.md).
+- Tool fragments, structured output, reasoning, provider translations, routing
+  policies, fallback order, least-cost selection, provider preference, custom
+  policies, OpenAI, Anthropic, Google, compatible hosts, BYOK, Azure, Bedrock,
+  and migrating existing OpenRouter-style calls:
+  [providers and integrations](../reference/integrations.md).
 
 ## Python environments and evaluation
 
-- Typed Environment, Runtime, Agent, Verifier, Task, Benchmark, and Job graphs:
-  [SDK tutorial](../tutorials/sdk-walkthrough.md).
+- Typed Environment, Task, Verifier, Agent, Harness, Benchmark, and Job graphs:
+  [Python SDK guide](../sdk/evaluation.md).
 - Environment actions, typed state/observation, Rewarders, resources, secrets,
-  and runtime placement: [authoring guide](../guides/write-environment.md).
-- Cross-Environment Task selection, attempts, bounded scheduling, verification,
-  and modes: [benchmark guide](../guides/benchmark-models.md) and
-  [benchmark concepts](../concepts/benchmark.md).
+  and runtime placement: [Environments](../project/environments.md).
+- Tasks, attempts, bounded scheduling, verification, and modes:
+  [Benchmarks](../project/benchmarks.md) and [Jobs](../running/jobs.md).
 
 ## Traces, datasets, and export
 
 - Record, label, read, filter, save, reload, upload, and curate new tasks:
-  [trace and dataset tutorial](../tutorials/traces-and-datasets.md).
-- `Trace`, `TraceContext`, `Turn`, action steps, reward events, credit,
-  transitions and returns: [trace concepts](../concepts/trace.md).
-- Trace `Dataset`, filtering, hashes, and manifests:
-  [datasets](../concepts/dataset.md).
-- `JSONLSink`, `SQLiteSink`, `MultiSink`, `OTelSink`, writer lifecycle:
-  [sinks](../concepts/sink.md), [capture](../guides/capture-traces.md),
-  [OpenTelemetry](../guides/export-otel.md).
-- `Redactor`, `Sampler`, content retention: [redaction](../guides/redact-pii.md).
+  [traces](../running/traces.md) and [artifacts](../running/artifacts.md).
+- `Trace`, action steps, reward events, usage, latency, and reusing evidence as
+  datasets: [traces](../running/traces.md#reuse-evidence-responsibly).
+- `Redactor`, content retention, and treating captured files according to their
+  contents: [artifacts](../running/artifacts.md).
+- OpenTelemetry export, hosted ingestion, and CI evaluations:
+  [providers and integrations](../reference/integrations.md#plural-intel-ci-and-opentelemetry).
 - Hugging Face-style records and verifier-style traces:
   [Python SDK guide](../sdk/evaluation.md).
 
@@ -66,26 +59,24 @@ names here describe the installed package, not proposed future convenience APIs.
 - Environment/harness/agent/benchmark/job creation, inspection, dry run, model
   access, updates, and first execution: [CLI tutorial](../tutorials/cli-walkthrough.md).
 - Environment actions, artifacts, and grading:
-  [actions and verifier tutorial](../tutorials/package-tools.md).
+  [Verifiers](../project/verifiers.md).
 - `Job`, `Trial`, `JobStore`, programmatic planning, execution,
-  cancellation, resume, and reports: [Python jobs](../sdk/package-jobs.md).
+  cancellation, resume, and reports: [Jobs](../running/jobs.md).
 - Attempts versus retries, deterministic locks, receipts, and identity:
-  [execution concepts](../concepts/execution.md).
+  [Jobs](../running/jobs.md) and [job operations](../guides/jobs.md).
 - Docker/Daytona, concurrency, runtime health, retries/resume/cancel:
   [job operations](../guides/jobs.md).
 - Built-in Hermes, Claude Code, and Codex names, custom Harness loops, ACP,
-  immutable archives, OCI, and secret grants: [harness guide](../guides/harnesses.md).
+  immutable archives, OCI, and secret grants: [Harnesses](../project/harnesses.md).
 - Custom `SandboxProvider` implementations and registries:
-  [runtime plugins](../guides/provider-plugins.md).
+  [provider extensions](../reference/integrations.md#sandbox-provider-extensions).
 
 ## Plural Intel objects
 
 - Publish and resolve exact Environment, Harness, Agent, Task, Verifier, and
-  cross-Environment Benchmark versions:
-  [advanced hosted API](../sdk/hosted-advanced.md).
-- Preserve Task-or-Benchmark Job sources, Trial/TrialExecution identity,
-  append-only events, human review state, and artifact digests:
-  [package sync](../guides/studio-sync.md).
+  cross-Environment Benchmark versions. Preserve Task-or-Benchmark Job sources,
+  Trial/TrialExecution identity, append-only events, human review state, and
+  artifact digests: [studio sync](../guides/studio-sync.md).
 
 ## Every CLI command group
 
@@ -101,6 +92,6 @@ and option, generated from the command tree.
 
 ## Reference and operations
 
-- [Package schemas](schemas.md) and [trace schema](trace-schema.md).
-- [CI evaluations](../guides/ci.md).
+- [Evaluation contract](../architecture/evaluation-contract.md) for the public
+  object model, ownership, lifecycle, and SDK/YAML/CLI parity.
 - [Version migration](../migration/v1.md) for users of the earlier API.

@@ -12,16 +12,13 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from plural.domain import (
-    AgentDefinition,
+from plural.agents import AgentDefinition
+from plural.common import ExecutionTarget, FrozenModel, HarnessCapability
+from plural.environments.definition import (
     EnvironmentDefinition,
     EnvironmentRuntime,
-    ExecutionTarget,
-    FrozenModel,
-    HarnessCapability,
     HarnessGrant,
     HarnessPolicy,
-    VerifierRuntime,
 )
 from plural.sandbox.models import (
     Capability,
@@ -33,6 +30,7 @@ from plural.sandbox.models import (
     SandboxRequirements,
     environment_required_capabilities,
 )
+from plural.verifiers import VerifierRuntime
 
 PolicyLayer = Literal["provider", "project", "environment", "harness", "agent"]
 

@@ -388,7 +388,9 @@ class Resolver:
     def _dump_object(self, value: ProjectObject, base: Path) -> dict[str, Any]:
         if isinstance(value, Agent):
             payload = _public_data(
-                value.model_dump(mode="json", exclude={"harness", "harness_kwargs"})
+                value.model_dump(
+                    mode="json", exclude={"harness", "harness_kwargs"}, exclude_none=True
+                )
             )
             if isinstance(value.harness, str):
                 payload["harness"] = value.harness
@@ -439,13 +441,15 @@ class Resolver:
                 "concurrency": spec.concurrency,
                 "per_runtime_concurrency": spec.per_runtime_concurrency,
                 "priority": spec.priority,
-                "retry": _public_data(spec.retry.model_dump(mode="json")),
+                "retry": _public_data(spec.retry.model_dump(mode="json", exclude_none=True)),
             }
         raise TypeError(f"cannot serialize {type(value).__name__}")
 
     def _dump_verifier(self, value: Verifier, base: Path) -> dict[str, Any]:
         exclude = {"check"} if isinstance(value, DeterministicVerifier) else set()
-        payload = _public_data(value.model_dump(mode="json", exclude=exclude or None))
+        payload = _public_data(
+            value.model_dump(mode="json", exclude=exclude or None, exclude_none=True)
+        )
         if isinstance(value, DeterministicVerifier):
             check = value.check
             if callable(check):
@@ -507,7 +511,9 @@ class Resolver:
         if isinstance(value, EnvironmentDefinition):
             return {
                 "kind": "environment",
-                **_public_data(value.model_dump(mode="json", exclude={"source"})),
+                **_public_data(
+                    value.model_dump(mode="json", exclude={"source"}, exclude_none=True)
+                ),
             }
         raise TypeError("Task environment is not a public Environment")
 
@@ -516,7 +522,9 @@ class Resolver:
             return {
                 "kind": "environment",
                 **_public_data(
-                    environment.definition().model_dump(mode="json", exclude={"source"})
+                    environment.definition().model_dump(
+                        mode="json", exclude={"source"}, exclude_none=True
+                    )
                 ),
             }
         source_file = environment._python_source or inspect.getsourcefile(type(environment))
@@ -533,11 +541,13 @@ class Resolver:
             "overview": environment.overview,
             "readme": environment.readme,
             "resources": _jsonable(environment.resources),
-            "runtime": _public_data(environment.runtime.model_dump(mode="json")),
+            "runtime": _public_data(environment.runtime.model_dump(mode="json", exclude_none=True)),
             "secrets": _jsonable(environment.secrets),
             "guardrails": _jsonable(environment.guardrails),
-            "harness_policy": _public_data(environment.harness_policy.model_dump(mode="json")),
-            "limits": _public_data(environment.limits.model_dump(mode="json")),
+            "harness_policy": _public_data(
+                environment.harness_policy.model_dump(mode="json", exclude_none=True)
+            ),
+            "limits": _public_data(environment.limits.model_dump(mode="json", exclude_none=True)),
             "metadata": _jsonable(environment.metadata),
         }
         if environment.reset_command:
@@ -704,7 +714,7 @@ def _is_project_object(value: object) -> TypeGuard[ProjectObject]:
 
 def _jsonable(value: Any) -> Any:
     if hasattr(value, "model_dump"):
-        return _public_data(value.model_dump(mode="json"))
+        return _public_data(value.model_dump(mode="json", exclude_none=True))
     if isinstance(value, tuple):
         return [_jsonable(item) for item in value]
     if isinstance(value, list):

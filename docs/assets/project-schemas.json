@@ -68,7 +68,7 @@
       },
       "EnvironmentResource": {
         "additionalProperties": false,
-        "description": "Data or application supplied by an Environment.",
+        "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``.",
         "properties": {
           "kind": {
             "enum": [
@@ -1020,7 +1020,7 @@
       },
       "EnvironmentResource": {
         "additionalProperties": false,
-        "description": "Data or application supplied by an Environment.",
+        "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``.",
         "properties": {
           "kind": {
             "enum": [
@@ -2338,7 +2338,7 @@
       },
       "EnvironmentResource": {
         "additionalProperties": false,
-        "description": "Data or application supplied by an Environment.",
+        "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``.",
         "properties": {
           "kind": {
             "enum": [

@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from plural.domain import HarnessPackage
+from plural.common import HarnessPackage
 
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 

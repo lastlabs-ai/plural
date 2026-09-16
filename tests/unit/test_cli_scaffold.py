@@ -23,12 +23,17 @@ def test_cli_help_leads_with_public_object_commands() -> None:
         "harness",
         "benchmarks",
         "auth",
+        "env",
+        "task",
+        "verifier",
+        "agent",
+        "benchmark",
     ):
         assert command in result.stdout
     root = get_command(app)
     assert isinstance(root, TyperGroup)
-    for compatibility_group in ("env", "task", "verifier", "agent", "benchmark"):
-        assert root.commands[compatibility_group].hidden
+    for resource_group in ("env", "task", "verifier", "agent", "benchmark"):
+        assert not root.commands[resource_group].hidden
     assert "watch" in root.commands["job"].commands
 
 

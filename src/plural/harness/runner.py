@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
 
-from plural.domain import HarnessDefinition
+from plural.common import HarnessDefinition
 from plural.harness.protocol import (
     HarnessEvent,
     HarnessProtocolError,

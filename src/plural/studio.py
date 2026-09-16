@@ -15,6 +15,9 @@ from urllib.parse import quote
 import httpx
 from pydantic import BaseModel
 
+from plural.agents import AgentDefinition
+from plural.common import HarnessPackage
+from plural.environments.definition import EnvironmentDefinition
 from plural.errors import (
     AuthenticationError,
     ConfigurationError,
@@ -23,21 +26,14 @@ from plural.errors import (
     NotFoundError,
     PluralError,
 )
-from plural.foundation import (
-    AgentDefinition,
-    BenchmarkDefinition,
-    DeterministicVerifier,
-    EnvironmentDefinition,
-    HarnessPackage,
-    HumanVerifier,
-    JobSpec,
-    TaskDefinition,
-)
+from plural.jobs import JobSpec
+from plural.tasks import BenchmarkDefinition, TaskDefinition
 from plural.tracing.schema import Trace
+from plural.verifiers import DeterministicVerifier, HumanVerifier
 
 if TYPE_CHECKING:
     from plural.client import Client
-    from plural.foundation import VerifierDefinition
+    from plural.verifiers import VerifierDefinition
 
 JsonObject = dict[str, Any]
 JsonList = list[JsonObject]

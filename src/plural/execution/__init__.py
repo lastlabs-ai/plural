@@ -1,7 +1,6 @@
 """Durable local Job and Trial runtime APIs."""
 
-from plural.execution.engine import ExecutionFailure, Trial, VerifierOutput
-from plural.execution.engine import Job as JobRunner
+from plural.execution.engine import ExecutionFailure, JobRunner, Trial, VerifierOutput
 from plural.execution.policy import (
     EffectivePolicy,
     PolicyDenial,

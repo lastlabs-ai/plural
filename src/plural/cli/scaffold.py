@@ -1,4 +1,4 @@
-"""Compatibility scaffolds around the public project serializer."""
+"""Resource scaffolds around the public project serializer."""
 
 from __future__ import annotations
 
@@ -10,22 +10,20 @@ import yaml
 from pydantic import BaseModel
 
 from plural import Agent, Benchmark, Environment, Harness, Job, Task
-from plural.domain import (
-    AgentDefinition,
+from plural.agents import AgentDefinition
+from plural.common import PackageSource
+from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
+from plural.harness.retrieval import package_from_archive, tree_digest
+from plural.jobs import JobSpec
+from plural.project import Resolver, public_schema
+from plural.tasks import BenchmarkDefinition, TaskDefinition
+from plural.verifiers import (
     AgentVerifier,
-    BenchmarkDefinition,
     DeterministicVerifier,
-    EnvironmentDefinition,
-    EnvironmentRuntime,
     HumanVerifier,
-    JobSpec,
-    PackageSource,
     RubricCriterion,
-    TaskDefinition,
     VerifierDefinition,
 )
-from plural.harness.retrieval import package_from_archive, tree_digest
-from plural.project import Resolver, public_schema
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -272,7 +270,7 @@ def scaffold_job(
 
 
 def load_environment(path: Path) -> EnvironmentDefinition:
-    """Compatibility adapter from the public loader to the engine definition."""
+    """Adapter from the public loader to the engine definition."""
     source = _target(path, "environment.yaml")
     value = Resolver(root=source.parent).load(source.name)
     if not isinstance(value, Environment):
@@ -320,7 +318,7 @@ def _resolve(base: Path, value: Path) -> Path:
 
 
 def load_task(path: Path) -> TaskDefinition:
-    """Compatibility adapter from the public loader to the engine definition."""
+    """Adapter from the public loader to the engine definition."""
     source = _target(path, "task.yaml")
     value = Resolver(root=source.parent).load(source.name)
     if not isinstance(value, Task):
@@ -329,7 +327,7 @@ def load_task(path: Path) -> TaskDefinition:
 
 
 def load_benchmark(path: Path) -> BenchmarkDefinition:
-    """Compatibility adapter from the public loader to the engine definition."""
+    """Adapter from the public loader to the engine definition."""
     source = _target(path, "benchmark.yaml")
     value = Resolver(root=source.parent).load(source.name)
     if not isinstance(value, Benchmark):
@@ -338,7 +336,7 @@ def load_benchmark(path: Path) -> BenchmarkDefinition:
 
 
 def load_agent(path: Path) -> AgentDefinition:
-    """Compatibility adapter from the public loader to the engine definition."""
+    """Adapter from the public loader to the engine definition."""
     source = _target(path, "agent.yaml")
     value = Resolver(root=source.parent).load(source.name)
     if not isinstance(value, Agent):
@@ -347,7 +345,7 @@ def load_agent(path: Path) -> AgentDefinition:
 
 
 def load_job(path: Path) -> JobSpec:
-    """Compatibility adapter from the public loader to the engine spec."""
+    """Adapter from the public loader to the engine spec."""
     source = _target(path, "job.yaml")
     value = Resolver(root=source.parent).load(source.name)
     if not isinstance(value, Job):

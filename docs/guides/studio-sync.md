@@ -68,5 +68,5 @@ Project-scoped keys already identify a project. Account-scoped keys require
 workflow where exact hosted revision IDs are already available; it does not
 synchronize local dependencies.
 
-See [hosted advanced workflows](../sdk/hosted-advanced.md) and
-[Python Jobs](../sdk/package-jobs.md).
+See [Jobs](../running/jobs.md) for execution and the
+[Python SDK](../sdk/evaluation.md) for programmatic use.

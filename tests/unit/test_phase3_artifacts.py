@@ -3,23 +3,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from plural.agents import AgentBinding, AgentDefinition
 from plural.catalog import ModelCatalog
-from plural.domain import (
-    AgentBinding,
-    AgentDefinition,
-    BenchmarkDefinition,
-    BenchmarkJobSource,
-    DeterministicVerifier,
-    EnvironmentDefinition,
-    JobSpec,
-    RoutingSpec,
-    TaskDefinition,
-    TrialReceipt,
-    VerifierRuntime,
-    WeightedVerifier,
-)
+from plural.common import RoutingSpec
+from plural.environments.definition import EnvironmentDefinition
 from plural.importers.mercor import import_mercor_trial
+from plural.jobs import BenchmarkJobSource, JobSpec, TrialReceipt
+from plural.tasks import BenchmarkDefinition, TaskDefinition
 from plural.trajectory import normalize_trajectory
+from plural.verifiers import DeterministicVerifier, VerifierRuntime, WeightedVerifier
 
 
 def test_trajectory_normalizes_native_formats_and_preserves_original() -> None:

@@ -59,4 +59,4 @@ those. Restricted harness tools are soft-denied. A harness event may not
 smuggle scores, rewards, or an `actions` key back in.
 
 See [Harness and Environment policy](harness-policy.md) and
-[observability](observability.md).
+[traces](../running/traces.md).

@@ -23,9 +23,11 @@ ROOT = Path(__file__).parent
 HARNESS = ROOT / "minimal_harness"
 VERIFY = (
     "import json,pathlib; "
-    "p=pathlib.Path('artifacts/evidence.txt'); "
+    "rows=[json.loads(l) for l in pathlib.Path('artifacts/trajectory.jsonl').read_text().splitlines() if l.strip()]; "
+    "assert rows, 'missing harness trajectory'; "
     "pathlib.Path('verifier-result.json').write_text("
-    "json.dumps({'reward':1.0,'scores':{'present':1.0},'evidence':[p.read_text()]})+'\\n')"
+    "json.dumps({'reward':1.0,'scores':{'present':1.0},"
+    "'evidence':[f'{len(rows)} trajectory rows']})+'\\n')"
 )
 
 
