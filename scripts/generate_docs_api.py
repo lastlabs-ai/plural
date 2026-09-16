@@ -1,5 +1,6 @@
 """Render a portable API reference for both MkDocs and Plural Intel."""
 
+import enum
 import importlib
 import inspect
 import re
@@ -54,6 +55,10 @@ def _resolve(name):
 
 
 def _signature(value):
+    if inspect.isclass(value) and isinstance(value, enum.EnumMeta):
+        # inspect.signature() spells the Enum constructor differently before
+        # Python 3.12; pin the modern form so generated docs are portable.
+        return "(*values)"
     try:
         s = str(inspect.signature(value))
     except (ValueError, TypeError):
