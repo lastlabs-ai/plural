@@ -12,5 +12,4 @@ task = Task(
     ),
     environment=environment,
     verifiers=[solved],
-    initial_state={"secret": "slate"},
 )

@@ -58,16 +58,6 @@ source:
         max_seconds: 120.0
         max_cost_usd: null
       metadata: {}
-      reset_command:
-      - python
-      - commands.py
-      - reset
-      package:
-        command:
-        - python
-        - commands.py
-        source: .
-        digest: sha256:96c27efe2094ff5f07c832c797bf2933a0b59a896dd6386bb279a1020ff9baeb
     verifiers:
     - name: solved
       version: 0.1.0
@@ -93,8 +83,7 @@ source:
       check:
         python: verify.py:solved
     resources: []
-    initial_state:
-      secret: slate
+    initial_state: {}
     reset_options: {}
   primary_metric: reward
   description: ''

@@ -9,7 +9,7 @@ nav: false
 # Model calls, routing, and responses
 
 Use `Client` when you need a model response without creating an environment.
-Complete [authentication](../getting-started/setup.md) first. These examples
+Complete [authentication](../getting-started.md) first. These examples
 make live model calls; use IDs supported by your configured endpoint.
 
 ## Make and inspect a call
@@ -166,7 +166,6 @@ except PluralError as exc:
     print(type(exc).__name__, "retryable:", is_retryable(exc))
 ```
 
-Do not blindly retry authentication, schema, or permission errors. The full
-error types and request fields are in the [API reference](../reference/api.md).
+Do not blindly retry authentication, schema, or permission errors.
 For custom providers, Azure, Bedrock, and OpenTelemetry, continue through the
 [feature guide](../reference/feature-map.md).

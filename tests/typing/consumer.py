@@ -32,6 +32,13 @@ from plural import (
 )
 
 
+class CustomHarness(Harness):
+    name = "custom"
+
+    def run(self, task: Any, agent: Any, environment: Any) -> dict[str, str]:
+        return {"response": task.instructions}
+
+
 def main() -> None:
     catalog: ModelCatalog = ModelCatalog()
     _ = catalog.get("openai/gpt-4o-mini")
@@ -44,7 +51,7 @@ def main() -> None:
     assert msg.role == "user"
     assert env.name == "x"
     assert len(ds) == 1
-    harness = Harness(name="custom", command=("python", "runner.py"))
+    harness = CustomHarness()
     verifier = DeterministicVerifier(name="v", check=("python", "-c", "pass"))
     task = Task(
         name="1",

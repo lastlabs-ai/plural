@@ -1,6 +1,6 @@
 # Plural
 
-Plural 0.13.0 is a Python SDK and CLI for building reproducible agent
+Plural 0.13.3 is a Python SDK and CLI for building reproducible agent
 evaluations and keeping the evidence behind every score.
 
 ## Evaluation in seven objects
@@ -10,7 +10,7 @@ evaluations and keeping the evidence behind every score.
 3. **Task** — instructions bound to one Environment and its Verifiers.
 4. **Benchmark** — immutable versioned Task pins.
 5. **Agent** — catalog model, instructions, and optional Harness.
-6. **Harness** — optional custom model interaction loop.
+6. **Harness** — native loop, a built-in name, or a custom executable.
 7. **Job** — Agents × Tasks × attempts, with retries and evidence.
 
 Python is the semantic source of truth. YAML serializes the same objects
@@ -19,7 +19,7 @@ losslessly, and the CLI uses the same resolver and defaults.
 ## Install
 
 ```bash
-pip install "plural==0.13.0"
+pip install "plural==0.13.3"
 ```
 
 ## First evaluation
@@ -47,14 +47,11 @@ job = Job(benchmark, agents=(agent,))
 print(job.plan.trial_count)
 ```
 
-Here `environment` is a packaged `Environment` instance. Typed Python actions
-become executable with one packaging call:
+Here `environment` is an `Environment` instance. Typed Python actions run
+from the class directory:
 
 ```python
-environment = SupportQueue(runtime=runtime).package(
-    ("python", "commands.py"),
-    source="environment",
-)
+environment = SupportQueue(runtime=runtime)
 ```
 
 Validate and run the same graph:

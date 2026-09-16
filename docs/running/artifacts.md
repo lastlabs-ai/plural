@@ -2,16 +2,18 @@
 route: /docs/running/artifacts
 title: Artifacts and evidence
 order: 88
-description: Inspect immutable receipts, logs, manifests, state, observations, renderings, trajectories, verifier evidence, and imported output.
+description: Read trajectories, final state, and scoring evidence to understand what happened in a run.
 audience: all
 nav: true
 nav_group: Run
 ---
 # Artifacts and evidence
 
-An authored `Resource` is an Environment or Task input descriptor. A run
-artifact is an output file captured from one execution. They have different
-lifecycles and should not both be called “resources.”
+Artifacts are the files saved from a run. Use them to understand what the agent did, why it received a score, and which configuration produced the result.
+
+Start with the trajectory for the sequence of actions, the final State for what changed, and the Verifier results for the score. The receipt identifies the exact versions used; the manifest lists captured files and their hashes.
+
+A `Resource` describes an input to a Task or Environment. An artifact is an output from an execution.
 
 ## Local layout
 
@@ -70,24 +72,7 @@ truthful behavior.
 
 ## Import and derive
 
-Normalize a JSON/JSONL trajectory with `normalize_trajectory(...)` without
-changing the source. The bundled Mercor adapter can import a Mercor Trial
-directory:
-
-```python
-from pathlib import Path
-from plural.importers import import_mercor_trial
-
-record = import_mercor_trial(
-    Path("mercor-trial"),
-    destination=Path("imported-trial"),
-)
-print(record.provenance)
-```
-
-Imported receipts are marked `imported_unverified`; import does not upgrade
-their trust. There is no general CLI command that imports arbitrary run
-directories.
+Use `normalize_trajectory(...)` to read a captured JSON or JSONL trajectory in a common format while keeping the original file. Imported evidence remains unverified; there is no general CLI command for importing arbitrary run directories.
 
 Write analyses and exports as new derived files. Never edit a captured
 artifact and retain its old manifest or receipt.

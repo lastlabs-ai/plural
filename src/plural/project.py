@@ -205,7 +205,16 @@ class Resolver:
                 value._python_source = source
                 value._python_object = object_path
                 return cast(ProjectObject, value)
+            if inspect.isclass(value) and issubclass(value, Harness):
+                value._bound_python_source = source
+                value._bound_python_object = object_path
+                value = value()
+                value._python_source = source
+                value._python_object = object_path
+                value._bind_source(source)
             if isinstance(value, Environment):
+                type(value)._python_source = source
+                type(value)._python_object = type(value).__qualname__
                 value._python_source = source
                 value._python_object = object_path
         finally:
@@ -231,20 +240,65 @@ class Resolver:
             kind = str(payload.pop("kind", "") or _infer_kind(payload))
         if kind == "agent":
             harness_value = payload.get("harness")
-            if harness_value is not None:
+            if isinstance(harness_value, str):
+                from plural.harness.builtins import BUILTIN_HARNESSES
+
+                if harness_value not in BUILTIN_HARNESSES:
+                    harness = self._resolve_nested(harness_value, base)
+                    if not isinstance(harness, Harness):
+                        raise TypeError("Agent harness must resolve to a Harness subclass instance")
+                    payload["harness"] = harness
+            elif harness_value is not None:
+                if isinstance(harness_value, Mapping):
+                    self._reject_legacy_declared_harness(harness_value)
                 harness = self._resolve_nested(harness_value, base)
                 if not isinstance(harness, Harness):
-                    raise TypeError("Agent harness must resolve to a Harness")
+                    raise TypeError("Agent harness must resolve to a Harness or built-in name")
                 payload["harness"] = harness
-            return Agent.model_validate(payload, context={"catalog": self.catalog})
+            return Agent.model_validate(payload, context={"catalog": self.catalog, "root": base})
         if kind == "harness":
-            source_text = str(payload.get("source", "."))
-            if "://" not in source_text:
-                path = Path(source_text).expanduser()
-                payload["source"] = str(
-                    path.resolve() if path.is_absolute() else (base / path).resolve()
+            self._reject_legacy_declared_harness(payload)
+            archive = payload.pop("archive", None)
+            if archive is not None:
+                from plural.harness.models import LockedHarness
+                from plural.harness.retrieval import package_from_archive
+
+                digest = payload.pop("digest", None)
+                if not isinstance(digest, str) or not digest:
+                    raise ValueError("Archived Harness YAML requires an immutable digest")
+                if payload:
+                    raise ValueError(
+                        f"Archived Harness YAML has unsupported fields: {sorted(payload)!r}"
+                    )
+                return LockedHarness.from_package(package_from_archive(str(archive), digest))
+            python_ref = payload.pop("python", None)
+            if python_ref is None:
+                raise ValueError(
+                    "Custom Harness YAML now references a Harness subclass.\n"
+                    "Use: kind: harness\n"
+                    "     python: harness.py:YourHarness"
                 )
-            return Harness.model_validate(payload)
+            loaded = Resolver(root=base, catalog=self.catalog).load(str(python_ref))
+            if not isinstance(loaded, Harness):
+                raise TypeError(f"{python_ref!r} did not resolve to a Harness subclass")
+            config = payload.pop("config", None)
+            allowed = {"name", "version", "description"}
+            unsupported = sorted(set(payload) - allowed)
+            if unsupported:
+                raise ValueError(
+                    "Class-based Harness YAML accepts only python and optional config; "
+                    f"remove: {unsupported!r}"
+                )
+            if config is not None:
+                if not isinstance(config, Mapping):
+                    raise TypeError("Harness config must be a mapping")
+                loaded = type(loaded)(config=dict(config))
+                loaded._python_source = Path(str(python_ref).split(":", 1)[0])
+                if not loaded._python_source.is_absolute():
+                    loaded._python_source = (base / loaded._python_source).resolve()
+                loaded._python_object = str(python_ref).split(":", 1)[1]
+                loaded._bind_source(loaded._python_source)
+            return loaded
         if kind == "verifier":
             payload = _resolve_verifier_check(payload, base)
             return _VERIFIER_ADAPTER.validate_python(payload, context={"catalog": self.catalog})
@@ -323,22 +377,24 @@ class Resolver:
         else:
             raise TypeError(f"{reference} did not resolve to an Environment")
         if package is not None:
-            if not isinstance(package, Mapping) or "command" not in package:
-                raise ValueError("environment package requires command")
-            source = package.get("source")
-            environment.package(
-                tuple(str(item) for item in package["command"]),
-                source=(base / str(source)).resolve() if source else None,
-            )
-            digest = package.get("digest")
+            source = package.get("source") if isinstance(package, Mapping) else None
+            if source:
+                environment._bind_source((base / str(source)).resolve())
+            digest = package.get("digest") if isinstance(package, Mapping) else None
             if digest and environment.source is not None:
                 environment.source = environment.source.model_copy(update={"digest": str(digest)})
         return environment
 
     def _dump_object(self, value: ProjectObject, base: Path) -> dict[str, Any]:
         if isinstance(value, Agent):
-            payload = _public_data(value.model_dump(mode="json", exclude={"harness"}))
-            if value.harness is not None:
+            payload = _public_data(
+                value.model_dump(mode="json", exclude={"harness", "harness_kwargs"})
+            )
+            if isinstance(value.harness, str):
+                payload["harness"] = value.harness
+                if value.harness_kwargs:
+                    payload["harness_kwargs"] = _public_data(value.harness_kwargs)
+            elif value.harness is not None:
                 payload["harness"] = self._dump_harness(value.harness, base)
             return {"kind": "agent", **payload}
         if isinstance(value, Harness):
@@ -411,12 +467,39 @@ class Resolver:
                 payload["check"] = check
         return cast(dict[str, Any], payload)
 
+    def _reject_legacy_declared_harness(self, payload: Mapping[str, Any]) -> None:
+        from plural.harness.builtins import (
+            LEGACY_DECLARED_HARNESS_NAMES,
+            legacy_declared_harness_error,
+        )
+
+        name = str(payload.get("name") or "")
+        if name in LEGACY_DECLARED_HARNESS_NAMES and payload.get("implementation") == "declared":
+            raise legacy_declared_harness_error(name)
+
     def _dump_harness(self, harness: Harness, base: Path) -> dict[str, Any]:
-        payload = _public_data(harness.model_dump(mode="json", exclude_none=True))
-        source = harness.source
-        if "://" not in source:
-            payload["source"] = _relative(Path(source).expanduser().resolve(), base)
-        return {"kind": "harness", **payload}
+        from plural.harness.models import LockedHarness
+
+        if isinstance(harness, LockedHarness):
+            package = harness._package()
+            if package.source.kind != "archive" or package.source.digest is None:
+                raise ValueError("locked Harness must retain its archive URI and digest")
+            return {
+                "kind": "harness",
+                "archive": package.source.uri,
+                "digest": package.source.digest,
+            }
+        source = harness._python_source or harness._class_source_file()
+        if source is None:
+            raise ValueError("cannot serialize a Harness subclass without a source file")
+        object_path = harness._python_object or type(harness).__qualname__
+        payload: dict[str, Any] = {
+            "kind": "harness",
+            "python": f"{_relative(Path(source).resolve(), base)}:{object_path}",
+        }
+        if harness.config:
+            payload["config"] = _jsonable(harness.config)
+        return payload
 
     def _dump_environment_value(self, value: Any, base: Path) -> dict[str, Any]:
         if isinstance(value, Environment):
@@ -443,7 +526,6 @@ class Resolver:
         object_path = environment._python_object or type(environment).__qualname__
         reference = f"{_relative(source_path, base)}:{object_path}"
         payload: dict[str, Any] = {"kind": "environment", "python": reference}
-        definition = environment.definition()
         config = {
             "name": environment.name,
             "version": environment.version,
@@ -457,20 +539,10 @@ class Resolver:
             "harness_policy": _public_data(environment.harness_policy.model_dump(mode="json")),
             "limits": _public_data(environment.limits.model_dump(mode="json")),
             "metadata": _jsonable(environment.metadata),
-            "reset_command": list(environment.reset_command),
         }
+        if environment.reset_command:
+            config["reset_command"] = list(environment.reset_command)
         payload.update(config)
-        if environment._adapter_command is not None and environment.source is not None:
-            source_root = Path(environment.source.uri).resolve()
-            payload["package"] = {
-                "command": list(environment._adapter_command),
-                "source": _relative(source_root, base),
-                "digest": environment.source.digest,
-            }
-        elif definition.actions:
-            raise ValueError(
-                "Python @action Environments must call .package(command=...) before YAML export"
-            )
         return payload
 
 

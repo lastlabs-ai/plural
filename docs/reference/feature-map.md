@@ -15,7 +15,7 @@ names here describe the installed package, not proposed future convenience APIs.
 ## Getting started and authentication
 
 - Install, Python version, optional extras, API keys, BYOK, project scope,
-  gateway URLs, and SDK versus CLI credentials: [setup](../getting-started/setup.md).
+  gateway URLs, and SDK versus CLI credentials: [setup](../getting-started.md).
 - Device login/logout/status/whoami, profiles, org/project selection, precedence,
   config locations, output and exit codes: [CLI configuration](../cli/index.md).
 - Local versus hosted objects and Python versus package execution:
@@ -59,13 +59,13 @@ names here describe the installed package, not proposed future convenience APIs.
   [OpenTelemetry](../guides/export-otel.md).
 - `Redactor`, `Sampler`, content retention: [redaction](../guides/redact-pii.md).
 - Hugging Face-style records and verifier-style traces:
-  [API reference](api.md).
+  [Python SDK guide](../sdk/evaluation.md).
 
 ## Package authoring and execution
 
 - Environment/harness/agent/benchmark/job creation, inspection, dry run, model
   access, updates, and first execution: [CLI tutorial](../tutorials/cli-walkthrough.md).
-- Environment action adapters, JSON stdin/stdout, artifacts, and grading:
+- Environment actions, artifacts, and grading:
   [actions and verifier tutorial](../tutorials/package-tools.md).
 - `Job`, `Trial`, `JobStore`, programmatic planning, execution,
   cancellation, resume, and reports: [Python jobs](../sdk/package-jobs.md).
@@ -73,7 +73,7 @@ names here describe the installed package, not proposed future convenience APIs.
   [execution concepts](../concepts/execution.md).
 - Docker/Daytona, concurrency, runtime health, retries/resume/cancel:
   [job operations](../guides/jobs.md).
-- Custom harness protocols, first-party profiles, vendor recipes, ACP,
+- Built-in Hermes, Claude Code, and Codex names, custom Harness loops, ACP,
   immutable archives, OCI, and secret grants: [harness guide](../guides/harnesses.md).
 - Custom `SandboxProvider` implementations and registries:
   [runtime plugins](../guides/provider-plugins.md).
@@ -89,9 +89,8 @@ names here describe the installed package, not proposed future convenience APIs.
 
 ## Every CLI command group
 
-The [generated CLI reference](cli-commands.md) includes all options, positional
-arguments, defaults, help, and shell-completion flags. Its entries are generated
-from the command tree and checked for drift.
+The [CLI guide](../cli/evaluation.md#command-reference) includes every command
+and option, generated from the command tree.
 
 - `init`, `validate`, `inspect`, `export`, `models`, and `benchmarks`:
   [CLI tutorial](../tutorials/cli-walkthrough.md).
@@ -102,9 +101,6 @@ from the command tree and checked for drift.
 
 ## Reference and operations
 
-- [Python API](api.md), [definition fields](definitions.md), [package schemas](schemas.md),
-  [trace schema](trace-schema.md), and [glossary](glossary.md).
+- [Package schemas](schemas.md) and [trace schema](trace-schema.md).
 - [CI evaluations](../guides/ci.md).
-- [Security and trust](../operations/security.md),
-  [troubleshooting](../operations/troubleshooting.md), [limitations](limitations.md).
 - [Version migration](../migration/v1.md) for users of the earlier API.

@@ -54,7 +54,9 @@ def test_environment_compiles_exact_manifest() -> None:
     assert manifest.overview == "A stateful counter."
     assert manifest.readme == "# Counter"
     assert manifest.actions[0].name == "increment"
-    assert manifest.actions[0].kind == "python"
+    assert manifest.actions[0].kind == "command"
+    assert manifest.actions[0].command[-1] == "increment"
+    assert manifest.reset_command[-1] == "reset"
     assert manifest.rewarders[0].name == "progress"
     assert manifest.rewarders[0].weight == 2
     assert manifest.state_schema["properties"]["answer"]["type"] == "string"

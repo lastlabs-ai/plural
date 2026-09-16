@@ -1,130 +1,256 @@
 ---
 route: /docs/project/harnesses
 title: Harnesses
-order: 65
-description: Understand native loops and author a custom interaction strategy.
+order: 60
+description: Attach a built-in agent loop by name, or write a custom Harness when you need your own executable.
 audience: all
 nav: true
 nav_group: Build
-outcome: You can choose a Harness and understand its runtime, tool, and artifact contract.
+outcome: You can choose a built-in or custom Harness and understand where it runs.
 ---
 # Harnesses
 
-A Harness drives an Agent's interaction loop: model calls, messages, tool
-dispatch, stopping, and output capture. Omit `Agent.harness` to use Plural's
-native action or chat loop.
+A Harness is the loop that turns a model into a working agent. It sends information to the model, executes the tools it requests, returns the results, and decides when to stop.
 
-Treat the Harness as part of the experiment. “Model A with Harness X” and “Model A with Harness Y” are different agents even if their system instructions match.
+An Agent combines a model, instructions, and a Harness. The Environment supplies the world and its actions. **The Harness runs in the Runtime selected by the Task's Environment.** Built-in Harnesses install their CLI there automatically.
 
-## Use the built-in loop first
+## Start with Plural's native loop
 
-An Agent without an explicit Harness uses a native runner selected by the Job engine. With native Environment actions, it uses the action loop; without actions, it uses the chat loop. This keeps the smallest model-backed Agent configuration short.
-
-Use a custom Harness when you need different tool behavior, transcript format, stopping logic, or an existing agent stack. See the [integration guide](../guides/harnesses.md) for supported workflows. An adapter still needs its executable and dependencies installed.
-
-## Read the Harness contract
-
-This file illustrates the fields used by a custom runner:
-
-```yaml
-kind: harness
-name: my-loop
-version: "0.1.0"
-description: My custom Agent loop.
-command: [python, harness.py]
-source: .
-capabilities: [shell]
-models: ["openai/gpt-5.6-luna"]
-auth: [environment]
-secrets: [OPENAI_API_KEY]
-environment: [OPENAI_BASE_URL]
-outputs:
-  - path: result.json
-    required: true
-    media_type: application/json
-artifacts:
-  - path: trajectory.jsonl
-    required: true
-    media_type: application/jsonl
-trajectory: trajectory.jsonl
-```
-
-`command` is the executable argv. `models` declares supported model patterns.
-`capabilities` declares tools the Harness may use. `secrets` declares
-credential names an Agent may grant; every Agent grant must be a subset or
-execution fails before forwarding. `environment` lists non-secret
-configuration to forward when set. `source` is a directory path, archive URL,
-or OCI URL. Remote sources require `digest`.
-
-`outputs` and `artifacts` declare exact paths the runner must produce. If `trajectory` or `tito` is set, that path must also appear in `artifacts`. Use `healthcheck` for an optional pre-run command that checks installed dependencies.
-
-Create the same object in Python with `Harness(...)`. Local source directories
-are resolved and hashed at construction. Archive and OCI sources require an
-explicit digest.
-
-## Implement the runner
-
-Plural sends a JSON request on stdin. The runner reads the Task and Agent from that request, calls the Environment commands, writes output files, and emits one terminal event on stdout.
-
-For a successful custom run, a terminal event can look like:
-
-```json
-{
-  "type": "result",
-  "status": "succeeded",
-  "outputs": ["result.json"],
-  "artifacts": ["trajectory.jsonl"]
-}
-```
-
-The listed files must exist and match the Harness declarations. Send ordinary
-logs to stderr, keep structured events on stdout, honor the episode limits, and
-record useful action/observation evidence. The
-[support queue tutorial](../tutorials/support-queue.md) follows the built-in
-runner.
-
-## Environment tools and Harness tools
-
-Native Environment actions are exposed under names such as `environment.categorize`. Harness-owned tools use names such as `harness.web_search`. The Environment may restrict the Harness's tools through `harness_policy`:
-
-```yaml
-harness_policy:
-  denied_capabilities: [web_search]
-```
-
-This fragment denies a capability while leaving the default `allow_all` selection mode. Setting `mode: allowlist` means only the names in `allowed_harnesses` may run; an empty allowlist admits no explicit Harness. `allowed_capabilities` optionally sets a separate capability ceiling.
-
-A supported tool denial is reported to the Agent so it can choose another
-action. A disallowed Harness fails compatibility before execution. Network and
-read-only-root policy can further restrict the effective grant. Native
-Environment actions are not removed by a Harness capability denial.
-
-Capability declarations and cooperative tool denials are not a substitute for operating-system enforcement of arbitrary code. Use a suitable [runtime](runtime.md) and trust boundary.
-
-## Lock and distribute the implementation
-
-A Harness lock includes its name, version, and content digest. Supported sources are local trees, archives, and OCI references. Remote sources require a digest and never bypass integrity checks.
-
-Keep generated artifacts and caches out of the Harness source. If you move between machines, use a source the destination can materialize. An OCI Harness cannot currently be composed with a separate Environment image or build configuration in one Job.
-
-## Capture training data
-
-Train mode requires a Harness that sets `tito`, declares that path in
-`artifacts`, and emits valid exact token records.
+You do not need to name a Harness for your first evaluation. Leave `harness` unset:
 
 ```python
-harness = Harness(
-    name="training-loop",
-    command=("python", "harness.py"),
-    source="harness",
-    artifacts=("trajectory.jsonl", "tito.jsonl"),
-    trajectory="trajectory.jsonl",
-    tito="tito.jsonl",
+from plural import Agent
+
+agent = Agent(
+    model="openai/gpt-5.6-luna",
+    instructions="Use the available actions and stop when the Task is complete.",
 )
 ```
 
-A transcript or action list is not exact TITO. Do not set `tito` unless the
-implementation records token IDs, aligned log probabilities, tokenizer, model,
-and exact input/output/observation lengths.
+Plural uses its action loop when the Environment provides actions, or its chat loop otherwise. Use this to compare models under the same interaction strategy.
 
-[Training](../running/training.md) explains the fields and how to keep final evaluation scores separate from learning signals.
+## Attach a built-in Harness
+
+Hermes, Claude Code, and Codex attach by name. Plural validates the name and options before it creates a Runtime, then installs the pinned CLI inside that Runtime.
+Their implementations use the same `run(task, agent, environment)` lifecycle
+described below, so every Harness sees the Environment through one interface.
+
+```python
+from plural import Agent
+
+claude = Agent(
+    model="anthropic/claude-sonnet-5",
+    harness="claude-code",
+    harness_kwargs={"reasoning_effort": "high"},
+)
+
+codex = Agent(
+    model="openai/gpt-5.6-luna",
+    harness="codex",
+    harness_kwargs={"sandbox": "workspace-write"},
+)
+
+hermes = Agent(
+    model="openai/gpt-5.6-luna",
+    harness="hermes",
+)
+```
+
+The same fields work in YAML:
+
+```yaml
+kind: agent
+name: support-claude
+model: anthropic/claude-sonnet-5
+harness: claude-code
+harness_kwargs:
+  reasoning_effort: high
+```
+
+Discover the accepted options:
+
+```bash
+plural harness list
+plural harness schema claude-code
+```
+
+### Shared options
+
+Every built-in accepts:
+
+- **`version`** — override the release-pinned CLI version.
+- **`config`** — native CLI settings as an inline mapping or a file path. Plural loads a path, stores the mapping, and includes it in the Agent hash.
+
+Claude Code also accepts `reasoning_effort`, `permission_mode`, and `max_turns`. Codex also accepts `reasoning_effort` and `sandbox`.
+
+Unknown names and invalid options fail before the Runtime starts.
+
+### What Plural installs and how it runs
+
+Setup happens inside the fresh Runtime, not on your laptop.
+
+1. Plural installs the pinned CLI. On Docker and Daytona it may install system tools as root first. The Harness itself then runs as the Runtime's default user.
+2. The CLI starts from the Environment workspace.
+3. Model authentication comes from `Job(client=...)` or `Job(api_key=...)`. You do not put model keys on `Agent.secret_names`.
+4. Environment actions are exposed to the CLI as tools.
+5. Claude Code talks to a local compatibility service that forwards its Messages requests to Plural's existing OpenAI-compatible Job gateway. Codex and Hermes call that gateway directly.
+
+The Runtime must allow the network the installer and model gateway need. A `python:3.12-slim` image is enough for setup to add Node.js or pip tools. If the image cannot install those tools, or the network policy blocks them, the Trial fails with a clear error.
+
+Use `Runtime.local()` only when you trust the machine. Local setup uses a CLI already on PATH, or installs into the Runtime workspace.
+
+## Build a custom Harness
+
+A custom Harness is a Python class with one required method: `run`. You do not
+declare a command, source directory, output files, or transport. Plural finds the
+class file, hashes its directory, runs it inside the Environment Runtime, and
+writes the standard artifacts.
+
+Create `harness.py`:
+
+```python
+import json
+
+from plural import Harness, HarnessResult
+
+
+class SupportHarness(Harness):
+    name = "support-loop"
+    version = "1.0.0"
+
+    def run(self, task, agent, environment):
+        observation = environment.reset()
+        messages = [
+            {"role": "system", "content": agent.instructions},
+            {"role": "user", "content": task.instructions},
+            {"role": "user", "content": f"Current observation: {observation}"},
+        ]
+        trajectory = []
+
+        max_turns = int(self.config.get("max_turns", 20))
+        for turn in range(max_turns):
+            completion = agent.complete(messages, tools=environment.tools())
+            trajectory.append(
+                {"turn": turn, "type": "model", "text": completion.text}
+            )
+            if not completion.tool_calls:
+                return HarnessResult(
+                    response=completion.text,
+                    trajectory=tuple(trajectory),
+                )
+
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": completion.text,
+                    "tool_calls": list(completion.tool_calls),
+                }
+            )
+            for call in completion.tool_calls:
+                function = call["function"]
+                arguments = json.loads(function.get("arguments") or "{}")
+                observation = environment.step(function["name"], **arguments)
+                trajectory.append(
+                    {
+                        "turn": turn,
+                        "type": "action",
+                        "name": function["name"],
+                        "arguments": arguments,
+                        "observation": observation,
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call["id"],
+                        "content": json.dumps(observation),
+                    }
+                )
+
+        return HarnessResult(
+            response=f"Stopped after {max_turns} turns.",
+            trajectory=tuple(trajectory),
+        )
+```
+
+The `run` arguments are the same for every custom Harness:
+
+- `task` exposes `id`, `name`, `instructions`, `info`, and `metadata`.
+- `agent` exposes the selected model and instructions. Call
+  `agent.complete(messages, tools=...)` to use the Job's model gateway.
+- `environment` exposes `observation`, `reset()`, `step(action, **arguments)`,
+  and `tools()`. These methods execute the real Environment commands; the
+  Harness never needs to parse command metadata.
+
+`run` may be synchronous or asynchronous. Return a `HarnessResult`, a string,
+or a JSON-compatible mapping. `HarnessResult` lets you include structured
+trajectory events, logs, metadata, and a trace ID. Plural always writes
+`result.json`; it writes `trajectory.jsonl` and `logs.txt` when those values are
+present. The Harness does not write files or emit runner events itself.
+
+### Attach the custom Harness
+
+```python
+from plural import Agent
+
+harness = SupportHarness()
+
+agent = Agent(
+    name="support-custom",
+    model="openai/gpt-5.6-luna",
+    instructions="Follow the support policy and finish the ticket.",
+    harness=harness,
+)
+```
+
+Plural uses the directory containing `SupportHarness` as its source. Imports,
+helper modules, prompts, and other files beside the class are included in the
+same content hash.
+
+Pass reusable settings through the inherited `config` field and read them from
+`self.config` inside `run`:
+
+```python
+harness = SupportHarness(config={"max_turns": 12})
+```
+
+Class attributes describe policy and compatibility when needed:
+
+```python
+from plural import Harness, HarnessCapability
+
+
+class ResearchHarness(Harness):
+    name = "research-loop"
+    version = "1.0.0"
+    capabilities = frozenset({HarnessCapability.NETWORK_FETCH})
+    models = ("openai/*",)
+    secrets = ("SEARCH_API_KEY",)
+
+    def run(self, task, agent, environment):
+        ...
+```
+
+Grant application secrets through the Agent's `secret_names`. Model
+authentication still comes from `Job(client=...)` or `Job(api_key=...)`.
+Custom Python dependencies must already be available in the Environment
+Runtime.
+
+YAML references the class instead of repeating execution details:
+
+```yaml
+kind: harness
+python: harness.py:SupportHarness
+config:
+  max_turns: 12
+```
+
+Validate a Job using one Task before scaling up. A dry-run checks configuration; a live test checks that the implementation, dependencies, outputs, and scoring work together.
+
+## Tools, permissions, and training
+
+Environment actions describe the work available in the world. Harness capabilities describe extra tools used by the agent loop, such as file access or web search. An Environment's `harness_policy` can restrict which Harnesses or capabilities are allowed. Runtime controls enforce the execution boundary; capability declarations alone do not isolate arbitrary code.
+
+For training, the Harness must capture exact tokens in and tokens out and declare the corresponding artifact. Ordinary transcripts do not satisfy that requirement. See [Training and RL](../running/training.md).
+
+Next, choose a model and instructions in [Agents](agents.md).

@@ -691,6 +691,7 @@ class Job:
         registry: Any = None,
         store: Any = None,
         environ: Mapping[str, str] | None = None,
+        resource_resolvers: Mapping[str, Any] | None = None,
         progress: Any = None,
         project_policy: Any = None,
         catalog: ModelCatalog | None = None,
@@ -745,6 +746,7 @@ class Job:
             "providers": providers,
             "store": store,
             "environ": environ,
+            "resource_resolvers": resource_resolvers,
             "progress": progress,
             "project_policy": project_policy,
             "catalog": self.catalog,
@@ -756,7 +758,8 @@ class Job:
         }
 
     def _credential_environ(self) -> dict[str, str]:
-        current = dict(self._runner_options.get("environ") or os.environ)
+        configured = self._runner_options.get("environ")
+        current = dict(os.environ if configured is None else configured)
         if (
             self._runner_options.get("provider") is not None
             or self._runner_options.get("providers") is not None

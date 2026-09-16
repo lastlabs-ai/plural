@@ -22,13 +22,10 @@ The generated YAML has the same field names, defaults, nested graph, plan, and
 content hashes as Python. Use `plural inspect job.yaml` to view the resolved
 graph.
 
-The Environment's Python actions become executable through:
+The Environment is the class plus a Runtime:
 
 ```python
-environment = SupportQueue(runtime=runtime).package(
-    ("python", "commands.py"),
-    source=ROOT / "environment",
-)
+environment = SupportQueue(runtime=runtime)
 ```
 
-No scaffold-specific Pydantic file types participate in loading or execution.
+Follow the [support queue tutorial](support-queue.md) to run the project, inspect its scores, and adapt it to your own tickets.

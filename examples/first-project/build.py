@@ -30,7 +30,7 @@ environment = SupportQueue(
     ),
     runtime=Runtime.local(),
     limits=ExecutionLimits(max_turns=6, max_seconds=120),
-).package(("python", "commands.py"), source=ROOT / "environment")
+)
 
 verifier = DeterministicVerifier(name="correct-category", check=correct_category)
 

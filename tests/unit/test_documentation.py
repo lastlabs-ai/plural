@@ -67,7 +67,7 @@ def test_wordle_python_yaml_plan_and_materialized_source_are_identical() -> None
 
 
 def test_audited_documentation_limits_remain_explicit() -> None:
-    runtime = (ROOT / "docs/project/runtime.md").read_text(encoding="utf-8")
+    runtime = (ROOT / "docs/project/environments.md").read_text(encoding="utf-8")
     reviews = (ROOT / "docs/running/reviews.md").read_text(encoding="utf-8")
     integrations = (ROOT / "docs/reference/integrations.md").read_text(encoding="utf-8")
     fields = (ROOT / "docs/reference/fields.md").read_text(encoding="utf-8")

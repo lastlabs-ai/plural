@@ -52,7 +52,7 @@ env_app = typer.Typer(help="Compatibility Environment commands.")
 task_app = typer.Typer(help="Compatibility Task commands.")
 verifier_app = typer.Typer(help="Compatibility Verifier commands.")
 agent_app = typer.Typer(help="Compatibility Agent commands.")
-harness_app = typer.Typer(help="Advanced Harness commands.")
+harness_app = typer.Typer(help="List built-in Harnesses or author a custom one.")
 benchmark_app = typer.Typer(help="Compatibility Benchmark commands.")
 models_app = typer.Typer(help="List and inspect the effective model catalog.")
 benchmarks_app = typer.Typer(help="Inspect, compare, and export Benchmarks.")
@@ -65,12 +65,12 @@ for name, group in (
     ("task", task_app),
     ("verifier", verifier_app),
     ("agent", agent_app),
-    ("harness", harness_app),
     ("benchmark", benchmark_app),
 ):
     app.add_typer(group, name=name, hidden=True)
 for name, group in (
     ("models", models_app),
+    ("harness", harness_app),
     ("benchmarks", benchmarks_app),
     ("auth", auth_app),
     ("job", job_app),
@@ -493,7 +493,7 @@ def agent_init(
     path: Path = typer.Argument(Path("agent.yaml")),
     name: str = typer.Option("agent", "--name"),
     model: str = typer.Option(..., "--model"),
-    harness: Path | None = typer.Option(None, "--harness"),
+    harness: str | None = typer.Option(None, "--harness"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     """Create an Agent independent of Environment identity."""
@@ -543,6 +543,25 @@ def agent_publish(resource_id: str, revision_id: str) -> None:
     """Publish an existing hosted Agent revision."""
     with _client() as client:
         _emit(client.agents.publish_revision(resource_id, revision_id))
+
+
+@harness_app.command("list")
+def harness_list() -> None:
+    """List built-in Harnesses that Agents can attach by name."""
+    from plural.harness.builtins import list_builtin_harnesses, summarize_builtin
+
+    _emit([summarize_builtin(item) for item in list_builtin_harnesses()])
+
+
+@harness_app.command("schema")
+def harness_schema(name: str = typer.Argument(..., help="Built-in Harness name.")) -> None:
+    """Show the accepted kwargs schema for a built-in Harness."""
+    from plural.harness.builtins import builtin_schema
+
+    try:
+        _emit(builtin_schema(name))
+    except ValueError as exc:
+        _error(str(exc))
 
 
 @harness_app.command("init")

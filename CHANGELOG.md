@@ -9,7 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **0.13.0 break.** `Environment.runtime` is required. Harbor defaults are a
+- **0.13.3 break.** Custom Harnesses are Python subclasses with one
+  `run(task, agent, environment)` method. Plural discovers and hashes the class
+  directory and writes standard result, trajectory, log, and TITO artifacts.
+  Manual command, source, output, and transport declarations are removed.
+- **0.13.2.** Hermes, Claude Code, and Codex attach with `Agent(harness="...")`
+  and optional `harness_kwargs`. Plural installs the pinned CLI in the
+  Environment Runtime and maps Job credentials. Custom Harnesses remain the
+  escape hatch. Declared-only vendor recipes are rejected.
+- **0.13.1.** Environment subclasses are Job-ready from the class file. Pass
+  `runtime=`. Plural hashes that directory and runs `reset` and `@action`
+  methods. `.package()` and user-written command adapters are gone.
+- **0.13.0 break.** `Environment.runtime` is required. The defaults are a
   public network and `python:3.12-slim`. Use `Runtime.docker()`,
   `Runtime.local()`, or `Runtime.daytona()`.
 - Deterministic verifiers are functions over an `Episode`. `EvidenceContract`

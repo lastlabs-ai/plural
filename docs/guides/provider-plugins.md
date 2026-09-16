@@ -25,7 +25,7 @@ Subclass `plural.sandbox.base.SandboxProvider` and implement its asynchronous me
 
 The base implementation supplies `preflight`, `upload_bundle`, and `download_artifacts`. Override them only when your backend needs different behavior while preserving the contract. In particular, unsupported network or resource controls must fail before launch rather than being ignored.
 
-The complete method types are available in the [API reference](../reference/api.md); inspect the built-in providers in the current source checkout for working implementations.
+Inspect the built-in providers in the current source checkout for working implementations.
 
 ## Register your implementation
 
@@ -53,4 +53,4 @@ The registry loads the factory and requires a `SandboxProvider` instance. Provid
 
 Test the runtime lifecycle with a small trusted command. Then request a feature your provider cannot enforce and confirm it rejects the request. Check cancellation, timeouts, cleanup after failures, upload path restrictions, and exact artifact downloads.
 
-The Environment target classification and project policy must support the provider's intended placement; registration alone does not make a new name a fully integrated remote execution target. The entry-point API is currently Alpha. Use [Runtime and connectivity](../project/runtime.md) to understand how requirements are combined.
+The Environment target classification and project policy must support the provider's intended placement; registration alone does not make a new name a fully integrated remote execution target. The entry-point API is currently Alpha. Use [Runtime](../project/environments.md#runtime) to understand how requirements are combined.

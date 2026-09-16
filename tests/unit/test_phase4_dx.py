@@ -28,6 +28,14 @@ SERIALIZATION_INTERNAL = re.compile(
 )
 
 
+class CustomHarness(Harness):
+    name = "custom"
+    version = "1.0.0"
+
+    def run(self, task, agent, environment):
+        return {"task": task.id}
+
+
 def graph() -> tuple[Environment, DeterministicVerifier, Task, Benchmark, Agent, Job]:
     environment = Environment(name="world", version="1.0.0", runtime=Runtime.docker())
     verifier = DeterministicVerifier(name="done", check="python verify.py")
@@ -86,15 +94,26 @@ def test_python_reference_and_environment_packaging(tmp_path: Path) -> None:
         "    @action\n"
         "    def answer(self, value: str) -> str:\n"
         "        return value\n\n"
-        "world = World(runtime=Runtime.docker()).package(('python', 'adapter.py'))\n"
+        "world = World(runtime=Runtime.docker())\n"
     )
-    (tmp_path / "adapter.py").write_text("print('{}')\n")
     resolver = Resolver(root=tmp_path)
     environment = resolver.load("world.py:world")
     assert isinstance(environment, Environment)
     definition = environment.definition()
-    assert definition.actions[0].command == ("python", "adapter.py", "answer")
-    assert definition.reset_command == ("python", "adapter.py", "reset")
+    assert definition.actions[0].command == (
+        "python",
+        "-m",
+        "plural.environments.runner",
+        "world.py:World",
+        "answer",
+    )
+    assert definition.reset_command == (
+        "python",
+        "-m",
+        "plural.environments.runner",
+        "world.py:World",
+        "reset",
+    )
 
     task = Task(
         name="case",
@@ -110,13 +129,7 @@ def test_python_reference_and_environment_packaging(tmp_path: Path) -> None:
 
 def test_advanced_job_yaml_hides_nested_harness_protocol_names(tmp_path: Path) -> None:
     *_values, original = graph()
-    (tmp_path / "harness.py").write_text("print('ok')\n")
-    harness = Harness(
-        name="custom",
-        version="1.0.0",
-        command=("python", "harness.py"),
-        source=str(tmp_path),
-    )
+    harness = CustomHarness()
     job = Job(
         original.source,
         agents=[Agent(model="openai/gpt-5.6-luna", harness=harness)],

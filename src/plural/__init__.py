@@ -22,6 +22,7 @@ from plural.environments import (
     Observation,
     Resource,
     Runtime,
+    RuntimeVariable,
     Secret,
     State,
     TraceDataset,
@@ -45,7 +46,14 @@ from plural.errors import (
     is_retryable,
 )
 from plural.execution import JobStore, Trial
-from plural.harness import Harness, HarnessOutput
+from plural.harness import (
+    Harness,
+    HarnessAgent,
+    HarnessCompletion,
+    HarnessEnvironment,
+    HarnessResult,
+    HarnessTask,
+)
 from plural.jobs import (
     AgentAggregate,
     ArtifactManifest,
@@ -160,9 +168,13 @@ __all__ = [
     "ExecutionStatus",
     "ExecutionTarget",
     "Harness",
+    "HarnessAgent",
     "HarnessCapability",
-    "HarnessOutput",
+    "HarnessCompletion",
+    "HarnessEnvironment",
     "HarnessPolicy",
+    "HarnessResult",
+    "HarnessTask",
     "HumanVerifier",
     "InvalidRequestError",
     "JSONLSink",
@@ -190,6 +202,7 @@ __all__ = [
     "Resolver",
     "RetryPolicy",
     "Runtime",
+    "RuntimeVariable",
     "RubricCriterion",
     "SQLiteSink",
     "Sampler",

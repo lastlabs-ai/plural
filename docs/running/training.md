@@ -2,7 +2,7 @@
 route: /docs/running/training
 title: Training and RL
 order: 105
-description: Reuse project definitions for training with compatible exact token capture.
+description: Collect scored training data, connect an external trainer, and measure improvement on held-out Tasks.
 audience: all
 nav: true
 nav_group: Run
@@ -10,81 +10,71 @@ outcome: You understand what train mode requires and what a downstream trainer m
 ---
 # Training and RL
 
-Eval and train Jobs share the same project concepts. Both select Tasks, Agents, and final Verifiers. Train mode adds requirements for learning data and supports Environment rewarders; it does not itself update model weights.
+When evaluation reveals a consistent weakness, use those failures to decide what training should improve. Plural reuses your Tasks, Environments, and Verifiers to collect scored training runs and evaluate the agent afterward.
 
-## Begin with an evaluation you trust
+The package's train mode prepares learning data; it does not implement model optimization. Updating model weights, storing checkpoints, and deploying a trained model require a separate training system.
 
-Before collecting training data, check that your Verifiers distinguish known good and bad outcomes. Keep a held-out evaluation benchmark so you can test whether a change generalizes. Task metadata can label a split, but your data pipeline must enforce that separation.
+## 1. Establish a baseline
 
-## Exact tokens in, tokens out
+Run the agent in eval mode and inspect its failures. Confirm that the Environment gives it the information and actions needed to succeed, and that the Verifiers score correctly. Fix setup problems before treating low scores as model weaknesses.
 
-Train mode requires a Harness that supports **TITO**, exact tokens in and
-tokens out. Preflight checks the public Harness declaration and execution
-validates the emitted artifact. A reconstructed prompt, a retokenized
-transcript, or a list of game moves is insufficient.
+Reserve a held-out Benchmark for evaluation. Task metadata can label training and evaluation splits, but your data pipeline must keep them separate.
 
-A compatible public Harness declares:
+## 2. Choose a Harness with exact token capture
 
-```yaml
-kind: harness
-name: exact-token-loop
-version: 1.0.0
-command: [python, harness.py]
-source: harness
-artifacts:
-  - path: tito.jsonl
-    required: true
-    media_type: application/jsonl
-tito: tito.jsonl
+Train mode requires **TITO**, or exact tokens in and tokens out. These records connect the model's actual inputs and outputs to the resulting actions and scores.
+
+A compatible class-based Harness enables token capture and returns the exact
+records:
+
+```python
+from plural import Harness, HarnessResult
+
+
+class ExactTokenHarness(Harness):
+    name = "exact-token-loop"
+    supports_tito = True
+
+    def run(self, task, agent, environment):
+        # Capture these values from the actual model call.
+        records = (...)
+        return HarnessResult(
+            response="complete",
+            tito=records,
+        )
 ```
 
-`tito` derives internal support metadata; do not author internal support flags
-or paths. This is a contract to implement, not a switch that makes a Harness
-training-ready.
+The Harness must implement capture and return the records. Setting
+`supports_tito = True` alone does not provide that behavior; Plural writes the
+returned records to `tito.jsonl`. The support queue and Wordle examples use
+ordinary evaluation Harnesses and cannot run in train mode as supplied.
 
-Each `TITORecord` includes `step`, `tokenizer`, `model`, exact
-`input_token_ids`, `output_token_ids`, `observation_token_ids`, aligned
-`output_logprobs` and `output_top_logprobs`, `output_text`,
-`assistant_message`, and matching length fields. Values must come from the
-actual model call. A reconstructed prompt, retokenized transcript, or action
-list is insufficient.
+Each `TITORecord` includes the step, tokenizer, model, exact input/output/observation token IDs, matching lengths, output text, assistant message, and aligned output log probabilities. Values must come from the actual model call. Retokenizing a saved transcript is not equivalent.
 
-The support starter uses a native Harness without exact token capture, so it should fail train preflight. Keep them in eval mode. Select or implement a Harness whose model provider exposes the required token data before using:
+## 3. Collect one training Trial
+
+After configuring a Job with a compatible Harness and provider, validate and run it:
 
 ```bash
-plural run training-job.yaml --mode train --offline
+plural validate training-job.yaml
+plural run training-job.yaml --mode train --dry-run
+plural run training-job.yaml --mode train
 ```
 
-This command assumes you have authored `training-job.yaml` with a compatible Harness, runtime, and Tasks. It is not an additional quickstart command.
+These commands assume you have created `training-job.yaml` and configured model authentication. Start with one Task and one attempt. Before increasing concurrency, inspect the token artifact, trajectory, final state, and Verifier results. Complete any pending human reviews before using the run as fully scored data.
 
-## Final Verifiers and rewarders
+## 4. Add learning signals where needed
 
-A final Verifier assesses completion of the Task. An Environment rewarder represents an additional learning signal, such as progress toward a solution. Train mode includes rewarders; eval mode skips them.
+Final Verifiers measure Task success in both eval and train mode. Rewarders provide additional training signals, such as progress toward a solution.
 
-The package Job executor currently runs command Rewarders during final scoring,
-using captured artifacts and `rewarder-result.json`. It does not automatically
-call arbitrary Rewarder code after each native action. If an RL algorithm needs
-transition-level rewards, its Environment/Harness integration must invoke and
-record them.
+Package Jobs currently execute command Rewarders during final scoring. They do not automatically run a Rewarder after every native action. An algorithm that needs a reward for each transition must use an integration that invokes and records those rewards. Python Rewarders require an in-process integration.
 
-Python rewarders described by implementation digests are not executable from package Jobs; they require the supported in-process path. A declaration alone does not provide a remote implementation.
+The final Task reward remains the weighted aggregate of its Verifiers. Keep that evaluation metric stable as you experiment with learning signals.
 
-The final Task reward remains the weighted aggregate of its Verifiers.
-Rewarder outputs do not silently replace that evaluation metric.
+## 5. Train and evaluate again
 
-## Validate before scaling
+Select eligible Trials, preserve their Task and Agent versions and scores, and convert the records into your trainer's format. Apply your data access, redaction, and split rules before export.
 
-Run one complete training Trial before increasing concurrency. Confirm the TITO artifact exists, contains valid records, and corresponds to the actual model calls. Confirm the final Verifiers still receive their evidence. If a human Verifier is attached, finish the reviews before treating the dataset as fully scored.
+After training, make the updated model available through a supported endpoint and create a new Agent version. Run the held-out Benchmark with the same scoring and Runtime policy. Compare quality, cost, latency, and failure patterns before changing application routing.
 
-Do not claim exact provenance by fabricating token IDs or setting a support flag on approximate data. Unsupported capture is a configuration problem to solve in the Harness/provider integration.
-
-## Hand data to your trainer
-
-The downstream workflow chooses eligible Trials, preserves revision and score provenance, applies redaction and split rules, and converts the records into the trainer's expected format. Training, checkpoint storage, and deployment are separate from the Job executor.
-
-After updating the agent, run the held-out Benchmark in eval mode with the same scoring and runtime policy. Compare scores alongside completeness and behavior in the traces, not just a training reward curve.
-
-Plural intentionally does not implement SFT, DPO, PPO, GRPO, rollout
-optimization, gradient updates, checkpoint storage, or deployment. It provides
-versioned tasks, exact capture contracts, evidence, and evaluation before and
-after an external training system.
+See [Providers and integrations](../reference/integrations.md#route-after-evaluation) for using evaluation results to choose models for application requests.

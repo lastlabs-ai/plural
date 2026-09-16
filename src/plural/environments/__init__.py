@@ -16,6 +16,7 @@ from plural.environments.definition import (
     Resource,
     RewarderDefinition,
     Runtime,
+    RuntimeVariable,
     Secret,
     SecretReference,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "RewarderDefinition",
     "Resource",
     "Runtime",
+    "RuntimeVariable",
     "Secret",
     "SecretReference",
     "State",

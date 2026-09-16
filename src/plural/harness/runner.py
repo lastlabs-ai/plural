@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
@@ -48,6 +49,48 @@ class HarnessRunner:
     def __init__(self, provider: SandboxProvider) -> None:
         self.provider = provider
 
+    async def setup(
+        self,
+        handle: SandboxHandle,
+        definition: HarnessDefinition,
+        request: HarnessRunRequest,
+        *,
+        env: dict[str, str] | None = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        """Install Harness dependencies as root inside the existing Runtime."""
+        if not definition.setup:
+            return
+        setup_env = dict(env or {})
+        setup_env.setdefault("PLURAL_RUNTIME_PROVIDER", self.provider.name)
+        setup_env.setdefault("PLURAL_HARNESS_NAME", definition.name)
+        setup_env.setdefault("PLURAL_HARNESS_VERSION", definition.revision)
+        setup_env.setdefault(
+            "PLURAL_TOOLS_PREFIX", f"{request.workspace.rstrip('/')}/.plural/tools"
+        )
+        for command in definition.setup:
+            result = await self.provider.exec(
+                handle,
+                ExecRequest(
+                    command=command,
+                    cwd=request.workspace,
+                    env=setup_env,
+                    timeout_seconds=timeout_seconds,
+                    user="root",
+                ),
+            )
+            if result.timed_out:
+                raise TimeoutError("harness setup timed out")
+            if result.exit_code != 0:
+                message = result.stderr.decode("utf-8", errors="replace").strip()
+                stdout = result.stdout.decode("utf-8", errors="replace").strip()
+                detail = message or stdout
+                raise HarnessExecutionError(
+                    f"harness setup failed for {definition.name!r}: {detail[:2000]}",
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                )
+
     async def run(
         self,
         handle: SandboxHandle,
@@ -58,6 +101,13 @@ class HarnessRunner:
         timeout_seconds: float | None = None,
     ) -> HarnessExecution:
         """Execute and enforce protocol and declared-output boundaries."""
+        await self.setup(
+            handle,
+            definition,
+            request,
+            env=env,
+            timeout_seconds=timeout_seconds,
+        )
         if definition.healthcheck is not None:
             health = await self.provider.exec(
                 handle,
@@ -103,12 +153,20 @@ class HarnessRunner:
                 *command,
             )
             stdin = None
+        run_env = dict(env or {})
+        tools = f"{request.workspace.rstrip('/')}/.plural/tools/bin"
+        path_value = run_env.get("PATH") or os.environ.get("PATH") or "/usr/local/bin:/usr/bin:/bin"
+        if tools not in path_value.split(":"):
+            run_env["PATH"] = f"{tools}:{path_value}"
+        run_env.setdefault("PLURAL_RUNTIME_PROVIDER", self.provider.name)
+        run_env.setdefault("PLURAL_HARNESS_NAME", definition.name)
+        run_env.setdefault("PLURAL_HARNESS_VERSION", definition.revision)
         result = await self.provider.exec(
             handle,
             ExecRequest(
                 command=command,
                 cwd=request.workspace,
-                env=env or {},
+                env=run_env,
                 timeout_seconds=timeout_seconds,
                 stdin=stdin,
             ),

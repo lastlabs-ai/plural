@@ -50,13 +50,3 @@ limits:
   max_seconds: 120.0
   max_cost_usd: null
 metadata: {}
-reset_command:
-- python
-- commands.py
-- reset
-package:
-  command:
-  - python
-  - commands.py
-  source: .
-  digest: sha256:84efc94232c10bf8807f58a15d3b3d8cefbc0da09b0f8fbf7be0a69e47a6c9fe

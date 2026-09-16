@@ -19,8 +19,8 @@ without rerunning successful Trials. `06` prints the canonical schema-v2 Job
 graph for a compatible hosted API—the same graph an authenticated `plural run`
 synchronizes before submitting and watching its hosted Job.
 
-`minimal_harness/` is a complete custom Harness. It reads one
-request, writes one result plus evidence/trajectory artifacts, and emits one
-terminal event. `_foundation.py` builds first-class Task and Verifier versions,
-an Environment-independent Agent, a Benchmark source, and an
-Environment-routed Job.
+`minimal_harness/` is a complete custom Harness class. Its `run` method receives
+the standard Task, Agent, and Environment interfaces and returns a
+`HarnessResult`; Plural writes the execution artifacts. `_foundation.py` builds
+first-class Task and Verifier versions, an Environment-independent Agent, a
+Benchmark source, and an Environment-routed Job.

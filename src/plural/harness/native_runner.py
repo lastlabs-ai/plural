@@ -281,11 +281,7 @@ def _run_action(
     command = declaration.get("command") or []
     if not command:
         raise ValueError(f"environment action {name!r} has no command to execute")
-    clean_env = {
-        key: value
-        for key, value in os.environ.items()
-        if key in {"PATH", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT"}
-    }
+    clean_env = _action_environment(environment)
     completed = subprocess.run(
         _local_command(command),
         input=json.dumps(arguments).encode(),
@@ -372,11 +368,7 @@ def _reset_episode(
         _local_command(command),
         input=b"{}",
         cwd=str(workspace),
-        env={
-            key: value
-            for key, value in os.environ.items()
-            if key in {"PATH", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT"}
-        },
+        env=_action_environment(environment),
         capture_output=True,
         timeout=float((declared.get("reset") or {}).get("timeout_seconds") or 30),
         check=False,
@@ -408,6 +400,20 @@ def _emit(value: dict[str, Any]) -> None:
         json.dumps({"protocol": "plural-harness-v1", **value}, sort_keys=True),
         flush=True,
     )
+
+
+def _action_environment(environment: dict[str, Any]) -> dict[str, str]:
+    names = {
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "TMPDIR",
+        "SYSTEMROOT",
+        *environment.get("variable_names", []),
+    }
+    values = {key: value for key, value in os.environ.items() if key in names}
+    values["PLURAL_RESOURCES_DIR"] = _workspace_path("/workspace/resources")
+    return values
 
 
 if __name__ == "__main__":

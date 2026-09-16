@@ -4,7 +4,7 @@ title: Glossary
 order: 220
 description: Short definitions for the objects you author and the records a Job produces.
 audience: all
-nav: true
+nav: false
 nav_group: Reference
 ---
 # Glossary

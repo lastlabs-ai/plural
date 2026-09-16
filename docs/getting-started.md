@@ -2,80 +2,99 @@
 route: /docs/getting-started
 title: Getting started
 order: 20
-description: Build one public evaluation graph in Python, export the same graph to YAML, and run it locally from the CLI.
+description: Install Plural with pip or uv, create an account, choose a project or account API key, and authenticate the CLI and SDK.
 audience: all
 nav: true
 nav_group: Start
-outcome: You can author, validate, inspect, export, and dry-run a Job.
 ---
 # Getting started
 
-Plural 0.13.0 requires Python 3.10 or newer:
+Plural requires Python 3.10 or newer. Read [Core concepts](getting-started/concepts.md)
+first if the object names are new.
+
+## Install
+
+With pip:
 
 ```bash
-python -m pip install "plural==0.13.0"
-plural init support-eval
-cd support-eval
+python -m pip install "plural>=0.13.3"
 ```
 
-Open the generated Python project. Its essential graph is:
-
-```python
-from plural import Agent, Benchmark, Client, Environment, Episode, Job, Runtime, Task
-from plural import VerifierOutput
-from plural.verifiers import DeterministicVerifier
-
-environment = Environment(name="support-queue", runtime=Runtime.docker())
-
-def resolved(episode: Episode) -> VerifierOutput:
-    return VerifierOutput(reward=float(bool(episode.observation.get("done"))))
-
-verifier = DeterministicVerifier(name="resolved", check=resolved)
-task = Task(
-    name="ticket-1",
-    instructions="Resolve the support ticket.",
-    environment=environment,
-    verifiers=[verifier],
-)
-benchmark = Benchmark(name="support", version="1.0.0", tasks=[task])
-agent = Agent(model="openai/gpt-5.6-luna")
-job = Job(benchmark, agents=[agent], client=Client())
-```
-
-This is the golden flow throughout the docs: Environment → Verifier → Task →
-Benchmark → Agent → Job. Python constructors define field names, defaults, and
-validation. YAML stores the same objects and the CLI resolves them.
-
-`Runtime.docker()`, `Runtime.local()`, and `Runtime.daytona()` are the beginner
-Runtime API. Harbor defaults are a public network and `python:3.12-slim`.
-
-## Validate before execution
+With uv:
 
 ```bash
-plural validate project.py:job
-plural inspect project.py:job
-plural export project.py:job --output job.yaml
-plural run job.yaml --dry-run
+uv add "plural>=0.13.3"
 ```
 
-`--dry-run` resolves catalog entries, locks object hashes, checks
-Agent–Environment compatibility, and expands Trials. It does not call a model
-and does not need credentials.
+Optional extras include `plural[daytona]` when you want the Daytona Runtime.
 
-A live run needs Plural or a bring-your-own key on the Job, not on the Agent:
+## Create an account and an API key
+
+1. Create an account at [pluralintel.com/signup](https://pluralintel.com/signup).
+2. Create a project for the Environments, Tasks, and Jobs you are about to run.
+3. Create an API key. Keys start with `plural_`. Copy the secret once; Plural
+   does not show it again.
+
+### Project key vs account key
+
+A **project key** is bound to one project. Use it for a script or CI job that
+should only touch that project. The Client does not need a separate project
+id.
+
+An **account key** can reach any project your account may access. Pass the
+project every time: `Client(..., project="<project_id>")` or
+`PLURAL_PROJECT`. Do not use an account key in a shared runner if a project
+key will do.
+
+Keep keys out of source, Agent instructions, and Task metadata.
+
+## Authenticate the CLI
+
+Device login stores a credential on your machine. After this, `plural run`
+builds `Client()` for you:
 
 ```bash
 plural auth login
-plural run job.yaml
 ```
+
+Follow the browser prompt, then confirm:
+
+```bash
+plural auth status
+```
+
+To use a key you created in the app instead of device login:
+
+```bash
+export PLURAL_API_KEY=plural_...
+# account keys also need the project
+export PLURAL_PROJECT=<project_id>
+```
+
+`plural run --api-key` is a bring-your-own OpenAI-compatible key for the
+model, not a Plural key. Prefer `plural auth login` or `PLURAL_API_KEY` for
+the hosted catalog.
+
+## Authenticate the SDK
+
+`Client()` reads the login store or `PLURAL_API_KEY`:
 
 ```python
-Job(task, agents=[agent], client=Client())
-Job(task, agents=[agent], api_key="sk-...")
+from plural import Client
+
+client = Client()
 ```
 
-`Agent.secret_names` is only for extra application secrets declared by a custom
-Harness. Model authentication is injected by the Job.
+An account key must name the project:
 
-After `plural auth login`, `Client()` reads the stored key. Export
-`PLURAL_API_KEY` if you prefer the environment.
+```python
+client = Client(api_key="plural_...", project="<project_id>")
+```
+
+Pass that Client into a live Job. Dry-run does not need credentials:
+
+```python
+from plural import Job
+
+job = Job(task, agents=[agent], client=client)
+```

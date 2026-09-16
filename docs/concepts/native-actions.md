@@ -38,11 +38,11 @@ value stored as `observation`. Nested `@action` calls become `children`.
 A model response with no tool calls is normalized to
 `ParsedAction(name="respond", source="model_text")`.
 
-## In a package
+## On a Job
 
 `Environment` discovers each decorated action's name, description, parameters,
-observation shape, mutation flag, and timeout. `environment.package(command)`
-binds Python actions to one executable command adapter.
+observation shape, mutation flag, and timeout. A Job runs those methods from
+the class directory. You do not write an adapter.
 
 ```bash
 plural validate environment.py:environment

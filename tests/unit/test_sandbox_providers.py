@@ -99,7 +99,9 @@ class FakeDaytonaSandbox:
 
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
-        self.commands: list[tuple[tuple[str, ...], str, Mapping[str, str], float | None]] = []
+        self.commands: list[
+            tuple[tuple[str, ...], str, Mapping[str, str], float | None, str | None]
+        ] = []
         self.stdout = "ok"
 
     async def upload_file(self, data: bytes, path: str) -> None:
@@ -115,8 +117,9 @@ class FakeDaytonaSandbox:
         cwd: str,
         env: Mapping[str, str],
         timeout: float | None,
+        user: str | None = None,
     ) -> tuple[int, str, str]:
-        self.commands.append((command, cwd, env, timeout))
+        self.commands.append((command, cwd, env, timeout, user))
         return 0, self.stdout, ""
 
 

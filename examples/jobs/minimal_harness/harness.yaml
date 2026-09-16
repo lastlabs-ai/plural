@@ -1,14 +1,2 @@
 kind: harness
-name: example-harness
-version: 0.1.0
-description: Offline custom Harness example.
-command: [python, harness.py]
-source: .
-capabilities: [shell]
-auth: [none]
-outputs:
-  - {path: result.json, required: true, media_type: application/json}
-artifacts:
-  - {path: evidence.txt, required: true, media_type: text/plain}
-  - {path: trajectory.jsonl, required: true, media_type: application/jsonl}
-trajectory: trajectory.jsonl
+python: harness.py:ExampleHarness

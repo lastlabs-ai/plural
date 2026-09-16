@@ -21,7 +21,9 @@ from typer.testing import CliRunner
 from plural.cli.main import app
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "docs" / "reference" / "cli-commands.md"
+OUTPUT = ROOT / "docs" / "cli" / "evaluation.md"
+BEGIN = "<!-- generated-cli-reference -->"
+END = "<!-- /generated-cli-reference -->"
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
@@ -51,35 +53,25 @@ def _walk(command: object, path: tuple[str, ...] = ()) -> list[tuple[str, str]]:
     return rows
 
 
-def render() -> str:
-    """Render deterministic Markdown from every actual command help page.
-
-    Returns:
-        Complete generated Markdown.
-    """
+def render_commands() -> str:
+    """Render the generated command help sections."""
     sections = [
-        "---",
-        "route: /docs/reference/cli-commands",
-        'title: "Generated CLI command reference"',
-        "order: 210",
-        (
-            'description: "Generated reference for every Plural CLI command '
-            'and option exposed by the Typer application."'
-        ),
-        "audience: all",
-        "nav: true",
-        "nav_group: Reference",
-        "---",
-        "",
-        "# Generated CLI command reference",
-        "",
-        "This file is generated from the Typer application. Do not edit it by hand.",
+        "This section is generated from the Typer application. "
         "Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.",
         "",
     ]
     for name, help_text in _walk(get_command(app)):
-        sections.extend((f"## `{name}`", "", "```text", help_text, "```", ""))
-    return "\n".join(sections)
+        sections.extend((f"### `{name}`", "", "```text", help_text, "```", ""))
+    return "\n".join(sections).rstrip() + "\n"
+
+
+def splice(page: str, generated: str) -> str:
+    """Replace the generated region in the CLI guide."""
+    if BEGIN not in page or END not in page:
+        raise RuntimeError(f"{OUTPUT} is missing {BEGIN} / {END} markers")
+    before, remainder = page.split(BEGIN, 1)
+    _, after = remainder.split(END, 1)
+    return f"{before}{BEGIN}\n{generated}{END}{after}"
 
 
 def main() -> int:
@@ -91,9 +83,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    content = render()
+    current = OUTPUT.read_text(encoding="utf-8") if OUTPUT.exists() else ""
+    content = splice(current, render_commands())
     if args.check:
-        current = OUTPUT.read_text(encoding="utf-8") if OUTPUT.exists() else ""
         if current != content:
             print(f"CLI reference drift: {OUTPUT.relative_to(ROOT)}")
             diff = difflib.unified_diff(
@@ -109,7 +101,7 @@ def main() -> int:
         return 0
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(content, encoding="utf-8")
-    print(f"Wrote {OUTPUT.relative_to(ROOT)}.")
+    print(f"Wrote generated CLI reference into {OUTPUT.relative_to(ROOT)}.")
     return 0
 
 

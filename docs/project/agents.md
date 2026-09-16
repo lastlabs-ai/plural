@@ -1,98 +1,115 @@
 ---
 route: /docs/project/agents
 title: "Agents"
-order: 60
-description: "Create catalog-backed Agents with instructions, provider validation, and an optional custom Harness."
+order: 65
+description: Choose an available model, add instructions and a Harness, and run your Agent on a Task.
 audience: all
 nav: true
 nav_group: Build
-outcome: You can create bundled and project-catalog Agents without global registration.
+outcome: You can find a model, create an Agent, and evaluate it on your Tasks.
 ---
 # Agents
 
-An Agent owns a catalog model ID, instructions, optional provider preference,
-and at most one optional Harness. It does not own a Task or Environment.
+An Agent combines a model, instructions, and a [Harness](harnesses.md). The model makes decisions; the Harness manages its conversation, tools, and interaction with the Environment.
+
+Create an Agent for each configuration you want to compare. You can change the model, instructions, or Harness while keeping the Tasks and scoring the same.
+
+## Find a model
+
+Authenticate once using the [Getting started](../getting-started.md) setup:
+
+```bash
+plural auth login
+```
+
+Then use the Client's model catalog to see the available model IDs:
+
+```python
+from plural import Client
+
+client = Client()
+for model in client.catalog.models():
+    print(model.id)
+```
+
+The catalog lists models known to your Client. Calling a model also requires credentials and an endpoint that supports it. See [Getting started](../getting-started.md) for authentication.
+
+You can browse the same catalog from the command line:
+
+```bash
+plural models list
+```
+
+## Create your Agent
+
+Choose an ID from the catalog and give the Agent instructions:
 
 ```python
 from plural import Agent
 
 agent = Agent(
+    name="support-assistant",
     model="openai/gpt-5.6-luna",
-    name="careful",
-    version="1.0.0",
-    instructions="Use the available actions and be concise.",
+    instructions=(
+        "Inspect the ticket and follow its support policy. "
+        "Use the available actions to categorize it, draft a reply, and resolve it. "
+        "Stop when the Environment reports that the ticket is done."
+    ),
 )
 ```
 
-`name` defaults to the final segment of `model`; `version` defaults to `0.1.0`.
-Optional fields include `provider`, `fallback_models`, `temperature`,
-`max_tokens`, `auth_mode`, `secret_names`, `metadata`, and `harness`.
-Model authentication lives on the Job (`client=Client()` or `api_key=`), not
-on the Agent. `secret_names` is only for extra application secrets declared
-by a custom Harness; execution fails closed before forwarding an undeclared
-name.
+This Agent uses Plural's built-in Harness. You do not need to configure a custom Harness to get started.
 
-Models are stable IDs in the effective `ModelCatalog`. Bundled models and
-provider preferences validate at construction. Project entries use an explicit
-context:
+Task instructions describe the particular job to do. Agent instructions describe how the agent should approach its work across Tasks. Keep them clear, avoid conflicting rules, and state when to stop.
+
+## Use a different Harness
+
+Attach a built-in by name, or pass an instance of a custom `Harness` subclass
+from the [Harnesses guide](harnesses.md#build-a-custom-harness):
 
 ```python
-from plural import CatalogContext, ModelCatalog, ModelSpec
-from plural.catalog import ModelEndpoint
-
-catalog = ModelCatalog(
-    entries=[
-        ModelSpec(
-            id="project/support-model",
-            endpoints=[
-                ModelEndpoint(
-                    provider="project-gateway",
-                    upstream_id="support-model-v2",
-                )
-            ],
-        )
-    ]
+claude = Agent(
+    name="support-claude",
+    model="anthropic/claude-sonnet-5",
+    instructions="Follow the support policy and finish the ticket using the available tools.",
+    harness="claude-code",
+    harness_kwargs={"reasoning_effort": "high"},
 )
-context = CatalogContext(catalog)
-agent = context.agent(
-    model="project/support-model",
-    provider="project-gateway",
+
+custom = Agent(
+    name="support-custom-loop",
+    model="openai/gpt-5.6-luna",
+    instructions="Follow the support policy and finish the ticket using the available tools.",
+    harness=harness,
 )
 ```
 
-Register custom models and at least one reachable endpoint explicitly; do not
-copy an invented model ID into a Job. CLI commands accept `--catalog PATH`.
-Planning records both the catalog ID and resolved upstream ID in the lock and
-Trial receipt. A package Job reaches that endpoint through
-`OPENAI_BASE_URL` or `PLURAL_GATEWAY_URL`; the endpoint must implement
-OpenAI-compatible `POST /chat/completions`.
+The Harness runs in the Runtime selected by the Task's Environment. Built-ins install their CLI there. A custom Harness still needs its dependencies in that Runtime.
 
-With Plural Gateway, the native runner sends the catalog ID. With a direct
-`OPENAI_BASE_URL` or default OpenAI call, it sends the resolved `upstream_id`.
-The model-specific adapters used by `Client` are a separate API. Job does not
-directly execute Anthropic, Google, Bedrock, or Azure native protocols.
+Model authentication is supplied through the Job's Client. For extra application credentials, use `secret_names` to grant names the Harness declares. See [Harnesses](harnesses.md).
 
-A fallback chain evaluates a routing configuration, not one model. Avoid
-fallbacks when comparing individual models. After a trustworthy evaluation,
-quality, cost, and latency evidence can inform application routing through
-`Client`; keep the actual model resolution visible.
+## Evaluate the Agent
 
-For a custom interaction loop, attach one plain Harness:
+Given a Task named `task`, run the Agent with your Client:
 
 ```python
-from plural import Agent, Harness
+from plural import Job
 
-harness = Harness(
-    name="support-loop",
-    command=["python", "harness.py"],
-    source="harness",
-)
-agent = Agent(model="openai/gpt-5.6-luna", harness=harness)
+job = Job(task, agents=[agent], client=client)
+print(job.plan.trial_count)
+result = job.run()
 ```
 
-Changing model, instructions, routing fields, secret grants, metadata, Harness,
-or Harness source digest changes the Agent hash. Publish a new version instead
-of rewriting an Agent already used in a Job.
+Use a [Benchmark](benchmarks.md) to evaluate multiple Tasks and compare Agents.
 
-See [Harnesses](harnesses.md) for capability grants, outputs, artifacts, and
-TITO.
+## Make a useful comparison
+
+Start by changing one thing at a time:
+
+- **Model:** keep the Harness and instructions the same.
+- **Instructions:** keep the model and Harness the same.
+- **Harness:** keep the model and Task set the same.
+
+Use repeated attempts to see how consistent the results are. Inspect actions and scoring evidence as well as the final score.
+
+Leave fallback models unset when comparing individual models, so a different model does not silently complete the work. Advanced endpoint setup and application routing are covered in [Providers and integrations](../reference/integrations.md).

@@ -68,16 +68,6 @@ tasks:
       max_seconds: 120.0
       max_cost_usd: null
     metadata: {}
-    reset_command:
-    - python
-    - commands.py
-    - reset
-    package:
-      command:
-      - python
-      - commands.py
-      source: environment
-      digest: sha256:84efc94232c10bf8807f58a15d3b3d8cefbc0da09b0f8fbf7be0a69e47a6c9fe
   verifiers:
   - name: correct-category
     version: 0.1.0
@@ -171,16 +161,6 @@ tasks:
       max_seconds: 120.0
       max_cost_usd: null
     metadata: {}
-    reset_command:
-    - python
-    - commands.py
-    - reset
-    package:
-      command:
-      - python
-      - commands.py
-      source: environment
-      digest: sha256:84efc94232c10bf8807f58a15d3b3d8cefbc0da09b0f8fbf7be0a69e47a6c9fe
   verifiers:
   - name: correct-category
     version: 0.1.0
@@ -274,16 +254,6 @@ tasks:
       max_seconds: 120.0
       max_cost_usd: null
     metadata: {}
-    reset_command:
-    - python
-    - commands.py
-    - reset
-    package:
-      command:
-      - python
-      - commands.py
-      source: environment
-      digest: sha256:84efc94232c10bf8807f58a15d3b3d8cefbc0da09b0f8fbf7be0a69e47a6c9fe
   verifiers:
   - name: correct-category
     version: 0.1.0

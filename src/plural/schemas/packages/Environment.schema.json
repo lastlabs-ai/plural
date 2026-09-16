@@ -74,9 +74,38 @@
           "title": "Config",
           "type": "object"
         },
+        "content": {
+          "anyOf": [
+            {
+              "maxLength": 1048576,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
         "content_type": {
           "default": "",
           "title": "Content Type",
+          "type": "string"
+        },
+        "delivery": {
+          "default": "descriptor",
+          "enum": [
+            "descriptor",
+            "source",
+            "inline",
+            "resolver"
+          ],
+          "title": "Delivery",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
           "type": "string"
         },
         "digest": {
@@ -116,6 +145,18 @@
           ],
           "default": null,
           "title": "Path"
+        },
+        "resolver": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolver"
         },
         "uri": {
           "anyOf": [
@@ -276,6 +317,14 @@
           "exclusiveMinimum": 0,
           "title": "Timeout Seconds",
           "type": "number"
+        },
+        "variables": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RuntimeVariable"
+          },
+          "title": "Variables",
+          "type": "array"
         }
       },
       "title": "EnvironmentRuntime",
@@ -474,7 +523,7 @@
       "type": "object"
     },
     "NetworkMode": {
-      "description": "Requested sandbox network policy.\n\nHarbor names are canonical. Legacy Plural names remain aliases.",
+      "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
       "enum": [
         "public",
         "no-network",
@@ -614,12 +663,59 @@
       "title": "RewarderDefinition",
       "type": "object"
     },
+    "RuntimeVariable": {
+      "additionalProperties": false,
+      "description": "A launch-time variable declaration. Values are supplied to Job, never saved here.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "format": {
+          "default": "text",
+          "enum": [
+            "text",
+            "url",
+            "integer",
+            "json"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Z_][A-Z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "secret": {
+          "default": false,
+          "title": "Secret",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "RuntimeVariable",
+      "type": "object"
+    },
     "SecretReference": {
       "additionalProperties": false,
-      "description": "A named secret target declaration; package execution does not inject it yet.",
+      "description": "A named credential supplied when a Job runs, with an explicit execution target.",
       "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
         "name": {
-          "minLength": 1,
+          "pattern": "^[A-Z_][A-Z0-9_]*$",
           "title": "Name",
           "type": "string"
         },

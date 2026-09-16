@@ -13,6 +13,13 @@ from plural.verifiers import (
 )
 
 
+class CustomHarness(Harness):
+    name = "custom"
+
+    def run(self, task, agent, environment):
+        return {"task": task.id}
+
+
 def solved(*, weight: float = 1) -> DeterministicVerifier:
     return DeterministicVerifier(
         name="solved",
@@ -71,16 +78,11 @@ def test_agent_catalog_provider_fallback_and_single_harness(tmp_path) -> None:
             fallback_models=("not-registered/fallback",),
         )
 
-    (tmp_path / "harness.py").write_text("print('ok')\n")
-    harness = Harness(
-        name="custom",
-        command=("python", "harness.py"),
-        source=str(tmp_path),
-    )
+    harness = CustomHarness()
     harness_agent = Agent(model="openai/gpt-5.6-luna", harness=harness)
     planned = Job(task("harness"), agents=(harness_agent,)).spec.agents[0]
     assert planned.harness_package is not None
-    assert planned.harness_package.definition.name == harness.name
+    assert planned.harness_package.definition.name == type(harness).name
     assert planned.harness is not None
     with pytest.raises(ValidationError, match="harness_package"):
         Agent(

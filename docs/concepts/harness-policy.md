@@ -36,23 +36,30 @@ Harness stdout still must not smuggle scores or rewards.
 
 ## Built-in versus custom
 
-Omit `Agent.harness` to use Plural's built-in interaction loop. Set it to one
-plain `Harness` value when you need a custom executable:
+Omit `Agent.harness` to use Plural's native interaction loop. Set it to
+`"claude-code"`, `"codex"`, or `"hermes"` for a vendor CLI, or to one
+`Harness` subclass instance when you need a custom loop:
 
 ```python
-from plural import Agent, Harness
+from plural import Agent, Harness, HarnessResult
 
-harness = Harness(
-    name="research-loop",
-    command=["python", "harness.py"],
-    source="harness",
-    capabilities=["web_search"],
-)
+class ResearchHarness(Harness):
+    name = "research-loop"
+
+    def run(self, task, agent, environment):
+        completion = agent.complete(
+            [{"role": "user", "content": task.instructions}],
+            tools=environment.tools(),
+        )
+        return HarnessResult(response=completion.text)
+
+
+harness = ResearchHarness()
 agent = Agent(model="openai/gpt-5.6-luna", harness=harness)
 ```
 
-Plural locks the executable source and execution details internally before a
-Trial starts.
+Plural locks the class directory and configuration before a Trial starts.
+Every Harness receives the same Task, Agent, and Environment interface.
 
 ## How a grant is computed
 

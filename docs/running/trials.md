@@ -9,7 +9,9 @@ nav_group: Run
 ---
 # Trials and trajectories
 
-A Trial is one Agent × one Task × one planned attempt. Its ID is stable across
+A Trial is one Agent completing one Task once. For example, two Agents evaluated on three Tasks create six Trials. A second planned attempt doubles that to twelve.
+
+A Trial’s ID is stable across
 Runtime retries. A Trial execution is one actual attempt to run that Trial and
 uses a zero-based `execution_id`.
 

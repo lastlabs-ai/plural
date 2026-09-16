@@ -13,11 +13,21 @@ from plural.cli.main import app
 def test_cli_help_leads_with_public_object_commands() -> None:
     result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ("init", "validate", "inspect", "export", "run", "models", "benchmarks", "auth"):
+    for command in (
+        "init",
+        "validate",
+        "inspect",
+        "export",
+        "run",
+        "models",
+        "harness",
+        "benchmarks",
+        "auth",
+    ):
         assert command in result.stdout
     root = get_command(app)
     assert isinstance(root, TyperGroup)
-    for compatibility_group in ("env", "task", "verifier", "agent", "harness", "benchmark"):
+    for compatibility_group in ("env", "task", "verifier", "agent", "benchmark"):
         assert root.commands[compatibility_group].hidden
     assert "watch" in root.commands["job"].commands
 

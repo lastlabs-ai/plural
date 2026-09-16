@@ -43,7 +43,7 @@ body = [
     "order: 205",
     'description: "Post-resolution constructor schemas generated from the current Plural models."',
     "audience: all",
-    "nav: true",
+    "nav: false",
     "nav_group: Reference",
     "---",
     "# Field catalog",
@@ -58,6 +58,10 @@ body = [
     "the [Jobs guide](../running/jobs.md) and [Python SDK guide](../sdk/evaluation.md) "
     "for its source, Agent, mode, attempt, concurrency, retry, planning, and run "
     "arguments. Methods and Client request types belong in the API reference.",
+    "",
+    "For Python-authored Environments, `runtime` is a required Environment parameter. "
+    "The resolved schema below lists it as optional because it also describes stored definitions; "
+    "use the [Environments guide](../project/environments.md) when creating an Environment.",
     "",
     "[Download the complete schemas](../assets/project-schemas.json).",
     "",

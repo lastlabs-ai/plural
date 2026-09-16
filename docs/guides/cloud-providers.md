@@ -8,4 +8,4 @@ nav: false
 ---
 # Cloud Providers
 
-This page moved to [Runtime and connectivity](../project/runtime.md).
+This page moved to [Runtime](../project/environments.md#runtime).

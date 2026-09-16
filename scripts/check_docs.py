@@ -25,21 +25,18 @@ ANY_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE)
 REQUIRED_FIELDS = frozenset({"route", "title", "order", "description", "audience", "nav"})
 AUDIENCES = frozenset({"all", "developers", "operators", "maintainers", "internal"})
 NAV_GROUPS = frozenset(
-    {"Start", "Build", "Run", "Interfaces", "Tutorials", "Operations", "Reference"}
+    {"Start", "Build", "Run", "Interfaces", "Tutorials", "Operations"}
 )
 PACKAGE_NAV = [
     ("Start", "/docs", "index.md"),
-    ("Start", "/docs/getting-started", "getting-started.md"),
     ("Start", "/docs/getting-started/concepts", "getting-started/concepts.md"),
+    ("Start", "/docs/getting-started", "getting-started.md"),
     ("Build", "/docs/project/environments", "project/environments.md"),
-    ("Build", "/docs/project/runtime", "project/runtime.md"),
-    ("Build", "/docs/project/environment-components", "project/environment-components.md"),
     ("Build", "/docs/project/tasks", "project/tasks.md"),
     ("Build", "/docs/project/verifiers", "project/verifiers.md"),
-    ("Build", "/docs/project/agents", "project/agents.md"),
     ("Build", "/docs/project/harnesses", "project/harnesses.md"),
+    ("Build", "/docs/project/agents", "project/agents.md"),
     ("Build", "/docs/project/benchmarks", "project/benchmarks.md"),
-    ("Build", "/docs/project/updating", "project/updating.md"),
     ("Run", "/docs/running/jobs", "running/jobs.md"),
     ("Run", "/docs/running/trials", "running/trials.md"),
     ("Run", "/docs/running/artifacts", "running/artifacts.md"),
@@ -51,13 +48,6 @@ PACKAGE_NAV = [
     ("Tutorials", "/docs/tutorials/support-queue", "tutorials/support-queue.md"),
     ("Tutorials", "/docs/tutorials/wordle", "tutorials/wordle.md"),
     ("Operations", "/docs/reference/integrations", "reference/integrations.md"),
-    ("Operations", "/docs/operations/security", "operations/security.md"),
-    ("Operations", "/docs/operations/troubleshooting", "operations/troubleshooting.md"),
-    ("Operations", "/docs/reference/limitations", "reference/limitations.md"),
-    ("Reference", "/docs/reference/fields", "reference/fields.md"),
-    ("Reference", "/docs/reference/cli-commands", "reference/cli-commands.md"),
-    ("Reference", "/docs/reference/glossary", "reference/glossary.md"),
-    ("Reference", "/docs/reference/api", "reference/api.md"),
 ]
 FENCE = re.compile(r"^```(?P<language>[^\n]*)\n(?P<body>.*?)^```\s*$", re.MULTILINE | re.DOTALL)
 INTERNAL_AUTHORING = re.compile(
@@ -251,11 +241,7 @@ def main() -> int:
         text = source.read_text(encoding="utf-8")
         metadata = _metadata(source, text, failures)
         documents[source] = metadata
-        if metadata.get("nav") is True and source.name not in {
-            "api.md",
-            "cli-commands.md",
-            "fields.md",
-        }:
+        if metadata.get("nav") is True:
             _check_snippets(source, text, failures)
         route = metadata.get("route")
         if isinstance(route, str):

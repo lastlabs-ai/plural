@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 import plural
-from plural import Agent, Environment, Harness, HarnessCapability, HarnessOutput, Job, Runtime, Task
+from plural import Agent, Environment, Harness, Job, Runtime, Task
 from plural.cli.main import app
 from plural.project import dump, load
 from plural.verifiers import DeterministicVerifier
@@ -22,21 +22,25 @@ BANNED = re.compile(
 
 def _harness(source: Path) -> Harness:
     source.mkdir()
-    (source / "runner.py").write_text("print('ok')\n", encoding="utf-8")
-    return Harness(
-        name="custom-loop",
-        version="1.2.3",
-        description="A custom interaction loop.",
-        command="python runner.py",
-        source=str(source),
-        capabilities=(HarnessCapability.FILE_READ,),
-        models=("openai/*",),
-        auth=("environment",),
-        secrets=("OPENAI_API_KEY",),
-        outputs=(HarnessOutput(path="result.json", media_type="application/json"),),
-        artifacts=(HarnessOutput(path="trajectory.jsonl"),),
-        trajectory="trajectory.jsonl",
+    module = source / "harness.py"
+    module.write_text(
+        """
+from plural import Harness, HarnessResult
+
+class CustomHarness(Harness):
+    name = "custom-loop"
+    version = "1.2.3"
+    description = "A custom interaction loop."
+    secrets = ("OPENAI_API_KEY",)
+
+    def run(self, task, agent, environment):
+        return HarnessResult(response=task.instructions)
+""".lstrip(),
+        encoding="utf-8",
     )
+    value = load(f"{module}:CustomHarness")
+    assert isinstance(value, Harness)
+    return value
 
 
 def _job(harness: Harness) -> Job:
@@ -52,11 +56,15 @@ def _job(harness: Harness) -> Job:
     )
 
 
-def test_public_harness_constructor_and_exports_hide_internals(tmp_path: Path) -> None:
+def test_public_harness_class_and_exports_hide_internals(tmp_path: Path) -> None:
     harness = _harness(tmp_path / "runner")
-    assert harness.command == ("python", "runner.py")
-    assert harness.digest is not None
+    package = harness._package()
+    assert package.definition.command[2] == "plural.harness.class_runner"
+    assert package.definition.outputs[0].path == "result.json"
+    assert package.definition.trajectory_path == "trajectory.jsonl"
     assert Harness is plural.Harness
+    assert "HarnessResult" in plural.__all__
+    assert "HarnessEnvironment" in plural.__all__
     assert "HarnessPackage" not in plural.__all__
     assert "PackageSource" not in plural.__all__
     assert BANNED.search(" ".join(Harness.model_fields)) is None
@@ -102,6 +110,11 @@ def test_harness_cli_scaffold_and_validate_are_plain(tmp_path: Path) -> None:
     assert created.exit_code == 0, created.output
     emitted = (tmp_path / "custom" / "harness.yaml").read_text(encoding="utf-8")
     assert BANNED.search(emitted) is None
+    implementation = (tmp_path / "custom" / "harness.py").read_text(encoding="utf-8")
+    assert "class CustomHarness(Harness)" in implementation
+    assert "def run(" in implementation
+    assert "command=" not in implementation
+    assert "source=" not in implementation
     validated = runner.invoke(app, ["harness", "validate", str(tmp_path / "custom")])
     assert validated.exit_code == 0, validated.output
 

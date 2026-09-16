@@ -2,7 +2,7 @@
 route: /docs/running/jobs
 title: "Jobs"
 order: 80
-description: "Plan and run Agents against a Task or Benchmark locally by default, with explicit hosted submission."
+description: Run selected agents against your Tasks, preview the Trial count, and inspect the results.
 audience: all
 nav: true
 nav_group: Run
@@ -10,15 +10,19 @@ outcome: You can dry-run, execute, and inspect a reproducible Job.
 ---
 # Jobs
 
-A Job owns a Task or Benchmark source, Agents, mode, attempts, concurrency, and
-retry policy.
+A Job runs your chosen Agents against a Task or Benchmark and collects the results. It controls how many times each case is attempted and how many Trials run at once.
+
+## Create a Job
+
+Given a `benchmark` and two Agents, `careful` and `concise`:
 
 ```python
-from plural import Job, RetryPolicy
+from plural import Client, Job, RetryPolicy
 
 job = Job(
     benchmark,
     agents=[careful, concise],
+    client=Client(),
     attempts=2,
     concurrency=4,
     per_runtime_concurrency=2,
@@ -27,6 +31,8 @@ job = Job(
 print(job.plan.trial_count)
 result = job.run()
 ```
+
+With three Tasks, two Agents, and two attempts, this Job creates twelve Trials. Configure model authentication before calling `run`; the CLI can use `plural auth login`.
 
 Defaults are `mode="eval"`, `attempts=1`, `concurrency=1`,
 `per_runtime_concurrency=1`, `priority=0`, and no retries. Retry backoff starts
@@ -72,8 +78,7 @@ does not imply the same graph can run hosted.
 ## Evaluate before routing or training
 
 Eval mode runs final Verifiers and records quality, cost, latency, trajectory,
-and completeness evidence. Compare exact Agent and Benchmark pins. Only then
-use those records to choose routing policy for application traffic.
+and completeness evidence. Compare exact Agent and Benchmark pins. Use those records to [choose routing policy](../reference/integrations.md#route-after-evaluation) for application traffic.
 
 Train mode keeps the final Verifiers and adds exact TITO and supported
 Rewarders. It is intentionally stricter; see [Training and RL](training.md).

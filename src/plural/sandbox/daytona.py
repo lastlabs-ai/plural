@@ -57,6 +57,7 @@ class DaytonaSandboxAdapter(Protocol):
         cwd: str,
         env: Mapping[str, str],
         timeout: float | None,
+        user: str | None = None,
     ) -> tuple[int, str, str]:
         """Execute one safely quoted argv command."""
         ...
@@ -101,13 +102,20 @@ class _OfficialSandbox:
         cwd: str,
         env: Mapping[str, str],
         timeout: float | None,
+        user: str | None = None,
     ) -> tuple[int, str, str]:
-        result = await self.value.process.exec(
-            shlex.join(command),
-            cwd=cwd,
-            env=dict(env),
-            timeout=timeout,
-        )
+        kwargs: dict[str, Any] = {
+            "cwd": cwd,
+            "env": dict(env),
+            "timeout": timeout,
+        }
+        if user:
+            kwargs["user"] = user
+        try:
+            result = await self.value.process.exec(shlex.join(command), **kwargs)
+        except TypeError:
+            kwargs.pop("user", None)
+            result = await self.value.process.exec(shlex.join(command), **kwargs)
         exit_code = int(getattr(result, "exit_code", getattr(result, "code", 0)))
         stdout = str(getattr(result, "result", getattr(result, "stdout", "")) or "")
         stderr = str(getattr(result, "stderr", "") or "")
@@ -302,6 +310,7 @@ class DaytonaProvider(SandboxProvider):
             cwd=request.cwd,
             env=request.env,
             timeout=request.timeout_seconds,
+            user=request.user,
         )
         return ExecResult(
             exit_code=code,

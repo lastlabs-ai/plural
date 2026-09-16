@@ -30,18 +30,15 @@ plugins:
       sections:
         Start:
           - index.md
-          - getting-started.md
           - getting-started/concepts.md
+          - getting-started.md
         Build:
           - project/environments.md
-          - project/runtime.md
-          - project/environment-components.md
           - project/tasks.md
           - project/verifiers.md
-          - project/agents.md
           - project/harnesses.md
+          - project/agents.md
           - project/benchmarks.md
-          - project/updating.md
         Run:
           - running/jobs.md
           - running/trials.md
@@ -57,14 +54,6 @@ plugins:
           - tutorials/wordle.md
         Operations:
           - reference/integrations.md
-          - operations/security.md
-          - operations/troubleshooting.md
-          - reference/limitations.md
-        Reference:
-          - reference/fields.md
-          - reference/cli-commands.md
-          - reference/glossary.md
-          - reference/api.md
   - mkdocstrings:
       handlers:
         python:
@@ -94,18 +83,15 @@ markdown_extensions:
 nav:
   - Start:
       - Overview: index.md
-      - Getting started: getting-started.md
       - Core concepts: getting-started/concepts.md
+      - Getting started: getting-started.md
   - Build:
       - Environments: project/environments.md
-      - Runtime: project/runtime.md
-      - Environment components: project/environment-components.md
       - Tasks: project/tasks.md
       - Verifiers: project/verifiers.md
-      - Agents: project/agents.md
       - Harnesses: project/harnesses.md
+      - Agents: project/agents.md
       - Benchmarks: project/benchmarks.md
-      - Updating and versioning: project/updating.md
   - Run:
       - Jobs: running/jobs.md
       - Trials and trajectories: running/trials.md
@@ -121,11 +107,3 @@ nav:
       - Wordle: tutorials/wordle.md
   - Operations:
       - Providers and integrations: reference/integrations.md
-      - Security: operations/security.md
-      - Troubleshooting: operations/troubleshooting.md
-      - Known limitations: reference/limitations.md
-  - Reference:
-      - Fields: reference/fields.md
-      - CLI commands: reference/cli-commands.md
-      - Glossary: reference/glossary.md
-      - API: reference/api.md

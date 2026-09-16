@@ -406,7 +406,7 @@ class Trace(BaseModel):
         *,
         source: Literal["outcome", "events", "both"] = "outcome",
     ) -> list[Transition]:
-        """Flatten this episode into Gymnasium-style transitions.
+        """Flatten this episode into step-by-step transitions.
 
         Prefers :class:`Turn` steps. Falls back to grouping flat
         ``llm`` / ``action`` steps so production traces still export.

@@ -4,7 +4,7 @@ title: "Field catalog"
 order: 205
 description: "Post-resolution constructor schemas generated from the current Plural models."
 audience: all
-nav: true
+nav: false
 nav_group: Reference
 ---
 # Field catalog
@@ -12,6 +12,8 @@ nav_group: Reference
 Use this catalog after the conceptual guides. It is generated from the post-resolution Pydantic constructor models, including nested types. Required fields have no usable default. Custom cross-field validators also apply.
 
 These schemas describe resolved object values, not Python references, source materialization, runtime capability checks, or side effects. The imperative public `Job` constructor is omitted because it is not a Pydantic model; use the [Jobs guide](../running/jobs.md) and [Python SDK guide](../sdk/evaluation.md) for its source, Agent, mode, attempt, concurrency, retry, planning, and run arguments. Methods and Client request types belong in the API reference.
+
+For Python-authored Environments, `runtime` is a required Environment parameter. The resolved schema below lists it as optional because it also describes stored definitions; use the [Environments guide](../project/environments.md) when creating an Environment.
 
 [Download the complete schemas](../assets/project-schemas.json).
 
@@ -33,7 +35,6 @@ These schemas describe resolved object values, not Python references, source mat
 - [ExecutionTarget](#executiontarget)
 - [Guardrail](#guardrail)
 - [HarnessCapability](#harnesscapability)
-- [HarnessOutput](#harnessoutput)
 - [HarnessPolicy](#harnesspolicy)
 - [Action](#action)
 - [NetworkMode](#networkmode)
@@ -67,25 +68,9 @@ Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent.
 
 ## Harness
 
-An executable Agent interaction strategy.
+Base class for an Agent interaction loop.
 
-- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`version`** — `string`; optional. Default: `"0.1.0"`.
-- **`description`** — `string`; optional. Default: `""`.
-- **`command`** — `array of string`; required. Constraints: `{"minItems": 1}`.
-- **`source`** — `string`; optional. Default: `"."`.
-- **`digest`** — `string | null`; optional. Default: `null`.
-- **`requirements`** — `array of string`; optional. Default: `[]`.
-- **`capabilities`** — `array of HarnessCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
-- **`models`** — `array of string`; optional. Default: `["*"]`.
-- **`auth`** — `array of "environment" | "api_key" | "oauth" | "none"`; optional. Default: `["environment"]`.
-- **`secrets`** — `array of string`; optional. Default: `[]`.
-- **`environment`** — `array of string`; optional. Default: `[]`.
-- **`healthcheck`** — `array of string | null`; optional. Default: `null`.
-- **`outputs`** — `array of HarnessOutput`; optional. Default: `[]`.
-- **`artifacts`** — `array of HarnessOutput`; optional. Default: `[]`.
-- **`trajectory`** — `string | null`; optional. Default: `null`.
-- **`tito`** — `string | null`; optional. Default: `null`.
+- **`config`** — `object`; optional.
 
 ## Task
 
@@ -161,7 +146,8 @@ A catalog-backed model and its optional execution harness.
 - **`fallback_models`** — `array of string`; optional. Default: `[]`.
 - **`temperature`** — `number | null`; optional. Default: `null`.
 - **`max_tokens`** — `integer | null`; optional. Default: `null`.
-- **`harness`** — `Harness | null`; optional. Default: `null`.
+- **`harness`** — `Harness | string | null`; optional. Default: `null`.
+- **`harness_kwargs`** — `object`; optional.
 - **`auth_mode`** — `"environment" | "api_key" | "oauth" | "none"`; optional. Default: `"environment"`.
 - **`secret_names`** — `array of string`; optional. Default: `[]`.
 - **`metadata`** — `object`; optional.
@@ -256,14 +242,6 @@ A capability requested by an agent harness.
 
 Allowed values: `"shell" | "file_read" | "file_edit" | "code_execution" | "web_search" | "browser" | "network_fetch" | "mcp" | "subagents" | "persistence"`.
 
-
-## HarnessOutput
-
-One file produced by a Harness.
-
-- **`path`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`required`** — `boolean`; optional. Default: `true`.
-- **`media_type`** — `string`; optional. Default: `"application/octet-stream"`.
 
 ## HarnessPolicy
 

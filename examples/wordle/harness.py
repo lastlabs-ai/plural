@@ -1,56 +1,33 @@
-"""Offline player: attach Wordle to the Task, then follow reset / step."""
+"""Class-based offline Wordle Harness."""
 
 from __future__ import annotations
 
-import json
-import sys
-from pathlib import Path
+from plural import Harness, HarnessResult
+from wordle import WORDS
 
-from wordle import WORDS, Wordle
 
-request = json.loads(sys.stdin.readline())
-task = request["task"]
-env = Wordle(info={"task_id": task["task_id"]})
-observation, _info = env.reset()
-env.persist()
-trajectory = [
-    {"turn": 0, "type": "reset", "observation": env.observation_snapshot()},
-]
-for turn, word in enumerate(WORDS, start=1):
-    observation, reward, terminated, truncated, _info = env.step(word=word)
-    env.persist()
-    trajectory.append(
-        {
-            "turn": turn,
-            "action": {"name": "guess", "word": word},
-            "observation": env.observation_snapshot(),
-            "reward": reward,
-            "terminated": terminated,
-            "truncated": truncated,
-        }
-    )
-    if terminated:
-        break
+class WordleHarness(Harness):
+    """Play a fixed offline word list through the Environment interface."""
 
-Path("result.json").write_text(
-    json.dumps({"task_id": task["task_id"], "solved": env.observation.solved}) + "\n"
-)
-Path("evidence.txt").write_text(env.observation.text + "\n")
-Path("trajectory.jsonl").write_text("".join(json.dumps(item) + "\n" for item in trajectory))
-print(
-    json.dumps(
-        {
-            "type": "result",
-            "status": "succeeded",
-            "outputs": ["result.json"],
-            "artifacts": [
-                "evidence.txt",
-                "trajectory.jsonl",
-                "state.json",
-                "observation.json",
-            ],
-            "trace_id": f"wordle-{task['task_id']}",
-        }
-    ),
-    flush=True,
-)
+    name = "custom-wordle-loop"
+    auth = ("none",)
+
+    def run(self, task, agent, environment):
+        observation = environment.reset()
+        trajectory = [{"turn": 0, "type": "reset", "observation": observation}]
+        for turn, word in enumerate(WORDS, start=1):
+            observation = environment.step("guess", word=word)
+            trajectory.append(
+                {
+                    "turn": turn,
+                    "action": {"name": "guess", "word": word},
+                    "observation": observation,
+                }
+            )
+            if isinstance(observation, dict) and observation.get("solved"):
+                break
+        return HarnessResult(
+            response={"task_id": task.id, "observation": observation},
+            trajectory=tuple(trajectory),
+            trace_id=f"wordle-{task.id}",
+        )

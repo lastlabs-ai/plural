@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
-import shlex
+import sys
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from pathlib import Path
@@ -81,7 +81,7 @@ def _json_snapshot(value: Any) -> Any:
 
 
 class Environment(Generic[ObsT, StateT]):
-    """A Task-bound world with a Gymnasium ``reset`` / ``step`` episode API.
+    """A Task-bound world with a ``reset`` / ``step`` episode API.
 
     Compile typed declarations into one immutable execution view. A Task pins
     one Environment version. The Job or Harness constructs this instance for
@@ -140,7 +140,7 @@ class Environment(Generic[ObsT, StateT]):
             raise ValueError(
                 f"Cannot create Environment {self.name!r}.\n"
                 "runtime is required and says where the Agent and Environment execute.\n"
-                "Use a Harbor-style preset:\n"
+                "Pass a Runtime preset:\n"
                 "  Environment(..., runtime=Runtime.docker())\n"
                 "  Environment(..., runtime=Runtime.local())\n"
                 "  Environment(..., runtime=Runtime.daytona())"
@@ -154,8 +154,8 @@ class Environment(Generic[ObsT, StateT]):
         self.limits = limits or ExecutionLimits()
         self.metadata = deepcopy(type(self).metadata) if metadata is None else deepcopy(metadata)
         self.source: PackageSource | None = None
-        self._adapter_command: tuple[str, ...] | None = None
         self._package_root: Path | None = None
+        self._runner_ref: str | None = None
         self._compiled_definition: EnvironmentDefinition | None = None
         self._python_source: Path | None = None
         self._python_object: str | None = None
@@ -166,6 +166,8 @@ class Environment(Generic[ObsT, StateT]):
         self.observation = (
             observation if observation is not None else cast(ObsT, observation_type())
         )
+        if type(self) is not Environment:
+            self._bind_source()
 
     @classmethod
     def _declared_types(cls) -> tuple[type[Observation], type[State]]:
@@ -222,55 +224,69 @@ class Environment(Generic[ObsT, StateT]):
         if rendered:
             root.joinpath("view.json").write_text(json.dumps(rendered) + "\n", encoding="utf-8")
 
-    def package(
-        self,
-        command: str | tuple[str, ...],
-        *,
-        source: str | Path | None = None,
-    ) -> Environment[ObsT, StateT]:
-        """Bind Python actions to a local source tree and command adapter.
+    def _class_source_file(self) -> Path | None:
+        marked = getattr(self, "_python_source", None) or getattr(
+            type(self), "_python_source", None
+        )
+        if marked:
+            return Path(marked).expanduser().resolve()
+        module = sys.modules.get(type(self).__module__)
+        filename = getattr(module, "__file__", None) if module is not None else None
+        if filename:
+            return Path(filename).resolve()
+        try:
+            source = inspect.getsourcefile(type(self))
+        except TypeError:
+            source = None
+        return Path(source).resolve() if source else None
 
-        The adapter receives the action name as its final argument and JSON
-        parameters on standard input. It should persist state between calls in
-        its working directory. ``reset`` uses the same adapter.
-
-        Returns:
-            This Environment, ready to place directly on a Task.
-        """
+    def _bind_source(self, source: str | Path | None = None) -> None:
+        """Hash the class directory so a Job can upload and run this Environment."""
         from plural.harness.retrieval import tree_digest
 
-        adapter = tuple(shlex.split(command)) if isinstance(command, str) else tuple(command)
-        if not adapter or any(not item for item in adapter):
-            raise ValueError("environment package command must contain non-empty arguments")
+        class_file = self._class_source_file()
         if source is None:
-            module_file = inspect.getsourcefile(type(self))
-            if module_file is None:
-                raise ValueError("could not infer Environment source; pass source= explicitly")
-            root = Path(module_file).resolve().parent
+            if class_file is None:
+                if self._actions():
+                    raise ValueError(
+                        f"Cannot create Environment {self.name!r}.\n"
+                        "Plural could not find the file that defines this class, so it "
+                        "cannot collect the Environment source.\n"
+                        "Define the class in a .py file."
+                    )
+                return
+            root = class_file.parent
         else:
             requested = Path(source).expanduser().resolve()
             root = requested.parent if requested.is_file() else requested
+        if class_file is None:
+            class_file = root
         self.source = PackageSource(
             kind="local",
             uri=str(root),
             digest=tree_digest(root),
             trusted=True,
         )
-        self._adapter_command = adapter
         self._package_root = root
-        if self._python_source is None:
-            class_source = inspect.getsourcefile(type(self))
-            if class_source is not None:
-                self._python_source = Path(class_source).resolve()
-        self._python_object = self._python_object or type(self).__qualname__
-        return self
+        self._python_source = class_file if class_file.is_file() else None
+        self._python_object = (
+            getattr(self, "_python_object", None)
+            or getattr(type(self), "_python_object", None)
+            or type(self).__qualname__
+        )
+        if self._python_source is not None:
+            try:
+                relative = self._python_source.relative_to(root).as_posix()
+            except ValueError:
+                relative = self._python_source.name
+            self._runner_ref = f"{relative}:{self._python_object}"
 
     @classmethod
     def from_config(cls, **fields: Any) -> Environment[Any, Any]:
         """Restore a serialized public Environment configuration.
 
         This is primarily used by :mod:`plural.project`; users normally author
-        Python subclasses and call :meth:`package`.
+        Python subclasses.
 
         Returns:
             An Environment backed by the validated serialized configuration.
@@ -300,7 +316,7 @@ class Environment(Generic[ObsT, StateT]):
     ) -> tuple[ObsT, dict[str, Any]]:
         """Start a new episode.
 
-        Follows the Gymnasium reset contract: ``(observation, info)``. The Job
+        Returns ``(observation, info)``. The Job
         or Harness calls this after attaching the Environment to a Task. It is
         not an Agent action and does not take a Task name. Subclasses override
         this to load the bound Task's initial state. ``options`` is harness
@@ -319,7 +335,7 @@ class Environment(Generic[ObsT, StateT]):
     ) -> tuple[ObsT, float, bool, bool, dict[str, Any]]:
         """Apply one Agent action.
 
-        Follows the Gymnasium step contract: ``(observation, reward,
+        Returns ``(observation, reward,
         terminated, truncated, info)``. ``action`` is a mapping with
         ``name`` plus parameters, an action name plus kwargs, or kwargs
         alone when the Environment has a single ``@action``.
@@ -435,17 +451,18 @@ class Environment(Generic[ObsT, StateT]):
         observation_type, state_type = self._declared_types()
         actions = self._actions()
         reset_command = tuple(self.reset_command)
-        if self._adapter_command is not None:
+        if actions and self._runner_ref is not None:
+            prefix = ("python", "-m", "plural.environments.runner", self._runner_ref)
             actions = tuple(
                 action.model_copy(
                     update={
                         "kind": "command",
-                        "command": (*self._adapter_command, action.name),
+                        "command": (*prefix, action.name),
                     }
                 )
                 for action in actions
             )
-            reset_command = (*self._adapter_command, "reset")
+            reset_command = (*prefix, "reset")
         return EnvironmentDefinition(
             name=self.name,
             version=self.version,

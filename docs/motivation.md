@@ -1,7 +1,7 @@
 ---
 route: /docs/motivation
 title: "Why Plural exists"
-order: 10
+order: 5
 description: "You cannot buy a best model for your work. You author the world, pin the score, and compare Agents without rewriting either one."
 audience: all
 nav: false

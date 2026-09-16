@@ -9,7 +9,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel
 
-from plural import Agent, Benchmark, Environment, Harness, HarnessOutput, Job, Task
+from plural import Agent, Benchmark, Environment, Harness, Job, Task
 from plural.domain import (
     AgentDefinition,
     AgentVerifier,
@@ -150,32 +150,42 @@ def scaffold_task(
 
 
 def scaffold_harness(directory: Path, name: str, *, force: bool = False) -> list[Path]:
-    """Create a runnable standalone Harness."""
+    """Create a class-based custom Harness."""
     directory.mkdir(parents=True, exist_ok=True)
-    harness = {
-        "kind": "harness",
-        "name": name,
-        "version": "0.1.0",
-        "description": "Custom Agent interaction loop.",
-        "command": ["python", "harness.py", "chat"],
-        "source": ".",
-        "capabilities": ["shell"],
-        "secrets": ["PLURAL_API_KEY", "OPENAI_API_KEY"],
-        "environment": [
-            "PLURAL_GATEWAY_URL",
-            "OPENAI_BASE_URL",
-            "PLURAL_ALLOW_NO_AUTH",
-        ],
-        "outputs": [{"path": "result.json"}],
-        "artifacts": [{"path": "trajectory.jsonl"}],
-        "trajectory": "trajectory.jsonl",
-    }
+    class_name = "".join(part.capitalize() for part in name.replace("-", "_").split("_"))
+    class_name = f"{class_name or 'Custom'}Harness"
+    harness = {"kind": "harness", "python": f"harness.py:{class_name}"}
     config = _create(directory / "harness.yaml", harness, force=force)
     runner = directory / "harness.py"
     if runner.exists() and not force:
         raise FileExistsError(f"{runner} already exists; pass --force to replace it")
     runner.write_text(
-        (Path(__file__).parents[1] / "harness" / "native_runner.py").read_text(encoding="utf-8"),
+        (
+            "from plural import (Harness, HarnessAgent, HarnessEnvironment, "
+            "HarnessResult, HarnessTask)\n\n\n"
+            f"class {class_name}(Harness):\n"
+            f"    name = {name!r}\n"
+            '    description = "Custom Agent interaction loop."\n\n'
+            "    def run(\n"
+            "        self,\n"
+            "        task: HarnessTask,\n"
+            "        agent: HarnessAgent,\n"
+            "        environment: HarnessEnvironment,\n"
+            "    ) -> HarnessResult:\n"
+            "        observation = environment.reset()\n"
+            "        completion = agent.complete(\n"
+            "            [\n"
+            '                {"role": "system", "content": agent.instructions},\n'
+            '                {"role": "user", "content": task.instructions},\n'
+            "                {\n"
+            '                    "role": "user",\n'
+            '                    "content": f"Current observation: {observation}",\n'
+            "                },\n"
+            "            ],\n"
+            "            tools=environment.tools(),\n"
+            "        )\n"
+            "        return HarnessResult(response=completion.text)\n"
+        ),
         encoding="utf-8",
     )
     return [config, runner]
@@ -193,11 +203,8 @@ def scaffold_agent(
     **_: Any,
 ) -> Path:
     """Create an Environment-independent Agent revision."""
-    package = (
-        load_harness_reference(str(harness_path), digest=harness_digest)
-        if harness_path is not None
-        else None
-    )
+    from plural.harness.builtins import BUILTIN_HARNESSES
+
     agent: dict[str, Any] = {
         "kind": "agent",
         "name": name,
@@ -206,8 +213,13 @@ def scaffold_agent(
         "secret_names": list(secret_names),
     }
     target = _target(path, "agent.yaml")
-    if package is not None:
-        agent["harness"] = yaml.safe_load(Resolver(root=target.parent).dumps(package))
+    if harness_path is not None:
+        reference = str(harness_path)
+        if reference in BUILTIN_HARNESSES:
+            agent["harness"] = reference
+        else:
+            package = load_harness_reference(reference, digest=harness_digest)
+            agent["harness"] = yaml.safe_load(Resolver(root=target.parent).dumps(package))
     return _create(target, agent, force=force)
 
 
@@ -360,30 +372,28 @@ def load_harness_reference(
 ) -> Harness:
     """Load a local Harness or immutable archive."""
     path = Path(reference).expanduser()
-    if path.exists() and (path.is_dir() or path.suffix in {".yaml", ".yml"}):
+    if path.exists() and (path.is_dir() or path.suffix in {".yaml", ".yml", ".py"}):
+        if path.suffix == ".py":
+            raise ValueError(
+                "A Python Harness reference must include its class, "
+                "for example harness.py:SupportHarness"
+            )
         return load_harness(path)
-    if digest is None:
-        raise ValueError("archive Harness references require --digest")
-    package = package_from_archive(reference, digest, cache_root=cache_root)
-    definition = package.definition
-    return Harness(
-        name=definition.name,
-        version=definition.revision,
-        description=definition.description,
-        command=definition.command,
-        source=reference,
-        digest=digest,
-        requirements=definition.requirements,
-        capabilities=definition.capabilities,
-        models=definition.supported_models,
-        auth=definition.auth_modes,
-        secrets=definition.secret_names,
-        environment=definition.environment_names,
-        healthcheck=definition.healthcheck,
-        outputs=tuple(HarnessOutput(**item.model_dump()) for item in definition.outputs),
-        artifacts=tuple(HarnessOutput(**item.model_dump()) for item in definition.artifacts),
-        trajectory=definition.trajectory_path,
-        tito=definition.tito_path,
+    if ":" in reference and Path(reference.rsplit(":", 1)[0]).expanduser().is_file():
+        source = Path(reference.rsplit(":", 1)[0]).expanduser().resolve()
+        value = Resolver(root=source.parent).load(f"{source.name}:{reference.rsplit(':', 1)[1]}")
+        if not isinstance(value, Harness):
+            raise TypeError(f"{reference} is not a Harness subclass")
+        return value
+    if digest is not None:
+        from plural.harness.models import LockedHarness
+
+        return LockedHarness.from_package(
+            package_from_archive(reference, digest, cache_root=cache_root)
+        )
+    raise ValueError(
+        "Custom Harnesses must be Python subclasses. Use harness.yaml, a "
+        "file.py:HarnessClass reference, or an immutable archive with --digest."
     )
 
 

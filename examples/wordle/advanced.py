@@ -1,31 +1,16 @@
 """Optional advanced extensions; the beginner Job does not need these."""
 
-from pathlib import Path
+from harness import WordleHarness
 
 from plural import (
     Agent,
     AgentVerifier,
-    Harness,
-    HarnessCapability,
     HumanVerifier,
     RubricCriterion,
 )
 from plural.environments import rewarder
 
-custom_harness = Harness(
-    name="custom-wordle-loop",
-    command=("python", "harness.py"),
-    source=str(Path(__file__).parent),
-    capabilities=frozenset({HarnessCapability.FILE_READ}),
-    outputs=("result.json",),
-    artifacts=(
-        "evidence.txt",
-        "trajectory.jsonl",
-        "state.json",
-        "observation.json",
-    ),
-    trajectory="trajectory.jsonl",
-)
+custom_harness = WordleHarness()
 custom_agent = Agent(model="openai/gpt-5.6-luna", harness=custom_harness)
 
 quality = RubricCriterion(name="quality", description="The play is efficient and correct.")

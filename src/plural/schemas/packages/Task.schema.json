@@ -162,9 +162,38 @@
           "title": "Config",
           "type": "object"
         },
+        "content": {
+          "anyOf": [
+            {
+              "maxLength": 1048576,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
         "content_type": {
           "default": "",
           "title": "Content Type",
+          "type": "string"
+        },
+        "delivery": {
+          "default": "descriptor",
+          "enum": [
+            "descriptor",
+            "source",
+            "inline",
+            "resolver"
+          ],
+          "title": "Delivery",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
           "type": "string"
         },
         "digest": {
@@ -204,6 +233,18 @@
           ],
           "default": null,
           "title": "Path"
+        },
+        "resolver": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolver"
         },
         "uri": {
           "anyOf": [
@@ -282,7 +323,7 @@
       "type": "object"
     },
     "NetworkMode": {
-      "description": "Requested sandbox network policy.\n\nHarbor names are canonical. Legacy Plural names remain aliases.",
+      "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
       "enum": [
         "public",
         "no-network",

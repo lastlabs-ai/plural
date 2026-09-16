@@ -4,7 +4,7 @@ title: "API reference"
 order: 240
 description: "Supported public Python API signatures from the current source."
 audience: all
-nav: true
+nav: false
 nav_group: Reference
 ---
 # API reference
@@ -674,7 +674,7 @@ Append a turn step for one model turn.
 transitions(self, *, source: "Literal['outcome', 'events', 'both']" = 'outcome') -> 'list[Transition]'
 ```
 
-Flatten this episode into Gymnasium-style transitions.
+Flatten this episode into step-by-step transitions.
 
 ```text
 Prefers :class:`Turn` steps. Falls back to grouping flat
@@ -1207,7 +1207,7 @@ Read hosted upload metadata when a prior sync was registered.
 
 ## plural.Environment
 
-A Task-bound world with a Gymnasium ``reset`` / ``step`` episode API.
+A Task-bound world with a ``reset`` / ``step`` episode API.
 
 ```text
 Compile typed declarations into one immutable execution view. A Task pins
@@ -1257,23 +1257,6 @@ persist(self, directory: 'str | Path' = '.') -> 'None'
 
 Write ``state.json``, ``observation.json``, and ``view.json``.
 
-### plural.Environment.package
-
-```python
-package(self, command: 'str | tuple[str, ...]', *, source: 'str | Path | None' = None) -> 'Environment[ObsT, StateT]'
-```
-
-Bind Python actions to a local source tree and command adapter.
-
-```text
-The adapter receives the action name as its final argument and JSON
-parameters on standard input. It should persist state between calls in
-its working directory. ``reset`` uses the same adapter.
-
-Returns:
-    This Environment, ready to place directly on a Task.
-```
-
 ### plural.Environment.from_config
 
 ```python
@@ -1284,7 +1267,7 @@ Restore a serialized public Environment configuration.
 
 ```text
 This is primarily used by :mod:`plural.project`; users normally author
-Python subclasses and call :meth:`package`.
+Python subclasses.
 
 Returns:
     An Environment backed by the validated serialized configuration.
@@ -1299,7 +1282,7 @@ reset(self, *, seed: 'int | None' = None, options: 'dict[str, Any] | None' = Non
 Start a new episode.
 
 ```text
-Follows the Gymnasium reset contract: ``(observation, info)``. The Job
+Returns ``(observation, info)``. The Job
 or Harness calls this after attaching the Environment to a Task. It is
 not an Agent action and does not take a Task name. Subclasses override
 this to load the bound Task's initial state. ``options`` is harness
@@ -1318,7 +1301,7 @@ step(self, action: 'Any' = None, /, **kwargs: 'Any') -> 'tuple[ObsT, float, bool
 Apply one Agent action.
 
 ```text
-Follows the Gymnasium step contract: ``(observation, reward,
+Returns ``(observation, reward,
 terminated, truncated, info)``. ``action`` is a mapping with
 ``name`` plus parameters, an action name plus kwargs, or kwargs
 alone when the Environment has a single ``@action``.
@@ -1478,7 +1461,29 @@ plural.environments.types.serialize_observation(value: 'Any') -> 'Any'
 
 ## plural.Harness
 
-An executable Agent interaction strategy.
+Base class for an Agent interaction loop.
+
+```text
+Subclasses implement :meth:`run`. Plural discovers and hashes the Python
+class directory, invokes ``run`` in the Environment Runtime, and emits the
+standard result, trajectory, and log artifacts.
+```
+
+### plural.Harness.model_post_init
+
+```python
+model_post_init(self, context: 'Any', /) -> 'None'
+```
+
+Bind the subclass source immediately after validation.
+
+### plural.Harness.run
+
+```python
+run(self, task: 'HarnessTask', agent: 'HarnessAgent', environment: 'HarnessEnvironment') -> 'HarnessResult | str | dict[str, Any] | Any'
+```
+
+Run one Agent against one Task and Environment.
 
 ## plural.SandboxProvider
 

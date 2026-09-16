@@ -170,11 +170,11 @@ def package_from_archive(
         raise ValueError("harness.yaml must contain a mapping")
     if payload.get("kind") == "harness" or not ({"definition", "manifest"} & payload.keys()):
         from plural.harness.models import Harness
+        from plural.project import Resolver
 
-        public_payload = dict(payload)
-        public_payload.pop("kind", None)
-        public_payload["source"] = str(root)
-        public = Harness.model_validate(public_payload)
+        public = Resolver(root=root).load("harness.yaml")
+        if not isinstance(public, Harness):
+            raise TypeError("archived harness.yaml did not resolve to a Harness subclass")
         return HarnessPackage.model_validate(
             {
                 "definition": public._package().definition,

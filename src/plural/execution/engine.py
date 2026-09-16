@@ -38,6 +38,7 @@ from plural.domain import (
     content_hash,
 )
 from plural.evidence import first_json_mapping
+from plural.execution.inputs import ResourceResolver, resource_uploads, runtime_values
 from plural.execution.policy import (
     ProjectPolicy,
     resolve_effective_policy,
@@ -137,8 +138,10 @@ def _harness_environment(
         for name in (
             "PLURAL_API_KEY",
             "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
             "PLURAL_GATEWAY_URL",
             "OPENAI_BASE_URL",
+            "ANTHROPIC_BASE_URL",
             "PLURAL_ALLOW_NO_AUTH",
         )
         if environ.get(name)
@@ -195,6 +198,8 @@ def _environment_payload(task: TaskDefinition) -> dict[str, Any]:
         "guardrails": [item.model_dump(mode="json") for item in environment.guardrails],
         "resources": [item.model_dump(mode="json") for item in environment.resources],
         "workspace": "/workspace/environment",
+        "variable_names": [item.name for item in environment.runtime.variables]
+        + [item.name for item in environment.secrets if item.target == "environment"],
         "actions": [item.model_dump(mode="json") for item in environment.actions],
         "reset_command": list(environment.reset_command),
     }
@@ -400,12 +405,14 @@ class Trial:
         store: JobStore,
         environ: Mapping[str, str],
         project_policy: ProjectPolicy,
+        resource_resolvers: Mapping[str, ResourceResolver] | None = None,
     ) -> None:
         self.spec = spec
         self.job_spec = job_spec
         self.provider_for = provider_for
         self.store = store
         self.environ = environ
+        self.resource_resolvers = resource_resolvers or {}
         self.project_policy = project_policy
         self._active: dict[tuple[str, str], SandboxHandle] = {}
 
@@ -463,6 +470,14 @@ class Trial:
         )
         try:
             harness_env, secrets = _harness_environment(agent, package, self.environ)
+            for target in ("environment", "harness"):
+                values, declared_secrets = runtime_values(
+                    task.environment, self.environ, target=target
+                )
+                harness_env.update(values)
+                secrets.update(declared_secrets)
+            runtime_values(task.environment, self.environ, target="verifier")
+            harness_env["PLURAL_RESOURCES_DIR"] = "/workspace/resources"
             await self._preflight_harness(provider, package)
             source = materialize_package(package)
             requirements = _requirements(task, package)
@@ -489,6 +504,8 @@ class Trial:
                         "model": agent.model,
                         "instructions": agent.agent.instructions,
                         "routing": agent.routing.model_dump(mode="json", exclude_none=True),
+                        "harness": package.definition.name,
+                        "harness_kwargs": agent.harness_kwargs,
                     },
                     model_resolution=self.spec.model.model_dump(mode="json"),
                     environment=_environment_payload(task),
@@ -747,20 +764,28 @@ class Trial:
 
     async def _stage_environment(self, provider: SandboxProvider, handle: SandboxHandle) -> None:
         source = self.task.environment.source
-        if source is None:
-            return
-        if source.kind == "oci":
-            raise ExecutionFailure(
-                ErrorCode.CONFIGURATION, "OCI Environment source staging is unsupported"
+        root = None
+        if source is not None:
+            if source.kind == "oci":
+                raise ExecutionFailure(
+                    ErrorCode.CONFIGURATION, "OCI Environment source staging is unsupported"
+                )
+            root = (
+                Path(source.uri).expanduser().resolve()
+                if source.kind == "local"
+                else retrieve_archive(source.uri, source.digest or "")
             )
-        root = (
-            Path(source.uri).expanduser().resolve()
-            if source.kind == "local"
-            else retrieve_archive(source.uri, source.digest or "")
+            if source.digest is not None and tree_digest(root) != source.digest:
+                raise ValueError("Environment source lock mismatch")
+            await provider.upload_bundle(handle, root, root="/workspace/environment")
+        uploads = await asyncio.to_thread(
+            resource_uploads,
+            self.task.environment.resources,
+            self.task.resources,
+            root,
+            self.resource_resolvers,
         )
-        if source.digest is not None and tree_digest(root) != source.digest:
-            raise ValueError("Environment source lock mismatch")
-        await provider.upload_bundle(handle, root, root="/workspace/environment")
+        await provider.upload_files(handle, uploads, root="/workspace/resources")
         if self.task.state:
             validate_task_state(
                 task_id=self.task.task_id,
@@ -1003,7 +1028,13 @@ class Trial:
                 ),
             )
             verifier_secrets = {
-                name: value for name, value in verifier_env.items() if name.endswith("_API_KEY")
+                name: value
+                for name, value in verifier_env.items()
+                if name.endswith("_API_KEY")
+                or name
+                in {
+                    item.name for item in self.task.environment.secrets if item.target == "verifier"
+                }
             }
             verifier_stdout = _redact_bytes(execution.stdout, verifier_secrets)
             verifier_stderr = _redact_bytes(execution.stderr, verifier_secrets)
@@ -1043,10 +1074,11 @@ class Trial:
             await provider.destroy(handle)
 
     def _verifier_env(self, verifier: VerifierDefinition | None) -> dict[str, str]:
-        if not isinstance(verifier, AgentVerifier):
-            return {}
-        names = ("PLURAL_GATEWAY_URL", "OPENAI_BASE_URL", "PLURAL_API_KEY", "OPENAI_API_KEY")
-        return {name: self.environ[name] for name in names if self.environ.get(name)}
+        values, _ = runtime_values(self.task.environment, self.environ, target="verifier")
+        if isinstance(verifier, AgentVerifier):
+            names = ("PLURAL_GATEWAY_URL", "OPENAI_BASE_URL", "PLURAL_API_KEY", "OPENAI_API_KEY")
+            values.update({name: self.environ[name] for name in names if self.environ.get(name)})
+        return values
 
     def _receipt(
         self,
@@ -1160,6 +1192,7 @@ class Job:
         registry: ProviderRegistry = default_registry,
         store: JobStore | None = None,
         environ: Mapping[str, str] | None = None,
+        resource_resolvers: Mapping[str, ResourceResolver] | None = None,
         progress: Callable[[TrialSpec, TrialResult], None] | None = None,
         project_policy: ProjectPolicy | None = None,
         catalog: ModelCatalog | None = None,
@@ -1172,6 +1205,7 @@ class Job:
         self.registry = registry
         self.store = store or JobStore()
         self.environ = os.environ if environ is None else environ
+        self.resource_resolvers = resource_resolvers or {}
         self.progress = progress
         allow_local = any(task.environment.runtime.allow_unsafe_local for task in spec.tasks)
         self.project_policy = project_policy or ProjectPolicy.permissive(
@@ -1216,6 +1250,7 @@ class Job:
                     provider_for=self._provider_for,
                     store=self.store,
                     environ=self.environ,
+                    resource_resolvers=self.resource_resolvers,
                     project_policy=self.project_policy,
                 )
                 await runtime._preflight_harness(
@@ -1281,6 +1316,7 @@ class Job:
                         provider_for=self._provider_for,
                         store=self.store,
                         environ=self.environ,
+                        resource_resolvers=self.resource_resolvers,
                         project_policy=self.project_policy,
                     )
                     self._trials.add(trial)

@@ -2,19 +2,20 @@
 route: /docs/sdk/evaluation
 title: Python SDK guide
 order: 111
-description: Build, serialize, plan, run, inspect, version, and review the canonical evaluation graph with the Python SDK.
+description: Build, run, inspect, and export evaluations using the Python SDK.
 audience: developers
 nav: true
 nav_group: Interfaces
 ---
 # Python SDK guide
 
-Python constructors are the semantic source for YAML and CLI.
+Use the Python SDK to compose an Environment, Tasks, Verifiers, and Agents into a Job. You can run the Job directly or export it to YAML for the CLI.
 
-## Golden flow
+## Build a Job
+
+The following example assumes you have created the support queue `environment` from the [tutorial](../tutorials/support-queue.md). Save this code in a Python file so Plural can load the Verifier function. Configure authentication with `plural auth login` before a live run.
 
 ```python
-from pathlib import Path
 from plural import Agent, Benchmark, Client, Episode, Job, Task, VerifierOutput
 from plural.verifiers import DeterministicVerifier
 
@@ -123,5 +124,4 @@ version, validate it, and repin dependents. Hosted `Client.create`,
 `Client.update`, and `Client.push` publish canonical revisions through the
 service; they do not make an existing published revision mutable.
 
-Use [Fields](../reference/fields.md) for every constructor field and
-[API reference](../reference/api.md) for method signatures.
+Constructor fields and method signatures follow the objects shown in this guide.

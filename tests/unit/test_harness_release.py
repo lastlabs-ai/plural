@@ -273,6 +273,8 @@ def test_vendor_adapter_invokes_installed_cli_and_translates(
 ) -> None:
     request = _request().model_dump_json() + "\n"
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PLURAL_ALLOW_NO_AUTH", "1")
+    monkeypatch.setenv("PLURAL_GATEWAY_URL", "http://127.0.0.1:9")
     monkeypatch.setattr(vendor_adapter.sys, "argv", ["vendor_adapter.py", "claude-code"])
     monkeypatch.setattr(vendor_adapter.sys, "stdin", io.StringIO(request))
     monkeypatch.setattr(vendor_adapter.shutil, "which", lambda _name: "/usr/bin/claude")

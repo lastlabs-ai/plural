@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
@@ -78,14 +80,81 @@ class EnvironmentResource(FrozenModel):
     digest: str | None = None
     content_type: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
+    description: str = ""
+    delivery: Literal["descriptor", "source", "inline", "resolver"] = "descriptor"
+    content: str | None = Field(default=None, max_length=1_048_576)
+    resolver: str | None = None
+
+    @model_validator(mode="after")
+    def _resource_delivery(self) -> EnvironmentResource:
+        if self.delivery == "descriptor":
+            if self.content is not None or self.resolver is not None:
+                raise ValueError("Choose inline or resolver delivery for resource content")
+            return self
+        path = self.path or ""
+        if (
+            not path
+            or "\\" in path
+            or path.startswith("/")
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+            or PurePosixPath(path).is_absolute()
+        ):
+            raise ValueError("Resource path must be a safe relative file path")
+        if self.delivery == "inline":
+            if self.content is None:
+                raise ValueError("Inline resources require text content")
+            digest = "sha256:" + hashlib.sha256(self.content.encode()).hexdigest()
+            if self.digest is not None and self.digest != digest:
+                raise ValueError("Resource content does not match its digest")
+            object.__setattr__(self, "digest", digest)
+        elif self.content is not None:
+            raise ValueError("Only inline resources can contain text")
+        if self.delivery == "resolver":
+            if not self.resolver or not self.uri or not self.digest:
+                raise ValueError("Resolved resources require a resolver, URI, and expected digest")
+        elif self.resolver is not None:
+            raise ValueError("Only resolver resources can name a resolver")
+        if self.digest is not None and SHA256_PATTERN.fullmatch(self.digest) is None:
+            raise ValueError("Resource digest must be sha256:<64 lowercase hex characters>")
+        return self
+
+
+class RuntimeVariable(FrozenModel):
+    """A launch-time variable declaration. Values are supplied to Job, never saved here."""
+
+    name: str = Field(pattern=r"^[A-Z_][A-Z0-9_]*$")
+    description: str = ""
+    required: bool = True
+    secret: bool = False
+    format: Literal["text", "url", "integer", "json"] = "text"
+
+    @field_validator("name")
+    @classmethod
+    def _application_name(cls, value: str) -> str:
+        if value in {
+            "PATH",
+            "HOME",
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "LD_PRELOAD",
+            "PLURAL_RESOURCES_DIR",
+        } or value.startswith(("DYLD_", "PLURAL_")):
+            raise ValueError("Runtime variables cannot replace execution or resource controls")
+        return value
 
 
 class SecretReference(FrozenModel):
-    """A named secret target declaration; package execution does not inject it yet."""
+    """A named credential supplied when a Job runs, with an explicit execution target."""
 
-    name: str = Field(min_length=1)
+    name: str = Field(pattern=r"^[A-Z_][A-Z0-9_]*$")
     required: bool = True
     target: Literal["environment", "harness", "verifier"] = "environment"
+    description: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def _application_name(cls, value: str) -> str:
+        return RuntimeVariable._application_name(value)
 
 
 class RewarderDefinition(FrozenModel):
@@ -113,6 +182,7 @@ class EnvironmentRuntime(FrozenModel):
 
     provider: str = Field(default="docker", min_length=1)
     placement: dict[str, str] = Field(default_factory=dict)
+    variables: tuple[RuntimeVariable, ...] = ()
     image: str | None = None
     snapshot: str | None = None
     declarative_image: DeclarativeImage | None = None
@@ -157,6 +227,9 @@ class EnvironmentRuntime(FrozenModel):
 
     @model_validator(mode="after")
     def _valid_runtime(self) -> EnvironmentRuntime:
+        names = [item.name for item in self.variables]
+        if len(names) != len(set(names)):
+            raise ValueError("Runtime variable names must be unique")
         if self.network_allowlist and self.network is not NetworkMode.ALLOWLIST:
             raise ValueError(
                 "Cannot create Runtime.\n"
@@ -444,6 +517,11 @@ class EnvironmentDefinition(FrozenModel):
     @model_validator(mode="after")
     def _unique_names(self) -> EnvironmentDefinition:
         semantic_version(self.version)
+        overlap = {item.name for item in self.runtime.variables} & {
+            item.name for item in self.secrets
+        }
+        if overlap:
+            raise ValueError("Declare each runtime variable or secret only once")
         for label, values in (
             ("action", self.actions),
             ("resource", self.resources),

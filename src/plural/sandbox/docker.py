@@ -271,6 +271,8 @@ class DockerProvider(SandboxProvider):
         """Execute argv and capture logs, enforcing a host-side timeout."""
         container = self._validate(handle)
         args = ["exec", "--workdir", request.cwd]
+        if request.user:
+            args.extend(["--user", request.user])
         if request.stdin is not None:
             args.append("--interactive")
         for name, value in sorted(request.env.items()):

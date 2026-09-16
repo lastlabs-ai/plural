@@ -1,5 +1,7 @@
 """A support queue authored with Plural's typed Environment API."""
 
+import json
+from pathlib import Path
 from typing import Any
 
 from plural import Environment, Observation, State, action
@@ -54,12 +56,22 @@ class SupportQueue(Environment[QueueObservation, QueueState]):
     name = "support-queue"
     version = "1.0.0"
     overview = "Inspect a customer ticket, categorize it, draft a reply, and resolve it."
-    reset_command = ("python", "commands.py", "reset")
 
     def __init__(self, *, ticket_id: str | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         info = self.info if isinstance(self.info, dict) else {}
         self._ticket_id = ticket_id or info.get("ticket_id")
+
+    def _bound_ticket_id(self) -> str | None:
+        if self._ticket_id:
+            return str(self._ticket_id)
+        path = Path("task.json")
+        if not path.exists():
+            return None
+        task = json.loads(path.read_text(encoding="utf-8"))
+        info = task.get("info") if isinstance(task.get("info"), dict) else {}
+        ticket = info.get("ticket_id") or task.get("name") or task.get("task_id")
+        return str(ticket) if ticket else None
 
     def observe(self) -> dict:
         self.observation = QueueObservation(
@@ -78,7 +90,7 @@ class SupportQueue(Environment[QueueObservation, QueueState]):
         """Load the Task-bound ticket. Called by the Job, not the Agent."""
         del options
         super().reset(seed=seed)
-        ticket_id = self._ticket_id
+        ticket_id = self._bound_ticket_id()
         if ticket_id not in TICKETS:
             raise ValueError("SupportQueue must be constructed for a Task ticket")
         ticket = TICKETS[ticket_id]

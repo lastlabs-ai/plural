@@ -2,14 +2,16 @@
 route: /docs/project/updating
 title: Updating and versioning
 order: 75
-description: Know what can change in source, what needs a new published version, and which Job, Trial, review, and artifact records are append-only.
+description: Update your project while preserving the versions and results behind earlier comparisons.
 audience: all
-nav: true
+nav: false
 nav_group: Build
 ---
 # Updating and versioning
 
-Plural separates editable source from immutable evidence.
+Edit your project freely while developing it. Once you publish a version or run an evaluation, preserve that record so future comparisons have a clear baseline.
+
+If you change a support policy, for example, create a new Environment version, update the affected Tasks, and create a new Benchmark version. Earlier results still describe the earlier policy.
 
 ## Before publication
 

@@ -19,7 +19,7 @@ def solved(episode: Episode) -> VerifierOutput:
     return VerifierOutput(reward=float(bool(episode.observation.get("solved"))))
 
 
-def test_task_bind_rejects_unpackaged_action_environment() -> None:
+def test_task_bind_accepts_action_environment_without_package_call() -> None:
     class Wordle(Environment):
         name = "wordle"
 
@@ -28,17 +28,17 @@ def test_task_bind_rejects_unpackaged_action_environment() -> None:
             return {"word": word}
 
     environment = Wordle(runtime=Runtime.docker())
-    with pytest.raises(ValidationError, match="Cannot create Task 'easy-01'") as exc:
-        Task(
-            name="easy-01",
-            instructions="Play.",
-            environment=environment,
-            verifiers=[DeterministicVerifier(name="solved", check=solved)],
-        )
-    message = str(exc.value)
-    assert "Environment 'wordle' is not packaged" in message
-    assert "Package it before binding" in message
-    assert "Runtime.docker()" in message
+    task = Task(
+        name="easy-01",
+        instructions="Play.",
+        environment=environment,
+        verifiers=[DeterministicVerifier(name="solved", check=solved)],
+    )
+    definition = environment.definition()
+    assert environment.source is not None
+    assert definition.reset_command[:3] == ("python", "-m", "plural.environments.runner")
+    assert definition.actions[0].command[-1] == "guess"
+    assert task.environment is environment
 
 
 def test_verifier_rejects_non_callable_check() -> None:

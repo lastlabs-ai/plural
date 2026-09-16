@@ -129,6 +129,47 @@
             "additionalProperties": true,
             "title": "Config",
             "type": "object"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "delivery": {
+            "default": "descriptor",
+            "enum": [
+              "descriptor",
+              "source",
+              "inline",
+              "resolver"
+            ],
+            "title": "Delivery",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "maxLength": 1048576,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content"
+          },
+          "resolver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolver"
           }
         },
         "required": [
@@ -154,6 +195,14 @@
             },
             "title": "Placement",
             "type": "object"
+          },
+          "variables": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/RuntimeVariable"
+            },
+            "title": "Variables",
+            "type": "array"
           },
           "image": {
             "anyOf": [
@@ -475,7 +524,7 @@
         "type": "object"
       },
       "NetworkMode": {
-        "description": "Requested sandbox network policy.\n\nHarbor names are canonical. Legacy Plural names remain aliases.",
+        "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
         "enum": [
           "public",
           "no-network",
@@ -615,12 +664,54 @@
         "title": "RewarderDefinition",
         "type": "object"
       },
-      "SecretReference": {
+      "RuntimeVariable": {
         "additionalProperties": false,
-        "description": "A named secret target declaration; package execution does not inject it yet.",
+        "description": "A launch-time variable declaration. Values are supplied to Job, never saved here.",
         "properties": {
           "name": {
-            "minLength": 1,
+            "pattern": "^[A-Z_][A-Z0-9_]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "secret": {
+            "default": false,
+            "title": "Secret",
+            "type": "boolean"
+          },
+          "format": {
+            "default": "text",
+            "enum": [
+              "text",
+              "url",
+              "integer",
+              "json"
+            ],
+            "title": "Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RuntimeVariable",
+        "type": "object"
+      },
+      "SecretReference": {
+        "additionalProperties": false,
+        "description": "A named credential supplied when a Job runs, with an explicit execution target.",
+        "properties": {
+          "name": {
+            "pattern": "^[A-Z_][A-Z0-9_]*$",
             "title": "Name",
             "type": "string"
           },
@@ -637,6 +728,11 @@
               "verifier"
             ],
             "title": "Target",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
             "type": "string"
           }
         },
@@ -755,213 +851,15 @@
     "type": "object"
   },
   "Harness": {
-    "$defs": {
-      "HarnessCapability": {
-        "description": "A capability requested by an agent harness.",
-        "enum": [
-          "shell",
-          "file_read",
-          "file_edit",
-          "code_execution",
-          "web_search",
-          "browser",
-          "network_fetch",
-          "mcp",
-          "subagents",
-          "persistence"
-        ],
-        "title": "HarnessCapability",
-        "type": "string"
-      },
-      "HarnessOutput": {
-        "additionalProperties": false,
-        "description": "One file produced by a Harness.",
-        "properties": {
-          "path": {
-            "minLength": 1,
-            "title": "Path",
-            "type": "string"
-          },
-          "required": {
-            "default": true,
-            "title": "Required",
-            "type": "boolean"
-          },
-          "media_type": {
-            "default": "application/octet-stream",
-            "title": "Media Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "path"
-        ],
-        "title": "HarnessOutput",
+    "additionalProperties": false,
+    "description": "Base class for an Agent interaction loop.\n\nSubclasses implement :meth:`run`. Plural discovers and hashes the Python\nclass directory, invokes ``run`` in the Environment Runtime, and emits the\nstandard result, trajectory, and log artifacts.",
+    "properties": {
+      "config": {
+        "additionalProperties": true,
+        "title": "Config",
         "type": "object"
       }
     },
-    "additionalProperties": false,
-    "description": "An executable Agent interaction strategy.",
-    "properties": {
-      "name": {
-        "minLength": 1,
-        "title": "Name",
-        "type": "string"
-      },
-      "version": {
-        "default": "0.1.0",
-        "title": "Version",
-        "type": "string"
-      },
-      "description": {
-        "default": "",
-        "title": "Description",
-        "type": "string"
-      },
-      "command": {
-        "items": {
-          "type": "string"
-        },
-        "minItems": 1,
-        "title": "Command",
-        "type": "array"
-      },
-      "source": {
-        "default": ".",
-        "title": "Source",
-        "type": "string"
-      },
-      "digest": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Digest"
-      },
-      "requirements": {
-        "default": [],
-        "items": {
-          "type": "string"
-        },
-        "title": "Requirements",
-        "type": "array"
-      },
-      "capabilities": {
-        "default": [],
-        "items": {
-          "$ref": "#/$defs/HarnessCapability"
-        },
-        "title": "Capabilities",
-        "type": "array",
-        "uniqueItems": true
-      },
-      "models": {
-        "default": [
-          "*"
-        ],
-        "items": {
-          "type": "string"
-        },
-        "title": "Models",
-        "type": "array"
-      },
-      "auth": {
-        "default": [
-          "environment"
-        ],
-        "items": {
-          "enum": [
-            "environment",
-            "api_key",
-            "oauth",
-            "none"
-          ],
-          "type": "string"
-        },
-        "title": "Auth",
-        "type": "array"
-      },
-      "secrets": {
-        "default": [],
-        "items": {
-          "type": "string"
-        },
-        "title": "Secrets",
-        "type": "array"
-      },
-      "environment": {
-        "default": [],
-        "items": {
-          "type": "string"
-        },
-        "title": "Environment",
-        "type": "array"
-      },
-      "healthcheck": {
-        "anyOf": [
-          {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Healthcheck"
-      },
-      "outputs": {
-        "default": [],
-        "items": {
-          "$ref": "#/$defs/HarnessOutput"
-        },
-        "title": "Outputs",
-        "type": "array"
-      },
-      "artifacts": {
-        "default": [],
-        "items": {
-          "$ref": "#/$defs/HarnessOutput"
-        },
-        "title": "Artifacts",
-        "type": "array"
-      },
-      "trajectory": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Trajectory"
-      },
-      "tito": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Tito"
-      }
-    },
-    "required": [
-      "name",
-      "command"
-    ],
     "title": "Harness",
     "type": "object"
   },
@@ -1183,6 +1081,47 @@
             "additionalProperties": true,
             "title": "Config",
             "type": "object"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "delivery": {
+            "default": "descriptor",
+            "enum": [
+              "descriptor",
+              "source",
+              "inline",
+              "resolver"
+            ],
+            "title": "Delivery",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "maxLength": 1048576,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content"
+          },
+          "resolver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolver"
           }
         },
         "required": [
@@ -1249,7 +1188,7 @@
         "type": "object"
       },
       "NetworkMode": {
-        "description": "Requested sandbox network policy.\n\nHarbor names are canonical. Legacy Plural names remain aliases.",
+        "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
         "enum": [
           "public",
           "no-network",
@@ -1515,7 +1454,7 @@
   "DeterministicVerifier": {
     "$defs": {
       "NetworkMode": {
-        "description": "Requested sandbox network policy.\n\nHarbor names are canonical. Legacy Plural names remain aliases.",
+        "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
         "enum": [
           "public",
           "no-network",
@@ -1755,7 +1694,7 @@
   "AgentVerifier": {
     "$defs": {
       "NetworkMode": {
-        "description": "Requested sandbox network policy.\n\nHarbor names are canonical. Legacy Plural names remain aliases.",
+        "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
         "enum": [
           "public",
           "no-network",
@@ -2111,211 +2050,15 @@
     "$defs": {
       "Harness": {
         "additionalProperties": false,
-        "description": "An executable Agent interaction strategy.",
+        "description": "Base class for an Agent interaction loop.\n\nSubclasses implement :meth:`run`. Plural discovers and hashes the Python\nclass directory, invokes ``run`` in the Environment Runtime, and emits the\nstandard result, trajectory, and log artifacts.",
         "properties": {
-          "name": {
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "version": {
-            "default": "0.1.0",
-            "title": "Version",
-            "type": "string"
-          },
-          "description": {
-            "default": "",
-            "title": "Description",
-            "type": "string"
-          },
-          "command": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Command",
-            "type": "array"
-          },
-          "source": {
-            "default": ".",
-            "title": "Source",
-            "type": "string"
-          },
-          "digest": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Digest"
-          },
-          "requirements": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Requirements",
-            "type": "array"
-          },
-          "capabilities": {
-            "default": [],
-            "items": {
-              "$ref": "#/$defs/HarnessCapability"
-            },
-            "title": "Capabilities",
-            "type": "array",
-            "uniqueItems": true
-          },
-          "models": {
-            "default": [
-              "*"
-            ],
-            "items": {
-              "type": "string"
-            },
-            "title": "Models",
-            "type": "array"
-          },
-          "auth": {
-            "default": [
-              "environment"
-            ],
-            "items": {
-              "enum": [
-                "environment",
-                "api_key",
-                "oauth",
-                "none"
-              ],
-              "type": "string"
-            },
-            "title": "Auth",
-            "type": "array"
-          },
-          "secrets": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Secrets",
-            "type": "array"
-          },
-          "environment": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Environment",
-            "type": "array"
-          },
-          "healthcheck": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Healthcheck"
-          },
-          "outputs": {
-            "default": [],
-            "items": {
-              "$ref": "#/$defs/HarnessOutput"
-            },
-            "title": "Outputs",
-            "type": "array"
-          },
-          "artifacts": {
-            "default": [],
-            "items": {
-              "$ref": "#/$defs/HarnessOutput"
-            },
-            "title": "Artifacts",
-            "type": "array"
-          },
-          "trajectory": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Trajectory"
-          },
-          "tito": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tito"
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
           }
         },
-        "required": [
-          "name",
-          "command"
-        ],
         "title": "Harness",
-        "type": "object"
-      },
-      "HarnessCapability": {
-        "description": "A capability requested by an agent harness.",
-        "enum": [
-          "shell",
-          "file_read",
-          "file_edit",
-          "code_execution",
-          "web_search",
-          "browser",
-          "network_fetch",
-          "mcp",
-          "subagents",
-          "persistence"
-        ],
-        "title": "HarnessCapability",
-        "type": "string"
-      },
-      "HarnessOutput": {
-        "additionalProperties": false,
-        "description": "One file produced by a Harness.",
-        "properties": {
-          "path": {
-            "minLength": 1,
-            "title": "Path",
-            "type": "string"
-          },
-          "required": {
-            "default": true,
-            "title": "Required",
-            "type": "boolean"
-          },
-          "media_type": {
-            "default": "application/octet-stream",
-            "title": "Media Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "path"
-        ],
-        "title": "HarnessOutput",
         "type": "object"
       }
     },
@@ -2393,10 +2136,19 @@
             "$ref": "#/$defs/Harness"
           },
           {
+            "type": "string"
+          },
+          {
             "type": "null"
           }
         ],
-        "default": null
+        "default": null,
+        "title": "Harness"
+      },
+      "harness_kwargs": {
+        "additionalProperties": true,
+        "title": "Harness Kwargs",
+        "type": "object"
       },
       "auth_mode": {
         "default": "environment",
@@ -2647,6 +2399,47 @@
             "additionalProperties": true,
             "title": "Config",
             "type": "object"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "delivery": {
+            "default": "descriptor",
+            "enum": [
+              "descriptor",
+              "source",
+              "inline",
+              "resolver"
+            ],
+            "title": "Delivery",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "maxLength": 1048576,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content"
+          },
+          "resolver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolver"
           }
         },
         "required": [
@@ -2713,7 +2506,7 @@
         "type": "object"
       },
       "NetworkMode": {
-        "description": "Requested sandbox network policy.\n\nHarbor names are canonical. Legacy Plural names remain aliases.",
+        "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
         "enum": [
           "public",
           "no-network",

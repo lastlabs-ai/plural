@@ -1,7 +1,7 @@
 {
   "$defs": {
     "NetworkMode": {
-      "description": "Requested sandbox network policy.\n\nHarbor names are canonical. Legacy Plural names remain aliases.",
+      "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
       "enum": [
         "public",
         "no-network",

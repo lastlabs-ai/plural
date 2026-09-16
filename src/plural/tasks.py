@@ -130,11 +130,9 @@ def _task_bind_errors(task: Task) -> list[str]:
     ):
         errors.append(
             f"Cannot create Task {task.name!r}.\n"
-            f"Environment {environment.name!r} is not packaged, so a Job cannot "
-            "execute its actions.\n"
-            "Package it before binding:\n"
-            f"  environment = {type(environment).__name__}(runtime=Runtime.docker())"
-            '.package(("python", "commands.py"))'
+            f"Environment {environment.name!r} has @action methods but no source "
+            "tree, so a Job cannot execute them.\n"
+            "Define the Environment class in a .py file next to the files it needs."
         )
     if not task.verifiers:
         errors.append(

@@ -69,7 +69,7 @@ lines = [
     "order: 240",
     'description: "Supported public Python API signatures from the current source."',
     "audience: all",
-    "nav: true",
+    "nav: false",
     "nav_group: Reference",
     "---",
     "# API reference",

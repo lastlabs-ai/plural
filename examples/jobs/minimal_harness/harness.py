@@ -1,29 +1,20 @@
-"""Credential-free custom Harness example."""
+"""Credential-free class-based custom Harness example."""
 
 from __future__ import annotations
 
-import json
-import sys
-from pathlib import Path
+from plural import Harness, HarnessResult
 
-request = json.loads(sys.stdin.readline())
-task = request["task"]
-response = f"offline response for {task['task_id']}: {task['instructions']}"
-Path("result.json").write_text(json.dumps({"response": response}) + "\n", encoding="utf-8")
-Path("evidence.txt").write_text(response + "\n", encoding="utf-8")
-Path("trajectory.jsonl").write_text(
-    json.dumps({"type": "response", "text": response}) + "\n",
-    encoding="utf-8",
-)
-print(
-    json.dumps(
-        {
-            "type": "result",
-            "status": "succeeded",
-            "outputs": ["result.json"],
-            "artifacts": ["evidence.txt", "trajectory.jsonl"],
-            "trace_id": f"offline-{task['task_id']}",
-        },
-        sort_keys=True,
-    )
-)
+
+class ExampleHarness(Harness):
+    """Return a deterministic response without calling a model."""
+
+    name = "example-harness"
+    auth = ("none",)
+
+    def run(self, task, agent, environment):
+        response = f"offline response for {task.id}: {task.instructions}"
+        return HarnessResult(
+            response=response,
+            trajectory=({"type": "response", "text": response},),
+            trace_id=f"offline-{task.id}",
+        )

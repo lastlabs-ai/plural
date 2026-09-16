@@ -19,7 +19,7 @@ class SandboxModel(BaseModel):
 class NetworkMode(str, Enum):
     """Requested sandbox network policy.
 
-    Harbor names are canonical. Legacy Plural names remain aliases.
+    Use public, no-network, or allowlist to configure outbound access.
     """
 
     PUBLIC = "public"
@@ -261,6 +261,7 @@ class ExecRequest(SandboxModel):
     env: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: float | None = Field(default=None, gt=0)
     stdin: bytes | None = None
+    user: str | None = None
     capture_logs: bool = True
 
     @field_validator("command")

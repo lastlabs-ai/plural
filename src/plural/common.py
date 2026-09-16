@@ -202,6 +202,7 @@ class HarnessDefinition(FrozenModel):
     protocol_adapter: Literal["acp-client-v1"] | None = None
     implementation: Literal["declared", "runnable"] = "declared"
     command: tuple[str, ...] = ()
+    setup: tuple[tuple[str, ...], ...] = ()
     requirements: tuple[str, ...] = ()
     capabilities: frozenset[HarnessCapability] = frozenset()
     supported_models: tuple[str, ...] = ("*",)
@@ -244,6 +245,9 @@ class HarnessDefinition(FrozenModel):
             raise ValueError("tito_path must be declared in artifacts")
         if self.implementation == "runnable" and not self.command:
             raise ValueError("runnable harnesses require a command")
+        for command in self.setup:
+            if not command or any(not item.strip() for item in command):
+                raise ValueError("setup commands must be non-empty argv tuples")
         return self
 
 

@@ -131,9 +131,12 @@ class LocalProvider(SandboxProvider):
             "PLURAL_SANDBOX_ROOT": str(root),
             **request.env,
         }
+        command = resolve_local_command(request.command)
+        if request.user and request.user not in {"root", ""}:
+            command = ["sudo", "-n", "-u", request.user, "--", *command]
         started = time.monotonic()
         process = await asyncio.create_subprocess_exec(
-            *resolve_local_command(request.command),
+            *command,
             cwd=cwd,
             env=env,
             stdin=asyncio.subprocess.PIPE

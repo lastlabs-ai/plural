@@ -1,8 +1,19 @@
-"""Public Harness authoring."""
+"""Public class-based Harness authoring."""
 
-from plural.harness.models import Harness, HarnessOutput
+from plural.harness.interface import (
+    HarnessAgent,
+    HarnessCompletion,
+    HarnessEnvironment,
+    HarnessResult,
+    HarnessTask,
+)
+from plural.harness.models import Harness
 
 __all__ = [
     "Harness",
-    "HarnessOutput",
+    "HarnessAgent",
+    "HarnessCompletion",
+    "HarnessEnvironment",
+    "HarnessResult",
+    "HarnessTask",
 ]

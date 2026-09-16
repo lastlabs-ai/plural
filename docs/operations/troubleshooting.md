@@ -4,7 +4,7 @@ title: Troubleshooting
 order: 260
 description: Find the failing stage and resolve installation, policy, execution, or scoring problems.
 audience: all
-nav: true
+nav: false
 nav_group: Operations
 outcome: You can diagnose a run without confusing a runtime failure with a low score.
 ---
@@ -16,7 +16,7 @@ Start by identifying the stage that failed: installation, graph validation, runt
 
 Activate the environment where Plural is installed. Run
 `python -m pip show plural` and `plural --help`, then compare with the
-[generated CLI reference](../reference/cli-commands.md).
+[CLI command reference](../cli/evaluation.md#command-reference).
 
 ## A YAML field is rejected
 
@@ -31,8 +31,9 @@ Paths in Task, Benchmark, and Job files resolve relative to the file that contai
 ## A verifier fails at bind time or scoring
 
 Constructing `Task(..., environment=..., verifiers=...)` fails unless the
-Environment is packaged and each DeterministicVerifier `check` is a function
-(or a resolvable `path.py:object` / command) that accepts an `Episode`. The
+Environment class lives in a `.py` file and each DeterministicVerifier
+`check` is a function (or a resolvable `path.py:object` / command) that
+accepts an `Episode`. The
 function receives the full final observation, State, trajectory, artifacts,
 and usage. If the function returns the wrong shape, the Trial fails closed
 with a message that names the Verifier and the expected `VerifierOutput`.

@@ -5,7 +5,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel
 from typer.testing import CliRunner
 
@@ -143,11 +142,15 @@ def _training_benchmark_graph(tmp_path: Path) -> tuple[Path, Path]:
         task_paths=(first_task, second_task),
     )
     scaffold_harness(harness, "training-harness")
-    harness_yaml = harness / "harness.yaml"
-    payload = yaml.safe_load(harness_yaml.read_text(encoding="utf-8"))
-    payload["tito"] = "tito.jsonl"
-    payload["artifacts"].append({"path": "tito.jsonl"})
-    harness_yaml.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    harness_source = harness / "harness.py"
+    source = harness_source.read_text(encoding="utf-8")
+    harness_source.write_text(
+        source.replace(
+            '    description = "Custom Agent interaction loop."\n',
+            '    description = "Custom Agent interaction loop."\n    supports_tito = True\n',
+        ),
+        encoding="utf-8",
+    )
     scaffold_agent(
         agent,
         name="candidate",

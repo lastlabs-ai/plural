@@ -2,98 +2,100 @@
 route: /docs/interfaces/yaml
 title: YAML and serialization
 order: 125
-description: Serialize the Python evaluation graph losslessly with identical public field names, defaults, references, and hashes.
+description: Configure the same Tasks, Agents, and Jobs in YAML, with Python files supplying executable behavior.
 audience: all
 nav: true
 nav_group: Interfaces
 ---
 # YAML and serialization
 
-YAML is a lossless public serialization of Python SDK objects. It is not a
-second configuration model.
+Use Python to define behavior and YAML to organize reusable configuration. Both describe the same Plural objects and produce the same Job plan when their values match.
 
-## One object per file
+## Start with a small configuration
+
+An Agent file can contain just the values you want to set:
 
 ```yaml
 kind: agent
-model: openai/gpt-5.6-luna
 name: careful
-version: 1.0.0
-provider: null
-instructions: Use the available actions.
-fallback_models: []
-temperature: null
-max_tokens: null
-harness: null
-auth_mode: environment
-secret_names: []
-metadata: {}
+model: openai/gpt-5.6-luna
+instructions: Use the available actions and check the result before finishing.
 ```
 
-Dumped YAML includes defaults. Human-authored YAML may omit optional defaults;
-loading produces the same values.
+To attach a built-in Harness, keep the name compact. Do not embed a generated Harness object:
 
-References are relative to the containing file:
+```yaml
+kind: agent
+name: support-claude
+model: anthropic/claude-sonnet-5
+harness: claude-code
+harness_kwargs:
+  reasoning_effort: high
+```
+
+Custom Harness behavior stays in Python. Reference its class directly:
+
+```yaml
+kind: agent
+name: support-custom
+model: openai/gpt-5.6-luna
+harness: harness.py:SupportHarness
+```
+
+Plural loads the subclass, hashes its directory, and calls its `run` method.
+There is no command or source block to keep in sync.
+
+Optional fields use the same defaults as the Python SDK. Exported YAML may include those defaults explicitly.
+
+## Reference other files
+
+Paths resolve relative to the file that contains the reference. For example, `tasks/ticket-1.yaml` can use:
 
 ```yaml
 kind: task
 name: ticket-1
 version: 1.0.0
-instructions: Resolve the support ticket.
-goals: []
+instructions: Inspect, categorize, answer, and resolve the ticket.
 info:
   ticket_id: ticket-1
-metadata: {}
 environment: ../environment/environment.yaml
 verifiers:
   - ../verifiers/correct.yaml
-resources: []
-initial_state: {}
-reset_options: {}
 ```
 
-And a Job:
+A Job selects a Benchmark and the Agents to run:
 
 ```yaml
 kind: job
 source: benchmark.yaml
 agents:
   - agents/careful.yaml
-mode: eval
-attempts: 1
-concurrency: 1
-per_runtime_concurrency: 1
-priority: 0
-retry:
-  max_retries: 0
-  initial_backoff_seconds: 0.25
-  max_backoff_seconds: 10.0
-  multiplier: 2.0
-  retryable_codes:
-    - rate_limited
-    - provider_unavailable
-    - timeout
-    - runtime_unavailable
+  - agents/concise.yaml
+attempts: 2
+concurrency: 2
 ```
 
-## Python-backed Environments
+The default mode is `eval`. With three Tasks and two Agents, this Job plans twelve Trials: two attempts for each Agent and Task pair.
 
-YAML can reference an Environment subclass and its package adapter:
+## Include Python behavior
+
+An Environment needs executable code as well as configuration. This file references a class beside it and supplies the required Runtime:
 
 ```yaml
 kind: environment
 python: world.py:SupportQueue
 name: support-queue
 version: 1.0.0
-package:
-  command: [python, commands.py]
-  source: .
+runtime:
+  provider: local
+  allow_unsafe_local: true
 ```
 
-Generate this form with `plural.project.dump`, which records the source digest;
-do not hand-copy a stale digest.
+Plural loads the class and hashes its source directory. The [support queue tutorial](../tutorials/support-queue.md) provides the implementation and generates its YAML for you.
 
-## Round-trip guarantee
+## Export and reload
+
+Given a Python `job` object:
 
 ```python
 from plural.project import dump, load
@@ -104,10 +106,14 @@ assert restored.content_hash == job.content_hash
 assert restored.plan == job.plan
 ```
 
-The resolver also supports inline nested objects and `{ref: path}` or
-`{$ref: path}` mappings. Prefer simple path references in maintained projects
-so each authored object can be reviewed and versioned independently.
+Or export from the CLI:
 
-Use only the object and field names shown in this guide and the generated field
-catalog. Implementation and migration records are not part of the public
-authoring graph.
+```bash
+plural export job.py:job --output job.yaml
+plural validate job.yaml
+plural run job.yaml --dry-run
+```
+
+Use `dump` or `plural export` to generate source references and hashes. Keep generated configuration outside source directories when writing it would change a packaged source hash.
+
+Inline nested objects and reference mappings are also supported. Simple file paths usually make larger projects easier to review.

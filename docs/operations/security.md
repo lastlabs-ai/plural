@@ -2,15 +2,14 @@
 route: /docs/operations/security
 title: Security
 order: 934
-description: Understand Runtime isolation, information visibility, current secret handling, package integrity, evidence access, provider trust, and remaining limits.
+description: Choose isolation, credential handling, and evidence access for your evaluation workflow.
 audience: all
-nav: true
+nav: false
 nav_group: Operations
 ---
 # Security
 
-Plural validates policy and records provenance; it does not make arbitrary
-Agent, Environment, Harness, Verifier, provider, or artifact code trustworthy.
+Choose isolation and data access to match the code and information in your evaluation. Plural checks declared Runtime controls and records what ran; you remain responsible for which code, providers, and people you trust.
 
 ## Choose the process boundary
 
@@ -61,13 +60,11 @@ currently unsigned and self-reported. Imported runs are marked
 
 ## Minimize capability
 
-Start with no network, a pinned image, low compute and time limits,
-read-only-root where supported, scoped actions, and no optional Harness
-capabilities. Add only the controls required by the Task.
+Use a pinned image, modest compute and time limits, focused actions, and a read-only root where supported. Allow access to the model endpoint and other services the Task needs. For a fully offline workflow, block networking with a supporting Runtime. Grant optional Harness capabilities only when the workflow requires them.
 
 Hosted project policy is an additional ceiling; it cannot make a permissive
 Environment more restrictive inside a provider that lacks enforcement.
 
-Read [Runtime](../project/runtime.md), [Artifacts and evidence](../running/artifacts.md),
+Read [Runtime](../project/environments.md#runtime), [Artifacts and evidence](../running/artifacts.md),
 and [Known limitations](../reference/limitations.md) before processing
 sensitive data.
