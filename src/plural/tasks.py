@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, Literal
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -11,6 +11,9 @@ from plural.common import FrozenModel, content_hash, semantic_version, stable_id
 from plural.environments.definition import EnvironmentDefinition, EnvironmentResource
 from plural.environments.env import Environment
 from plural.verifiers import DeterministicVerifier, VerifierDefinition, WeightedVerifier
+
+if TYPE_CHECKING:
+    from plural.client import Client
 
 
 def _json_type_name(value: Any) -> str:
@@ -167,6 +170,21 @@ def _task_bind_errors(task: Task) -> list[str]:
     return errors
 
 
+def _hosted_slug(value: Any, kind: str) -> str:
+    """Return the hosted slug or id for a bound Environment or Verifier."""
+    from plural.studio import slugify
+
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        raw = value.get("slug") or value.get("name")
+    else:
+        raw = getattr(value, "slug", None) or getattr(value, "name", None)
+    if isinstance(raw, str) and raw:
+        return slugify(raw)
+    raise ValueError(f"Task {kind} {value!r} does not name a hosted slug or id")
+
+
 class Task(FrozenModel):
     """One versioned unit of work in a Python-authored Environment."""
 
@@ -269,11 +287,17 @@ class Task(FrozenModel):
         """Stable Task identifier."""
         return stable_id("tsk", self)
 
-    def _definition(self) -> TaskDefinition:
+    def definition(self) -> TaskDefinition:
         """Compile this Task into the current execution contract.
 
+        This is the same local-object to hosted-revision bridge that
+        ``Environment.definition()`` provides: ``client.create()``,
+        ``client.update()``, and ``client.push()`` all accept the compiled
+        definition, so a public ``Task`` works with the hosted APIs exactly
+        like a public ``Environment`` does.
+
         Returns:
-            The internal immutable execution definition.
+            The immutable execution definition used by Jobs and hosted publication.
         """
         return TaskDefinition(
             task_id=self.name,
@@ -292,6 +316,75 @@ class Task(FrozenModel):
             state=self.initial_state,
             reset_options=self.reset_options,
         )
+
+    def _definition(self) -> TaskDefinition:
+        """Compile this Task into the current execution contract.
+
+        Returns:
+            The internal immutable execution definition.
+        """
+        return self.definition()
+
+    def push(
+        self,
+        client: Client | None = None,
+        *,
+        environment_revision_id: str | None = None,
+        verifier_revision_ids: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Publish this Task as a hosted revision, creating its parent by slug.
+
+        This mirrors ``client.tasks.push()``, so the revision-id contract is
+        unchanged: pass explicit ids to pin exact dependencies, or omit them
+        to resolve each bound Environment and Verifier to its current
+        published revision in the same project, exactly like
+        ``plural task push`` does for ``task.yaml`` slugs.
+
+        Args:
+            client: Configured hosted client. Defaults to ambient configuration
+                (``PLURAL_API_KEY`` and friends) when omitted.
+            environment_revision_id: Exact hosted Environment revision to pin.
+            verifier_revision_ids: Exact hosted Verifier revisions, aligned
+                with this Task's verifiers.
+
+        Returns:
+            The hosted task revision record.
+        """
+        from plural.client import Client
+        from plural.studio import resolve_published_revision
+
+        active = client if client is not None else Client()
+        if environment_revision_id is None:
+            environment_revision_id, _ = resolve_published_revision(
+                active.environments,
+                "environment",
+                _hosted_slug(self.environment, "environment"),
+            )
+        if verifier_revision_ids is None:
+            verifier_revision_ids = [
+                resolve_published_revision(
+                    active.verifiers, "verifier", _hosted_slug(verifier, "verifier")
+                )[0]
+                for verifier in self.verifiers
+            ]
+        return active.tasks.push(
+            self.definition(),
+            environment_revision_id=environment_revision_id,
+            verifier_revision_ids=list(verifier_revision_ids),
+        )
+
+    def delete(self, client: Client | None = None) -> None:
+        """Delete this Task's hosted parent and all of its revisions.
+
+        Args:
+            client: Configured hosted client. Defaults to ambient configuration
+                when omitted.
+        """
+        from plural.client import Client
+        from plural.studio import slugify
+
+        active = client if client is not None else Client()
+        active.tasks.delete(slugify(self.name))
 
 
 class TaskDefinition(FrozenModel):
@@ -351,7 +444,7 @@ class BenchmarkDefinition(FrozenModel):
     revision: str = Field(default="0.1.0", min_length=1)
     source_hash: str | None = None
     tasks: tuple[TaskDefinition, ...] = Field(min_length=1)
-    primary_metric: str = "reward"
+    primary_metric: str = "score"
     description: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -415,7 +508,7 @@ class Benchmark(FrozenModel):
     name: str = Field(min_length=1)
     version: str
     tasks: tuple[Task, ...] = Field(min_length=1)
-    primary_metric: str = "reward"
+    primary_metric: str = "score"
     description: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 

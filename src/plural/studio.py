@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 from urllib.parse import quote
 
@@ -43,6 +43,59 @@ T = TypeVar("T", bound=BaseModel)
 def slugify(name: str, *, fallback: str = "item") -> str:
     """Return a project-safe resource slug."""
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:80] or fallback
+
+
+def resolve_published_revision(api: Any, kind: str, reference: str) -> tuple[str, dict[str, Any]]:
+    """Resolve a hosted slug to its current published revision.
+
+    Args:
+        api: Hosted environments or verifiers API.
+        kind: Human-readable resource kind used in errors.
+        reference: Hosted slug or id in the current project scope.
+
+    Returns:
+        The current revision id and revision payload.
+    """
+    try:
+        parent = api.get(reference)
+    except NotFoundError as exc:
+        raise ValueError(f"Unknown {kind} {reference!r} in the current project") from exc
+    if not isinstance(parent, Mapping):
+        raise ValueError(f"Hosted {kind} {reference!r} returned an invalid parent")
+    parent_id = parent.get("id") or reference
+    current_id = parent.get("current_revision_id")
+    if isinstance(current_id, str) and current_id:
+        try:
+            revision = api.revision(parent_id, current_id)
+        except NotFoundError as exc:
+            raise ValueError(
+                f"Hosted {kind} {reference!r} points to a missing current revision"
+            ) from exc
+        if not isinstance(revision, Mapping):
+            raise ValueError(f"Hosted {kind} {reference!r} returned an invalid revision")
+        return current_id, dict(revision)
+    revisions = api.revisions(parent_id)
+    published = [
+        item
+        for item in revisions
+        if isinstance(item, Mapping) and item.get("status") == "published"
+    ]
+    if not published:
+        raise ValueError(
+            f"Hosted {kind} {reference!r} has no published revision; publish one first"
+        )
+    revision = max(
+        published,
+        key=lambda item: (
+            str(item.get("published_at") or ""),
+            str(item.get("version") or ""),
+            str(item.get("id") or ""),
+        ),
+    )
+    revision_id = revision.get("id")
+    if not isinstance(revision_id, str) or not revision_id:
+        raise ValueError(f"Hosted {kind} {reference!r} returned an invalid revision")
+    return revision_id, dict(revision)
 
 
 def studio_base_url(gateway_base: str) -> str:
@@ -648,6 +701,7 @@ __all__ = [
     "create_object",
     "environment_definition",
     "push_object",
+    "resolve_published_revision",
     "slugify",
     "studio_base_url",
     "update_object",

@@ -93,11 +93,74 @@ def test_reset_and_step_follow_gymnasium() -> None:
     )
     assert observation.count == 2
     assert environment.state.count == 2
-    assert reward == 0
+    # The `progress` rewarder scored this transition and its weight applied.
+    assert reward == 2
+    assert info["rewards"] == [{"name": "progress", "weight": 2.0, "value": 1.0}]
     assert terminated is False
     assert truncated is False
-    assert info == {}
     assert [item.name for item in environment.definition().actions] == ["increment"]
+
+
+def test_environment_does_not_terminate_unless_it_says_so() -> None:
+    class Quiet(Environment[Observation, CounterState]):
+        name = "quiet"
+
+        @action
+        def touch(self) -> dict[str, bool]:
+            """Mark the observation done without declaring termination."""
+            self.observation.metadata["done"] = True
+            return {"ok": True}
+
+    environment = Quiet(runtime=Runtime.docker())
+    _observation, _reward, terminated, truncated, _info = environment.step("touch")
+    assert terminated is False
+    assert truncated is False
+
+
+def test_rewarder_failure_does_not_fail_the_step() -> None:
+    class Fragile(Environment[Observation, CounterState]):
+        name = "fragile"
+
+        @action
+        def bump(self) -> dict[str, int]:
+            """Advance the counter."""
+            self.state.count += 1
+            return {"count": self.state.count}
+
+        @rewarder
+        def broken(self, previous_state, current_state, action, result) -> float:
+            """Fail on purpose."""
+            raise RuntimeError("judge unavailable")
+
+    environment = Fragile(runtime=Runtime.docker())
+    _observation, reward, _terminated, _truncated, info = environment.step("bump")
+    assert environment.state.count == 1
+    assert reward == 0
+    assert info["rewards"][0]["error"] == "judge unavailable"
+
+
+def test_reward_method_and_rewarders_combine() -> None:
+    class Scored(Environment[Observation, CounterState]):
+        name = "scored"
+
+        @action
+        def bump(self) -> dict[str, int]:
+            """Advance the counter."""
+            self.state.count += 1
+            return {"count": self.state.count}
+
+        def reward(self, previous_state, current_state, action, result) -> float:
+            return 0.5
+
+        @rewarder(weight=3)
+        def progress(self, previous_state, current_state, action, result) -> float:
+            """Reward any advance."""
+            return 1.0
+
+    environment = Scored(runtime=Runtime.docker())
+    _observation, reward, _terminated, _truncated, info = environment.step("bump")
+    assert reward == 3.5
+    assert [item["name"] for item in info["rewards"]] == ["reward", "progress"]
 
 
 def test_reset_cannot_be_an_action() -> None:

@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from plural.agents import AgentBinding
 from plural.catalog import ModelCatalog
@@ -56,9 +56,11 @@ from plural.sandbox import (
 from plural.tasks import TaskDefinition, validate_task_state
 from plural.trajectory import normalize_trajectory
 from plural.verifiers import (
+    STOP_REASONS,
     AgentVerifier,
     DeterministicVerifier,
     Episode,
+    EpisodeOutcome,
     EpisodeUsage,
     HumanVerifier,
     VerifierDefinition,
@@ -331,6 +333,35 @@ def _normalized_trajectory_artifact(
     return _json_artifact("trajectory.normalized.json", normalized.model_dump(mode="json"))
 
 
+def _step_rewards(artifacts: Sequence[DownloadedFile]) -> tuple[dict[str, Any], ...]:
+    """Return the per-step reward records the Harness recorded for this episode."""
+    source = _trajectory_source(artifacts)
+    if source is None:
+        return ()
+    try:
+        trajectory = normalize_trajectory(source.data)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return ()
+    return tuple(event.payload for event in trajectory.events if event.kind == "reward")
+
+
+def _episode_outcome(artifacts: Sequence[DownloadedFile]) -> EpisodeOutcome:
+    """Read how the episode ended from the Harness result."""
+    result = first_json_mapping(artifacts, ("result.json", "final-result.json", "output.json"))
+    if not result:
+        return EpisodeOutcome()
+    reported = str(result.get("stop_reason") or "")
+    return EpisodeOutcome(
+        # A third-party Harness may report anything; an unknown reason reads as
+        # unreported here and is rejected outright at the hosted API boundary.
+        stop_reason=cast(Any, reported if reported in STOP_REASONS else ""),
+        terminated=bool(result.get("terminated")),
+        truncated=bool(result.get("truncated")),
+        turns=int(result.get("turns") or 0),
+        total_reward=float(result.get("total_reward") or 0),
+    )
+
+
 def _trajectory_cost(artifacts: Sequence[DownloadedFile]) -> float | None:
     source = _trajectory_source(artifacts)
     if source is None:
@@ -580,9 +611,7 @@ class Trial:
 
             if self.job_spec.mode is JobMode.TRAIN:
                 tito = _validate_tito(package, artifacts)
-                rewarder_results = await self._run_rewarders(artifacts, trace_id)
-            else:
-                rewarder_results = ()
+            self._emit_step_rewards(_step_rewards(artifacts))
 
             self.store.emit(
                 self.spec.job_id,
@@ -597,16 +626,15 @@ class Trial:
                 observation=environment_observation,
                 state=environment_state,
             )
-            all_results = (*rewarder_results, *verifier_results)
             artifacts = _with_artifact(
                 artifacts,
                 _json_artifact(
                     "verifier-results.json",
-                    [item.model_dump(mode="json") for item in all_results],
+                    [item.model_dump(mode="json") for item in verifier_results],
                 ),
             )
             awaiting = any(item.status == "awaiting_review" for item in verifier_results)
-            reward, scores = _aggregate(task, all_results)
+            score, scores = _aggregate(task, verifier_results)
             status: Literal["succeeded", "awaiting_review"] = (
                 "awaiting_review" if awaiting else "succeeded"
             )
@@ -623,7 +651,7 @@ class Trial:
             result = TrialResult(
                 status=status,
                 receipt=receipt,
-                reward=None if awaiting else reward,
+                score=None if awaiting else score,
                 scores={} if awaiting else scores,
                 verifier_results=verifier_results,
                 trace_id=trace_id,
@@ -695,7 +723,7 @@ class Trial:
             trial_id=self.spec.trial_id,
             execution_id=execution_id,
             message=result.error_message or "",
-            data={"reward": result.reward, "scores": result.scores},
+            data={"score": result.score, "scores": result.scores},
             secret_values=secrets.values(),
         )
         heartbeat.cancel()
@@ -788,46 +816,27 @@ class Trial:
                 root="/workspace/environment",
             )
 
-    async def _run_rewarders(
-        self,
-        artifacts: Sequence[DownloadedFile],
-        trace_id: str | None,
-    ) -> tuple[VerifierResult, ...]:
-        output: list[VerifierResult] = []
-        for rewarder in self.task.environment.rewarders:
-            if rewarder.kind != "command":
-                raise ExecutionFailure(
-                    ErrorCode.CONFIGURATION,
-                    f"Python Rewarder {rewarder.name!r} cannot execute from a package Job; "
-                    "publish a command Rewarder",
-                )
-            result, _, _ = await self._run_score_command(
-                name=rewarder.name,
-                digest=content_hash(rewarder),
-                kind="deterministic",
-                command=rewarder.command,
-                runtime=VerifierRuntime(
-                    provider=self.task.environment.runtime.provider,
-                    image=self.task.environment.runtime.image,
-                    network=self.task.environment.runtime.network,
-                    network_allowlist=self.task.environment.runtime.network_allowlist,
-                    resources=self.task.environment.runtime.resources,
-                    timeout_seconds=rewarder.timeout_seconds,
-                ),
-                result_path="rewarder-result.json",
-                artifacts=artifacts,
-                trace_id=trace_id,
-                evidence_required=False,
-            )
-            output.append(result)
+    def _emit_step_rewards(self, rewards: Sequence[Mapping[str, Any]]) -> None:
+        """Publish recorded per-step rewards as training signal.
+
+        Rewards are recorded on every episode. Only train-mode Jobs stream them
+        as reward events, because only training consumes them.
+        """
+        if self.job_spec.mode is not JobMode.TRAIN:
+            return
+        for item in rewards:
             self.store.emit(
                 self.spec.job_id,
                 "reward",
                 "running",
                 trial_id=self.spec.trial_id,
-                data={"name": rewarder.name, "reward": result.reward},
+                data={
+                    "action": item.get("action"),
+                    "turn": item.get("turn"),
+                    "reward": item.get("value"),
+                    "signals": item.get("signals") or [],
+                },
             )
-        return tuple(output)
 
     async def _run_verifiers(
         self,
@@ -865,7 +874,7 @@ class Trial:
                         verifier_digest=verifier.content_hash,
                         kind="deterministic",
                         status="succeeded",
-                        reward=parsed.reward,
+                        score=parsed.score,
                         scores=parsed.scores,
                         evidence=parsed.evidence,
                         feedback=parsed.feedback,
@@ -931,14 +940,18 @@ class Trial:
                 except (UnicodeDecodeError, ValueError):
                     continue
                 break
+        outcome = _episode_outcome(artifacts)
         return Episode(
             observation=view_observation,
             state=view_state,
             trajectory=trajectory,
             artifacts={item.path: item.path for item in artifacts},
             usage=EpisodeUsage(
+                turns=outcome.turns,
                 cost_usd=getattr(self, "_last_cost", None),
             ),
+            outcome=outcome,
+            rewards=list(_step_rewards(artifacts)),
         )
 
     async def _run_score_command(
@@ -1045,7 +1058,7 @@ class Trial:
                     verifier_digest=digest,
                     kind=kind,  # type: ignore[arg-type]
                     status="succeeded",
-                    reward=output.reward,
+                    score=output.score,
                     scores=output.scores,
                     evidence=output.evidence,
                     feedback=output.feedback,
@@ -1120,19 +1133,19 @@ def _aggregate(
         return None, {}
     weights = {binding.verifier.content_hash: binding.weight for binding in task.verifiers}
     weighted = [
-        (item.reward, weights[item.verifier_digest])
+        (item.score, weights[item.verifier_digest])
         for item in final
-        if item.status == "succeeded" and item.reward is not None
+        if item.status == "succeeded" and item.score is not None
     ]
     total = sum(weight for _, weight in weighted)
-    reward = sum(value * weight for value, weight in weighted) / total if total else None
+    score = sum(value * weight for value, weight in weighted) / total if total else None
     scores: dict[str, float] = {}
     for item in final:
-        if item.reward is not None:
-            scores[f"verifier.{item.verifier_name}"] = item.reward
+        if item.score is not None:
+            scores[f"verifier.{item.verifier_name}"] = item.score
         for key, value in item.scores.items():
             scores[f"{item.verifier_name}.{key}"] = value
-    return reward, scores
+    return score, scores
 
 
 def _agent_aggregates(
@@ -1142,7 +1155,7 @@ def _agent_aggregates(
     rows: list[AgentAggregate] = []
     for agent in spec.agents:
         selected = [item for item in results if item.receipt.agent_digest == agent.content_hash]
-        rewards = [item.reward for item in selected if item.reward is not None]
+        scores = [item.score for item in selected if item.score is not None]
         costs = [item.receipt.cost_usd for item in selected if item.receipt.cost_usd is not None]
         latencies = [
             item.receipt.timings["total_seconds"]
@@ -1156,7 +1169,7 @@ def _agent_aggregates(
                 model_id=agent.model,
                 count=len(selected),
                 successes=sum(item.status == "succeeded" for item in selected),
-                mean_reward=sum(rewards) / len(rewards) if rewards else None,
+                mean_score=sum(scores) / len(scores) if scores else None,
                 total_cost=sum(costs) if costs else None,
                 mean_latency_seconds=sum(latencies) / len(latencies) if latencies else None,
             )
@@ -1392,7 +1405,7 @@ class JobRunner:
             normalized = (value - criterion.min_score) / (criterion.max_score - criterion.min_score)
             weighted += normalized * criterion.weight
             total_weight += criterion.weight
-        review_reward = weighted / total_weight
+        review_score = weighted / total_weight
         source = next(item for item in aggregate.trials if item.receipt.trial_id == trial_id)
         replacements = tuple(
             VerifierResult(
@@ -1400,7 +1413,7 @@ class JobRunner:
                 verifier_digest=item.verifier_digest,
                 kind="human",
                 status="succeeded",
-                reward=review_reward,
+                score=review_score,
                 scores={str(key): float(value) for key, value in scores.items()},
                 feedback=feedback,
             )
@@ -1408,12 +1421,12 @@ class JobRunner:
             else item
             for item in source.verifier_results
         )
-        reward, aggregate_scores = _aggregate(task, replacements)
+        score, aggregate_scores = _aggregate(task, replacements)
         still_pending = any(item.status == "awaiting_review" for item in replacements)
         updated_trial = source.model_copy(
             update={
                 "status": "awaiting_review" if still_pending else "succeeded",
-                "reward": None if still_pending else reward,
+                "score": None if still_pending else score,
                 "scores": {} if still_pending else aggregate_scores,
                 "verifier_results": replacements,
             }
@@ -1444,7 +1457,7 @@ class JobRunner:
             {
                 "scores": dict(scores),
                 "feedback": feedback,
-                "reward": review_reward,
+                "score": review_score,
             },
             updated_trial,
         )
@@ -1454,7 +1467,7 @@ class JobRunner:
             "succeeded" if not still_pending else "awaiting_review",
             updated_trial.status,
             trial_id=trial_id,
-            data={"verifier": verifier_name, "reward": review_reward},
+            data={"verifier": verifier_name, "score": review_score},
         )
         return updated
 
@@ -1544,7 +1557,7 @@ prompt = json.dumps({
     "evidence_contract": spec["evidence"],
     "evidence": judge_input,
     "output_contract": {
-        "reward": "finite number",
+        "score": "finite number",
         "scores": "object mapping criterion names to finite numbers",
         "evidence": "non-empty list of concise strings citing supplied evidence",
         "feedback": "string",
@@ -1553,12 +1566,12 @@ prompt = json.dumps({
 schema = {
     "type": "object",
     "properties": {
-        "reward": {"type": "number"},
+        "score": {"type": "number"},
         "scores": {"type": "object", "additionalProperties": {"type": "number"}},
         "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1},
         "feedback": {"type": "string"},
     },
-    "required": ["reward", "scores", "evidence", "feedback"],
+    "required": ["score", "scores", "evidence", "feedback"],
     "additionalProperties": False,
 }
 body = json.dumps({
@@ -1578,10 +1591,10 @@ content = response["choices"][0]["message"]["content"]
 result = json.loads(content)
 def finite_number(value):
     return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
-if set(result) != {"reward", "scores", "evidence", "feedback"}:
+if set(result) != {"score", "scores", "evidence", "feedback"}:
     raise ValueError("AgentVerifier output must match VerifierOutput fields exactly")
-if not finite_number(result["reward"]):
-    raise ValueError("AgentVerifier reward must be finite")
+if not finite_number(result["score"]):
+    raise ValueError("AgentVerifier score must be finite")
 if not isinstance(result["scores"], dict) or any(
     not isinstance(name, str) or not finite_number(value)
     for name, value in result["scores"].items()

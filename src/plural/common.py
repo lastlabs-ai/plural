@@ -187,8 +187,12 @@ class FileDeclaration(FrozenModel):
         return safe_relative_path(value)
 
 
-class HarnessDefinition(FrozenModel):
-    """Versioned executable harness contract."""
+class HarnessProtocol(FrozenModel):
+    """Internal versioned executable harness contract.
+
+    Built from the public :class:`plural.HarnessDefinition`. Carries the wire
+    details Plural needs to launch a harness and is never authored by hand.
+    """
 
     schema_version: Literal["2"] = "2"
     name: str = Field(min_length=1)
@@ -231,7 +235,7 @@ class HarnessDefinition(FrozenModel):
         return value
 
     @model_validator(mode="after")
-    def _valid_definition(self) -> HarnessDefinition:
+    def _valid_definition(self) -> HarnessProtocol:
         if self.protocol == "acp" and self.protocol_adapter != "acp-client-v1":
             raise ValueError("protocol='acp' requires protocol_adapter='acp-client-v1'")
         if self.protocol != "acp" and self.protocol_adapter is not None:
@@ -256,7 +260,7 @@ class HarnessPackage(FrozenModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
-    definition: HarnessDefinition = Field(validation_alias=AliasChoices("definition", "manifest"))
+    definition: HarnessProtocol = Field(validation_alias=AliasChoices("definition", "manifest"))
     source: PackageSource
 
     @model_validator(mode="before")
@@ -323,8 +327,8 @@ __all__ = [
     "FrozenModel",
     "HarnessBinding",
     "HarnessCapability",
-    "HarnessDefinition",
     "HarnessPackage",
+    "HarnessProtocol",
     "PackageSource",
     "RoutingSpec",
     "SHA256_PATTERN",

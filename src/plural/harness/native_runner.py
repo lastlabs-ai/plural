@@ -10,9 +10,15 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+# This module is uploaded and run as a standalone script, so it cannot import
+# from the plural package. Keep in sync with plural.environments.runner.PROTOCOL;
+# test_episode_contract.py asserts the two match.
+STEP_PROTOCOL = "plural-step-v1"
 
 
 def _local_command(command: list[Any]) -> list[str]:
@@ -25,13 +31,71 @@ def _local_command(command: list[Any]) -> list[str]:
 _CHAT_PROFILES = {"chat", "native.chat.v1"}
 _ACTION_PROFILES = {"actions", "native.actions.v1"}
 
+# Budgets cut an episode short without the Environment declaring completion.
+_BUDGET_STOPS = {"max_turns", "max_seconds", "max_cost"}
+
+_FINISH = "finish"
+_FINISH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": _FINISH,
+        "description": (
+            "End the episode. Call this when the task is complete or when you "
+            "cannot make further progress."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "A short description of the outcome.",
+                }
+            },
+            "required": [],
+        },
+    },
+}
+
+
+@dataclass
+class _ToolOutcome:
+    """One dispatched tool call: what the Agent sees and what the record keeps."""
+
+    message: dict[str, Any]
+    transition: dict[str, Any] | None = None
+    reward: dict[str, Any] | None = None
+    terminated: bool = False
+    truncated: bool = False
+    finished: bool = False
+    summary: str | None = None
+
+
+@dataclass
+class _Episode:
+    """The recorded episode, kept separately from the Agent's context."""
+
+    messages: list[dict[str, Any]] = field(default_factory=list)
+    transitions: list[dict[str, Any]] = field(default_factory=list)
+    rewards: list[dict[str, Any]] = field(default_factory=list)
+
+    def document(self) -> dict[str, Any]:
+        """Return the trajectory document written to ``trajectory.jsonl``."""
+        return {
+            "messages": self.messages,
+            "transitions": self.transitions,
+            "rewards": self.rewards,
+        }
+
+    def total_reward(self) -> float:
+        return sum(float(item.get("value") or 0) for item in self.rewards)
+
 
 def main() -> None:
     """Run one model-backed native profile without evaluating its own answer."""
     profile = sys.argv[1] if len(sys.argv) > 1 else "native.chat.v1"
     request = json.loads(sys.stdin.readline())
     try:
-        result, trajectory, trace_id = _run(profile, request)
+        result, episode, trace_id = _run(profile, request)
     except Exception as exc:  # noqa: BLE001
         _emit({"type": "error", "message": str(exc)})
         print(str(exc), file=sys.stderr)
@@ -41,7 +105,7 @@ def main() -> None:
         encoding="utf-8",
     )
     Path("trajectory.jsonl").write_text(
-        json.dumps({"messages": trajectory}, sort_keys=True) + "\n",
+        json.dumps(episode.document(), sort_keys=True) + "\n",
         encoding="utf-8",
     )
     _emit(
@@ -55,7 +119,7 @@ def main() -> None:
     )
 
 
-def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], _Episode, str]:
     if profile not in _CHAT_PROFILES | _ACTION_PROFILES:
         raise ValueError(f"unknown native profile {profile!r}")
     agent = _mapping(request.get("agent"), "agent")
@@ -74,16 +138,20 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
     if profile in _ACTION_PROFILES and not actions:
         raise ValueError(f"{profile} requires at least one environment native action")
     denials = _denials(request)
-    trajectory: list[dict[str, Any]] = []
-    _reset_episode(request, environment, declared, trajectory)
+    episode = _Episode()
+    reset = _reset_episode(request, environment, declared)
+    episode.transitions.append(reset)
     prompt = _prompt(request, environment, denials)
     system = str(agent.get("instructions") or "").strip()
     if denials:
         system = "\n\n".join(part for part in (system, _denial_text(denials)) if part)
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": prompt},
-    ]
+    episode.messages.extend(
+        [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
+    )
+    messages = episode.messages
     tools = [
         {
             "type": "function",
@@ -96,14 +164,25 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
         }
         for name, action in actions.items()
     ]
+    if profile in _ACTION_PROFILES and _FINISH not in actions:
+        tools.append(_FINISH_TOOL)
     catalog_model = str(agent.get("model") or "")
     execution_model = _execution_model(request, catalog_model)
     total_cost = 0.0
     final_message: dict[str, Any] | None = None
-    for _turn in range(1, max_turns + 1):
+    summary: str | None = None
+    stop_reason: str | None = None
+    terminated = bool(reset.get("terminated"))
+    truncated = bool(reset.get("truncated"))
+    if terminated or truncated:
+        stop_reason = "environment_terminated" if terminated else "environment_truncated"
+    for turn in range(1, max_turns + 1):
+        if stop_reason is not None:
+            break
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise TimeoutError(f"{profile} exceeded max_seconds={max_seconds}")
+            stop_reason = "max_seconds"
+            break
         response = _model_call(
             model=execution_model,
             routing=_mapping(agent.get("routing") or {}, "agent.routing"),
@@ -119,32 +198,69 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], list[di
                 "max_cost_usd requires the gateway to return usage.cost_usd or usage.cost"
             )
         total_cost += float(cost or 0)
-        if max_cost is not None and total_cost > float(max_cost):
-            raise RuntimeError(f"{profile} exceeded max_cost_usd={max_cost}")
         messages.append(message)
+        if max_cost is not None and total_cost > float(max_cost):
+            stop_reason = "max_cost"
+            break
         calls = message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
         if profile in _CHAT_PROFILES or not calls:
             final_message = message
+            stop_reason = "agent_response"
             break
         for call in calls:
-            messages.append(_dispatch_tool(call, actions, environment, denials, deadline))
-    if final_message is None:
-        raise RuntimeError(f"{profile} reached max_turns={max_turns} without a final response")
+            outcome = _dispatch_tool(call, actions, environment, denials, deadline, turn)
+            messages.append(outcome.message)
+            if outcome.transition is not None:
+                episode.transitions.append(outcome.transition)
+            if outcome.reward is not None:
+                episode.rewards.append(outcome.reward)
+            if outcome.finished:
+                summary = outcome.summary
+                stop_reason = "agent_finished"
+            elif outcome.terminated:
+                stop_reason = "environment_terminated"
+            elif outcome.truncated:
+                stop_reason = "environment_truncated"
+            terminated = terminated or outcome.terminated
+            truncated = truncated or outcome.truncated
+            if stop_reason is not None:
+                break
+    if stop_reason is None:
+        stop_reason = "max_turns"
+    response_text = summary if summary is not None else _final_text(final_message, messages)
     trace_id = str(uuid4())
     return (
         {
             "profile": profile,
             "task_id": _mapping(request.get("task"), "task").get("task_id"),
-            "response": final_message.get("content"),
+            "response": response_text,
             "model": execution_model,
             "catalog_model": catalog_model,
             "turns": len([item for item in messages if item.get("role") == "assistant"]),
             "cost_usd": total_cost,
+            "stop_reason": stop_reason,
+            "terminated": terminated,
+            "truncated": truncated or stop_reason in _BUDGET_STOPS,
+            "total_reward": episode.total_reward(),
             "trace_id": trace_id,
         },
-        messages,
+        episode,
         trace_id,
     )
+
+
+def _final_text(
+    final_message: dict[str, Any] | None,
+    messages: list[dict[str, Any]],
+) -> str:
+    """Return the Agent's closing text, if it produced any."""
+    if final_message is not None:
+        content = final_message.get("content")
+        return content if isinstance(content, str) else ""
+    for item in reversed(messages):
+        if item.get("role") == "assistant" and isinstance(item.get("content"), str):
+            return str(item["content"])
+    return ""
 
 
 def _execution_model(request: dict[str, Any], catalog_model: str) -> str:
@@ -237,30 +353,80 @@ def _tool_observation(call: dict[str, Any], name: str, payload: dict[str, Any]) 
     }
 
 
+def _parse_envelope(text: str) -> dict[str, Any] | None:
+    """Return the step envelope emitted by the Environment runner, if present."""
+    stripped = text.strip()
+    if not stripped:
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict) or parsed.get("protocol") != STEP_PROTOCOL:
+        return None
+    observation = parsed.get("observation")
+    info = parsed.get("info")
+    return {
+        "observation": observation if isinstance(observation, dict) else {},
+        "reward": float(parsed.get("reward") or 0),
+        "terminated": bool(parsed.get("terminated")),
+        "truncated": bool(parsed.get("truncated")),
+        "info": info if isinstance(info, dict) else {},
+    }
+
+
 def _dispatch_tool(
     call: Any,
     actions: dict[str, dict[str, Any]],
     environment: dict[str, Any],
     denials: list[dict[str, str]],
     deadline: float,
-) -> dict[str, Any]:
+    turn: int,
+) -> _ToolOutcome:
     if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
         raise ValueError("model emitted an invalid action call")
     function = call["function"]
     name = str(function.get("name") or "")
     denied = {item["capability"]: item["reason"] for item in denials}
+    if name == _FINISH and _FINISH not in actions:
+        return _finish(call, function, turn)
     if name.startswith("harness."):
         tool = name.removeprefix("harness.")
         reason = denied.get(tool, "unknown harness tool")
-        return _tool_observation(call, name, {"error": "denied", "reason": reason, "tool": name})
+        return _ToolOutcome(
+            message=_tool_observation(
+                call, name, {"error": "denied", "reason": reason, "tool": name}
+            )
+        )
     action_name = name.removeprefix("environment.") if name.startswith("environment.") else name
     if action_name not in actions:
-        return _tool_observation(
-            call,
-            name,
-            {"error": "denied", "reason": f"unknown tool {name!r}", "tool": name},
+        return _ToolOutcome(
+            message=_tool_observation(
+                call,
+                name,
+                {"error": "denied", "reason": f"unknown tool {name!r}", "tool": name},
+            )
         )
-    return _run_action(call, action_name, actions, environment, deadline)
+    return _run_action(call, action_name, actions, environment, deadline, turn)
+
+
+def _finish(call: dict[str, Any], function: dict[str, Any], turn: int) -> _ToolOutcome:
+    """Record the Agent's decision to end the episode."""
+    arguments = _arguments(function)
+    raw = arguments.get("summary")
+    summary = raw if isinstance(raw, str) else ""
+    return _ToolOutcome(
+        message=_tool_observation(call, _FINISH, {"status": "episode ended"}),
+        transition={"type": "finish", "turn": turn, "action": _FINISH, "summary": summary},
+        finished=True,
+        summary=summary,
+    )
+
+
+def _arguments(function: dict[str, Any]) -> dict[str, Any]:
+    raw = function.get("arguments") or "{}"
+    parsed = json.loads(raw) if isinstance(raw, str) else raw
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _run_action(
@@ -269,11 +435,10 @@ def _run_action(
     actions: dict[str, dict[str, Any]],
     environment: dict[str, Any],
     deadline: float,
-) -> dict[str, Any]:
-    function = call["function"]
+    turn: int,
+) -> _ToolOutcome:
     declaration = actions[name]
-    raw_arguments = function.get("arguments") or "{}"
-    arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+    arguments = _arguments(call["function"])
     remaining = deadline - time.monotonic()
     timeout = min(float(declaration.get("timeout_seconds", 30)), remaining)
     if timeout <= 0:
@@ -291,15 +456,55 @@ def _run_action(
         timeout=timeout,
         check=False,
     )
-    output = completed.stdout.decode(errors="replace")
     if completed.returncode != 0:
         error = completed.stderr.decode(errors="replace")[:1000]
-        output = json.dumps({"error": error, "exit_code": completed.returncode})
-    return {
-        "role": "tool",
-        "tool_call_id": str(call.get("id") or name),
-        "content": output[:100_000],
-    }
+        payload = {"error": error, "exit_code": completed.returncode}
+        return _ToolOutcome(message=_tool_observation(call, name, payload))
+    output = completed.stdout.decode(errors="replace")
+    envelope = _parse_envelope(output)
+    if envelope is None:
+        # A custom action command that does not speak the step protocol.
+        return _ToolOutcome(
+            message={
+                "role": "tool",
+                "tool_call_id": str(call.get("id") or name),
+                "content": output[:100_000],
+            }
+        )
+    environment["observation"] = envelope["observation"]
+    # The Agent sees the observation and its own errors. Reward stays out of
+    # context so it cannot be used to infer the answer.
+    visible = dict(envelope["observation"])
+    error = envelope["info"].get("error")
+    if error:
+        visible["error"] = error
+    signals = envelope["info"].get("rewards")
+    reward = None
+    if envelope["reward"] or signals:
+        reward = {
+            "type": "reward",
+            "turn": turn,
+            "action": name,
+            "value": envelope["reward"],
+            "signals": signals if isinstance(signals, list) else [],
+        }
+    return _ToolOutcome(
+        message=_tool_observation(call, name, visible),
+        transition={
+            "type": "step",
+            "turn": turn,
+            "action": name,
+            "arguments": arguments,
+            "observation": envelope["observation"],
+            "reward": envelope["reward"],
+            "terminated": envelope["terminated"],
+            "truncated": envelope["truncated"],
+            "info": envelope["info"],
+        },
+        reward=reward,
+        terminated=envelope["terminated"],
+        truncated=envelope["truncated"],
+    )
 
 
 def _response_message(response: dict[str, Any]) -> dict[str, Any]:
@@ -352,18 +557,20 @@ def _reset_episode(
     request: dict[str, Any],
     environment: dict[str, Any],
     declared: dict[str, dict[str, Any]],
-    trajectory: list[dict[str, Any]],
-) -> None:
+) -> dict[str, Any]:
+    """Start the episode and return its opening trajectory record."""
     workspace = Path(_workspace_path(str(environment.get("workspace") or "/workspace/environment")))
     workspace.mkdir(parents=True, exist_ok=True)
     task = _mapping(request.get("task"), "task")
     (workspace / "task.json").write_text(json.dumps(task, sort_keys=True) + "\n", encoding="utf-8")
+    record: dict[str, Any] = {"type": "reset", "turn": 0}
     command = [str(item) for item in environment.get("reset_command") or ()]
     if not command:
         reset = declared.get("reset") or {}
         command = [str(item) for item in reset.get("command") or ()]
     if not command:
-        return
+        record["observation"] = environment.get("observation")
+        return record
     completed = subprocess.run(
         _local_command(command),
         input=b"{}",
@@ -376,23 +583,28 @@ def _reset_episode(
     if completed.returncode != 0:
         error = completed.stderr.decode(errors="replace")[:1000]
         raise RuntimeError(f"environment reset failed: {error or completed.returncode}")
+    envelope = _parse_envelope(completed.stdout.decode(errors="replace"))
+    if envelope is not None:
+        environment["observation"] = envelope["observation"]
+        record.update(
+            {
+                "observation": envelope["observation"],
+                "terminated": envelope["terminated"],
+                "truncated": envelope["truncated"],
+                "info": envelope["info"],
+            }
+        )
+        return record
     observation_path = workspace / "observation.json"
     if observation_path.exists():
         observation = json.loads(observation_path.read_text(encoding="utf-8"))
-        if isinstance(observation, dict):
-            environment["observation"] = observation
     else:
         raw = completed.stdout.decode(errors="replace").strip()
         observation = json.loads(raw) if raw else {}
-        if isinstance(observation, dict):
-            environment["observation"] = observation
-    trajectory.append(
-        {
-            "turn": 0,
-            "type": "reset",
-            "observation": environment.get("observation"),
-        }
-    )
+    if isinstance(observation, dict):
+        environment["observation"] = observation
+    record["observation"] = environment.get("observation")
+    return record
 
 
 def _emit(value: dict[str, Any]) -> None:

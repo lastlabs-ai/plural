@@ -33,8 +33,10 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [Runtime](#runtime)
 - [ExecutionLimits](#executionlimits)
 - [ExecutionTarget](#executiontarget)
+- [FileDeclaration](#filedeclaration)
 - [Guardrail](#guardrail)
 - [HarnessCapability](#harnesscapability)
+- [HarnessDefinition](#harnessdefinition)
 - [HarnessPolicy](#harnesspolicy)
 - [Action](#action)
 - [NetworkMode](#networkmode)
@@ -147,7 +149,7 @@ A catalog-backed model and its optional execution harness.
 - **`fallback_models`** — `array of string`; optional. Default: `[]`.
 - **`temperature`** — `number | null`; optional. Default: `null`.
 - **`max_tokens`** — `integer | null`; optional. Default: `null`.
-- **`harness`** — `Harness | string | null`; optional. Default: `null`.
+- **`harness`** — `HarnessDefinition | Harness | string | null`; optional. Default: `null`.
 - **`harness_kwargs`** — `object`; optional.
 - **`auth_mode`** — `"environment" | "api_key" | "oauth" | "none"`; optional. Default: `"environment"`.
 - **`secret_names`** — `array of string`; optional. Default: `[]`.
@@ -160,7 +162,7 @@ A semantic version that pins an ordered set of Tasks.
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`version`** — `string`; required.
 - **`tasks`** — `array of Task`; required. Constraints: `{"minItems": 1}`.
-- **`primary_metric`** — `string`; optional. Default: `"reward"`.
+- **`primary_metric`** — `string`; optional. Default: `"score"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`metadata`** — `object`; optional.
 
@@ -235,6 +237,14 @@ Execution isolation class.
 Allowed values: `"local" | "docker" | "remote"`.
 
 
+## FileDeclaration
+
+A file emitted or consumed by a package.
+
+- **`path`** — `string`; required. Constraints: `{"minLength": 1}`.
+- **`required`** — `boolean`; optional. Default: `true`.
+- **`media_type`** — `string`; optional. Default: `"application/octet-stream"`.
+
 ## Guardrail
 
 A plain-language Environment rule.
@@ -248,6 +258,28 @@ A capability requested by an agent harness.
 
 Allowed values: `"shell" | "file_read" | "file_edit" | "code_execution" | "web_search" | "browser" | "network_fetch" | "mcp" | "subagents" | "persistence"`.
 
+
+## HarnessDefinition
+
+A declared executable Agent interaction strategy.
+
+- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
+- **`version`** — `string`; optional. Default: `"0.1.0"`.
+- **`description`** — `string`; optional. Default: `""`.
+- **`command`** — `array of string`; required. Constraints: `{"minItems": 1}`.
+- **`source`** — `string`; optional. Default: `"."`.
+- **`digest`** — `string | null`; optional. Default: `null`.
+- **`requirements`** — `array of string`; optional. Default: `[]`.
+- **`capabilities`** — `array of HarnessCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
+- **`models`** — `array of string`; optional. Default: `["*"]`.
+- **`auth`** — `array of "environment" | "api_key" | "oauth" | "none"`; optional. Default: `["environment"]`.
+- **`secrets`** — `array of string`; optional. Default: `[]`.
+- **`environment`** — `array of string`; optional. Default: `[]`.
+- **`healthcheck`** — `array of string | null`; optional. Default: `null`.
+- **`outputs`** — `array of FileDeclaration`; optional. Default: `[]`.
+- **`artifacts`** — `array of FileDeclaration`; optional. Default: `[]`.
+- **`trajectory`** — `string | null`; optional. Default: `null`.
+- **`tito`** — `string | null`; optional. Default: `null`.
 
 ## HarnessPolicy
 
@@ -290,7 +322,7 @@ Optional compute limits.
 
 ## Rewarder
 
-A train-only state-transition rewarder.
+A named state-transition reward signal scored inside each step.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`description`** — `string`; optional. Default: `""`.

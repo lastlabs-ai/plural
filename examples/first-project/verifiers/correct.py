@@ -6,11 +6,11 @@ def correct_category(episode: Episode) -> VerifierOutput:
     expected = episode.state.get("expected")
     drafted = bool(str(observation.get("draft_reply") or "").strip())
     correct = bool(observation.get("done") and observation.get("category") == expected and drafted)
-    reward = float(correct)
+    score = float(correct)
     return VerifierOutput(
-        reward=reward,
+        score=score,
         scores={
-            "correct_category": reward,
+            "correct_category": score,
             "response_drafted": float(drafted),
         },
         evidence=[

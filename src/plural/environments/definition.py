@@ -189,7 +189,7 @@ class SecretReference(FrozenModel):
 
 
 class RewarderDefinition(FrozenModel):
-    """A train-only state-transition rewarder."""
+    """A named state-transition reward signal scored inside each step."""
 
     name: str = Field(min_length=1)
     description: str = ""

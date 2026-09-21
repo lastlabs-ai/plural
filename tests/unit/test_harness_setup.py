@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from plural.common import FileDeclaration, HarnessDefinition
+from plural.common import FileDeclaration, HarnessProtocol
 from plural.harness.builtins import resolve_builtin_package
 from plural.harness.install import main as install_main
 from plural.harness.protocol import HarnessRunRequest
@@ -128,7 +128,7 @@ async def test_setup_runs_as_root_then_harness_as_default_user() -> None:
 async def test_setup_failure_is_clear() -> None:
     provider = RecordingProvider()
     provider.fail_setup = True
-    definition = HarnessDefinition(
+    definition = HarnessProtocol(
         name="codex",
         implementation="runnable",
         command=("python", "vendor_adapter.py", "codex"),

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from plural.common import FileDeclaration, HarnessDefinition
+from plural.common import FileDeclaration, HarnessProtocol
 from plural.harness import native_runner, vendor_adapter
 from plural.harness.protocol import HarnessRunRequest
 from plural.harness.retrieval import build_archive, package_from_archive, retrieve_archive
@@ -36,7 +36,7 @@ def _request() -> HarnessRunRequest:
 
 def test_raw_acp_manifest_is_rejected() -> None:
     try:
-        HarnessDefinition(name="acp", protocol="acp", command=("agent",))
+        HarnessProtocol(name="acp", protocol="acp", command=("agent",))
     except ValidationError as exc:
         assert "protocol_adapter='acp-client-v1'" in str(exc)
     else:
@@ -68,7 +68,7 @@ for line in sys.stdin:
 """.lstrip(),
         encoding="utf-8",
     )
-    manifest = HarnessDefinition(
+    manifest = HarnessProtocol(
         name="acp",
         protocol="acp",
         protocol_adapter="acp-client-v1",
@@ -153,7 +153,7 @@ def test_archive_rejects_traversal(tmp_path: Path) -> None:
 
 def test_trajectory_path_must_be_declared_as_artifact() -> None:
     with pytest.raises(ValidationError, match="trajectory_path must be declared"):
-        HarnessDefinition(
+        HarnessProtocol(
             name="bad-trajectory",
             command=("python", "harness.py"),
             trajectory_path="trajectory.jsonl",
@@ -211,12 +211,14 @@ def test_native_actions_executes_only_declared_actions(
     request["environment"]["workspace"] = str(tmp_path)
     request["environment"]["limits"]["max_cost_usd"] = 1
 
-    result, trajectory, _trace_id = native_runner._run("native.actions.v1", request)
+    result, episode, _trace_id = native_runner._run("native.actions.v1", request)
 
     assert result["response"] == "complete"
     assert result["turns"] == 2
     assert result["cost_usd"] == 0.02
-    tool = next(item for item in trajectory if item.get("role") == "tool")
+    assert result["stop_reason"] == "agent_response"
+    tool = next(item for item in episode.messages if item.get("role") == "tool")
+    # A command that does not speak the step protocol still reaches the Agent.
     assert '"seen": 7' in tool["content"]
 
 
@@ -256,7 +258,7 @@ def test_native_runner_selects_gateway_catalog_or_direct_upstream_model(
         }
     )
 
-    result, _trajectory, _trace_id = native_runner._run(
+    result, _episode, _trace_id = native_runner._run(
         "native.chat.v1",
         request.model_dump(mode="json"),
     )

@@ -39,11 +39,15 @@ def rewarder(
     weight: float = 1,
     timeout_seconds: float = 30,
 ) -> Any:
-    """Declare a train-only state-transition rewarder.
+    """Declare a named state-transition reward signal.
 
     The callable must accept ``previous_state, current_state, action, result``.
-    It is compiled into manifest metadata; the Job engine invokes rewarders
-    only in train mode.
+    Every rewarder runs inside :meth:`Environment.step` immediately after the
+    action that changed the world, so it scores one transition and supports
+    credit assignment. ``weight`` scales its contribution to the step reward.
+
+    Rewards are recorded on the episode. They never contribute to a Verifier
+    score.
 
     Returns:
         A decorated rewarder callable.
@@ -338,6 +342,9 @@ class Environment(Generic[ObsT, StateT]):
         ``name`` plus parameters, an action name plus kwargs, or kwargs
         alone when the Environment has a single ``@action``.
 
+        ``reward`` sums :meth:`reward` and every ``@rewarder`` for this one
+        transition. ``info["rewards"]`` breaks the total down by name.
+
         Returns:
             Observation, reward, terminal flags, and step information.
         """
@@ -345,16 +352,75 @@ class Environment(Generic[ObsT, StateT]):
         previous = self.state_snapshot()
         result = self._invoke_action(name, params)
         payload = {"name": name, **params}
-        reward = float(self.reward(previous, self.state_snapshot(), payload, result))
-        return self.observation, reward, self.terminated(), self.truncated(), {}
+        reward, breakdown = self._step_reward(previous, self.state_snapshot(), payload, result)
+        info: dict[str, Any] = {}
+        if breakdown:
+            info["rewards"] = breakdown
+        return self.observation, reward, self.terminated(), self.truncated(), info
+
+    def _step_reward(
+        self,
+        previous_state: Any,
+        current_state: Any,
+        action: Mapping[str, Any],
+        result: Any,
+    ) -> tuple[float, list[dict[str, Any]]]:
+        """Score this one transition with every declared reward signal.
+
+        Returns:
+            The total reward and one record per signal.
+        """
+        breakdown: list[dict[str, Any]] = []
+        total = 0.0
+        if type(self).reward is not Environment.reward:
+            value = float(self.reward(previous_state, current_state, action, result))
+            total += value
+            breakdown.append({"name": "reward", "value": value, "weight": 1.0})
+        for config, func in self._bound_rewarders():
+            weight = float(config["weight"])
+            entry: dict[str, Any] = {"name": str(config["name"]), "weight": weight}
+            try:
+                value = float(func(previous_state, current_state, action, result))
+            except Exception as exc:  # noqa: BLE001
+                # A reward signal must never fail the action that already ran.
+                entry.update({"value": 0.0, "error": str(exc)})
+            else:
+                entry["value"] = value
+                total += weight * value
+            breakdown.append(entry)
+        return total, breakdown
+
+    def _bound_rewarders(self) -> tuple[tuple[dict[str, Any], Callable[..., float]], ...]:
+        """Return each declared rewarder's config with its bound method."""
+        bound: list[tuple[dict[str, Any], Callable[..., float]]] = []
+        seen: set[str] = set()
+        for owner in type(self).__mro__:
+            for attribute, value in owner.__dict__.items():
+                config = getattr(value, _REWARDER_ATTR, None)
+                if not callable(value) or not isinstance(config, dict):
+                    continue
+                if config["name"] in seen:
+                    continue
+                seen.add(str(config["name"]))
+                bound.append((config, getattr(self, attribute)))
+        return tuple(bound)
 
     def terminated(self) -> bool:
-        """Return whether the episode reached a Task success or failure state."""
-        observation = self.observation
-        return any(getattr(observation, attr, False) for attr in ("done", "solved", "terminated"))
+        """Return whether the Environment ended the episode.
+
+        Override this to end the episode when the world reaches a Task success
+        or failure state. The default never terminates, which leaves the stop
+        decision to the Agent or the Harness budget.
+        """
+        return False
 
     def truncated(self) -> bool:
-        """Return whether the episode ended on a budget or external stop."""
+        """Return whether the Environment cut the episode short.
+
+        Override this to stop an episode that cannot usefully continue but did
+        not reach a success or failure state. Harness turn, time, and cost
+        budgets truncate independently of this method.
+        """
         return False
 
     def reward(

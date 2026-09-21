@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
 
-from plural.common import HarnessDefinition
+from plural.common import HarnessProtocol
 from plural.harness.protocol import (
     HarnessEvent,
     HarnessProtocolError,
@@ -52,7 +52,7 @@ class HarnessRunner:
     async def setup(
         self,
         handle: SandboxHandle,
-        definition: HarnessDefinition,
+        definition: HarnessProtocol,
         request: HarnessRunRequest,
         *,
         env: dict[str, str] | None = None,
@@ -94,7 +94,7 @@ class HarnessRunner:
     async def run(
         self,
         handle: SandboxHandle,
-        definition: HarnessDefinition,
+        definition: HarnessProtocol,
         request: HarnessRunRequest,
         *,
         env: dict[str, str] | None = None,

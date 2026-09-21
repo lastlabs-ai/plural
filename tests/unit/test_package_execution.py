@@ -13,8 +13,8 @@ from plural.common import (
     ExecutionTarget,
     FileDeclaration,
     HarnessBinding,
-    HarnessDefinition,
     HarnessPackage,
+    HarnessProtocol,
     PackageSource,
 )
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
@@ -71,7 +71,7 @@ class JudgeProvider(FakeProvider):
         assert self.judge_input["final"]["name"] == "result.json"
         self.files[handle.sandbox_id]["agent-verifier-result.json"] = json.dumps(
             {
-                "reward": 0.8,
+                "score": 0.8,
                 "scores": {"quality": 0.8},
                 "evidence": ["result.json answer=42", "observation.text=done"],
                 "feedback": "Correct and concise.",
@@ -179,7 +179,7 @@ async def test_agent_verifier_scores_configured_criteria_with_contracted_evidenc
 
     assert result.status == "succeeded"
     judged = result.trials[0].verifier_results[0]
-    assert judged.reward == 0.8
+    assert judged.score == 0.8
     assert judged.scores == {"quality": 0.8}
     assert judged.evidence == ("result.json answer=42", "observation.text=done")
     execution = store.trial_path(spec.plan().trials[0]) / "executions/0"
@@ -216,7 +216,7 @@ async def test_cross_environment_scheduler_uses_each_runtime_and_bounds_concurre
     assert result.benchmark.name == "mixed"
     assert result.aggregates[0].count == 4
     assert result.aggregates[0].successes == 4
-    assert result.aggregates[0].mean_reward == 1
+    assert result.aggregates[0].mean_score == 1
     assert result.aggregates[0].total_cost == pytest.approx(0.04)
     assert result.aggregates[0].mean_latency_seconds is not None
 
@@ -269,7 +269,7 @@ async def test_human_verifier_yields_awaiting_review(tmp_path: Path) -> None:
         feedback="approved",
     )
     assert resolved.status == "succeeded"
-    assert resolved.trials[0].reward == 1
+    assert resolved.trials[0].score == 1
     assert job.store.successful_result(trial) == resolved.trials[0]
     assert pending_projection != (execution / "result.json").read_bytes()
     for relative, content in immutable_before.items():
@@ -304,7 +304,7 @@ async def test_train_persists_validated_tito_as_hashed_artifact(
     source.mkdir()
     (source / "run.py").write_text("pass\n", encoding="utf-8")
     package = HarnessPackage(
-        definition=HarnessDefinition(
+        definition=HarnessProtocol(
             name="tito",
             implementation="runnable",
             command=("python", "run.py"),
@@ -348,7 +348,7 @@ async def test_agent_secret_grants_must_be_declared_by_selected_harness(
     source.mkdir()
     (source / "run.py").write_text("pass\n", encoding="utf-8")
     package = HarnessPackage(
-        definition=HarnessDefinition(
+        definition=HarnessProtocol(
             name="restricted",
             implementation="runnable",
             command=("python", "run.py"),

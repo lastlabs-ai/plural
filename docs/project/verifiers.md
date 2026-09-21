@@ -32,7 +32,7 @@ def resolved_correctly(episode: Episode) -> VerifierOutput:
     category = episode.observation.get("category")
     correct = bool(expected) and category == expected
     return VerifierOutput(
-        reward=float(done and correct),
+        score=float(done and correct),
         scores={"correct_category": float(correct)},
         evidence=[f"Resolved: {done}; category: {category}; correct: {correct}"],
     )
@@ -44,7 +44,7 @@ completion = DeterministicVerifier(
 )
 ```
 
-This check gives a reward of 1 when the ticket is resolved with the expected category, and 0 otherwise. `scores` stores additional measurements; `evidence` explains the result. Add a separate check if a nonempty response is also required.
+This check gives a score of 1 when the ticket is resolved with the expected category, and 0 otherwise. `scores` stores additional measurements; `evidence` explains the result. Add a separate check if a nonempty response is also required.
 
 The function must be available in a Python file. YAML can reference it as well:
 
@@ -167,6 +167,6 @@ task = Task(
 )
 ```
 
-Choose only the checks your workflow needs. In this combination, objective completion, judged reply quality, and human helpfulness all contribute to the result. Criterion ranges are normalized and criterion weights are applied; each Verifier's `weight` contributes to the final weighted reward. Inspect individual scores as well as the aggregate: a high subjective score should not obscure a failed objective check.
+Choose only the checks your workflow needs. In this combination, objective completion, judged reply quality, and human helpfulness all contribute to the result. Criterion ranges are normalized and criterion weights are applied; each Verifier's `weight` contributes to the final weighted score. Inspect individual scores as well as the aggregate: a high subjective score should not obscure a failed objective check.
 
 Next, choose the [Harness](harnesses.md) that will drive your agent's interaction with the Environment.

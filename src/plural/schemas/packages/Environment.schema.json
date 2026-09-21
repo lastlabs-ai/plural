@@ -610,7 +610,7 @@
     },
     "RewarderDefinition": {
       "additionalProperties": false,
-      "description": "A train-only state-transition rewarder.",
+      "description": "A named state-transition reward signal scored inside each step.",
       "properties": {
         "command": {
           "default": [],

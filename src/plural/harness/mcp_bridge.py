@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+# This module runs as a standalone stdio server. Keep in sync with
+# plural.environments.runner.PROTOCOL.
+STEP_PROTOCOL = "plural-step-v1"
 
 
 def main() -> None:
@@ -107,9 +112,20 @@ def _call_action(
     if not text:
         return {"ok": True}
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
     except json.JSONDecodeError:
         return {"output": text}
+    if not isinstance(parsed, dict) or parsed.get("protocol") != STEP_PROTOCOL:
+        return parsed
+    # Show the Agent the observation and its own errors. Reward stays out of
+    # context so it cannot be used to infer the expected outcome.
+    observation = parsed.get("observation")
+    visible = dict(observation) if isinstance(observation, dict) else {"observation": observation}
+    info = parsed.get("info")
+    error = info.get("error") if isinstance(info, dict) else None
+    if error:
+        visible["error"] = error
+    return visible
 
 
 def _tools(environment: dict[str, Any]) -> list[dict[str, Any]]:
@@ -145,6 +161,14 @@ def _workspace(environment: dict[str, Any]) -> str:
     )
 
 
+def _local_command(command: tuple[str, ...]) -> list[str]:
+    """Resolve ``python`` to this interpreter when the name is not on PATH."""
+    resolved = [str(item) for item in command]
+    if resolved and resolved[0] == "python" and shutil.which("python") is None:
+        resolved[0] = sys.executable
+    return resolved
+
+
 def _run_command(
     command: tuple[str, ...],
     *,
@@ -152,7 +176,7 @@ def _run_command(
     stdin: str | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
-        command,
+        _local_command(command),
         cwd=cwd,
         input=None if stdin is None else stdin.encode(),
         capture_output=True,

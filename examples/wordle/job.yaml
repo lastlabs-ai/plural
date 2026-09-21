@@ -85,7 +85,7 @@ source:
     resources: []
     initial_state: {}
     reset_options: {}
-  primary_metric: reward
+  primary_metric: score
   description: ''
   metadata: {}
 agents:

@@ -256,7 +256,7 @@ plural trial list JOB_ID
 plural trial watch TRIAL_ID --job JOB_ID
 ```
 
-`job show` prints mean reward, cost, and latency. The AgentVerifier reward is the weighted rubric score, not a simple 0/1. `trial list` shows each ticket. A low score on one ticket and a high score on another is the useful signal.
+`job show` prints mean score, cost, and latency. The AgentVerifier score is the weighted rubric score, not a simple 0/1. `trial list` shows each ticket. A low score on one ticket and a high score on another is the useful signal.
 
 Open `.plural/jobs/JOB_ID/trials/TRIAL_ID/` when a score is surprising:
 

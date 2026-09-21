@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from pydantic import BaseModel
+
 from plural.harness.interface import (
     HarnessAgent,
     HarnessEnvironment,
@@ -114,6 +116,17 @@ async def _await_value(value: Any) -> Any:
     return await value
 
 
+def _encodable(value: Any) -> Any:
+    """Serialize values a Harness may pass through, such as HarnessStep."""
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _dumps(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, default=_encodable)
+
+
 def _write_result(result: HarnessResult) -> None:
     trace_id = result.trace_id or str(uuid4())
     payload = {
@@ -122,13 +135,13 @@ def _write_result(result: HarnessResult) -> None:
         **result.metadata,
     }
     Path("result.json").write_text(
-        json.dumps(payload, sort_keys=True) + "\n",
+        _dumps(payload) + "\n",
         encoding="utf-8",
     )
     artifacts: list[str] = []
     if result.trajectory:
         Path("trajectory.jsonl").write_text(
-            "".join(json.dumps(item, sort_keys=True) + "\n" for item in result.trajectory),
+            "".join(_dumps(item) + "\n" for item in result.trajectory),
             encoding="utf-8",
         )
         artifacts.append("trajectory.jsonl")
@@ -137,7 +150,7 @@ def _write_result(result: HarnessResult) -> None:
         artifacts.append("logs.txt")
     if result.tito:
         Path("tito.jsonl").write_text(
-            "".join(json.dumps(item, sort_keys=True) + "\n" for item in result.tito),
+            "".join(_dumps(item) + "\n" for item in result.tito),
             encoding="utf-8",
         )
         artifacts.append("tito.jsonl")

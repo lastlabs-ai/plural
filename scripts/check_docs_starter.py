@@ -43,6 +43,8 @@ class ModelFixture(BaseHTTPRequestHandler):
             "categorize",
             "draft_response",
             "resolve",
+            # The Harness offers this so the Agent can end the episode itself.
+            "finish",
         }
         task = json.loads(request["messages"][1]["content"])
         history = [m for m in request["messages"] if m["role"] == "tool"]
@@ -134,7 +136,7 @@ try:
         assert plan["trial_count"] == 1
         result = json.loads(_run("run", "job.yaml", "--offline"))
         assert result["status"] == "succeeded", result
-        assert result["trials"][0]["reward"] == 1, result
+        assert result["trials"][0]["score"] == 1, result
         _run("job", "show", result["job_id"])
         _run("trial", "list", result["job_id"])
         suite = json.loads(
@@ -148,14 +150,14 @@ try:
                 "--offline",
             )
         )
-        assert len(suite["trials"]) == 6 and all(t["reward"] == 1 for t in suite["trials"]), suite
+        assert len(suite["trials"]) == 6 and all(t["score"] == 1 for t in suite["trials"]), suite
         ModelFixture.wrong = True
         # A changed instruction makes this a distinct Trial configuration.
         changed_job = yaml.safe_load((root / "job.yaml").read_text())
         changed_job["agents"][0]["instructions"] += " Inspect the result."
         (root / "job.yaml").write_text(yaml.safe_dump(changed_job, sort_keys=False))
         failed_quality = json.loads(_run("run", "job.yaml", "--offline"))
-        assert failed_quality["trials"][0]["reward"] == 0, failed_quality
+        assert failed_quality["trials"][0]["score"] == 0, failed_quality
         ModelFixture.wrong = False
         human = {
             "kind": "human",
@@ -202,7 +204,7 @@ try:
         )
         done = json.loads(_run("job", "show", pending["job_id"]))
         stored = JobStore(root / ".plural/jobs").read_job_result(pending["job_id"])
-        assert stored.status == "succeeded" and stored.trials[0].reward == 1
+        assert stored.status == "succeeded" and stored.trials[0].score == 1
         print(
             f"PASS: typed build, 5 validators, dry-run, native loop, 6-Trial benchmark, "
             f"zero-score case, local review completion ({ModelFixture.calls} controlled "

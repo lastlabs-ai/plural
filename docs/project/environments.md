@@ -21,7 +21,7 @@ Before writing code, decide:
 2. **What information would it have?** Expose the ticket and applicable policy.
 3. **What can it do?** Define focused actions that reflect the real workflow.
 4. **How will you know it succeeded?** Keep the expected outcome available to a Verifier.
-5. **When should it stop?** Define completion and set a turn and time budget.
+5. **When should it stop?** Decide what counts as finished and set a turn and time budget. See [How an episode ends](#how-an-episode-ends).
 
 Start with a small, representative workflow. Add cases and complexity after you can explain why a known good run passes and a known bad run fails.
 
@@ -91,6 +91,56 @@ environment = TicketTriage(runtime=Runtime.local())
 The Job calls `reset` to start each run and invokes the actions the agent selects. Only agent-facing methods use `@action`; `reset` and `step` are lifecycle methods. Typed action parameters tell the model which inputs each action accepts. Clear docstrings and validation errors help it use them correctly.
 
 The directory containing the class is its source package. Keep the code and data it needs there, and keep credentials, caches, and generated results elsewhere. Plural records the source hash and copies the package into the Runtime.
+
+## How an episode ends
+
+Every agent action goes through `step`, which returns the same five values Gymnasium uses:
+
+```python
+observation, reward, terminated, truncated, info = environment.step("categorize", category="billing")
+```
+
+The agent only ever sees the observation. The remaining values describe the transition, and Plural records them on the episode rather than showing them to the model, so a reward or a terminal flag never leaks into the model's context.
+
+An episode can stop for three reasons, and each records a different `stop_reason` on the Trial:
+
+- **The Environment ends it.** Override `terminated()` when the world reaches a Task success or failure state, as the example above does when the ticket is categorized. Override `truncated()` when the episode cannot usefully continue but reached neither outcome. Both default to `False`, so an Environment that never overrides them leaves the stop decision entirely to the agent and the budget.
+- **The agent ends it.** Plural adds a `finish` tool alongside your actions, and the agent calls it when the work is done or when it cannot make progress. Its optional `summary` becomes the Trial's response. Declare an `@action` named `finish` if you would rather handle that yourself.
+- **A budget cuts it short.** `max_turns`, `max_seconds`, and `max_cost_usd` truncate the episode instead of failing the Trial, so you still get a trajectory and Verifier results.
+
+`terminated` and `truncated` are recorded separately from `stop_reason`, because neither is set when the agent chose to stop. Read `stop_reason` to tell an agent that finished early from a world that declared the Task over.
+
+## Rewards
+
+A reward is per-step credit for one state transition. Verifiers decide whether the Trial succeeded; rewards explain which action deserved the credit. They are recorded on the episode in every mode, and they never contribute to a score.
+
+For a single signal, override `reward`:
+
+```python
+class TicketTriage(Environment[TicketObservation, TicketState]):
+    def reward(self, previous_state, current_state, action, result) -> float:
+        return 1.0 if current_state["category"] == current_state["expected"] else 0.0
+```
+
+For several named signals, declare a `@rewarder` for each. Every one runs inside `step` immediately after the action that changed the world, and `weight` scales its contribution:
+
+```python
+from plural import rewarder
+
+
+class TicketTriage(Environment[TicketObservation, TicketState]):
+    @rewarder(weight=2)
+    def correct_category(self, previous_state, current_state, action, result) -> float:
+        return 1.0 if current_state["category"] == current_state["expected"] else 0.0
+
+    @rewarder
+    def progress(self, previous_state, current_state, action, result) -> float:
+        return 1.0 if current_state["category"] and not previous_state["category"] else 0.0
+```
+
+Every reward signal takes exactly `previous_state, current_state, action, result`. The two states are detached JSON snapshots taken before and after the action, so read them like dictionaries rather than as your `State` class. `action` is the action name plus its parameters, and `result` is whatever the action returned.
+
+The `reward` returned by `step` is the weighted total of `reward()` and every rewarder, and `info["rewards"]` breaks that total down by name. A signal that raises is recorded as `0.0` with its error in that breakdown, because a reward bug must not fail an action that already changed the world. A trainer reads these per-step values; see [Training and RL](../running/training.md).
 
 ## Connect Tasks and scoring
 
@@ -320,7 +370,7 @@ Docker and Daytona connection credentials configure the run worker, separately f
 - **Metadata:** use `name`, `version`, and `overview` to identify the Environment; use `metadata` for labels and ownership.
 - **Display:** override `Observation.render()` to control model-facing text and `Environment.view()` to create an operator summary.
 - **Harness policy:** restrict custom Harnesses and their capabilities. See [Harnesses](harnesses.md).
-- **Rewarders:** define additional learning signals for a supported training integration. Final success is scored by Verifiers. See [Training and RL](../running/training.md).
+- **Rewards:** attach per-step credit to state transitions. See [Rewards](#rewards).
 
 ## Build a complete example
 

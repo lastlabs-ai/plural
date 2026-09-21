@@ -13,8 +13,8 @@ from plural.common import (
     FileDeclaration,
     FrozenModel,
     HarnessCapability,
-    HarnessDefinition,
     HarnessPackage,
+    HarnessProtocol,
     PackageSource,
 )
 from plural.harness.retrieval import tree_digest
@@ -261,7 +261,7 @@ def resolve_builtin_package(name: str, kwargs: dict[str, Any] | None = None) -> 
     options = normalize_kwargs(name, kwargs)
     version = str(options["version"])
     source = Path(__file__).parent
-    definition = HarnessDefinition(
+    definition = HarnessProtocol(
         name=spec.name,
         revision=version,
         description=spec.description,

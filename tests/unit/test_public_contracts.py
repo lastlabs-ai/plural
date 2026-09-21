@@ -8,8 +8,8 @@ from plural.common import (
     ExecutionTarget,
     HarnessBinding,
     HarnessCapability,
-    HarnessDefinition,
     HarnessPackage,
+    HarnessProtocol,
     PackageSource,
 )
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
@@ -98,7 +98,7 @@ def test_task_pins_environment_and_weighted_verifiers() -> None:
 
 def test_agent_is_not_environment_bound_and_stamp_is_per_trial() -> None:
     package = HarnessPackage(
-        definition=HarnessDefinition(
+        definition=HarnessProtocol(
             name="web",
             implementation="runnable",
             command=("python", "run.py"),

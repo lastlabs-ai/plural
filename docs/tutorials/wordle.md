@@ -102,7 +102,7 @@ This walkthrough builds that Environment, a verifier, five fixed Tasks (one per 
 
 
     def solved(episode: Episode) -> VerifierOutput:
-        return VerifierOutput(reward=float(bool(episode.observation.get("solved"))))
+        return VerifierOutput(score=float(bool(episode.observation.get("solved"))))
 
 
     environment = Wordle(runtime=Runtime.local())
@@ -152,7 +152,7 @@ This walkthrough builds that Environment, a verifier, five fixed Tasks (one per 
 
 
     def solved(episode: Episode) -> VerifierOutput:
-        return VerifierOutput(reward=float(bool(episode.observation.get("solved"))))
+        return VerifierOutput(score=float(bool(episode.observation.get("solved"))))
     ```
 
     `environment.yaml`:
@@ -236,7 +236,7 @@ plural trial list JOB_ID
 plural trial watch TRIAL_ID --job JOB_ID
 ```
 
-`job show` prints mean reward, cost, and latency. `trial list` shows each word. Reward 1 means that word was solved. Reward 0 means the agent used its guesses without matching the secret.
+`job show` prints mean score, cost, and latency. `trial list` shows each word. Score 1 means that word was solved. Score 0 means the agent used its guesses without matching the secret.
 
 Open `.plural/jobs/JOB_ID/trials/TRIAL_ID/` when a score is surprising:
 

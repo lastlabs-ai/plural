@@ -65,11 +65,11 @@ These commands assume you have created `training-job.yaml` and configured model 
 
 ## 4. Add learning signals where needed
 
-Final Verifiers measure Task success in both eval and train mode. Rewarders provide additional training signals, such as progress toward a solution.
+Final Verifiers measure Task success in both eval and train mode. Rewarders provide the per-step signal an algorithm needs to assign credit, such as progress toward a solution.
 
-Package Jobs currently execute command Rewarders during final scoring. They do not automatically run a Rewarder after every native action. An algorithm that needs a reward for each transition must use an integration that invokes and records those rewards. Python Rewarders require an in-process integration.
+Every Rewarder runs inside `step`, immediately after the action that changed the world, and its value is recorded on the episode in both modes. Train mode is what emits those values as a training signal. `info["rewards"]` breaks each step's total down by name, so you can see which action earned the credit. See [Rewards](../project/environments.md#rewards) for how to declare them.
 
-The final Task reward remains the weighted aggregate of its Verifiers. Keep that evaluation metric stable as you experiment with learning signals.
+The final Task score remains the weighted aggregate of its Verifiers. Rewards never contribute to it. Keep that evaluation metric stable as you experiment with learning signals.
 
 ## 5. Train and evaluate again
 

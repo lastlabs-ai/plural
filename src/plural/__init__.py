@@ -61,8 +61,10 @@ from plural.harness import (
     Harness,
     HarnessAgent,
     HarnessCompletion,
+    HarnessDefinition,
     HarnessEnvironment,
     HarnessResult,
+    HarnessStep,
     HarnessTask,
 )
 from plural.jobs import (
@@ -97,6 +99,7 @@ from plural.sandbox import (
     SandboxProvider,
     SandboxRequirements,
 )
+from plural.sessions import SessionSnapshot
 from plural.studio import Studio
 from plural.tasks import Benchmark, BenchmarkDiff, Task, TaskPin
 from plural.tracing import (
@@ -113,9 +116,11 @@ from plural.tracing import (
 from plural.trajectory import Trajectory, TrajectoryEvent, normalize_trajectory
 from plural.types import ChatRequest, ChatResponse, Message, Tool, Usage
 from plural.verifiers import (
+    STOP_REASONS,
     AgentVerifier,
     DeterministicVerifier,
     Episode,
+    EpisodeOutcome,
     EpisodeUsage,
     HumanVerifier,
     RubricCriterion,
@@ -166,6 +171,7 @@ __all__ = [
     "JobResult",
     "JobStore",
     "RetryPolicy",
+    "SessionSnapshot",
     "Trial",
     "TrialResult",
     # Hosting and models.
@@ -193,6 +199,7 @@ __all__ = [
     "DaytonaProvider",
     "DeclarativeImage",
     "DockerProvider",
+    "EpisodeOutcome",
     "EpisodeUsage",
     "ErrorCode",
     "ExecutionStatus",
@@ -200,8 +207,10 @@ __all__ = [
     "HarnessAgent",
     "HarnessCapability",
     "HarnessCompletion",
+    "HarnessDefinition",
     "HarnessEnvironment",
     "HarnessResult",
+    "HarnessStep",
     "HarnessTask",
     "InvalidRequestError",
     "JSONLSink",
@@ -210,6 +219,7 @@ __all__ = [
     "NetworkMode",
     "NotFoundError",
     "Outcome",
+    "STOP_REASONS",
     "PluralError",
     "ProgressEvent",
     "ProviderRegistry",

@@ -10,9 +10,11 @@ from typing import Any
 
 from plural import Environment, Runtime
 
+PROTOCOL = "plural-step-v1"
+
 
 def main(argv: list[str] | None = None) -> None:
-    """Dispatch ``reset`` or one ``@action`` on the Environment class."""
+    """Dispatch ``reset`` or one ``@action`` and emit one step envelope."""
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) != 2:
         raise SystemExit(
@@ -20,11 +22,9 @@ def main(argv: list[str] | None = None) -> None:
         )
     world = _load(args[0])
     _restore(world)
-    observation = _dispatch(world, args[1])
+    envelope = _dispatch(world, args[1])
     world.persist()
-    print(
-        json.dumps(observation if isinstance(observation, dict) else world.observation_snapshot())
-    )
+    print(json.dumps(envelope, sort_keys=True))
 
 
 def _load(reference: str) -> Environment[Any, Any]:
@@ -74,19 +74,48 @@ def _restore(world: Environment[Any, Any]) -> None:
         )
 
 
-def _dispatch(world: Environment[Any, Any], name: str) -> Any:
+def _envelope(
+    world: Environment[Any, Any],
+    kind: str,
+    *,
+    reward: float = 0.0,
+    terminated: bool | None = None,
+    truncated: bool | None = None,
+    info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "protocol": PROTOCOL,
+        "kind": kind,
+        "observation": world.observation_snapshot(),
+        "reward": reward,
+        "terminated": world.terminated() if terminated is None else terminated,
+        "truncated": world.truncated() if truncated is None else truncated,
+        "info": info or {},
+    }
+
+
+def _dispatch(world: Environment[Any, Any], name: str) -> dict[str, Any]:
     if name == "reset":
-        observation, _info = world.reset()
-        return observation
+        _observation, info = world.reset()
+        return _envelope(world, "reset", info=info if isinstance(info, dict) else {})
     raw = sys.stdin.read().strip()
     params = json.loads(raw) if raw else {}
     if not isinstance(params, dict):
         raise ValueError("action parameters must be a JSON object")
     try:
-        observation, _reward, _terminated, _truncated, _info = world.step(name, **params)
-        return observation
+        _observation, reward, terminated, truncated, info = world.step(name, **params)
     except ValueError as error:
-        return {"error": str(error), **world.observation_snapshot()}
+        # Invalid Agent input is feedback, not an execution failure. The Agent
+        # sees the error and can retry; the episode continues.
+        return _envelope(world, "step", info={"error": str(error)})
+    return _envelope(
+        world,
+        "step",
+        reward=float(reward),
+        terminated=terminated,
+        truncated=truncated,
+        info=info if isinstance(info, dict) else {},
+    )
 
 
 if __name__ == "__main__":

@@ -95,6 +95,7 @@ nav:
   - Run:
       - Jobs: running/jobs.md
       - Trials and trajectories: running/trials.md
+      - Sessions: running/sessions.md
       - Artifacts and evidence: running/artifacts.md
       - Reviews: running/reviews.md
       - Training and RL: running/training.md

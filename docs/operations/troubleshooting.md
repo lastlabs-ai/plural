@@ -67,7 +67,7 @@ Supply the implementation named by `check`. Imported modules and data are not
 automatically available in the Verifier Runtime. The scorer must write its
 declared result path as valid JSON and include evidence when required.
 
-## Execution succeeded but reward is zero
+## Execution succeeded but the score is zero
 
 That can be a legitimate evaluation outcome. Inspect the final state and verifier feedback. A correctly executed agent can still choose the wrong category. Preserve zero-scoring completed Trials in your comparison.
 
@@ -75,7 +75,7 @@ That can be a legitimate evaluation outcome. Inspect the final state and verifie
 
 Use `plural review list JOB_ID` for local Jobs or `plural review hosted-list` for
 hosted assignments. Submit all required criteria in their declared ranges. A
-pending human score withholds the final reward; it is not a runtime timeout.
+pending human score withholds the final score; it is not a runtime timeout.
 
 ## Train mode reports unsupported TITO
 

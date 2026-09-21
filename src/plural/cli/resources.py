@@ -2,26 +2,35 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
 import typer
 
+from plural.cli.config import default_credential_store, resolve_context
 from plural.cli.output import _client, _emit, _error, _validated
 from plural.cli.scaffold import (
+    find_remote_task,
+    init_task,
     load_agent,
     load_benchmark,
     load_environment,
     load_harness,
     load_task,
+    load_task_for_push,
     load_verifier,
     scaffold_agent,
     scaffold_benchmark,
     scaffold_environment,
     scaffold_harness,
-    scaffold_task,
     scaffold_verifier,
+    task_push_needs_remote,
 )
+from plural.client import Client
+from plural.config import resolve_gateway_url
+from plural.errors import PluralError
+from plural.tasks import TaskDefinition
 
 env_app = typer.Typer(help="Author, inspect, and publish Environments.")
 task_app = typer.Typer(help="Author, inspect, and publish Tasks.")
@@ -74,24 +83,51 @@ def env_publish(resource_id: str, revision_id: str) -> None:
 
 @task_app.command("init")
 def task_init(
-    path: Path = typer.Argument(Path("task.yaml")),
-    task_id: str = typer.Option("task", "--id"),
-    environment: Path = typer.Option(..., "--environment", "-e"),
-    verifier: list[Path] = typer.Option(..., "--verifier", "-v"),
-    force: bool = typer.Option(False, "--force"),
+    name: str = typer.Argument(..., help="Task slug and local directory name."),
+    environment: str | None = typer.Option(
+        None, "--environment", "-e", help="Hosted environment slug/id or local file."
+    ),
+    verifier: list[str] | None = typer.Option(
+        None, "--verifier", "-v", help="Hosted verifier slug/id or local file."
+    ),
+    bare: bool = typer.Option(False, "--bare", help="Create an empty task package."),
+    push: bool = typer.Option(False, "--push", help="Publish the new task immediately."),
+    force: bool = typer.Option(False, "--force", help="Replace existing task files."),
 ) -> None:
-    """Create a Task pinned to an Environment and Verifiers."""
+    """Create a local Task directory without publishing it."""
+    client = _task_init_client()
+    if client is None:
+        typer.echo(
+            "Remote task name was not checked because PLURAL_API_KEY is not set.",
+            err=True,
+        )
+    else:
+        _confirm_task_slug(client, name)
     try:
-        created = scaffold_task(
-            path,
-            task_id=task_id,
-            environment_path=environment,
-            verifier_paths=tuple(verifier),
+        created = init_task(
+            name,
+            environment=environment,
+            verifiers=tuple(verifier or ()),
+            bare=bare,
             force=force,
         )
     except (OSError, ValueError, FileExistsError) as exc:
         _error(str(exc))
-    _emit({"created": str(created)})
+    if not push:
+        _emit({"created": [str(item) for item in created]})
+        return
+    directory = Path(name).expanduser()
+    with _client() as push_client:
+        definition, environment_revision_id, verifier_revision_ids = _validated(
+            lambda target: load_task_for_push(target, client=push_client),
+            directory,
+        )
+        record = push_client.tasks.push(
+            definition,
+            environment_revision_id=environment_revision_id,
+            verifier_revision_ids=verifier_revision_ids,
+        )
+    _emit({"created": [str(item) for item in created], "pushed": record})
 
 
 @task_app.command("validate")
@@ -109,19 +145,93 @@ def task_show(path: Path = typer.Argument(Path("task.yaml"))) -> None:
 
 @task_app.command("push")
 def task_push(
-    path: Path = typer.Argument(Path("task.yaml")),
-    environment_revision_id: str = typer.Option(..., "--environment-revision-id"),
-    verifier_revision_id: list[str] = typer.Option(..., "--verifier-revision-id"),
+    path: Path = typer.Argument(Path("task.yaml"), help="Task file or task directory."),
+    environment_revision_id: str | None = typer.Option(
+        None, "--environment-revision-id", help="Override the hosted environment revision."
+    ),
+    verifier_revision_id: list[str] | None = typer.Option(
+        None, "--verifier-revision-id", help="Override a hosted verifier revision."
+    ),
 ) -> None:
-    """Publish a Task revision with exact hosted dependencies."""
+    """Publish a Task revision, resolving hosted environment and verifier slugs."""
+    try:
+        needs_remote = task_push_needs_remote(
+            path,
+            environment_revision_id=environment_revision_id,
+            verifier_revision_ids=verifier_revision_id,
+        )
+    except (OSError, ValueError) as exc:
+        _error(str(exc))
+    if not needs_remote:
+        task = _validated(load_task, path)
+        if environment_revision_id is None or verifier_revision_id is None:
+            _error(
+                "Task push requires --environment-revision-id and --verifier-revision-id "
+                "unless task.yaml uses hosted environment and verifier slugs"
+            )
+        with _client() as client:
+            _emit(
+                client.tasks.push(
+                    task,
+                    environment_revision_id=environment_revision_id,
+                    verifier_revision_ids=verifier_revision_id,
+                )
+            )
+        return
     with _client() as client:
-        _emit(
-            client.tasks.push(
-                _validated(load_task, path),
+
+        def _load_for_push(target: Path) -> tuple[TaskDefinition, str, list[str]]:
+            return load_task_for_push(
+                target,
+                client=client,
                 environment_revision_id=environment_revision_id,
                 verifier_revision_ids=verifier_revision_id,
             )
+
+        definition, resolved_environment, resolved_verifiers = _validated(_load_for_push, path)
+        _emit(
+            client.tasks.push(
+                definition,
+                environment_revision_id=resolved_environment,
+                verifier_revision_ids=resolved_verifiers,
+            )
         )
+
+
+def _task_init_client() -> Client | None:
+    """Return a hosted client when task-init collision checks are possible."""
+    api_key = os.environ.get("PLURAL_API_KEY")
+    if not api_key:
+        return None
+    try:
+        context = resolve_context(credentials=default_credential_store())
+        return Client(
+            api_key=api_key,
+            base_url=resolve_gateway_url(context.api_url),
+            project=context.project,
+        )
+    except (OSError, ValueError, PluralError) as exc:
+        _error(str(exc))
+
+
+def _confirm_task_slug(client: Client, name: str) -> None:
+    """Warn about an existing hosted slug and ask whether to continue locally."""
+    try:
+        existing = find_remote_task(client, name)
+    except PluralError as exc:
+        _error(str(exc))
+    if existing is None:
+        return
+    typer.echo(
+        f"Warning: a task named {name!r} already exists in the current project.",
+        err=True,
+    )
+    try:
+        proceed = typer.confirm("Proceed?", default=False)
+    except typer.Abort:
+        raise typer.Exit(0) from None
+    if not proceed:
+        raise typer.Exit(0)
 
 
 @task_app.command("publish")

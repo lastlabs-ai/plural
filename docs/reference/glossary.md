@@ -32,8 +32,10 @@ nav_group: Reference
 - **Artifact:** a captured output file, identified by path and content hash.
 - **Receipt:** the Trial's recorded identities, runtime, timing, and integrity information.
 - **Review:** a person's scoring submission for a pending human Verifier.
-- **Reward:** the scalar quality signal produced by a Verifier or learning integration.
-- **Rewarder:** an Environment-declared learning signal, used by supported train execution paths.
+- **Score:** the scalar quality signal a Verifier produces, aggregated onto the Trial.
+- **Reward:** per-step credit for one state transition, recorded on the episode and never part of a score.
+- **Rewarder:** an Environment-declared reward signal, scored inside every step.
+- **Stop reason:** how one episode ended, such as `environment_terminated`, `agent_finished`, or `max_turns`.
 - **TITO:** exact tokens in and tokens out, with aligned provenance for training.
 - **Version:** a semantic version of an authored object; its content hash identifies resolved content.
 - **Leaderboard:** a comparison derived from Agent results on a Benchmark under a stated aggregation rule.

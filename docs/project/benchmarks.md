@@ -75,14 +75,14 @@ YAML describes the same collection:
 kind: benchmark
 name: support-triage
 version: 1.0.0
-primary_metric: reward
+primary_metric: score
 tasks:
   - tasks/ticket-1.yaml
   - tasks/ticket-2.yaml
   - tasks/ticket-3.yaml
 ```
 
-`primary_metric` defaults to `reward`. That is the correctness score written by each Task's Verifiers. Leave it as `reward` unless you have a named Verifier score you want to rank on.
+`primary_metric` defaults to `score`. That is the correctness score written by each Task's Verifiers. Leave it as `score` unless you have a named Verifier score you want to rank on.
 
 Choose cases that represent the decisions you need to make. For customer support, include billing, technical, and account requests, then add the difficult ones that matter to your product. A small set checks that evaluation works; a representative set is what you use to choose an agent.
 
@@ -116,7 +116,7 @@ result = job.run()
 for row in result.aggregates:
     print(
         row.agent_name,
-        row.mean_reward,
+        row.mean_score,
         row.total_cost,
         row.mean_latency_seconds,
     )
@@ -128,13 +128,13 @@ Every completed Trial records a score, whether later attempts agree, how long it
 
 ### Correctness
 
-Correctness is the Verifier reward. For a support ticket, that is usually 1 when the agent assigned the right category, drafted a reply, and resolved the ticket, and 0 otherwise. The Benchmark ranks Agents on `primary_metric`, which defaults to this reward.
+Correctness is the Verifier score. For a support ticket, that is usually 1 when the agent assigned the right category, drafted a reply, and resolved the ticket, and 0 otherwise. The Benchmark ranks Agents on `primary_metric`, which defaults to this score.
 
 A Trial can finish executing and still score 0. Completing the run is not the same as doing the work correctly.
 
 ### Consistency
 
-`attempts` repeats each Agent × Task pair as independent Trials. Two attempts is enough to see whether a score is stable. If an agent solves a ticket once and fails the same ticket the next time, the mean reward is hiding unreliable behavior.
+`attempts` repeats each Agent × Task pair as independent Trials. Two attempts is enough to see whether a score is stable. If an agent solves a ticket once and fails the same ticket the next time, the mean score is hiding unreliable behavior.
 
 Do not use retries for this. Retries recover a failed execution; attempts are the repeated samples you compare.
 
@@ -154,7 +154,7 @@ An agent is on the frontier when no other agent is both more correct and cheaper
 
 A common rule:
 
-1. Set a correctness floor for the workflow, such as a mean reward you will accept.
+1. Set a correctness floor for the workflow, such as a mean score you will accept.
 2. Drop every agent below that floor.
 3. Among the agents that remain, prefer lower cost. Use latency as the tie-breaker when two agents cost about the same.
 
@@ -171,13 +171,13 @@ plural trial list JOB_ID
 plural trial watch TRIAL_ID --job JOB_ID
 ```
 
-`job show` prints the aggregates: mean reward, successes, total cost, and mean latency for each Agent. `trial list` shows the per-case scores behind those averages.
+`job show` prints the aggregates: mean score, successes, total cost, and mean latency for each Agent. `trial list` shows the per-case scores behind those averages.
 
 When a score is surprising, open that Trial under `.plural/jobs/JOB_ID/trials/TRIAL_ID/`:
 
 1. **Trajectory:** what the agent saw, which actions it took, and the feedback it received.
 2. **Final State and Observation:** what actually changed in the Environment.
-3. **Verifier results:** which checks passed and the evidence behind the reward.
+3. **Verifier results:** which checks passed and the evidence behind the score.
 4. **Receipt:** which Agent, Task, and Runtime produced the result.
 
 For a misrouted ticket, inspect whether the agent skipped the policy, misunderstood it, chose an invalid action, or stopped early. These traces explain the observed score. They do not reveal every internal reason a model made its decision.

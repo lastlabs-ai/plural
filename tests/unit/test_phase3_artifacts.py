@@ -163,7 +163,7 @@ def test_mercor_import_normalizes_and_writes_unverified_bundle(tmp_path: Path) -
     assert imported.provenance == "imported_unverified"
     assert "environment" in imported.config
     assert "modal_app_name" not in json.dumps(imported.config)
-    assert imported.reward == 0.75
+    assert imported.score == 0.75
     assert imported.tito_transitions == [{"input": "a", "output": "b"}]
     assert [event.kind for event in imported.trajectory.events] == ["message", "action"]
     assert imported.logs == (

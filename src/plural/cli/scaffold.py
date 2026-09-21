@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import warnings
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 from pydantic import BaseModel
@@ -13,17 +15,23 @@ from plural import Agent, Benchmark, Environment, Harness, Job, Task
 from plural.agents import AgentDefinition
 from plural.common import PackageSource
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
+from plural.errors import NotFoundError
 from plural.harness.retrieval import package_from_archive, tree_digest
 from plural.jobs import JobSpec
-from plural.project import Resolver, public_schema
+from plural.project import Resolver, prepare_task_payload, public_schema, read_task_package
+from plural.studio import resolve_published_revision
 from plural.tasks import BenchmarkDefinition, TaskDefinition
 from plural.verifiers import (
     AgentVerifier,
     DeterministicVerifier,
     HumanVerifier,
     RubricCriterion,
+    Verifier,
     VerifierDefinition,
 )
+
+if TYPE_CHECKING:
+    from plural.client import Client
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -124,6 +132,287 @@ def scaffold_verifier(
             ),
         )
     return _create(_target(path, "verifier.yaml"), verifier, force=force)
+
+
+def init_task(
+    name: str,
+    *,
+    environment: str | Path | None = None,
+    verifiers: str | Path | Sequence[str | Path] | None = (),
+    bare: bool = False,
+    directory: str | Path | None = None,
+    force: bool = False,
+    client: Client | None = None,
+) -> list[Path]:
+    """Create a local task directory without publishing it.
+
+    Args:
+        name: Task slug and default directory name.
+        environment: Optional hosted environment slug/id or local file reference.
+        verifiers: Optional hosted verifier slugs/ids or local file references.
+        bare: When true, write empty instructions/resources and only identity fields.
+        directory: Optional directory to create instead of ``./<name>``.
+        force: Replace existing task files.
+        client: Optional configured client used only to warn when ``name`` exists.
+
+    Returns:
+        The created instruction file, task file, and resources directory.
+    """
+    _validate_task_name(name)
+    if client is not None and find_remote_task(client, name) is not None:
+        warnings.warn(
+            f"Task {name!r} already exists in the current project; "
+            "writing local files without publishing",
+            stacklevel=2,
+        )
+    target = Path(directory).expanduser() if directory is not None else Path(name)
+    target.mkdir(parents=True, exist_ok=True)
+    instruction = target / "instruction.md"
+    if instruction.exists() and not force:
+        raise FileExistsError(f"{instruction} already exists; pass --force to replace it")
+    resources = target / "resources"
+    resources.mkdir(parents=True, exist_ok=True)
+    verifier_refs = _task_verifier_refs(verifiers)
+
+    if bare:
+        instruction.write_text("", encoding="utf-8")
+        payload: dict[str, Any] = {"kind": "task", "name": name, "version": "0.1.0"}
+    else:
+        instruction.write_text(
+            f"# {name}\n\nReplace this with what the agent should accomplish.\n",
+            encoding="utf-8",
+        )
+        payload = {
+            "kind": "task",
+            "name": name,
+            "version": "0.1.0",
+            "instructions": "instruction.md",
+            "initial_state": {},
+            "info": {},
+            "resources": [
+                {
+                    "kind": "file",
+                    "name": "resources",
+                    "path": "resources",
+                    "delivery": "source",
+                }
+            ],
+        }
+        if environment is not None:
+            payload["environment"] = _task_binding_text(environment, target)
+        if verifier_refs:
+            payload["verifiers"] = [
+                _task_binding_text(verifier, target) for verifier in verifier_refs
+            ]
+    config = _create(target / "task.yaml", payload, force=force)
+    return [instruction, config, resources]
+
+
+def find_remote_task(client: Client, name: str) -> dict[str, Any] | None:
+    """Return a hosted task parent, or ``None`` when its slug is available.
+
+    Args:
+        client: Configured hosted client.
+        name: Task slug or id in the client's project scope.
+
+    Returns:
+        The hosted parent mapping, or ``None`` when no such task exists.
+    """
+    try:
+        parent = client.tasks.get(name)
+    except NotFoundError:
+        return None
+    return dict(parent) if isinstance(parent, Mapping) else parent
+
+
+def task_push_needs_remote(
+    path: str | Path,
+    *,
+    environment_revision_id: str | None = None,
+    verifier_revision_ids: Sequence[str] | None = None,
+) -> bool:
+    """Return whether task push must resolve hosted slugs before publishing.
+
+    Args:
+        path: Task YAML file or task directory.
+        environment_revision_id: Explicit hosted revision id, when supplied.
+        verifier_revision_ids: Explicit hosted revision ids, when supplied.
+
+    Returns:
+        ``True`` when any environment or verifier binding is a hosted slug
+        rather than a local file. Explicit revision ids still use the hosted
+        definitions for local validation.
+    """
+    _source, raw, base = read_task_package(path)
+    environment_value = raw.get("environment")
+    verifier_values = raw.get("verifiers")
+    has_remote_environment = isinstance(environment_value, str) and not _binding_is_local(
+        environment_value, base
+    )
+    has_remote_verifier = isinstance(verifier_values, (list, tuple)) and any(
+        isinstance(value, str) and not _binding_is_local(value, base) for value in verifier_values
+    )
+    return has_remote_environment or has_remote_verifier
+
+
+def load_task_for_push(
+    path: str | Path,
+    *,
+    client: Client | None = None,
+    environment_revision_id: str | None = None,
+    verifier_revision_ids: Sequence[str] | None = None,
+) -> tuple[TaskDefinition, str, list[str]]:
+    """Load a task package and resolve its hosted environment and verifiers.
+
+    Args:
+        path: Task YAML file or task directory.
+        client: Configured hosted client, required for slug references.
+        environment_revision_id: Explicit hosted revision id overriding lookup.
+        verifier_revision_ids: Explicit hosted revision ids overriding lookup.
+
+    Returns:
+        The compiled task definition with resolved revision ids.
+    """
+    source, raw, base = read_task_package(path)
+    environment_value = raw.get("environment")
+    verifier_values = raw.get("verifiers")
+    if environment_value is None:
+        raise ValueError(
+            f"{source} does not name an environment; add environment: <slug> to task.yaml"
+        )
+    if not isinstance(verifier_values, (list, tuple)) or not verifier_values:
+        raise ValueError(f"{source} does not name a verifier; add verifiers: [<slug>] to task.yaml")
+    explicit_verifiers = list(verifier_revision_ids) if verifier_revision_ids is not None else None
+    if explicit_verifiers is not None and len(explicit_verifiers) != len(verifier_values):
+        raise ValueError(
+            f"{source} names {len(verifier_values)} verifiers "
+            f"but received {len(explicit_verifiers)} --verifier-revision-id values"
+        )
+    resolver = Resolver(root=base)
+    environment_revision = _remote_task_revision(client, "environment", environment_value, base)
+    verifier_revisions = [
+        _remote_task_revision(client, "verifier", value, base) for value in verifier_values
+    ]
+    payload = prepare_task_payload(raw, base)
+    payload["environment"] = _prepare_task_binding(
+        environment_value,
+        resolver,
+        base,
+        "environment",
+        environment_revision[1] if environment_revision is not None else None,
+    )
+    payload["verifiers"] = [
+        _prepare_task_binding(
+            value, resolver, base, "verifier", revision[1] if revision is not None else None
+        )
+        for value, revision in zip(verifier_values, verifier_revisions, strict=True)
+    ]
+    task = Task.model_validate(payload, context={"catalog": resolver.catalog})
+    if environment_revision_id is not None:
+        resolved_environment = environment_revision_id
+    elif environment_revision is not None:
+        resolved_environment = environment_revision[0]
+    else:
+        raise ValueError(
+            f"Task environment {environment_value!r} is a local file; "
+            "pass --environment-revision-id to push it"
+        )
+    resolved_verifiers = []
+    for index, (value, revision) in enumerate(
+        zip(verifier_values, verifier_revisions, strict=True)
+    ):
+        if explicit_verifiers is not None:
+            resolved_verifiers.append(explicit_verifiers[index])
+        elif revision is not None:
+            resolved_verifiers.append(revision[0])
+        else:
+            raise ValueError(
+                f"Task verifier {index + 1} {value!r} is a local file; "
+                "pass --verifier-revision-id to push it"
+            )
+    return task._definition(), resolved_environment, resolved_verifiers
+
+
+def _validate_task_name(name: str) -> None:
+    """Reject empty names and directory traversal before creating files."""
+    candidate = Path(name)
+    if not name or candidate.is_absolute() or len(candidate.parts) != 1:
+        raise ValueError(f"Task name {name!r} must be a single directory name")
+    if name in {".", ".."}:
+        raise ValueError(f"Task name {name!r} must be a single directory name")
+
+
+def _task_verifier_refs(verifiers: str | Path | Sequence[str | Path] | None) -> list[str | Path]:
+    """Normalize one verifier reference or a sequence of references."""
+    if verifiers is None:
+        return []
+    if isinstance(verifiers, (str, Path)):
+        return [verifiers]
+    return list(verifiers)
+
+
+def _task_binding_text(value: str | Path, base: Path) -> str:
+    """Store a task binding as a portable relative path or hosted slug."""
+    text = str(value)
+    candidate = Path(text).expanduser()
+    if not candidate.exists():
+        return text
+    absolute = candidate.resolve()
+    try:
+        return absolute.relative_to(base.resolve()).as_posix()
+    except ValueError:
+        return text
+
+
+def _binding_is_local(value: Any, base: Path) -> bool:
+    """Return whether a task binding points at an existing local file."""
+    if not isinstance(value, (str, Path)):
+        return False
+    candidate = Path(str(value)).expanduser()
+    if candidate.is_absolute():
+        return candidate.exists()
+    return (base / candidate).exists()
+
+
+def _remote_task_revision(
+    client: Client | None, kind: str, value: Any, base: Path
+) -> tuple[str, dict[str, Any]] | None:
+    """Fetch the current hosted revision for a slug reference, if needed."""
+    if not isinstance(value, str) or _binding_is_local(value, base):
+        return None
+    if client is None:
+        raise ValueError(
+            f"Task {kind} {value!r} is a hosted slug; pass a configured client to resolve it"
+        )
+    api = client.environments if kind == "environment" else client.verifiers
+    revision_id, revision = resolve_published_revision(api, kind, value)
+    definition = revision.get("definition") if isinstance(revision, Mapping) else None
+    if not isinstance(definition, Mapping):
+        raise ValueError(f"Hosted {kind} {value!r} did not include its current definition")
+    return revision_id, dict(definition)
+
+
+def _prepare_task_binding(
+    value: Any,
+    resolver: Resolver,
+    base: Path,
+    kind: str,
+    remote_definition: dict[str, Any] | None,
+) -> Any:
+    """Resolve one environment or verifier binding to a public SDK object."""
+    if isinstance(value, (Environment, EnvironmentDefinition, Verifier)):
+        return value
+    if isinstance(value, Mapping):
+        return resolver.resolve(value)
+    if isinstance(value, (str, Path)):
+        if _binding_is_local(value, base):
+            return resolver.resolve(str(value))
+        if remote_definition is not None:
+            return resolver.resolve(remote_definition)
+        raise ValueError(
+            f"Task {kind} {value!r} is a local file; pass an explicit hosted revision id to push it"
+        )
+    raise TypeError(f"Task {kind} must be an object, file, or hosted slug")
 
 
 def scaffold_task(
@@ -317,9 +606,9 @@ def _resolve(base: Path, value: Path) -> Path:
     return value if value.is_absolute() else base / value
 
 
-def load_task(path: Path) -> TaskDefinition:
+def load_task(path: str | Path) -> TaskDefinition:
     """Adapter from the public loader to the engine definition."""
-    source = _target(path, "task.yaml")
+    source, _, _ = read_task_package(path)
     value = Resolver(root=source.parent).load(source.name)
     if not isinstance(value, Task):
         raise TypeError(f"{source} is not a Task")
@@ -444,7 +733,9 @@ def generate_schemas(directory: Path) -> list[Path]:
 
 
 __all__ = [
+    "find_remote_task",
     "generate_schemas",
+    "init_task",
     "load_agent",
     "load_benchmark",
     "load_environment",
@@ -452,8 +743,10 @@ __all__ = [
     "load_harness_reference",
     "load_job",
     "load_task",
+    "load_task_for_push",
     "load_verifier",
     "read_yaml",
+    "resolve_published_revision",
     "scaffold_agent",
     "scaffold_benchmark",
     "scaffold_environment",
@@ -461,5 +754,6 @@ __all__ = [
     "scaffold_job",
     "scaffold_task",
     "scaffold_verifier",
+    "task_push_needs_remote",
     "write_yaml",
 ]

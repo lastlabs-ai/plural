@@ -606,7 +606,7 @@
       "type": "string"
     },
     "primary_metric": {
-      "default": "reward",
+      "default": "score",
       "title": "Primary Metric",
       "type": "string"
     },

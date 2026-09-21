@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
+import mimetypes
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -22,7 +23,7 @@ from plural.agents import Agent
 from plural.catalog import ModelCatalog, ModelSpec
 from plural.environments import Environment
 from plural.environments.definition import EnvironmentDefinition
-from plural.harness import Harness
+from plural.harness import Harness, HarnessDefinition
 from plural.jobs import Job
 from plural.tasks import Benchmark, Task
 from plural.verifiers import (
@@ -33,15 +34,184 @@ from plural.verifiers import (
 )
 
 ProjectObject = Agent | Harness | Environment[Any, Any] | Verifier | Task | Benchmark | Job
+_TASK_INSTRUCTION_SUFFIXES = frozenset({".md", ".markdown", ".txt"})
+_TASK_RESOURCE_DIRECTORY = "resources"
 _VERIFIER_ADAPTER: TypeAdapter[VerifierDefinition] = TypeAdapter(VerifierDefinition)
 _INTERNAL_SCHEMA_TYPES = frozenset(
     {
         "HarnessBinding",
-        "HarnessDefinition",
         "HarnessPackage",
+        "HarnessProtocol",
         "PackageSource",
     }
 )
+
+
+def task_source(path: str | Path) -> Path:
+    """Return the ``task.yaml`` file for a task file or task directory.
+
+    Args:
+        path: Either a task YAML file or a directory created by task init.
+
+    Returns:
+        The task configuration file inside that location.
+
+    Raises:
+        FileNotFoundError: If a directory does not contain ``task.yaml``.
+    """
+    candidate = Path(path).expanduser()
+    if candidate.is_dir():
+        source = candidate / "task.yaml"
+        if not source.is_file():
+            raise FileNotFoundError(f"{candidate} must contain task.yaml")
+        return source
+    if candidate.suffix in {".yaml", ".yml"}:
+        return candidate
+    return candidate / "task.yaml"
+
+
+def read_task_package(path: str | Path) -> tuple[Path, dict[str, Any], Path]:
+    """Read a task package without resolving its environment or verifiers.
+
+    Args:
+        path: Either a task YAML file or a directory created by task init.
+
+    Returns:
+        The task file, its raw mapping, and the directory containing that file.
+    """
+    source = task_source(path)
+    return source, _read_mapping(source), source.parent
+
+
+def prepare_task_payload(payload: Mapping[str, Any], base: str | Path) -> dict[str, Any]:
+    """Inline task sidecars so file-backed tasks validate like inline tasks.
+
+    Args:
+        payload: Raw ``task.yaml`` mapping.
+        base: Directory containing ``task.yaml``.
+
+    Returns:
+        A task mapping with ``instruction.md`` contents inlined and files below
+        ``resources/`` converted to inline task resources.
+    """
+    root = Path(base).expanduser().resolve()
+    prepared = dict(payload)
+    prepared.pop("kind", None)
+    prepared["instructions"] = _read_task_instructions(prepared.get("instructions"), root)
+    prepared["resources"] = _expand_task_resources(prepared.get("resources"), root)
+    return prepared
+
+
+def _read_task_instructions(value: Any, base: Path) -> Any:
+    """Return instruction text, reading a markdown sidecar when referenced."""
+    if not isinstance(value, str):
+        return value
+    reference = Path(value).expanduser()
+    candidate = reference.resolve() if reference.is_absolute() else (base / reference).resolve()
+    if candidate.suffix.lower() not in _TASK_INSTRUCTION_SUFFIXES:
+        return value
+    try:
+        candidate.relative_to(base)
+    except ValueError:
+        return value
+    if not candidate.is_file():
+        return value
+    try:
+        return candidate.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Task instructions {value!r} must be UTF-8 text") from exc
+
+
+def _expand_task_resources(value: Any, base: Path) -> Any:
+    """Convert task-package resource files into inline resource mappings.
+
+    Returns:
+        Resource entries with local files replaced by inline mappings.
+    """
+    declared = value if value is not None else []
+    if not isinstance(declared, (list, tuple)):
+        return value
+    expanded: list[Any] = []
+    covered: set[str] = set()
+    for entry in declared:
+        directory_files = _task_source_files(entry, base)
+        if directory_files is None:
+            expanded.append(entry)
+            continue
+        for source in directory_files:
+            resource = _inline_task_resource(
+                source, base, entry if isinstance(entry, Mapping) else {}
+            )
+            expanded.append(resource)
+            path = resource.get("path")
+            if isinstance(path, str):
+                covered.add(path)
+    resources_root = base / _TASK_RESOURCE_DIRECTORY
+    if resources_root.is_dir():
+        for source in sorted(
+            (item for item in resources_root.rglob("*") if item.is_file()),
+            key=lambda item: item.relative_to(base).as_posix(),
+        ):
+            relative = source.relative_to(base).as_posix()
+            if relative in covered:
+                continue
+            covered.add(relative)
+            expanded.append(_inline_task_resource(source, base, {}))
+    return expanded
+
+
+def _task_source_files(entry: Any, base: Path) -> list[Path] | None:
+    """Return local files for a source resource, or ``None`` to leave it alone."""
+    if not isinstance(entry, Mapping):
+        return None
+    if entry.get("delivery") != "source":
+        return None
+    raw_path = entry.get("path")
+    if not isinstance(raw_path, str) or not raw_path:
+        return None
+    reference = Path(raw_path).expanduser()
+    target = reference.resolve() if reference.is_absolute() else (base / reference).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        return None
+    if target.is_dir():
+        return sorted(
+            (item for item in target.rglob("*") if item.is_file()),
+            key=lambda item: item.relative_to(base).as_posix(),
+        )
+    if target.is_file():
+        return [target]
+    return None
+
+
+def _inline_task_resource(source: Path, base: Path, template: Mapping[str, Any]) -> dict[str, Any]:
+    """Convert one task-package file into an inline resource mapping.
+
+    Returns:
+        An inline resource entry rooted at the task package.
+    """
+    relative = source.relative_to(base).as_posix()
+    try:
+        text = source.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"Task resource {relative!r} must be UTF-8 text; binary task attachments "
+            "are not supported"
+        ) from exc
+    content_type, _ = mimetypes.guess_type(source.name)
+    resource: dict[str, Any] = {
+        "kind": template.get("kind", "file"),
+        "name": relative,
+        "path": relative,
+        "content_type": template.get("content_type") or content_type or "text/plain",
+        "delivery": "inline",
+        "content": text,
+    }
+    for key in ("config", "description"):
+        if template.get(key) is not None:
+            resource[key] = template[key]
+    return resource
 
 
 class CatalogContext:
@@ -305,8 +475,16 @@ class Resolver:
         if kind == "environment":
             return self._load_environment(payload, base)
         if kind == "task":
-            environment = self._resolve_nested(payload.pop("environment"), base)
-            verifiers = tuple(self._resolve_nested(item, base) for item in payload.pop("verifiers"))
+            payload = prepare_task_payload(payload, base)
+            try:
+                environment_value = payload.pop("environment")
+            except KeyError as exc:
+                raise ValueError("Task YAML must name an environment") from exc
+            verifier_values = payload.pop("verifiers", None)
+            if not isinstance(verifier_values, (list, tuple)) or not verifier_values:
+                raise ValueError("Task YAML must name at least one verifier")
+            environment = self._resolve_nested(environment_value, base)
+            verifiers = tuple(self._resolve_nested(item, base) for item in verifier_values)
             return Task.model_validate(
                 {**payload, "environment": environment, "verifiers": verifiers},
                 context={"catalog": self.catalog},
@@ -397,7 +575,7 @@ class Resolver:
                 if value.harness_kwargs:
                     payload["harness_kwargs"] = _public_data(value.harness_kwargs)
             elif value.harness is not None:
-                payload["harness"] = self._dump_harness(value.harness, base)
+                payload["harness"] = self._dump_harness_value(value.harness, base)
             return {"kind": "agent", **payload}
         if isinstance(value, Harness):
             return self._dump_harness(value, base)
@@ -480,6 +658,17 @@ class Resolver:
         name = str(payload.get("name") or "")
         if name in LEGACY_DECLARED_HARNESS_NAMES and payload.get("implementation") == "declared":
             raise legacy_declared_harness_error(name)
+
+    def _dump_harness_value(
+        self, harness: HarnessDefinition | Harness, base: Path
+    ) -> dict[str, Any]:
+        if not isinstance(harness, HarnessDefinition):
+            return self._dump_harness(harness, base)
+        payload = _public_data(harness.model_dump(mode="json", exclude_none=True))
+        if "://" not in harness.source:
+            # Keep a local Harness directory portable across machines.
+            payload["source"] = _relative(Path(harness.source).resolve(), base)
+        return {"kind": "harness", **payload}
 
     def _dump_harness(self, harness: Harness, base: Path) -> dict[str, Any]:
         from plural.harness.models import LockedHarness

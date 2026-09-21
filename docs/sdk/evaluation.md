@@ -20,7 +20,7 @@ from plural import Agent, Benchmark, Client, Episode, Job, Task, VerifierOutput
 from plural.verifiers import DeterministicVerifier
 
 def resolved(episode: Episode) -> VerifierOutput:
-    return VerifierOutput(reward=float(bool(episode.observation.get("done"))))
+    return VerifierOutput(score=float(bool(episode.observation.get("done"))))
 
 verifier = DeterministicVerifier(name="resolved", check=resolved)
 task = Task(
@@ -44,6 +44,11 @@ job = Job(benchmark, agents=(agent,), client=Client())
 Environment, Agent, Harness, Verifier, and Task versions default to `0.1.0`.
 Benchmark `version` is required. Job defaults are eval mode, one attempt, and
 concurrency one.
+
+To publish the task to Plural Intel instead of running it locally, see
+[Publish a Task object](../project/tasks.md#publish-a-task-object):
+`task.push()` publishes the revision, resolving the bound Environment and
+Verifier to their current published revisions.
 
 ## Serialize and resolve
 
@@ -93,7 +98,7 @@ Anthropic, Google, Bedrock, or Azure native APIs directly.
 print(job.plan.job_id, job.plan.trial_count)
 result = job.run()
 for trial in result.trials:
-    print(trial.status, trial.reward, trial.receipt.artifact_hashes)
+    print(trial.status, trial.score, trial.receipt.artifact_hashes)
 ```
 
 In async code, use `await job.run_async()`. Pass `resume=True` only for the same

@@ -34,7 +34,7 @@ multiple local criterion scores.
 
 Each criterion score must fall within its `min_score` and `max_score`. Plural
 normalizes the criterion ranges, applies criterion weights, then includes the
-Human Verifier reward in the Task's Verifier-weighted final reward.
+Human Verifier score in the Task's Verifier-weighted final score.
 
 ## Evidence and access
 

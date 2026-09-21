@@ -31,6 +31,7 @@ from plural.cli.scaffold import (
     load_job,
     scaffold_job,
 )
+from plural.cli.session import session_app
 from plural.client import Client
 from plural.config import resolve_gateway_url
 from plural.errors import PluralError
@@ -64,6 +65,7 @@ for name, group in (
     ("job", job_app),
     ("trial", trial_app),
     ("review", review_app),
+    ("session", session_app),
 ):
     app.add_typer(group, name=name)
 

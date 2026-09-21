@@ -33,6 +33,91 @@ task = Task(
 
 `info` is public case data. Here, the Environment uses the ticket ID to look up the case. Keep expected answers out of `info`, instructions, and observations.
 
+## Start from a task directory
+
+For hosted work, keep the task itself local until it is ready to publish:
+
+```bash
+plural task init support-ticket --environment ticket-triage --verifier correct-team
+```
+
+This creates a directory with the same name:
+
+```text
+support-ticket/
+├── instruction.md
+├── task.yaml
+└── resources/
+```
+
+`task.yaml` stores the task identity, `initial_state`, public `info`, the
+hosted environment slug, and verifier slugs. The `instructions` field points
+to `instruction.md`; its contents are inlined when the task loads. A literal
+instruction string in `task.yaml` continues to work. Every UTF-8 text file
+added below `resources/` is staged as a task file at the same relative path.
+Use `--bare` for empty instructions, resources, and identity-only `task.yaml`,
+and `--push` to publish immediately after creating the directory.
+
+In Python, the same helper writes the same package:
+
+```python
+from plural.cli.scaffold import init_task
+
+init_task("support-ticket", environment="ticket-triage", verifiers=["correct-team"])
+```
+
+If `PLURAL_API_KEY` is set, `plural task init` checks whether the slug already
+exists in the current project and asks whether to proceed. Answering `n`
+writes nothing. Without a key, the command creates the directory locally and
+reports that the remote name was not checked. The Python helper warns when the
+slug exists but does not prompt.
+
+Publish the directory when it is ready:
+
+```bash
+plural task push support-ticket
+```
+
+Push resolves each environment and verifier slug to its current published
+revision in the same project. A missing slug, or a bare task without bindings,
+is an error. Explicit `--environment-revision-id` and repeatable
+`--verifier-revision-id` values override slug lookup.
+
+## Publish a Task object
+
+A `Task` has the same local-to-hosted relationship as an `Environment`.
+`task.definition()` compiles the canonical revision, so `client.create()`,
+`client.update()`, and `client.push()` all accept a public `Task` exactly like
+they accept a public `Environment`:
+
+```python
+from plural import Client, Task
+
+task = Task(
+    name="support-ticket",
+    instructions="Inspect, categorize, answer, and resolve the ticket.",
+    environment=environment,
+    verifiers=[verifier],
+)
+task.push()
+```
+
+`task.push()` publishes the task revision, creating its hosted parent by slug
+when needed. Like `plural task push`, it resolves each bound Environment and
+Verifier to its current published revision unless exact ids are passed:
+
+```python
+task.push(
+    Client(),
+    environment_revision_id="env-revision",
+    verifier_revision_ids=["verifier-revision"],
+)
+```
+
+`task.delete()` removes the hosted parent and all of its revisions. Revisions
+themselves are immutable: publishing an edited task mints a new revision under
+the same parent, which is how updates work for every Plural resource.
+
 ## Set the initial State
 
 Use `initial_state` when each Task should start the Environment with different data. Plural checks these fields against the Environment's State schema and loads them before `reset` during package Job execution.

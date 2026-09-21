@@ -26,7 +26,7 @@ VERIFY = (
     "rows=[json.loads(l) for l in pathlib.Path('artifacts/trajectory.jsonl').read_text().splitlines() if l.strip()]; "
     "assert rows, 'missing harness trajectory'; "
     "pathlib.Path('verifier-result.json').write_text("
-    "json.dumps({'reward':1.0,'scores':{'present':1.0},"
+    "json.dumps({'score':1.0,'scores':{'present':1.0},"
     "'evidence':[f'{len(rows)} trajectory rows']})+'\\n')"
 )
 

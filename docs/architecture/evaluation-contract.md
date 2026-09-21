@@ -76,14 +76,16 @@ An Environment episode follows one transition pipeline:
 3. invoke an Agent action;
 4. update Environment state;
 5. produce the Agent-visible observation;
-6. run matching transition Rewarders in train mode;
-7. repeat until terminal, truncated, or limited;
+6. run every declared Rewarder against the transition;
+7. repeat until the Environment terminates or truncates, the Agent finishes, or
+   a budget truncates the episode;
 8. persist the trajectory, state, observation, rendering, logs, and artifacts;
 9. run Task Verifiers against filtered evidence;
 10. aggregate scores into the Trial and Benchmark result.
 
-Rewarders provide transition-level training signals. Verifiers assess completed
-Trials. They do not share lifecycle hooks or result types.
+Rewarders credit one transition and are recorded on the episode in every mode.
+Verifiers assess completed Trials and are the only source of a score. They do
+not share lifecycle hooks or result types.
 
 ## Model catalog
 

@@ -7,8 +7,8 @@ from pathlib import Path
 from plural.common import (
     FileDeclaration,
     HarnessCapability,
-    HarnessDefinition,
     HarnessPackage,
+    HarnessProtocol,
     PackageSource,
 )
 from plural.harness.builtins import (
@@ -23,7 +23,7 @@ from plural.harness.retrieval import tree_digest
 
 
 def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> HarnessPackage:
-    definition = HarnessDefinition(
+    definition = HarnessProtocol(
         name=profile,
         revision="1.0.0",
         description=f"Plural first-party {profile} harness profile.",

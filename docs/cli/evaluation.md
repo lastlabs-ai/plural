@@ -127,6 +127,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ job         Advanced durable Job and event commands.                                             │
 │ trial       Inspect and watch Trials.                                                            │
 │ review      Inspect and submit human reviews.                                                    │
+│ session     Export and redeploy portable agent sessions.                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1061,6 +1062,61 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
+### `plural session`
+
+```text
+
+ Usage: plural session [OPTIONS] COMMAND [ARGS]...
+
+ Export and redeploy portable agent sessions.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ export  Export a session bundle from a hosted trial or local files.                              │
+│ import  Redeploy a bundle as a separate instance directory.                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural session export`
+
+```text
+
+ Usage: plural session export [OPTIONS]
+
+ Export a session bundle from a hosted trial or local files.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --trial              <str>   Hosted trial id.                                                    │
+│ --agent              <path>  Agent YAML or JSON file.                                            │
+│ --environment        <path>  Environment YAML or JSON file.                                      │
+│ --state              <path>  State JSON file.                                                    │
+│ --data               <str>   Data reference to record.                                           │
+│ --data-dir           <path>  Directory bundled into data/.                                       │
+│ --name               <str>   Snapshot name.                                                      │
+│ --out                <path>  Bundle directory. [default: sessions]                               │
+│ --help                       Show this message and exit.                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural session import`
+
+```text
+
+ Usage: plural session import [OPTIONS] {bundle}
+
+ Redeploy a bundle as a separate instance directory.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    bundle      <path>  Session bundle directory. [required]                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --dest        <path>  Parent directory for the new instance.                                     │
+│ --help                Show this message and exit.                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
 ### `plural task`
 
 ```text
@@ -1073,10 +1129,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a Task pinned to an Environment and Verifiers.                                  │
+│ init      Create a local Task directory without publishing it.                                   │
 │ validate  Validate a complete Task revision graph.                                               │
 │ show      Show a resolved Task.                                                                  │
-│ push      Publish a Task revision with exact hosted dependencies.                                │
+│ push      Publish a Task revision, resolving hosted environment and verifier slugs.              │
 │ publish   Publish an existing hosted Task revision.                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -1085,19 +1141,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural task init [OPTIONS] [path]
+ Usage: plural task init [OPTIONS] {name}
 
- Create a Task pinned to an Environment and Verifiers.
+ Create a local Task directory without publishing it.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: task.yaml]                                                         │
+│ *    name      <str>  Task slug and local directory name. [required]                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│    --id                   <str>   [default: task]                                                │
-│ *  --environment  -e      <path>  [required]                                                     │
-│ *  --verifier     -v      <path>  [required]                                                     │
-│    --force                                                                                       │
-│    --help                         Show this message and exit.                                    │
+│ --environment  -e      <str>  Hosted environment slug/id or local file.                          │
+│ --verifier     -v      <str>  Hosted verifier slug/id or local file.                             │
+│ --bare                        Create an empty task package.                                      │
+│ --push                        Publish the new task immediately.                                  │
+│ --force                       Replace existing task files.                                       │
+│ --help                        Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1124,15 +1181,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural task push [OPTIONS] [path]
 
- Publish a Task revision with exact hosted dependencies.
+ Publish a Task revision, resolving hosted environment and verifier slugs.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: task.yaml]                                                         │
+│   path      <path>  Task file or task directory. [default: task.yaml]                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --environment-revision-id        <str>  [required]                                            │
-│ *  --verifier-revision-id           <str>  [required]                                            │
-│    --help                                  Show this message and exit.                           │
+│ --environment-revision-id        <str>  Override the hosted environment revision.                │
+│ --verifier-revision-id           <str>  Override a hosted verifier revision.                     │
+│ --help                                  Show this message and exit.                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

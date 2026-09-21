@@ -611,7 +611,7 @@
       },
       "RewarderDefinition": {
         "additionalProperties": false,
-        "description": "A train-only state-transition rewarder.",
+        "description": "A named state-transition reward signal scored inside each step.",
         "properties": {
           "name": {
             "minLength": 1,
@@ -2048,6 +2048,32 @@
   },
   "Agent": {
     "$defs": {
+      "FileDeclaration": {
+        "additionalProperties": false,
+        "description": "A file emitted or consumed by a package.",
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "media_type": {
+            "default": "application/octet-stream",
+            "title": "Media Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "FileDeclaration",
+        "type": "object"
+      },
       "Harness": {
         "additionalProperties": false,
         "description": "Base class for an Agent interaction loop.\n\nSubclasses implement :meth:`run`. Plural discovers and hashes the Python\nclass directory, invokes ``run`` in the Environment Runtime, and emits the\nstandard result, trajectory, and log artifacts.",
@@ -2059,6 +2085,189 @@
           }
         },
         "title": "Harness",
+        "type": "object"
+      },
+      "HarnessCapability": {
+        "description": "A capability requested by an agent harness.",
+        "enum": [
+          "shell",
+          "file_read",
+          "file_edit",
+          "code_execution",
+          "web_search",
+          "browser",
+          "network_fetch",
+          "mcp",
+          "subagents",
+          "persistence"
+        ],
+        "title": "HarnessCapability",
+        "type": "string"
+      },
+      "HarnessDefinition": {
+        "additionalProperties": false,
+        "description": "A declared executable Agent interaction strategy.\n\nPoint ``source`` at a local directory or a remote archive and name the\n``command`` that runs the loop. Subclass :class:`Harness` instead to write\none in Python.",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "default": "0.1.0",
+            "title": "Version",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "command": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Command",
+            "type": "array"
+          },
+          "source": {
+            "default": ".",
+            "title": "Source",
+            "type": "string"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Digest"
+          },
+          "requirements": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Requirements",
+            "type": "array"
+          },
+          "capabilities": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/HarnessCapability"
+            },
+            "title": "Capabilities",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "models": {
+            "default": [
+              "*"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "auth": {
+            "default": [
+              "environment"
+            ],
+            "items": {
+              "enum": [
+                "environment",
+                "api_key",
+                "oauth",
+                "none"
+              ],
+              "type": "string"
+            },
+            "title": "Auth",
+            "type": "array"
+          },
+          "secrets": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Secrets",
+            "type": "array"
+          },
+          "environment": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Environment",
+            "type": "array"
+          },
+          "healthcheck": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Healthcheck"
+          },
+          "outputs": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/FileDeclaration"
+            },
+            "title": "Outputs",
+            "type": "array"
+          },
+          "artifacts": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/FileDeclaration"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "trajectory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Trajectory"
+          },
+          "tito": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tito"
+          }
+        },
+        "required": [
+          "name",
+          "command"
+        ],
+        "title": "HarnessDefinition",
         "type": "object"
       }
     },
@@ -2132,6 +2341,9 @@
       },
       "harness": {
         "anyOf": [
+          {
+            "$ref": "#/$defs/HarnessDefinition"
+          },
           {
             "$ref": "#/$defs/Harness"
           },
@@ -2791,7 +3003,7 @@
         "type": "array"
       },
       "primary_metric": {
-        "default": "reward",
+        "default": "score",
         "title": "Primary Metric",
         "type": "string"
       },

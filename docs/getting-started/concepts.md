@@ -34,7 +34,7 @@ flowchart LR
 
 Runtime and Resources are nested inside the Environment, not separate objects.
 Rewarders are nested inside the Environment too, and they are not Verifiers:
-Rewarders emit a train-only signal, Verifiers score a finished Trial.
+Rewarders credit one step, Verifiers score a finished Trial.
 
 ## Environment
 
@@ -50,8 +50,9 @@ The Environment is the world the Agent is allowed to take action in. It owns:
   settings, and compute placement. Changing it changes the Environment hash.
 - **Resources** — the world's filesystem: files and data that are already
   there, shared across Tasks.
-- **Rewarders** — optional train-only signals over state transitions. They
-  feed downstream training data; they never score an evaluation.
+- **Rewarders** — optional signals over state transitions. Each one runs on
+  every step and is recorded on the episode so you can see which action earned
+  the credit. A trainer reads them; they never score an evaluation.
 
 These docs use the game Wordle as a running example, and a support-ticket
 queue when we need a second world. One Environment can host many Tasks: Wordle
@@ -131,9 +132,10 @@ A Job is how you run a Task or a Benchmark. It holds the Agents, the number
 of attempts, concurrency, and whether the run is **eval** or **train**.
 
 Eval is the default: score the Agent and keep the episode record. Train uses
-the same graph and adds training-grade capture (exact tokens in and out, plus
-Environment rewarders when you declare them). Use train when you want data
-for a downstream trainer. Neither mode updates model weights inside Plural.
+the same graph and adds training-grade capture, namely the exact tokens in and
+out. Rewards are recorded in both modes; train mode is what emits them as a
+signal a trainer can consume. Use train when you want data for a downstream
+trainer. Neither mode updates model weights inside Plural.
 
 A live Job needs `Job(..., client=Client())` or `api_key=`. Dry-run does not.
 

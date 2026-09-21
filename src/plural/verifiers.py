@@ -48,11 +48,60 @@ class EpisodeUsage(FrozenModel):
     cost_usd: float | None = None
 
 
+STOP_REASONS: tuple[str, ...] = (
+    # The Environment ended the episode.
+    "environment_terminated",
+    "environment_truncated",
+    # The Agent ended the episode.
+    "agent_finished",
+    "agent_response",
+    # A Harness budget cut the episode short.
+    "max_turns",
+    "max_seconds",
+    "max_cost",
+    # The episode did not finish.
+    "error",
+)
+
+
+class EpisodeOutcome(FrozenModel):
+    """How one episode ended.
+
+    ``stop_reason`` is one of :data:`STOP_REASONS`. ``terminated`` means the
+    Environment declared the episode over; ``truncated`` means it was cut short
+    by the Environment or by a Harness budget. Neither is set when the Agent
+    chose to stop, so read ``stop_reason`` to tell those cases apart.
+    """
+
+    stop_reason: Literal[
+        "",
+        "environment_terminated",
+        "environment_truncated",
+        "agent_finished",
+        "agent_response",
+        "max_turns",
+        "max_seconds",
+        "max_cost",
+        "error",
+    ] = ""
+    terminated: bool = False
+    truncated: bool = False
+    turns: int = 0
+    total_reward: float = 0
+
+    @property
+    def completed(self) -> bool:
+        """Whether the Environment itself ended the episode."""
+        return self.terminated
+
+
 class Episode(FrozenModel):
     """Completed Agent episode handed to a Verifier.
 
     ``state`` is the full internal Environment snapshot. It is never shown to
-    the Agent. ``observation`` is what the Agent last saw.
+    the Agent. ``observation`` is what the Agent last saw. ``rewards`` holds the
+    per-step reward records; they support credit assignment and must not be
+    treated as a score.
     """
 
     observation: dict[str, Any] = Field(default_factory=dict)
@@ -60,12 +109,19 @@ class Episode(FrozenModel):
     trajectory: list[Any] = Field(default_factory=list)
     artifacts: dict[str, Any] = Field(default_factory=dict)
     usage: EpisodeUsage = Field(default_factory=EpisodeUsage)
+    outcome: EpisodeOutcome = Field(default_factory=EpisodeOutcome)
+    rewards: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class VerifierOutput(FrozenModel):
-    """Score returned by a Verifier function or command."""
+    """Score returned by a Verifier function or command.
 
-    reward: float
+    ``score`` is the headline number for the Task; ``scores`` holds any named
+    sub-metrics behind it. A Verifier never produces a reward: rewards score one
+    Environment transition, not the finished attempt.
+    """
+
+    score: float
     scores: dict[str, float] = Field(default_factory=dict)
     evidence: tuple[str, ...] = ()
     feedback: str = ""
@@ -76,7 +132,7 @@ class VerifierOutput(FrozenModel):
         Returns:
             This output when all scores are finite.
         """
-        if any(not math.isfinite(item) for item in (self.reward, *self.scores.values())):
+        if any(not math.isfinite(item) for item in (self.score, *self.scores.values())):
             raise ValueError("Verifier emitted non-finite scores")
         return self
 
@@ -116,7 +172,7 @@ def coerce_verifier_output(value: Any, *, verifier_name: str) -> VerifierOutput:
         except Exception as exc:
             raise ValueError(
                 f"Verifier {verifier_name!r} returned an invalid result.\n"
-                "Return VerifierOutput or a mapping with a finite 'reward' and optional "
+                "Return VerifierOutput or a mapping with a finite 'score' and optional "
                 "'scores', 'evidence', and 'feedback'.\n"
                 f"Got: {value!r}\n"
                 f"Cause: {exc}"

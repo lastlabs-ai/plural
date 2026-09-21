@@ -18,7 +18,7 @@ from plural.common import (
     semantic_version,
     stable_id,
 )
-from plural.harness.models import Harness
+from plural.harness.models import Harness, HarnessDefinition
 
 
 @lru_cache(maxsize=1)
@@ -37,7 +37,7 @@ class Agent(FrozenModel):
     fallback_models: tuple[str, ...] = ()
     temperature: float | None = None
     max_tokens: int | None = Field(default=None, gt=0)
-    harness: Harness | str | None = None
+    harness: HarnessDefinition | Harness | str | None = None
     harness_kwargs: dict[str, Any] = Field(default_factory=dict)
     auth_mode: Literal["environment", "api_key", "oauth", "none"] = "environment"
     secret_names: tuple[str, ...] = ()

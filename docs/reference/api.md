@@ -1306,6 +1306,9 @@ terminated, truncated, info)``. ``action`` is a mapping with
 ``name`` plus parameters, an action name plus kwargs, or kwargs
 alone when the Environment has a single ``@action``.
 
+``reward`` sums :meth:`reward` and every ``@rewarder`` for this one
+transition. ``info["rewards"]`` breaks the total down by name.
+
 Returns:
     Observation, reward, terminal flags, and step information.
 ```
@@ -1316,7 +1319,13 @@ Returns:
 terminated(self) -> 'bool'
 ```
 
-Return whether the episode reached a Task success or failure state.
+Return whether the Environment ended the episode.
+
+```text
+Override this to end the episode when the world reaches a Task success
+or failure state. The default never terminates, which leaves the stop
+decision to the Agent or the Harness budget.
+```
 
 ### plural.Environment.truncated
 
@@ -1324,7 +1333,13 @@ Return whether the episode reached a Task success or failure state.
 truncated(self) -> 'bool'
 ```
 
-Return whether the episode ended on a budget or external stop.
+Return whether the Environment cut the episode short.
+
+```text
+Override this to stop an episode that cannot usefully continue but did
+not reach a success or failure state. Harness turn, time, and cost
+budgets truncate independently of this method.
+```
 
 ### plural.Environment.reward
 
@@ -1353,12 +1368,16 @@ plural.action(fn: 'Callable[..., Any] | None' = None, *, name: 'str | None' = No
 
 ## plural.rewarder
 
-Declare a train-only state-transition rewarder.
+Declare a named state-transition reward signal.
 
 ```text
 The callable must accept ``previous_state, current_state, action, result``.
-It is compiled into manifest metadata; the Job engine invokes rewarders
-only in train mode.
+Every rewarder runs inside :meth:`Environment.step` immediately after the
+action that changed the world, so it scores one transition and supports
+credit assignment. ``weight`` scales its contribution to the step reward.
+
+Rewards are recorded on the episode. They never contribute to a Verifier
+score.
 
 Returns:
     A decorated rewarder callable.

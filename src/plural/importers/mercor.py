@@ -44,7 +44,7 @@ class MercorTrialImport(FrozenModel):
     trajectory: Trajectory
     tito_transitions: Any = None
     verifier: dict[str, Any] = Field(default_factory=dict)
-    reward: float | None = None
+    score: float | None = None
     logs: tuple[str, ...] = ()
     artifacts: ArtifactManifest = Field(default_factory=ArtifactManifest)
     artifact_manifest: Any = None
@@ -142,7 +142,7 @@ class MercorTrialImport(FrozenModel):
             artifact_hashes={entry.path: entry.sha256 for entry in entries},
             trust="imported_unverified",
         )
-        result = TrialResult(status="succeeded", receipt=receipt, reward=self.reward)
+        result = TrialResult(status="succeeded", receipt=receipt, score=self.score)
         _write_model(execution / "receipt.json", receipt)
         _write_model(execution / "result.json", result)
         _write_model(destination / "result.json", result)
@@ -194,10 +194,11 @@ def import_mercor_trial(
     transitions = _read_json(root / "agent" / "tito_transitions.json")
     if transitions is None:
         transitions = _read_json(root / "tito_transitions.json")
+    # Mercor names the Verifier's score "reward" in its own export format.
     verifier_raw = _read_json(root / "verifier" / "reward.json")
     verifier = verifier_raw if isinstance(verifier_raw, dict) else {}
-    reward_value = verifier.get("reward") if isinstance(verifier, dict) else None
-    reward = float(reward_value) if isinstance(reward_value, (int, float)) else None
+    reported = verifier.get("reward") if isinstance(verifier, dict) else None
+    score = float(reported) if isinstance(reported, (int, float)) else None
     logs = _discover_logs(root)
     manifest, raw_manifest, transfers = _read_manifest(root)
     imported = MercorTrialImport(
@@ -206,7 +207,7 @@ def import_mercor_trial(
         trajectory=trajectory,
         tito_transitions=transitions,
         verifier=verifier,
-        reward=reward,
+        score=score,
         logs=logs,
         artifacts=manifest,
         artifact_manifest=raw_manifest,

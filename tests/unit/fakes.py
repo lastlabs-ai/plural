@@ -66,7 +66,7 @@ class FakeProvider(SandboxProvider):
         if request.stdin is None:
             self.files[handle.sandbox_id]["verifier-result.json"] = json.dumps(
                 {
-                    "reward": 1,
+                    "score": 1,
                     "scores": {"correct": 1},
                     "evidence": ["result.json"],
                 }

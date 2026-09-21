@@ -145,6 +145,10 @@ class SupportQueue(Environment[QueueObservation, QueueState]):
         self.state.status = "resolved"
         return self.observe()
 
+    def terminated(self) -> bool:
+        """End the episode once the ticket is resolved."""
+        return self.state.done
+
     def view(self) -> dict[str, str]:
         """Render a compact operator view for inspection UIs."""
         return {

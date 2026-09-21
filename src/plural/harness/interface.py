@@ -114,6 +114,25 @@ class HarnessAgent:
         )
 
 
+class HarnessStep(FrozenModel):
+    """One Environment transition returned to a custom Harness.
+
+    ``reward`` is recorded on the episode for credit assignment. Do not place it
+    in the Agent's context: it can leak the expected outcome.
+    """
+
+    observation: Any = None
+    reward: float = 0
+    terminated: bool = False
+    truncated: bool = False
+    info: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def done(self) -> bool:
+        """Whether the Environment ended the episode."""
+        return self.terminated or self.truncated
+
+
 class HarnessEnvironment:
     """Environment controls supplied to ``Harness.run``."""
 
@@ -164,11 +183,15 @@ class HarnessEnvironment:
         raw_command = self.raw.get("reset_command")
         if not isinstance(raw_command, list) or not raw_command:
             return self._observation
-        self._observation = self._exec(tuple(str(item) for item in raw_command))
+        self._observation = self._exec(tuple(str(item) for item in raw_command)).observation
         return self._observation
 
-    def step(self, action: str, /, **arguments: Any) -> Any:
-        """Run one named Environment action and return its observation."""
+    def step(self, action: str, /, **arguments: Any) -> HarnessStep:
+        """Run one named Environment action.
+
+        Returns:
+            The transition: observation, reward, terminated, truncated, info.
+        """
         declaration = next(
             (item for item in self.actions if str(item.get("name") or "") == action),
             None,
@@ -183,17 +206,23 @@ class HarnessEnvironment:
         raw_command = declaration.get("command")
         if not isinstance(raw_command, list) or not raw_command:
             raise ValueError(f"Environment action {action!r} has no executable command")
-        self._observation = self._exec(
+        step = self._exec(
             tuple(str(item) for item in raw_command),
             stdin=json.dumps(arguments).encode(),
         )
-        return self._observation
+        self._observation = step.observation
+        return step
 
-    def _exec(self, command: tuple[str, ...], stdin: bytes | None = None) -> Any:
-        from plural.harness.native_runner import _action_environment, _workspace_path
+    def _exec(self, command: tuple[str, ...], stdin: bytes | None = None) -> HarnessStep:
+        from plural.harness.native_runner import (
+            STEP_PROTOCOL,
+            _action_environment,
+            _local_command,
+            _workspace_path,
+        )
 
         completed = subprocess.run(
-            command,
+            _local_command(list(command)),
             cwd=_workspace_path(self.workspace),
             env=_action_environment(self.raw),
             input=stdin,
@@ -207,11 +236,21 @@ class HarnessEnvironment:
             )
         text = completed.stdout.decode("utf-8", errors="replace").strip()
         if not text:
-            return {}
+            return HarnessStep(observation={})
         try:
-            return json.loads(text)
+            parsed = json.loads(text)
         except json.JSONDecodeError:
-            return {"output": text}
+            return HarnessStep(observation={"output": text})
+        if isinstance(parsed, dict) and parsed.get("protocol") == STEP_PROTOCOL:
+            info = parsed.get("info")
+            return HarnessStep(
+                observation=parsed.get("observation"),
+                reward=float(parsed.get("reward") or 0),
+                terminated=bool(parsed.get("terminated")),
+                truncated=bool(parsed.get("truncated")),
+                info=info if isinstance(info, dict) else {},
+            )
+        return HarnessStep(observation=parsed)
 
 
 class HarnessResult(FrozenModel):
@@ -260,5 +299,6 @@ __all__ = [
     "HarnessCompletion",
     "HarnessEnvironment",
     "HarnessResult",
+    "HarnessStep",
     "HarnessTask",
 ]

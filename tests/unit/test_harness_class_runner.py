@@ -26,10 +26,17 @@ class SupportHarness(Harness):
 
     {keyword}def run(self, task, agent, environment):
         observation = environment.reset()
-        observation = environment.step("answer", value=task.info["value"])
+        step = environment.step("answer", value=task.info["value"])
         return HarnessResult(
-            response=observation,
-            trajectory=({{"type": "action", "observation": observation}},),
+            response=step.observation,
+            trajectory=(
+                {{
+                    "type": "action",
+                    "observation": step.observation,
+                    "reward": step.reward,
+                    "terminated": step.terminated,
+                }},
+            ),
             logs=("finished",),
             metadata={{"custom": self.config.get("label", "default")}},
             trace_id="trace-custom",

@@ -14,5 +14,5 @@ with tempfile.TemporaryDirectory(prefix="plural-local-job-") as temporary:
     result = job.run()
     assert len(result.trials) == 2
     assert all(trial.status == "succeeded" for trial in result.trials)
-    assert all(trial.reward == 1.0 for trial in result.trials)
+    assert all(trial.score == 1.0 for trial in result.trials)
     print(f"{result.job_id}: {len(result.trials)} verified offline trials")

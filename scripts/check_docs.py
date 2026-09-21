@@ -37,6 +37,7 @@ PACKAGE_NAV = [
     ("Build", "/docs/project/benchmarks", "project/benchmarks.md"),
     ("Run", "/docs/running/jobs", "running/jobs.md"),
     ("Run", "/docs/running/trials", "running/trials.md"),
+    ("Run", "/docs/running/sessions", "running/sessions.md"),
     ("Run", "/docs/running/artifacts", "running/artifacts.md"),
     ("Run", "/docs/running/reviews", "running/reviews.md"),
     ("Run", "/docs/running/training", "running/training.md"),

@@ -304,7 +304,7 @@ class VerifierResult(FrozenModel):
     verifier_digest: str
     kind: Literal["deterministic", "agent", "human"]
     status: Literal["succeeded", "failed", "awaiting_review"]
-    reward: float | None = None
+    score: float | None = None
     scores: dict[str, float] = Field(default_factory=dict)
     evidence: tuple[str, ...] = ()
     feedback: str = ""
@@ -312,12 +312,12 @@ class VerifierResult(FrozenModel):
     @model_validator(mode="after")
     def _finite(self) -> VerifierResult:
         values = [*self.scores.values()]
-        if self.reward is not None:
-            values.append(self.reward)
+        if self.score is not None:
+            values.append(self.score)
         if any(not math.isfinite(item) for item in values):
             raise ValueError("verifier result contains a non-finite score")
-        if self.status == "succeeded" and self.reward is None:
-            raise ValueError("successful verifier result requires reward")
+        if self.status == "succeeded" and self.score is None:
+            raise ValueError("successful verifier result requires a score")
         return self
 
 
@@ -632,7 +632,7 @@ class TrialResult(FrozenModel):
 
     status: Literal["succeeded", "failed", "cancelled", "awaiting_review"]
     receipt: TrialReceipt
-    reward: float | None = None
+    score: float | None = None
     scores: dict[str, float] = Field(default_factory=dict)
     verifier_results: tuple[VerifierResult, ...] = ()
     trace_id: str | None = None
@@ -656,7 +656,7 @@ class AgentAggregate(FrozenModel):
     model_id: str
     count: int = Field(ge=0)
     successes: int = Field(ge=0)
-    mean_reward: float | None = None
+    mean_score: float | None = None
     total_cost: float | None = None
     mean_latency_seconds: float | None = None
 
