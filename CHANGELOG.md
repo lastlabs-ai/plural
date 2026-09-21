@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-21
+
+### Changed
+
+- **0.14.0 break.** A Verifier produces a `score`. A step `reward` stays on the episode and never becomes that score. `VerifierOutput` and `VerifierResult` take `score`.
+- `HarnessDefinition` is the public flattened schema. `Harness` stays the authoring base class. The internal wire model is `HarnessProtocol`.
+- An episode ends with a declared stop reason. `Environment.step` returns the observation, reward, terminated flag, truncated flag, and info. Only the observation is shown to the Agent.
+
+### Added
+
+- `Task.definition()`, `Task.push()`, and `Task.delete()` publish a local Task the same way an Environment does. Push resolves each bound Environment and Verifier to its current published revision.
+- `plural task init` writes `instruction.md`, `task.yaml`, and `resources/`, and asks before reusing a slug that already exists in the project.
+- Session snapshots can be saved and redeployed as a directory bundle.
+
 ## [0.13.3] - 2026-09-16
 
 ### Changed
@@ -503,7 +517,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.13.3...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.14.0
 [0.13.3]: https://github.com/lastlabs-ai/plural/releases/tag/v0.13.3
 [0.12.1]: https://github.com/lastlabs-ai/plural/releases/tag/v0.12.1
 [0.12.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.12.0
