@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-24T13:43:51Z",
+  "updated_at": "2026-09-21T18:24:29Z",
   "models": [
     {
       "id": "anthropic/claude-fable-5",
@@ -226,8 +226,8 @@
           "region": "us",
           "upstream_id": "claude-opus-5-20260723",
           "pricing": {
-            "prompt": "0.000005",
-            "completion": "0.000025"
+            "prompt": "0.0000055",
+            "completion": "0.0000275"
           }
         },
         {
@@ -318,8 +318,8 @@
           "region": "us",
           "upstream_id": "claude-sonnet-5-20260630",
           "pricing": {
-            "prompt": "0.000002",
-            "completion": "0.00001"
+            "prompt": "0.0000022",
+            "completion": "0.000011"
           }
         },
         {
@@ -437,8 +437,8 @@
       "name": "DeepSeek: V4 Pro",
       "context_length": 1000000,
       "pricing": {
-        "prompt": "0.00000174",
-        "completion": "0.00000348"
+        "prompt": "0.00000191",
+        "completion": "0.00000383"
       },
       "architecture": {
         "modality": "text->text",
@@ -968,13 +968,13 @@
           "region": "us",
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
-            "prompt": "0.0000055",
-            "completion": "0.000033",
+            "prompt": "0.0000044",
+            "completion": "0.000022",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.000011",
-                "completion": "0.0000495"
+                "prompt": "0.0000088",
+                "completion": "0.000033"
               }
             ]
           }
@@ -1172,13 +1172,13 @@
           "region": "us",
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
-            "prompt": "0.0000055",
-            "completion": "0.000033",
+            "prompt": "0.0000044",
+            "completion": "0.000022",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.000011",
-                "completion": "0.0000495"
+                "prompt": "0.0000088",
+                "completion": "0.000033"
               }
             ]
           }
