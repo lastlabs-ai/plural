@@ -4,7 +4,7 @@ import random
 
 from pydantic import Field
 
-from plural import Environment, Observation, State, action
+from plural import Environment, Observation, State, action, initial
 
 WORDS = ("crane", "slate", "audio", "point", "heart")
 
@@ -15,7 +15,13 @@ class Board(Observation):
 
 
 class Game(State):
-    secret: str = ""
+    secret: str = initial(
+        "",
+        description="The hidden word for this Task.",
+        min_length=5,
+        max_length=5,
+        pattern=r"^[a-z]{5}$",
+    )
     remaining: int = 6
     solved: bool = False
     guesses: list[str] = Field(default_factory=list)

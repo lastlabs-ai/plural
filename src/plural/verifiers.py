@@ -18,7 +18,11 @@ from plural.sandbox.models import NetworkMode, ResourceRequirements
 
 
 class VerifierRuntime(FrozenModel):
-    """Verifier-owned runtime, independent of the Environment."""
+    """Machine for a verifier that needs its own sandbox.
+
+    The default runs in the Task Environment. Set a provider, image, network,
+    resource limit, or timeout to use a different machine.
+    """
 
     provider: str = Field(default="docker", min_length=1)
     image: str | None = None
@@ -36,6 +40,25 @@ class VerifierRuntime(FrozenModel):
                 "Set network='allowlist' or remove allowed_hosts."
             )
         return self
+
+
+def runtime_is_custom(runtime: VerifierRuntime) -> bool:
+    """Return whether this runtime names its own machine.
+
+    Docker, public network, and a 60 second timeout, with no image or resource
+    limits, is the default and runs in the Task Environment.
+
+    Returns:
+        True when any runtime field differs from that default.
+    """
+    return bool(
+        runtime.image
+        or runtime.network is not NetworkMode.PUBLIC
+        or runtime.network_allowlist
+        or runtime.resources.configured
+        or runtime.provider != "docker"
+        or runtime.timeout_seconds != 60
+    )
 
 
 class EpisodeUsage(FrozenModel):
@@ -156,6 +179,42 @@ class RubricCriterion(FrozenModel):
 @lru_cache(maxsize=1)
 def _bundled_catalog() -> ModelCatalog:
     return ModelCatalog()
+
+
+def score_from_rewards(episode: Episode, source: str) -> VerifierOutput:
+    """Turn recorded rewarder output into a verifier score.
+
+    ``source`` is ``total`` for the episode reward, or one rewarder's name.
+    The score is that reward summed across the episode.
+
+    Returns:
+        A score equal to the selected reward.
+    """
+    if source == "total":
+        total = float(episode.outcome.total_reward)
+        return VerifierOutput(
+            score=total,
+            evidence=(f"total reward {total}",),
+        )
+    total = 0.0
+    for record in episode.rewards:
+        if not isinstance(record, dict):
+            continue
+        signals = record.get("signals")
+        if isinstance(signals, list):
+            for signal in signals:
+                if isinstance(signal, dict) and str(signal.get("name") or "") == source:
+                    value = float(signal.get("value") or 0)
+                    weight = float(signal.get("weight") or 1)
+                    total += weight * value
+            continue
+        if str(record.get("name") or "") == source:
+            total += float(record.get("value") or 0)
+    return VerifierOutput(
+        score=total,
+        scores={source: total},
+        evidence=(f"{source} reward {total}",),
+    )
 
 
 def coerce_verifier_output(value: Any, *, verifier_name: str) -> VerifierOutput:
@@ -296,14 +355,17 @@ class DeterministicVerifier(Verifier):
                     "  DeterministicVerifier(name='solved', check=solved)"
                 )
             return self
-        if isinstance(check, dict) and check.get("python"):
+        if isinstance(check, dict) and (
+            check.get("python") or isinstance(check.get("reward"), str)
+        ):
             return self
         if isinstance(check, tuple) and check and all(isinstance(item, str) for item in check):
             return self
         raise ValueError(
             f"Cannot create DeterministicVerifier {self.name!r}.\n"
             "check must be a function that accepts an Episode, a "
-            "{'python': 'verify.py:solved'} reference, or a command argv.\n"
+            "{'python': 'verify.py:solved'} reference, a command argv, "
+            "or {'reward': 'total'} / {'reward': 'rewarder-name'}.\n"
             f"Got {type(check).__name__}: {check!r}."
         )
 
@@ -333,6 +395,21 @@ class DeterministicVerifier(Verifier):
             value = check.get("python")
             return str(value) if value else None
         return None
+
+    @property
+    def reward_source(self) -> str | None:
+        """Rewarder name whose episode total is the score, if this check uses one.
+
+        ``total`` means every rewarder combined.
+        """
+        check = self.check
+        if not isinstance(check, dict) or check.get("python"):
+            return None
+        reward = check.get("reward")
+        if not isinstance(reward, str):
+            return None
+        name = reward.strip()
+        return name or "total"
 
     @property
     def checker(self) -> Callable[[Episode], Any] | None:

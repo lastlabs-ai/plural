@@ -1,4 +1,4 @@
-from verifier import solved
+from verifier import solved, turns
 
 from environment import environment
 from plural import Task
@@ -11,5 +11,5 @@ task = Task(
         "Call guess one word at a time and stop when solved."
     ),
     environment=environment,
-    verifiers=[solved],
+    verifiers=[solved, turns],
 )

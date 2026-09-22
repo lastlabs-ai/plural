@@ -24,19 +24,10 @@ source:
       runtime:
         provider: local
         placement: {}
-        image: null
-        snapshot: null
-        declarative_image: null
-        build_context: null
-        dockerfile: null
+        variables: []
         network: public
         network_allowlist: []
-        resources:
-          cpu: null
-          memory_mb: null
-          pids: null
-          disk_mb: null
-          storage_mb: null
+        resources: {}
         read_only_root: false
         targets:
         - local
@@ -51,37 +42,44 @@ source:
       harness_policy:
         mode: allow_all
         allowed_harnesses: []
-        allowed_capabilities: null
         denied_capabilities: []
       limits:
         max_turns: 8
         max_seconds: 120.0
-        max_cost_usd: null
       metadata: {}
     verifiers:
     - name: solved
       version: 0.1.0
-      info: null
       criteria: []
       weight: 1.0
       metadata: {}
       kind: deterministic
       runtime:
         provider: docker
-        image: null
         network: public
         network_allowlist: []
-        resources:
-          cpu: null
-          memory_mb: null
-          pids: null
-          disk_mb: null
-          storage_mb: null
+        resources: {}
         timeout_seconds: 60.0
       result_path: verifier-result.json
       evidence_required: true
       check:
         python: verify.py:solved
+    - name: turns
+      version: 0.1.0
+      criteria: []
+      weight: 1.0
+      metadata: {}
+      kind: deterministic
+      runtime:
+        provider: docker
+        network: public
+        network_allowlist: []
+        resources: {}
+        timeout_seconds: 60.0
+      result_path: verifier-result.json
+      evidence_required: true
+      check:
+        python: verify.py:turns
     resources: []
     initial_state: {}
     reset_options: {}
@@ -93,11 +91,8 @@ agents:
   model: openai/gpt-5.6-luna
   name: gpt-5.6-luna
   version: 0.1.0
-  provider: null
   instructions: Play Wordle with the guess action. Stop as soon as the board is solved.
   fallback_models: []
-  temperature: null
-  max_tokens: null
   auth_mode: environment
   secret_names: []
   metadata: {}

@@ -44,6 +44,40 @@ def test_trajectory_normalizes_native_formats_and_preserves_original() -> None:
     ]
 
 
+def test_trajectory_reads_atif_steps() -> None:
+    document = {
+        "schema_version": "ATIF-v1.7",
+        "agent": {"name": "codex", "model_name": "openai/gpt-5.6-sol"},
+        "steps": [
+            {"step_id": 1, "source": "user", "message": "Create hello.txt."},
+            {
+                "step_id": 2,
+                "source": "agent",
+                "message": "I'll create it.",
+                "tool_calls": [
+                    {
+                        "tool_call_id": "call-1",
+                        "function_name": "write_file",
+                        "arguments": {"path": "hello.txt"},
+                    }
+                ],
+                "observation": {
+                    "results": [{"source_call_id": "call-1", "content": "File created"}]
+                },
+            },
+        ],
+    }
+    trajectory = normalize_trajectory(document)
+    assert [event.kind for event in trajectory.events] == [
+        "message",
+        "message",
+        "action",
+        "observation",
+    ]
+    assert trajectory.events[2].payload["function_name"] == "write_file"
+    assert trajectory.original == document
+
+
 def test_planning_pins_benchmark_task_and_catalog_endpoint() -> None:
     catalog = ModelCatalog()
     catalog_model = catalog.models()[0]

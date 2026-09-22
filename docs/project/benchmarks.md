@@ -186,6 +186,6 @@ Local runs stay in the local store unless you submit or synchronize them. Plural
 
 ## Use the findings
 
-Keep the Tasks and scoring stable while you compare Agents. When you add cases, change a Verifier, or edit the Environment, publish a new Benchmark version so earlier results keep their meaning.
+Keep the Tasks and scoring stable while you compare Agents. When you add cases, change a Verifier, or edit the Environment, save a new Benchmark version so earlier results keep their meaning.
 
 Use recurring failures to improve instructions, the Harness, or the Environment, or to decide that the work needs [training](../running/training.md). When an agent meets the correctness floor at an acceptable cost, apply that choice in [routing](../reference/integrations.md#route-after-evaluation).

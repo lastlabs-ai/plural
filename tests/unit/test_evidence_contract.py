@@ -8,11 +8,16 @@ from plural import (
     Environment,
     Episode,
     Runtime,
+    State,
     Task,
     VerifierOutput,
     action,
+    initial,
 )
-from plural.environments.definition import EnvironmentDefinition
+from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
+from plural.execution.policy import verifier_score_sandbox
+from plural.tasks import validate_task_state
+from plural.verifiers import EpisodeOutcome, VerifierRuntime, score_from_rewards
 
 
 def solved(episode: Episode) -> VerifierOutput:
@@ -41,12 +46,101 @@ def test_task_bind_accepts_action_environment_without_package_call() -> None:
     assert task.environment is environment
 
 
+def test_reward_check_uses_a_named_rewarder() -> None:
+    verifier = DeterministicVerifier(name="efficiency", check={"reward": "efficiency"})
+    assert verifier.reward_source == "efficiency"
+    episode = Episode(
+        outcome=EpisodeOutcome(total_reward=3),
+        rewards=[
+            {
+                "signals": [
+                    {"name": "efficiency", "value": 2, "weight": 1},
+                    {"name": "other", "value": 9, "weight": 1},
+                ]
+            }
+        ],
+    )
+    assert score_from_rewards(episode, "efficiency").score == 2
+    assert score_from_rewards(episode, "total").score == 3
+
+
+def test_default_verifier_runtime_uses_the_task_environment() -> None:
+    environment = EnvironmentDefinition(
+        name="wordle",
+        runtime=EnvironmentRuntime(provider="daytona", image="wordle:latest"),
+    )
+    provider, requirements = verifier_score_sandbox(environment, VerifierRuntime())
+    assert provider == "daytona"
+    assert requirements.image == "wordle:latest"
+    provider, requirements = verifier_score_sandbox(
+        environment,
+        VerifierRuntime(provider="docker", image="checker:latest"),
+    )
+    assert provider == "docker"
+    assert requirements.image == "checker:latest"
+
+
 def test_verifier_rejects_non_callable_check() -> None:
     with pytest.raises(ValidationError, match="Cannot create DeterministicVerifier") as exc:
         DeterministicVerifier(name="solved", check=123)
     message = str(exc.value)
     assert "function that accepts an Episode" in message
     assert "Got int" in message
+
+
+def test_initial_constraints_live_on_the_schema_not_the_default() -> None:
+    class Game(State):
+        secret: str = initial(
+            "",
+            min_length=5,
+            max_length=5,
+            pattern=r"^[a-z]{5}$",
+        )
+
+    assert Game().secret == ""
+    secret = Game.model_json_schema()["properties"]["secret"]
+    assert secret["x-plural-initial"] is True
+    assert secret["minLength"] == 5
+    assert secret["maxLength"] == 5
+    assert secret["pattern"] == "^[a-z]{5}$"
+    schema = {"type": "object", "properties": {"secret": secret}}
+    assert validate_task_state(
+        task_id="easy-01",
+        environment_name="wordle",
+        state={"secret": "crane"},
+        state_schema=schema,
+    ) == {"secret": "crane"}
+    with pytest.raises(ValueError, match="exactly 5 lowercase letters"):
+        validate_task_state(
+            task_id="easy-01",
+            environment_name="wordle",
+            state={"secret": "no"},
+            state_schema=schema,
+        )
+
+
+def test_task_state_rejects_fields_the_environment_owns() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "secret": {"type": "string", "x-plural-initial": True},
+            "solved": {"type": "boolean"},
+        },
+    }
+    accepted = validate_task_state(
+        task_id="easy-01",
+        environment_name="wordle",
+        state={"secret": "crane"},
+        state_schema=schema,
+    )
+    assert accepted == {"secret": "crane"}
+    with pytest.raises(ValueError, match="cannot set 'solved'"):
+        validate_task_state(
+            task_id="easy-01",
+            environment_name="wordle",
+            state={"solved": True},
+            state_schema=schema,
+        )
 
 
 def test_task_bind_rejects_unknown_initial_state() -> None:

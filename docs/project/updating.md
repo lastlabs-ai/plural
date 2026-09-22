@@ -9,27 +9,35 @@ nav_group: Build
 ---
 # Updating and versioning
 
-Edit your project freely while developing it. Once you publish a version or run an evaluation, preserve that record so future comparisons have a clear baseline.
+Edit the files in a Plural project on your machine, then save a version when you
+want that setup recorded. A saved version is current immediately. Earlier runs
+keep the version they started with.
 
-If you change a support policy, for example, create a new Environment version, update the affected Tasks, and create a new Benchmark version. Earlier results still describe the earlier policy.
+If you change a support policy, for example, save a new Environment version,
+update the affected Tasks, and save a new Benchmark version. Earlier results
+still describe the earlier policy.
 
-## Before publication
+## Local files
 
-Python and YAML files are drafts: edit them, rebuild packages, and validate
-again. Created SDK models are frozen values, so construct a new value rather
-than mutating an instance.
+Python and YAML files on your machine are the working copy until you push them.
+Edit them, rebuild packages, and validate again. Created SDK models are frozen
+values, so construct a new value rather than mutating an instance.
 
 Every Environment, Harness, Agent, Verifier, and Task defaults to version
 `0.1.0`; Benchmark requires an explicit version. A content hash includes the
 resolved fields and pinned dependencies. Editing source or configuration and
 reloading creates a different hash even if the version string is unchanged.
 
-That is useful while drafting, but do not compare or publish two meanings under
-the same version.
+Do not compare two meanings under the same version.
 
-## After publication
+## Versions
 
-Published revisions are immutable:
+Saving from the UI, the CLI, or the SDK records a version and makes it current.
+The UI increments the last number (`1.0.0` becomes `1.0.1`). A programmatic
+save can name the version explicitly. Pushing the same version and the same
+content again leaves that version in place.
+
+Saved versions are immutable:
 
 - Environment changes, including source, Runtime, actions, resources, or
   policy, require a new Environment version.

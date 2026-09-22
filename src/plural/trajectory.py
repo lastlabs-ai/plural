@@ -124,13 +124,71 @@ def _decode(source: Any) -> Any:
     return source
 
 
+def _atif_events(value: Mapping[str, Any]) -> list[TrajectoryEvent] | None:
+    """Read Harbor's ATIF document when ``schema_version`` says so.
+
+    ATIF steps are the interchange record. Plural still keeps reward and verifier
+    scores beside the trajectory; they are not ATIF fields.
+
+    Returns:
+        Normalized events, or ``None`` when the document is not ATIF.
+    """
+    schema = value.get("schema_version")
+    steps = value.get("steps")
+    if not isinstance(schema, str) or not schema.startswith("ATIF-"):
+        return None
+    if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes, bytearray)):
+        return None
+    events: list[TrajectoryEvent] = []
+
+    def add(kind: TrajectoryKind, payload: Mapping[str, Any], original: Mapping[str, Any]) -> None:
+        events.append(
+            TrajectoryEvent(
+                sequence=len(events),
+                kind=kind,
+                payload={str(key): item for key, item in payload.items()},
+                original=dict(original),
+            )
+        )
+
+    for step in steps:
+        if not isinstance(step, Mapping):
+            continue
+        message = step.get("message")
+        if isinstance(message, str):
+            add("message", {"source": step.get("source"), "message": message}, step)
+        reasoning = step.get("reasoning")
+        if isinstance(reasoning, str):
+            add("reasoning", {"reasoning": reasoning}, step)
+        calls = step.get("tool_calls")
+        if isinstance(calls, Sequence) and not isinstance(calls, (str, bytes, bytearray)):
+            for call in calls:
+                if isinstance(call, Mapping):
+                    add("action", call, call)
+        observation = step.get("observation")
+        if isinstance(observation, Mapping):
+            add("observation", observation, observation)
+        metrics = step.get("metrics")
+        if isinstance(metrics, Mapping):
+            add("cost", metrics, metrics)
+    return events
+
+
 def normalize_trajectory(source: Any) -> Trajectory:
-    """Normalize current native formats while retaining original data.
+    """Normalize current native formats and ATIF while retaining original data.
+
+    A document whose ``schema_version`` starts with ``ATIF-`` is read as Harbor's
+    Agent Trajectory Interchange Format. Other JSON and JSONL shapes use the
+    existing event adapter.
 
     Returns:
         A provider-neutral trajectory with source payloads attached.
     """
     original = _decode(source)
+    if isinstance(original, Mapping):
+        atif = _atif_events(original)
+        if atif is not None:
+            return Trajectory(events=tuple(atif), original=original)
     events: list[TrajectoryEvent] = []
     for item, hint in _rows(original):
         kind = _kind(item, hint)

@@ -35,6 +35,7 @@ This walkthrough builds that Environment, a verifier, five fixed Tasks (one per 
         Runtime,
         State,
         Task,
+        initial,
         VerifierOutput,
         action,
     )
@@ -48,7 +49,13 @@ This walkthrough builds that Environment, a verifier, five fixed Tasks (one per 
 
 
     class Game(State):
-        secret: str = ""
+        secret: str = initial(
+            "",
+            description="The hidden word for this Task.",
+            min_length=5,
+            max_length=5,
+            pattern=r"^[a-z]{5}$",
+        )
         remaining: int = 6
         solved: bool = False
         guesses: list[str] = Field(default_factory=list)

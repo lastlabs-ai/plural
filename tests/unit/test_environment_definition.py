@@ -61,6 +61,10 @@ def test_environment_compiles_exact_manifest() -> None:
     assert manifest.rewarders[0].weight == 2
     assert manifest.state_schema["properties"]["answer"]["type"] == "string"
     assert "x-plural-hidden" not in manifest.state_schema["properties"]["answer"]
+    assert manifest.state_schema["properties"]["seed"]["x-plural-initial"] is True
+    assert "x-plural-initial" not in manifest.state_schema["properties"]["answer"]
+    assert "x-plural-initial" not in manifest.state_schema["properties"]["count"]
+    assert "x-plural-initial" not in manifest.state_schema["properties"]["metadata"]
     assert manifest.observation_schema["properties"]["count"]["type"] == "integer"
     assert manifest.resources[0].name == "orders"
     assert manifest.secrets[0].name == "DATABASE_URL"

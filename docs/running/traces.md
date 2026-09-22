@@ -50,6 +50,8 @@ In the selected execution's `artifacts/`, open `trajectory.jsonl` to see the nat
 
 The native runner's trajectory is a JSONL interaction record. It is not automatically a full schema-v3 SDK Trace, and its trace ID does not by itself upload the record to Plural Intel. The standalone tracing SDK and hosted ingestion have their own contracts. Inspect what your selected integration actually records.
 
+`trajectory.json` is read as [ATIF](https://docs.harborframework.com/core-concepts/agents/atif), Harbor's Agent Trajectory Interchange Format (`ATIF-v1.7`). That is the document to exchange with other tools. Plural's normalized events are a view over ATIF and over the native JSONL log. Reward totals and verifier scores stay beside the trajectory.
+
 When available, final Environment state, observation, rendering, trajectory, and
 Verifier results are copied into the execution artifacts and listed in the
 manifest. Missing runtime data remains absent. Preserve additional files

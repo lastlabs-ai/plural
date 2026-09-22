@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -72,6 +73,11 @@ def validate_task_state(
         )
     properties = state_schema.get("properties")
     fields = properties if isinstance(properties, dict) else {}
+    settable = {
+        key
+        for key, spec in fields.items()
+        if isinstance(spec, dict) and spec.get("x-plural-initial") is True
+    }
     unknown = [key for key in state if not isinstance(fields.get(key), dict)]
     errors: list[str] = []
     if unknown:
@@ -84,17 +90,27 @@ def validate_task_state(
         spec = fields.get(key)
         if not isinstance(spec, dict):
             continue
+        if settable and key not in settable:
+            errors.append(
+                f"initial_state cannot set {key!r}. "
+                "Only State fields marked with initial() can be supplied by a Task."
+            )
+            continue
         expected = _schema_types(spec)
         actual = _json_type_name(value)
         if expected and actual not in expected and not (value is None and "null" in expected):
             errors.append(
                 f"initial_state {key!r} expected {' or '.join(sorted(expected))}, got {actual}."
             )
+            continue
+        errors.extend(_constraint_errors(key, value, spec))
     required = state_schema.get("required")
     if isinstance(required, list):
         for key in required:
             spec = fields.get(key)
             if key in state or not isinstance(spec, dict) or "default" in spec:
+                continue
+            if settable and key not in settable:
                 continue
             errors.append(f"initial_state is missing required State field {key!r}.")
     if errors:
@@ -105,6 +121,71 @@ def validate_task_state(
             + f"\n{environment_name} State fields: {available}"
         )
     return {str(key): value for key, value in state.items()}
+
+
+def _constraint_errors(key: str, value: Any, spec: Mapping[str, Any]) -> list[str]:
+    """Return failures of the limits declared on one initial State field."""
+    phrase = _constraint_phrase(spec)
+    errors: list[str] = []
+    if isinstance(value, str):
+        minimum = spec.get("minLength")
+        maximum = spec.get("maxLength")
+        pattern = spec.get("pattern")
+        too_short = isinstance(minimum, int) and len(value) < minimum
+        too_long = isinstance(maximum, int) and len(value) > maximum
+        mismatched = isinstance(pattern, str) and re.fullmatch(pattern, value) is None
+        if phrase and (too_short or too_long or mismatched):
+            errors.append(f"initial_state {key!r} must be {phrase}.")
+        else:
+            if too_short:
+                errors.append(f"initial_state {key!r} must be at least {minimum} characters.")
+            if too_long:
+                errors.append(f"initial_state {key!r} must be at most {maximum} characters.")
+            if mismatched:
+                errors.append(f"initial_state {key!r} must match {pattern!r}.")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        minimum = spec.get("minimum")
+        maximum = spec.get("maximum")
+        if isinstance(minimum, (int, float)) and value < minimum:
+            errors.append(f"initial_state {key!r} must be at least {minimum}.")
+        if isinstance(maximum, (int, float)) and value > maximum:
+            errors.append(f"initial_state {key!r} must be at most {maximum}.")
+        exclusive_minimum = spec.get("exclusiveMinimum")
+        exclusive_maximum = spec.get("exclusiveMaximum")
+        if isinstance(exclusive_minimum, (int, float)) and value <= exclusive_minimum:
+            errors.append(f"initial_state {key!r} must be greater than {exclusive_minimum}.")
+        if isinstance(exclusive_maximum, (int, float)) and value >= exclusive_maximum:
+            errors.append(f"initial_state {key!r} must be less than {exclusive_maximum}.")
+    if isinstance(value, list):
+        minimum = spec.get("minItems")
+        maximum = spec.get("maxItems")
+        if isinstance(minimum, int) and len(value) < minimum:
+            errors.append(f"initial_state {key!r} must have at least {minimum} items.")
+        if isinstance(maximum, int) and len(value) > maximum:
+            errors.append(f"initial_state {key!r} must have at most {maximum} items.")
+    choices = spec.get("enum")
+    if isinstance(choices, list) and value not in choices:
+        rendered = ", ".join(repr(item) for item in choices)
+        errors.append(f"initial_state {key!r} must be one of {rendered}.")
+    return errors
+
+
+def _constraint_phrase(spec: Mapping[str, Any]) -> str | None:
+    """Return a short requirement for a fixed number of letters, when the pattern says so.
+
+    Returns:
+        A phrase such as ``exactly 5 lowercase letters``, or ``None``.
+    """
+    pattern = spec.get("pattern")
+    if not isinstance(pattern, str):
+        return None
+    lowercase = re.fullmatch(r"\^\[a-z\]\{(\d+)\}\$", pattern)
+    if lowercase:
+        return f"exactly {lowercase.group(1)} lowercase letters"
+    letters = re.fullmatch(r"\^\[A-Za-z\]\{(\d+)\}\$", pattern)
+    if letters:
+        return f"exactly {letters.group(1)} letters"
+    return None
 
 
 def _task_bind_errors(task: Task) -> list[str]:

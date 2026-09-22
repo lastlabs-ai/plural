@@ -30,7 +30,7 @@ from plural.sandbox.models import (
     SandboxRequirements,
     environment_required_capabilities,
 )
-from plural.verifiers import VerifierRuntime
+from plural.verifiers import VerifierRuntime, runtime_is_custom
 
 PolicyLayer = Literal["provider", "project", "environment", "harness", "agent"]
 
@@ -135,6 +135,26 @@ def _cap_resources(
         pids=requested.pids,
         disk_mb=disk_mb,
     )
+
+
+def verifier_score_sandbox(
+    environment: EnvironmentDefinition,
+    runtime: VerifierRuntime,
+) -> tuple[str, SandboxRequirements]:
+    """Choose the sandbox a verifier check runs in.
+
+    A default runtime uses the Task Environment. Anything else uses the
+    verifier's own provider, image, and network.
+
+    Returns:
+        The provider name and the sandbox requirements for the check.
+    """
+    if runtime_is_custom(runtime):
+        return (
+            runtime.provider,
+            sandbox_requirements_for(environment, verifier_runtime=runtime),
+        )
+    return environment.runtime.provider, sandbox_requirements_for(environment)
 
 
 def sandbox_requirements_for(

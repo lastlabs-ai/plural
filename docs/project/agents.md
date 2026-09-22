@@ -86,7 +86,7 @@ custom = Agent(
 
 The Harness runs in the Runtime selected by the Task's Environment. Built-ins install their CLI there. A custom Harness still needs its dependencies in that Runtime.
 
-Model authentication is supplied through the Job's Client. For extra application credentials, use `secret_names` to grant names the Harness declares. See [Harnesses](harnesses.md).
+Model authentication is supplied through the Job's Client. A custom Harness declares the environment names it reads, and `secret_names` grants a subset of those names. If one of those names is missing when the run starts, the error lists it and does not include the value. See [Harnesses](harnesses.md).
 
 ## Evaluate the Agent
 

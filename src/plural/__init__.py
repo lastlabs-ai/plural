@@ -37,6 +37,7 @@ from plural.environments import (
     TraceDataset,
     TraceFilter,
     action,
+    initial,
     rewarder,
 )
 from plural.errors import (
@@ -160,6 +161,7 @@ __all__ = [
     "Verifier",
     "VerifierOutput",
     "action",
+    "initial",
     "dump",
     "dumps",
     "load",

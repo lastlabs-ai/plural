@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - Unreleased
+
+### Added
+
+- `initial()` marks the State fields a Task may set before an episode, including constraints such as length and pattern. Unmarked fields stay episode progress and cannot be supplied as `initial_state`.
+- Harbor ATIF documents normalize into the same trajectory events as native traces. Reward and verifier scores stay beside the trajectory.
+- `score_from_rewards` turns a named rewarder, or the episode reward total, into a Verifier score.
+
+### Changed
+
+- A Verifier with the default runtime scores inside the Task Environment. A runtime that sets its own provider, image, network, resources, or timeout uses that sandbox instead.
+- Saving a version from the UI, the CLI, or the SDK makes it current. Files on disk are the working copy until they are pushed. The UI increments the last version number.
+- Missing Agent keys and vendor model credentials name the environment variables that are absent and leave their values out of the error.
+
 ## [0.14.0] - 2026-09-21
 
 ### Changed
@@ -518,6 +532,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs site (MkDocs) and cookbook-style routing examples.
 
 [Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.14.0...HEAD
+[0.14.1]: https://github.com/lastlabs-ai/plural/compare/v0.14.0...HEAD
 [0.14.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.14.0
 [0.13.3]: https://github.com/lastlabs-ai/plural/releases/tag/v0.13.3
 [0.12.1]: https://github.com/lastlabs-ai/plural/releases/tag/v0.12.1

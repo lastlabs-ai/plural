@@ -31,7 +31,7 @@ class _FakeTasksAPI(_FakeRevisionAPI):
 
     def push(self, value: Any, **references: Any) -> dict[str, Any]:
         self.pushed.append({"value": value, "references": references})
-        return {"id": "task-revision", "status": "draft"}
+        return {"id": "task-revision", "status": "published"}
 
     def delete(self, resource_id: str) -> None:
         self.deleted.append(resource_id)
@@ -68,7 +68,7 @@ def test_push_resolves_current_revisions_by_name() -> None:
 
     record = _task().push(client)  # type: ignore[arg-type]
 
-    assert record == {"id": "task-revision", "status": "draft"}
+    assert record == {"id": "task-revision", "status": "published"}
     assert client.environments.get_calls == ["world"]
     assert client.verifiers.get_calls == ["correct"]
     assert client.tasks.pushed[0]["references"] == {

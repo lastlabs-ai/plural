@@ -35,7 +35,7 @@ task = Task(
 
 ## Start from a task directory
 
-For hosted work, keep the task itself local until it is ready to publish:
+For hosted work, the directory is the task until you push a version:
 
 ```bash
 plural task init support-ticket --environment ticket-triage --verifier correct-team
@@ -72,7 +72,7 @@ writes nothing. Without a key, the command creates the directory locally and
 reports that the remote name was not checked. The Python helper warns when the
 slug exists but does not prompt.
 
-Publish the directory when it is ready:
+Push the directory to save that version:
 
 ```bash
 plural task push support-ticket
@@ -120,7 +120,7 @@ the same parent, which is how updates work for every Plural resource.
 
 ## Set the initial State
 
-Use `initial_state` when each Task should start the Environment with different data. Plural checks these fields against the Environment's State schema and loads them before `reset` during package Job execution.
+Use `initial_state` when each Task should start the Environment with different data. Mark those State fields with `initial()`. Constraints passed there, such as `min_length=5` and `pattern=r"^[a-z]{5}$"`, are requirements on the value a Task saves. Plural checks the values against the Environment's State schema and loads them before `reset` during package Job execution. A Task cannot set unmarked fields, such as whether the episode is already solved.
 
 The following small project shows both initial State and packaged files:
 
@@ -154,14 +154,14 @@ Save the Environment in `environment/world.py`:
 ```python
 from pathlib import Path
 
-from plural import Environment, Observation, State, action
+from plural import Environment, Observation, State, action, initial
 
 DATA = Path(__file__).parent / "data"
 
 
 class TicketState(State):
-    issue: str = ""
-    expected: str = ""
+    issue: str = initial("", description="The support request for this Task.")
+    expected: str = initial("", description="The category this ticket should receive.")
     category: str = ""
     done: bool = False
 

@@ -34,7 +34,7 @@ class _FakeTasks:
 
     def push(self, value: Any, **references: Any) -> dict[str, Any]:
         self.pushed.append({"value": value, "references": references})
-        return {"id": "task-revision", "status": "draft"}
+        return {"id": "task-revision", "status": "published"}
 
 
 class _FakeRevisionAPI:

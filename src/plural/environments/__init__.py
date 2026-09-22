@@ -21,7 +21,7 @@ from plural.environments.definition import (
     SecretReference,
 )
 from plural.environments.env import Environment, rewarder
-from plural.environments.types import Observation, State
+from plural.environments.types import Observation, State, initial
 
 __all__ = [
     "Action",
@@ -46,5 +46,6 @@ __all__ = [
     "TraceDataset",
     "TraceFilter",
     "action",
+    "initial",
     "rewarder",
 ]

@@ -22,6 +22,7 @@ from plural.execution.policy import (
     ProjectPolicy,
     resolve_effective_policy,
     sandbox_requirements_for,
+    verifier_score_sandbox,
 )
 from plural.execution.scheduler import drain
 from plural.execution.store import JobStore
@@ -66,6 +67,7 @@ from plural.verifiers import (
     VerifierDefinition,
     VerifierOutput,
     VerifierRuntime,
+    score_from_rewards,
 )
 
 
@@ -145,10 +147,12 @@ def _harness_environment(
         )
     missing = [name for name in agent.secret_names if not environ.get(name)]
     if missing:
+        listed = ", ".join(missing)
         raise ExecutionFailure(
             ErrorCode.AUTHENTICATION,
-            f"Agent {agent.name!r} is missing declared secrets: {missing!r}.\n"
-            "Export those names in the process environment before Job.run().",
+            f"Agent {agent.name!r} is missing keys in the environment: {listed}.\n"
+            "Set those names before the run. This error names the keys and does not "
+            "include their values.",
         )
     secrets = {name: environ[name] for name in names if environ.get(name)}
     configured = {
@@ -861,11 +865,17 @@ class Trial:
                     )
                 )
                 continue
-            if isinstance(verifier, DeterministicVerifier) and verifier.checker is not None:
+            if isinstance(verifier, DeterministicVerifier) and (
+                verifier.checker is not None or verifier.reward_source is not None
+            ):
                 episode = self._episode(artifacts, observation=observation, state=state)
                 try:
-                    output = verifier.invoke(episode).model_dump(mode="json")
-                    parsed = VerifierOutput.model_validate(output).validated_finite()
+                    scored = (
+                        score_from_rewards(episode, verifier.reward_source)
+                        if verifier.reward_source
+                        else verifier.invoke(episode)
+                    )
+                    parsed = scored.validated_finite()
                 except ValueError as exc:
                     raise ExecutionFailure(ErrorCode.VERIFIER_FAILED, str(exc)) from exc
                 results.append(
@@ -970,11 +980,8 @@ class Trial:
         observation: Mapping[str, Any] | None = None,
         state: Mapping[str, Any] | None = None,
     ) -> tuple[VerifierResult, bytes, bytes]:
-        provider = self.provider_for(runtime.provider)
-        requirements = sandbox_requirements_for(
-            self.task.environment,
-            verifier_runtime=runtime,
-        )
+        provider_name, requirements = verifier_score_sandbox(self.task.environment, runtime)
+        provider = self.provider_for(provider_name)
         await provider.preflight(requirements)
         handle = await provider.create(requirements)
         self._active[(provider.name, handle.sandbox_id)] = handle
@@ -1258,13 +1265,11 @@ class JobRunner:
                 verifier = binding.verifier
                 if isinstance(verifier, HumanVerifier):
                     continue
-                provider = self._provider_for(verifier.runtime.provider)
-                await provider.preflight(
-                    sandbox_requirements_for(
-                        task.environment,
-                        verifier_runtime=verifier.runtime,
-                    )
+                provider_name, requirements = verifier_score_sandbox(
+                    task.environment, verifier.runtime
                 )
+                provider = self._provider_for(provider_name)
+                await provider.preflight(requirements)
 
     async def run(self, *, resume: bool = False) -> JobResult:
         """Execute all ready Trials with global and per-runtime bounds."""

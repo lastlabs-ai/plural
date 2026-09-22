@@ -242,8 +242,10 @@ def _map_credentials(vendor: str) -> None:
         os.environ["ANTHROPIC_API_KEY"] = os.environ.get("ANTHROPIC_API_KEY") or key or "plural"
         if not gateway and not os.environ.get("PLURAL_ALLOW_NO_AUTH"):
             raise SystemExit(
-                "Claude Code needs Job(client=...) or Job(api_key=...) so Plural can "
-                "authenticate model calls through the local Messages bridge."
+                "Claude Code is missing PLURAL_GATEWAY_URL or OPENAI_BASE_URL in the "
+                "environment, so model calls cannot authenticate. "
+                "Job(client=...) sets PLURAL_GATEWAY_URL. "
+                "Job(api_key=...) sets OPENAI_API_KEY."
             )
         return
     if key:
@@ -254,8 +256,9 @@ def _map_credentials(vendor: str) -> None:
         os.environ.get("OPENAI_API_KEY") or os.environ.get("PLURAL_ALLOW_NO_AUTH")
     ):
         raise SystemExit(
-            f"{vendor} needs Job(client=...) or Job(api_key=...) for model authentication. "
-            "Do not put model keys on Agent.secret_names."
+            f"{vendor} is missing a model key in the environment. "
+            "Set one of: PLURAL_API_KEY, OPENAI_API_KEY. "
+            "Job(client=...) and Job(api_key=...) set these for you."
         )
 
 

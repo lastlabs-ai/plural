@@ -40,7 +40,7 @@ Plural keeps State out of its agent-facing payloads. Your actions must preserve 
 Save Environment classes in a Python file. This small example lets an agent classify one support request:
 
 ```python
-from plural import Environment, Observation, Runtime, State, action
+from plural import Environment, Observation, Runtime, State, action, initial
 
 
 class TicketObservation(Observation):
@@ -53,7 +53,7 @@ class TicketObservation(Observation):
 
 
 class TicketState(State):
-    expected: str = "billing"
+    expected: str = initial("billing", description="The category this ticket should receive.")
     category: str = ""
     done: bool = False
 
@@ -146,7 +146,7 @@ The `reward` returned by `step` is the weighted total of `reward()` and every re
 
 The example above always uses the same ticket. For a useful benchmark, reuse the Environment with different case data. Each [Task](tasks.md) supplies instructions, selects its case, and attaches one or more [Verifiers](verifiers.md).
 
-Use `reset` to load the selected case and clear previous progress. Task `info` is public, so it can hold a ticket ID but should not hold the answer key. `initial_state` supplies schema-checked setup data; your reset implementation must preserve any fields it needs. Task `reset_options` are stored, but package Jobs do not currently forward them to `reset`.
+Use `reset` to load the selected case and clear previous progress. Task `info` is public, so it can hold a ticket ID but should not hold the answer key. `initial_state` supplies schema-checked setup data; your reset implementation must preserve any fields it needs. Mark those State fields with `initial()`, and pass constraints such as `min_length=5` or `pattern=r"^[a-z]{5}$"` when a Task's value must match a rule. Unmarked fields, such as `done` or a running guess list, belong to the episode and a Task cannot set them. `State.seed` is settable. `State.metadata` is not. Task `reset_options` are stored, but package Jobs do not currently forward them to `reset`.
 
 The [support queue tutorial](../tutorials/support-queue.md) shows how the Environment loads the Task's ticket and scores the completed workflow.
 
