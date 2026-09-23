@@ -56,10 +56,9 @@ hermes = Agent(
 )
 ```
 
-The same fields work in YAML:
+The same fields work in a project's `agents/support-claude/agent.yaml`:
 
 ```yaml
-kind: agent
 name: support-claude
 model: anthropic/claude-sonnet-5
 harness: claude-code
@@ -67,12 +66,7 @@ harness_kwargs:
   reasoning_effort: high
 ```
 
-Discover the accepted options:
-
-```bash
-plural harness list
-plural harness schema claude-code
-```
+Built-in Harnesses are never directories in `harnesses/`; name them directly in `agent.yaml`. `plural agent validate support-claude` checks the name and every option.
 
 ### Shared options
 
@@ -93,7 +87,7 @@ Setup happens inside the fresh Runtime, not on your laptop.
 2. The CLI starts from the Environment workspace.
 3. Model authentication comes from `Job(client=...)` or `Job(api_key=...)`. Those calls set `PLURAL_API_KEY`, `OPENAI_API_KEY`, or `PLURAL_GATEWAY_URL`. If a required name is missing, the run stops and the error names it. The error does not include the value. You do not put model keys on `Agent.secret_names` for a built-in Harness. A custom Harness lists the names it reads in `secrets`, and the Agent requires that subset.
 4. Environment actions are exposed to the CLI as tools.
-5. Claude Code talks to a local compatibility service that forwards its Messages requests to Plural's existing OpenAI-compatible Job gateway. Codex and Hermes call that gateway directly.
+5. Claude Code talks to a local compatibility service that forwards its Messages requests to the Job's OpenAI-compatible model gateway. Codex and Hermes call that gateway directly.
 
 The Runtime must allow the network the installer and model gateway need. A `python:3.12-slim` image is enough for setup to add Node.js or pip tools. If the image cannot install those tools, or the network policy blocks them, the Trial fails with a clear error.
 
@@ -106,7 +100,13 @@ declare a command, source directory, output files, or transport. Plural finds th
 class file, hashes its directory, runs it inside the Environment Runtime, and
 writes the standard artifacts.
 
-Create `harness.py`:
+In a project, create the Harness directory from the template:
+
+```bash
+plural harness init support-loop
+```
+
+This writes `harnesses/support-loop/harness.yaml` and `harnesses/support-loop/harness.py`. Replace `harness.py` with:
 
 ```python
 import json
@@ -149,21 +149,21 @@ class SupportHarness(Harness):
             for call in completion.tool_calls:
                 function = call["function"]
                 arguments = json.loads(function.get("arguments") or "{}")
-                observation = environment.step(function["name"], **arguments)
+                step = environment.step(function["name"], **arguments)
                 trajectory.append(
                     {
                         "turn": turn,
                         "type": "action",
                         "name": function["name"],
                         "arguments": arguments,
-                        "observation": observation,
+                        "observation": step.observation,
                     }
                 )
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call["id"],
-                        "content": json.dumps(observation),
+                        "content": json.dumps(step.observation),
                     }
                 )
 
@@ -180,7 +180,10 @@ The `run` arguments are the same for every custom Harness:
   `agent.complete(messages, tools=...)` to use the Job's model gateway.
 - `environment` exposes `observation`, `reset()`, `step(action, **arguments)`,
   and `tools()`. These methods execute the real Environment commands; the
-  Harness never needs to parse command metadata.
+  Harness never needs to parse command metadata. `step` returns the
+  transition's `observation`, `reward`, `terminated`, `truncated`, and `info`.
+  Send only the observation to the model: a reward or termination flag in the
+  model's context can leak the expected outcome.
 
 `run` may be synchronous or asynchronous. Return a `HarnessResult`, a string,
 or a JSON-compatible mapping. `HarnessResult` lets you include structured
@@ -192,7 +195,7 @@ present. The Harness does not write files or emit runner events itself.
 
 The trajectory file to exchange with other tools is [`trajectory.json` in ATIF](https://docs.harborframework.com/core-concepts/agents/atif), Harbor's Agent Trajectory Interchange Format. Current ATIF is `ATIF-v1.7`: an `agent` block, ordered `steps`, and optional `final_metrics`. Put Plural-only notes in the schema's `extra` field. A reward stays on the episode, and a verifier score stays on the trial; neither is an ATIF step.
 
-`normalize_trajectory` reads an ATIF document alongside Plural's existing JSON and JSONL logs. Built-in loops still write `trajectory.jsonl` for the native record. Point a custom Harness's `trajectory` field at `trajectory.json` when it writes ATIF. The spec is Harbor's [ATIF RFC](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md).
+`normalize_trajectory` reads an ATIF document as well as Plural's own JSON and JSONL trajectories. Built-in loops write `trajectory.jsonl`. A Harness described by a `HarnessDefinition` that writes ATIF sets its `trajectory` field to `trajectory.json`. The spec is Harbor's [ATIF RFC](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md).
 
 ### Attach the custom Harness
 
@@ -242,16 +245,31 @@ authentication still comes from `Job(client=...)` or `Job(api_key=...)`.
 Custom Python dependencies must already be available in the Environment
 Runtime.
 
-YAML references the class instead of repeating execution details:
+### Save the Harness in a project
+
+`harnesses/support-loop/harness.yaml` names the class and supplies its configuration, instead of repeating execution details:
 
 ```yaml
-kind: harness
+name: support-loop
+version: 1.0.0
+description: Tool loop that follows the support policy.
 python: harness.py:SupportHarness
 config:
   max_turns: 12
 ```
 
-Validate a Job using one Task before scaling up. A dry-run checks configuration; a live test checks that the implementation, dependencies, outputs, and scoring work together.
+`name` must match the directory name. The manifest supplies the Harness's identity, so a class saved in a project does not need `name` or `version` attributes; values set there are replaced by the manifest's. An Agent uses the Harness by name in `agent.yaml`:
+
+```yaml
+name: support-custom
+model: openai/gpt-5.6-luna
+instructions: Follow the support policy and finish the ticket.
+harness: support-loop
+```
+
+Validating or pushing the Agent includes the Harness it names, so `plural agent push support-custom --with-deps` pushes both.
+
+Try the Harness on one Task before scaling up. `plural run --task ticket-1 --agent support-custom --dry-run` checks configuration; a live run checks that the implementation, dependencies, outputs, and scoring work together. You can also pass the Harness inline, as in `plural run --task ticket-1 --model openai/gpt-5.6-luna --harness support-loop`. A run started with `--model` always expects a model credential; to run a Harness that never calls a model, save an Agent with `auth_mode: none`, as the `scripted` Agent in the [first project](../tutorials/first-project.md) does.
 
 ## Tools, permissions, and training
 

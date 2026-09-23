@@ -448,7 +448,7 @@
     },
     "VerifierRuntime": {
       "additionalProperties": false,
-      "description": "Verifier-owned runtime, independent of the Environment.",
+      "description": "Machine for a verifier that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
       "properties": {
         "image": {
           "anyOf": [

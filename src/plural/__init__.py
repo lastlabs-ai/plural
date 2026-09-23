@@ -10,9 +10,10 @@ from importlib.metadata import PackageNotFoundError, version
 
 # Authoring: worlds (Environment owns Runtime, Resources, Rewarders).
 from plural.agents import Agent
+from plural.benchmarks import BenchmarkCategory, BenchmarkScoring, EvaluationTrack
 
 # Hosting and models.
-from plural.catalog import ModelCatalog, ModelSpec, estimate_cost
+from plural.catalog import CatalogContext, ModelCatalog, ModelSpec, estimate_cost
 from plural.client import Client, Plural
 
 # Advanced: harness protocol, sandbox providers, tracing, errors, utilities.
@@ -88,7 +89,7 @@ from plural.jobs import (
     TrialStatus,
     VerifierResult,
 )
-from plural.project import CatalogContext, Resolver, dump, dumps, load
+from plural.project import Project, ProjectError, ResourceRef, Workspace
 from plural.sandbox import (
     Capability,
     DaytonaProvider,
@@ -141,9 +142,12 @@ __all__ = [
     "Agent",
     "AgentVerifier",
     "Benchmark",
+    "BenchmarkCategory",
+    "BenchmarkScoring",
     "CatalogContext",
     "DeterministicVerifier",
     "Environment",
+    "EvaluationTrack",
     "Episode",
     "ExecutionLimits",
     "Harness",
@@ -151,7 +155,6 @@ __all__ = [
     "HumanVerifier",
     "Observation",
     "Resource",
-    "Resolver",
     "RubricCriterion",
     "Runtime",
     "RuntimeVariable",
@@ -162,10 +165,12 @@ __all__ = [
     "VerifierOutput",
     "action",
     "initial",
-    "dump",
-    "dumps",
-    "load",
     "rewarder",
+    # Projects.
+    "Project",
+    "ProjectError",
+    "ResourceRef",
+    "Workspace",
     # Running.
     "Job",
     "JobMode",

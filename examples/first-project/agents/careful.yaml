@@ -1,9 +1,0 @@
-kind: agent
-model: openai/gpt-5.6-luna
-name: careful
-version: 0.1.0
-instructions: Inspect the ticket before categorizing it. Use the Environment actions.
-fallback_models: []
-auth_mode: environment
-secret_names: []
-metadata: {}

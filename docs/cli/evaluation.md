@@ -2,92 +2,157 @@
 route: /docs/cli/evaluation
 title: CLI guide
 order: 120
-description: Validate, inspect, export, run, compare, watch, and review the same evaluation objects used by the Python SDK.
+description: Create a project, validate and push its resources, run Tasks and Benchmarks, and inspect, rerun, and review the resulting Jobs.
 audience: all
 nav: true
 nav_group: Interfaces
 ---
 # CLI guide
 
-Use the CLI to validate a project, preview its Trials, run an evaluation, and inspect results. Commands accept YAML files or Python references such as `job.py:job`, which selects the `job` object in that file.
+The CLI works on a project directory: a `project.yaml` file with one directory per
+resource beside it, such as `environments/wordle/` or `tasks/crane/`. Commands
+name resources by their directory name, and most resource commands default to the
+resource directory you are in. Commands that print data, such as `validate`,
+`show`, `list`, and `run`, accept `--json` for machine-readable output.
 
-## Create and validate a project
+Projects written for Plural 0.14 or earlier use a different layout; see
+[Migrate to 0.15](../migration/projects.md).
+
+## Create a project
 
 ```bash
-plural init support-eval
+plural project init support-eval
 cd support-eval
-plural validate project.py:job
-plural inspect project.py:job
-plural export project.py:job --output job.yaml
-plural run job.yaml --dry-run
+plural env init support-queue
+plural verifier init correct-category
+plural task init ticket-1 -e support-queue -v correct-category
+plural benchmark init support-triage
+plural benchmark add ticket-1 -b support-triage
+plural agent init careful -m openai/gpt-5.6-luna
 ```
 
-A live run needs `plural auth login` or `--api-key`. Dry-run does not.
+`plural project init` works offline. Each resource `init` command writes a
+template with places marked `PLURAL-TODO` for you to fill in; a new Environment
+and Verifier need real behavior before a run means anything. The
+[support queue tutorial](../tutorials/support-queue.md) provides both. Without
+`-m`, `agent init` leaves the model for you to choose from `plural models list`.
+A new Environment uses the `docker` runtime, so Docker must be running when you
+run it; the `local` runtime avoids Docker but is a trusted subprocess on your
+machine, not a sandbox.
 
-A new scaffold still needs executable Environment and Verifier
-implementations. The [support queue tutorial](../tutorials/support-queue.md)
-provides both before its first live run.
-
-A Job contains Agents. To run a Task or Benchmark directly, add one or more
-repeatable Agent references:
+`validate` checks a resource and everything it depends on without uploading
+anything, and reports every `PLURAL-TODO` that is still unfinished. `show` prints
+the local copy of a resource, or the hosted one when there is no local copy. A
+local copy that is not valid yet is reported as an error instead:
 
 ```bash
-plural run benchmark.yaml \
-  --agent agents/careful.yaml \
-  --agent agents/concise.yaml \
-  --attempts 2 \
-  --concurrency 4 \
-  --dry-run
+plural benchmark validate support-triage
+plural task show ticket-1
+plural project show support-eval
 ```
 
-CLI overrides apply only when supplied. Otherwise Python defaults remain:
-`mode=eval`, `attempts=1`, `concurrency=1`, and
-`per_runtime_concurrency=1`.
+## Run
 
-## Models and Benchmarks
+A run selects exactly one source, a Task (`-t`) or a Benchmark (`-b`), and
+exactly one way to act: a catalog model (`-m`) or a saved Agent (`-a`).
 
 ```bash
-plural models list
-plural models show openai/gpt-5.6-luna
-plural benchmarks show benchmark.yaml
-plural benchmarks diff benchmark-v1.yaml benchmark-v2.yaml
-plural benchmarks export benchmark.yaml --output benchmark-graph.yaml
+plural run -t ticket-1 -m openai/gpt-5.6-luna
+plural run -b support-triage -a careful
+plural run -b support-triage -m openai/gpt-5.6-luna -h codex
 ```
 
-Use `--catalog PATH` on commands that load model-backed objects when your
-project registers additional catalog entries.
+`-m` without `-h` uses `native`, Plural's built-in tool loop. `-h` names a
+Harness in `harnesses/` or a built-in one such as `codex` or `claude-code`. Add
+`--dry-run` to validate the inputs and print the plan, including the version
+and content hash of every input, without running anything. `--attempts N` plans
+N independent Trials per Task, and `--concurrency N` runs up to N Trials at once.
+Both default to 1.
+
+Every run is a new Job. A local run executes on this machine and records the Job
+under `.plural/jobs/<job-id>/` in the project. A run that calls a live model
+needs an API key: `plural auth login --api-key-stdin`, `PLURAL_API_KEY`, or your
+own `OPENAI_API_KEY` for `openai/` models. A browser login is enough for hosted
+commands, but the model gateway does not accept it. `--dry-run` needs none, and
+neither does an Agent with `auth_mode: none`.
 
 ## Jobs, Trials, and reviews
 
 ```bash
 plural job list
 plural job show JOB_ID
-plural job watch JOB_ID --follow
-plural trial list JOB_ID
-plural trial watch TRIAL_ID --job JOB_ID --follow
-plural review list JOB_ID
-plural review submit JOB_ID TRIAL_ID \
-  --verifier policy-review \
-  --score 2 \
+plural job rerun JOB_ID
+plural trial show TRIAL_ID
+plural trial rerun TRIAL_ID
+plural review list
+plural review submit TRIAL_ID --verifier policy-review --score 2 \
   --feedback "Meets policy."
 ```
 
-Local inspection commands default to `.plural/jobs`; use `--store PATH` when
-the Job ran from another source directory.
+`job list` shows local and hosted Jobs, labeled by where they ran. `job show` and
+`trial show` look for a local record first and then ask the hosted project.
+`job rerun` runs a Job again with the exact pinned inputs it used and creates a
+new Job linked to the original. `trial rerun` runs one Trial again as a new
+one-Trial Job. `review list` shows Trials waiting for a HumanVerifier score, and
+`review submit` records one; add `--hosted` to either for hosted review
+assignments. Submissions are append-only. See [Jobs](../running/jobs.md) and
+[Reviews](../running/reviews.md).
 
-## Local and hosted
-
-`plural run` executes locally by default. This describes orchestration and
-storage, not Runtime provider or network access. Use `--hosted` only when you
-intend to sync and submit:
+## Models
 
 ```bash
-plural auth status
-plural run job.yaml --hosted
+plural models list
+plural models list --provider openai
 ```
 
-`--offline` is a hidden compatibility alias and is unnecessary for the normal
-local path.
+Signed in, `plural models list` shows only the models your organization permits.
+Organization admins can restrict models, and the hosted service enforces that
+restriction on runs and gateway calls as well as on this list. Signed out, it
+shows the bundled catalog without any organization policy.
+
+## Hosted projects
+
+Local runs need no hosted project. To share resources with your team or run on
+hosted infrastructure, sign in and push:
+
+```bash
+plural auth login
+plural project init support-eval --push
+plural benchmark push support-triage --with-deps
+plural agent push careful
+plural run -b support-triage -a careful --hosted --follow
+```
+
+`plural project init --push` creates the hosted project, or connects to it when
+it already exists; the name must match `project.yaml`. The hosted project is
+private. The command records the binding in `.plural/project.json` and selects
+the project as your scope. A push creates an immutable, private revision that is
+usable in that project immediately; pushing never makes anything public, and
+sharing is a separate action in the Plural web app. A push validates first,
+uploads nothing unless the whole push can succeed, and refuses files that look
+like credentials, such as `.env` or private keys. `--hosted` requires every
+input of the run to be pushed already with identical content, and `--follow`
+streams hosted progress until the Job finishes. See
+[Push and pull resources](../guides/studio-sync.md).
+
+`plural auth status` shows which credential is in use, a browser login or an API
+key, and the current scope. `plural auth scope` shows or changes where hosted
+commands go:
+
+```bash
+plural auth scope
+plural auth scope -p support-eval
+plural auth scope .
+plural auth scope --org acme
+```
+
+`-p` selects an existing hosted project, `.` or `--account` selects account
+scope, and `--org` switches between organization accounts (`personal` selects
+your own). A new scope is checked with the service before it is saved; if the
+check fails, the previous scope stays in place. Scope selects a destination and
+never changes what your credential may do. An API key limited to one project
+can only reach that project. Credentials are stored in your OS keyring or a
+private file in your user config directory, never in the project.
 
 ## Command reference
 
@@ -100,7 +165,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural [OPTIONS] COMMAND [ARGS]...
 
- Define environments, evaluate agents, and inspect reproducible results.
+ Build, push, and run Plural projects.
+
+ Start with `plural project init <name>`, add resources with `plural
+ <env|task|verifier|harness|agent|benchmark> init <name>`, and run them with `plural run --task
+ <name> --model <model>`.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --install-completion          Install completion for the current shell.                          │
@@ -109,25 +178,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help                        Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init        Create a small Python-first evaluation project.                                      │
-│ validate    Load and validate any Python or YAML project object.                                 │
-│ inspect     Show the fully resolved public object graph.                                         │
-│ export      Export the resolved graph as canonical public YAML.                                  │
-│ run         Run locally by default; use --hosted for explicit remote submission.                 │
-│ schemas     Generate schemas from the public SDK models.                                         │
-│ env         Author, inspect, and publish Environments.                                           │
-│ task        Author, inspect, and publish Tasks.                                                  │
-│ verifier    Author, inspect, and publish Verifiers.                                              │
-│ agent       Author, inspect, and publish Agents.                                                 │
-│ benchmark   Author, inspect, and publish Benchmarks.                                             │
-│ models      List and inspect the effective model catalog.                                        │
-│ harness     List built-in Harnesses or author a custom one.                                      │
-│ benchmarks  Inspect, compare, and export Benchmarks.                                             │
-│ auth        Authenticate with hosted Plural services.                                            │
-│ job         Advanced durable Job and event commands.                                             │
-│ trial       Inspect and watch Trials.                                                            │
-│ review      Inspect and submit human reviews.                                                    │
-│ session     Export and redeploy portable agent sessions.                                         │
+│ run        Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.      │
+│ auth       Sign in, sign out, and choose the hosted account or project commands use.             │
+│ project    Create, register, and inspect projects.                                               │
+│ env        Create, validate, push, pull, and inspect Environments.                               │
+│ verifier   Create, validate, push, pull, and inspect Verifiers.                                  │
+│ harness    Create, validate, push, pull, and inspect Harnesses.                                  │
+│ task       Create, validate, push, pull, and inspect Tasks.                                      │
+│ agent      Create, validate, push, pull, and inspect Agents.                                     │
+│ benchmark  Create, validate, push, pull, and inspect Benchmarks.                                 │
+│ job        List, inspect, and rerun Jobs.                                                        │
+│ trial      Inspect and rerun Trials.                                                             │
+│ review     List and submit human reviews.                                                        │
+│ models     List the models you may run.                                                          │
+│ session    Export and redeploy portable agent sessions.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -137,17 +201,19 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural agent [OPTIONS] COMMAND [ARGS]...
 
- Author, inspect, and publish Agents.
+ Create, validate, push, pull, and inspect Agents.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create an Agent independent of Environment identity.                                   │
-│ validate  Validate an Agent.                                                                     │
-│ show      Show an Agent.                                                                         │
-│ push      Publish an Agent parent and immutable revision.                                        │
-│ publish   Publish an existing hosted Agent revision.                                             │
+│ init      Create a saved Agent: a model, instructions, and an optional Harness.                  │
+│ validate  Check a resource and everything it depends on, without uploading.                      │
+│ push      Validate and push an immutable, private revision to the bound project.                 │
+│ pull      Restore a hosted revision's editable files into this project.                          │
+│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
+│ list      List resources of this kind, labeled local or hosted.                                  │
+│ serve     Reserved: serve an Agent as an endpoint (not available yet).                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -155,36 +221,54 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural agent init [OPTIONS] [path]
+ Usage: plural agent init [OPTIONS] {name}
 
- Create an Agent independent of Environment identity.
+ Create a saved Agent: a model, instructions, and an optional Harness.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: agent.yaml]                                                        │
+│ *    name      <str>  Agent name. [required]                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│    --name           <str>  [default: agent]                                                      │
-│ *  --model          <str>  [required]                                                            │
-│    --harness        <str>                                                                        │
-│    --force                                                                                       │
-│    --help                  Show this message and exit.                                           │
+│ --model    -m      <str>  Catalog model id.                                                      │
+│ --harness          <str>  Harness name.                                                          │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural agent publish`
+### `plural agent list`
 
 ```text
 
- Usage: plural agent publish [OPTIONS] {resource_id} {revision_id}
+ Usage: plural agent list [OPTIONS]
 
- Publish an existing hosted Agent revision.
+ List resources of this kind, labeled local or hosted.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --local           Only list local resources.                                                     │
+│ --hosted          Only list hosted resources.                                                    │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent pull`
+
+```text
+
+ Usage: plural agent pull [OPTIONS] [name]
+
+ Restore a hosted revision's editable files into this project.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    resource_id      <str>  [required]                                                          │
-│ *    revision_id      <str>  [required]                                                          │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --version          <str>  Version to restore.                                                    │
+│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --force                   Replace local files that differ. The old copy is kept under            │
+│                           .plural/backups.                                                       │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -192,16 +276,37 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural agent push [OPTIONS] [path]
+ Usage: plural agent push [OPTIONS] [name]
 
- Publish an Agent parent and immutable revision.
+ Validate and push an immutable, private revision to the bound project.
+
+ Pushing unchanged content reuses the existing revision. Without
+ --with-deps, every dependency must already be pushed with identical
+ content. Nothing is uploaded unless the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: agent.yaml]                                                        │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --harness-revision-id        <str>                                                               │
-│ --help                              Show this message and exit.                                  │
+│ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent serve`
+
+```text
+
+ Usage: plural agent serve [OPTIONS] [name]
+
+ Reserved: serve an Agent as an endpoint (not available yet).
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Agent to serve.                                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -209,15 +314,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural agent show [OPTIONS] [path]
+ Usage: plural agent show [OPTIONS] [name]
 
- Show an Agent.
+ Show a resource: the local copy if there is one, otherwise the hosted one.
+
+ An invalid local copy is an error, not a reason to show the hosted one.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: agent.yaml]                                                        │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --local           Only read local files.                                                         │
+│ --hosted          Only read the hosted project.                                                  │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -225,14 +335,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural agent validate [OPTIONS] [path]
+ Usage: plural agent validate [OPTIONS] [name]
 
- Validate an Agent.
+ Check a resource and everything it depends on, without uploading.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: agent.yaml]                                                        │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -243,15 +354,16 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural auth [OPTIONS] COMMAND [ARGS]...
 
- Authenticate with hosted Plural services.
+ Sign in, sign out, and choose the hosted account or project commands use.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ login   Authenticate using the hosted device flow.                                               │
-│ logout  Remove stored credentials for the active profile.                                        │
-│ status  Show local authentication context without exposing secrets.                              │
+│ login   Sign in with your browser (or store an API key).                                         │
+│ logout  Revoke and remove the stored credential for this profile.                                │
+│ status  Check the credential with the service and show the current scope.                        │
+│ scope   Show or change where hosted commands go by default.                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -261,11 +373,17 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural auth login [OPTIONS]
 
- Authenticate using the hosted device flow.
+ Sign in with your browser (or store an API key).
+
+ A browser login acts as you: it reaches every account and project your
+ roles allow. Credentials are stored in your OS keyring or a private file
+ in your user config directory, never in a project.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --no-browser                                                                                     │
-│ --help                Show this message and exit.                                                │
+│ --no-browser                  Print the URL only.                                                │
+│ --api-key-stdin               Store an API key read from standard input instead.                 │
+│ --api-url              <str>  Hosted service URL.                                                │
+│ --help                        Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -275,10 +393,34 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural auth logout [OPTIONS]
 
- Remove stored credentials for the active profile.
+ Revoke and remove the stored credential for this profile.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural auth scope`
+
+```text
+
+ Usage: plural auth scope [OPTIONS] [.]
+
+ Show or change where hosted commands go by default.
+
+ Scope selects a destination; it never changes what your credential may
+ do. The new scope is checked with the service before it is saved, and a
+ failed check leaves the previous scope in place.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   [.]      <str>  `.` selects account scope. Omit to show the current scope.                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --account                 Select account scope.                                                  │
+│ --project  -p      <str>  Select an existing hosted project by name.                             │
+│ --org              <str>  Switch to an organization account (slug or id), or `personal`.         │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -288,9 +430,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural auth status [OPTIONS]
 
- Show local authentication context without exposing secrets.
+ Check the credential with the service and show the current scope.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -301,17 +444,38 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural benchmark [OPTIONS] COMMAND [ARGS]...
 
- Author, inspect, and publish Benchmarks.
+ Create, validate, push, pull, and inspect Benchmarks.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a Benchmark selecting Task revisions across Environments.                       │
-│ validate  Validate a complete Benchmark revision graph.                                          │
-│ show      Show a resolved Benchmark.                                                             │
-│ push      Publish a cross-Environment Benchmark revision.                                        │
-│ publish   Publish an existing hosted Benchmark revision.                                         │
+│ init      Create a new Benchmark from the standard template.                                     │
+│ validate  Check a resource and everything it depends on, without uploading.                      │
+│ push      Validate and push an immutable, private revision to the bound project.                 │
+│ pull      Restore a hosted revision's editable files into this project.                          │
+│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
+│ list      List resources of this kind, labeled local or hosted.                                  │
+│ add       Add a Task to a Benchmark (a local edit until you push).                               │
+│ remove    Remove a Task from a Benchmark (a local edit until you push).                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark add`
+
+```text
+
+ Usage: plural benchmark add [OPTIONS] {task}
+
+ Add a Task to a Benchmark (a local edit until you push).
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    task      <str>  Task to add. [required]                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --benchmark  -b      <str>  Benchmark to edit. Defaults to the one you are in.                   │
+│ --push                      Push the Benchmark afterwards.                                       │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -319,35 +483,52 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural benchmark init [OPTIONS] [path]
+ Usage: plural benchmark init [OPTIONS] {name}
 
- Create a Benchmark selecting Task revisions across Environments.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: benchmark.yaml]                                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│    --name           <str>   [default: benchmark]                                                 │
-│ *  --task   -t      <path>  [required]                                                           │
-│    --force                                                                                       │
-│    --help                   Show this message and exit.                                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural benchmark publish`
-
-```text
-
- Usage: plural benchmark publish [OPTIONS] {resource_id} {revision_id}
-
- Publish an existing hosted Benchmark revision.
+ Create a new Benchmark from the standard template.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    resource_id      <str>  [required]                                                          │
-│ *    revision_id      <str>  [required]                                                          │
+│ *    name      <str>  Benchmark name. [required]                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark list`
+
+```text
+
+ Usage: plural benchmark list [OPTIONS]
+
+ List resources of this kind, labeled local or hosted.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --local           Only list local resources.                                                     │
+│ --hosted          Only list hosted resources.                                                    │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark pull`
+
+```text
+
+ Usage: plural benchmark pull [OPTIONS] [name]
+
+ Restore a hosted revision's editable files into this project.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --version          <str>  Version to restore.                                                    │
+│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --force                   Replace local files that differ. The old copy is kept under            │
+│                           .plural/backups.                                                       │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -355,16 +536,39 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural benchmark push [OPTIONS] [path]
+ Usage: plural benchmark push [OPTIONS] [name]
 
- Publish a cross-Environment Benchmark revision.
+ Validate and push an immutable, private revision to the bound project.
+
+ Pushing unchanged content reuses the existing revision. Without
+ --with-deps, every dependency must already be pushed with identical
+ content. Nothing is uploaded unless the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: benchmark.yaml]                                                    │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --task-revision-id        <str>  [required]                                                   │
-│    --help                           Show this message and exit.                                  │
+│ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark remove`
+
+```text
+
+ Usage: plural benchmark remove [OPTIONS] {task}
+
+ Remove a Task from a Benchmark (a local edit until you push).
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    task      <str>  Task to remove. [required]                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --benchmark  -b      <str>  Benchmark to edit. Defaults to the one you are in.                   │
+│ --push                      Push the Benchmark afterwards.                                       │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -372,15 +576,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural benchmark show [OPTIONS] [path]
+ Usage: plural benchmark show [OPTIONS] [name]
 
- Show a resolved Benchmark.
+ Show a resource: the local copy if there is one, otherwise the hosted one.
+
+ An invalid local copy is an error, not a reason to show the hosted one.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: benchmark.yaml]                                                    │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --local           Only read local files.                                                         │
+│ --hosted          Only read the hosted project.                                                  │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -388,86 +597,16 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural benchmark validate [OPTIONS] [path]
+ Usage: plural benchmark validate [OPTIONS] [name]
 
- Validate a complete Benchmark revision graph.
+ Check a resource and everything it depends on, without uploading.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: benchmark.yaml]                                                    │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural benchmarks`
-
-```text
-
- Usage: plural benchmarks [OPTIONS] COMMAND [ARGS]...
-
- Inspect, compare, and export Benchmarks.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ show    Show one resolved Benchmark.                                                             │
-│ diff    Compare two resolved Benchmark versions.                                                 │
-│ export  Write a Benchmark and its pinned dependency graph.                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural benchmarks diff`
-
-```text
-
- Usage: plural benchmarks diff [OPTIONS] {before} {after}
-
- Compare two resolved Benchmark versions.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    before      <str>  [required]                                                               │
-│ *    after       <str>  [required]                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --catalog        <path>                                                                          │
-│ --help                   Show this message and exit.                                             │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural benchmarks export`
-
-```text
-
- Usage: plural benchmarks export [OPTIONS] {REF}
-
- Write a Benchmark and its pinned dependency graph.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    REF      <str>  [required]                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --output   -o      <path>  [required]                                                         │
-│    --catalog          <path>                                                                     │
-│    --help                     Show this message and exit.                                        │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural benchmarks show`
-
-```text
-
- Usage: plural benchmarks show [OPTIONS] {REF}
-
- Show one resolved Benchmark.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    REF      <str>  [required]                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --catalog        <path>                                                                          │
-│ --help                   Show this message and exit.                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -477,17 +616,18 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural env [OPTIONS] COMMAND [ARGS]...
 
- Author, inspect, and publish Environments.
+ Create, validate, push, pull, and inspect Environments.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a standalone Environment package.                                               │
-│ validate  Validate a canonical Environment.                                                      │
-│ show      Show a canonical Environment.                                                          │
-│ push      Publish an Environment parent and immutable revision.                                  │
-│ publish   Publish an existing hosted Environment revision.                                       │
+│ init      Create a new Environment from the standard template.                                   │
+│ validate  Check a resource and everything it depends on, without uploading.                      │
+│ push      Validate and push an immutable, private revision to the bound project.                 │
+│ pull      Restore a hosted revision's editable files into this project.                          │
+│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
+│ list      List resources of this kind, labeled local or hosted.                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -495,34 +635,52 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural env init [OPTIONS] [path]
+ Usage: plural env init [OPTIONS] {name}
 
- Create a standalone Environment package.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --name         <str>  [default: environment]                                                     │
-│ --force                                                                                          │
-│ --help                Show this message and exit.                                                │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural env publish`
-
-```text
-
- Usage: plural env publish [OPTIONS] {resource_id} {revision_id}
-
- Publish an existing hosted Environment revision.
+ Create a new Environment from the standard template.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    resource_id      <str>  [required]                                                          │
-│ *    revision_id      <str>  [required]                                                          │
+│ *    name      <str>  Environment name. [required]                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env list`
+
+```text
+
+ Usage: plural env list [OPTIONS]
+
+ List resources of this kind, labeled local or hosted.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --local           Only list local resources.                                                     │
+│ --hosted          Only list hosted resources.                                                    │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env pull`
+
+```text
+
+ Usage: plural env pull [OPTIONS] [name]
+
+ Restore a hosted revision's editable files into this project.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --version          <str>  Version to restore.                                                    │
+│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --force                   Replace local files that differ. The old copy is kept under            │
+│                           .plural/backups.                                                       │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -530,15 +688,21 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural env push [OPTIONS] [path]
+ Usage: plural env push [OPTIONS] [name]
 
- Publish an Environment parent and immutable revision.
+ Validate and push an immutable, private revision to the bound project.
+
+ Pushing unchanged content reuses the existing revision. Without
+ --with-deps, every dependency must already be pushed with identical
+ content. Nothing is uploaded unless the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -546,15 +710,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural env show [OPTIONS] [path]
+ Usage: plural env show [OPTIONS] [name]
 
- Show a canonical Environment.
+ Show a resource: the local copy if there is one, otherwise the hosted one.
+
+ An invalid local copy is an error, not a reason to show the hosted one.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --local           Only read local files.                                                         │
+│ --hosted          Only read the hosted project.                                                  │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -562,33 +731,16 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural env validate [OPTIONS] [path]
+ Usage: plural env validate [OPTIONS] [name]
 
- Validate a canonical Environment.
+ Check a resource and everything it depends on, without uploading.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural export`
-
-```text
-
- Usage: plural export [OPTIONS] {REF}
-
- Export the resolved graph as canonical public YAML.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    REF      <str>  [required]                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --output   -o      <path>  [required]                                                         │
-│    --catalog          <path>                                                                     │
-│    --help                     Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -598,19 +750,18 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural harness [OPTIONS] COMMAND [ARGS]...
 
- List built-in Harnesses or author a custom one.
+ Create, validate, push, pull, and inspect Harnesses.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list      List built-in Harnesses that Agents can attach by name.                                │
-│ schema    Show the accepted kwargs schema for a built-in Harness.                                │
-│ init      Create a custom Harness.                                                               │
-│ validate  Validate and lock a Harness.                                                           │
-│ show      Show a Harness.                                                                        │
-│ push      Publish a Harness parent and immutable revision.                                       │
-│ publish   Publish an existing hosted Harness revision.                                           │
+│ init      Create a new Harness from the standard template.                                       │
+│ validate  Check a resource and everything it depends on, without uploading.                      │
+│ push      Validate and push an immutable, private revision to the bound project.                 │
+│ pull      Restore a hosted revision's editable files into this project.                          │
+│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
+│ list      List resources of this kind, labeled local or hosted.                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -618,17 +769,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural harness init [OPTIONS] [path]
+ Usage: plural harness init [OPTIONS] {name}
 
- Create a custom Harness.
+ Create a new Harness from the standard template.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
+│ *    name      <str>  Harness name. [required]                                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --name         <str>  [default: harness]                                                         │
-│ --force                                                                                          │
-│ --help                Show this message and exit.                                                │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -638,27 +787,34 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural harness list [OPTIONS]
 
- List built-in Harnesses that Agents can attach by name.
+ List resources of this kind, labeled local or hosted.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --local           Only list local resources.                                                     │
+│ --hosted          Only list hosted resources.                                                    │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural harness publish`
+### `plural harness pull`
 
 ```text
 
- Usage: plural harness publish [OPTIONS] {resource_id} {revision_id}
+ Usage: plural harness pull [OPTIONS] [name]
 
- Publish an existing hosted Harness revision.
+ Restore a hosted revision's editable files into this project.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    resource_id      <str>  [required]                                                          │
-│ *    revision_id      <str>  [required]                                                          │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --version          <str>  Version to restore.                                                    │
+│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --force                   Replace local files that differ. The old copy is kept under            │
+│                           .plural/backups.                                                       │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -666,31 +822,21 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural harness push [OPTIONS] [path]
+ Usage: plural harness push [OPTIONS] [name]
 
- Publish a Harness parent and immutable revision.
+ Validate and push an immutable, private revision to the bound project.
 
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural harness schema`
-
-```text
-
- Usage: plural harness schema [OPTIONS] {name}
-
- Show the accepted kwargs schema for a built-in Harness.
+ Pushing unchanged content reuses the existing revision. Without
+ --with-deps, every dependency must already be pushed with identical
+ content. Nothing is uploaded unless the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name      <str>  Built-in Harness name. [required]                                          │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -698,15 +844,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural harness show [OPTIONS] [path]
+ Usage: plural harness show [OPTIONS] [name]
 
- Show a Harness.
+ Show a resource: the local copy if there is one, otherwise the hosted one.
+
+ An invalid local copy is an error, not a reason to show the hosted one.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --local           Only read local files.                                                         │
+│ --hosted          Only read the hosted project.                                                  │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -714,50 +865,16 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural harness validate [OPTIONS] [path]
+ Usage: plural harness validate [OPTIONS] [name]
 
- Validate and lock a Harness.
+ Check a resource and everything it depends on, without uploading.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: .]                                                                 │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural init`
-
-```text
-
- Usage: plural init [OPTIONS] [path]
-
- Create a small Python-first evaluation project.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  Project directory. [default: .]                                              │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --force                                                                                          │
-│ --help           Show this message and exit.                                                     │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural inspect`
-
-```text
-
- Usage: plural inspect [OPTIONS] {REF}
-
- Show the fully resolved public object graph.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    REF      <str>  [required]                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --catalog        <path>                                                                          │
-│ --format         <json|yaml>  [default: yaml]                                                    │
-│ --help                        Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -767,37 +884,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural job [OPTIONS] COMMAND [ARGS]...
 
- Advanced durable Job and event commands.
+ List, inspect, and rerun Jobs.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init    Create a path-based Job.                                                                 │
-│ list    List durable local Jobs.                                                                 │
-│ show    Show a Job, lock, result, and latest event.                                              │
-│ submit  Submit a hosted Job from exact revision IDs.                                             │
-│ watch   Replay or follow local or hosted append-only Job events.                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural job init`
-
-```text
-
- Usage: plural job init [OPTIONS] [path]
-
- Create a path-based Job.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: job.yaml]                                                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --source               <path>            [required]                                           │
-│    --source-kind          <benchmark|task>  [default: benchmark]                                 │
-│ *  --agent        -a      <path>            [required]                                           │
-│    --force                                                                                       │
-│    --help                                   Show this message and exit.                          │
+│ list   List Jobs, newest first, labeled local or hosted.                                         │
+│ show   Show a Job and its Trials (local first, then hosted).                                     │
+│ rerun  Run a Job again with the exact inputs it used. Creates a new, linked Job.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -807,11 +902,30 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural job list [OPTIONS]
 
- List durable local Jobs.
+ List Jobs, newest first, labeled local or hosted.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --store        <path>  [default: .plural/jobs]                                                   │
-│ --help                 Show this message and exit.                                               │
+│ --local           Only local Jobs.                                                               │
+│ --hosted          Only hosted Jobs.                                                              │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural job rerun`
+
+```text
+
+ Usage: plural job rerun [OPTIONS] {job_id}
+
+ Run a Job again with the exact inputs it used. Creates a new, linked Job.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    job_id      <str>  Job to run again with its original pinned inputs. [required]             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -821,55 +935,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural job show [OPTIONS] {job_id}
 
- Show a Job, lock, result, and latest event.
+ Show a Job and its Trials (local first, then hosted).
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    job_id      <str>  [required]                                                               │
+│ *    job_id      <str>  Job id. [required]                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --store        <path>  [default: .plural/jobs]                                                   │
-│ --help                 Show this message and exit.                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural job submit`
-
-```text
-
- Usage: plural job submit [OPTIONS] [path]
-
- Submit a hosted Job from exact revision IDs.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: job.yaml]                                                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --source-revision-id        <str>  [required]                                                 │
-│ *  --agent-revision-id         <str>  [required]                                                 │
-│ *  --idempotency-key           <str>  [required]                                                 │
-│    --name                      <str>  [default: Job]                                             │
-│    --help                             Show this message and exit.                                │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural job watch`
-
-```text
-
- Usage: plural job watch [OPTIONS] {job_id}
-
- Replay or follow local or hosted append-only Job events.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    job_id      <str>  [required]                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --store         <path>              [default: .plural/jobs]                                      │
-│ --after         <int range> [x>=0]  [default: 0]                                                 │
-│ --follow                                                                                         │
-│ --json                                                                                           │
-│ --hosted                                                                                         │
-│ --help                              Show this message and exit.                                  │
+│ --follow          Stream progress until it finishes.                                             │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -879,14 +953,13 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural models [OPTIONS] COMMAND [ARGS]...
 
- List and inspect the effective model catalog.
+ List the models you may run.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list  List models in the effective bundled plus project catalog.                                 │
-│ show  Show one effective catalog model.                                                          │
+│ list  List models your account may use.                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -896,28 +969,72 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural models list [OPTIONS]
 
- List models in the effective bundled plus project catalog.
+ List models your account may use.
+
+ Signed in, the hosted service returns only the models your organization
+ permits, and enforces that list when a run starts. Signed out, the bundled
+ catalog is shown without any organization policy.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --catalog        <path>                                                                          │
+│ --provider        <str>  Only this provider.                                                     │
+│ --json                   Print machine-readable JSON.                                            │
 │ --help                   Show this message and exit.                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural models show`
+### `plural project`
 
 ```text
 
- Usage: plural models show [OPTIONS] {model_id}
+ Usage: plural project [OPTIONS] COMMAND [ARGS]...
 
- Show one effective catalog model.
+ Create, register, and inspect projects.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init  Create a project in ./<name>, or register the project you are in.                          │
+│ show  Show a project, local copy first, then hosted.                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural project init`
+
+```text
+
+ Usage: plural project init [OPTIONS] {name}
+
+ Create a project in ./<name>, or register the project you are in.
+
+ Without --push this works offline. With --push, an existing local project
+ is registered as it is; no local file is overwritten.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    model_id      <str>  [required]                                                             │
+│ *    name      <str>  Project name: lowercase letters, digits, and hyphens. [required]           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --catalog        <path>                                                                          │
-│ --help                   Show this message and exit.                                             │
+│ --push          Also create (or connect) the hosted project and select it as your scope.         │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural project show`
+
+```text
+
+ Usage: plural project show [OPTIONS] {name}
+
+ Show a project, local copy first, then hosted.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  Project name. [required]                                                   │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --local           Only look at local files.                                                      │
+│ --hosted          Only look at the hosted project.                                               │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -927,49 +1044,14 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural review [OPTIONS] COMMAND [ARGS]...
 
- Inspect and submit human reviews.
+ List and submit human reviews.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list           List local Trials awaiting human review.                                          │
-│ submit         Durably append a local human-review submission.                                   │
-│ hosted-list    List hosted human review assignments.                                             │
-│ hosted-submit  Submit hosted human-review criterion scores.                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural review hosted-list`
-
-```text
-
- Usage: plural review hosted-list [OPTIONS]
-
- List hosted human review assignments.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --status        <str>  [default: awaiting_review]                                                │
-│ --help                 Show this message and exit.                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural review hosted-submit`
-
-```text
-
- Usage: plural review hosted-submit [OPTIONS] {assignment_id}
-
- Submit hosted human-review criterion scores.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    assignment_id      <str>  [required]                                                        │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --score                  <str>  criterion=value [required]                                    │
-│ *  --idempotency-key        <str>  [required]                                                    │
-│    --feedback               <str>                                                                │
-│    --help                          Show this message and exit.                                   │
+│ list    List Trials waiting for a human score.                                                   │
+│ submit  Record a human score. Submissions are append-only.                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -977,16 +1059,14 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural review list [OPTIONS] {job_id}
+ Usage: plural review list [OPTIONS]
 
- List local Trials awaiting human review.
+ List Trials waiting for a human score.
 
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    job_id      <str>  [required]                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --store        <path>  [default: .plural/jobs]                                                   │
-│ --help                 Show this message and exit.                                               │
+│ --hosted          Hosted review assignments.                                                     │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -994,20 +1074,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural review submit [OPTIONS] {job_id} {trial_id}
+ Usage: plural review submit [OPTIONS] {target}
 
- Durably append a local human-review submission.
+ Record a human score. Submissions are append-only.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    job_id        <str>  [required]                                                             │
-│ *    trial_id      <str>  [required]                                                             │
+│ *    target      <str>  Trial id, or a review assignment id with --hosted. [required]            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --verifier        <str>    [required]                                                         │
-│ *  --score           <float>  [required]                                                         │
-│    --feedback        <str>                                                                       │
-│    --store           <path>   [default: .plural/jobs]                                            │
-│    --help                     Show this message and exit.                                        │
+│ *  --score           <str>  `criterion=value`, or a bare value for a one-criterion rubric.       │
+│                             [required]                                                           │
+│    --verifier        <str>  Human Verifier (local).                                              │
+│    --feedback        <str>  Notes for the record.                                                │
+│    --hosted                 Submit a hosted assignment.                                          │
+│    --help                   Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1015,50 +1095,24 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural run [OPTIONS] {REF}
+ Usage: plural run [OPTIONS]
 
- Run locally by default; use --hosted for explicit remote submission.
+ Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
 
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    REF      <str>  Task, Benchmark, or Job reference. [required]                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --agent                    -a                <str>               Agent reference; repeatable.    │
-│ --mode                                       <eval|train>                                        │
-│ --attempts                                   <int range> [x>=1]                                  │
-│ --concurrency                                <int range> [x>=1]                                  │
-│ --per-runtime-concurrency                    <int range> [x>=1]                                  │
-│ --dry-run                                                                                        │
-│ --hosted                                                         Explicitly synchronize and      │
-│                                                                  submit to hosted Plural.        │
-│ --watch                        --no-watch                        Follow hosted Job events after  │
-│                                                                  explicit submission.            │
-│                                                                  [default: watch]                │
-│ --json                                                           Render watched hosted events as │
-│                                                                  JSON Lines.                     │
-│ --idempotency-key                            <str>                                               │
-│ --api-key                                    <str>               Bring-your-own                  │
-│                                                                  OpenAI-compatible key.          │
-│ --name                                       <str>               [default: Job]                  │
-│ --format                                     <json|yaml>         [default: json]                 │
-│ --catalog                                    <path>                                              │
-│ --help                                                           Show this message and exit.     │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural schemas`
-
-```text
-
- Usage: plural schemas [OPTIONS] [path]
-
- Generate schemas from the public SDK models.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: schemas]                                                           │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --task         -t      <str>               Task to run.                                          │
+│ --benchmark    -b      <str>               Benchmark to run.                                     │
+│ --model        -m      <str>               Catalog model id.                                     │
+│ --harness      -h      <str>               Harness for --model. Default: native (Plural's        │
+│                                            built-in tool loop).                                  │
+│ --agent        -a      <str>               Saved Agent to run.                                   │
+│ --hosted                                   Run on hosted infrastructure using pushed revisions.  │
+│ --attempts             <int range> [x>=1]  Advanced: Trials per Task (default 1).                │
+│ --concurrency          <int range> [x>=1]  Advanced: Trials to run at once. [default: 1]         │
+│ --dry-run                                  Advanced: validate and show the plan without running. │
+│ --follow                                   With --hosted, stream progress.                       │
+│ --json                                     Print machine-readable JSON.                          │
+│ --help                                     Show this message and exit.                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1123,17 +1177,18 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural task [OPTIONS] COMMAND [ARGS]...
 
- Author, inspect, and publish Tasks.
+ Create, validate, push, pull, and inspect Tasks.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a local Task directory without publishing it.                                   │
-│ validate  Validate a complete Task revision graph.                                               │
-│ show      Show a resolved Task.                                                                  │
-│ push      Publish a Task revision, resolving hosted environment and verifier slugs.              │
-│ publish   Publish an existing hosted Task revision.                                              │
+│ init      Create a Task with instructions, one Environment, and its Verifiers.                   │
+│ validate  Check a resource and everything it depends on, without uploading.                      │
+│ push      Validate and push an immutable, private revision to the bound project.                 │
+│ pull      Restore a hosted revision's editable files into this project.                          │
+│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
+│ list      List resources of this kind, labeled local or hosted.                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1143,35 +1198,52 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural task init [OPTIONS] {name}
 
- Create a local Task directory without publishing it.
+ Create a Task with instructions, one Environment, and its Verifiers.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name      <str>  Task slug and local directory name. [required]                             │
+│ *    name      <str>  Task name. [required]                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment  -e      <str>  Hosted environment slug/id or local file.                          │
-│ --verifier     -v      <str>  Hosted verifier slug/id or local file.                             │
-│ --bare                        Create an empty task package.                                      │
-│ --push                        Publish the new task immediately.                                  │
-│ --force                       Replace existing task files.                                       │
+│ --environment  -e      <str>  Environment the Task runs in.                                      │
+│ --verifier     -v      <str>  Verifier that scores it. Repeat for more.                          │
 │ --help                        Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural task publish`
+### `plural task list`
 
 ```text
 
- Usage: plural task publish [OPTIONS] {resource_id} {revision_id}
+ Usage: plural task list [OPTIONS]
 
- Publish an existing hosted Task revision.
+ List resources of this kind, labeled local or hosted.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --local           Only list local resources.                                                     │
+│ --hosted          Only list hosted resources.                                                    │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task pull`
+
+```text
+
+ Usage: plural task pull [OPTIONS] [name]
+
+ Restore a hosted revision's editable files into this project.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    resource_id      <str>  [required]                                                          │
-│ *    revision_id      <str>  [required]                                                          │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --version          <str>  Version to restore.                                                    │
+│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --force                   Replace local files that differ. The old copy is kept under            │
+│                           .plural/backups.                                                       │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1179,17 +1251,21 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural task push [OPTIONS] [path]
+ Usage: plural task push [OPTIONS] [name]
 
- Publish a Task revision, resolving hosted environment and verifier slugs.
+ Validate and push an immutable, private revision to the bound project.
+
+ Pushing unchanged content reuses the existing revision. Without
+ --with-deps, every dependency must already be pushed with identical
+ content. Nothing is uploaded unless the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  Task file or task directory. [default: task.yaml]                            │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --environment-revision-id        <str>  Override the hosted environment revision.                │
-│ --verifier-revision-id           <str>  Override a hosted verifier revision.                     │
-│ --help                                  Show this message and exit.                              │
+│ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1197,15 +1273,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural task show [OPTIONS] [path]
+ Usage: plural task show [OPTIONS] [name]
 
- Show a resolved Task.
+ Show a resource: the local copy if there is one, otherwise the hosted one.
+
+ An invalid local copy is an error, not a reason to show the hosted one.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: task.yaml]                                                         │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --local           Only read local files.                                                         │
+│ --hosted          Only read the hosted project.                                                  │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1213,14 +1294,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural task validate [OPTIONS] [path]
+ Usage: plural task validate [OPTIONS] [name]
 
- Validate a complete Task revision graph.
+ Check a resource and everything it depends on, without uploading.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: task.yaml]                                                         │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -1231,70 +1313,66 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural trial [OPTIONS] COMMAND [ARGS]...
 
- Inspect and watch Trials.
+ Inspect and rerun Trials.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list   List planned Trials and current states.                                                   │
-│ watch  Replay or follow events for one Trial.                                                    │
+│ show     Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted).     │
+│ rerun    Run one Trial again with its pinned inputs, as a new one-Trial Job.                     │
+│ rescore  Reserved: score a finished Trial again (not available yet).                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural trial list`
+### `plural trial rerun`
 
 ```text
 
- Usage: plural trial list [OPTIONS] {job_id}
+ Usage: plural trial rerun [OPTIONS] {trial_id}
 
- List planned Trials and current states.
+ Run one Trial again with its pinned inputs, as a new one-Trial Job.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    job_id      <str>  [required]                                                               │
+│ *    trial_id      <str>  Trial to run again. [required]                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --store        <path>  [default: .plural/jobs]                                                   │
-│ --help                 Show this message and exit.                                               │
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural trial watch`
+### `plural trial rescore`
 
 ```text
 
- Usage: plural trial watch [OPTIONS] {trial_id}
+ Usage: plural trial rescore [OPTIONS] {trial_id}
 
- Replay or follow events for one Trial.
+ Reserved: score a finished Trial again (not available yet).
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    trial_id      <str>  [required]                                                             │
+│ *    trial_id      <str>  Trial id. [required]                                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --job           <str>               [required]                                                │
-│    --store         <path>              [default: .plural/jobs]                                   │
-│    --after         <int range> [x>=0]  [default: 0]                                              │
-│    --follow                                                                                      │
-│    --json                                                                                        │
-│    --hosted                                                                                      │
-│    --help                              Show this message and exit.                               │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural validate`
+### `plural trial show`
 
 ```text
 
- Usage: plural validate [OPTIONS] {REF}
+ Usage: plural trial show [OPTIONS] {trial_id}
 
- Load and validate any Python or YAML project object.
+ Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted).
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    REF      <str>  [required]                                                                  │
+│ *    trial_id      <str>  Trial id. [required]                                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --catalog        <path>                                                                          │
-│ --help                   Show this message and exit.                                             │
+│ --follow          Stream progress until it finishes.                                             │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1304,17 +1382,18 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural verifier [OPTIONS] COMMAND [ARGS]...
 
- Author, inspect, and publish Verifiers.
+ Create, validate, push, pull, and inspect Verifiers.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a deterministic, agent, or human Verifier.                                      │
-│ validate  Validate a Verifier.                                                                   │
-│ show      Show a Verifier.                                                                       │
-│ push      Publish a Verifier parent and immutable revision.                                      │
-│ publish   Publish an existing hosted Verifier revision.                                          │
+│ init      Create a new Verifier from the standard template.                                      │
+│ validate  Check a resource and everything it depends on, without uploading.                      │
+│ push      Validate and push an immutable, private revision to the bound project.                 │
+│ pull      Restore a hosted revision's editable files into this project.                          │
+│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
+│ list      List resources of this kind, labeled local or hosted.                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1322,35 +1401,52 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural verifier init [OPTIONS] [path]
+ Usage: plural verifier init [OPTIONS] {name}
 
- Create a deterministic, agent, or human Verifier.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: verifier.yaml]                                                     │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --name         <str>                        [default: verifier]                                  │
-│ --kind         <deterministic|agent|human>  [default: deterministic]                             │
-│ --force                                                                                          │
-│ --help                                      Show this message and exit.                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural verifier publish`
-
-```text
-
- Usage: plural verifier publish [OPTIONS] {resource_id} {revision_id}
-
- Publish an existing hosted Verifier revision.
+ Create a new Verifier from the standard template.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    resource_id      <str>  [required]                                                          │
-│ *    revision_id      <str>  [required]                                                          │
+│ *    name      <str>  Verifier name. [required]                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier list`
+
+```text
+
+ Usage: plural verifier list [OPTIONS]
+
+ List resources of this kind, labeled local or hosted.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --local           Only list local resources.                                                     │
+│ --hosted          Only list hosted resources.                                                    │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier pull`
+
+```text
+
+ Usage: plural verifier pull [OPTIONS] [name]
+
+ Restore a hosted revision's editable files into this project.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --version          <str>  Version to restore.                                                    │
+│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --force                   Replace local files that differ. The old copy is kept under            │
+│                           .plural/backups.                                                       │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1358,15 +1454,21 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural verifier push [OPTIONS] [path]
+ Usage: plural verifier push [OPTIONS] [name]
 
- Publish a Verifier parent and immutable revision.
+ Validate and push an immutable, private revision to the bound project.
+
+ Pushing unchanged content reuses the existing revision. Without
+ --with-deps, every dependency must already be pushed with identical
+ content. Nothing is uploaded unless the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: verifier.yaml]                                                     │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1374,15 +1476,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural verifier show [OPTIONS] [path]
+ Usage: plural verifier show [OPTIONS] [name]
 
- Show a Verifier.
+ Show a resource: the local copy if there is one, otherwise the hosted one.
+
+ An invalid local copy is an error, not a reason to show the hosted one.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: verifier.yaml]                                                     │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --local           Only read local files.                                                         │
+│ --hosted          Only read the hosted project.                                                  │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1390,14 +1497,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural verifier validate [OPTIONS] [path]
+ Usage: plural verifier validate [OPTIONS] [name]
 
- Validate a Verifier.
+ Check a resource and everything it depends on, without uploading.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   path      <path>  [default: verifier.yaml]                                                     │
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```

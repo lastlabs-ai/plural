@@ -35,6 +35,8 @@ from plural.harness.interface import (
     HarnessTask,
 )
 
+PLURAL_PACKAGE_PREFIX = "plural-package:"
+
 
 class HarnessDefinition(FrozenModel):
     """A declared executable Agent interaction strategy.
@@ -96,7 +98,10 @@ class HarnessDefinition(FrozenModel):
     @model_validator(mode="after")
     def _valid_harness(self) -> HarnessDefinition:
         semantic_version(self.version)
-        if "://" not in self.source:
+        if self.source.startswith(PLURAL_PACKAGE_PREFIX):
+            if self.digest is None:
+                raise ValueError("A Plural package Harness source requires its tree digest")
+        elif "://" not in self.source:
             from plural.harness.retrieval import tree_digest
 
             root = Path(self.source).expanduser().resolve()
@@ -145,7 +150,44 @@ class HarnessDefinition(FrozenModel):
             tito_path=self.tito,
         )
 
+    @classmethod
+    def from_package(
+        cls, package: HarnessPackage, *, source: str | None = None
+    ) -> HarnessDefinition:
+        """Flatten an executable package into the public declared schema.
+
+        Args:
+            package: The package to describe.
+            source: Replacement source location, such as the Plural package a
+                pushed Harness is stored in. Defaults to the package's own.
+
+        Returns:
+            The equivalent declared Harness.
+        """
+        protocol = package.definition
+        return cls(
+            name=protocol.name,
+            version=protocol.revision,
+            description=protocol.description,
+            command=protocol.command,
+            source=source or package.source.uri,
+            digest=package.source.digest,
+            requirements=protocol.requirements,
+            capabilities=protocol.capabilities,
+            models=protocol.supported_models,
+            auth=protocol.auth_modes,
+            secrets=protocol.secret_names,
+            environment=protocol.environment_names,
+            healthcheck=protocol.healthcheck,
+            outputs=protocol.outputs,
+            artifacts=protocol.artifacts,
+            trajectory=protocol.trajectory_path,
+            tito=protocol.tito_path,
+        )
+
     def _source(self) -> PackageSource:
+        if self.source.startswith(PLURAL_PACKAGE_PREFIX):
+            return PackageSource(kind="package", uri=self.source, digest=self.digest)
         if self.source.startswith("oci://"):
             if self.digest is None:
                 raise ValueError("OCI Harness sources require a digest")

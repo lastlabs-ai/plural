@@ -1,0 +1,11 @@
+# Harness: the loop that connects an Agent's model to an Environment.
+# This one calls no model: it follows keyword rules, so the project runs
+# offline and without credentials. Use it to check the wiring end to end.
+name: scripted-triage
+version: 0.1.0
+description: Keyword triage without a model, for offline runs.
+python: harness.py:ScriptedTriageHarness
+config:
+  keywords:
+    billing: [charged, refund, invoice]
+    technical: [crash, error, bug]

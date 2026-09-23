@@ -24,6 +24,9 @@ SOURCE = (
 )
 
 
+CATEGORIES = {"ticket-1": "billing", "ticket-2": "technical", "ticket-3": "account"}
+
+
 class ModelFixture(BaseHTTPRequestHandler):
     """Serve predictable action choices for integration checks."""
 
@@ -46,19 +49,20 @@ class ModelFixture(BaseHTTPRequestHandler):
             # The Harness offers this so the Agent can end the episode itself.
             "finish",
         }
-        task = json.loads(request["messages"][1]["content"])
         history = [m for m in request["messages"] if m["role"] == "tool"]
         if not history:
             name = "inspect_ticket"
             args = {}
         elif len(history) == 1:
+            # Choose from what inspect_ticket showed, as a model would.
+            ticket = history[0]["content"]
             name = "categorize"
             args = {
                 "category": "account"
                 if self.wrong
-                else {"ticket-1": "billing", "ticket-2": "technical", "ticket-3": "account"}[
-                    task["task_info"]["ticket_id"]
-                ]
+                else next(
+                    category for ticket_id, category in CATEGORIES.items() if ticket_id in ticket
+                )
             }
         elif len(history) == 2:
             name = "draft_response"
@@ -108,8 +112,10 @@ try:
             "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
             "OPENAI_API_KEY": "documentation-test-only",
             "OPENAI_BASE_URL": f"http://127.0.0.1:{server.server_port}/v1",
+            # Never read this machine's Plural sign-in.
+            "PLURAL_CONFIG_HOME": str(Path(temp) / "config"),
         }
-        for key in ("PLURAL_GATEWAY_URL", "PLURAL_API_KEY"):
+        for key in ("PLURAL_GATEWAY_URL", "PLURAL_API_KEY", "PLURAL_PROJECT", "PLURAL_PROFILE"):
             env.pop(key, None)
         cli = Path(sys.executable).with_name("plural")
 
@@ -121,80 +127,70 @@ try:
                 raise AssertionError(output.stdout + output.stderr)
             return output.stdout
 
-        subprocess.run(
-            [sys.executable, "build.py"], cwd=root, env=env, check=True, capture_output=True
-        )
-        for kind, path in [
-            ("env", "environment"),
-            ("task", "tasks/ticket-1.yaml"),
-            ("verifier", "verifiers/correct.yaml"),
-            ("agent", "agents/careful.yaml"),
-            ("benchmark", "benchmark.yaml"),
+        for kind, name in [
+            ("env", "support-queue"),
+            ("task", "ticket-1"),
+            ("verifier", "correct-category"),
+            ("harness", "scripted-triage"),
+            ("agent", "careful"),
+            ("benchmark", "support-triage"),
         ]:
-            _run(kind, "validate", path)
-        plan = json.loads(_run("run", "job.yaml", "--dry-run"))
-        assert plan["trial_count"] == 1
-        result = json.loads(_run("run", "job.yaml", "--offline"))
+            _run(kind, "validate", name)
+        plan = json.loads(_run("run", "-t", "ticket-1", "-a", "careful", "--dry-run", "--json"))
+        assert len(plan["trials"]) == 1 and plan["harness"] == "native", plan
+        assert not (root / ".plural" / "jobs").exists(), "a dry run must not create a Job"
+        result = json.loads(_run("run", "-t", "ticket-1", "-a", "careful", "--json"))
         assert result["status"] == "succeeded", result
         assert result["trials"][0]["score"] == 1, result
         _run("job", "show", result["job_id"])
-        _run("trial", "list", result["job_id"])
-        suite = json.loads(
-            _run(
-                "run",
-                "benchmark.yaml",
-                "--agent",
-                "agents/careful.yaml",
-                "--agent",
-                "agents/concise.yaml",
-                "--offline",
-            )
-        )
-        assert len(suite["trials"]) == 6 and all(t["score"] == 1 for t in suite["trials"]), suite
+        _run("trial", "show", result["trials"][0]["trial_id"])
+        suites = [
+            json.loads(_run("run", "-b", "support-triage", "-a", agent, "--json"))
+            for agent in ("careful", "concise")
+        ]
+        trials = [trial for suite in suites for trial in suite["trials"]]
+        assert len(trials) == 6 and all(t["score"] == 1 for t in trials), suites
         ModelFixture.wrong = True
-        # A changed instruction makes this a distinct Trial configuration.
-        changed_job = yaml.safe_load((root / "job.yaml").read_text())
-        changed_job["agents"][0]["instructions"] += " Inspect the result."
-        (root / "job.yaml").write_text(yaml.safe_dump(changed_job, sort_keys=False))
-        failed_quality = json.loads(_run("run", "job.yaml", "--offline"))
+        failed_quality = json.loads(_run("run", "-t", "ticket-1", "-a", "careful", "--json"))
         assert failed_quality["trials"][0]["score"] == 0, failed_quality
         ModelFixture.wrong = False
-        human = {
-            "kind": "human",
-            "name": "triage-review",
-            "criteria": [
+
+        _run("verifier", "init", "triage-review")
+        (root / "verifiers/triage-review/verify.py").unlink()
+        (root / "verifiers/triage-review/verifier.yaml").write_text(
+            yaml.safe_dump(
                 {
-                    "name": "fit",
-                    "description": "The category matches the ticket.",
-                    "min_score": 0,
-                    "max_score": 2,
-                }
-            ],
-            "weight": 0.5,
-        }
-        (root / "verifiers/review.yaml").write_text(yaml.safe_dump(human))
-        task = yaml.safe_load((root / "tasks/ticket-1.yaml").read_text())
-        task["verifiers"].append(human)
-        (root / "tasks/review-case.yaml").write_text(yaml.safe_dump(task))
-        _run(
-            "job",
-            "init",
-            "review-job.yaml",
-            "--source",
-            "tasks/review-case.yaml",
-            "--source-kind",
-            "task",
-            "--agent",
-            "agents/careful.yaml",
+                    "name": "triage-review",
+                    "version": "0.1.0",
+                    "kind": "human",
+                    "criteria": [
+                        {
+                            "name": "fit",
+                            "description": "The category matches the ticket.",
+                            "min_score": 0,
+                            "max_score": 2,
+                        }
+                    ],
+                    "weight": 0.5,
+                },
+                sort_keys=False,
+            )
         )
-        pending = json.loads(_run("run", "review-job.yaml", "--offline"))
+        shutil.copytree(root / "tasks/ticket-1", root / "tasks/review-case")
+        task_file = root / "tasks/review-case/task.yaml"
+        task = yaml.safe_load(task_file.read_text())
+        task["name"] = "review-case"
+        task["verifiers"].append("triage-review")
+        task_file.write_text(yaml.safe_dump(task, sort_keys=False))
+        pending = json.loads(_run("run", "-t", "review-case", "-a", "careful", "--json"))
         assert pending["status"] == "awaiting_review", pending
-        _run("review", "list", pending["job_id"])
+        waiting = json.loads(_run("review", "list", "--json"))
+        trial_id = pending["trials"][0]["trial_id"]
+        assert trial_id in json.dumps(waiting), waiting
         _run(
             "review",
             "submit",
-            pending["job_id"],
-            pending["trials"][0]["receipt"]["trial_id"],
+            trial_id,
             "--verifier",
             "triage-review",
             "--score",
@@ -202,11 +198,10 @@ try:
             "--feedback",
             "Verified fixture.",
         )
-        done = json.loads(_run("job", "show", pending["job_id"]))
         stored = JobStore(root / ".plural/jobs").read_job_result(pending["job_id"])
-        assert stored.status == "succeeded" and stored.trials[0].score == 1
+        assert stored.status == "succeeded" and stored.trials[0].score == 1, stored
         print(
-            f"PASS: typed build, 5 validators, dry-run, native loop, 6-Trial benchmark, "
+            f"PASS: 6 validators, dry-run, native loop, 6-Trial benchmark, "
             f"zero-score case, local review completion ({ModelFixture.calls} controlled "
             f"model responses)."
         )

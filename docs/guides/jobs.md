@@ -13,129 +13,128 @@ create the files used here, configure model credentials, and grant the harness
 secret. Add a [verifier](../project/verifiers.md) before treating a job as
 a scored evaluation. This page covers operations after your first run.
 
-## Validate and inspect
+## Validate and preview
 
 ```bash
-plural env validate environment
-plural verifier validate verifier.yaml
-plural task validate task.yaml
-plural benchmark validate benchmark.yaml
-plural agent show agent.yaml
-plural run job.yaml --dry-run --format yaml
+plural env validate support-queue
+plural verifier validate correct-category
+plural task validate ticket-1
+plural benchmark validate support-triage
+plural agent show careful
+plural run -b support-triage -a careful --dry-run
 ```
 
-`--dry-run` computes the job ID, complete lock, trial IDs, and count without
-starting a sandbox. It is the safest release/CI preflight.
+Each `validate` command also checks everything the resource depends on.
+`--dry-run` resolves every input, prints the version and content hash of each one
+and the number of Trials, and starts nothing. It needs no model credential, which
+makes it a safe preflight for CI.
 
-## Hosted execution
-
-With `PLURAL_API_KEY` configured, `plural run` validates the complete graph,
-publishes it in dependency order, submits a hosted Job using the exact returned
-revision IDs, prints the Job, and follows hosted events:
+## Local runs
 
 ```bash
-plural run job.yaml
-plural run job.yaml --json
-plural run job.yaml --no-watch --idempotency-key release-42
+plural run -b support-triage -a careful
+plural run -t ticket-1 -m openai/gpt-5.6-luna
 ```
 
-The default idempotency key is the stable local Job ID. Identical shared
-dependencies are published once per synchronization pass. `plural job submit`
-remains the advanced workflow for callers that already have exact hosted source
-and Agent revision IDs.
+Every run is a new Job. A local run is recorded under `.plural/jobs/<job_id>/`
+in the project, with a `run.json` that pins the version and content hash of every
+input. Before running, Plural copies each input's source into `.plural/packages/`,
+so later edits to your working files do not change what a recorded Job used.
 
-## Local development
-
-```bash
-plural run task.yaml --agent agent.yaml --mode eval --offline
-```
-
-`--private` is equivalent to `--offline`. Both keep the durable Job log under
-`.plural/jobs`.
-
-The local provider is not a sandbox. It executes package commands as child
-processes under your user account and cannot enforce network, resources,
-filesystem boundaries, or a read-only root. It is available only when the
-Task's Environment declares provider `local`, `network: full`, and
-`allow_unsafe_local: true`. Verifiers declare runtime and connectivity
-independently.
+The `local` Runtime provider is a trusted subprocess, not a sandbox. It runs
+resource code as child processes under your user account and cannot enforce network, resource, or
+filesystem boundaries, or a read-only root. An Environment selects it with
+`provider: local` under `runtime:` in its `environment.yaml`. Verifiers declare
+their Runtime independently.
 
 ## Docker
 
-Install Docker and make sure the daemon is healthy. Then:
+Install Docker and make sure the daemon is healthy. Then set `provider: docker`
+in the Environment's `runtime:` and run as usual:
 
 ```bash
-plural run benchmark.yaml --agent agent.yaml --concurrency 4 --offline
+plural run -b support-triage -a careful --concurrency 4
 ```
 
-If no image/build context is configured, the CLI uses the Environment directory
-as a Docker build context. You can instead set `environment.runtime.image` to a
-pinned image reference. Container, network, and compute live on the environment;
-the job only selects a requested target. `network: none` is the strongest
-supported Docker network policy;
-`restricted` domain/CIDR allowlists are not implemented by this provider.
-Docker resource support covers CPU, memory, and process count, not per-container
-disk limits. Plural records the inspected image ID in the receipt.
+Without `image`, the `docker` preset uses `python:3.12-slim`. Set `runtime.image`
+to a pinned image reference, or set `dockerfile` (and optionally `build_context`,
+which defaults to the Environment directory) to build one. Container, network,
+and compute settings live on the Environment; the Job does not override them.
+`network: no-network` is the strongest Docker network policy; Docker does not
+enforce an `allowlist` of hosts. Docker supports CPU, memory, and process-count
+limits, not per-container disk limits. Plural records the image ID in the
+receipt.
 
 The Docker daemon is a privileged trust boundary. A hardened container reduces
-guest capabilities but does not make an untrusted local daemon or host safe.
-Opt-in daemon integration tests use the `docker` pytest marker.
+what the code inside can do, but it does not make an untrusted daemon or host
+safe.
 
 ## Daytona
 
 ```bash
 pip install "plural[daytona]"
 export DAYTONA_API_KEY='...'
-plural run job.yaml --offline
+plural run -b support-triage -a careful
 ```
 
-Set the provider and image, snapshot, or declarative image on each Environment
-revision. Daytona supports
-CPU/memory and `none`, `full`, or non-empty restricted network allowlists in the
-current adapter. Local Docker build contexts, pid/disk limits, persistence,
-compose, read-only root, and stdin execution are unavailable. The harness runner
-works around stdin by uploading its request first. Live tests require explicit
-credentials and the `daytona` marker.
+Set `provider: daytona` on each Environment's `runtime:`, with an image or
+snapshot the provider can reach; without one it uses `python:3.12-slim`. Daytona
+supports CPU and memory limits and all three network modes: `public`,
+`no-network`, and `allowlist` with a non-empty `allowed_hosts`. It cannot build
+from a local Dockerfile, and it does not support process-count or disk limits,
+persistent workspaces, compose, or a read-only root.
 
-## Sweeps and independent attempts
+## Attempts and concurrency
 
 ```bash
-plural run job.yaml --agent agent-a.yaml --agent agent-b.yaml \
-  --attempts 3 --concurrency 8 --per-runtime-concurrency 4 --offline
+plural run -b support-triage -a careful --attempts 3 --concurrency 8
 ```
 
-`per_runtime_concurrency` bounds launches independently for each Environment
-runtime while `concurrency` is the global ceiling. Three Agents, ten selected
-Tasks, and two attempts plan sixty Trials. Retry policy may append multiple
-TrialExecutions but does not add Trials.
+`--attempts` plans independent Trials per Task, and `--concurrency` bounds how
+many run at once. Ten Tasks with three attempts plan thirty Trials. A run uses
+one Agent or model; to compare several, run each one and compare the Jobs. Retry
+policy may append executions to a Trial but does not add Trials.
 
-## Resume, retry, cancel, and review
+The Python `Job` also accepts several Agents and a `per_runtime_concurrency`
+limit for each Environment Runtime; see [Jobs](../running/jobs.md).
 
-An offline/private run prints its `job_id` and stores state under
-`.plural/jobs`.
+## Hosted execution
+
+```bash
+plural project init support-eval --push
+plural benchmark push support-triage --with-deps
+plural agent push careful
+plural run -b support-triage -a careful --hosted --follow
+```
+
+`--hosted` runs on hosted infrastructure using revisions you have already pushed,
+and refuses to start when any input differs from its pushed revision. `--follow`
+streams progress until the Job finishes; without it, the command returns once
+the Job is submitted, and `plural job show JOB_ID --follow` reconnects later. See
+[Push and pull resources](studio-sync.md).
+
+## Inspect, rerun, and review
 
 ```bash
 plural job list
 plural job show JOB_ID
-plural trial list JOB_ID
-plural job watch JOB_ID --json
-plural trial watch TRIAL_ID --job JOB_ID --json
-plural review list JOB_ID
-plural review submit JOB_ID TRIAL_ID --verifier human-review --score 1
+plural trial show TRIAL_ID
+plural job rerun JOB_ID
+plural trial rerun TRIAL_ID
+plural review list
+plural review submit TRIAL_ID --verifier human-review --score 1
 ```
 
-The append-only event stream records planning, provisioning, execution,
-verification, retry, human-review, and terminal transitions. `TrialExecution`
-distinguishes retries from independent Trial attempts. Use the Python
-`Job.run(resume=True)` and `Job.cancel()` APIs for local lifecycle operations.
-Human review submissions resolve Trials that are explicitly
-`awaiting_review`.
+`job rerun` runs a Job again with the exact inputs it pinned and creates a new
+Job whose `rerun_of_job_id` points at the original. `trial rerun` creates a new
+one-Trial Job whose `rerun_of_trial_id` points at the Trial. A hosted rerun is
+refused when the model catalog would now resolve the model differently.
 
-For a hosted Job submitted with `--no-watch`, reconnect with:
+Each Job's `events.jsonl` is an append-only record of planning, provisioning,
+execution, verification, retries, human review, and the final status. A retry is
+a new execution inside the same Trial, not a new attempt. From Python,
+`job.run(resume=True)` keeps the Trials that already succeeded. A review
+submission completes only a Trial that is waiting at `awaiting_review`.
 
-```bash
-plural job watch JOB_ID --hosted --json
-```
-
-Runnable offline counterparts are in
+Runnable offline Python examples are in
 [`examples/jobs`](https://github.com/lastlabs-ai/plural/tree/main/examples/jobs).

@@ -401,6 +401,13 @@ class JobSpec(FrozenModel):
     per_runtime_concurrency: int = Field(default=1, ge=1)
     priority: int = 0
     retry: RetryPolicy = Field(default_factory=RetryPolicy)
+    run_id: str | None = Field(
+        default=None,
+        description=(
+            "Distinguishes separate executions of the same configuration, so each run "
+            "and rerun gets its own Job and Trial ids and never overwrites another."
+        ),
+    )
 
     @model_validator(mode="after")
     def _compatible(self) -> JobSpec:
@@ -428,20 +435,22 @@ class JobSpec(FrozenModel):
     @property
     def content_hash(self) -> str:
         """Stable Job configuration digest."""
+        if self.run_id is None:
+            return content_hash(self.model_dump(mode="json", exclude={"run_id"}))
         return content_hash(self)
 
     @property
     def job_id(self) -> str:
         """Stable Trial-set identity excluding retries and scheduling."""
-        return stable_id(
-            "job",
-            {
-                "source": self.source,
-                "agents": self.agents,
-                "mode": self.mode,
-                "attempts": self.attempts,
-            },
-        )
+        identity: dict[str, Any] = {
+            "source": self.source,
+            "agents": self.agents,
+            "mode": self.mode,
+            "attempts": self.attempts,
+        }
+        if self.run_id is not None:
+            identity["run_id"] = self.run_id
+        return stable_id("job", identity)
 
     def plan(self, catalog: ModelCatalog | None = None) -> JobPlan:
         """Expand Agent x Task x attempt and freeze per-Trial compatibility.
@@ -649,7 +658,13 @@ class TrialResult(FrozenModel):
 
 
 class AgentAggregate(FrozenModel):
-    """Minimal leaderboard row for one exact Agent revision."""
+    """Minimal leaderboard row for one exact Agent revision.
+
+    ``mean_score`` averages repeated attempts within each Task first, then
+    combines Tasks with the Benchmark's declared weights, over the Tasks that
+    have a score. ``coverage`` is the weighted share of Tasks that do. See
+    :func:`plural.benchmarks.aggregate_configuration`.
+    """
 
     agent_name: str
     agent_digest: str
@@ -657,6 +672,7 @@ class AgentAggregate(FrozenModel):
     count: int = Field(ge=0)
     successes: int = Field(ge=0)
     mean_score: float | None = None
+    coverage: float = 0
     total_cost: float | None = None
     mean_latency_seconds: float | None = None
 
@@ -794,7 +810,7 @@ class Job:
             "A live model call needs Plural or a bring-your-own key.\n"
             "SDK:  Job(task, agents=[agent], client=Client())\n"
             "SDK:  Job(task, agents=[agent], api_key='...')\n"
-            "CLI:  plural auth login && plural run job.yaml"
+            "CLI:  plural auth login && plural run --task <name> --model <model>"
         )
 
     @property

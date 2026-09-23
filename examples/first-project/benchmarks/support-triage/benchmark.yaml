@@ -1,0 +1,22 @@
+# Benchmark: a named collection of Tasks and the rules for ranking results.
+# Results rank on the Verifier score only; step rewards never contribute.
+name: support-triage
+version: 1.0.0
+description: Categorize and resolve support tickets according to policy.
+purpose: >-
+  Measures whether an Agent reads a ticket and its policy, routes it to the
+  right team, and closes it with a reply, which is the core of support triage.
+tasks:
+  - ticket-1
+  - ticket-2
+  - ticket-3
+scoring:
+  metric: Correctly triaged tickets
+  description: Share of tickets resolved with the expected category and a drafted reply.
+  aggregation: weighted_mean
+  score_range: [0.0, 1.0]
+  success_threshold: 1.0
+  # An attempt that ends without a score because of the Agent counts as the lowest score.
+  agent_failure: zero
+  # Attempts lost to infrastructure are excluded and reported separately.
+  infrastructure_error: exclude

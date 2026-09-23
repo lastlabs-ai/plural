@@ -4,11 +4,10 @@ import json
 
 import httpx
 
-from plural.cli.auth import AuthClient
-from plural.cli.config import Credential
+from plural.auth import AuthClient, Credential
 
 
-def test_auth_client_device_refresh_revoke_status_and_whoami() -> None:
+def test_auth_client_device_refresh_revoke_and_status() -> None:
     requests: list[httpx.Request] = []
     poll_count = 0
 
@@ -43,9 +42,16 @@ def test_auth_client_device_refresh_revoke_status_and_whoami() -> None:
         if path.endswith("/revoke"):
             return httpx.Response(204)
         if path.endswith("/status"):
-            return httpx.Response(200, json={"authenticated": True, "subject": "user-1"})
-        if path.endswith("/account/me"):
-            return httpx.Response(200, json={"id": "user-1", "email": "dev@example.com"})
+            return httpx.Response(
+                200,
+                json={
+                    "authenticated": True,
+                    "subject": "user-1",
+                    "credential": "login",
+                    "account_id": None,
+                    "project_id": None,
+                },
+            )
         return httpx.Response(404, json={"detail": "missing"})
 
     opened: list[str] = []
@@ -64,16 +70,15 @@ def test_auth_client_device_refresh_revoke_status_and_whoami() -> None:
         refreshed = client.refresh(tokens.refresh_token or "")
         assert refreshed.access_token == "new-access"
         credential = tokens.credential()
-        assert client.status(credential).authenticated
-        assert client.whoami(credential)["id"] == "user-1"
+        status = client.status(tokens.access_token)
+        assert status.authenticated
+        assert status.credential == "login"
+        assert status.project_id is None
         client.revoke(credential)
 
     assert any(request.url.path.endswith("/refresh") for request in requests)
-    auth_requests = [
-        request
-        for request in requests
-        if request.url.path.endswith("/status") or request.url.path.endswith("/account/me")
-    ]
+    auth_requests = [request for request in requests if request.url.path.endswith("/status")]
+    assert auth_requests
     assert all(
         request.headers["authorization"] == "Bearer access-secret" for request in auth_requests
     )

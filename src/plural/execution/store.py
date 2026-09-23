@@ -61,7 +61,8 @@ class JobStore:
         config_path = destination / "config.json"
         if config_path.exists():
             existing_spec = JobSpec.model_validate_json(config_path.read_text(encoding="utf-8"))
-            if existing_spec != spec:
+            # In memory a Verifier check is a callable; on disk it is its source digest.
+            if existing_spec.model_dump(mode="json") != spec.model_dump(mode="json"):
                 raise ValueError(ErrorCode.LOCK_INCOMPATIBLE.value)
         else:
             self._write_model(config_path, spec)

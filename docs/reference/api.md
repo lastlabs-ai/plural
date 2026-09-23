@@ -80,56 +80,27 @@ Raises:
     PluralError: If a transport error occurs while probing.
 ```
 
-### plural.Client.create
-
-```python
-create(self, obj: 'Any', **kwargs: 'Any') -> 'dict[str, Any]'
-```
-
-Publish a canonical revision or ingest a Trace.
-
-```text
-Args:
-    obj: Canonical Environment, Task, Verifier, Agent, Harness,
-        Benchmark revision, or Trace.
-    **kwargs: Required hosted revision references for graph edges.
-
-Returns:
-    The hosted record created by the studio API.
-```
-
-### plural.Client.update
-
-```python
-update(self, obj: 'Any', **kwargs: 'Any') -> 'dict[str, Any]'
-```
-
-Publish a new immutable canonical revision.
-
-```text
-Args:
-    obj: Canonical revision or Trace.
-    **kwargs: Required hosted revision references for graph edges.
-
-Returns:
-    The hosted record updated by the studio API.
-```
-
 ### plural.Client.push
 
 ```python
 push(self, obj: 'Any', **kwargs: 'Any') -> 'dict[str, Any]'
 ```
 
-Publish a canonical revision, creating its parent by slug.
+Push one immutable revision, creating its parent by slug.
 
 ```text
+The revision is usable as soon as it is saved and stays private to
+the project. Pushing identical content again returns the same
+revision. To push a project directory with its dependencies, use
+``plural <kind> push`` or :func:`plural.project.sync.push`.
+
 Args:
-    obj: Canonical revision or Trace.
-    **kwargs: Required hosted revision references for graph edges.
+    obj: Environment, Task, Verifier, Agent, Harness, Benchmark, or Trace.
+    **kwargs: Hosted revision ids for graph edges, such as a Task's
+        ``environment_revision_id`` and ``verifier_revision_ids``.
 
 Returns:
-    The hosted record created or updated by the studio API.
+    The hosted revision record.
 ```
 
 ### plural.Client.chat
@@ -836,6 +807,11 @@ Returns:
 
 A semantic version that pins an ordered set of Tasks.
 
+```text
+Each version is a release. Beyond its Tasks it may declare categories,
+scoring rules, and evaluation tracks; see :class:`BenchmarkRelease`.
+```
+
 ### plural.Benchmark.diff
 
 ```python
@@ -865,166 +841,350 @@ export(self) -> 'dict[str, Any]'
 
 Return the deterministic complete dependency graph.
 
-## plural.project.CatalogContext
+## plural.project.resources.LocalResource
 
-Explicit factory for objects validated against an effective catalog.
-
-```python
-plural.project.CatalogContext(catalog: 'ModelCatalog | None' = None) -> 'None'
-```
-
-### plural.project.CatalogContext.from_file
+One validated local resource and the SDK object it defines.
 
 ```python
-from_file(path: 'str | Path') -> 'CatalogContext'
+plural.project.resources.LocalResource(ref: 'ResourceRef', directory: 'Path', value: 'Any', dependencies: 'tuple[ResourceRef, ...]') -> None
 ```
 
-Load project model entries from JSON or YAML.
+## plural.project.manifests.LockEntry
+
+One resolved resource: its local identity and, once pushed, its revision.
+
+## plural.project.manifests.LockFile
+
+``plural.lock``: resolved dependency revisions and content hashes.
+
+```text
+Hosted identifiers belong to ``project_id``. Entries recorded for another
+hosted project are never used as dependency pins.
+```
+
+## plural.project.layout.Project
+
+A project directory and its identity.
+
+```python
+plural.project.layout.Project(root: 'Path', manifest: 'ProjectManifest') -> None
+```
+
+### plural.project.layout.Project.find
+
+```python
+find(start: 'Path | None' = None) -> 'Project'
+```
+
+Load the project containing ``start`` (default: the working directory).
 
 ```text
 Returns:
-    A context containing bundled models plus explicit project entries.
+    The project.
+
+Raises:
+    ProjectError: When no enclosing directory holds ``project.yaml``.
 ```
 
-### plural.project.CatalogContext.agent
+### plural.project.layout.Project.at
 
 ```python
-agent(self, **fields: 'Any') -> 'Agent'
+at(root: 'Path') -> 'Project'
 ```
 
-Create an Agent against this effective catalog.
+Load the project whose ``project.yaml`` is directly in ``root``.
 
 ```text
 Returns:
-    A validated Agent.
+    The project.
+
+Raises:
+    ProjectError: When ``project.yaml`` is missing or invalid.
 ```
 
-### plural.project.CatalogContext.agent_verifier
+### plural.project.layout.Project.resource_dir
 
 ```python
-agent_verifier(self, **fields: 'Any') -> 'AgentVerifier'
+resource_dir(self, ref: 'ResourceRef') -> 'Path'
 ```
 
-Create an AgentVerifier against this effective catalog.
+Directory that holds one resource.
 
 ```text
 Returns:
-    A validated AgentVerifier.
+    The resource directory, whether or not it exists.
 ```
 
-### plural.project.CatalogContext.resolver
+### plural.project.layout.Project.manifest_path
 
 ```python
-resolver(self, root: 'str | Path | None' = None) -> 'Resolver'
+manifest_path(self, ref: 'ResourceRef') -> 'Path'
 ```
 
-Create a resolver carrying this catalog.
+Canonical manifest path for one resource.
 
 ```text
 Returns:
-    A public project resolver.
+    The manifest path, whether or not it exists.
 ```
 
-## plural.project.Resolver
-
-Resolve Python object references and public YAML object graphs.
+### plural.project.layout.Project.has
 
 ```python
-plural.project.Resolver(*, root: 'str | Path | None' = None, catalog: 'ModelCatalog | None' = None) -> 'None'
+has(self, ref: 'ResourceRef') -> 'bool'
 ```
 
-### plural.project.Resolver.load
-
-```python
-load(self, reference: 'str | Path', *, expected: 'type[Any] | tuple[type[Any], ...] | None' = None) -> 'ProjectObject'
-```
-
-Load one YAML file or ``path.py:object`` reference.
+Whether the resource directory exists locally.
 
 ```text
 Returns:
-    The resolved public SDK object.
+    ``True`` when the directory exists.
 ```
 
-### plural.project.Resolver.resolve
+### plural.project.layout.Project.names
 
 ```python
-resolve(self, value: 'Any', *, base: 'str | Path | None' = None) -> 'Any'
+names(self, kind: 'ResourceKind') -> 'list[str]'
 ```
 
-Resolve an inline object, reference, or already-created SDK object.
+Local resource names of one kind, sorted.
 
 ```text
 Returns:
-    The corresponding public SDK object.
+    The names.
 ```
 
-### plural.project.Resolver.dumps
+### plural.project.layout.Project.resource_at
 
 ```python
-dumps(self, value: 'ProjectObject', *, base: 'str | Path | None' = None) -> 'str'
+resource_at(self, path: 'Path') -> 'ResourceRef | None'
 ```
 
-Serialize one public SDK graph to deterministic YAML.
+The resource whose directory contains ``path``, if any.
 
 ```text
 Returns:
-    YAML using public field names and defaults.
+    The resource, or ``None`` outside any resource directory.
 ```
 
-### plural.project.Resolver.dump
+### plural.project.layout.Project.read_lock
 
 ```python
-dump(self, value: 'ProjectObject', path: 'str | Path') -> 'Path'
+read_lock(self) -> 'LockFile'
 ```
 
-Write one public SDK graph as YAML.
+Return ``plural.lock``, or an empty lock when none exists yet.
+
+```text
+Raises:
+    ProjectError: When the lock exists but is invalid.
+```
+
+### plural.project.layout.Project.write_lock
+
+```python
+write_lock(self, lock: 'LockFile') -> 'None'
+```
+
+Write ``plural.lock`` with resources in a stable order.
+
+### plural.project.layout.Project.read_binding
+
+```python
+read_binding(self) -> 'ProjectBinding | None'
+```
+
+Return the hosted project this checkout is bound to, if any.
+
+```text
+Raises:
+    ProjectError: When the binding file is unreadable.
+```
+
+### plural.project.layout.Project.write_binding
+
+```python
+write_binding(self, binding: 'ProjectBinding') -> 'None'
+```
+
+Bind this checkout to a hosted project.
+
+## plural.project.manifests.ProjectBinding
+
+``.plural/project.json``: the hosted project this checkout pushes to.
+
+## plural.project.layout.ProjectError
+
+A project, resource, or command precondition that the user must fix.
+
+```text
+``problems`` lists every independent issue so one run reports all of them.
+```
+
+```python
+plural.project.layout.ProjectError(message: 'str', problems: 'list[str] | None' = None) -> 'None'
+```
+
+## plural.project.manifests.ProjectManifest
+
+``project.yaml``: project identity and the layout version it follows.
+
+## plural.project.layout.ResourceKind
+
+One resource kind: its CLI noun, directory, manifest, and hosted collection.
+
+```python
+plural.project.layout.ResourceKind(name: 'str', cli: 'str', directory: 'str', manifest: 'str', label: 'str') -> None
+```
+
+## plural.project.layout.ResourceRef
+
+A resource named within one project, such as ``task/refund``.
+
+```python
+plural.project.layout.ResourceRef(kind: 'str', name: 'str') -> None
+```
+
+### plural.project.layout.ResourceRef.parse
+
+```python
+parse(value: 'str') -> 'ResourceRef'
+```
+
+Parse ``kind/name``.
 
 ```text
 Returns:
-    The written path.
+    The reference.
 ```
 
-## plural.project.dump
+## plural.project.resources.Workspace
 
-Serialize a public object graph to YAML.
+Resolve resources by name inside one project, caching each load.
+
+```python
+plural.project.resources.Workspace(project: 'Project', *, catalog: 'ModelCatalog | None' = None) -> 'None'
+```
+
+### plural.project.resources.Workspace.load
+
+```python
+load(self, ref: 'ResourceRef') -> 'LocalResource'
+```
+
+Load and fully validate one resource and its dependencies.
 
 ```text
 Returns:
-    The written path.
+    The validated resource.
+
+Raises:
+    ProjectError: Listing every problem found.
 ```
+
+### plural.project.resources.Workspace.get
 
 ```python
-plural.project.dump(value: 'ProjectObject', path: 'str | Path') -> 'Path'
+get(self, kind: 'str', name: 'str') -> 'Any'
 ```
 
-## plural.project.dumps
+Load a resource by kind and name, the way the CLI addresses it.
 
-Serialize a public object graph to YAML text.
+```text
+``kind`` is a kind name or its CLI noun, so ``workspace.get("env",
+"support-queue")`` is the object ``plural env show support-queue``
+describes.
+
+Args:
+    kind: ``environment``/``env``, ``task``, ``verifier``, ``harness``,
+        ``agent``, or ``benchmark``.
+    name: The resource's directory name.
+
+Returns:
+    The validated SDK object, such as a ``Task`` or ``Benchmark``.
+
+Raises:
+    ProjectError: When the resource is missing or invalid.
+
+Examples:
+    >>> from plural.project import Project, Workspace
+    >>> workspace = Workspace(Project.find())  # doctest: +SKIP
+    >>> benchmark = workspace.get("benchmark", "support-triage")  # doctest: +SKIP
+```
+
+### plural.project.resources.Workspace.dependencies
+
+```python
+dependencies(self, ref: 'ResourceRef') -> 'tuple[ResourceRef, ...]'
+```
+
+Direct dependencies declared in a manifest, without loading code.
 
 ```text
 Returns:
-    The YAML text.
+    The declared dependencies.
+
+Raises:
+    ProjectError: When the manifest cannot be read.
+```
+
+### plural.project.resources.Workspace.dependency_order
+
+```python
+dependency_order(self, roots: 'Iterable[ResourceRef]') -> 'list[ResourceRef]'
+```
+
+Return ``roots`` and everything they depend on, dependencies first.
+
+```text
+Unresolved references and cycles are reported before any code is
+imported or anything is uploaded.
+
+Raises:
+    ProjectError: Listing unresolved references or the first cycle.
+```
+
+## plural.project.layout.check_name
+
+Validate a project or resource name.
+
+```text
+A valid name is already a hosted slug, so a local directory and its hosted
+resource are the same string on every filesystem.
+
+Returns:
+    The name, unchanged.
+
+Raises:
+    ProjectError: When the name cannot be used as a directory and slug.
 ```
 
 ```python
-plural.project.dumps(value: 'ProjectObject') -> 'str'
+plural.project.layout.check_name(name: 'str', what: 'str') -> 'str'
 ```
 
-## plural.project.load
+## plural.project.layout.find_project_root
 
-Load a public project object from YAML or Python.
+Return the nearest directory at or above ``start`` holding ``project.yaml``.
+
+```python
+plural.project.layout.find_project_root(start: 'Path | None' = None) -> 'Path | None'
+```
+
+## plural.project.schemas.manifest_schemas
+
+Schemas for every file a project author writes by hand.
 
 ```text
 Returns:
-    The resolved object.
+    Schemas keyed by file name, such as ``task.yaml``.
 ```
 
 ```python
-plural.project.load(reference: 'str | Path', *, catalog: 'ModelCatalog | None' = None, expected: 'type[Any] | tuple[type[Any], ...] | None' = None) -> 'ProjectObject'
+plural.project.schemas.manifest_schemas() -> 'dict[str, dict[str, Any]]'
 ```
 
-## plural.project.public_schema
+## plural.project.schemas.public_schema
 
 Return a JSON Schema containing only public authoring fields.
 
@@ -1034,7 +1194,20 @@ Returns:
 ```
 
 ```python
-plural.project.public_schema(model: 'type[BaseModel]') -> 'dict[str, Any]'
+plural.project.schemas.public_schema(model: 'type[BaseModel]') -> 'dict[str, Any]'
+```
+
+## plural.project.layout.resource_kind
+
+Return a kind by its name (``environment``) or CLI noun (``env``).
+
+```text
+Raises:
+    ValueError: When the name is not a resource kind.
+```
+
+```python
+plural.project.layout.resource_kind(name: 'str') -> 'ResourceKind'
 ```
 
 ## plural.JobStore
@@ -1425,8 +1598,11 @@ Persistent internal Environment state for the episode.
 State is never sent to the Agent. Only :class:`Observation` is visible.
 Verifiers receive the final State on :class:`~plural.verifiers.Episode`.
 
+Mark a field with :func:`initial` when a Task should supply it. Unmarked
+fields are episode progress and cannot be set as ``initial_state``.
+
 Attributes:
-    seed: Optional deterministic seed.
+    seed: Optional deterministic seed a Task may set.
     metadata: Extra internal fields that do not need a typed attribute.
 ```
 
@@ -1444,6 +1620,34 @@ Returns:
 
 ```python
 plural.environments.types.as_text(value: 'Any') -> 'str'
+```
+
+## plural.environments.types.initial
+
+Mark a State field as a value a Task may set before the episode starts.
+
+```text
+Episode progress, such as whether the case is solved or which guesses have
+been made, stays a normal field. The Environment owns those values.
+``State.seed`` is settable. ``State.metadata`` is not.
+
+Constraints are requirements on the value a Task saves. For example,
+``min_length=5``, ``max_length=5``, and ``pattern=r"^[a-z]{5}$"`` require
+a five-letter word. They are stored on the field's JSON Schema.
+
+Args:
+    default: Value used when the Task leaves the field blank.
+    default_factory: Factory used when the default is mutable.
+    description: Shown next to the field when a Task sets initial state.
+    **constraints: Limits such as ``min_length``, ``max_length``,
+        ``pattern``, ``minimum``, ``maximum``, or ``enum``.
+
+Returns:
+    A Pydantic field whose JSON Schema includes ``x-plural-initial``.
+```
+
+```python
+plural.environments.types.initial(default: 'Any' = Ellipsis, *, default_factory: 'Any' = None, description: 'str | None' = None, **constraints: 'Any') -> 'Any'
 ```
 
 ## plural.environments.types.is_empty_observation

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import math
 import shlex
@@ -10,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, ValidationInfo, field_serializer, model_validator
+from pydantic import Field, PrivateAttr, ValidationInfo, field_serializer, model_validator
 
 from plural.catalog import ModelCatalog
 from plural.common import FrozenModel, RoutingSpec, content_hash
@@ -242,6 +243,13 @@ def coerce_verifier_output(value: Any, *, verifier_name: str) -> VerifierOutput:
     )
 
 
+def _file_digest(path: Path) -> str | None:
+    try:
+        return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+    except OSError:
+        return None
+
+
 def _accepts_episode(fn: Callable[..., Any]) -> bool:
     try:
         signature = inspect.signature(fn)
@@ -323,6 +331,8 @@ class DeterministicVerifier(Verifier):
     result_path: str = "verifier-result.json"
     evidence_required: bool = True
 
+    _source_digest: str | None = PrivateAttr(default=None)
+
     @model_validator(mode="before")
     @classmethod
     def _normalize_check(cls, value: Any) -> Any:
@@ -372,12 +382,28 @@ class DeterministicVerifier(Verifier):
     @field_serializer("check")
     def _serialize_check(self, check: Any) -> Any:
         if callable(check):
-            source = inspect.getsourcefile(check)
-            qualname = getattr(check, "__qualname__", getattr(check, "__name__", "check"))
-            return {"python": f"{Path(source).name}:{qualname}" if source else qualname}
+            return self._callable_reference(check)
         if isinstance(check, tuple):
             return list(check)
         return check
+
+    def _callable_reference(self, check: Callable[..., Any]) -> dict[str, str]:
+        """Name a callable check and fingerprint the code behind it.
+
+        The digest makes an edit to the check's source a new Verifier version
+        rather than a silent change under an old one. A project Verifier binds
+        the digest of its whole directory; otherwise it is the source file's.
+
+        Returns:
+            The ``python`` reference and, when known, its source ``digest``.
+        """
+        source = inspect.getsourcefile(check)
+        qualname = getattr(check, "__qualname__", getattr(check, "__name__", "check"))
+        reference = {"python": f"{Path(source).name}:{qualname}" if source else qualname}
+        digest = self._source_digest or (_file_digest(Path(source)) if source else None)
+        if digest:
+            reference["digest"] = digest
+        return reference
 
     @property
     def command(self) -> tuple[str, ...]:
@@ -417,18 +443,9 @@ class DeterministicVerifier(Verifier):
         check = self.check
         return check if callable(check) else None
 
-    def _hash_payload(self) -> dict[str, Any]:
-        payload = self.model_dump(mode="json", exclude={"check"})
-        check = self.check
-        if callable(check):
-            source = inspect.getsourcefile(check)
-            qualname = getattr(check, "__qualname__", getattr(check, "__name__", "check"))
-            payload["check"] = {"python": f"{Path(source).name}:{qualname}" if source else qualname}
-        elif isinstance(check, tuple):
-            payload["check"] = list(check)
-        else:
-            payload["check"] = check
-        return payload
+    def bind_source_digest(self, digest: str) -> None:
+        """Fingerprint a callable check by the package that ships it."""
+        self._source_digest = digest
 
     def invoke(self, episode: Episode) -> VerifierOutput:
         """Run an in-process Episode function.

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from project_fixtures import write_project
 from typer.testing import CliRunner
 
 from plural import Agent, Environment, Harness, Job, Runtime, Task
@@ -20,7 +21,8 @@ from plural.harness.vendor_harnesses import (
     CodexHarness,
     HermesHarness,
 )
-from plural.project import dump, load
+from plural.project import Project, ProjectError, ResourceRef, Workspace
+from plural.project.resources import load_harness_directory
 from plural.verifiers import DeterministicVerifier
 
 
@@ -108,79 +110,90 @@ def test_version_override_changes_package_lock() -> None:
     assert overridden.definition.setup[0][-1] == "0.18.2"
 
 
-def test_python_and_yaml_roundtrip_keep_compact_builtin(tmp_path: Path) -> None:
+def _agent_project(root: Path, agent_yaml: str) -> Workspace:
+    project = write_project(root)
+    (project.root / "agents/baseline/agent.yaml").write_text(agent_yaml, encoding="utf-8")
+    return Workspace(project)
+
+
+def test_agent_yaml_keeps_compact_builtin_and_matches_python(tmp_path: Path) -> None:
     agent = Agent(
         model="anthropic/claude-sonnet-5",
+        name="baseline",
         harness="claude-code",
         harness_kwargs={"permission_mode": "acceptEdits"},
     )
-    job = Job(_task(), agents=(agent,))
-    path = dump(job, tmp_path / "job.yaml")
-    text = path.read_text(encoding="utf-8")
-    assert "harness: claude-code" in text
-    assert "permission_mode: acceptEdits" in text
-    assert "kind: harness" not in text.split("agents:", 1)[1]
-    restored = load(path)
-    assert isinstance(restored, Job)
-    restored_agent = restored.agents[0]
-    assert restored_agent.harness == "claude-code"
-    assert restored_agent.harness_kwargs["permission_mode"] == "acceptEdits"
-    assert restored_agent.content_hash == agent.content_hash
-    assert restored.content_hash == job.content_hash
-    assert restored.plan == job.plan
-
-
-def test_legacy_declared_vendor_harness_is_rejected(tmp_path: Path) -> None:
-    path = tmp_path / "harness.yaml"
-    path.write_text(
-        "kind: harness\nname: hermes\nimplementation: declared\n",
-        encoding="utf-8",
+    space = _agent_project(
+        tmp_path / "support-desk",
+        "name: baseline\n"
+        "version: 0.1.0\n"
+        "model: anthropic/claude-sonnet-5\n"
+        "harness: claude-code\n"
+        "harness_kwargs:\n"
+        "  permission_mode: acceptEdits\n",
     )
-    with pytest.raises(ValueError, match="built-in now"):
-        load(path)
-
-
-def test_custom_class_harness_roundtrips(tmp_path: Path) -> None:
-    source = tmp_path / "runner"
-    source.mkdir()
-    module = source / "harness.py"
-    module.write_text(
-        """
-from plural import Harness, HarnessResult
-
-class CustomHarness(Harness):
-    name = "custom-loop"
-
-    def run(self, task, agent, environment):
-        return HarnessResult(response=task.instructions)
-""".lstrip(),
-        encoding="utf-8",
-    )
-    harness = load(f"{module}:CustomHarness")
-    assert isinstance(harness, Harness)
-    agent = Agent(model="openai/gpt-5.6-luna", harness=harness)
-    path = dump(agent, tmp_path / "agent.yaml")
-    restored = load(path)
+    loaded = space.load(ResourceRef("agent", "baseline"))
+    restored = loaded.value
     assert isinstance(restored, Agent)
-    assert isinstance(restored.harness, Harness)
-    assert type(restored.harness).name == "custom-loop"
+    assert restored.harness == "claude-code"
+    assert restored.harness_kwargs["permission_mode"] == "acceptEdits"
     assert restored.content_hash == agent.content_hash
+    assert loaded.dependencies == ()
+    job = Job(_task(), agents=(agent,))
+    assert Job(_task(), agents=(restored,)).content_hash == job.content_hash
 
 
-def test_cli_lists_builtins_and_emits_schema() -> None:
+def test_builtin_names_cannot_be_redeclared_as_project_harnesses(tmp_path: Path) -> None:
+    project = write_project(tmp_path / "support-desk")
+    directory = project.root / "harnesses/hermes"
+    directory.mkdir()
+    (directory / "harness.yaml").write_text(
+        "name: hermes\nversion: 0.1.0\npython: harness.py:Hermes\n", encoding="utf-8"
+    )
+    with pytest.raises(ProjectError) as caught:
+        Workspace(project).load(ResourceRef("harness", "hermes"))
+    assert "'hermes' is a built-in Harness" in " ".join(caught.value.problems)
+
+
+def test_custom_class_harness_loads_the_same_everywhere(tmp_path: Path) -> None:
+    project = write_project(tmp_path / "support-desk")
+    space = Workspace(project)
+    harness = space.load(ResourceRef("harness", "scripted")).value
+    assert isinstance(harness, Harness)
+    assert type(harness).name == "scripted"
+    agent = space.load(ResourceRef("agent", "baseline")).value
+    assert isinstance(agent.harness, Harness)
+    assert agent.harness.content_hash == harness.content_hash
+    direct = load_harness_directory(project.root / "harnesses/scripted", name="scripted")
+    assert direct.content_hash == harness.content_hash
+    fresh = Workspace(Project.at(project.root)).load(ResourceRef("agent", "baseline")).value
+    assert fresh.content_hash == agent.content_hash
+
+
+def test_cli_lists_builtins_and_shows_their_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    project = write_project(tmp_path / "support-desk")
+    monkeypatch.chdir(project.root)
     runner = CliRunner()
-    listed = runner.invoke(app, ["harness", "list"])
+    listed = runner.invoke(app, ["harness", "list", "--local", "--json"])
     assert listed.exit_code == 0, listed.output
-    payload = json.loads(listed.output)
-    names = {item["name"] for item in payload}
-    assert set(BUILTIN_HARNESS_NAMES) <= names
-    schema = runner.invoke(app, ["harness", "schema", "claude-code"])
-    assert schema.exit_code == 0, schema.output
-    body = json.loads(schema.output)
-    assert body["title"] == "claude-code"
-    assert "reasoning_effort" in body["properties"]
-    unknown = runner.invoke(app, ["harness", "schema", "cursor"])
-    assert unknown.exit_code == 2
+    names = {item["name"] for item in json.loads(listed.stdout)}
+    assert names == {"scripted"}
+    listed = runner.invoke(app, ["harness", "list", "--json"])
+    assert listed.exit_code == 0, listed.output
+    payload = json.loads(listed.stdout)
+    builtins = {item["name"] for item in payload if item["location"] == "built-in"}
+    assert builtins == set(BUILTIN_HARNESS_NAMES)
+    shown = runner.invoke(app, ["harness", "show", "claude-code", "--json"])
+    assert shown.exit_code == 0, shown.output
+    body = json.loads(shown.stdout)
+    assert body["location"] == "built-in"
+    assert body["pinned_version"] == get_builtin("claude-code").pinned_version
+    assert body["harness_kwargs"]["title"] == "claude-code"
+    assert "reasoning_effort" in body["harness_kwargs"]["properties"]
+    unknown = runner.invoke(app, ["harness", "show", "cursor"])
+    assert unknown.exit_code == 1
     assert builtin_schema("codex")["x-pinned-version"] == get_builtin("codex").pinned_version
 
 

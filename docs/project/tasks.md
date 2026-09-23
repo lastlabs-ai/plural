@@ -33,115 +33,117 @@ task = Task(
 
 `info` is public case data. Here, the Environment uses the ticket ID to look up the case. Keep expected answers out of `info`, instructions, and observations.
 
-## Start from a task directory
+## Save a Task in a project
 
-For hosted work, the directory is the task until you push a version:
+In a [project](../getting-started.md#create-a-project), each Task is a directory under `tasks/` named after the Task. Create one from inside the project:
 
 ```bash
-plural task init support-ticket --environment ticket-triage --verifier correct-team
+plural task init ticket-1 --environment support-queue --verifier correct-category
 ```
 
-This creates a directory with the same name:
+This creates:
 
 ```text
-support-ticket/
-├── instruction.md
+tasks/ticket-1/
 ├── task.yaml
-└── resources/
+└── instruction.md
 ```
 
-`task.yaml` stores the task identity, `initial_state`, public `info`, the
-hosted environment slug, and verifier slugs. The `instructions` field points
-to `instruction.md`; its contents are inlined when the task loads. A literal
-instruction string in `task.yaml` continues to work. Every UTF-8 text file
-added below `resources/` is staged as a task file at the same relative path.
-Use `--bare` for empty instructions, resources, and identity-only `task.yaml`,
-and `--push` to publish immediately after creating the directory.
+Add a `resources/` directory when the Task needs its own files. `task.yaml` names the Task, its one Environment, and its Verifiers. This is `tasks/ticket-1/task.yaml` from the [first project](../tutorials/first-project.md):
 
-In Python, the same helper writes the same package:
-
-```python
-from plural.cli.scaffold import init_task
-
-init_task("support-ticket", environment="ticket-triage", verifiers=["correct-team"])
+```yaml
+name: ticket-1
+version: 0.1.0
+instructions: instruction.md
+environment: support-queue
+verifiers:
+  - correct-category
+initial_state:
+  ticket_id: ticket-1
 ```
 
-If `PLURAL_API_KEY` is set, `plural task init` checks whether the slug already
-exists in the current project and asks whether to proceed. Answering `n`
-writes nothing. Without a key, the command creates the directory locally and
-reports that the remote name was not checked. The Python helper warns when the
-slug exists but does not prompt.
+- `name` must match the directory name.
+- `instructions` is the path of a UTF-8 file in the Task directory, `instruction.md` by default. Its contents are the Task's instructions.
+- `environment` is the name of one Environment in `environments/`, and `verifiers` lists at least one Verifier in `verifiers/`, each once. References between resources are always by name within the project.
+- `initial_state`, `info`, `goals`, `metadata`, and `reset_options` have the same meaning as the `Task` fields described on this page.
+- `resources` lists files and directories to give the Task, relative to its directory. It defaults to `resources`, so every file placed below `resources/` is included, and a missing `resources/` directory is not an error. Task files must be UTF-8 text; a binary file fails validation. Paths must stay inside the Task directory.
 
-Push the directory to save that version:
+Check the Task and everything it depends on:
 
 ```bash
-plural task push support-ticket
+plural task validate ticket-1
 ```
 
-Push resolves each environment and verifier slug to its current published
-revision in the same project. A missing slug, or a bare task without bindings,
-is an error. Explicit `--environment-revision-id` and repeatable
-`--verifier-revision-id` values override slug lookup.
+Validation loads the Environment and each Verifier as well, and reports every problem it finds, including placeholders the template left for you to fill in. Omit the name to validate the Task whose directory you are in.
 
-## Publish a Task object
+### Push the Task
 
-A `Task` has the same local-to-hosted relationship as an `Environment`.
-`task.definition()` compiles the canonical revision, so `client.create()`,
-`client.update()`, and `client.push()` all accept a public `Task` exactly like
-they accept a public `Environment`:
+Pushing saves the Task as an immutable, private revision in the hosted project this checkout is bound to:
+
+```bash
+plural task push ticket-1 --with-deps
+```
+
+`--with-deps` also pushes the Environment and Verifiers when they are not hosted yet. Without it, each dependency must already be pushed with identical content, and the push stops before uploading anything if one is not. Pushing unchanged content reuses the existing revision. If you change a file but keep the same `version`, the push is refused; bump `version` first. A pushed revision is available in its project immediately and becomes the Task's current version. Pushing never makes a Task public.
+
+`plural task pull ticket-1` restores a hosted revision into `tasks/ticket-1/`. It refuses to overwrite local files that differ unless you pass `--force`, which keeps the old copy under `.plural/backups`.
+
+## Load a Task from Python
+
+The CLI and the Python SDK read the same directories. Load a saved Task by name and run it:
 
 ```python
-from plural import Client, Task
+from plural import Job
+from plural.project import Project, Workspace
 
-task = Task(
-    name="support-ticket",
-    instructions="Inspect, categorize, answer, and resolve the ticket.",
-    environment=environment,
-    verifiers=[verifier],
-)
-task.push()
+workspace = Workspace(Project.find())
+task = workspace.get("task", "ticket-1")
+agent = workspace.get("agent", "careful")
+result = Job(task, agents=[agent]).run()
 ```
 
-`task.push()` publishes the task revision, creating its hosted parent by slug
-when needed. Like `plural task push`, it resolves each bound Environment and
-Verifier to its current published revision unless exact ids are passed:
-
-```python
-task.push(
-    Client(),
-    environment_revision_id="env-revision",
-    verifier_revision_ids=["verifier-revision"],
-)
-```
-
-`task.delete()` removes the hosted parent and all of its revisions. Revisions
-themselves are immutable: publishing an edited task mints a new revision under
-the same parent, which is how updates work for every Plural resource.
+The loaded value is an ordinary `Task`, so everything on this page applies to it. A `Task` built in Python, like the one at the top of this page, also runs directly with `Job` for scripting. Project directories are how the CLI and hosted projects exchange Tasks.
 
 ## Set the initial State
 
-Use `initial_state` when each Task should start the Environment with different data. Mark those State fields with `initial()`. Constraints passed there, such as `min_length=5` and `pattern=r"^[a-z]{5}$"`, are requirements on the value a Task saves. Plural checks the values against the Environment's State schema and loads them before `reset` during package Job execution. A Task cannot set unmarked fields, such as whether the episode is already solved.
+Use `initial_state` when each Task should start the Environment with different data. Mark those State fields with `initial()`. Constraints passed there, such as `min_length=5` and `pattern=r"^[a-z]{5}$"`, are requirements on the value a Task saves. Plural checks the values against the Environment's State schema and loads them before each Trial calls `reset`. A Task cannot set unmarked fields, such as whether the episode is already solved.
 
-The following small project shows both initial State and packaged files:
+The following small project shows both initial State and resource files. Create it with:
+
+```bash
+plural project init support-eval
+cd support-eval
+plural env init ticket-triage
+plural verifier init correct-team
+plural task init duplicate-charge --environment ticket-triage --verifier correct-team
+```
+
+When you have filled in the files below, the project looks like this:
 
 ```text
 support-eval/
-  project.py
-  verify.py
-  environment/
-    world.py
-    data/
-      policy.md
-      invoice.csv
+├── project.yaml
+├── environments/ticket-triage/
+│   ├── environment.yaml
+│   ├── environment.py
+│   ├── README.md
+│   └── resources/policy.md
+├── verifiers/correct-team/
+│   ├── verifier.yaml
+│   └── verify.py
+└── tasks/duplicate-charge/
+    ├── task.yaml
+    ├── instruction.md
+    └── resources/invoice.csv
 ```
 
-Put this policy in `environment/data/policy.md`:
+Put this policy in `environments/ticket-triage/resources/policy.md`:
 
 ```text
 Duplicate charges should be assigned to billing for refund review.
 ```
 
-Put this sample attachment in `environment/data/invoice.csv`:
+Put this sample attachment in `tasks/duplicate-charge/resources/invoice.csv`:
 
 ```csv
 invoice_id,amount_usd,status
@@ -149,14 +151,17 @@ INV-101,49.00,paid
 INV-102,49.00,duplicate
 ```
 
-Save the Environment in `environment/world.py`:
+Save the Environment in `environments/ticket-triage/environment.py`:
 
 ```python
+import os
 from pathlib import Path
 
 from plural import Environment, Observation, State, action, initial
 
-DATA = Path(__file__).parent / "data"
+
+def resource(scope: str, path: str) -> str:
+    return (Path(os.environ["PLURAL_RESOURCES_DIR"]) / scope / path).read_text()
 
 
 class TicketState(State):
@@ -175,9 +180,6 @@ class TicketObservation(Observation):
 
 
 class TicketTriage(Environment[TicketObservation, TicketState]):
-    name = "ticket-triage"
-    overview = "Read a support ticket and its invoice, then assign the right team."
-
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         # Preserve the issue and expected category supplied by the Task.
@@ -186,14 +188,14 @@ class TicketTriage(Environment[TicketObservation, TicketState]):
         self.observation = TicketObservation(
             text=self.state.issue,
             issue=self.state.issue,
-            policy=(DATA / "policy.md").read_text(),
+            policy=resource("shared", "resources/policy.md"),
         )
         return self.observation, {}
 
     @action
     def read_invoice(self) -> TicketObservation:
         """Read the invoice attached to this support case."""
-        self.observation.invoice = (DATA / "invoice.csv").read_text()
+        self.observation.invoice = resource("task", "resources/invoice.csv")
         return self.observation
 
     @action
@@ -213,61 +215,73 @@ class TicketTriage(Environment[TicketObservation, TicketState]):
 
 Reset clears progress while preserving the Task's `issue` and `expected` fields. Replacing State with an empty `TicketState()` here would discard those initial conditions.
 
-## Add shared and Task-specific resources
+Replace the placeholder comment in `environments/ticket-triage/README.md` with a sentence describing the Environment, such as "A support queue with one ticket and its invoice." Validation reports every placeholder the templates leave, and the run below refuses to start until they are filled in. Then replace `environments/ticket-triage/environment.yaml` with:
 
-Save `resolved_correctly` from the [DeterministicVerifier example](verifiers.md#deterministicverifier) in `verify.py`. Then create `project.py`:
-
-```python
-from environment.world import TicketTriage
-from verify import resolved_correctly
-
-from plural import (
-    Agent, DeterministicVerifier, Job, Resource, Runtime, Task,
-)
-
-environment = TicketTriage(
-    runtime=Runtime.local(),
-    resources=[
-        Resource(
-            "data/policy.md",
-            kind="data",
-            content_type="text/markdown",
-        ),
-    ],
-)
-
-verifier = DeterministicVerifier(name="correct-team", check=resolved_correctly)
-
-task = Task(
-    name="duplicate-charge",
-    instructions="Read the ticket, policy, and invoice. Assign the ticket to the right team.",
-    environment=environment,
-    initial_state={
-        "issue": "I was charged twice for the same subscription.",
-        "expected": "billing",
-    },
-    resources=[
-        Resource("data/invoice.csv", content_type="text/csv"),
-    ],
-    verifiers=[verifier],
-)
-
-agent = Agent(
-    model="openai/gpt-5.6-luna",
-    instructions="Read the available evidence before assigning the ticket.",
-)
-job = Job(task, agents=[agent])
+```yaml
+name: ticket-triage
+version: 0.1.0
+overview: Read a support ticket and its invoice, then assign the right team.
+python: environment.py:TicketTriage
+readme: README.md
+resources:
+  - resources/policy.md
+runtime:
+  provider: local
+limits:
+  max_turns: 4
+  max_seconds: 60
 ```
 
-The shared policy belongs to the Environment. The invoice describes an input for this Task. In this example, both files are packaged beneath the Environment's source directory and staged automatically by the short `Resource("path")` form. Reset reads the policy into the Observation; `read_invoice` exposes the attachment through an action.
+Save the `resolved_correctly` function from the [DeterministicVerifier example](verifiers.md#deterministicverifier) in `verifiers/correct-team/verify.py`, and point `verifiers/correct-team/verifier.yaml` at it:
+
+```yaml
+name: correct-team
+version: 0.1.0
+kind: deterministic
+check: verify.py:resolved_correctly
+```
+
+Finally, write the case. `tasks/duplicate-charge/instruction.md` holds the instructions:
+
+```text
+Read the ticket, policy, and invoice. Assign the ticket to the right team.
+```
+
+and `tasks/duplicate-charge/task.yaml` supplies the initial State:
+
+```yaml
+name: duplicate-charge
+version: 0.1.0
+instructions: instruction.md
+environment: ticket-triage
+verifiers:
+  - correct-team
+initial_state:
+  issue: I was charged twice for the same subscription.
+  expected: billing
+```
+
+## Add shared and Task-specific resources
+
+The shared policy belongs to the Environment, so it is listed under `resources` in `environment.yaml`. The invoice describes an input for this Task, so it lives in the Task's `resources/` directory. Each Trial receives both, under separate roots:
+
+```text
+/workspace/resources/
+  shared/resources/policy.md     # from the Environment
+  task/resources/invoice.csv     # from this Task only
+```
+
+Environment code reads the root from `PLURAL_RESOURCES_DIR`. Reset reads the policy into the Observation; `read_invoice` exposes the attachment through an action. Files are not added to the model's prompt automatically.
 
 A URI alone does not fetch data. For data that must be resolved at launch, use `resolver` delivery as described in [Environment resources](environments.md#resources).
 
-This example uses one invoice. To support many cases, add a public case ID or resource name and have Environment code select the corresponding file. Package only the inputs that should be accessible together; a custom Harness with filesystem access may read other staged files.
+This example uses one invoice. To support many cases, give each Task its own files, or add a public case ID and have Environment code select the corresponding data. Package only the inputs that should be accessible together; a custom Harness with filesystem access may read other staged files.
 
 ### Supply data for just one Task
 
-Use an inline resource for a small case-specific attachment:
+Files in a Task's `resources/` directory reach that Task's Trials only. Task files are UTF-8 text, such as CSV, JSON, or Markdown. They never replace shared files, even when their paths match.
+
+A `Task` built in Python takes the same file as an inline resource:
 
 ```python
 invoice = Resource(
@@ -277,7 +291,7 @@ invoice = Resource(
 )
 ```
 
-Pass `resources=[invoice]` to this Task. It becomes `/workspace/resources/task/invoice.csv` for this Trial only. Shared inputs stay in `/workspace/resources/shared/`. Read the attachment in an Environment action:
+Pass `resources=[invoice]` to the Task. It becomes `/workspace/resources/task/invoice.csv` for this Trial only. Read it in an Environment action:
 
 ```python
 import os
@@ -287,29 +301,29 @@ resource_root = Path(os.environ["PLURAL_RESOURCES_DIR"])
 invoice_text = (resource_root / "task" / "invoice.csv").read_text()
 ```
 
-Keep case-specific files out of a shared source package when other Tasks should not receive them. Initial state and resource files are separate: `initial_state` initializes the Environment's State, while resources provide files that reset or actions can read. Both are prepared before reset. Reset code should preserve Task-injected State fields it intends to use.
+Keep case-specific files out of the Environment when other Tasks should not receive them. Initial state and resource files are separate: `initial_state` initializes the Environment's State, while resources provide files that reset or actions can read. Both are prepared before reset. Reset code should preserve Task-injected State fields it intends to use.
 
 ## Run the example
 
-From `support-eval`, validate and preview the Job before making model calls:
+From `support-eval`, validate and preview the run before making model calls:
 
 ```bash
-plural validate project.py:job
-plural run project.py:job --dry-run
-plural auth login
-plural run project.py:job
+plural task validate duplicate-charge
+plural run --task duplicate-charge --model openai/gpt-5.6-luna --dry-run
+plural auth login --api-key-stdin < plural-api-key.txt
+plural run --task duplicate-charge --model openai/gpt-5.6-luna
 ```
 
-Inspect the resulting Trial to check that the issue appeared in the Observation, the invoice was available, and the expected category remained in internal State. Local execution is for trusted code; see [Runtime](environments.md#runtime) for isolation options.
+`--model` without `--harness` uses `native`, Plural's built-in tool loop. A live model needs an API key: store a Plural API key with `plural auth login --api-key-stdin`, as above, or export `PLURAL_API_KEY` or `OPENAI_API_KEY`. A browser login alone is not accepted for model calls. The run is a Job recorded under `.plural/jobs/`. `plural trial show TRIAL_ID` prints the Trial's score, Verifier evidence, and artifacts directory. Open `observation.json` there to check that the issue and invoice reached the Observation, and `state.json` to check that the expected category stayed in internal State. The `local` runtime is a trusted subprocess, not a sandbox; see [Runtime](environments.md#runtime) for isolation options.
 
 ## Choose the right place for data
 
 - **`instructions` and `goals`:** what the agent should accomplish.
 - **`info`:** public case information, such as an identifier.
 - **`initial_state`:** internal starting values defined by the State schema.
-- **`resources`:** descriptions of files, datasets, or applications used by the case.
-- **`metadata`:** organizational labels, such as owner or training/evaluation split.
+- **`resources`:** files the case uses, which Environment code can read.
+- **`metadata`:** organizational labels, such as an owner or a training or evaluation split.
 
-Task `reset_options` are stored but are not currently forwarded to `reset` by package Jobs. Use initial State or explicit case loading for those runs.
+Plural stores a Task's `reset_options` but does not yet pass them to `reset`. Use `initial_state` or load the case in Environment code instead.
 
 Keep one coherent outcome per Task. Include common cases and important failures, test your Verifiers on known outcomes, and reserve held-out Tasks if you plan to train. Collect Tasks into a [Benchmark](benchmarks.md) to compare agents across the work you care about.

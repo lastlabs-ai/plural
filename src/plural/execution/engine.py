@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from plural.agents import AgentBinding
+from plural.benchmarks.results import AttemptEvidence, aggregate_configuration
+from plural.benchmarks.rules import BenchmarkScoring
 from plural.catalog import ModelCatalog
 from plural.common import ErrorCode, HarnessPackage, content_hash
 from plural.evidence import first_json_mapping
@@ -33,6 +35,7 @@ from plural.harness.runner import HarnessExecutionError, HarnessRunner
 from plural.jobs import (
     AgentAggregate,
     ArtifactReference,
+    BenchmarkJobSource,
     JobMode,
     JobResult,
     JobSpec,
@@ -1159,16 +1162,39 @@ def _agent_aggregates(
     spec: JobSpec,
     results: Sequence[TrialResult],
 ) -> tuple[AgentAggregate, ...]:
+    source = spec.source
+    release = source.benchmark if isinstance(source, BenchmarkJobSource) else None
+    scoring = release.scoring if release is not None else BenchmarkScoring()
+    categories = release.categories if release is not None else ()
+    tasks = [task.task_id for task in spec.tasks]
     rows: list[AgentAggregate] = []
     for agent in spec.agents:
         selected = [item for item in results if item.receipt.agent_digest == agent.content_hash]
-        scores = [item.score for item in selected if item.score is not None]
         costs = [item.receipt.cost_usd for item in selected if item.receipt.cost_usd is not None]
         latencies = [
             item.receipt.timings["total_seconds"]
             for item in selected
             if "total_seconds" in item.receipt.timings
         ]
+        combined = aggregate_configuration(
+            tasks,
+            [
+                AttemptEvidence(
+                    task=item.receipt.task_pin.name,
+                    attempt=item.receipt.attempt,
+                    status=item.status,
+                    score=item.score,
+                    error_code=item.error_code.value if item.error_code else None,
+                    cost_usd=item.receipt.cost_usd,
+                    latency_seconds=item.receipt.timings.get("total_seconds"),
+                    trial_id=item.receipt.trial_id,
+                )
+                for item in selected
+            ],
+            scoring=scoring,
+            categories=categories,
+            required_attempts=spec.attempts,
+        )
         rows.append(
             AgentAggregate(
                 agent_name=agent.name,
@@ -1176,7 +1202,8 @@ def _agent_aggregates(
                 model_id=agent.model,
                 count=len(selected),
                 successes=sum(item.status == "succeeded" for item in selected),
-                mean_score=sum(scores) / len(scores) if scores else None,
+                mean_score=combined.score,
+                coverage=combined.coverage,
                 total_cost=sum(costs) if costs else None,
                 mean_latency_seconds=sum(latencies) / len(latencies) if latencies else None,
             )

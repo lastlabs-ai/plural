@@ -146,9 +146,15 @@ class HarnessCapability(str, Enum):
 
 
 class PackageSource(FrozenModel):
-    """Immutable package source."""
+    """Immutable package source.
 
-    kind: Literal["local", "oci", "archive"]
+    ``digest`` identifies the package contents. For ``local`` and ``package``
+    sources it is the source tree digest, so the same files have the same
+    identity on every machine. A ``package`` source is a resource package
+    stored by Plural; its ``uri`` is ``plural-package:<archive digest>``.
+    """
+
+    kind: Literal["local", "oci", "archive", "package"]
     uri: str = Field(min_length=1)
     digest: str | None = None
     trusted: bool = False
@@ -274,8 +280,15 @@ class HarnessPackage(FrozenModel):
 
     @property
     def content_hash(self) -> str:
-        """Stable package hash."""
-        return content_hash(self)
+        """Stable package hash: the protocol plus the source contents, not its location."""
+        if self.source.digest is None:
+            return content_hash(self)
+        return content_hash(
+            {
+                "definition": self.definition.model_dump(mode="json"),
+                "source_digest": self.source.digest,
+            }
+        )
 
     @property
     def package_id(self) -> str:

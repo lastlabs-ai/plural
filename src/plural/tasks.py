@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
+from plural.benchmarks.rules import (
+    BenchmarkCategory,
+    BenchmarkScoring,
+    EvaluationTrack,
+    check_track_limits,
+    validate_release_rules,
+)
 from plural.common import FrozenModel, content_hash, semantic_version, stable_id
-from plural.environments.definition import EnvironmentDefinition, EnvironmentResource
+from plural.environments.definition import (
+    EnvironmentDefinition,
+    EnvironmentResource,
+    ExecutionLimits,
+)
 from plural.environments.env import Environment
 from plural.verifiers import DeterministicVerifier, VerifierDefinition, WeightedVerifier
-
-if TYPE_CHECKING:
-    from plural.client import Client
 
 
 def _json_type_name(value: Any) -> str:
@@ -251,21 +259,6 @@ def _task_bind_errors(task: Task) -> list[str]:
     return errors
 
 
-def _hosted_slug(value: Any, kind: str) -> str:
-    """Return the hosted slug or id for a bound Environment or Verifier."""
-    from plural.studio import slugify
-
-    if isinstance(value, str):
-        return value
-    if isinstance(value, Mapping):
-        raw = value.get("slug") or value.get("name")
-    else:
-        raw = getattr(value, "slug", None) or getattr(value, "name", None)
-    if isinstance(raw, str) and raw:
-        return slugify(raw)
-    raise ValueError(f"Task {kind} {value!r} does not name a hosted slug or id")
-
-
 class Task(FrozenModel):
     """One versioned unit of work in a Python-authored Environment."""
 
@@ -406,67 +399,6 @@ class Task(FrozenModel):
         """
         return self.definition()
 
-    def push(
-        self,
-        client: Client | None = None,
-        *,
-        environment_revision_id: str | None = None,
-        verifier_revision_ids: Sequence[str] | None = None,
-    ) -> dict[str, Any]:
-        """Publish this Task as a hosted revision, creating its parent by slug.
-
-        This mirrors ``client.tasks.push()``, so the revision-id contract is
-        unchanged: pass explicit ids to pin exact dependencies, or omit them
-        to resolve each bound Environment and Verifier to its current
-        published revision in the same project, exactly like
-        ``plural task push`` does for ``task.yaml`` slugs.
-
-        Args:
-            client: Configured hosted client. Defaults to ambient configuration
-                (``PLURAL_API_KEY`` and friends) when omitted.
-            environment_revision_id: Exact hosted Environment revision to pin.
-            verifier_revision_ids: Exact hosted Verifier revisions, aligned
-                with this Task's verifiers.
-
-        Returns:
-            The hosted task revision record.
-        """
-        from plural.client import Client
-        from plural.studio import resolve_published_revision
-
-        active = client if client is not None else Client()
-        if environment_revision_id is None:
-            environment_revision_id, _ = resolve_published_revision(
-                active.environments,
-                "environment",
-                _hosted_slug(self.environment, "environment"),
-            )
-        if verifier_revision_ids is None:
-            verifier_revision_ids = [
-                resolve_published_revision(
-                    active.verifiers, "verifier", _hosted_slug(verifier, "verifier")
-                )[0]
-                for verifier in self.verifiers
-            ]
-        return active.tasks.push(
-            self.definition(),
-            environment_revision_id=environment_revision_id,
-            verifier_revision_ids=list(verifier_revision_ids),
-        )
-
-    def delete(self, client: Client | None = None) -> None:
-        """Delete this Task's hosted parent and all of its revisions.
-
-        Args:
-            client: Configured hosted client. Defaults to ambient configuration
-                when omitted.
-        """
-        from plural.client import Client
-        from plural.studio import slugify
-
-        active = client if client is not None else Client()
-        active.tasks.delete(slugify(self.name))
-
 
 class TaskDefinition(FrozenModel):
     """First-class Task revision pinned to one Environment and Verifiers."""
@@ -517,7 +449,86 @@ class TaskDefinition(FrozenModel):
         return stable_id("tsk", self)
 
 
-class BenchmarkDefinition(FrozenModel):
+RELEASE_FIELDS = (
+    "categories",
+    "scoring",
+    "tracks",
+    "default_view",
+    "purpose",
+    "success",
+    "limitations",
+    "license",
+    "forked_from",
+)
+
+
+class BenchmarkRelease(FrozenModel):
+    """What a Benchmark version declares beyond its Tasks.
+
+    Every Benchmark version is a release: its Tasks, their Environments and
+    Verifiers, and these rules are fixed once it is saved.
+
+    Attributes:
+        categories: Named groups of Tasks, scored together in results.
+        scoring: How attempts become one score per configuration.
+        tracks: Versioned conditions results are compared under.
+        default_view: Which comparison readers see first: ``"models"`` under
+            a controlled setup, or ``"agents"`` as complete systems.
+        purpose: What the Benchmark measures and who it helps.
+        success: What a successful Task attempt means.
+        limitations: What results do not show.
+        license: License for the Benchmark and its published results.
+        forked_from: Immutable reference of the release this was derived from.
+    """
+
+    categories: tuple[BenchmarkCategory, ...] = ()
+    scoring: BenchmarkScoring = Field(default_factory=BenchmarkScoring)
+    tracks: tuple[EvaluationTrack, ...] = ()
+    default_view: Literal["models", "agents"] = "agents"
+    purpose: str = ""
+    success: str = ""
+    limitations: tuple[str, ...] = ()
+    license: str = ""
+    forked_from: str | None = None
+
+    def _release_payload(self) -> dict[str, Any]:
+        """Release fields that differ from their defaults.
+
+        Leaving defaults out keeps the digest of a Benchmark saved before these
+        fields existed unchanged.
+
+        Returns:
+            Non-default release fields in JSON form.
+        """
+        payload = self.model_dump(mode="json", include=set(RELEASE_FIELDS))
+        defaults = BenchmarkRelease().model_dump(mode="json")
+        return {key: value for key, value in payload.items() if value != defaults[key]}
+
+    def _validate_release(self, name: str, limits: Sequence[tuple[str, ExecutionLimits]]) -> None:
+        validate_release_rules(
+            [task for task, _ in limits],
+            self.categories,
+            self.scoring,
+            self.tracks,
+            self.default_view,
+        )
+        issues = [
+            issue
+            for track in self.tracks
+            for task, limit in limits
+            for issue in check_track_limits(
+                track,
+                task,
+                max_turns=limit.max_turns,
+                max_seconds=limit.max_seconds,
+                max_cost_usd=limit.max_cost_usd,
+            )
+        ]
+        if issues:
+            raise ValueError(f"Cannot create Benchmark {name!r}.\n" + "\n".join(issues))
+
+
+class BenchmarkDefinition(BenchmarkRelease):
     """A revisioned ordered selection of Tasks across Environments."""
 
     schema_version: Literal["2"] = "2"
@@ -534,12 +545,18 @@ class BenchmarkDefinition(FrozenModel):
         identities = [task.identity for task in self.tasks]
         if len(identities) != len(set(identities)):
             raise ValueError("benchmark Task revisions must be unique")
+        self._validate_release(
+            self.name, [(task.task_id, task.environment.limits) for task in self.tasks]
+        )
         return self
 
     @property
     def content_hash(self) -> str:
         """Stable Benchmark revision digest."""
-        return self.source_hash or content_hash(self.model_dump(exclude={"source_hash"}))
+        if self.source_hash:
+            return self.source_hash
+        payload = self.model_dump(exclude={"source_hash", *RELEASE_FIELDS})
+        return content_hash({**payload, **self._release_payload()})
 
     @property
     def benchmark_id(self) -> str:
@@ -583,8 +600,12 @@ class BenchmarkDiff(FrozenModel):
         )
 
 
-class Benchmark(FrozenModel):
-    """A semantic version that pins an ordered set of Tasks."""
+class Benchmark(BenchmarkRelease):
+    """A semantic version that pins an ordered set of Tasks.
+
+    Each version is a release. Beyond its Tasks it may declare categories,
+    scoring rules, and evaluation tracks; see :class:`BenchmarkRelease`.
+    """
 
     name: str = Field(min_length=1)
     version: str
@@ -599,6 +620,12 @@ class Benchmark(FrozenModel):
         names = [task.name for task in self.tasks]
         if len(names) != len(set(names)):
             raise ValueError("benchmark Task names must be unique")
+        self._validate_release(
+            self.name,
+            [(task.name, task._environment_definition().limits) for task in self.tasks]
+            if self.tracks
+            else [(name, ExecutionLimits()) for name in names],
+        )
         return self
 
     @property
@@ -620,6 +647,7 @@ class Benchmark(FrozenModel):
                 "primary_metric": self.primary_metric,
                 "description": self.description,
                 "metadata": self.metadata,
+                **self._release_payload(),
             }
         )
 
@@ -641,11 +669,20 @@ class Benchmark(FrozenModel):
         )
         shared_before = [pin.name for pin in self.task_pins if pin.name in after]
         shared_after = [pin.name for pin in other.task_pins if pin.name in before]
+        before_release = self.model_dump(mode="json", include=set(RELEASE_FIELDS))
+        after_release = other.model_dump(mode="json", include=set(RELEASE_FIELDS))
         configuration_changes = {
             field: (getattr(self, field), getattr(other, field))
             for field in ("primary_metric", "description", "metadata")
             if getattr(self, field) != getattr(other, field)
         }
+        configuration_changes.update(
+            {
+                field: (before_release[field], after_release[field])
+                for field in RELEASE_FIELDS
+                if before_release[field] != after_release[field]
+            }
+        )
         return BenchmarkDiff(
             added=tuple(sorted(added, key=lambda pin: pin.name)),
             removed=tuple(sorted(removed, key=lambda pin: pin.name)),
@@ -682,6 +719,7 @@ class Benchmark(FrozenModel):
                 "primary_metric": self.primary_metric,
                 "description": self.description,
                 "metadata": self.metadata,
+                **self._release_payload(),
                 "task_pins": [pin.model_dump(mode="json") for pin in self.task_pins],
                 "content_hash": self.content_hash,
             },
@@ -708,12 +746,15 @@ class Benchmark(FrozenModel):
             primary_metric=self.primary_metric,
             description=self.description,
             metadata=self.metadata,
+            **{field: getattr(self, field) for field in RELEASE_FIELDS},
         )
 
 
 __all__ = [
+    "RELEASE_FIELDS",
     "Benchmark",
     "BenchmarkDefinition",
+    "BenchmarkRelease",
     "BenchmarkDiff",
     "Task",
     "TaskDefinition",

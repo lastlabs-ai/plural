@@ -33,7 +33,7 @@ These three parts describe the interaction:
 - **State** holds internal data, including the expected answer and changes made during the run.
 - **Observation** contains the information you choose to show the agent.
 
-Plural keeps State out of its agent-facing payloads. Your actions must preserve that separation: return an Observation or selected fields, rather than the full State. A Verifier can read the final State to check the result. This separation controls what Plural shows the model; use Runtime isolation when running untrusted code.
+After each action, the agent sees the Environment's current `self.observation` and nothing else. An action's return value is passed to reward signals but is never shown to the agent, so update `self.observation` with what the agent should see, and never copy State into it. A Verifier can read the final State to check the result. This separation controls what Plural shows the model; use Runtime isolation when running untrusted code.
 
 ## Define the Environment
 
@@ -88,9 +88,53 @@ environment = TicketTriage(runtime=Runtime.local())
 
 `runtime` is a required Environment parameter. It selects where the Environment and agent run. This example uses your machine for trusted development.
 
-The Job calls `reset` to start each run and invokes the actions the agent selects. Only agent-facing methods use `@action`; `reset` and `step` are lifecycle methods. Typed action parameters tell the model which inputs each action accepts. Clear docstrings and validation errors help it use them correctly.
+The Job calls `reset` to start each run and invokes the actions the agent selects. Only agent-facing methods use `@action`; `reset` and `step` are lifecycle methods. Typed action parameters tell the model which inputs each action accepts. Clear docstrings help it use them correctly. When an action raises `ValueError`, the agent sees the message and the episode continues, so it can correct its input.
 
 The directory containing the class is its source package. Keep the code and data it needs there, and keep credentials, caches, and generated results elsewhere. Plural records the source hash and copies the package into the Runtime.
+
+## Save the Environment in a project
+
+In a project, an Environment is a directory under `environments/` named after it. Create one from the standard template:
+
+```bash
+plural env init ticket-triage
+```
+
+```text
+environments/ticket-triage/
+├── environment.yaml
+├── environment.py
+└── README.md
+```
+
+Create a `resources/` directory beside them when the Environment needs data files. The class lives in `environment.py`, and the directory is its source package. `environment.yaml` holds everything else: identity, resources, Runtime, and settings. This is the manifest from the [first project](../tutorials/first-project.md):
+
+```yaml
+name: support-queue
+version: 1.0.0
+description: A customer support queue with one open ticket per Task.
+overview: Inspect a customer ticket, categorize it, draft a reply, and resolve it.
+python: environment.py:SupportQueue
+readme: README.md
+resources:
+  - resources/policy.md
+runtime:
+  provider: local
+harness_policy:
+  mode: allow_all
+limits:
+  max_turns: 6
+  max_seconds: 120
+```
+
+- `name` must match the directory name. Identity comes from the manifest, so the class does not need `name` or `overview` attributes.
+- `python` names the Environment subclass as `file.py:Class`.
+- `readme` points to `README.md`, which explains the actions, State, Observation, rewards, and settings to people who use the Environment.
+- `resources` lists files to stage, relative to the directory. A path is the [short form](#the-short-form); a mapping takes the same fields as `Resource`.
+- `runtime` selects a preset with `provider` (`docker`, `local`, or `daytona`); the other keys are that preset's arguments, such as `image` or `cpus`. The template uses `docker` with the `python:3.12-slim` image.
+- `harness_policy`, `limits`, `secrets`, `guardrails`, and `metadata` take the same values as the Environment arguments of those names.
+
+Every path must stay inside the Environment directory. Check the Environment with `plural env validate ticket-triage`, and save it to your hosted project with `plural env push ticket-triage`. A push is an immutable revision that stays private to the project. It refuses files that look like credentials and paths that escape the directory; list other files to leave out in a `.pluralignore` file in the Environment directory. Credentials are never stored in the project. Supply them when the Job runs, as described in [Runtime variables and secrets](#runtime-variables-and-secrets).
 
 ## How an episode ends
 
@@ -102,7 +146,7 @@ observation, reward, terminated, truncated, info = environment.step("categorize"
 
 The agent only ever sees the observation. The remaining values describe the transition, and Plural records them on the episode rather than showing them to the model, so a reward or a terminal flag never leaks into the model's context.
 
-An episode can stop for three reasons, and each records a different `stop_reason` on the Trial:
+An episode can stop for three reasons, and each records a different `stop_reason` on the Trial. The full set of values is `plural.STOP_REASONS`:
 
 - **The Environment ends it.** Override `terminated()` when the world reaches a Task success or failure state, as the example above does when the ticket is categorized. Override `truncated()` when the episode cannot usefully continue but reached neither outcome. Both default to `False`, so an Environment that never overrides them leaves the stop decision entirely to the agent and the budget.
 - **The agent ends it.** Plural adds a `finish` tool alongside your actions, and the agent calls it when the work is done or when it cannot make progress. Its optional `summary` becomes the Trial's response. Declare an `@action` named `finish` if you would rather handle that yourself.
@@ -146,7 +190,7 @@ The `reward` returned by `step` is the weighted total of `reward()` and every re
 
 The example above always uses the same ticket. For a useful benchmark, reuse the Environment with different case data. Each [Task](tasks.md) supplies instructions, selects its case, and attaches one or more [Verifiers](verifiers.md).
 
-Use `reset` to load the selected case and clear previous progress. Task `info` is public, so it can hold a ticket ID but should not hold the answer key. `initial_state` supplies schema-checked setup data; your reset implementation must preserve any fields it needs. Mark those State fields with `initial()`, and pass constraints such as `min_length=5` or `pattern=r"^[a-z]{5}$"` when a Task's value must match a rule. Unmarked fields, such as `done` or a running guess list, belong to the episode and a Task cannot set them. `State.seed` is settable. `State.metadata` is not. Task `reset_options` are stored, but package Jobs do not currently forward them to `reset`.
+Use `reset` to load the selected case and clear previous progress. Task `info` is public, so it can hold a ticket ID but should not hold the answer key. `initial_state` supplies schema-checked setup data; your reset implementation must preserve any fields it needs. Mark those State fields with `initial()`, and pass constraints such as `min_length=5` or `pattern=r"^[a-z]{5}$"` when a Task's value must match a rule. Unmarked fields, such as `done` or a running guess list, belong to the episode and a Task cannot set them. `State.seed` is settable. `State.metadata` is not. Plural stores a Task's `reset_options` but does not yet pass them to `reset`, so load case data through `initial_state` instead.
 
 The [support queue tutorial](../tutorials/support-queue.md) shows how the Environment loads the Task's ticket and scores the completed workflow.
 
@@ -265,7 +309,8 @@ policy = Resource("policies/refunds.md")
 ```
 
 That is `kind="file"`, `delivery="source"`, with the name defaulting to the
-path. Pass `resources=[policy]` when creating the Environment.
+path. Pass `resources=[policy]` when creating the Environment. In
+`environment.yaml`, list the same path under `resources`.
 
 ### Saved text and configuration
 
@@ -327,9 +372,9 @@ def load_ticket(resource: Resource) -> bytes:
 job = Job(task, agents=[agent], resource_resolvers={"support-ticket": load_ticket})
 ```
 
-Resolvers run in the Job process before the Agent starts. They receive the resource declaration and return bytes. Plural rejects missing resolvers or mismatched hashes. Register implementations in the process running the Job; saving a resolver name in the UI does not install it on a hosted worker. A URI alone is never fetched automatically.
+Resolvers run in the Job process before the Agent starts. They receive the resource declaration and return bytes. Plural rejects missing resolvers or mismatched hashes. Register implementations in the process running the Job; naming a resolver in a manifest or in the web app does not install it for hosted runs. A URI alone is never fetched automatically.
 
-Existing resources without a delivery setting use `descriptor`: they remain references and do not stage files. Existing Environment code can continue to load them itself.
+A `Resource` declared with explicit fields and no `delivery` is a `descriptor`: Plural records the reference but stages no file, and your Environment code must load the data itself.
 
 ## Runtime variables and secrets
 
@@ -361,9 +406,9 @@ job = Job(task, agents=[agent], environ={
 
 Required declarations must have a nonempty value. Supported formats are `text`, `url`, `integer`, and `json`. Set `required=False` for optional inputs. Values are injected into Environment reset and action commands; declarations never contain values. The Harness shares the runtime and can access these variables, so use trusted Harness code.
 
-Existing `Secret` references are also injected according to their `environment`, `harness`, or `verifier` target. Environment secret references as metadata declare names and targets only; values are supplied when the Job runs and are never stored on the Environment. Verifier credentials are supplied to the scoring process. Managed stdout and stderr redact declared secrets; Environment code must avoid writing credentials into observations or custom artifacts.
+`Secret` references are also injected according to their `environment`, `harness`, or `verifier` target. Environment secret references as metadata declare names and targets only; values are supplied when the Job runs and are never stored on the Environment. Verifier credentials are supplied to the scoring process. Managed stdout and stderr redact declared secrets; Environment code must avoid writing credentials into observations or custom artifacts.
 
-Docker and Daytona connection credentials configure the run worker, separately from these Task variables. The UI shows the saved provider configuration; availability and capability checks happen when a run starts. Authenticate model calls through the Job's `client` or `api_key` parameter.
+Docker and Daytona connection credentials configure the machine that runs the Job, separately from these Task variables. Plural checks that the provider is available and supports the requested controls when a run starts. Authenticate model calls through the Job's `client` or `api_key` parameter. `plural run` needs an API key for model calls: a Plural API key stored with `plural auth login --api-key-stdin`, or an exported `PLURAL_API_KEY` or `OPENAI_API_KEY`. A browser login alone is not accepted for model calls.
 
 ## Optional components
 

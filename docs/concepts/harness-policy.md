@@ -13,39 +13,39 @@ the loop that decides what to do. It belongs to the **Agent**, not the
 Environment.
 
 An **Environment** is the world. Native actions are what the Agent performs
-there. The Environment parses those calls and returns observations. It does
+there. The Environment runs those actions and returns observations. It does
 not wrap the model.
 
-When a Trial runs, the Agent executes inside that Task's Environment
-runtime. The Environment may forbid harness tools — for example
-`network=none` removes web search. That is a ceiling, not ownership.
+When a Trial runs, the Harness executes inside the Runtime of that Task's
+Environment. The Environment can forbid Harness tools; for example, an
+Environment with `network: no-network` removes web search. That is a ceiling,
+not ownership of the loop.
 
-## Two tool classes
+## Two kinds of tools
 
-- An Environment action is parsed and executed by the Environment. The
-  Agent always receives world actions.
-- `harness.<tool>` is parsed by the harness. Restricted or unknown harness
-  tools return `{error: "denied", reason}` and the Trial continues.
+- **Environment actions** are run by the Environment. The Agent always receives
+  them, and they cannot be denied.
+- **Harness tools**, such as web search or file editing, are run by the Harness.
+  When the Environment denies one, calling it returns an error with the reason
+  (`{"error": "denied", "reason": ...}`), and the Trial continues.
 
-Skills and instructions stay harness-owned. Soft denials are injected
-before the first turn: "`web_search` is unavailable because this
-Environment has no public internet."
+Skills and instructions stay with the Harness. Plural's native loop tells the
+model which tools are unavailable before the first turn, for example "`web_search`
+is unavailable because Environment network=none."
 
-Hard-fail only if a denied capability is **successfully performed**.
-Harness stdout still must not smuggle scores or rewards.
+Nothing a Harness writes can add a score, a reward, or new actions to the Trial.
 
 ## Built-in versus custom
 
-Omit `Agent.harness` to use Plural's native interaction loop. Set it to
-`"claude-code"`, `"codex"`, or `"hermes"` for a vendor CLI, or to one
-`Harness` subclass instance when you need a custom loop:
+Omit `harness` on the Agent to use `native`, Plural's built-in tool loop. Set it
+to `"claude-code"`, `"codex"`, or `"hermes"` for a vendor CLI, or to an instance
+of your own `Harness` subclass when you need a custom loop:
 
 ```python
 from plural import Agent, Harness, HarnessResult
 
-class ResearchHarness(Harness):
-    name = "research-loop"
 
+class ResearchHarness(Harness):
     def run(self, task, agent, environment):
         completion = agent.complete(
             [{"role": "user", "content": task.instructions}],
@@ -58,19 +58,39 @@ harness = ResearchHarness()
 agent = Agent(model="openai/gpt-5.6-luna", harness=harness)
 ```
 
-Plural locks the class directory and configuration before a Trial starts.
-Every Harness receives the same Task, Agent, and Environment interface.
+Plural records the content hash of the Harness's directory and its configuration
+before a Trial starts. Every Harness receives the same Task, Agent, and
+Environment interface. See [Harnesses](../project/harnesses.md).
 
-## How a grant is computed
+## How the Environment limits a Harness
 
-`resolve_trial_harness_grant(environment, agent)` starts from the Harness
-declared capabilities and only subtracts:
+An Environment's `harness_policy` sets which Harnesses may run and which
+capabilities they keep:
 
-1. `environment.harness_policy.denied_capabilities`
-2. The optional environment allowlist
-3. Derived network denials (`network=none` removes `web_search`, `browser`,
-   `network_fetch`, `mcp`; `restricted` removes `web_search` and `browser`)
-4. `file_edit` when `read_only_root` is set
+```yaml
+harness_policy:
+  mode: allowlist
+  allowed_harnesses: [native, support-loop]
+  denied_capabilities: [web_search]
+```
 
-`HarnessRunRequest` carries `granted_capabilities`, `denied_capabilities`,
-and `capability_denials` (`{capability, reason}`).
+- `mode: allow_all`, the default, accepts any Harness. `mode: allowlist` accepts
+  only the Harnesses named in `allowed_harnesses`; any other is refused before
+  the run starts. Include `native` to allow Plural's built-in loop.
+- `denied_capabilities` removes the listed capabilities.
+- `allowed_capabilities`, when set, removes every capability not listed.
+
+Plural starts from the capabilities the Harness declares and only ever removes
+some. On top of the policy above, it removes:
+
+- `web_search`, `browser`, `network_fetch`, and `mcp` when the Runtime's network
+  is `no-network`;
+- `web_search` and `browser` when the network is `allowlist`;
+- `file_edit` when the Runtime has a read-only root.
+
+The capabilities are `shell`, `file_read`, `file_edit`, `code_execution`,
+`web_search`, `browser`, `network_fetch`, `mcp`, `subagents`, and `persistence`.
+Each Trial's receipt records the capabilities that were declared, granted, and
+denied, with the reason for each denial. Capability declarations describe the
+Harness; only the Runtime isolates code, so use Docker or a remote Runtime for a
+Harness you do not trust.

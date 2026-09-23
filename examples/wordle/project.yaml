@@ -1,0 +1,4 @@
+# Plural project identity. Resources live in the directories beside this file.
+schema_version: 1
+name: wordle
+description: Guess a hidden five-letter word in six tries.

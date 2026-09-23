@@ -9,11 +9,11 @@ nav_group: Interfaces
 ---
 # Python SDK guide
 
-Use the Python SDK to compose an Environment, Tasks, Verifiers, and Agents into a Job. You can run the Job directly or export it to YAML for the CLI.
+Use the Python SDK to compose an Environment, Tasks, Verifiers, and Agents into a Job, or to load the resources of a project and run them the way `plural run` does.
 
 ## Build a Job
 
-The following example assumes you have created the support queue `environment` from the [tutorial](../tutorials/support-queue.md). Save this code in a Python file so Plural can load the Verifier function. Configure authentication with `plural auth login` before a live run.
+The following example assumes you have created the support queue `environment` from the [tutorial](../tutorials/support-queue.md). Save this code in a Python file so Plural can load the Verifier function. A live run needs an API key: store a Plural API key with `plural auth login --api-key-stdin`, or export `PLURAL_API_KEY`.
 
 ```python
 from plural import Agent, Benchmark, Client, Episode, Job, Task, VerifierOutput
@@ -43,30 +43,37 @@ job = Job(benchmark, agents=(agent,), client=Client())
 
 Environment, Agent, Harness, Verifier, and Task versions default to `0.1.0`.
 Benchmark `version` is required. Job defaults are eval mode, one attempt, and
-concurrency one.
+concurrency one. `client=Client()` authenticates the Job's model calls with your
+Plural API key; the Job still runs on this machine.
 
-To publish the task to Plural Intel instead of running it locally, see
-[Publish a Task object](../project/tasks.md#publish-a-task-object):
-`task.push()` publishes the revision, resolving the bound Environment and
-Verifier to their current published revisions.
+## Load project resources
 
-## Serialize and resolve
+In a [project](../getting-started.md#create-a-project), load resources by kind
+and name instead of constructing them:
 
 ```python
-from plural.project import dump, load
+from plural import Job
+from plural.project import Project, Workspace
 
-dump(job, "job.yaml")
-restored = load("job.yaml")
-assert restored.content_hash == job.content_hash
-assert restored.plan == job.plan
+workspace = Workspace(Project.find())
+task = workspace.get("task", "ticket-1")
+agent = workspace.get("agent", "careful")
+result = Job(task, agents=[agent]).run()
 ```
 
-`Resolver` also loads `path.py:object` references and nested relative YAML
-references. Use `CatalogContext` when adding project model entries:
+`workspace.get` accepts a kind name or its CLI noun, such as `"env"`, and
+returns the validated SDK object after loading everything it depends on. An
+invalid resource raises `ProjectError` with every problem listed. The Job runs
+locally and plans the same Trials as `plural run --task ticket-1 --agent
+careful`, but it is not recorded under `.plural/jobs/`. See
+[YAML and serialization](../interfaces/yaml.md) for the manifest format.
+
+Use `CatalogContext` when adding project model entries:
 
 ```python
 from plural import CatalogContext, ModelCatalog, ModelSpec
 from plural.catalog import ModelEndpoint
+from plural.project import Project, Workspace
 
 context = CatalogContext(
     ModelCatalog(
@@ -84,13 +91,17 @@ context = CatalogContext(
     )
 )
 agent = context.agent(model="project/support-model", provider="project-gateway")
-restored = context.resolver(".").load("job.yaml")
+workspace = Workspace(Project.find(), catalog=context.catalog)
 ```
 
+Passing `catalog` to `Workspace` validates the project's Agents and Verifiers
+against the same entries.
+
 The project endpoint must be reachable through `OPENAI_BASE_URL` or
-`PLURAL_GATEWAY_URL` and accept OpenAI-compatible chat completions. `Client`
-provider adapters are separate from Job native execution; Job does not call
-Anthropic, Google, Bedrock, or Azure native APIs directly.
+`PLURAL_GATEWAY_URL` and accept OpenAI-compatible chat completions. A Job sends
+every model call through that OpenAI-compatible endpoint. It does not call the
+Anthropic, Google, Bedrock, or Azure APIs directly, even though `Client` has
+adapters for them; see [Providers and integrations](../reference/integrations.md).
 
 ## Plan and run
 
@@ -101,8 +112,9 @@ for trial in result.trials:
     print(trial.status, trial.score, trial.receipt.artifact_hashes)
 ```
 
-In async code, use `await job.run_async()`. Pass `resume=True` only for the same
-locked Job. Customize execution with `attempts`, `concurrency`,
+In async code, use `await job.run_async()`. `job.run(resume=True)` continues an
+interrupted run of the same Job and refuses when any planned input has changed.
+Customize execution with `attempts`, `concurrency`,
 `per_runtime_concurrency`, `RetryPolicy`, provider mappings, `JobStore`,
 progress callbacks, project policy, and catalog.
 
@@ -118,15 +130,24 @@ for event in store.events(job.plan.job_id):
     print(event.sequence, event.status)
 ```
 
-The supported local review interface is the CLI and currently accepts one
-criterion score. It does not expose full contracted evidence or
-multi-criterion submission; see [Reviews](../running/reviews.md).
+`JobStore()` reads `.plural/jobs` relative to the current directory. From the
+project root, that is where `plural run` records local Jobs. Review local Trials
+with the CLI: `plural review list` and
+`plural review submit`, with one `--score criterion=value` per criterion.
+`plural review list` does not expose the full contracted evidence view; see
+[Reviews](../running/reviews.md).
 
-## Publish a new revision
+## Save a new revision
 
-SDK values are frozen. Edit source, construct a new object with a new semantic
-version, validate it, and repin dependents. Hosted `Client.create`,
-`Client.update`, and `Client.push` publish canonical revisions through the
-service; they do not make an existing published revision mutable.
+SDK values are frozen. Edit the source, construct a new object with a new
+version, validate it, and update the resources that depend on it. To save project resources to your
+hosted project, use `plural <kind> push <name> --with-deps`, which pushes
+dependencies first and records each revision in `plural.lock`. `Client.push`
+saves one object as an immutable, private revision; an object that references
+others needs their hosted revision ids, such as a Task's
+`environment_revision_id` and `verifier_revision_ids`. A saved revision is available in its project
+immediately and never changes afterwards. See
+[Updating and versioning](../project/updating.md).
 
-Constructor fields and method signatures follow the objects shown in this guide.
+Every exported class and function, with its fields and signature, is listed in
+the [API reference](../reference/api.md).

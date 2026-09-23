@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import respx
 
-from plural import Client
+from plural import Agent, Client, Environment, Runtime, Task
 from plural.agents import AgentBinding, AgentDefinition
 from plural.environments.definition import EnvironmentDefinition
 from plural.jobs import BenchmarkJobSource, JobSpec
@@ -77,7 +77,7 @@ def test_upload_trace_tito_uses_canonical_binary_route(tmp_path: Path) -> None:
 
 
 @respx.mock
-def test_publish_environment_parent_and_revision(tmp_path: Path) -> None:
+def test_push_environment_parent_and_revision(tmp_path: Path) -> None:
     respx.get(f"{BASE}/environments/world").mock(
         return_value=httpx.Response(404, json={"detail": "Not found"})
     )
@@ -99,14 +99,13 @@ def test_publish_environment_parent_and_revision(tmp_path: Path) -> None:
 
 
 @respx.mock
-def test_publish_task_and_agent_revision_references(tmp_path: Path) -> None:
+def test_push_task_and_agent_revision_references(tmp_path: Path) -> None:
     client = _client(tmp_path)
-    verifier = DeterministicVerifier(name="correct", command=("python", "verify.py"))
-    task = TaskDefinition(
-        task_id="case-1",
+    task = Task(
+        name="case-1",
         instructions="Solve it.",
-        environment=EnvironmentDefinition(name="World"),
-        verifiers=(WeightedVerifier(verifier=verifier, weight=2),),
+        environment=Environment(name="World", runtime=Runtime.docker()),
+        verifiers=[DeterministicVerifier(name="correct", check="python verify.py")],
     )
     for collection, slug, parent_id in (
         ("tasks", "case-1", "task_1"),
@@ -121,28 +120,26 @@ def test_publish_task_and_agent_revision_references(tmp_path: Path) -> None:
     agent_route = respx.post(f"{BASE}/agents/agent_1/revisions").mock(
         return_value=httpx.Response(200, json={"id": "agent_rev_1"})
     )
-    publish_route = respx.post(f"{BASE}/agents/agent_1/revisions/agent_rev_1/publish").mock(
-        return_value=httpx.Response(200, json={"id": "agent_rev_1", "published": True})
-    )
     client.tasks.push(
         task,
         environment_revision_id="env_rev_1",
         verifier_revision_ids=["verifier_rev_1"],
     )
-    client.agents.push(AgentDefinition(name="candidate", model="test/model"))
-    client.agents.publish_revision("agent_1", "agent_rev_1")
+    client.agents.push(Agent(name="candidate", model="openai/gpt-5.6-luna"))
     task_payload = json.loads(task_route.calls.last.request.content)
     assert task_payload["environment_revision_id"] == "env_rev_1"
-    assert task_payload["verifiers"] == [{"verifier_revision_id": "verifier_rev_1", "weight": 2.0}]
+    assert task_payload["verifier_revision_ids"] == ["verifier_rev_1"]
+    assert task_payload["instructions"] == "Solve it."
+    assert "environment" not in task_payload and "verifiers" not in task_payload
     agent_payload = json.loads(agent_route.calls.last.request.content)
-    assert agent_payload["model"] == "test/model"
+    assert agent_payload["model"] == "openai/gpt-5.6-luna"
     assert "environment" not in agent_payload
     assert all(
         "/agents/" in str(call.request.url)
         for call in respx.calls
         if call.request.method == "POST" and "agent" in str(call.request.url)
     )
-    assert publish_route.called
+    assert not hasattr(client.agents, "publish_revision")
 
 
 @respx.mock

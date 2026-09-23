@@ -1,0 +1,8 @@
+# Harness: the loop that connects an Agent to an Environment. This one calls no
+# model: it guesses the configured words in order, so the project runs offline.
+name: word-list
+version: 0.1.0
+description: Guess a fixed word list in order, without a model.
+python: harness.py:WordListHarness
+config:
+  words: [crane, slate, audio, point, heart]

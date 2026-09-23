@@ -138,6 +138,8 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "src/plural/cli/**" = ["B008", "DOC201"]
+# Scaffold text: each PLURAL-TODO line is reported whole as a validation message.
+"src/plural/project/templates.py" = ["E501"]
 "src/plural/sandbox/**" = ["D", "DOC"]
 "src/plural/harness/**" = ["D", "DOC"]
 "src/plural/execution/**" = ["D", "DOC"]

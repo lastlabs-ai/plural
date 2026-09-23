@@ -1,0 +1,6 @@
+# Verifier: scores a finished episode. Its score is what Tasks and Benchmarks rank on.
+name: solved
+version: 0.1.0
+kind: deterministic
+check: verify.py:verify
+weight: 1

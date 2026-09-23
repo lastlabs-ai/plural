@@ -247,9 +247,9 @@ class Client:
             api_key = os.environ.get("PLURAL_API_KEY") or os.environ.get("ENROUTE_API_KEY")
             if not api_key:
                 try:
-                    from plural.cli.config import default_credential_store, resolve_context
+                    from plural.auth import resolve_session
 
-                    api_key = resolve_context(credentials=default_credential_store()).api_key
+                    api_key = resolve_session().api_key
                 except (OSError, ValueError):
                     api_key = None
         provider_map = self._build_providers(
@@ -270,7 +270,7 @@ class Client:
         self.base_url = resolve_gateway_url(base_url)
         from plural.studio import Studio
 
-        self.studio = Studio(self)
+        self.studio = Studio.for_client(self)
         self.environments = self.studio.environments
         self.tasks = self.studio.tasks
         self.verifiers = self.studio.verifiers
@@ -311,48 +311,25 @@ class Client:
         """
         return all(_provider_is_authenticated(provider) for provider in self._providers.values())
 
-    def create(self, obj: Any, **kwargs: Any) -> dict[str, Any]:
-        """Publish a canonical revision or ingest a Trace.
-
-        Args:
-            obj: Canonical Environment, Task, Verifier, Agent, Harness,
-                Benchmark revision, or Trace.
-            **kwargs: Required hosted revision references for graph edges.
-
-        Returns:
-            The hosted record created by the studio API.
-        """
-        from plural.studio import create_object
-
-        return create_object(self, obj, **kwargs)
-
-    def update(self, obj: Any, **kwargs: Any) -> dict[str, Any]:
-        """Publish a new immutable canonical revision.
-
-        Args:
-            obj: Canonical revision or Trace.
-            **kwargs: Required hosted revision references for graph edges.
-
-        Returns:
-            The hosted record updated by the studio API.
-        """
-        from plural.studio import update_object
-
-        return update_object(self, obj, **kwargs)
-
     def push(self, obj: Any, **kwargs: Any) -> dict[str, Any]:
-        """Publish a canonical revision, creating its parent by slug.
+        """Push one immutable revision, creating its parent by slug.
+
+        The revision is usable as soon as it is saved and stays private to
+        the project. Pushing identical content again returns the same
+        revision. To push a project directory with its dependencies, use
+        ``plural <kind> push`` or :func:`plural.project.sync.push`.
 
         Args:
-            obj: Canonical revision or Trace.
-            **kwargs: Required hosted revision references for graph edges.
+            obj: Environment, Task, Verifier, Agent, Harness, Benchmark, or Trace.
+            **kwargs: Hosted revision ids for graph edges, such as a Task's
+                ``environment_revision_id`` and ``verifier_revision_ids``.
 
         Returns:
-            The hosted record created or updated by the studio API.
+            The hosted revision record.
         """
         from plural.studio import push_object
 
-        return push_object(self, obj, **kwargs)
+        return push_object(self.studio, obj, **kwargs)
 
     def _build_providers(
         self,

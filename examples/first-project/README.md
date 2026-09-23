@@ -1,33 +1,56 @@
-# First Plural project
+# support-queue
 
-This support-ticket example uses Plural's typed Environment API, native model
-loop, deterministic evidence, two Agents, and a three-Task Benchmark.
+A complete Plural project in the standard layout: one Environment, three Tasks, one
+Verifier, a Benchmark, two model Agents, and a scripted Agent that needs no model.
 
-From an environment with the current Plural checkout installed:
-
-```bash
-python build.py
-plural run job.yaml --dry-run
+```
+environments/support-queue/   environment.yaml, environment.py, README.md, resources/policy.md
+tasks/ticket-{1,2,3}/         task.yaml, instruction.md
+verifiers/correct-category/   verifier.yaml, verify.py
+harnesses/scripted-triage/    harness.yaml, harness.py
+agents/careful/               agent.yaml   (model, native harness)
+agents/concise/               agent.yaml   (model, native harness)
+agents/scripted/              agent.yaml   (keyword harness, no model call)
+benchmarks/support-triage/    benchmark.yaml, README.md
 ```
 
-To execute, configure `OPENAI_API_KEY`, then run one Job:
+## Run it offline
+
+The `scripted` Agent follows keyword rules instead of calling a model, so this works
+without an account or API key:
 
 ```bash
-plural run job.yaml
+plural benchmark validate support-triage
+plural run --benchmark support-triage --agent scripted
+plural job list
+plural trial show <trial-id>
+plural job rerun <job-id>
 ```
 
-Or compare both Agents with bounded concurrency:
+Every run is a new Job under `.plural/jobs/`, with the exact inputs recorded. A rerun
+uses those pinned inputs, not your current files.
+
+## Run it with a model
+
+These call a model and can incur charges:
 
 ```bash
-plural run benchmark.yaml \
-  --agent agents/careful.yaml \
-  --agent agents/concise.yaml \
-  --concurrency 2
+export OPENAI_API_KEY=...                # or: plural auth login
+plural run --task ticket-1 --model openai/gpt-5.6-luna
+plural run --benchmark support-triage --agent careful
 ```
 
-These commands call a model and can incur charges. Local orchestration does not
-mean no network. This starter intentionally uses the unsafe local Runtime for
-easy inspection.
+`--model` without `--harness` uses `native`, Plural's built-in tool loop.
 
-The complete explanation is in `docs/tutorials/support-queue.md`. `build.py`
-rewrites generated YAML; edit the Python source for reproducible changes.
+## Push it to Plural
+
+```bash
+plural auth login
+plural project init support-queue --push       # creates a private hosted project
+plural benchmark push support-triage --with-deps
+plural agent push scripted --with-deps
+plural run --benchmark support-triage --agent scripted --hosted
+```
+
+Pushing never makes anything public. The `local` runtime is a trusted subprocess, not
+a sandbox; switch `runtime.provider` to `docker` for code you do not trust.

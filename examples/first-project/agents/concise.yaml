@@ -1,9 +1,0 @@
-kind: agent
-model: openai/gpt-5.6-luna
-name: concise
-version: 0.1.0
-instructions: Complete the task using the available actions. Be concise.
-fallback_models: []
-auth_mode: environment
-secret_names: []
-metadata: {}

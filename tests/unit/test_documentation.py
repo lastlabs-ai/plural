@@ -2,22 +2,32 @@
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from plural import Job
-from plural.harness.retrieval import tree_digest
-from plural.project import Resolver
+from plural.project import Project, Workspace
+from plural.project.runs import RunRequest, plan_run
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(sys.executable).with_name("plural")
+TUTORIALS = {
+    "first-project": ("support-triage", "scripted"),
+    "wordle": ("wordle", "word-list"),
+}
 
 
-def _run(*command: str, cwd: Path = ROOT) -> str:
+def _run(*command: str, cwd: Path = ROOT, env: dict[str, str] | None = None) -> str:
     result = subprocess.run(
         command,
         cwd=cwd,
+        env=env,
         text=True,
         capture_output=True,
         check=False,
@@ -26,44 +36,79 @@ def _run(*command: str, cwd: Path = ROOT) -> str:
     return result.stdout
 
 
+@pytest.fixture
+def isolated(tmp_path: Path) -> dict[str, str]:
+    """An environment with no stored login and no model credentials."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("PLURAL_", "OPENAI_", "ANTHROPIC_"))
+    }
+    env["PLURAL_CONFIG_HOME"] = str(tmp_path / "config")
+    return env
+
+
 def test_canonical_docs_metadata_links_nav_terms_and_snippets() -> None:
     """Keep the authored docs contract aligned with navigation and public APIs."""
     output = _run(sys.executable, "scripts/check_docs.py")
     assert "internal links are valid" in output
 
 
-def test_tutorial_python_files_compile_and_dry_run() -> None:
-    """Compile both tutorials and resolve their documented Python/YAML Jobs."""
-    for directory in ("first-project", "wordle"):
-        root = ROOT / "examples" / directory
-        for path in sorted(root.rglob("*.py")):
-            compile(path.read_text(encoding="utf-8"), str(path), "exec")
+@pytest.mark.parametrize("directory", sorted(TUTORIALS))
+def test_tutorial_projects_validate_and_dry_run(directory: str, isolated: dict[str, str]) -> None:
+    root = ROOT / "examples" / directory
+    benchmark, agent = TUTORIALS[directory]
+    for path in sorted(root.rglob("*.py")):
+        compile(path.read_text(encoding="utf-8"), str(path), "exec")
 
-    wordle = ROOT / "examples" / "wordle"
-    for reference in ("job.py:job", "job.yaml"):
-        _run(str(CLI), "validate", reference, cwd=wordle)
-        _run(str(CLI), "run", reference, "--dry-run", cwd=wordle)
+    _run(str(CLI), "benchmark", "validate", benchmark, cwd=root, env=isolated)
+    plan = json.loads(
+        _run(
+            str(CLI),
+            "run",
+            "-b",
+            benchmark,
+            "-a",
+            agent,
+            "--dry-run",
+            "--json",
+            cwd=root,
+            env=isolated,
+        )
+    )
+    assert plan["source"] == f"benchmark/{benchmark}"
+    assert plan["location"] == "local"
+    assert plan["trials"]
+    assert not (root / ".plural").exists()
 
-    starter = ROOT / "examples" / "first-project"
-    _run(str(CLI), "validate", "job.yaml", cwd=starter)
-    _run(str(CLI), "run", "job.yaml", "--dry-run", cwd=starter)
+
+def test_wordle_runs_offline_from_the_cli(tmp_path: Path, isolated: dict[str, str]) -> None:
+    project = tmp_path / "wordle"
+    shutil.copytree(ROOT / "examples" / "wordle", project)
+    job = json.loads(
+        _run(
+            str(CLI), "run", "-b", "wordle", "-a", "word-list", "--json", cwd=project, env=isolated
+        )
+    )
+    assert job["status"] == "succeeded"
+    assert [trial["score"] for trial in job["trials"]] == [1.0, 1.0, 1.0]
+    shown = json.loads(
+        _run(str(CLI), "job", "show", job["job_id"], "--json", cwd=project, env=isolated)
+    )
+    assert shown["job_id"] == job["job_id"]
 
 
-def test_wordle_python_yaml_plan_and_materialized_source_are_identical() -> None:
-    wordle = ROOT / "examples" / "wordle"
-    resolver = Resolver(root=wordle)
-    python_job = resolver.load("job.py:job")
-    yaml_job = resolver.load("job.yaml")
-    assert isinstance(python_job, Job)
-    assert isinstance(yaml_job, Job)
-    assert python_job.content_hash == yaml_job.content_hash
-    assert python_job.plan == yaml_job.plan
+@pytest.mark.parametrize("directory", sorted(TUTORIALS))
+def test_python_sdk_and_cli_plan_the_same_job(directory: str) -> None:
+    benchmark, agent = TUTORIALS[directory]
+    workspace = Workspace(Project.find(ROOT / "examples" / directory))
 
-    python_source = python_job.source.tasks[0].environment.definition().source
-    yaml_source = yaml_job.source.tasks[0].environment.definition().source
-    assert python_source is not None
-    assert yaml_source is not None
-    assert python_source.digest == yaml_source.digest == tree_digest(wordle)
+    from_python = Job(workspace.get("benchmark", benchmark), agents=[workspace.get("agent", agent)])
+    from_cli = plan_run(workspace, RunRequest(benchmark=benchmark, agent=agent))
+
+    unnumbered = from_cli.spec.model_copy(update={"run_id": None})
+    assert unnumbered.content_hash == from_python.spec.content_hash
+    assert len(from_cli.job.plan.trials) == len(from_python.plan.trials)
 
 
 def test_audited_documentation_limits_remain_explicit() -> None:

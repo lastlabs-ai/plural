@@ -12,7 +12,7 @@ outcome: You understand what train mode requires and what a downstream trainer m
 
 When evaluation reveals a consistent weakness, use those failures to decide what training should improve. Plural reuses your Tasks, Environments, and Verifiers to collect scored training runs and evaluate the agent afterward.
 
-The package's train mode prepares learning data; it does not implement model optimization. Updating model weights, storing checkpoints, and deploying a trained model require a separate training system.
+Plural's train mode prepares learning data; it does not implement model optimization. Updating model weights, storing checkpoints, and deploying a trained model require a separate training system.
 
 ## 1. Establish a baseline
 
@@ -46,28 +46,37 @@ class ExactTokenHarness(Harness):
 
 The Harness must implement capture and return the records. Setting
 `supports_tito = True` alone does not provide that behavior; Plural writes the
-returned records to `tito.jsonl`. The support queue and Wordle examples use
+returned records to `tito.jsonl`. In train mode, a Trial whose Harness does not
+declare `supports_tito` fails with a `tito_unsupported` error, and a Trial
+whose records are missing, empty, or invalid fails with `evidence_missing` or
+`artifact_failed`. The support queue and Wordle examples use
 ordinary evaluation Harnesses and cannot run in train mode as supplied.
 
 Each `TITORecord` includes the step, tokenizer, model, exact input/output/observation token IDs, matching lengths, output text, assistant message, and aligned output log probabilities. Values must come from the actual model call. Retokenizing a saved transcript is not equivalent.
 
 ## 3. Collect one training Trial
 
-After configuring a Job with a compatible Harness and provider, validate and run it:
+Train mode is set on the Python `Job`; `plural run` always runs in eval mode. Given a Task and an Agent whose Harness captures TITO, check the plan and then run it:
 
-```bash
-plural validate training-job.yaml
-plural run training-job.yaml --mode train --dry-run
-plural run training-job.yaml --mode train
+```python
+from plural import Client, Job, JobMode
+from plural.project import Project, Workspace
+
+workspace = Workspace(Project.find())
+task = workspace.get("task", "ticket-1")
+agent = workspace.get("agent", "exact-token")
+job = Job(task, agents=[agent], mode=JobMode.TRAIN, client=Client())
+print(job.plan.trial_count)
+result = job.run()
 ```
 
-These commands assume you have created `training-job.yaml` and configured model authentication. Start with one Task and one attempt. Before increasing concurrency, inspect the token artifact, trajectory, final state, and Verifier results. Complete any pending human reviews before using the run as fully scored data.
+This assumes your project defines that Task and Agent and that a Plural API key is available, stored with `plural auth login --api-key-stdin` or set as `PLURAL_API_KEY`. Start with one Task and one attempt. Before increasing concurrency, inspect the token artifact, trajectory, final state, and Verifier results. Complete any pending human reviews before using the run as fully scored data.
 
 ## 4. Add learning signals where needed
 
 Final Verifiers measure Task success in both eval and train mode. Rewarders provide the per-step signal an algorithm needs to assign credit, such as progress toward a solution.
 
-Every Rewarder runs inside `step`, immediately after the action that changed the world, and its value is recorded on the episode in both modes. Train mode is what emits those values as a training signal. `info["rewards"]` breaks each step's total down by name, so you can see which action earned the credit. See [Rewards](../project/environments.md#rewards) for how to declare them.
+Every Rewarder runs inside `step`, immediately after the action that changed the world, and its value is recorded on the episode in both modes. Train mode also writes each step's reward as a `reward` event in the Job's progress events, which is where a trainer reads them. Rewards are credit for the trainer, never shown to the agent. `info["rewards"]` breaks each step's total down by name, so you can see which action earned the credit. See [Rewards](../project/environments.md#rewards) for how to declare them.
 
 The final Task score remains the weighted aggregate of its Verifiers. Rewards never contribute to it. Keep that evaluation metric stable as you experiment with learning signals.
 

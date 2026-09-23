@@ -1,2 +1,4 @@
-kind: harness
+name: example-harness
+version: 0.1.0
+description: Return a deterministic response without calling a model.
 python: harness.py:ExampleHarness

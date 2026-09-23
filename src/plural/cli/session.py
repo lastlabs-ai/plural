@@ -9,7 +9,8 @@ from typing import Any
 import typer
 import yaml
 
-from plural.cli.output import _client, _emit, _error
+from plural.cli.common import fail as _error
+from plural.cli.common import handled, session, signed_in
 from plural.sessions import (
     SessionSnapshot,
     export_from_parts,
@@ -17,7 +18,11 @@ from plural.sessions import (
     import_bundle,
 )
 
-session_app = typer.Typer(help="Export and redeploy portable agent sessions.")
+session_app = typer.Typer(help="Export and redeploy portable agent sessions.", no_args_is_help=True)
+
+
+def _emit(payload: dict[str, Any]) -> None:
+    typer.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
 def _load_mapping(path: Path) -> dict[str, Any]:
@@ -32,6 +37,7 @@ def _load_mapping(path: Path) -> dict[str, Any]:
 
 
 @session_app.command("export")
+@handled
 def session_export(
     trial: str | None = typer.Option(None, "--trial", help="Hosted trial id."),
     agent: Path | None = typer.Option(None, "--agent", help="Agent YAML or JSON file."),
@@ -46,8 +52,10 @@ def session_export(
 ) -> None:
     """Export a session bundle from a hosted trial or local files."""
     if trial:
-        with _client() as client:
-            snapshot = export_from_trial(client.studio, trial)
+        current = signed_in(session())
+        if current.project is None:
+            _error("Select the Trial's project first with `plural auth scope --project <name>`.")
+        snapshot = export_from_trial(current.studio(), trial)
         if name:
             snapshot = snapshot.model_copy(update={"name": name})
         path = snapshot.save(out)
@@ -67,6 +75,7 @@ def session_export(
 
 
 @session_app.command("import")
+@handled
 def session_import(
     bundle: Path = typer.Argument(help="Session bundle directory."),
     dest: Path | None = typer.Option(None, "--dest", help="Parent directory for the new instance."),

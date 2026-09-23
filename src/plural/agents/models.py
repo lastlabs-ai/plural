@@ -16,7 +16,6 @@ from plural.common import (
     RoutingSpec,
     content_hash,
     semantic_version,
-    stable_id,
 )
 from plural.harness.models import Harness, HarnessDefinition
 
@@ -222,13 +221,17 @@ class AgentDefinition(FrozenModel):
 
     @property
     def content_hash(self) -> str:
-        """Stable Agent revision digest."""
-        return content_hash(self)
+        """Stable Agent revision digest, independent of where the Harness is stored."""
+        payload = self.model_dump(mode="json", exclude={"harness_package"})
+        payload["harness_package"] = (
+            self.harness_package.content_hash if self.harness_package is not None else None
+        )
+        return content_hash(payload)
 
     @property
     def agent_id(self) -> str:
         """Stable Agent revision identifier."""
-        return stable_id("agt", self)
+        return f"agt_{self.content_hash.removeprefix('sha256:')[:24]}"
 
 
 class AgentBinding(FrozenModel):

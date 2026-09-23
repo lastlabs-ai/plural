@@ -1,23 +1,61 @@
-# Wordle
+# wordle
 
-The canonical public SDK example:
+Wordle as a Plural project in the standard layout. The Environment keeps the secret
+word on State, so the Agent only ever sees the board.
+
+```
+environments/wordle/     environment.yaml, environment.py, README.md
+tasks/{crane,slate,point}/  task.yaml, instruction.md   (one secret word each)
+verifiers/solved/        verifier.yaml, verify.py
+harnesses/word-list/     harness.yaml, harness.py       (guesses a fixed list, no model)
+agents/word-list/        agent.yaml                     (runs the word-list Harness)
+agents/luna/             agent.yaml                     (a model on the native harness)
+benchmarks/wordle/       benchmark.yaml, README.md
+run.py                   the same run from the Python SDK
+```
+
+## Run it offline
+
+The `word-list` Agent calls no model, so this needs no account or key:
 
 ```bash
-plural validate job.py:job
-plural run job.py:job --dry-run
-plural validate job.yaml
-plural run job.yaml --dry-run
+plural benchmark validate wordle
+plural run --benchmark wordle --agent word-list
+plural job show <job-id>
 ```
 
-`environment.py`, `verifier.py`, `task.py`, `benchmark.py`, `agent.py`, and
-`job.py` each create one public object. `job.yaml` is generated with:
+The same run from Python loads the same resources by name:
+
+```bash
+python run.py
+```
 
 ```python
-from plural.project import dump
-from job import job
+from plural import Job
+from plural.project import Project, Workspace
 
-dump(job, "job.yaml")
+workspace = Workspace(Project.find())
+benchmark = workspace.get("benchmark", "wordle")
+agent = workspace.get("agent", "word-list")
+result = Job(benchmark, agents=[agent]).run()
 ```
 
-`advanced.py` keeps the custom Harness, Agent/Human Verifiers, and Rewarder out
-of the beginner flow.
+## Run it with a model
+
+This calls a model and can incur charges:
+
+```bash
+plural auth login                      # or: export OPENAI_API_KEY=...
+plural run --task crane --model openai/gpt-5.6-luna
+plural run --benchmark wordle --agent luna
+```
+
+## Push it to Plural
+
+```bash
+plural project init wordle --push      # creates a private hosted project
+plural benchmark push wordle --with-deps
+plural run --benchmark wordle --agent luna --hosted
+```
+
+Pushing never makes anything public.

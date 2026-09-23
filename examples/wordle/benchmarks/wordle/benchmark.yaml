@@ -1,0 +1,19 @@
+# Benchmark: a named collection of Tasks and the rules for ranking results.
+name: wordle
+version: 1.0.0
+description: Solve Wordle puzzles from a five-word dictionary.
+purpose: >-
+  Checks that an Agent reads feedback from an Environment and uses it to narrow
+  its next action, on a problem small enough to inspect by hand.
+tasks:
+  - crane
+  - slate
+  - point
+scoring:
+  metric: Puzzles solved
+  description: Share of puzzles solved within six guesses.
+  aggregation: weighted_mean
+  score_range: [0.0, 1.0]
+  success_threshold: 1.0
+  agent_failure: zero
+  infrastructure_error: exclude

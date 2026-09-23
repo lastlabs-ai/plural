@@ -16,21 +16,22 @@ An evaluation needs a model endpoint and a place to run code. Configure these se
 
 ## Model endpoints
 
-Agents and Agent Verifiers use stable IDs from the effective `ModelCatalog`.
-Catalog endpoint rows describe model resolution; they are not transport
-adapters and do not guarantee live access.
+Agents and Agent Verifiers name models by stable IDs from a `ModelCatalog`. A
+catalog entry says which upstream model an ID resolves to; it does not by
+itself give you access to that model.
 
-Package Job native runners speak OpenAI-compatible `POST /chat/completions`.
-They send the catalog ID to `PLURAL_GATEWAY_URL`, or the resolved upstream ID
-to `OPENAI_BASE_URL` and default OpenAI. Anthropic, Google, Bedrock, and Azure
-native APIs are not directly executed by Job.
+A Job makes every model call as an OpenAI-compatible `POST /chat/completions`.
+It sends the catalog ID to `PLURAL_GATEWAY_URL`, or the resolved upstream ID to
+`OPENAI_BASE_URL` or, when neither is set, to OpenAI. Anthropic, Google, Bedrock,
+and Azure native APIs are not directly executed by Job; reach those models
+through the Plural gateway or another OpenAI-compatible endpoint.
 
 `Client` is a separate application inference API with provider adapters for
 OpenAI, Anthropic, Google, Azure, Bedrock, and OpenAI-compatible services.
 Actual access depends on credentials, endpoint configuration, region, account
 entitlements, and current provider availability.
 
-For private endpoints, create a project catalog entry using the [Agents guide](../project/agents.md#find-a-model), then verify connectivity with a small Job.
+The CLI uses the bundled catalog; `plural models list` shows it, filtered by your organization's model policy when you are signed in (see the [Agents guide](../project/agents.md#find-a-model)). Signed in, the service enforces that policy for runs, reruns, and gateway calls, whatever the local catalog says. For a private endpoint, add a catalog entry in Python as shown in the [Python SDK guide](../sdk/evaluation.md#load-project-resources), pass the catalog to `Job(..., catalog=...)` or `Workspace(project, catalog=...)`, then verify connectivity with a small Job.
 
 ## Route after evaluation
 
@@ -38,7 +39,7 @@ Use Benchmark results to choose which agent configuration should handle each kin
 
 For example, choose a model for routine support requests only after it meets your support Benchmark's quality threshold. Evaluate difficult or high-risk requests separately before choosing their route.
 
-The package does not automatically turn Job scores into a learned router. Your application selects the approved candidates and routing policy. `Client` supports model selection, ordered fallbacks, and cost or latency policies. A fallback handles a failed request; it does not judge whether a successful response is correct.
+Plural does not automatically turn Job scores into a learned router. Your application selects the approved candidates and routing policy. `Client` supports model selection, ordered fallbacks, and cost or latency policies. A fallback handles a failed request; it does not judge whether a successful response is correct.
 
 Given the model ID you selected from your evaluation and your application's messages:
 
@@ -58,7 +59,7 @@ Track the model actually used, along with quality, cost, and latency. Re-evaluat
 
 ## Built-in Runtime providers
 
-- `local`: trusted development subprocess; no isolation.
+- `local`: a trusted subprocess on your machine, not a sandbox; no isolation.
 - `docker`: local containers with the capability limits documented in
   [Runtime](../project/environments.md#runtime).
 - `daytona`: optional remote adapter installed through `plural[daytona]`.
@@ -85,7 +86,7 @@ registry = ProviderRegistry()
 registry.register(PartnerProvider())
 ```
 
-Or publish an entry point:
+Or declare an entry point:
 
 ```toml
 [project.entry-points."plural.sandbox_providers"]
@@ -98,18 +99,22 @@ forms, network policy, compute controls, stdin, persistence, compose, or
 filesystem behavior it cannot enforce. Never silently broaden network,
 filesystem, or credential access.
 
-The provider must also map to the Environment's target and fit any hosted
-project policy. Plugin discovery alone is not a partner certification.
+The provider must also support the Environment's execution target and fit any
+hosted project policy. Registering a provider does not make it available to
+hosted runs.
 
 ## Plural Intel, CI, and OpenTelemetry
 
-`plural run job.yaml` is local. `plural run job.yaml --hosted` explicitly
-synchronizes and submits to Plural Intel. Hosted support depends on backend
-revision APIs, artifact transport, source materialization, and configured
-Runtime providers.
+`plural run` is local. `plural run ... --hosted` submits to Plural Intel using
+revisions already pushed with `plural <kind> push`, and refuses to start when any
+input differs from its pushed revision. Hosted runs also need Runtime providers
+configured for the project. See
+[Push and pull resources](../guides/studio-sync.md).
 
-CI should validate and dry-run the same pinned Job, then execute only when
-credentials and costs are intentional.
+In CI, run `validate` on the resources and `plural run ... --dry-run` on the same
+inputs, then execute only when credentials and costs are intentional. Use an API
+key limited to the one project CI needs; store it with
+`plural auth login --api-key-stdin` or set `PLURAL_API_KEY`.
 
 Install `plural[otel]` to export tracing-SDK spans to an existing collector.
 OpenTelemetry is an observability sink, not the Job's artifact store or a

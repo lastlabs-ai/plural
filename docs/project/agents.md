@@ -16,13 +16,15 @@ Create an Agent for each configuration you want to compare. You can change the m
 
 ## Find a model
 
-Authenticate once using the [Getting started](../getting-started.md) setup:
+List the model IDs you may run:
 
 ```bash
-plural auth login
+plural models list
 ```
 
-Then use the Client's model catalog to see the available model IDs:
+Signed out, this shows the catalog bundled with Plural. After `plural auth login`, the hosted service returns only the models your organization permits. Organization admins can restrict models, and the service enforces that list for runs, reruns, and model calls through the gateway, so a model missing from this list will be refused.
+
+From Python, a `Client` exposes the same catalog. `Client()` needs a Plural API key, stored with `plural auth login --api-key-stdin` or set as `PLURAL_API_KEY`:
 
 ```python
 from plural import Client
@@ -32,13 +34,7 @@ for model in client.catalog.models():
     print(model.id)
 ```
 
-The catalog lists models known to your Client. Calling a model also requires credentials and an endpoint that supports it. See [Getting started](../getting-started.md) for authentication.
-
-You can browse the same catalog from the command line:
-
-```bash
-plural models list
-```
+Calling a model requires credentials and an endpoint that supports it. See [Getting started](../getting-started.md) for authentication.
 
 ## Create your Agent
 
@@ -58,9 +54,33 @@ agent = Agent(
 )
 ```
 
-This Agent uses Plural's built-in Harness. You do not need to configure a custom Harness to get started.
+This Agent has no Harness, so it uses `native`, Plural's built-in tool loop. You do not need to configure a custom Harness to get started.
 
 Task instructions describe the particular job to do. Agent instructions describe how the agent should approach its work across Tasks. Keep them clear, avoid conflicting rules, and state when to stop.
+
+### Save the Agent in a project
+
+In a project, an Agent is a directory under `agents/` named after it, holding one `agent.yaml`:
+
+```bash
+plural agent init support-assistant --model openai/gpt-5.6-luna
+```
+
+`agent.yaml` takes the same fields as `Agent`:
+
+```yaml
+name: support-assistant
+version: 0.1.0
+model: openai/gpt-5.6-luna
+instructions: >-
+  Inspect the ticket and follow its support policy. Use the available actions
+  to categorize it, draft a reply, and resolve it. Stop when the Environment
+  reports that the ticket is done.
+```
+
+`name` must match the directory name. `harness` is optional: it names a Harness in the project's `harnesses/` directory or a built-in (`hermes`, `claude-code`, or `codex`), and `harness_kwargs` sets a built-in's options. `auth_mode: none` marks an Agent whose Harness never calls a model, so it runs without credentials. Model keys and other credentials are never written in `agent.yaml`.
+
+`plural agent validate support-assistant` checks the model id, the Harness, and its options. `plural agent push support-assistant --with-deps` saves a private revision, together with a project Harness that is not hosted yet.
 
 ## Use a different Harness
 
@@ -90,7 +110,16 @@ Model authentication is supplied through the Job's Client. A custom Harness decl
 
 ## Evaluate the Agent
 
-Given a Task named `task`, run the Agent with your Client:
+From the CLI, run a saved Agent on a Task, or try a model without saving an Agent first:
+
+```bash
+plural run --task ticket-1 --agent support-assistant
+plural run --task ticket-1 --model openai/gpt-5.6-luna
+```
+
+Every run is a new Job. A local run is recorded under `.plural/jobs/`; a run with `--hosted` is recorded in the hosted project. Add `--dry-run` to see the plan without calling a model. A live local run needs an API key, a Plural key or your own `OPENAI_API_KEY`; a browser login alone is not accepted for model calls.
+
+In Python, given a Task named `task`, run the Agent with your Client:
 
 ```python
 from plural import Job
@@ -112,4 +141,4 @@ Start by changing one thing at a time:
 
 Use repeated attempts to see how consistent the results are. Inspect actions and scoring evidence as well as the final score.
 
-Leave fallback models unset when comparing individual models, so a different model does not silently complete the work. Advanced endpoint setup and application routing are covered in [Providers and integrations](../reference/integrations.md).
+Leave `fallback_models` unset when comparing individual models, so a different model does not silently complete the work. Advanced endpoint setup and application routing are covered in [Providers and integrations](../reference/integrations.md).

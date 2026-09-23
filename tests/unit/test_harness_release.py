@@ -12,7 +12,13 @@ from pydantic import ValidationError
 from plural.common import FileDeclaration, HarnessProtocol
 from plural.harness import native_runner, vendor_adapter
 from plural.harness.protocol import HarnessRunRequest
-from plural.harness.retrieval import build_archive, package_from_archive, retrieve_archive
+from plural.harness.retrieval import (
+    archive_bytes,
+    build_archive,
+    package_from_archive,
+    retrieve_archive,
+    validate_archive,
+)
 from plural.harness.runner import HarnessRunner
 from plural.sandbox import LocalProvider, NetworkMode, SandboxRequirements
 
@@ -149,6 +155,52 @@ def test_archive_rejects_traversal(tmp_path: Path) -> None:
         assert "unsafe archive path" in str(exc)
     else:
         raise AssertionError("archive traversal was extracted")
+
+
+def _tar(*members: tuple[str, bytes], link: str | None = None) -> bytes:
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w:gz") as archive:
+        for name, data in members:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+        if link:
+            info = tarfile.TarInfo(link)
+            info.type = tarfile.SYMTYPE
+            info.linkname = "/etc/passwd"
+            archive.addfile(info)
+    return payload.getvalue()
+
+
+def test_validate_archive_lists_files_without_extracting(tmp_path: Path) -> None:
+    (tmp_path / "pkg" / "resources").mkdir(parents=True)
+    (tmp_path / "pkg" / "environment.yaml").write_text("name: x\n", encoding="utf-8")
+    (tmp_path / "pkg" / "resources" / "policy.md").write_text("p\n", encoding="utf-8")
+    assert validate_archive(archive_bytes(tmp_path / "pkg")) == (
+        "environment.yaml",
+        "resources/policy.md",
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (_tar(("../escape", b"x")), "unsafe archive path"),
+        (_tar(("/abs", b"x")), "unsafe archive path"),
+        (_tar(("ok.txt", b"x"), link="link"), "unsupported archive member"),
+        (_tar(("a.txt", b"x"), ("a.txt", b"y")), "duplicate archive member"),
+        (_tar(("config/.env", b"KEY=1")), "likely credential"),
+        (_tar(("keys/server.pem", b"-----")), "likely credential"),
+        (b"not a tarball", "invalid package archive"),
+    ],
+)
+def test_validate_archive_rejects_unsafe_packages(payload: bytes, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        validate_archive(payload)
+
+
+def test_validate_archive_allows_env_example() -> None:
+    assert validate_archive(_tar((".env.example", b"KEY="))) == (".env.example",)
 
 
 def test_trajectory_path_must_be_declared_as_artifact() -> None:

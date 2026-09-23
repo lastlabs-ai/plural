@@ -1,0 +1,4 @@
+# Plural project identity. Resources live in the directories beside this file.
+schema_version: 1
+name: support-queue
+description: Triage support tickets by category, then draft a reply and resolve them.

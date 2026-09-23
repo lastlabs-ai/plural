@@ -16,7 +16,7 @@ from plural import (
     Runtime,
     Task,
 )
-from plural.cli.scaffold import load_harness
+from plural.project.resources import load_harness_directory
 from plural.verifiers import DeterministicVerifier, VerifierRuntime
 
 ROOT = Path(__file__).parent
@@ -43,7 +43,7 @@ def build_job(
     Returns:
         A planned Job ready for local execution.
     """
-    harness = load_harness(HARNESS)
+    harness = load_harness_directory(HARNESS)
     isolated = provider != "local"
     environment = Environment(
         name="offline-example",

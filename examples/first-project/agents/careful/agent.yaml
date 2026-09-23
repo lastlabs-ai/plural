@@ -1,0 +1,6 @@
+# Agent: a model, its instructions, and an optional harness.
+# No harness means Plural's built-in tool loop (native).
+name: careful
+version: 0.1.0
+model: openai/gpt-5.6-luna
+instructions: Inspect the ticket before categorizing it. Use the Environment actions.

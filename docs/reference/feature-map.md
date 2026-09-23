@@ -14,84 +14,88 @@ names here describe the installed package, not proposed future convenience APIs.
 
 ## Getting started and authentication
 
-- Install, Python version, optional extras, API keys, BYOK, project scope,
-  gateway URLs, and SDK versus CLI credentials: [setup](../getting-started.md).
-- Device login/logout/status/whoami, profiles, org/project selection, precedence,
-  config locations, output and exit codes: [CLI configuration](../cli/index.md).
-- Local versus hosted objects and Python versus package execution:
-  [concepts](../getting-started/concepts.md).
+- Installing Plural, creating a project, signing in, and choosing a scope:
+  [Getting started](../getting-started.md).
+- `plural auth login`, `logout`, `status`, and `scope`, configuration
+  locations, output, and exit codes: [Command-line interface](../cli/index.md).
+- Local versus hosted resources, and the CLI versus the Python SDK:
+  [Concepts](../getting-started/concepts.md).
 
 ## Model calls and providers
 
-- `Client` / `Plural`, `chat`, `achat`, `stream`, `astream`, closing/flushing,
-  normalized requests/responses, errors, retries, tags, and catalog:
-  [model client](../sdk/client.md).
-- Tool fragments, structured output, reasoning, provider translations, routing
-  policies, fallback order, least-cost selection, provider preference, custom
-  policies, OpenAI, Anthropic, Google, compatible hosts, BYOK, Azure, Bedrock,
-  and migrating existing OpenRouter-style calls:
-  [providers and integrations](../reference/integrations.md).
+- `Client` / `Plural`, `chat`, `achat`, `stream`, `astream`, errors, retries,
+  and the model catalog: [Model calls](../sdk/client.md).
+- `plural models list` and the models your organization permits:
+  [Agents](../project/agents.md#find-a-model).
+- Model endpoints, OpenAI-compatible hosts, bring-your-own keys, and routing
+  after evaluation: [Providers and integrations](integrations.md).
 
-## Python environments and evaluation
+## Build a project
 
-- Typed Environment, Task, Verifier, Agent, Harness, Benchmark, and Job graphs:
-  [Python SDK guide](../sdk/evaluation.md).
-- Environment actions, typed state/observation, Rewarders, resources, secrets,
-  and runtime placement: [Environments](../project/environments.md).
-- Tasks, attempts, bounded scheduling, verification, and modes:
-  [Benchmarks](../project/benchmarks.md) and [Jobs](../running/jobs.md).
+- The project layout and every manifest: [YAML and serialization](../interfaces/yaml.md).
+- Environment actions, State, Observation, rewards, resources, secrets, and
+  Runtime: [Environments](../project/environments.md).
+- Instructions, initial State, and Task files: [Tasks](../project/tasks.md).
+- Deterministic checks, model judges, and human rubrics:
+  [Verifiers](../project/verifiers.md).
+- The native loop, the built-in Hermes, Claude Code, and Codex Harnesses, custom
+  Harness classes, and secret grants: [Harnesses](../project/harnesses.md).
+- Models, instructions, and saved Agents: [Agents](../project/agents.md).
+- Task collections, scoring rules, tracks, and releases:
+  [Benchmarks](../project/benchmarks.md).
+- Versions, content hashes, and immutability:
+  [Updating and versioning](../project/updating.md).
+
+## Run and inspect
+
+- `plural run`, dry runs, attempts, concurrency, and the Python `Job`:
+  [Jobs](../running/jobs.md).
+- Docker, Daytona, hosted runs, and reruns: [Build and run a job](../guides/jobs.md).
+- `plural job list`, `job show`, `job rerun`, `trial show`, and `trial rerun`:
+  [Trials and trajectories](../running/trials.md).
+- Receipts, artifacts, logs, and redaction:
+  [Artifacts and evidence](../running/artifacts.md).
+- `plural review list` and `review submit`: [Reviews](../running/reviews.md).
+- `plural session export` and `session import`: [Sessions](../running/sessions.md).
+- Train mode and exact token capture: [Training and RL](../running/training.md).
 
 ## Traces, datasets, and export
 
-- Record, label, read, filter, save, reload, upload, and curate new tasks:
-  [traces](../running/traces.md) and [artifacts](../running/artifacts.md).
-- `Trace`, action steps, reward events, usage, latency, and reusing evidence as
-  datasets: [traces](../running/traces.md#reuse-evidence-responsibly).
-- `Redactor`, content retention, and treating captured files according to their
-  contents: [artifacts](../running/artifacts.md).
+- Reading a recorded episode, `Trace` records from the tracing SDK, and reusing
+  evidence as data: [Traces and Trials](../running/traces.md).
+- Normalized trajectories and `normalize_trajectory`:
+  [Trials and trajectories](../running/trials.md#trajectories).
+- `Redactor`, retention, and treating captured files according to their contents:
+  [Artifacts and evidence](../running/artifacts.md).
 - OpenTelemetry export, hosted ingestion, and CI evaluations:
-  [providers and integrations](../reference/integrations.md#plural-intel-ci-and-opentelemetry).
-- Hugging Face-style records and verifier-style traces:
-  [Python SDK guide](../sdk/evaluation.md).
-
-## Package authoring and execution
-
-- Environment/harness/agent/benchmark/job creation, inspection, dry run, model
-  access, updates, and first execution: [CLI tutorial](../tutorials/cli-walkthrough.md).
-- Environment actions, artifacts, and grading:
-  [Verifiers](../project/verifiers.md).
-- `Job`, `Trial`, `JobStore`, programmatic planning, execution,
-  cancellation, resume, and reports: [Jobs](../running/jobs.md).
-- Attempts versus retries, deterministic locks, receipts, and identity:
-  [Jobs](../running/jobs.md) and [job operations](../guides/jobs.md).
-- Docker/Daytona, concurrency, runtime health, retries/resume/cancel:
-  [job operations](../guides/jobs.md).
-- Built-in Hermes, Claude Code, and Codex names, custom Harness loops, ACP,
-  immutable archives, OCI, and secret grants: [Harnesses](../project/harnesses.md).
+  [Providers and integrations](integrations.md#plural-intel-ci-and-opentelemetry).
 - Custom `SandboxProvider` implementations and registries:
-  [provider extensions](../reference/integrations.md#sandbox-provider-extensions).
+  [Sandbox provider extensions](integrations.md#sandbox-provider-extensions).
 
-## Plural Intel objects
+## Hosted projects
 
-- Publish and resolve exact Environment, Harness, Agent, Task, Verifier, and
-  cross-Environment Benchmark versions. Preserve Task-or-Benchmark Job sources,
-  Trial/TrialExecution identity, append-only events, human review state, and
-  artifact digests: [studio sync](../guides/studio-sync.md).
+- `plural project init --push`, `plural <kind> push` and `pull`, `--with-deps`,
+  `.pluralignore`, and `plural.lock`:
+  [Push and pull resources](../guides/studio-sync.md).
+- Publishing a Benchmark release to the public Hub, a separate step in the web
+  app: [Benchmark publications](../architecture/benchmark-publications.md).
 
-## Every CLI command group
+## Every CLI command
 
-The [CLI guide](../cli/evaluation.md#command-reference) includes every command
-and option, generated from the command tree.
+The [CLI guide](../cli/evaluation.md#command-reference) lists every command and
+option, generated from the command tree. Each resource kind uses the same verbs:
 
-- `init`, `validate`, `inspect`, `export`, `models`, and `benchmarks`:
-  [CLI tutorial](../tutorials/cli-walkthrough.md).
-- `job init/list/show/watch`, `trial list/watch`, and `review list/submit`:
-  [job operations](../guides/jobs.md).
-- `run REF [--agent REF...] [--mode <eval|train>]` and `schemas`:
-  [CLI overview](../cli/index.md).
+```bash
+plural <env|task|verifier|harness|agent|benchmark> init|validate|push|pull|show|list
+```
+
+`plural benchmark add` and `remove` edit a Benchmark's Task list. The other
+groups are `plural run`, `plural job`, `plural trial`, `plural review`,
+`plural models`, `plural session`, `plural project`, and `plural auth`.
 
 ## Reference and operations
 
 - [Evaluation contract](../architecture/evaluation-contract.md) for the public
-  object model, ownership, lifecycle, and SDK/YAML/CLI parity.
-- [Version migration](../migration/v1.md) for users of the earlier API.
+  object model, ownership, lifecycle, and SDK, YAML, and CLI parity.
+- [Migrate to 0.15](../migration/projects.md) for projects and commands from
+  earlier releases.

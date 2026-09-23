@@ -7,19 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.14.1] - Unreleased
+## [0.15.0] - 2026-09-23
+
+**0.15.0 break.** Plural is organized around a project directory and one command shape
+for every resource. See [Migrate to 0.15](docs/migration/projects.md) for every removed
+command and API and how to move a project.
+
+### Changed
+
+- A project is a directory with `project.yaml`, and each resource lives in its own directory under `environments/`, `tasks/`, `verifiers/`, `harnesses/`, `agents/`, or `benchmarks/`, named by that directory. Manifests refer to one another by name. Commands find the project by walking up from the current directory.
+- Every resource kind has the same commands: `plural <kind> init|validate|push|pull|show|list`. `list` labels results local or hosted and filters with `--local` or `--hosted`. `plural benchmark add|remove` edits membership locally.
+- `plural run -t <task>|-b <benchmark>` with `-m <model> [-h <harness>]` or `-a <agent>`. The default Harness is `native`. Every run is a Job, local by default, recorded under `.plural/jobs/` with the version and content hash of every input. `--hosted` runs pushed revisions only.
+- A push creates an immutable, private revision that is available immediately. Pushes are validated first, all-or-nothing, and duplicate-free; `--with-deps` pushes the dependency graph. Each revision carries a content-addressed package of its files, which `pull` restores. `pull` refuses to overwrite differing local files unless `--force`, which keeps a backup.
+- `plural auth login|logout|status|scope`. `plural auth scope` selects account or project scope after checking it with the service, keeps the organization context, and never changes what the credential may do. A push is refused when the scope and the checkout's project binding disagree.
+- `plural project init <name>` works offline. `--push` creates or connects the private hosted project and selects it.
+- `plural models list [--provider]` lists the models the organization allows.
+- The server rejects a package whose bytes do not match its digest, or that contains a file that looks like a credential or a path that escapes the archive, using the same rules as the CLI.
+- An API key limited to one project can reach only that project and cannot create projects.
+- A Verifier with the default runtime scores inside the Task Environment. A runtime that sets its own provider, image, network, resources, or timeout uses that sandbox instead.
+- Saving a version from the UI, the CLI, or the SDK makes it current. Files on disk are the working copy until they are pushed. The UI increments the last version number.
+- Missing Agent keys and vendor model credentials name the environment variables that are absent and leave their values out of the error.
 
 ### Added
 
 - `initial()` marks the State fields a Task may set before an episode, including constraints such as length and pattern. Unmarked fields stay episode progress and cannot be supplied as `initial_state`.
 - Harbor ATIF documents normalize into the same trajectory events as native traces. Reward and verifier scores stay beside the trajectory.
 - `score_from_rewards` turns a named rewarder, or the episode reward total, into a Verifier score.
+- `plural job rerun` and `plural trial rerun` run the pinned inputs again as a new Job linked to the original. A hosted rerun is refused if the model catalog would resolve the Agent's model differently.
+- `Workspace.get(kind, name)` loads a project resource from Python the way the CLI addresses it.
+- Organizations can restrict which models their members run. Runs, reruns, and gateway calls enforce the restriction.
+- `plural trial rescore` and `plural agent serve` are reserved.
 
-### Changed
+### Removed
 
-- A Verifier with the default runtime scores inside the Task Environment. A runtime that sets its own provider, image, network, resources, or timeout uses that sandbox instead.
-- Saving a version from the UI, the CLI, or the SDK makes it current. Files on disk are the working copy until they are pushed. The UI increments the last version number.
-- Missing Agent keys and vendor model credentials name the environment variables that are absent and leave their values out of the error.
+- `plural init`, `plural validate <file>`, `plural inspect`, `plural export`, `plural schemas`, `plural <kind> publish`, `plural benchmarks`, `plural job init|submit|watch`, `plural trial list|watch`, `plural review hosted-list|hosted-submit`, `plural models show`, and `plural harness schema`.
+- `job.yaml` and `job.py` projects, `plural.project.Resolver`, `plural.load`, `plural.dump`, `plural.dumps`, and the Studio `publish` methods. Revisions no longer have a published status.
+
+### Fixed
+
+- A Python-authored Job with a deterministic Verifier can resume its own store. Its stored configuration was compared with a live callable and always reported `lock_incompatible`.
+- A provider API key is never sent to the Plural gateway. The gateway URL is set only when a Plural API key is present.
 
 ## [0.14.0] - 2026-09-21
 

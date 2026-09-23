@@ -15,22 +15,24 @@ Plural starts from that world.
 
 ```mermaid
 flowchart TB
-  world[Your_Environment]
-  agentA[Agent_A]
-  agentB[Agent_B]
-  score[Verifiers]
+  world["Your Environment"]
+  agentA["Agent A"]
+  agentB["Agent B"]
+  score["Verifiers"]
   world --> agentA
   world --> agentB
   agentA --> score
   agentB --> score
 ```
 
-An **Environment** is the place an episode happens. It owns actions, State (never shown to the Agent), Observation (the only agent-visible surface), and where the Trial runs. You cannot rewrite it from the Agent side.
+An **Environment** is the place an episode happens. It owns the actions, the State (never shown to the Agent), the Observation (the only part the Agent sees), and the Runtime where it runs. Nothing on the Agent side can rewrite it.
 
-A **Task** is one piece of work in that world: instructions, public info, one pinned Environment revision, and weighted **Verifiers**. The Verifiers decide if the episode counted. They are not the Agent, and they are not the world.
+A **Task** is one piece of work in that world: instructions, the Environment it runs in, and the **Verifiers** that score it. The Verifiers decide whether the episode counted. They are not the Agent, and they are not the world.
 
-An **Agent** is a model, instructions, and an optional **Harness** that wraps the LLM. It is not bound to an Environment. The same Agent can sit a Task in a ticket world today and a Wordle board tomorrow.
+An **Agent** is a model, instructions, and an optional **Harness**, the loop that connects the model to the Environment. It is not bound to an Environment. The same Agent can work a ticket queue today and a Wordle board tomorrow.
 
-A **Job** is how you run that graph: one Task or a **Benchmark** of Tasks, one or more Agents, as many attempts as you want. Eval mode scores. Train mode can also emit Rewarders. Either way you get a **Trace** — the episode — and, if a human has to look, a **Review**.
+A **Job** is how you run that setup: one Task or a **Benchmark** of Tasks, one or more Agents, as many attempts as you want. Each Agent's attempt at a Task is a **Trial**, which keeps the trajectory, the artifacts, and the score. When a person has to judge the result, the Trial waits for a **Review**.
 
-What this unlocks: you can change the model without rewriting the world, change the score without rewriting the Agent, and keep every revision so a later run is the same experiment.
+What this unlocks: you can change the model without rewriting the world, change the score without rewriting the Agent, and pin every input so a later run is the same experiment.
+
+Next, read [Core concepts](getting-started/concepts.md) for each object in detail, then [Getting started](getting-started.md) to install Plural and run a Task.

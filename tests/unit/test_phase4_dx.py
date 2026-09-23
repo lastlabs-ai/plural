@@ -5,14 +5,16 @@ import json
 import re
 from pathlib import Path
 
-import yaml
+import pytest
+from project_fixtures import write_project
 from typer.testing import CliRunner
 
-from plural import Agent, Benchmark, Environment, Harness, Job, Runtime, Task
-from plural.catalog import ModelCatalog, ModelEndpoint, ModelSpec
+from plural import Agent, Environment, Job
+from plural.catalog import CatalogContext, ModelCatalog, ModelEndpoint, ModelSpec
 from plural.cli.main import app
-from plural.project import CatalogContext, Resolver, dump, load
-from plural.verifiers import DeterministicVerifier
+from plural.project import KINDS, ResourceRef, Workspace
+from plural.project.runs import RunRequest, plan_run
+from plural.project.templates import project_scaffold, resource_scaffold
 
 ROOT = Path(__file__).resolve().parents[2]
 STALE_PUBLIC_API = re.compile(
@@ -28,45 +30,36 @@ SERIALIZATION_INTERNAL = re.compile(
 )
 
 
-class CustomHarness(Harness):
-    name = "custom"
-    version = "1.0.0"
-
-    def run(self, task, agent, environment):
-        return {"task": task.id}
-
-
-def graph() -> tuple[Environment, DeterministicVerifier, Task, Benchmark, Agent, Job]:
-    environment = Environment(name="world", version="1.0.0", runtime=Runtime.docker())
-    verifier = DeterministicVerifier(name="done", check="python verify.py")
-    task = Task(
-        name="case",
-        instructions="Complete the case.",
-        environment=environment,
-        verifiers=[verifier],
-    )
-    benchmark = Benchmark(name="suite", version="1.0.0", tasks=[task])
-    agent = Agent(model="openai/gpt-5.6-luna")
-    return environment, verifier, task, benchmark, agent, Job(benchmark, agents=[agent])
+FIXTURE_REFS = [
+    ResourceRef("environment", "queue"),
+    ResourceRef("verifier", "resolved"),
+    ResourceRef("task", "refund"),
+    ResourceRef("harness", "scripted"),
+    ResourceRef("agent", "baseline"),
+    ResourceRef("benchmark", "basics"),
+]
 
 
-def test_every_public_concept_round_trips_with_equal_hashes(tmp_path: Path) -> None:
-    values = graph()
-    for value in values:
-        path = tmp_path / f"{type(value).__name__.lower()}.yaml"
-        dump(value, path)
-        restored = load(path)
-        assert type(restored) is type(value)
-        assert restored.content_hash == value.content_hash
-        if isinstance(value, (Environment, Task, Benchmark, Job)):
-            emitted = path.read_text(encoding="utf-8")
-            assert "schema_version" not in emitted
-            assert "revision:" not in emitted
-            assert SERIALIZATION_INTERNAL.search(emitted) is None
-    original_job = values[-1]
-    restored_job = load(tmp_path / "job.yaml")
-    assert isinstance(restored_job, Job)
-    assert restored_job.plan == original_job.plan
+def test_every_resource_loads_with_stable_hashes(tmp_path: Path) -> None:
+    project = write_project(tmp_path / "support-desk")
+    first, second = Workspace(project), Workspace(project)
+    for ref in FIXTURE_REFS:
+        loaded = first.load(ref)
+        assert loaded.content_hash.startswith("sha256:")
+        assert second.load(ref).content_hash == loaded.content_hash, ref
+        manifest = (project.resource_dir(ref) / ref.info.manifest).read_text(encoding="utf-8")
+        assert "schema_version" not in manifest
+        assert SERIALIZATION_INTERNAL.search(manifest) is None, ref
+
+
+def test_scaffolded_manifests_use_public_words_only(tmp_path: Path) -> None:
+    project_scaffold("support-desk").write(tmp_path / "support-desk")
+    for kind in KINDS:
+        scaffold = resource_scaffold(kind, "example")
+        for relative, text in scaffold.files.items():
+            if relative.endswith(".yaml"):
+                assert "schema_version" not in text
+                assert SERIALIZATION_INTERNAL.search(text) is None, (kind.name, relative)
 
 
 def test_public_docs_and_examples_do_not_regress_to_internal_authoring_api() -> None:
@@ -85,64 +78,48 @@ def test_public_docs_and_examples_do_not_regress_to_internal_authoring_api() -> 
         assert STALE_PUBLIC_API.search(source.read_text(encoding="utf-8")) is None, source
 
 
-def test_python_reference_and_environment_packaging(tmp_path: Path) -> None:
-    (tmp_path / ".pluralignore").write_text("task.yaml\n")
-    (tmp_path / "world.py").write_text(
-        "from plural import Environment, Runtime, action\n\n"
-        "class World(Environment):\n"
-        "    name = 'packaged'\n\n"
-        "    @action\n"
-        "    def answer(self, value: str) -> str:\n"
-        "        return value\n\n"
-        "world = World(runtime=Runtime.docker())\n"
-    )
-    resolver = Resolver(root=tmp_path)
-    environment = resolver.load("world.py:world")
+def test_environment_actions_run_through_the_class_reference(tmp_path: Path) -> None:
+    project = write_project(tmp_path / "support-desk")
+    directory = project.root / "environments/queue"
+    (directory / ".pluralignore").write_text("notes.txt\n")
+    space = Workspace(project)
+    environment = space.load(ResourceRef("environment", "queue")).value
     assert isinstance(environment, Environment)
     definition = environment.definition()
     assert definition.actions[0].command == (
         "python",
         "-m",
         "plural.environments.runner",
-        "world.py:World",
-        "answer",
+        "environment.py:Queue",
+        "submit",
     )
     assert definition.reset_command == (
         "python",
         "-m",
         "plural.environments.runner",
-        "world.py:World",
+        "environment.py:Queue",
         "reset",
     )
-
-    task = Task(
-        name="case",
-        instructions="Answer.",
-        environment=environment,
-        verifiers=[DeterministicVerifier(name="done", check="python verify.py")],
+    before = environment.content_hash
+    (directory / "notes.txt").write_text("scratch\n")
+    assert Workspace(project).load(ResourceRef("environment", "queue")).content_hash == before
+    (directory / "environment.py").write_text(
+        (directory / "environment.py").read_text() + "\n# edited\n"
     )
-    resolver.dump(task, "task.yaml")
-    restored = resolver.load("task.yaml")
-    assert isinstance(restored, Task)
-    assert restored.content_hash == task.content_hash
+    assert Workspace(project).load(ResourceRef("environment", "queue")).content_hash != before
 
 
-def test_advanced_job_yaml_hides_nested_harness_protocol_names(tmp_path: Path) -> None:
-    *_values, original = graph()
-    harness = CustomHarness()
-    job = Job(
-        original.source,
-        agents=[Agent(model="openai/gpt-5.6-luna", harness=harness)],
-    )
-    path = dump(job, tmp_path / "advanced-job.yaml")
-    emitted = path.read_text(encoding="utf-8")
-    assert "schema_version" not in emitted
-    assert "revision:" not in emitted
-    assert SERIALIZATION_INTERNAL.search(emitted) is None
-    restored = load(path)
-    assert isinstance(restored, Job)
-    assert restored.content_hash == job.content_hash
-    assert restored.plan == job.plan
+def test_runs_plan_the_same_graph_as_python(tmp_path: Path) -> None:
+    project = write_project(tmp_path / "support-desk")
+    space = Workspace(project)
+    benchmark = space.load(ResourceRef("benchmark", "basics")).value
+    agent = space.load(ResourceRef("agent", "baseline")).value
+    planned = plan_run(space, RunRequest(benchmark="basics", agent="baseline"))
+    direct = Job(benchmark, agents=[agent])
+    assert planned.spec.model_copy(update={"run_id": None}).content_hash == direct.content_hash
+    assert [item.task_id for item in planned.job.plan.trials] == [
+        item.task_id for item in direct.plan.trials
+    ]
 
 
 def test_custom_catalog_context_is_explicit_and_validates_provider() -> None:
@@ -161,55 +138,27 @@ def test_custom_catalog_context_is_explicit_and_validates_provider() -> None:
         raise AssertionError("custom model leaked into the bundled catalog")
 
 
-def test_cli_uses_same_graph_for_validate_inspect_export_and_dry_run(tmp_path: Path) -> None:
-    *_values, job = graph()
-    source = dump(job, tmp_path / "job.yaml")
+def test_cli_validate_reports_the_same_hash_as_the_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    project = write_project(tmp_path / "support-desk")
+    monkeypatch.chdir(project.root)
+    space = Workspace(project)
     runner = CliRunner()
-    validated = runner.invoke(app, ["validate", str(source)])
-    assert validated.exit_code == 0, validated.output
-    assert json.loads(validated.stdout)["content_hash"] == job.content_hash
+    nouns = {"environment": "env"}
+    for ref in FIXTURE_REFS:
+        result = runner.invoke(app, [nouns.get(ref.kind, ref.kind), "validate", ref.name, "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["content_hash"] == space.load(ref).content_hash
 
-    inspected = runner.invoke(app, ["inspect", str(source), "--format", "json"])
-    assert inspected.exit_code == 0, inspected.output
-    assert json.loads(inspected.stdout)["kind"] == "job"
 
-    exported = tmp_path / "exported.yaml"
-    result = runner.invoke(app, ["export", str(source), "--output", str(exported)])
+def test_models_list_offline_uses_the_bundled_catalog(
+    monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    result = CliRunner().invoke(app, ["models", "list", "--provider", "openai", "--json"])
     assert result.exit_code == 0, result.output
-    assert load(exported).content_hash == job.content_hash
-
-    planned = runner.invoke(app, ["run", str(source), "--dry-run"])
-    assert planned.exit_code == 0, planned.output
-    assert json.loads(planned.stdout)["job_id"] == job.plan.job_id
-
-    shown = runner.invoke(app, ["benchmarks", "show", str(tmp_path / "benchmark.yaml")])
-    assert shown.exit_code == 2
-    dump(job.source, tmp_path / "benchmark.yaml")
-    shown = runner.invoke(app, ["benchmarks", "show", str(tmp_path / "benchmark.yaml")])
-    assert shown.exit_code == 0, shown.output
-
-
-def test_cli_effective_catalog_models_and_errors(tmp_path: Path) -> None:
-    catalog = tmp_path / "plural.yaml"
-    catalog.write_text(
-        yaml.safe_dump(
-            {
-                "catalog": {
-                    "models": [
-                        {
-                            "id": "project/model",
-                            "endpoints": [
-                                {
-                                    "provider": "project-host",
-                                    "upstream_id": "model",
-                                }
-                            ],
-                        }
-                    ]
-                }
-            }
-        )
-    )
-    models = CliRunner().invoke(app, ["models", "show", "project/model", "--catalog", str(catalog)])
-    assert models.exit_code == 0, models.output
-    assert json.loads(models.stdout)["id"] == "project/model"
+    payload = json.loads(result.stdout)
+    assert payload["source"] == "catalog"
+    ids = [item["id"] for item in payload["models"]]
+    assert "openai/gpt-5.6-luna" in ids
+    assert all(item.startswith("openai/") for item in ids)

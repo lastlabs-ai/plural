@@ -1,11 +1,18 @@
-"""Run the same public Job used by job.yaml."""
+"""Run the Wordle Benchmark from Python, using the same resources as the CLI.
 
-from agent import agent
-from benchmark import benchmark
+Equivalent to ``plural run --benchmark wordle --agent word-list``, except the Job
+is not recorded under ``.plural/jobs``.
+"""
 
-from plural import Client, Job
+from pathlib import Path
+
+from plural import Job
+from plural.project import Project, Workspace
 
 if __name__ == "__main__":
-    job = Job(benchmark, agents=[agent], client=Client())
-    result = job.run()
-    print(f"{result.job_id}: {result.status}")
+    workspace = Workspace(Project.find(Path(__file__).parent))
+    benchmark = workspace.get("benchmark", "wordle")
+    agent = workspace.get("agent", "word-list")
+    result = Job(benchmark, agents=[agent]).run()
+    for trial in result.trials:
+        print(f"{trial.receipt.task_pin.name}: score={trial.score}")

@@ -27,10 +27,13 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HumanVerifier](#humanverifier)
 - [Agent](#agent)
 - [Benchmark](#benchmark)
+- [BenchmarkCategory](#benchmarkcategory)
+- [BenchmarkScoring](#benchmarkscoring)
 - [Capability](#capability)
 - [DeclarativeImage](#declarativeimage)
 - [Resource](#resource)
 - [Runtime](#runtime)
+- [EvaluationTrack](#evaluationtrack)
 - [ExecutionLimits](#executionlimits)
 - [ExecutionTarget](#executiontarget)
 - [FileDeclaration](#filedeclaration)
@@ -159,12 +162,46 @@ A catalog-backed model and its optional execution harness.
 
 A semantic version that pins an ordered set of Tasks.
 
+- **`categories`** — `array of BenchmarkCategory`; optional. Default: `[]`.
+- **`scoring`** — `BenchmarkScoring`; optional.
+- **`tracks`** — `array of EvaluationTrack`; optional. Default: `[]`.
+- **`default_view`** — `"models" | "agents"`; optional. Default: `"agents"`.
+- **`purpose`** — `string`; optional. Default: `""`.
+- **`success`** — `string`; optional. Default: `""`.
+- **`limitations`** — `array of string`; optional. Default: `[]`.
+- **`license`** — `string`; optional. Default: `""`.
+- **`forked_from`** — `string | null`; optional. Default: `null`.
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`version`** — `string`; required.
 - **`tasks`** — `array of Task`; required. Constraints: `{"minItems": 1}`.
 - **`primary_metric`** — `string`; optional. Default: `"score"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`metadata`** — `object`; optional.
+
+## BenchmarkCategory
+
+A named group of Tasks, scored together in results.
+
+- **`id`** — `string`; required.
+- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
+- **`description`** — `string`; optional. Default: `""`.
+- **`tasks`** — `array of string`; required. Constraints: `{"minItems": 1}`.
+- **`taxonomy`** — `string | null`; optional. Default: `null`.
+
+## BenchmarkScoring
+
+How a release turns attempts into one score per configuration.
+
+- **`metric`** — `string`; optional. Default: `"Score"`.
+- **`description`** — `string`; optional. Default: `""`.
+- **`aggregation`** — `"weighted_mean"`; optional. Default: `"weighted_mean"`.
+- **`score_range`** — `array of JSON value`; optional. Default: `[0.0, 1.0]`. Constraints: `{"maxItems": 2, "minItems": 2}`.
+- **`success_threshold`** — `number | null`; optional. Default: `1.0`.
+- **`task_weights`** — `object`; optional.
+- **`coverage_required`** — `number`; optional. Default: `1.0`. Constraints: `{"exclusiveMinimum": 0, "maximum": 1}`.
+- **`agent_failure`** — `"zero" | "exclude"`; optional. Default: `"zero"`.
+- **`infrastructure_error`** — `"exclude"`; optional. Default: `"exclude"`.
+- **`min_tasks_for_interval`** — `integer`; optional. Default: `5`. Constraints: `{"minimum": 2}`.
 
 ## Capability
 
@@ -221,6 +258,26 @@ Where an Environment runs: Docker, a trusted local process, or Daytona.
 - **`timeout_seconds`** — `number`; optional. Default: `300`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`build_timeout_sec`** — `number`; optional. Default: `600`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`allow_unsafe_local`** — `boolean`; optional. Default: `false`.
+
+## EvaluationTrack
+
+Versioned rules that make results on one track comparable.
+
+- **`id`** — `string`; required.
+- **`version`** — `string`; optional. Default: `"1.0.0"`.
+- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
+- **`kind`** — `"models" | "agents"`; required.
+- **`description`** — `string`; optional. Default: `""`.
+- **`attempts`** — `integer`; optional. Default: `1`. Constraints: `{"maximum": 32, "minimum": 1}`.
+- **`max_retries`** — `integer`; optional. Default: `0`. Constraints: `{"maximum": 10, "minimum": 0}`.
+- **`harnesses`** — `array of string`; optional. Default: `[]`.
+- **`instructions`** — `"none" | "any"`; optional. Default: `"any"`.
+- **`temperature`** — `number | null`; optional. Default: `null`.
+- **`max_tokens`** — `integer | null`; optional. Default: `null`.
+- **`tools`** — `string`; optional. Default: `"Environment actions only."`.
+- **`max_turns`** — `integer | null`; optional. Default: `null`.
+- **`max_seconds`** — `number | null`; optional. Default: `null`.
+- **`max_cost_usd`** — `number | null`; optional. Default: `null`.
 
 ## ExecutionLimits
 
@@ -363,7 +420,7 @@ A named credential supplied when a Job runs, with an explicit execution target.
 
 ## VerifierRuntime
 
-Verifier-owned runtime, independent of the Environment.
+Machine for a verifier that needs its own sandbox.
 
 - **`provider`** — `string`; optional. Default: `"docker"`. Constraints: `{"minLength": 1}`.
 - **`image`** — `string | null`; optional. Default: `null`.

@@ -32,7 +32,7 @@ print(job.plan.trial_count)
 result = job.run()
 ```
 
-With three Tasks, two Agents, and two attempts, this Job creates twelve Trials. Configure model authentication before calling `run`; the CLI can use `plural auth login`.
+With three Tasks, two Agents, and two attempts, this Job creates twelve Trials. `client=Client()` sends model calls through the Plural gateway with your Plural API key, stored with `plural auth login --api-key-stdin` or set as `PLURAL_API_KEY`. A browser login alone is not accepted for model calls.
 
 Defaults are `mode="eval"`, `attempts=1`, `concurrency=1`,
 `per_runtime_concurrency=1`, `priority=0`, and no retries. Retry backoff starts
@@ -45,40 +45,72 @@ evidence, or policy errors.
 
 ## Plan, run, resume
 
+From the CLI, a run selects one Task or Benchmark and one Agent or model:
+
 ```bash
-plural validate job.py:job
-plural run job.py:job --dry-run
-plural run job.yaml
+plural run -b wordle -a word-list --dry-run
+plural run -b wordle -a word-list
 plural job list
 plural job show JOB_ID
-plural job watch JOB_ID --follow
+plural job rerun JOB_ID
 ```
 
-`job.plan` freezes Task and Benchmark pins, model endpoint resolutions,
-Environment/Verifier/Agent/Harness hashes, Runtime provider, mode, and the
-Agent × Task × attempt Trial expansion.
+Every run is a new Job. A local run is recorded under `.plural/jobs/<job_id>/`:
+`config.json` and `lock.json` hold the resolved Job and its lock, `events.jsonl`
+the progress events, `trials/` the Trial records, and `run.json` the pinned
+version and content hash of every input. `plural job rerun` runs a recorded Job
+again with those exact inputs and creates a new Job linked to it through
+`rerun_of_job_id`; `plural trial rerun TRIAL_ID` does the same for one Trial as a
+new one-Trial Job linked through `rerun_of_trial_id`.
 
-`job.run(resume=True)` or the advanced resume command reuses only successful
-locked Trials and appends new executions where needed. A changed lock is
-rejected.
+From Python, load the same project resources with a `Workspace`:
+
+```python
+from plural import Job
+from plural.project import Project, Workspace
+
+workspace = Workspace(Project.find())
+benchmark = workspace.get("benchmark", "wordle")
+agent = workspace.get("agent", "word-list")
+result = Job(benchmark, agents=[agent]).run()
+```
+
+That Job runs locally and is not recorded under `.plural/jobs`. Pass
+`client=Client()` to send model calls through the Plural gateway with your API
+key.
+
+`job.plan` fixes everything the Job will use before it starts: the Task and
+Benchmark versions, the model endpoint each model resolves to, the content
+hashes of every Environment, Verifier, Agent, and Harness, the Runtime
+provider, the mode, and the list of Trials (one per Agent, Task, and attempt).
+
+`job.run(resume=True)` keeps the Trials that already succeeded and runs new
+executions for the rest. It refuses to resume when any planned input has
+changed.
 
 Use `await job.run_async()` inside an existing event loop.
 
 ## Local and hosted
 
-`plural run` executes with local orchestration and a store beside the source
-reference. The Environment can still select Docker or Daytona and call paid
-model APIs. `--hosted` explicitly synchronizes the graph and submits it to
-Plural Intel.
+`plural run` executes on this machine by default. The Environment can still
+select Docker or Daytona and call paid model APIs. `plural run ... --hosted`
+submits the Job to Plural Intel using revisions you have already pushed; it
+refuses to start when any input differs from its pushed revision. `--follow`
+streams hosted progress. See [Push and pull resources](../guides/studio-sync.md).
 
-Hosted execution needs materializable source, supported revision APIs,
-credentials, and policy-compatible Runtime providers. A successful local run
-does not imply the same graph can run hosted.
+Hosted execution also needs credentials and Runtime providers that fit the
+project's policy. A successful local run does not imply the same inputs can run
+hosted.
 
 ## Evaluate before routing or training
 
-Eval mode runs final Verifiers and records quality, cost, latency, trajectory,
-and completeness evidence. Compare exact Agent and Benchmark pins. Use those records to [choose routing policy](../reference/integrations.md#route-after-evaluation) for application traffic.
+Eval mode, the default, runs the Verifiers at the end of each episode and
+records the score, cost, latency, trajectory, and whether each Trial completed.
+Compare results only across the same Agent and Benchmark versions. Use those
+records to [choose a routing policy](../reference/integrations.md#route-after-evaluation) for application traffic.
 
-Train mode keeps the final Verifiers and adds exact TITO and supported
-Rewarders. It is intentionally stricter; see [Training and RL](training.md).
+Train mode (`mode=JobMode.TRAIN`) also runs the Verifiers, and additionally
+requires the Harness to record the exact tokens in and tokens out of every model
+call. A Trial whose Harness does not support that capture fails with a
+`tito_unsupported` error. Train mode also streams each step's reward as a progress
+event; see [Training and RL](training.md).

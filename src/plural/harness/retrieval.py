@@ -19,10 +19,55 @@ from plural.common import HarnessPackage
 
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
+_CREDENTIAL_NAMES = frozenset({"credentials.json", "id_rsa", "id_ed25519", ".netrc", ".npmrc"})
+_CREDENTIAL_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
 
-def tree_digest(root: Path) -> str:
-    """Hash a package tree by relative path and bytes."""
-    ignore_file = root.resolve() / ".pluralignore"
+
+def looks_like_credential(relative: str) -> bool:
+    """Whether a package path names a file that usually holds a secret."""
+    name = relative.rsplit("/", 1)[-1]
+    return (
+        name in _CREDENTIAL_NAMES
+        or (name.startswith(".env") and name != ".env.example")
+        or name.endswith(_CREDENTIAL_SUFFIXES)
+    )
+
+
+def validate_archive(payload: bytes) -> tuple[str, ...]:
+    """Check a package archive without extracting it and return its file paths.
+
+    The rules are the ones extraction enforces: relative paths only, regular
+    files and directories only, no duplicates, and a bounded total size. Files
+    that look like credentials are rejected as well.
+
+    Raises:
+        ValueError: When the archive is unreadable or breaks a rule.
+    """
+    if len(payload) > MAX_ARCHIVE_BYTES:
+        raise ValueError(f"archive exceeds {MAX_ARCHIVE_BYTES} bytes")
+    try:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:*") as archive:
+            members = _checked_members(archive)
+    except tarfile.TarError as exc:
+        raise ValueError("invalid package archive") from exc
+    paths = tuple(PurePosixPath(item.name).as_posix() for item in members if not item.isdir())
+    secrets = [path for path in paths if looks_like_credential(path)]
+    if secrets:
+        raise ValueError(f"archive contains a likely credential: {secrets[0]}")
+    return paths
+
+
+def package_files(root: Path) -> list[tuple[str, Path]]:
+    """Files that make up a package, as sorted ``(relative path, path)`` pairs.
+
+    ``.git``, ``.plural``, and ``__pycache__`` are never part of a package, nor
+    is any path listed in the package's ``.pluralignore``.
+
+    Raises:
+        ValueError: When the tree contains a symlink.
+    """
+    base = root.resolve()
+    ignore_file = base / ".pluralignore"
     ignored = (
         {
             line.strip().removeprefix("./")
@@ -32,9 +77,9 @@ def tree_digest(root: Path) -> str:
         if ignore_file.is_file()
         else set()
     )
-    digest = hashlib.sha256()
-    for path in sorted(root.resolve().rglob("*")):
-        relative = path.relative_to(root.resolve())
+    files = []
+    for path in sorted(base.rglob("*")):
+        relative = path.relative_to(base)
         if any(part in {".git", ".plural", "__pycache__"} for part in relative.parts):
             continue
         if relative.as_posix() in ignored:
@@ -42,31 +87,41 @@ def tree_digest(root: Path) -> str:
         if path.is_symlink():
             raise ValueError(f"package contains a symlink: {relative}")
         if path.is_file():
-            digest.update(relative.as_posix().encode())
-            digest.update(b"\0")
-            digest.update(path.read_bytes())
-            digest.update(b"\0")
+            files.append((relative.as_posix(), path))
+    return files
+
+
+def tree_digest(root: Path) -> str:
+    """Hash a package tree by relative path and bytes."""
+    digest = hashlib.sha256()
+    for relative, path in package_files(root):
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
     return f"sha256:{digest.hexdigest()}"
 
 
 def build_archive(source: Path, destination: Path) -> str:
     """Build a normalized gzip tar archive and return its byte digest."""
-    root = source.resolve()
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    payload = archive_bytes(source)
+    _atomic_write(destination, payload)
+    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+def archive_bytes(source: Path) -> bytes:
+    """Return a normalized gzip tar of exactly the files in :func:`tree_digest`.
+
+    Paths, bytes, and the executable bit are the only inputs, so the same tree
+    produces the same archive on every machine.
+    """
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w", format=tarfile.USTAR_FORMAT) as archive:
-        for path in sorted(root.rglob("*")):
-            relative = path.relative_to(root)
-            if any(part in {".git", ".plural", "__pycache__"} for part in relative.parts):
-                continue
-            if path.is_symlink():
-                raise ValueError(f"package contains a symlink: {relative}")
-            if not path.is_file():
-                continue
+        for relative, path in package_files(source):
             data = path.read_bytes()
-            info = tarfile.TarInfo(relative.as_posix())
+            info = tarfile.TarInfo(relative)
             info.size = len(data)
-            info.mode = path.stat().st_mode & 0o777
+            info.mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
             info.mtime = 0
             info.uid = info.gid = 0
             info.uname = info.gname = ""
@@ -74,9 +129,13 @@ def build_archive(source: Path, destination: Path) -> str:
     compressed = io.BytesIO()
     with gzip.GzipFile(fileobj=compressed, mode="wb", filename="", mtime=0) as output:
         output.write(buffer.getvalue())
-    payload = compressed.getvalue()
-    _atomic_write(destination, payload)
-    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+    return compressed.getvalue()
+
+
+def extract_archive(payload: bytes, destination: Path) -> None:
+    """Safely extract a package archive, rejecting links and path traversal."""
+    destination.mkdir(parents=True, exist_ok=True)
+    _extract(payload, destination)
 
 
 def retrieve_archive(
@@ -168,13 +227,10 @@ def package_from_archive(
     payload = yaml.safe_load((root / "harness.yaml").read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("harness.yaml must contain a mapping")
-    if payload.get("kind") == "harness" or not ({"definition", "manifest"} & payload.keys()):
-        from plural.harness.models import Harness
-        from plural.project import Resolver
+    if "python" in payload or not ({"definition", "manifest"} & payload.keys()):
+        from plural.project.resources import load_harness_directory
 
-        public = Resolver(root=root).load("harness.yaml")
-        if not isinstance(public, Harness):
-            raise TypeError("archived harness.yaml did not resolve to a Harness subclass")
+        public = load_harness_directory(root)
         return HarnessPackage.model_validate(
             {
                 "definition": public._package().definition,
@@ -194,6 +250,11 @@ def materialize_package(
     """Return a local package tree, or None for OCI image packages."""
     if package.source.kind == "oci":
         return None
+    if package.source.kind == "package":
+        raise ValueError(
+            f"Harness {package.definition.name!r} is stored in a Plural project. "
+            f"Restore it with `plural harness pull {package.definition.name}` to run it locally."
+        )
     if package.source.kind == "archive":
         if package.source.digest is None:  # pragma: no cover - model invariant
             raise ValueError("archive source requires digest")
@@ -228,10 +289,11 @@ def _extract(payload: bytes, destination: Path) -> None:
         raise ValueError("invalid harness archive") from exc
 
 
-def _extract_members(archive: tarfile.TarFile, destination: Path) -> None:
+def _checked_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
     total = 0
     seen: set[str] = set()
-    for member in archive.getmembers():
+    members = archive.getmembers()
+    for member in members:
         path = PurePosixPath(member.name)
         if path.is_absolute() or ".." in path.parts or path.parts in {(), (".",)}:
             raise ValueError(f"unsafe archive path: {member.name!r}")
@@ -242,13 +304,21 @@ def _extract_members(archive: tarfile.TarFile, destination: Path) -> None:
             raise ValueError(f"duplicate archive member: {member.name!r}")
         seen.add(normalized)
         if member.isdir():
-            (destination / path.as_posix()).mkdir(parents=True, exist_ok=True)
             continue
         if not member.isfile():
             raise ValueError(f"unsupported archive member: {member.name!r}")
         total += member.size
         if total > MAX_ARCHIVE_BYTES:
             raise ValueError(f"extracted archive exceeds {MAX_ARCHIVE_BYTES} bytes")
+    return members
+
+
+def _extract_members(archive: tarfile.TarFile, destination: Path) -> None:
+    for member in _checked_members(archive):
+        path = PurePosixPath(member.name)
+        if member.isdir():
+            (destination / path.as_posix()).mkdir(parents=True, exist_ok=True)
+            continue
         source = archive.extractfile(member)
         if source is None:
             raise ValueError(f"cannot read archive member: {member.name!r}")
@@ -275,8 +345,11 @@ def _atomic_write(path: Path, payload: bytes) -> None:
 
 __all__ = [
     "MAX_ARCHIVE_BYTES",
+    "archive_bytes",
     "build_archive",
+    "extract_archive",
     "materialize_package",
+    "package_files",
     "package_from_archive",
     "retrieve_archive",
     "tree_digest",

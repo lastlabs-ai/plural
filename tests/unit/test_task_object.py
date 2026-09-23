@@ -63,40 +63,7 @@ def test_definition_matches_internal_contract() -> None:
     assert task.definition() == task._definition()
 
 
-def test_push_resolves_current_revisions_by_name() -> None:
-    client = _FakeClient()
-
-    record = _task().push(client)  # type: ignore[arg-type]
-
-    assert record == {"id": "task-revision", "status": "published"}
-    assert client.environments.get_calls == ["world"]
-    assert client.verifiers.get_calls == ["correct"]
-    assert client.tasks.pushed[0]["references"] == {
-        "environment_revision_id": "world-revision",
-        "verifier_revision_ids": ["correct-revision"],
-    }
-
-
-def test_push_honors_explicit_revision_ids() -> None:
-    client = _FakeClient()
-
-    _task().push(
-        client,  # type: ignore[arg-type]
-        environment_revision_id="env-explicit",
-        verifier_revision_ids=["verifier-explicit"],
-    )
-
-    assert client.environments.get_calls == []
-    assert client.verifiers.get_calls == []
-    assert client.tasks.pushed[0]["references"] == {
-        "environment_revision_id": "env-explicit",
-        "verifier_revision_ids": ["verifier-explicit"],
-    }
-
-
-def test_delete_removes_hosted_parent_by_slug() -> None:
-    client = _FakeClient()
-
-    _task().delete(client)  # type: ignore[arg-type]
-
-    assert client.tasks.deleted == ["demo-task"]
+def test_tasks_are_pushed_from_projects_not_objects() -> None:
+    task = _task()
+    assert not hasattr(task, "push")
+    assert not hasattr(task, "delete")

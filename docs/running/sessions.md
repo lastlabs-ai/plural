@@ -14,8 +14,8 @@ redeploy it later as a separate instance: the agent revision, the environment
 revision, the accumulated environment state, data references, and provenance
 pointing back at the source job or trial.
 
-Snapshots travel as plain directory bundles so they stay inspectable without
-new formats to learn.
+Snapshots are plain directory bundles, so you can read and diff them with
+ordinary tools.
 
 ```text
 support-session/
@@ -26,14 +26,16 @@ support-session/
 └── manifest.json
 ```
 
-There is deliberately no backend table and no Studio surface yet: snapshots
-move as files until a Sessions home exists.
+Sessions are files only. The hosted project does not store them and the web
+app has no page for them yet, so keep bundles wherever you keep other project
+files.
 
 ## Export from a hosted trial
 
-Snapshot the agent, environment, and latest state of a finished trial. State
-is best-effort: the newest trace's state payload when traces recorded one,
-otherwise an empty object.
+Snapshot the agent, environment, and latest state of a finished hosted trial.
+This needs `plural auth login` and the trial's project selected with
+`plural auth scope --project <name>`. The state is the state recorded by the
+trial's newest trace, or an empty object when no trace recorded one.
 
 ```bash
 plural session export --trial <trial-id> --out sessions/support
@@ -45,13 +47,14 @@ to the run it came from.
 
 ## Export from local files
 
-Bundle definitions you already have on disk. Pass `--data-dir` to copy files
-into the bundle's `data/` folder.
+Bundle definitions you already have on disk, such as the manifests in your
+project. `--data` records a data reference by name without copying it; pass
+`--data-dir` to copy a directory into the bundle's `data/` folder.
 
 ```bash
 plural session export \
-  --agent agent.yaml \
-  --environment environment.yaml \
+  --agent agents/support-assistant/agent.yaml \
+  --environment environments/support-queue/environment.yaml \
   --state state.json \
   --data data/ticket.json \
   --data-dir ./data \
@@ -61,8 +64,9 @@ plural session export \
 
 ## Redeploy as a separate instance
 
-Import copies the bundle to a new timestamped instance directory and records
-the import in `instance.json`. The original bundle is never modified, so each
+Import copies the bundle to a new timestamped instance directory, such as
+`sessions/instances/support-session-20260923-202646/`, and records the import in
+`instance.json`. The original bundle is never modified, so each
 import is a distinct instance you can start, stop, and diff independently.
 
 ```bash

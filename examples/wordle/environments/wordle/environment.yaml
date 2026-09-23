@@ -1,0 +1,19 @@
+# Environment: identity, runtime, and settings.
+# Behavior (actions, state, observations) is Python in environment.py.
+name: wordle
+version: 1.0.0
+description: Guess a hidden five-letter word in six tries.
+overview: Guess a hidden five-letter word in six tries.
+python: environment.py:Wordle
+readme: README.md
+
+# local runs the Environment as a trusted subprocess on this machine. It is not
+# a sandbox; use docker for code you do not trust.
+runtime:
+  provider: local
+
+harness_policy:
+  mode: allow_all
+limits:
+  max_turns: 8
+  max_seconds: 60

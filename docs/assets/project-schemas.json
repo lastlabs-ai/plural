@@ -1313,7 +1313,7 @@
       },
       "VerifierRuntime": {
         "additionalProperties": false,
-        "description": "Verifier-owned runtime, independent of the Environment.",
+        "description": "Machine for a verifier that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
         "properties": {
           "provider": {
             "default": "docker",
@@ -1579,7 +1579,7 @@
       },
       "VerifierRuntime": {
         "additionalProperties": false,
-        "description": "Verifier-owned runtime, independent of the Environment.",
+        "description": "Machine for a verifier that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
         "properties": {
           "provider": {
             "default": "docker",
@@ -1819,7 +1819,7 @@
       },
       "VerifierRuntime": {
         "additionalProperties": false,
-        "description": "Verifier-owned runtime, independent of the Environment.",
+        "description": "Machine for a verifier that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
         "properties": {
           "provider": {
             "default": "docker",
@@ -2481,6 +2481,142 @@
         "title": "AgentVerifier",
         "type": "object"
       },
+      "BenchmarkCategory": {
+        "additionalProperties": false,
+        "description": "A named group of Tasks, scored together in results.\n\n``id`` is stable across releases. A category is author-defined unless\n``taxonomy`` names a shared classification, such as ``\"plural:coding\"``.\nScores in author-defined categories are only comparable within this\nBenchmark; two Benchmarks that both say \"reasoning\" may measure different\nthings.\n\nAttributes:\n    id: Stable identifier within the Benchmark, such as ``\"hard-words\"``.\n    name: Label shown to readers.\n    description: What the Tasks in this category have in common.\n    tasks: Names of the Tasks in this category. A Task may be in several.\n    taxonomy: Optional shared classification identifier.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Tasks",
+            "type": "array"
+          },
+          "taxonomy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Taxonomy"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tasks"
+        ],
+        "title": "BenchmarkCategory",
+        "type": "object"
+      },
+      "BenchmarkScoring": {
+        "additionalProperties": false,
+        "description": "How a release turns attempts into one score per configuration.\n\nRepeated attempts of a Task are averaged first. Task scores are then\ncombined with ``task_weights``; a Task without a weight counts once. Step\nrewards never contribute: only the Verifier score on each Trial does.\n\nAttributes:\n    metric: Human-readable name of the success metric, such as\n        ``\"Resolution rate\"``. It labels the Verifier score; it never\n        selects a different value to rank on.\n    description: What a score means, in words a reader can act on.\n    aggregation: How Task scores combine. ``\"weighted_mean\"`` averages\n        attempts per Task, then takes the ``task_weights`` mean.\n    score_range: Lowest and highest possible Task score.\n    success_threshold: A Task attempt at or above this score counts as a\n        success. ``None`` means the Benchmark has no pass/fail notion.\n    task_weights: Weight per Task name. Unlisted Tasks weigh 1.\n    coverage_required: Weighted share of Tasks that must have a score\n        before a result can be ranked officially.\n    agent_failure: How an attempt that ended without a Verifier score\n        because of the Agent (for example, a budget ran out) is scored.\n        ``\"zero\"`` scores it at the bottom of the range.\n    infrastructure_error: Attempts lost to the runtime or provider are\n        excluded from scores and reported separately.\n    min_tasks_for_interval: Fewest scored Tasks before an uncertainty\n        interval is reported. Below this, uncertainty is shown as unknown.",
+        "properties": {
+          "metric": {
+            "default": "Score",
+            "title": "Metric",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "aggregation": {
+            "const": "weighted_mean",
+            "default": "weighted_mean",
+            "title": "Aggregation",
+            "type": "string"
+          },
+          "score_range": {
+            "default": [
+              0.0,
+              1.0
+            ],
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Score Range",
+            "type": "array"
+          },
+          "success_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 1.0,
+            "title": "Success Threshold"
+          },
+          "task_weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Task Weights",
+            "type": "object"
+          },
+          "coverage_required": {
+            "default": 1.0,
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "title": "Coverage Required",
+            "type": "number"
+          },
+          "agent_failure": {
+            "default": "zero",
+            "enum": [
+              "zero",
+              "exclude"
+            ],
+            "title": "Agent Failure",
+            "type": "string"
+          },
+          "infrastructure_error": {
+            "const": "exclude",
+            "default": "exclude",
+            "title": "Infrastructure Error",
+            "type": "string"
+          },
+          "min_tasks_for_interval": {
+            "default": 5,
+            "minimum": 2,
+            "title": "Min Tasks For Interval",
+            "type": "integer"
+          }
+        },
+        "title": "BenchmarkScoring",
+        "type": "object"
+      },
       "DeterministicVerifier": {
         "additionalProperties": false,
         "description": "Function or command that scores a completed Episode.",
@@ -2659,6 +2795,146 @@
           "name"
         ],
         "title": "EnvironmentResource",
+        "type": "object"
+      },
+      "EvaluationTrack": {
+        "additionalProperties": false,
+        "description": "Versioned rules that make results on one track comparable.\n\nA ``models`` track holds the setup fixed so results compare models: one\nharness, no extra instructions, and fixed inference settings. An\n``agents`` track compares complete systems, so harness, instructions,\ntools, and settings may differ within the declared limits.\n\nA track version is immutable within a Benchmark. Changing a rule needs a\nnew track version, and results on different versions are not ranked\ntogether.\n\nAttributes:\n    id: Stable track identifier, such as ``\"controlled\"``.\n    version: Semantic version of these rules.\n    name: Label shown to readers.\n    kind: ``\"models\"`` or ``\"agents\"``.\n    description: What the track holds constant, in plain words.\n    attempts: Attempts per Task every ranked result must have.\n    max_retries: Infrastructure retries allowed per attempt.\n    harnesses: Allowed harness names. Empty allows any on an ``agents``\n        track and means the built-in loop on a ``models`` track.\n    instructions: ``\"none\"`` forbids Agent instructions beyond the Task.\n    temperature: Required temperature, when fixed.\n    max_tokens: Required output-token limit, when fixed.\n    tools: How tools are provided, in words; tools come from the Task\n        Environment and the allowed harnesses.\n    max_turns: Highest turn limit an Environment in this release may set.\n    max_seconds: Highest time limit an Environment may set.\n    max_cost_usd: Highest cost limit an Environment may set.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "version": {
+            "default": "1.0.0",
+            "title": "Version",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "models",
+              "agents"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "attempts": {
+            "default": 1,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "max_retries": {
+            "default": 0,
+            "maximum": 10,
+            "minimum": 0,
+            "title": "Max Retries",
+            "type": "integer"
+          },
+          "harnesses": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Harnesses",
+            "type": "array"
+          },
+          "instructions": {
+            "default": "any",
+            "enum": [
+              "none",
+              "any"
+            ],
+            "title": "Instructions",
+            "type": "string"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Temperature"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Tokens"
+          },
+          "tools": {
+            "default": "Environment actions only.",
+            "title": "Tools",
+            "type": "string"
+          },
+          "max_turns": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Turns"
+          },
+          "max_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Seconds"
+          },
+          "max_cost_usd": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Cost Usd"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind"
+        ],
+        "title": "EvaluationTrack",
         "type": "object"
       },
       "HumanVerifier": {
@@ -2936,7 +3212,7 @@
       },
       "VerifierRuntime": {
         "additionalProperties": false,
-        "description": "Verifier-owned runtime, independent of the Environment.",
+        "description": "Machine for a verifier that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
         "properties": {
           "provider": {
             "default": "docker",
@@ -2983,8 +3259,71 @@
       }
     },
     "additionalProperties": false,
-    "description": "A semantic version that pins an ordered set of Tasks.",
+    "description": "A semantic version that pins an ordered set of Tasks.\n\nEach version is a release. Beyond its Tasks it may declare categories,\nscoring rules, and evaluation tracks; see :class:`BenchmarkRelease`.",
     "properties": {
+      "categories": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/BenchmarkCategory"
+        },
+        "title": "Categories",
+        "type": "array"
+      },
+      "scoring": {
+        "$ref": "#/$defs/BenchmarkScoring"
+      },
+      "tracks": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/EvaluationTrack"
+        },
+        "title": "Tracks",
+        "type": "array"
+      },
+      "default_view": {
+        "default": "agents",
+        "enum": [
+          "models",
+          "agents"
+        ],
+        "title": "Default View",
+        "type": "string"
+      },
+      "purpose": {
+        "default": "",
+        "title": "Purpose",
+        "type": "string"
+      },
+      "success": {
+        "default": "",
+        "title": "Success",
+        "type": "string"
+      },
+      "limitations": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Limitations",
+        "type": "array"
+      },
+      "license": {
+        "default": "",
+        "title": "License",
+        "type": "string"
+      },
+      "forked_from": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Forked From"
+      },
       "name": {
         "minLength": 1,
         "title": "Name",

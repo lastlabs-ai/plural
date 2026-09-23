@@ -12,12 +12,10 @@ python scripts/generate_docs_api.py
 python scripts/generate_cli_reference.py
 ```
 
-The first-project tutorial embeds four complete Python files from
-`examples/first-project`. After changing them, rebuild the definitions and refresh
-the walkthrough and download together:
+The first-project tutorial walks through `examples/first-project`, a project in the
+standard layout. After changing any file in it, refresh the download:
 
 ```bash
-python examples/first-project/build.py
 python scripts/sync_docs_starter.py
 ```
 

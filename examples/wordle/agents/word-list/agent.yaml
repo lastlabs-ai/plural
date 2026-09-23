@@ -1,0 +1,7 @@
+# Agent: runs the word-list Harness. The model is recorded but never called,
+# so this Agent needs no credentials.
+name: word-list
+version: 0.1.0
+model: openai/gpt-5.6-luna
+harness: word-list
+auth_mode: none

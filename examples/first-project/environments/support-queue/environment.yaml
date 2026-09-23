@@ -1,0 +1,25 @@
+# Environment: identity, resources, runtime, and settings.
+# Behavior (actions, state, observations, rewards) is Python in environment.py.
+# README.md explains both to the people who use this Environment.
+name: support-queue
+version: 1.0.0
+description: A customer support queue with one open ticket per Task.
+overview: Inspect a customer ticket, categorize it, draft a reply, and resolve it.
+python: environment.py:SupportQueue
+readme: README.md
+
+# Files staged into the runtime, relative to this directory.
+resources:
+  - resources/policy.md
+
+# local runs the Environment as a trusted subprocess on this machine. It is not
+# a sandbox; use docker for code you do not trust.
+runtime:
+  provider: local
+
+# Settings: which Agent harnesses may run here, and per-Trial limits.
+harness_policy:
+  mode: allow_all
+limits:
+  max_turns: 6
+  max_seconds: 120

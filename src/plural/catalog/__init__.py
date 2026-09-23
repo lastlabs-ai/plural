@@ -8,6 +8,7 @@ Examples:
 
 from __future__ import annotations
 
+from plural.catalog.context import CatalogContext
 from plural.catalog.models import (
     Architecture,
     ModelCatalog,
@@ -19,6 +20,7 @@ from plural.catalog.models import (
 
 __all__ = [
     "Architecture",
+    "CatalogContext",
     "ModelCatalog",
     "ModelEndpoint",
     "ModelPricing",

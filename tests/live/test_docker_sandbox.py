@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
+import yaml
 
-from plural.cli.main import app
-from plural.cli.scaffold import read_yaml, scaffold_environment, scaffold_harness, write_yaml
 from plural.harness.protocol import HarnessRunRequest
-from plural.harness.retrieval import materialize_package, package_from_archive
+from plural.harness.retrieval import build_archive, materialize_package, package_from_archive
 from plural.harness.runner import HarnessRunner
 from plural.sandbox import (
     DockerProvider,
@@ -53,22 +50,25 @@ async def test_docker_sandbox_lifecycle() -> None:
         await provider.destroy(handle)
 
 
-async def test_scaffold_build_publish_add_and_docker_execution(tmp_path: Path) -> None:
-    environment = tmp_path / "environment"
+async def test_archived_harness_package_runs_in_docker(tmp_path: Path) -> None:
     harness = tmp_path / "harness"
-    scaffold_environment(environment, "docker-flow")
-    scaffold_harness(harness, "docker-flow")
-    harness_yaml = read_yaml(harness / "harness.yaml")
-    harness_yaml.update(
-        {
-            "command": ["python", "smoke.py"],
-            "capabilities": [],
-            "secrets": [],
-            "environment": [],
-            "auth": ["none"],
-        }
+    harness.mkdir()
+    (harness / "harness.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "definition": {
+                    "name": "docker-flow",
+                    "implementation": "runnable",
+                    "command": ["python", "smoke.py"],
+                    "auth_modes": ["none"],
+                    "outputs": [{"path": "result.json"}],
+                    "artifacts": [{"path": "trajectory.jsonl", "required": False}],
+                    "trajectory_path": "trajectory.jsonl",
+                }
+            }
+        ),
+        encoding="utf-8",
     )
-    write_yaml(harness / "harness.yaml", harness_yaml)
     (harness / "smoke.py").write_text(
         "import json,sys\n"
         "json.loads(sys.stdin.readline())\n"
@@ -79,24 +79,9 @@ async def test_scaffold_build_publish_add_and_docker_execution(tmp_path: Path) -
         "'artifacts':['trajectory.jsonl']}),flush=True)\n",
         encoding="utf-8",
     )
-    runner = CliRunner()
-    built = runner.invoke(app, ["harness", "build", str(harness)])
-    published = runner.invoke(app, ["harness", "publish", str(harness)])
-    assert built.exit_code == published.exit_code == 0
-    archive = json.loads(published.stdout)
-    added = runner.invoke(
-        app,
-        [
-            "harness",
-            "add",
-            archive["published"],
-            "--digest",
-            archive["digest"],
-            "--environment",
-            str(environment),
-        ],
-    )
-    assert added.exit_code == 0, added.stderr
+    archive_path = tmp_path / "harness.tar.gz"
+    digest = build_archive(harness, archive_path)
+    archive = {"published": str(archive_path), "digest": digest}
     package = package_from_archive(archive["published"], archive["digest"])
     source = materialize_package(package)
     assert source is not None

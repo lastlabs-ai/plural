@@ -7,10 +7,9 @@ from pathlib import Path
 import pytest
 
 from plural import Agent, Harness, HarnessEnvironment
-from plural.cli.scaffold import load_harness_reference
 from plural.harness import class_runner
-from plural.harness.retrieval import build_archive, package_from_archive
-from plural.project import dump, load
+from plural.harness.retrieval import build_archive, extract_archive, package_from_archive
+from plural.project.resources import load_harness_directory
 
 
 def _write_harness(root: Path, *, asynchronous: bool = False) -> Path:
@@ -142,40 +141,49 @@ def test_environment_tools_and_unknown_action_are_clear() -> None:
         environment.step("missing")
 
 
+def _harness_package(root: Path, *, config: str = "") -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    _write_harness(root)
+    (root / "harness.yaml").write_text(
+        "name: support-loop\nversion: 1.0.0\npython: custom.py:SupportHarness\n" + config,
+        encoding="utf-8",
+    )
+    return root
+
+
 def test_class_source_and_config_are_in_harness_and_agent_hash(
     tmp_path: Path,
 ) -> None:
-    module = _write_harness(tmp_path)
-    first = load(f"{module}:SupportHarness")
+    source = _harness_package(tmp_path / "support-loop")
+    first = load_harness_directory(source, name="support-loop")
     assert isinstance(first, Harness)
     configured = type(first)(config={"label": "one"})
-    configured._bind_source(module)
+    configured._bind_source(source)
     changed = type(first)(config={"label": "two"})
-    changed._bind_source(module)
+    changed._bind_source(source)
     assert configured.content_hash != changed.content_hash
     first_agent = Agent(model="openai/gpt-5.6-luna", harness=configured)
     changed_agent = Agent(model="openai/gpt-5.6-luna", harness=changed)
     assert first_agent.content_hash != changed_agent.content_hash
 
-    path = dump(first_agent, tmp_path / "agent.yaml")
-    text = path.read_text(encoding="utf-8")
-    assert "python: custom.py:SupportHarness" in text
-    assert "command:" not in text
-    restored = load(path)
-    assert isinstance(restored, Agent)
-    assert restored.content_hash == first_agent.content_hash
+    _harness_package(source, config="config:\n  label: one\n")
+    from_manifest = load_harness_directory(source, name="support-loop")
+    assert from_manifest.config == {"label": "one"}
+    assert from_manifest.content_hash == configured.content_hash
+    before = from_manifest.content_hash
+
+    (source / "custom.py").write_text(
+        (source / "custom.py").read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8"
+    )
+    edited = load_harness_directory(source, name="support-loop")
+    assert edited.content_hash != before
 
 
-def test_class_harness_archive_preserves_package_and_yaml_reference(
+def test_class_harness_archive_preserves_package_and_python_reference(
     tmp_path: Path,
 ) -> None:
-    source = tmp_path / "source"
-    source.mkdir()
-    _write_harness(source)
-    (source / "harness.yaml").write_text(
-        "kind: harness\npython: custom.py:SupportHarness\n",
-        encoding="utf-8",
-    )
+    source = _harness_package(tmp_path / "source")
+    original = load_harness_directory(source, name="support-loop")
     archive = tmp_path / "harness.tar.gz"
     digest = build_archive(source, archive)
 
@@ -187,16 +195,9 @@ def test_class_harness_archive_preserves_package_and_yaml_reference(
     assert package.source.kind == "archive"
     assert package.definition.command[-2] == "custom.py:SupportHarness"
 
-    harness = load_harness_reference(
-        str(archive),
-        digest=digest,
-        cache_root=tmp_path / "cache",
-    )
-    agent = Agent(model="openai/gpt-5.6-luna", harness=harness)
-    path = dump(agent, tmp_path / "archived-agent.yaml")
-    text = path.read_text(encoding="utf-8")
-    assert f"archive: {archive}" in text
-    assert f"digest: {digest}" in text
-    restored = load(path)
-    assert isinstance(restored, Agent)
-    assert restored.content_hash == agent.content_hash
+    restored_root = tmp_path / "restored"
+    extract_archive(archive.read_bytes(), restored_root)
+    restored = load_harness_directory(restored_root, name="support-loop")
+    assert restored.content_hash == original.content_hash
+    agent = Agent(model="openai/gpt-5.6-luna", harness=original)
+    assert Agent(model="openai/gpt-5.6-luna", harness=restored).content_hash == agent.content_hash
