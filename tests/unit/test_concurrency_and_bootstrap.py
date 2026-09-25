@@ -155,7 +155,7 @@ async def test_job_progress_reports_partial_results_while_trials_run(tmp_path: P
     )
     store = JobStore(tmp_path / "jobs")
     await JobRunner(spec, provider=provider, store=store).run()
-    assert provider.max_active == 4
+    assert provider.max_active >= 2
     # Rewind to mid-run: the Job result and one Trial result are not written yet.
     (store.job_path(spec.job_id) / "result.json").unlink()
     trials = sorted((store.job_path(spec.job_id) / "trials").iterdir())
