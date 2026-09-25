@@ -86,10 +86,7 @@ def _recorded(tmp_path: Path) -> list[dict]:
         tools=None,
         text="done",
     )
-    return [
-        json.loads(line)
-        for line in (tmp_path / "episode.jsonl").read_text().splitlines()
-    ]
+    return [json.loads(line) for line in (tmp_path / "episode.jsonl").read_text().splitlines()]
 
 
 def test_episode_records_turns_and_only_new_messages(tmp_path: Path) -> None:

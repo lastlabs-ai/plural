@@ -29,8 +29,7 @@ class TokenUsage(FrozenModel):
     def reported(self) -> bool:
         """Whether the provider reported any usage at all."""
         return any(
-            value is not None
-            for value in (self.input_tokens, self.output_tokens, self.cost_usd)
+            value is not None for value in (self.input_tokens, self.output_tokens, self.cost_usd)
         )
 
 
@@ -124,9 +123,7 @@ class UsageTotals(FrozenModel):
             output_tokens=plus(self.output_tokens, usage.output_tokens),
             cached_input_tokens=plus(self.cached_input_tokens, usage.cached_input_tokens),
             cost_usd=(
-                self.cost_usd
-                if usage.cost_usd is None
-                else (self.cost_usd or 0.0) + usage.cost_usd
+                self.cost_usd if usage.cost_usd is None else (self.cost_usd or 0.0) + usage.cost_usd
             ),
             calls_missing_tokens=self.calls_missing_tokens
             + (usage.input_tokens is None or usage.output_tokens is None),

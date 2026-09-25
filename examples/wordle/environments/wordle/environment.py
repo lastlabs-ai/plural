@@ -9,7 +9,21 @@ from plural import Environment, Observation, State, action, initial
 # Legal guesses. The Environment chooses which of these, if any, to print.
 EASY = ("crane", "slate", "audio", "point", "heart")
 MEDIUM = ("storm", "grape", "flame", "brick", "smile", "cabin", "river", "crane", "slate", "audio")
-WORDS = EASY + ("storm", "grape", "flame", "brick", "smile", "cabin", "river", "crypt", "nymph", "fjord", "glyph", "axiom", "bayou")
+WORDS = EASY + (
+    "storm",
+    "grape",
+    "flame",
+    "brick",
+    "smile",
+    "cabin",
+    "river",
+    "crypt",
+    "nymph",
+    "fjord",
+    "glyph",
+    "axiom",
+    "bayou",
+)
 
 
 class Board(Observation):
