@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 import typer
 
@@ -24,6 +24,7 @@ from plural.cli.common import (
     signed_in,
     workspace,
 )
+from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.jobs import JobResult, TrialResult, TrialSpec
 from plural.project import ProjectError, Workspace
 from plural.project.runs import (
@@ -65,8 +66,22 @@ def run(
     attempts: int | None = typer.Option(
         None, "--attempts", min=1, help="Advanced: Trials per Task (default 1)."
     ),
-    concurrency: int = typer.Option(
-        1, "--concurrency", min=1, help="Advanced: Trials to run at once."
+    concurrency: str = typer.Option(
+        "auto",
+        "--concurrency",
+        "-n",
+        help=(
+            "Trials to run at once: a number, or auto to size it from this machine, "
+            "the runtime, and where the model runs."
+        ),
+    ),
+    plural_version: str | None = typer.Option(
+        None,
+        "--plural-version",
+        help=(
+            "Plural to install in Docker and remote sandboxes: a version, or latest. "
+            "Default: this CLI's own code."
+        ),
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Advanced: validate and show the plan without running."
@@ -76,6 +91,10 @@ def run(
 ) -> None:
     """Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job."""
     space = workspace()
+    current = session()
+    environ = _run_environ(current)
+    if plural_version:
+        environ[RUNTIME_VERSION_VARIABLE] = plural_version
     plan = plan_run(
         space,
         RunRequest(
@@ -85,8 +104,10 @@ def run(
             harness=harness,
             agent=agent,
             attempts=attempts,
-            concurrency=concurrency,
+            concurrency=_concurrency(concurrency),
+            hosted=hosted,
         ),
+        environ=environ,
     )
     if dry_run:
         payload = _plan_payload(plan, hosted=hosted)
@@ -107,15 +128,13 @@ def run(
         if follow:
             _follow_hosted(studio, job_id)
         return
-    current = session()
+    total = len(plan.job.plan.trials)
     typer.echo(
         f"Running {plan.source} with {plan.agent.name} ({plan.agent.model}) locally: "
-        f"{len(plan.job.plan.trials)} trial(s).",
+        f"{total} trial(s), {_pace(plan)}.",
         err=as_json,
     )
-    job_id, result = run_local(
-        space, plan, environ=_run_environ(current), progress=_progress(as_json)
-    )
+    job_id, result = run_local(space, plan, environ=environ, progress=_progress(as_json, total))
     payload = {"location": "local", **local_job(space, job_id)}
     emit(payload, as_json=as_json, text=lambda: _print_result(job_id, result))
 
@@ -466,12 +485,48 @@ def _run_environ(current: Session) -> dict[str, str]:
     return environ
 
 
-def _progress(quiet: bool) -> Any:
+def _concurrency(value: str) -> int | Literal["auto"]:
+    if value.strip().lower() == "auto":
+        return "auto"
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0
+    if number < 1:
+        raise ProjectError(f"--concurrency {value!r}: expected auto or a number of at least 1.")
+    return number
+
+
+def _pace(plan: RunPlan) -> str:
+    at_once = f"{plan.spec.concurrency} at a time"
+    return f"{at_once} (auto: {plan.concurrency_reason})" if plan.concurrency_reason else at_once
+
+
+def _progress(quiet: bool, total: int | None = None) -> Any:
+    """Print each finished Trial with the Job's running tally.
+
+    Trials finish out of order under concurrency; the tally is what is known so
+    far, and the final aggregate applies the Benchmark's own scoring.
+    """
+    done = succeeded = failed = 0
+    scores: list[float] = []
+
     def report(trial: TrialSpec, result: TrialResult) -> None:
+        nonlocal done, succeeded, failed
+        done += 1
+        succeeded += result.status == "succeeded"
+        failed += result.status == "failed"
+        if result.score is not None:
+            scores.append(result.score)
         if quiet:
             return
         score = "-" if result.score is None else f"{result.score:.3f}"
-        typer.echo(f"  {trial.trial_id}  {trial.task_id}  {result.status}  score={score}")
+        mean = f"{sum(scores) / len(scores):.3f}" if scores else "-"
+        count = f"{done}/{total}" if total else str(done)
+        typer.echo(
+            f"  [{count}] {trial.trial_id}  {trial.task_id}  {result.status}  score={score}"
+            f"  | {succeeded} succeeded, {failed} failed, mean {mean}"
+        )
 
     return report
 
@@ -483,6 +538,8 @@ def _plan_payload(plan: RunPlan, *, hosted: bool) -> dict[str, Any]:
         "agent": str(plan.agent_ref) if plan.agent_ref else plan.agent.name,
         "model": plan.agent.model,
         "harness": plan.harness,
+        "concurrency": plan.spec.concurrency,
+        "concurrency_reason": plan.concurrency_reason,
         "trials": [
             {"trial_id": item.trial_id, "task": item.task_id, "attempt": item.attempt}
             for item in plan.job.plan.trials
@@ -495,7 +552,9 @@ def _print_plan(payload: dict[str, Any]) -> None:
     typer.echo(
         f"Would run {payload['source']} with {payload['agent']} "
         f"({payload['model']}, harness {payload['harness']}) "
-        f"{payload['location']}ly: {len(payload['trials'])} trial(s)."
+        f"{payload['location']}ly: {len(payload['trials'])} trial(s), "
+        f"{payload['concurrency']} at a time"
+        + (f" (auto: {payload['concurrency_reason']})." if payload["concurrency_reason"] else ".")
     )
     rows(
         (
@@ -526,6 +585,22 @@ def _print_job(payload: dict[str, Any]) -> None:
         typer.echo(f"  Model:  {payload['model']} via {payload.get('harness')}")
     if payload.get("rerun_of_job_id"):
         typer.echo(f"  Rerun of job {payload['rerun_of_job_id']}")
+    progress = payload.get("progress")
+    if progress:
+        typer.echo(
+            f"  Progress: {progress['finished']}/{progress['planned']} finished, "
+            f"{progress['running']} running, {progress['succeeded']} succeeded, "
+            f"{progress['failed']} failed"
+        )
+    for aggregate in payload.get("aggregates") or []:
+        if not isinstance(aggregate, dict) or "agent_name" not in aggregate:
+            continue
+        mean = aggregate.get("mean_score")
+        typer.echo(
+            f"  {aggregate['agent_name']}: mean score "
+            f"{'-' if mean is None else f'{mean:.3f}'} over {aggregate['count']} trial(s), "
+            f"coverage {aggregate.get('coverage', 0):.0%}"
+        )
     trials = payload.get("trials") or []
     if trials:
         rows(

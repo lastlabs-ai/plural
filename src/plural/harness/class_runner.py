@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> None:
         if inspect.isawaitable(value):
             value = asyncio.run(_await_value(value))
         result = _normalize(value)
-        _write_result(result)
+        _write_result(result, environment)
     except Exception as exc:  # noqa: BLE001 - normalize user Harness failures
         print(
             json.dumps(
@@ -130,11 +130,28 @@ def _dumps(value: Any) -> str:
     return json.dumps(value, sort_keys=True, default=_encodable)
 
 
-def _write_result(result: HarnessResult) -> None:
+def _outcome(environment: HarnessEnvironment) -> dict[str, Any]:
+    """How the episode ended, from the Environment's last transition."""
+    if environment.terminated:
+        stop_reason = "environment_terminated"
+    elif environment.truncated:
+        stop_reason = "environment_truncated"
+    else:
+        stop_reason = "agent_finished"
+    return {
+        "stop_reason": stop_reason,
+        "terminated": environment.terminated,
+        "truncated": environment.truncated,
+        "turns": environment.turns,
+    }
+
+
+def _write_result(result: HarnessResult, environment: HarnessEnvironment) -> None:
     trace_id = result.trace_id or str(uuid4())
     payload = {
         "response": result.response,
         "trace_id": trace_id,
+        **_outcome(environment),
         **result.metadata,
     }
     Path("result.json").write_text(

@@ -136,7 +136,9 @@ ordinary `Job` from it.
   input to its version and content hash, and a pushed revision pins each
   dependency by revision id.
 - CLI flags only select resources or explicitly override SDK fields such as
-  attempts and concurrency. The CLI has no independent defaults or validators.
+  attempts and concurrency. The CLI has no independent validators; its one
+  independent default is `--concurrency auto`, which resolves to a number with
+  the SDK's `recommend_concurrency` before the Job is planned.
 - The SDK and the hosted service compute the same content hash, so pushing
   unchanged content reuses the existing revision. A push is private to its
   project; public sharing is always a separate action.

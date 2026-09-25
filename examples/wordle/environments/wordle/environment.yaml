@@ -12,8 +12,8 @@ readme: README.md
 resources: []
 #  - resources/policy.md
 
-# local runs the Environment as a trusted subprocess on this machine, using the
-# same Python that has Plural installed. docker's stock image does not.
+# local runs the Environment as a trusted subprocess on this machine. For
+# container isolation use provider: docker; plural run adds Plural to the image.
 runtime:
   provider: local
 

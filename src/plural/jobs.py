@@ -737,8 +737,8 @@ class Job:
         *,
         mode: JobMode = JobMode.EVAL,
         attempts: int = 1,
-        concurrency: int = 1,
-        per_runtime_concurrency: int = 1,
+        concurrency: int | Literal["auto"] = 1,
+        per_runtime_concurrency: int | None = None,
         priority: int = 0,
         retry: RetryPolicy | None = None,
         provider: Any = None,
@@ -789,12 +789,30 @@ class Job:
             agents=tuple(AgentBinding(agent=agent._definition()) for agent in self.agents),
             mode=mode,
             attempts=attempts,
-            concurrency=concurrency,
-            per_runtime_concurrency=per_runtime_concurrency,
             priority=priority,
             retry=retry or RetryPolicy(),
         )
         self.catalog = catalog or ModelCatalog()
+        self.plan = self.spec.plan(self.catalog)
+        self.concurrency_reason: str | None = None
+        if concurrency == "auto":
+            from plural.execution.capacity import recommend_concurrency
+
+            advice = recommend_concurrency(
+                self.spec, trial_count=self.plan.trial_count, environ=environ
+            )
+            concurrency = advice.trials
+            self.concurrency_reason = advice.reason
+        elif not isinstance(concurrency, int) or concurrency < 1:
+            raise ValueError("Cannot create Job.\nconcurrency must be 'auto' or at least 1.")
+        if per_runtime_concurrency is not None and per_runtime_concurrency < 1:
+            raise ValueError("Cannot create Job.\nper_runtime_concurrency must be at least 1.")
+        self.spec = self.spec.model_copy(
+            update={
+                "concurrency": concurrency,
+                "per_runtime_concurrency": per_runtime_concurrency or concurrency,
+            }
+        )
         self.plan = self.spec.plan(self.catalog)
         self._runner_options = {
             "provider": provider,

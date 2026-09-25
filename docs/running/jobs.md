@@ -34,8 +34,12 @@ result = job.run()
 
 With three Tasks, two Agents, and two attempts, this Job creates twelve Trials. `client=Client()` sends model calls through the Plural gateway with your Plural API key, stored with `plural auth login --api-key-stdin` or set as `PLURAL_API_KEY`. A browser login alone is not accepted for model calls.
 
-Defaults are `mode="eval"`, `attempts=1`, `concurrency=1`,
-`per_runtime_concurrency=1`, `priority=0`, and no retries. Retry backoff starts
+Defaults are `mode="eval"`, `attempts=1`, `concurrency=1`, `priority=0`, and no
+retries. `per_runtime_concurrency` defaults to `concurrency`, so Trials that share
+one Environment Runtime run in parallel too; set it lower to cap one Runtime.
+`concurrency="auto"` sizes the Job from this machine, its Runtimes, and where the
+model runs, and `job.concurrency_reason` says which limit set it; see
+[Attempts and concurrency](../guides/jobs.md#attempts-and-concurrency). Retry backoff starts
 at 0.25 seconds, caps at 10 seconds, and doubles for rate limits, provider
 unavailability, timeouts, and Runtime unavailability.
 

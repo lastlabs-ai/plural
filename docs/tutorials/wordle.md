@@ -86,7 +86,8 @@ absent. The docstring is the description the Agent reads. The episode ends when
 `terminated()` sees the puzzle solved or no guesses left.
 
 `environment.yaml` names the class and the runtime. The `local` runtime is a trusted
-subprocess on your machine, not a sandbox:
+subprocess on your machine, not a sandbox. `provider: docker` runs each Trial in
+a container instead, and `plural run` adds Plural to its image for you:
 
 ```yaml
 name: wordle

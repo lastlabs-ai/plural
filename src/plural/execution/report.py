@@ -252,8 +252,13 @@ def publish_execution(
     execution_root: Path,
     *,
     worker_id: str = "local",
+    agent_definition: str | None = None,
 ) -> Published:
-    """Report one local execution directory as an execution of hosted ``trial_id``."""
+    """Report one local execution directory as an execution of hosted ``trial_id``.
+
+    A receipt records the Agent binding's digest; the hosted pin is the Agent
+    definition's. Pass ``agent_definition`` so the two can be compared.
+    """
     result = TrialResult.model_validate_json(
         (execution_root / "result.json").read_text(encoding="utf-8")
     )
@@ -262,7 +267,7 @@ def publish_execution(
     pins = trial.get("pins") or {}
     for label, local, hosted in (
         ("Environment", receipt.environment_digest, pins.get("environment")),
-        ("Agent", receipt.agent_digest, pins.get("agent")),
+        ("Agent", agent_definition or receipt.agent_digest, pins.get("agent")),
     ):
         if hosted and local != hosted:
             raise PublishError(f"{label} {local} does not match the hosted pin {hosted}")
@@ -372,9 +377,7 @@ def publish_job(
     execution, including failed ones, becomes a hosted execution in order, so
     retries and their cost are kept.
     """
-    names = {
-        binding.agent.content_hash: binding.name for binding in store.load_spec(local_job_id).agents
-    }
+    agents = {binding.content_hash: binding for binding in store.load_spec(local_job_id).agents}
     hosted = {
         (str(item.get("task_name")), str(item.get("agent_name")), item["attempt"]): item
         for item in studio.jobs.trials(hosted_job_id)
@@ -390,13 +393,21 @@ def publish_job(
             receipt = TrialResult.model_validate_json(
                 (execution_root / "result.json").read_text(encoding="utf-8")
             ).receipt
-            key = (receipt.task_pin.name, names.get(receipt.agent_digest, ""), receipt.attempt)
+            binding = agents.get(receipt.agent_digest)
+            name = binding.name if binding is not None else ""
+            key = (receipt.task_pin.name, name, receipt.attempt)
             target = hosted.get(key)
             if target is None:
                 raise PublishError(
                     f"No hosted Trial for Task {key[0]} attempt {key[2]} with Agent {key[1]}"
                 )
             published.append(
-                publish_execution(studio, str(target["id"]), execution_root, worker_id=worker_id)
+                publish_execution(
+                    studio,
+                    str(target["id"]),
+                    execution_root,
+                    worker_id=worker_id,
+                    agent_definition=binding.agent.content_hash if binding is not None else None,
+                )
             )
     return published

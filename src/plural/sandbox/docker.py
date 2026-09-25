@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import shutil
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from plural.sandbox.base import SandboxProvider
@@ -28,6 +30,25 @@ from plural.sandbox.models import (
     safe_relative_path,
 )
 
+HOST_ALIAS = "host.docker.internal"
+_LOOPBACK = {"localhost", "127.0.0.1", "::1"}
+
+
+def _host_url(value: str) -> str:
+    """Point a loopback URL, such as a local model gateway, at the Docker host.
+
+    Inside a container ``localhost`` is the container itself.
+    """
+    if not value.startswith(("http://", "https://")):
+        return value
+    parsed = urlsplit(value)
+    if parsed.hostname not in _LOOPBACK:
+        return value
+    netloc = HOST_ALIAS if parsed.port is None else f"{HOST_ALIAS}:{parsed.port}"
+    if parsed.username or parsed.password:
+        return value
+    return urlunsplit(parsed._replace(netloc=netloc))
+
 
 class DockerProvider(SandboxProvider):
     """Create one locked-down Docker container per execution phase."""
@@ -41,6 +62,7 @@ class DockerProvider(SandboxProvider):
         self.default_image = default_image
         self._containers: set[str] = set()
         self._active_exec: dict[str, asyncio.subprocess.Process] = {}
+        self._layer_locks: dict[str, asyncio.Lock] = {}
 
     async def _run(
         self,
@@ -180,6 +202,40 @@ class DockerProvider(SandboxProvider):
             )
         return image, stdout.decode().strip() or None
 
+    async def extend_image(
+        self, requirements: SandboxRequirements, context: Path, key: str
+    ) -> SandboxRequirements:
+        """Layer a build context onto the requirements' image, once per base and key.
+
+        The context's Dockerfile receives the base image as the ``BASE`` build
+        argument. The result is tagged by base identity and ``key``, so later
+        Trials and Jobs reuse it instead of building again.
+
+        Returns:
+            The requirements, pointing at the extended image.
+        """
+        await self.preflight(requirements)
+        base, identity = await self._image(requirements)
+        digest = hashlib.sha256(f"{identity or base}\n{key}".encode()).hexdigest()
+        tag = f"plural-runtime:{digest[:32]}"
+        async with self._layer_locks.setdefault(tag, asyncio.Lock()):
+            code, _stdout, _stderr = await self._run(
+                "image", "inspect", tag, "--format", "{{.Id}}", check=False
+            )
+            if code != 0:
+                await self._run(
+                    "build",
+                    "--pull=false",
+                    "--build-arg",
+                    f"BASE={base}",
+                    "--tag",
+                    tag,
+                    str(context),
+                )
+        return requirements.model_copy(
+            update={"image": tag, "build_context": None, "dockerfile": None}
+        )
+
     async def create(self, requirements: SandboxRequirements) -> SandboxHandle:
         """Create and start a hardened, scoped container."""
         await self.preflight(requirements)
@@ -204,8 +260,10 @@ class DockerProvider(SandboxProvider):
         ]
         if requirements.network is NetworkMode.NONE:
             args.extend(["--network", "none"])
-        elif requirements.network is NetworkMode.FULL:
-            args.extend(["--network", "bridge"])
+        else:
+            args.extend(["--add-host", f"{HOST_ALIAS}:host-gateway"])
+            if requirements.network is NetworkMode.FULL:
+                args.extend(["--network", "bridge"])
         if requirements.resources.cpu is not None:
             args.extend(["--cpus", str(requirements.resources.cpu)])
         if requirements.resources.memory_mb is not None:
@@ -276,7 +334,7 @@ class DockerProvider(SandboxProvider):
         if request.stdin is not None:
             args.append("--interactive")
         for name, value in sorted(request.env.items()):
-            args.extend(["--env", f"{name}={value}"])
+            args.extend(["--env", f"{name}={_host_url(value)}"])
         args.extend([container, *request.command])
         started = time.monotonic()
         process = await asyncio.create_subprocess_exec(

@@ -10,6 +10,7 @@ import math
 import os
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -20,6 +21,14 @@ from plural.benchmarks.rules import BenchmarkScoring
 from plural.catalog import ModelCatalog
 from plural.common import ErrorCode, HarnessPackage, content_hash
 from plural.evidence import first_json_mapping
+from plural.execution.bootstrap import (
+    RUNTIME_VERSION_VARIABLE,
+    PluralDistribution,
+    install_plural,
+    needs_plural,
+    prepare_requirements,
+    resolve_distribution,
+)
 from plural.execution.inputs import ResourceResolver, resource_uploads, runtime_values
 from plural.execution.policy import (
     ProjectPolicy,
@@ -549,7 +558,10 @@ class Trial:
                 await self._preflight_harness(provider, package)
                 source = materialize_package(package)
                 requirements = _requirements(task, package)
+            distribution = self._plural_distribution(provider, package)
             async with phase("environment_setup"):
+                if distribution is not None:
+                    requirements = await prepare_requirements(provider, requirements, distribution)
                 handle = await provider.create(requirements)
             self._active[(provider.name, handle.sandbox_id)] = handle
             self.store.emit(
@@ -566,6 +578,12 @@ class Trial:
                         await provider.upload_bundle(handle, source, root="/workspace/harness")
                 async with phase("environment_setup"):
                     await self._stage_environment(provider, handle)
+                    if distribution is not None:
+                        harness_env.update(
+                            await install_plural(
+                                provider, handle, distribution, network=requirements.network
+                            )
+                        )
                 request = HarnessRunRequest(
                     request_id=self.spec.trial_id,
                     task=task.public_payload,
@@ -843,6 +861,14 @@ class Trial:
         ):
             raise ValueError(f"Harness source lock mismatch for {agent.name!r}")
 
+    def _plural_distribution(
+        self, provider: SandboxProvider, package: HarnessPackage
+    ) -> PluralDistribution | None:
+        """The Plural a non-local sandbox needs for this Trial, if it runs any."""
+        if provider.name == "local" or not needs_plural(self.task, package):
+            return None
+        return resolve_distribution(self.environ.get(RUNTIME_VERSION_VARIABLE))
+
     async def _stage_environment(self, provider: SandboxProvider, handle: SandboxHandle) -> None:
         source = self.task.environment.source
         root = None
@@ -1057,9 +1083,21 @@ class Trial:
         provider_name, requirements = verifier_score_sandbox(self.task.environment, runtime)
         provider = self.provider_for(provider_name)
         await provider.preflight(requirements)
+        distribution = (
+            resolve_distribution(self.environ.get(RUNTIME_VERSION_VARIABLE))
+            if provider.name != "local" and needs_plural(self.task, None, command)
+            else None
+        )
+        if distribution is not None:
+            requirements = await prepare_requirements(provider, requirements, distribution)
         handle = await provider.create(requirements)
         self._active[(provider.name, handle.sandbox_id)] = handle
         try:
+            plural_env = (
+                await install_plural(provider, handle, distribution, network=requirements.network)
+                if distribution is not None
+                else {}
+            )
             view_observation = first_json_mapping(
                 artifacts, ("final-observation.json", "observation.json")
             ) or dict(observation or {})
@@ -1095,7 +1133,7 @@ class Trial:
                 *(FileUpload(path=f"artifacts/{item.path}", data=item.data) for item in artifacts),
             ]
             await provider.upload_files(handle, uploads)
-            verifier_env = self._verifier_env(verifier)
+            verifier_env = {**self._verifier_env(verifier), **plural_env}
             execution = await provider.exec(
                 handle,
                 ExecRequest(
@@ -1282,6 +1320,59 @@ def _agent_aggregates(
             )
         )
     return tuple(rows)
+
+
+@dataclass(frozen=True)
+class JobProgress:
+    """A Job's standing so far, read from its store while Trials still run.
+
+    The aggregates use the same Benchmark scoring as the final result, over the
+    Trials that have finished, so ``coverage`` shows how much of it they cover.
+    """
+
+    planned: int
+    finished: int
+    running: int
+    succeeded: int
+    failed: int
+    trials: tuple[TrialResult, ...]
+    aggregates: tuple[AgentAggregate, ...]
+
+
+def job_progress(store: JobStore, job_id: str) -> JobProgress:
+    """Summarize a local Job from its per-Trial results and events.
+
+    Returns:
+        Counts and partial aggregates for the Trials recorded so far.
+    """
+    spec = store.load_spec(job_id)
+    planned: int | None = None
+    order: dict[str, int] = {}
+    started: set[str] = set()
+    for event in store.events(job_id):
+        if event.type == "planned" and planned is None:
+            planned = int(event.data.get("trial_count") or 0)
+        if event.trial_id is None:
+            continue
+        order.setdefault(event.trial_id, event.sequence)
+        if event.type == "provisioning":
+            started.add(event.trial_id)
+    trials = tuple(
+        sorted(
+            store.trial_results(job_id),
+            key=lambda item: order.get(item.receipt.trial_id, math.inf),
+        )
+    )
+    finished = {item.receipt.trial_id for item in trials}
+    return JobProgress(
+        planned=planned if planned is not None else spec.plan().trial_count,
+        finished=len(trials),
+        running=len(started - finished),
+        succeeded=sum(item.status == "succeeded" for item in trials),
+        failed=sum(item.status == "failed" for item in trials),
+        trials=trials,
+        aggregates=_agent_aggregates(spec, trials),
+    )
 
 
 class JobRunner:
@@ -1715,4 +1806,11 @@ json.dump(result, open("agent-verifier-result.json", "w"))
 """
 
 
-__all__ = ["ExecutionFailure", "JobRunner", "Trial", "VerifierOutput"]
+__all__ = [
+    "ExecutionFailure",
+    "JobProgress",
+    "JobRunner",
+    "Trial",
+    "VerifierOutput",
+    "job_progress",
+]

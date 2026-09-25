@@ -774,7 +774,7 @@ plural.tracing.resources.trace_json_schema() -> 'dict[str, Any]'
 Simple public runner for a Task or Benchmark and catalog-backed Agents.
 
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: 'int' = 1, per_runtime_concurrency: 'int' = 1, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None) -> 'None'
 ```
 
 ### plural.Job.run_async
@@ -1957,6 +1957,23 @@ doctor(self) -> 'ProviderDoctor'
 ```
 
 Detect the Docker CLI and daemon.
+
+### plural.DockerProvider.extend_image
+
+```python
+extend_image(self, requirements: 'SandboxRequirements', context: 'Path', key: 'str') -> 'SandboxRequirements'
+```
+
+Layer a build context onto the requirements' image, once per base and key.
+
+```text
+The context's Dockerfile receives the base image as the ``BASE`` build
+argument. The result is tagged by base identity and ``key``, so later
+Trials and Jobs reuse it instead of building again.
+
+Returns:
+    The requirements, pointing at the extended image.
+```
 
 ### plural.DockerProvider.create
 

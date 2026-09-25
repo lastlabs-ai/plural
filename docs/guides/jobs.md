@@ -90,13 +90,84 @@ persistent workspaces, compose, or a read-only root.
 plural run -b support-triage -a careful --attempts 3 --concurrency 8
 ```
 
-`--attempts` plans independent Trials per Task, and `--concurrency` bounds how
-many run at once. Ten Tasks with three attempts plan thirty Trials. A run uses
-one Agent or model; to compare several, run each one and compare the Jobs. Retry
-policy may append executions to a Trial but does not add Trials.
+`--attempts` plans independent Trials per Task, and `--concurrency` (or `-n`)
+bounds how many run at once. Ten Tasks with three attempts plan thirty Trials. A
+run uses one Agent or model; to compare several, run each one and compare the
+Jobs. Retry policy may append executions to a Trial but does not add Trials.
 
-The Python `Job` also accepts several Agents and a `per_runtime_concurrency`
-limit for each Environment Runtime; see [Jobs](../running/jobs.md).
+`--concurrency` defaults to `auto`, which sizes it before the run and prints the
+number and the reason:
+
+```text
+Running benchmark/wordle with word-list (openai/gpt-5.6-luna) locally: 3 trial(s), 3 at a time (auto: every Trial at once).
+```
+
+A Trial spends most of its time waiting on the model, so `auto` takes the lowest
+of these limits:
+
+| Limit | Value |
+| --- | --- |
+| Trials in the Job | All of them |
+| `local` Runtime | 4 per CPU, and 256 MB each from half this machine's memory |
+| `docker` Runtime | 2 containers per CPU the Environment requests (default 1), and its `memory` (default 512 MB) from half this machine's memory |
+| Remote Runtime, such as `daytona` | `PLURAL_MAX_SANDBOXES`, default 10 |
+| A model served on this machine | 1, when `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL` is a loopback address and no Plural key routes through the gateway |
+| `PLURAL_MODEL_CONCURRENCY` | Your provider's rate limit, when you set it |
+| Ceiling | 64 |
+
+A hosted model API is not bounded by this machine, so a Benchmark against it
+usually runs every Trial at once, up to the ceiling. When your provider
+rate-limits, set `PLURAL_MODEL_CONCURRENCY` to its concurrent-request allowance.
+A model on your own GPU is the opposite case: raise `PLURAL_MODEL_CONCURRENCY`
+only as far as its server batches requests. A number passed to `--concurrency`
+is used as it is. With `--hosted`, `auto` uses the Trial count and the ceiling,
+because this machine does not run the Trials.
+
+Each Trial prints when it finishes, with the Job's standing so far:
+
+```text
+  [2/3] trl_0cba547518e8343e731ddaf3  slate  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
+```
+
+Trials finish out of order. The running mean is a plain mean of the scores so
+far; the final result applies the Benchmark's own scoring to every Trial, in plan
+order. `plural job show JOB_ID` on a Job that is still running shows its
+progress and the Benchmark aggregate over the Trials that have finished, with
+the share of Tasks they cover.
+
+The Python `Job` takes `concurrency="auto"` too, and also accepts several Agents
+and a `per_runtime_concurrency` limit for each Environment Runtime; see
+[Jobs](../running/jobs.md).
+
+## Plural inside Docker and remote sandboxes
+
+An Environment written as a Python class, and a Python Harness, run Plural's own
+runners inside the sandbox, so the sandbox needs the `plural` package. `plural
+run` provides it before the Harness starts. You do not need to install it in the
+image yourself.
+
+- `docker` builds your Environment's image once with Plural added and reuses it
+  for later Trials and Jobs. The image is tagged `plural-runtime:<hash>` from
+  the base image and the exact Plural code.
+- Other providers, such as `daytona`, install Plural into each sandbox as it
+  starts. This takes a few seconds and needs the sandbox's network.
+
+By default the sandbox gets the same Plural code as the CLI that planned the
+Job, so an unreleased build works too. `--plural-version 0.16.0` or
+`--plural-version latest` installs a published release instead. From Python, set
+`PLURAL_RUNTIME_VERSION` in the Job's environment. An image that already has the
+selected version is used as it is. A `no-network` sandbox on a remote provider
+needs an image with it preinstalled:
+
+```dockerfile
+FROM python:3.12-slim
+RUN pip install --no-cache-dir plural==0.16.0
+```
+
+Inside a Docker container, `localhost` is the container. Plural rewrites a
+loopback model URL, such as a gateway at `http://localhost:8005/v1`, to
+`host.docker.internal`, so a local API server stays reachable. On Linux, bind
+that server to an address the Docker bridge can reach, not only `127.0.0.1`.
 
 ## Hosted execution
 

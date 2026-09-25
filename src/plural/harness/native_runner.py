@@ -617,6 +617,7 @@ def _emit(value: dict[str, Any]) -> None:
 def _action_environment(environment: dict[str, Any]) -> dict[str, str]:
     names = {
         "PATH",
+        "PYTHONPATH",
         "LANG",
         "LC_ALL",
         "TMPDIR",

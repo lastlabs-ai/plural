@@ -26,6 +26,7 @@ from typing import Any, Literal
 from plural.agents import Agent
 from plural.common import HarnessPackage, PackageSource
 from plural.environments.definition import EnvironmentDefinition
+from plural.execution.capacity import recommend_concurrency
 from plural.harness.retrieval import tree_digest
 from plural.jobs import (
     BenchmarkJobSource,
@@ -72,7 +73,8 @@ class RunRequest:
     harness: str | None = None
     agent: str | None = None
     attempts: int | None = None
-    concurrency: int = 1
+    concurrency: int | Literal["auto"] = 1
+    hosted: bool = False
 
 
 @dataclass
@@ -85,6 +87,8 @@ class RunPlan:
     inputs: list[ResourceRef]
     job: Job
     pins: dict[str, dict[str, str]] = field(default_factory=dict)
+    concurrency_reason: str | None = None
+    """Why ``auto`` chose the Job's concurrency; ``None`` when a number was given."""
 
     @property
     def spec(self) -> JobSpec:
@@ -121,8 +125,13 @@ class RunRecord:
         return dict(self.__dict__)
 
 
-def plan_run(workspace: Workspace, request: RunRequest) -> RunPlan:
+def plan_run(
+    workspace: Workspace, request: RunRequest, *, environ: Mapping[str, str] | None = None
+) -> RunPlan:
     """Resolve a run request against the project.
+
+    ``environ`` is the environment the run will use; ``auto`` concurrency reads
+    the model endpoint and sandbox quota from it.
 
     Returns:
         The validated plan.
@@ -157,14 +166,26 @@ def plan_run(workspace: Workspace, request: RunRequest) -> RunPlan:
                 f"{harness_name!r}. Allowed: {allowed}. Pass --harness <name>."
             )
     attempts = request.attempts or 1
+    auto = request.concurrency == "auto"
     job = Job(
         loaded.value,
         agents=[agent],
         attempts=attempts,
-        concurrency=request.concurrency,
+        concurrency=1 if auto else request.concurrency,
         catalog=workspace.catalog,
     )
-    job.spec = job.spec.model_copy(update={"run_id": uuid.uuid4().hex})
+    update: dict[str, Any] = {"run_id": uuid.uuid4().hex}
+    reason = None
+    if auto:
+        advice = recommend_concurrency(
+            job.spec,
+            trial_count=job.plan.trial_count,
+            environ=environ,
+            hosted=request.hosted,
+        )
+        update["concurrency"] = update["per_runtime_concurrency"] = advice.trials
+        reason = advice.reason
+    job.spec = job.spec.model_copy(update=update)
     job.plan = job.spec.plan(workspace.catalog)
     inputs = workspace.dependency_order(
         [source, *([agent_ref] if agent_ref else []), *([harness_ref] if harness_ref else [])]
@@ -177,7 +198,13 @@ def plan_run(workspace: Workspace, request: RunRequest) -> RunPlan:
         for item in inputs
     }
     return RunPlan(
-        source=source, agent=agent, agent_ref=agent_ref, inputs=inputs, job=job, pins=pins
+        source=source,
+        agent=agent,
+        agent_ref=agent_ref,
+        inputs=inputs,
+        job=job,
+        pins=pins,
+        concurrency_reason=reason,
     )
 
 
@@ -361,13 +388,30 @@ def local_job(workspace: Workspace, job_id: str) -> dict[str, Any]:
         if result_path.is_file()
         else None
     )
+    if result is not None:
+        return {
+            **record,
+            "status": result.status,
+            "trials": [_trial_summary(item) for item in result.trials],
+            "aggregates": [item.model_dump(mode="json") for item in result.aggregates],
+            "directory": str(directory),
+        }
+    from plural.execution.engine import job_progress
+    from plural.execution.store import JobStore
+
+    progress = job_progress(JobStore(workspace.project.jobs_dir), job_id)
     return {
         **record,
-        "status": result.status if result else "running",
-        "trials": [_trial_summary(item) for item in result.trials] if result else [],
-        "aggregates": (
-            [item.model_dump(mode="json") for item in result.aggregates] if result else []
-        ),
+        "status": "running",
+        "progress": {
+            "planned": progress.planned,
+            "finished": progress.finished,
+            "running": progress.running,
+            "succeeded": progress.succeeded,
+            "failed": progress.failed,
+        },
+        "trials": [_trial_summary(item) for item in progress.trials],
+        "aggregates": [item.model_dump(mode="json") for item in progress.aggregates],
         "directory": str(directory),
     }
 

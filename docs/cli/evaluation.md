@@ -66,8 +66,12 @@ plural run -b support-triage -m openai/gpt-5.6-luna -h codex
 Harness in `harnesses/` or a built-in one such as `codex` or `claude-code`. Add
 `--dry-run` to validate the inputs and print the plan, including the version
 and content hash of every input, without running anything. `--attempts N` plans
-N independent Trials per Task, and `--concurrency N` runs up to N Trials at once.
-Both default to 1.
+N independent Trials per Task and defaults to 1. `--concurrency N` (or `-n N`)
+runs up to N Trials at once and defaults to `auto`, which sizes it from this
+machine, the Runtime, and where the model runs; see
+[Attempts and concurrency](../guides/jobs.md#attempts-and-concurrency).
+`--plural-version` selects the Plural installed in Docker and remote sandboxes;
+see [Plural inside Docker and remote sandboxes](../guides/jobs.md#plural-inside-docker-and-remote-sandboxes).
 
 Every run is a new Job. A local run executes on this machine and records the Job
 under `.plural/jobs/<job-id>/` in the project. A run that calls a live model
@@ -1134,19 +1138,27 @@ This section is generated from the Typer application. Run `uv run python scripts
  Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --task         -t      <str>               Task to run.                                          │
-│ --benchmark    -b      <str>               Benchmark to run.                                     │
-│ --model        -m      <str>               Catalog model id.                                     │
-│ --harness      -h      <str>               Harness for --model. Default: native (Plural's        │
-│                                            built-in tool loop).                                  │
-│ --agent        -a      <str>               Saved Agent to run.                                   │
-│ --hosted                                   Run on hosted infrastructure using pushed revisions.  │
-│ --attempts             <int range> [x>=1]  Advanced: Trials per Task (default 1).                │
-│ --concurrency          <int range> [x>=1]  Advanced: Trials to run at once. [default: 1]         │
-│ --dry-run                                  Advanced: validate and show the plan without running. │
-│ --follow                                   With --hosted, stream progress.                       │
-│ --json                                     Print machine-readable JSON.                          │
-│ --help                                     Show this message and exit.                           │
+│ --task            -t      <str>               Task to run.                                       │
+│ --benchmark       -b      <str>               Benchmark to run.                                  │
+│ --model           -m      <str>               Catalog model id.                                  │
+│ --harness         -h      <str>               Harness for --model. Default: native (Plural's     │
+│                                               built-in tool loop).                               │
+│ --agent           -a      <str>               Saved Agent to run.                                │
+│ --hosted                                      Run on hosted infrastructure using pushed          │
+│                                               revisions.                                         │
+│ --attempts                <int range> [x>=1]  Advanced: Trials per Task (default 1).             │
+│ --concurrency     -n      <str>               Trials to run at once: a number, or auto to size   │
+│                                               it from this machine, the runtime, and where the   │
+│                                               model runs.                                        │
+│                                               [default: auto]                                    │
+│ --plural-version          <str>               Plural to install in Docker and remote sandboxes:  │
+│                                               a version, or latest. Default: this CLI's own      │
+│                                               code.                                              │
+│ --dry-run                                     Advanced: validate and show the plan without       │
+│                                               running.                                           │
+│ --follow                                      With --hosted, stream progress.                    │
+│ --json                                        Print machine-readable JSON.                       │
+│ --help                                        Show this message and exit.                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

@@ -176,6 +176,9 @@ class HarnessEnvironment:
             else ()
         )
         self._observation = payload.get("observation")
+        self.turns = 0
+        self.terminated = False
+        self.truncated = False
 
     @property
     def observation(self) -> Any:
@@ -254,6 +257,9 @@ class HarnessEnvironment:
                 self._recorder.step(started, action=action, arguments=arguments, error=str(exc))
             raise
         self._observation = step.observation
+        self.turns += 1
+        self.terminated = step.terminated
+        self.truncated = step.truncated
         if self._recorder and started:
             self._recorder.step(
                 started,
