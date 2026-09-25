@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
+from plural.harness.episode import EPISODE_FILE, EpisodeRecorder
 from plural.harness.interface import (
     HarnessAgent,
     HarnessEnvironment,
@@ -46,13 +47,15 @@ def main(argv: list[str] | None = None) -> None:
     if not isinstance(environment_payload, dict):
         raise SystemExit("Harness request is missing environment")
     task = HarnessTask.from_payload(task_payload)
+    recorder = EpisodeRecorder(EPISODE_FILE)
     agent = HarnessAgent(
         agent_payload,
         model_resolution=(
             request["model_resolution"] if isinstance(request.get("model_resolution"), dict) else {}
         ),
+        recorder=recorder,
     )
-    environment = HarnessEnvironment(environment_payload)
+    environment = HarnessEnvironment(environment_payload, recorder=recorder)
     try:
         value = harness.run(task, agent, environment)
         if inspect.isawaitable(value):
@@ -154,6 +157,9 @@ def _write_result(result: HarnessResult) -> None:
             encoding="utf-8",
         )
         artifacts.append("tito.jsonl")
+    episode = Path(EPISODE_FILE)
+    if episode.exists() and episode.stat().st_size:
+        artifacts.append(EPISODE_FILE)
     print(
         json.dumps(
             {

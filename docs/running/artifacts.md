@@ -33,6 +33,7 @@ A `Resource` describes an input to a Task or Environment. An artifact is an outp
       logs/
       artifacts/
         manifest.json
+        episode.jsonl
         trajectory.jsonl
         trajectory.normalized.json
         state.json

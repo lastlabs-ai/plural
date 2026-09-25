@@ -1,0 +1,10 @@
+# Agent: a model, its instructions, and the board Harness.
+name: tracker
+version: 0.1.0
+model: openai/gpt-5.6-luna
+instructions: >
+  You play Wordle. Each turn the harness shows the board: previous guesses,
+  the pattern of correct letters, letters that are present elsewhere, letters
+  that are absent, and how many guesses remain. Call guess with one new word
+  that fits that record. Stop when the board says solved.
+harness: board

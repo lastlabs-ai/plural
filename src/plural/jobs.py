@@ -308,6 +308,8 @@ class VerifierResult(FrozenModel):
     scores: dict[str, float] = Field(default_factory=dict)
     evidence: tuple[str, ...] = ()
     feedback: str = ""
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
     @model_validator(mode="after")
     def _finite(self) -> VerifierResult:
@@ -596,6 +598,35 @@ class JobPlan(FrozenModel):
         return self
 
 
+PhaseName = Literal[
+    "agent_setup",
+    "environment_setup",
+    "agent_execution",
+    "artifact_collection",
+    "verification",
+    "cleanup",
+]
+
+
+class PhaseTiming(FrozenModel):
+    """One timed phase of a TrialExecution, measured by the execution engine.
+
+    Phases are recorded in the order they started. A phase may appear more than
+    once, for example Agent setup before and after the sandbox exists, and
+    phases may overlap. Their durations therefore describe accumulated work;
+    wall-clock time is ``completed_at - started_at`` on the receipt.
+    """
+
+    name: PhaseName
+    started_at: datetime
+    completed_at: datetime
+
+    @property
+    def seconds(self) -> float:
+        """Duration of this phase in seconds."""
+        return (self.completed_at - self.started_at).total_seconds()
+
+
 class TrialReceipt(FrozenModel):
     """Immutable TrialExecution provenance."""
 
@@ -627,13 +658,21 @@ class TrialReceipt(FrozenModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     timings: dict[str, float] = Field(default_factory=dict)
+    phases: tuple[PhaseTiming, ...] = ()
     cost_usd: float | None = Field(default=None, ge=0)
     trust: Literal["self_reported", "imported_unverified"] = "self_reported"
 
     @property
     def receipt_hash(self) -> str:
-        """Integrity digest."""
-        return content_hash(self)
+        """Integrity digest.
+
+        A receipt without phase timings hashes as it did before phases were
+        recorded, so receipts written by earlier versions still verify.
+        """
+        payload = self.model_dump(mode="json")
+        if not self.phases:
+            payload.pop("phases")
+        return content_hash(payload)
 
 
 class TrialResult(FrozenModel):
@@ -867,6 +906,8 @@ __all__ = [
     "TITORecord",
     "TaskJobSource",
     "TrialExecution",
+    "PhaseName",
+    "PhaseTiming",
     "TrialReceipt",
     "TrialResult",
     "TrialSpec",

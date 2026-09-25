@@ -763,8 +763,16 @@ class Studio:
             if response.status_code >= 400:
                 response.read()
                 _raise_http(response)
+            event = ""
             for line in response.iter_lines():
-                if line.startswith("data:"):
+                if not line:
+                    event = ""
+                elif line.startswith("event:"):
+                    event = line.removeprefix("event:").strip()
+                elif line.startswith("data:"):
+                    if event == "end":
+                        # The stream is complete; the server closes it next.
+                        return
                     value = json.loads(line.removeprefix("data:").strip())
                     if isinstance(value, dict):
                         yield value

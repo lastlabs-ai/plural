@@ -1,19 +1,25 @@
-# Environment: identity, runtime, and settings.
-# Behavior (actions, state, observations) is Python in environment.py.
+# Environment: identity, resources, runtime, and settings.
+# Behavior (actions, state, observations, rewards) is Python in environment.py.
+# README.md explains both to the people who use this Environment.
 name: wordle
-version: 1.0.0
-description: Guess a hidden five-letter word in six tries.
-overview: Guess a hidden five-letter word in six tries.
+version: 0.1.0
+description: Guess a hidden five-letter word. Each guess is marked correct, present, or absent.
+overview: Six guesses. The secret stays on State, and the Agent only sees the board.
 python: environment.py:Wordle
 readme: README.md
 
-# local runs the Environment as a trusted subprocess on this machine. It is not
-# a sandbox; use docker for code you do not trust.
+# Files staged into the runtime, relative to this directory.
+resources: []
+#  - resources/policy.md
+
+# local runs the Environment as a trusted subprocess on this machine, using the
+# same Python that has Plural installed. docker's stock image does not.
 runtime:
   provider: local
 
+# Settings: which Agent harnesses may run here, and per-Trial limits.
 harness_policy:
   mode: allow_all
 limits:
-  max_turns: 8
-  max_seconds: 60
+  max_turns: 6
+  max_seconds: 120

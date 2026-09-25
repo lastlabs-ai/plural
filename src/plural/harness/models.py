@@ -313,6 +313,11 @@ class Harness(BaseModel, ABC):
                 media_type="application/jsonl",
             ),
             FileDeclaration(path="logs.txt", required=False, media_type="text/plain"),
+            FileDeclaration(
+                path="episode.jsonl",
+                required=False,
+                media_type="application/jsonl; profile=plural.episode/v1",
+            ),
         ]
         if type(self).supports_tito:
             artifacts.append(

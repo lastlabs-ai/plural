@@ -166,8 +166,14 @@ def test_project_init_push_registers_an_existing_project_without_overwriting(
     monkeypatch.chdir(project.root / "tasks")
 
     code, output = cli("project", "init", "support-desk", "--push")
-    assert code == 0, output
+    assert code == 1
     assert "leaving its files as they are" in output
+    assert "--connect" in output
+    assert list(fake.projects) == [existing["id"]]
+    assert project.read_binding() is None
+
+    code, output = cli("project", "init", "support-desk", "--push", "--connect")
+    assert code == 0, output
     assert list(fake.projects) == [existing["id"]]
     assert (project.root / "README.md").read_text() == readme
     binding = project.read_binding()
@@ -206,6 +212,38 @@ def test_project_show_prefers_local_then_hosted(fake: FakeHosted, tmp_path: Path
     assert code == 1
 
 
-def test_there_is_no_project_push_command(fake: FakeHosted) -> None:
-    code, _ = cli("project", "push")
-    assert code != 0
+def test_project_push_does_not_attach_to_an_existing_hosted_project(
+    fake: FakeHosted, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = write_project(tmp_path / "support-desk")
+    fake.add_project("support-desk")
+    login()
+    monkeypatch.chdir(project.root)
+    code, output = cli("project", "push", "--yes")
+    assert code == 1
+    assert "--connect" in output
+    assert project.read_binding() is None
+    assert fake.writes == []
+
+
+def test_login_prompts_for_an_api_key(fake: FakeHosted) -> None:
+    code, output = cli("auth", "login", "--api-key-stdin", stdin="plural_test\n")
+    assert code == 0, output
+    assert "Enter API key:" in output
+    assert ">>" in output
+
+
+def test_login_reads_only_the_plural_key_from_an_env_file(
+    fake: FakeHosted, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text('OPENAI_API_KEY=sk-secret\nPLURAL_API_KEY="plural_from_file"\n')
+    monkeypatch.delenv("PLURAL_API_KEY", raising=False)
+    code, output = cli("auth", "login", "--env-file", str(env_file))
+    assert code == 0, output
+    assert "sk-secret" not in output
+    assert "plural_from_file" not in output
+    assert load_config()  # credential store, not the config file, holds the key
+    from plural.auth import resolve_session
+
+    assert resolve_session().api_key == "plural_from_file"

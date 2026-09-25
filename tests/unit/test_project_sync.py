@@ -229,6 +229,52 @@ def test_hosted_model_run_records_an_agent_named_after_the_model(hosted: Hosted)
     assert (hosted.project_id, "agents", "openai-gpt-5-6-luna") in hosted.fake.parents
 
 
+def test_project_push_uploads_every_resource_and_repeats_as_unchanged(hosted: Hosted) -> None:
+    code, output = hosted.cli("project", "push", "--yes", "--json")
+    assert code == 0, output
+    steps = json.loads(output)["steps"]
+    assert steps
+    assert {step["status"] for step in steps} == {"pushed"}
+    assert hosted.fake.revision_count() == len(steps)
+
+    writes = len(hosted.fake.writes)
+    code, output = hosted.cli("project", "push", "--yes")
+    assert code == 0, output
+    assert "already pushed" in output
+    assert len(hosted.fake.writes) == writes
+
+
+def test_project_push_bumps_a_changed_resource_instead_of_overwriting(hosted: Hosted) -> None:
+    assert hosted.cli("project", "push", "--yes")[0] == 0
+    writes = len(hosted.fake.writes)
+    revisions = hosted.fake.revision_count()
+    instruction = hosted.project.root / "tasks/refund/instruction.md"
+    instruction.write_text("Review order A-1 carefully.\n")
+
+    code, output = hosted.cli("project", "push", "--yes")
+    assert code == 1
+    assert "nothing was uploaded" in output
+    assert "--bump" in output
+    assert len(hosted.fake.writes) == writes
+
+    code, output = hosted.cli("project", "push", "--bump", "--yes", "--json")
+    assert code == 0, output
+    steps = json.loads(output)["steps"]
+    bumped = next(step for step in steps if step["resource"] == "task/refund")
+    assert bumped["status"] == "pushed"
+    assert bumped["version"] != "0.1.0"
+    manifest = (hosted.project.root / "tasks/refund/task.yaml").read_text()
+    assert f"version: {bumped['version']}" in manifest
+    assert hosted.fake.revision_count() > revisions
+
+
+def test_project_push_asks_before_uploading_without_yes(hosted: Hosted) -> None:
+    code, output = hosted.cli("project", "push")
+    assert code == 1
+    assert "--yes" in output
+    assert hosted.fake.writes == []
+
+
 def test_models_list_comes_from_the_hosted_policy(hosted: Hosted) -> None:
     code, output = hosted.cli("models", "list", "--provider", "anthropic", "--json")
     assert code == 0, output

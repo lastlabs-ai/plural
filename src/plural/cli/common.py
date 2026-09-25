@@ -75,6 +75,34 @@ def rows(items: Iterable[Iterable[Any]], header: Iterable[str]) -> None:
         )
 
 
+def success(message: str) -> None:
+    """Print a one-line outcome, marked done."""
+    typer.echo(typer.style("✓ ", fg="green", bold=True) + typer.style(message, bold=True))
+
+
+def heading(message: str) -> None:
+    """Print a bold section heading."""
+    typer.echo(typer.style(message, bold=True))
+
+
+def muted(message: str) -> str:
+    """``message`` styled as secondary text."""
+    return typer.style(message, dim=True)
+
+
+def details(pairs: Iterable[tuple[str, str]]) -> None:
+    """Print labeled values in an indented, aligned block."""
+    items = list(pairs)
+    width = max((len(label) for label, _ in items), default=0)
+    for label, value in items:
+        typer.echo(f"  {muted(label.ljust(width))}  {value}")
+
+
+def note(message: str) -> None:
+    """Print a caution the user should act on."""
+    typer.echo(typer.style("! ", fg="yellow", bold=True) + message)
+
+
 def workspace() -> Workspace:
     """The project containing the working directory.
 
@@ -150,13 +178,18 @@ def relative(path: Path, root: Path) -> str:
 
 __all__ = [
     "JSON_OPTION",
+    "details",
     "emit",
     "fail",
     "handled",
+    "heading",
+    "muted",
+    "note",
     "project_studio",
     "relative",
     "rows",
     "session",
     "signed_in",
+    "success",
     "workspace",
 ]

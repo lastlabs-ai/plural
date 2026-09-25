@@ -20,9 +20,10 @@ plural auth login
 plural project init support-eval --push
 ```
 
-`--push` creates the hosted project, or connects to it when it already exists,
-and registers the local project as it is; no local file is overwritten. The
-hosted project is private. The command records the binding in
+`--push` creates a private hosted project and registers the local project as it
+is; no local file is overwritten. If a hosted project with that name already
+exists, the command stops. Pass `--connect` to bind to it, or `--name` to
+create a different one. The command records the binding in
 `.plural/project.json`, which is not committed, and selects the project as your
 [scope](../cli/evaluation.md#hosted-projects). Every push and pull from this
 checkout goes to the bound project.
@@ -37,9 +38,19 @@ project reaches only that project, whatever scope you select.
 ## Push
 
 ```bash
+plural project push
 plural benchmark push support-triage --with-deps
 plural agent push careful
 ```
+
+`plural project push` pushes every local resource, dependencies first. It prints
+the plan and asks before uploading; `--yes` skips the question. Unchanged
+content reuses the existing revision. A resource whose files changed under the
+same `version` is refused; `--bump` gives each of those the next patch version
+and pushes a new revision. Old revisions stay, so earlier Jobs still point at
+what they ran. Hosted resources that are not in this checkout are left as they
+are. Push refuses when the hosted project has a newer revision this checkout
+has not pulled, unless you pass `--force`.
 
 A push validates the resource and plans the whole dependency graph before it
 writes anything. If a dependency is not pushed yet or has changed locally, the

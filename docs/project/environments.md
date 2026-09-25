@@ -35,6 +35,33 @@ These three parts describe the interaction:
 
 After each action, the agent sees the Environment's current `self.observation` and nothing else. An action's return value is passed to reward signals but is never shown to the agent, so update `self.observation` with what the agent should see, and never copy State into it. A Verifier can read the final State to check the result. This separation controls what Plural shows the model; use Runtime isolation when running untrusted code.
 
+## Display views
+
+Override `view()` to control how people see the world in the run viewer. Plural records the view after the reset and after every step, for display and replay only. It never reaches the agent, and it is not scored.
+
+A view is plain data, not code. It declares a `schema` and a `kind` that the viewer knows how to draw, so a run can never ship its own rendering script:
+
+```python
+def view(self):
+    return {
+        "schema": "plural.view/v1",
+        "kind": "marks-grid",
+        "title": "Wordle",
+        "columns": 5,
+        "max_rows": 6,
+        "rows": [{"letters": "crane", "marks": ["absent", "present", "correct", "absent", "absent"]}],
+        "status": "5 guesses left",
+    }
+```
+
+Version 1 defines these kinds:
+
+- `marks-grid` draws `rows` of `letters`, each letter marked `correct`, `present`, or `absent`, with an optional `title`, `columns`, `max_rows`, and `status`.
+- `markdown` shows `markdown` as plain text.
+- `key-values` shows `items`, a list of `{"label": ..., "value": ...}` pairs.
+
+The viewer shows any other view, or one it cannot read, as formatted JSON beside the observation. Leave out anything the agent must not learn if people with read access should not see it either: a view is visible to everyone who can read the run, like the observation. The Wordle example shows guesses and marks, never the secret word.
+
 ## Define the Environment
 
 Save Environment classes in a Python file. This small example lets an agent classify one support request:

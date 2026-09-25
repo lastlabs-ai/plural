@@ -1,0 +1,6 @@
+# Harness: the loop that connects an Agent's model to an Environment.
+name: board
+version: 0.1.0
+description: Remembers Wordle marks and shows the model the board, not the secret.
+python: harness.py:BoardHarness
+config: {}

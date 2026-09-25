@@ -12,6 +12,8 @@ from typing import Any
 from pydantic import Field
 
 from plural.common import FrozenModel
+from plural.harness.episode import EpisodeRecorder
+from plural.usage import normalize_usage
 
 
 class HarnessTask(FrozenModel):
@@ -56,7 +58,9 @@ class HarnessAgent:
         payload: dict[str, Any],
         *,
         model_resolution: dict[str, Any] | None = None,
+        recorder: EpisodeRecorder | None = None,
     ) -> None:
+        self._recorder = recorder
         self.raw = dict(payload)
         self.name = str(payload.get("name") or "")
         self.model = str(payload.get("model") or "")
@@ -90,13 +94,24 @@ class HarnessAgent:
         }
         if tools:
             payload["tools"] = tools
-        response = _gateway_request(payload)
+        started = self._recorder.start() if self._recorder else None
+        try:
+            response = _gateway_request(payload)
+        except Exception as exc:
+            if self._recorder and started:
+                self._recorder.model_call(
+                    started, model=str(model), messages=messages, tools=tools, error=str(exc)
+                )
+            raise
         choices = response.get("choices")
         message: dict[str, Any] = {}
+        finish_reason: str | None = None
         if isinstance(choices, list) and choices and isinstance(choices[0], dict):
             raw_message = choices[0].get("message")
             if isinstance(raw_message, dict):
                 message = raw_message
+            if isinstance(choices[0].get("finish_reason"), str):
+                finish_reason = choices[0]["finish_reason"]
         content = message.get("content")
         text = content if isinstance(content, str) else ""
         raw_tool_calls = message.get("tool_calls")
@@ -106,10 +121,22 @@ class HarnessAgent:
             else ()
         )
         usage = response.get("usage")
+        raw_usage = dict(usage) if isinstance(usage, dict) else {}
+        if self._recorder and started:
+            self._recorder.model_call(
+                started,
+                model=str(response.get("model") or model),
+                messages=messages,
+                tools=tools,
+                text=text,
+                tool_calls=tool_calls,
+                finish_reason=finish_reason,
+                usage=normalize_usage(raw_usage, cost=response.get("cost")),
+            )
         return HarnessCompletion(
             text=text,
             tool_calls=tool_calls,
-            usage=dict(usage) if isinstance(usage, dict) else {},
+            usage=raw_usage,
             raw=response,
         )
 
@@ -136,7 +163,8 @@ class HarnessStep(FrozenModel):
 class HarnessEnvironment:
     """Environment controls supplied to ``Harness.run``."""
 
-    def __init__(self, payload: dict[str, Any]) -> None:
+    def __init__(self, payload: dict[str, Any], *, recorder: EpisodeRecorder | None = None) -> None:
+        self._recorder = recorder
         self.raw = dict(payload)
         self.name = str(payload.get("name") or "")
         self.overview = str(payload.get("overview") or "")
@@ -183,7 +211,16 @@ class HarnessEnvironment:
         raw_command = self.raw.get("reset_command")
         if not isinstance(raw_command, list) or not raw_command:
             return self._observation
-        self._observation = self._exec(tuple(str(item) for item in raw_command)).observation
+        started = self._recorder.start() if self._recorder else None
+        try:
+            step, view = self._exec(tuple(str(item) for item in raw_command))
+        except Exception as exc:
+            if self._recorder and started:
+                self._recorder.reset(started, error=str(exc))
+            raise
+        self._observation = step.observation
+        if self._recorder and started:
+            self._recorder.reset(started, observation=step.observation, info=step.info, view=view)
         return self._observation
 
     def step(self, action: str, /, **arguments: Any) -> HarnessStep:
@@ -206,14 +243,34 @@ class HarnessEnvironment:
         raw_command = declaration.get("command")
         if not isinstance(raw_command, list) or not raw_command:
             raise ValueError(f"Environment action {action!r} has no executable command")
-        step = self._exec(
-            tuple(str(item) for item in raw_command),
-            stdin=json.dumps(arguments).encode(),
-        )
+        started = self._recorder.start() if self._recorder else None
+        try:
+            step, view = self._exec(
+                tuple(str(item) for item in raw_command),
+                stdin=json.dumps(arguments).encode(),
+            )
+        except Exception as exc:
+            if self._recorder and started:
+                self._recorder.step(started, action=action, arguments=arguments, error=str(exc))
+            raise
         self._observation = step.observation
+        if self._recorder and started:
+            self._recorder.step(
+                started,
+                action=action,
+                arguments=arguments,
+                observation=step.observation,
+                reward=step.reward,
+                terminated=step.terminated,
+                truncated=step.truncated,
+                info=step.info,
+                view=view,
+            )
         return step
 
-    def _exec(self, command: tuple[str, ...], stdin: bytes | None = None) -> HarnessStep:
+    def _exec(
+        self, command: tuple[str, ...], stdin: bytes | None = None
+    ) -> tuple[HarnessStep, dict[str, Any] | None]:
         from plural.harness.native_runner import (
             STEP_PROTOCOL,
             _action_environment,
@@ -236,21 +293,25 @@ class HarnessEnvironment:
             )
         text = completed.stdout.decode("utf-8", errors="replace").strip()
         if not text:
-            return HarnessStep(observation={})
+            return HarnessStep(observation={}), None
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
-            return HarnessStep(observation={"output": text})
+            return HarnessStep(observation={"output": text}), None
         if isinstance(parsed, dict) and parsed.get("protocol") == STEP_PROTOCOL:
             info = parsed.get("info")
-            return HarnessStep(
-                observation=parsed.get("observation"),
-                reward=float(parsed.get("reward") or 0),
-                terminated=bool(parsed.get("terminated")),
-                truncated=bool(parsed.get("truncated")),
-                info=info if isinstance(info, dict) else {},
+            view = parsed.get("view")
+            return (
+                HarnessStep(
+                    observation=parsed.get("observation"),
+                    reward=float(parsed.get("reward") or 0),
+                    terminated=bool(parsed.get("terminated")),
+                    truncated=bool(parsed.get("truncated")),
+                    info=info if isinstance(info, dict) else {},
+                ),
+                view if isinstance(view, dict) and view else None,
             )
-        return HarnessStep(observation=parsed)
+        return HarnessStep(observation=parsed), None
 
 
 class HarnessResult(FrozenModel):

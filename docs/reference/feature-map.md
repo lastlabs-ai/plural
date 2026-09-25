@@ -74,7 +74,7 @@ names here describe the installed package, not proposed future convenience APIs.
 
 ## Hosted projects
 
-- `plural project init --push`, `plural <kind> push` and `pull`, `--with-deps`,
+- `plural project init --push`, `plural project push`, `plural <kind> push` and `pull`, `--with-deps`,
   `.pluralignore`, and `plural.lock`:
   [Push and pull resources](../guides/studio-sync.md).
 - Publishing a Benchmark release to the public Hub, a separate step in the web

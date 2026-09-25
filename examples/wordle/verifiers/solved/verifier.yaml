@@ -1,4 +1,5 @@
-# Verifier: scores a finished episode. Its score is what Tasks and Benchmarks rank on.
+# Verifier: scores a finished episode. Its score, never the step rewards, is
+# what Tasks and Benchmarks rank on.
 name: solved
 version: 0.1.0
 kind: deterministic

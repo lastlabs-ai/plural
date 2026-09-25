@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -17,7 +19,7 @@ from plural.auth import (
     resolve_session,
     save_config,
 )
-from plural.cli.common import JSON_OPTION, emit, handled, session, signed_in
+from plural.cli.common import JSON_OPTION, details, emit, handled, note, session, signed_in, success
 from plural.project import Project, ProjectError, find_project_root
 
 auth_app = typer.Typer(
@@ -33,6 +35,16 @@ def login(
     api_key_stdin: bool = typer.Option(
         False, "--api-key-stdin", help="Store an API key read from standard input instead."
     ),
+    from_env: bool = typer.Option(
+        False,
+        "--from-env",
+        help="Store PLURAL_API_KEY from the environment. The value is not printed.",
+    ),
+    env_file: Path | None = typer.Option(
+        None,
+        "--env-file",
+        help="Read PLURAL_API_KEY from this file. Other variables in the file are ignored.",
+    ),
     api_url: str | None = typer.Option(None, "--api-url", help="Hosted service URL."),
 ) -> None:
     """Sign in with your browser (or store an API key).
@@ -47,11 +59,13 @@ def login(
     if api_url:
         profile = profile.model_copy(update={"api_url": api_url.rstrip("/")})
     target = api_url.rstrip("/") if api_url else current.api_url
+    sources = sum((api_key_stdin, from_env, env_file is not None))
+    if sources > 1:
+        raise ProjectError("Choose one of --api-key-stdin, --from-env, or --env-file.")
     if api_key_stdin:
-        key = sys.stdin.readline().strip()
-        if not key:
-            raise ProjectError("No API key on standard input.")
-        credential = Credential(api_key=key)
+        credential = Credential(api_key=_prompt_api_key())
+    elif from_env or env_file is not None:
+        credential = Credential(api_key=_key_from_env(env_file))
     else:
         with AuthClient(target) as client:
             _device, tokens = client.login(
@@ -67,8 +81,8 @@ def login(
     refreshed = resolve_session()
     profile = _settle_account(refreshed, profile)
     save_config(load_config().with_profile(current.profile, profile))
-    typer.echo(f"Signed in to {target}.")
-    _print_scope(resolve_session())
+    success(f"Signed in to {target}")
+    _print_scope(resolve_session(), header=False, service=True)
 
 
 @auth_app.command("logout")
@@ -100,9 +114,8 @@ def status(as_json: bool = JSON_OPTION) -> None:
     payload = {**_scope_payload(current), "status": remote.model_dump(mode="json")}
 
     def text() -> None:
-        typer.echo(f"Service:    {current.api_url}")
-        typer.echo(f"Credential: {_describe_credential(current, remote)}")
-        _print_scope(current, header=False)
+        success("Signed in")
+        _print_scope(current, header=False, service=True, remote=remote)
 
     emit(payload, as_json=as_json, text=text)
 
@@ -270,25 +283,84 @@ def _local_binding() -> dict[str, Any] | None:
     }
 
 
-def _print_scope(current: Session, *, header: bool = True) -> None:
+def _prompt_api_key() -> str:
+    """Read one API key from stdin after telling the user what to paste."""
+    typer.echo("Enter API key:")
+    typer.echo(">> ", nl=False)
+    key = sys.stdin.readline().strip()
+    if not key:
+        raise ProjectError("No API key on standard input.")
+    return key
+
+
+def _key_from_env(env_file: Path | None) -> str:
+    """Return PLURAL_API_KEY from the environment or one env file.
+
+    Other names in an env file are ignored and never printed.
+    """
+    if env_file is not None:
+        key = _dotenv_value(env_file, "PLURAL_API_KEY")
+        if not key:
+            raise ProjectError(f"No PLURAL_API_KEY in {env_file}.")
+        return key
+    key = os.environ.get("PLURAL_API_KEY", "").strip()
+    if not key:
+        raise ProjectError(
+            "No PLURAL_API_KEY in the environment. Export it, or pass --env-file .env."
+        )
+    return key
+
+
+def _dotenv_value(path: Path, name: str) -> str | None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise ProjectError(f"Could not read {path}.") from exc
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() != name:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        return value.strip() or None
+    return None
+
+
+def _print_scope(
+    current: Session,
+    *,
+    header: bool = True,
+    service: bool = False,
+    remote: AuthStatus | None = None,
+) -> None:
     payload = _scope_payload(current)
     if header:
-        typer.echo(f"Credential: {_describe_credential(current)}")
+        success("Signed in")
     profile = load_config().profiles.get(current.profile, Profile())
     account = profile.account_slug or current.account_id or "personal"
     if current.project:
-        typer.echo(f"Scope:      project {payload['project']} (account {account})")
+        scope_label = f"project {payload['project']} (account {account})"
     else:
-        typer.echo(f"Scope:      account {account}")
+        scope_label = f"account {account}"
+    pairs: list[tuple[str, str]] = []
+    if service:
+        pairs.append(("Service", current.api_url))
+    pairs.append(("Credential", _describe_credential(current, remote)))
+    pairs.append(("Scope", scope_label))
     local = payload["local_project"]
     if local:
         bound = local["bound_to"]
-        typer.echo(
-            f"Directory:  project {local['name']}, "
-            + (f"bound to hosted project {bound}" if bound else "not registered (local only)")
+        directory = f"project {local['name']}, " + (
+            f"bound to hosted project {bound}" if bound else "not registered (local only)"
         )
-        if bound and current.project and payload["project"] != bound:
-            typer.echo(
-                f"Note: pushes from here will be refused until the scope selects {bound} "
-                "or account scope."
-            )
+        pairs.append(("Directory", directory))
+    details(pairs)
+    if local and local["bound_to"] and current.project and payload["project"] != local["bound_to"]:
+        note(
+            f"Pushes from here will be refused until the scope selects {local['bound_to']} "
+            "or account scope."
+        )

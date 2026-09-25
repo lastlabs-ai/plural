@@ -419,8 +419,9 @@ plural run --benchmark support-triage --agent scripted --hosted --follow
 `plural auth login` opens your browser and stores the credential in your user config
 directory or OS keyring, never in the project. `project init --push` takes the name in
 `project.yaml` (`support-queue`) and registers the existing project as it is, without
-changing any local file. It creates or connects a private hosted project, stores the
-binding in `.plural/project.json`, and selects the project as your scope.
+changing any local file. It creates a private hosted project, stores the
+binding in `.plural/project.json`, and selects the project as your scope. If that
+name already exists, pass `--connect` to use it.
 `--with-deps` also pushes the Tasks, Verifier, Environment, and Harness the resource
 depends on. `--follow` streams progress until the Job finishes.
 

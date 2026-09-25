@@ -1,0 +1,8 @@
+# Agent: a model and instructions. No harness, so Plural uses its built-in loop.
+name: plain
+version: 0.1.0
+model: openai/gpt-5.6-luna
+instructions: >
+  You play Wordle. Call guess with one five-letter word at a time. A reply
+  marks each letter: + correct, ? present elsewhere, - absent. Use only those
+  marks. Stop when the board says solved.

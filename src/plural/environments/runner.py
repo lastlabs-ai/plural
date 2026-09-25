@@ -91,6 +91,9 @@ def _envelope(
         "terminated": world.terminated() if terminated is None else terminated,
         "truncated": world.truncated() if truncated is None else truncated,
         "info": info or {},
+        # Display state for the run viewer. Recorded on the episode, never
+        # returned to the Harness as part of the observation.
+        "view": world.view() or None,
     }
 
 

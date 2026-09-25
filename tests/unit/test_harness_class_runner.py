@@ -120,7 +120,19 @@ def test_class_runner_standardizes_sync_and_async_harnesses(
     assert trajectory["observation"]["status"] == "complete"
     terminal = json.loads(capsys.readouterr().out)
     assert terminal["outputs"] == ["result.json"]
-    assert terminal["artifacts"] == ["trajectory.jsonl", "logs.txt"]
+    assert terminal["artifacts"] == ["trajectory.jsonl", "logs.txt", "episode.jsonl"]
+    episode = [
+        json.loads(line)
+        for line in (execution / "episode.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [record["kind"] for record in episode] == ["environment.reset", "environment.step"]
+    step = episode[1]
+    assert step["schema"] == "plural.episode/v1"
+    assert step["action"] == "answer"
+    assert step["arguments"] == {"value": "done"}
+    assert step["observation"] == {"status": "complete", "value": "done"}
+    assert step["turn"] == 1
+    assert step["duration_ms"] >= 0
 
 
 def test_environment_tools_and_unknown_action_are_clear() -> None:

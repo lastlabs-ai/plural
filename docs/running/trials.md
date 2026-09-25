@@ -65,6 +65,72 @@ Normalization is tolerant and does not invent missing data. A normalized
 trajectory is not a full [`Trace`](traces.md), and a `trace_id` alone does not
 upload local files.
 
+## The episode record
+
+When a Harness runs through `HarnessAgent` and `HarnessEnvironment`, Plural
+itself records the episode in `episode.jsonl`, whatever the Harness writes. Each
+line is one record with `schema: "plural.episode/v1"`, a `sequence` that orders
+the episode, a `turn`, `started_at`, `ended_at`, and `duration_ms`. There are
+three kinds:
+
+- `environment.reset` has the first `observation`, `info`, and `view`.
+- `environment.step` has the `action` and its `arguments`, the `observation`
+  returned to the Harness, and the `reward`, `terminated`, `truncated`, `info`,
+  and `view` of the transition.
+- `model.call` has the `model`, the request `messages`, the offered `tools`,
+  and the response `text`, `tool_calls`, `finish_reason`, and `usage`. Only
+  messages that are new since the previous call are stored; `messages_offset`
+  gives their position in the full request.
+
+A model call opens a turn, and the steps it causes belong to that turn. A
+Harness that never calls a model gets one turn per step. A failed call or step
+is recorded with its `error`.
+
+Of a step's fields, only the observation went to the Harness and therefore
+possibly to the model. The reward, the episode flags, `info`, and the view are
+for scoring, training, and display. The hosted run viewer labels each field
+this way.
+
+## Usage, cost, and timing
+
+`usage` on a model call follows one shape for every provider. `input_tokens`
+counts all prompt tokens, including cached ones, and `cached_input_tokens` is
+the part served from a cache. It is never added to the input count. Anthropic
+cache reads and writes are folded into `input_tokens` to match. A count or a
+cost the provider did not report is `null`, not zero, and totals record how
+many calls left each one out.
+
+The receipt's `phases` list the measured phases of an execution:
+`agent_setup`, `environment_setup`, `agent_execution`, `artifact_collection`,
+`verification`, and `cleanup`, each with `started_at` and `completed_at`.
+Phases can repeat and overlap, so their sum is the work done, not the wall
+clock time. Each Verifier result also carries its own `started_at` and
+`completed_at`.
+
+## Publish a local run to a hosted Job
+
+`plural.execution.report.publish_job` reports each execution of a local Job to
+a hosted Job planned from the same pushed resources. It matches Trials by Task,
+Agent name, and attempt, and replays each execution through the hosted worker
+API: the episode as progress events, logs, artifacts, usage, phases, and
+Verifier results. Failed executions are published too, so the hosted Trial keeps
+their retries and cost.
+
+```python
+from pathlib import Path
+
+from plural.execution.report import publish_job
+from plural.execution.store import JobStore
+from plural.studio import Studio
+
+studio = Studio(api_root="https://pluralintel.com/api/v1", token=TOKEN, project=PROJECT_ID)
+publish_job(studio, JobStore(Path(".plural/jobs")), LOCAL_JOB_ID, HOSTED_JOB_ID)
+```
+
+Publishing is idempotent: running it again records nothing new. It refuses an
+execution whose Environment or Verifier content hash differs from the hosted
+pins.
+
 ## How the episode ended
 
 Alongside the score, each Trial records why the episode stopped: a

@@ -123,8 +123,9 @@ plural agent push careful
 plural run -b support-triage -a careful --hosted --follow
 ```
 
-`plural project init --push` creates the hosted project, or connects to it when
-it already exists; the name must match `project.yaml`. The hosted project is
+`plural project init --push` creates the hosted project. If that name already
+exists, pass `--connect` to bind to it or `--name` to create a different one.
+`plural project push` then uploads every local resource. The hosted project is
 private. The command records the binding in `.plural/project.json` and selects
 the project as your scope. A push creates an immutable, private revision that is
 usable in that project immediately; pushing never makes anything public, and
@@ -380,10 +381,14 @@ This section is generated from the Typer application. Run `uv run python scripts
  in your user config directory, never in a project.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --no-browser                  Print the URL only.                                                │
-│ --api-key-stdin               Store an API key read from standard input instead.                 │
-│ --api-url              <str>  Hosted service URL.                                                │
-│ --help                        Show this message and exit.                                        │
+│ --no-browser                   Print the URL only.                                               │
+│ --api-key-stdin                Store an API key read from standard input instead.                │
+│ --from-env                     Store PLURAL_API_KEY from the environment. The value is not       │
+│                                printed.                                                          │
+│ --env-file             <path>  Read PLURAL_API_KEY from this file. Other variables in the file   │
+│                                are ignored.                                                      │
+│ --api-url              <str>   Hosted service URL.                                               │
+│ --help                         Show this message and exit.                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -996,6 +1001,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ init  Create a project in ./<name>, or register the project you are in.                          │
 │ show  Show a project, local copy first, then hosted.                                             │
+│ push  Push every local resource to the bound hosted project.                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1008,14 +1014,42 @@ This section is generated from the Typer application. Run `uv run python scripts
  Create a project in ./<name>, or register the project you are in.
 
  Without --push this works offline. With --push, an existing local project
- is registered as it is; no local file is overwritten.
+ is registered as it is; no local file is overwritten. A hosted project
+ that already has this name is left alone unless --connect is set.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    name      <str>  Project name: lowercase letters, digits, and hyphens. [required]           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --push          Also create (or connect) the hosted project and select it as your scope.         │
-│ --help          Show this message and exit.                                                      │
+│ --push                  Create a hosted project with this name and select it as your scope.      │
+│ --connect               Bind to the hosted project that already has this name. Requires --push.  │
+│ --name           <str>  Hosted project name, when it should differ from the local project.       │
+│                         Requires --push.                                                         │
+│ --help                  Show this message and exit.                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural project push`
+
+```text
+
+ Usage: plural project push [OPTIONS]
+
+ Push every local resource to the bound hosted project.
+
+ New revisions are added dependencies first. Existing revisions are never
+ overwritten or deleted. A resource whose files changed but whose version
+ did not is refused until you bump the version or pass --bump.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --yes      -y             Push without asking.                                                   │
+│ --bump                    Give each changed resource the next patch version.                     │
+│ --force                   Add revisions even if the hosted copy changed since this checkout last │
+│                           synced.                                                                │
+│ --connect                 Bind to the hosted project that already has this name.                 │
+│ --name             <str>  Hosted project name, when this checkout is not bound yet.              │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

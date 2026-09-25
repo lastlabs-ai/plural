@@ -1,0 +1,24 @@
+# Benchmark: a named collection of Tasks and the rules for ranking results.
+# Results rank on the Verifier score only; step rewards never contribute.
+name: wordlebench
+version: 0.1.0
+description: Seven Wordle tasks, from a short word list to an unlisted dictionary.
+purpose: Measure whether an Agent can use letter marks to find a hidden five-letter word. Easy and medium tasks name the allowed words. Hard tasks do not.
+tasks:
+  - case-01
+  - case-02
+  - case-03
+  - medium-01
+  - medium-02
+  - hard-01
+  - hard-02
+scoring:
+  metric: Success rate
+  description: Share of tasks solved. 1 means the hidden word was guessed. 0 means it was not. Step rewards are not part of the score.
+  aggregation: weighted_mean
+  score_range: [0.0, 1.0]
+  success_threshold: 1.0
+  # An attempt that ends without a score because of the Agent counts as the lowest score.
+  agent_failure: zero
+  # Attempts lost to infrastructure are excluded and reported separately.
+  infrastructure_error: exclude

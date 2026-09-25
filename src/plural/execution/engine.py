@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fnmatch
 import json
 import math
 import os
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -28,6 +29,7 @@ from plural.execution.policy import (
 )
 from plural.execution.scheduler import drain
 from plural.execution.store import JobStore
+from plural.harness.episode import EPISODE_FILE
 from plural.harness.packages import BUILTIN_PROFILES, native_actions_v1, native_chat_v1
 from plural.harness.protocol import HarnessProtocolError, HarnessRunRequest
 from plural.harness.retrieval import materialize_package, retrieve_archive, tree_digest
@@ -39,6 +41,8 @@ from plural.jobs import (
     JobMode,
     JobResult,
     JobSpec,
+    PhaseName,
+    PhaseTiming,
     TITORecord,
     TrialReceipt,
     TrialResult,
@@ -340,11 +344,38 @@ def _normalized_trajectory_artifact(
     return _json_artifact("trajectory.normalized.json", normalized.model_dump(mode="json"))
 
 
+def _episode_records(artifacts: Sequence[DownloadedFile]) -> list[dict[str, Any]]:
+    """Return the framework-recorded ``episode.jsonl`` records, if any."""
+    source = next((item for item in artifacts if item.path == EPISODE_FILE), None)
+    if source is None:
+        return []
+    records: list[dict[str, Any]] = []
+    try:
+        for line in source.data.decode().splitlines():
+            if line.strip():
+                parsed = json.loads(line)
+                if isinstance(parsed, dict):
+                    records.append(parsed)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    return records
+
+
 def _step_rewards(artifacts: Sequence[DownloadedFile]) -> tuple[dict[str, Any], ...]:
-    """Return the per-step reward records the Harness recorded for this episode."""
+    """Return the per-step reward records for this episode.
+
+    A Harness-written trajectory takes precedence. Without one, rewards come
+    from the steps Plural recorded in ``episode.jsonl``.
+    """
     source = _trajectory_source(artifacts)
     if source is None:
-        return ()
+        return tuple(
+            {"reward": record["reward"], "step": record.get("sequence"), "action": record["action"]}
+            for record in _episode_records(artifacts)
+            if record.get("kind") == "environment.step"
+            and isinstance(record.get("reward"), (int, float))
+            and record.get("error") is None
+        )
     try:
         trajectory = normalize_trajectory(source.data)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
@@ -481,6 +512,20 @@ class Trial:
         verifier_results: tuple[VerifierResult, ...] = ()
         tito: ArtifactReference | None = None
         cost_usd: float | None = None
+        phases: list[PhaseTiming] = []
+
+        @contextlib.asynccontextmanager
+        async def phase(name: PhaseName) -> AsyncIterator[None]:
+            began = datetime.now(timezone.utc)
+            try:
+                yield
+            finally:
+                phases.append(
+                    PhaseTiming(
+                        name=name, started_at=began, completed_at=datetime.now(timezone.utc)
+                    )
+                )
+
         heartbeat = asyncio.create_task(self._heartbeat(execution_id))
         self.store.emit(
             self.spec.job_id,
@@ -500,10 +545,12 @@ class Trial:
                 secrets.update(declared_secrets)
             runtime_values(task.environment, self.environ, target="verifier")
             harness_env["PLURAL_RESOURCES_DIR"] = "/workspace/resources"
-            await self._preflight_harness(provider, package)
-            source = materialize_package(package)
-            requirements = _requirements(task, package)
-            handle = await provider.create(requirements)
+            async with phase("agent_setup"):
+                await self._preflight_harness(provider, package)
+                source = materialize_package(package)
+                requirements = _requirements(task, package)
+            async with phase("environment_setup"):
+                handle = await provider.create(requirements)
             self._active[(provider.name, handle.sandbox_id)] = handle
             self.store.emit(
                 self.spec.job_id,
@@ -515,8 +562,10 @@ class Trial:
             )
             try:
                 if source is not None:
-                    await provider.upload_bundle(handle, source, root="/workspace/harness")
-                await self._stage_environment(provider, handle)
+                    async with phase("agent_setup"):
+                        await provider.upload_bundle(handle, source, root="/workspace/harness")
+                async with phase("environment_setup"):
+                    await self._stage_environment(provider, handle)
                 request = HarnessRunRequest(
                     request_id=self.spec.trial_id,
                     task=task.public_payload,
@@ -565,16 +614,18 @@ class Trial:
                         else ""
                     ),
                 )
-                execution = await HarnessRunner(provider).run(
-                    handle,
-                    package.definition,
-                    request,
-                    env=harness_env,
-                    timeout_seconds=min(
-                        task.environment.runtime.timeout_seconds,
-                        task.environment.limits.max_seconds,
-                    ),
-                )
+                async with phase("agent_execution"):
+                    execution = await HarnessRunner(provider).run(
+                        handle,
+                        package.definition,
+                        request,
+                        env=harness_env,
+                        timeout_seconds=min(
+                            task.environment.runtime.timeout_seconds,
+                            task.environment.limits.max_seconds,
+                        ),
+                    )
+                collection_started = datetime.now(timezone.utc)
                 stdout = _redact_bytes(execution.stdout, secrets)
                 stderr = _redact_bytes(execution.stderr, secrets)
                 trace_id = execution.trace_id
@@ -612,9 +663,17 @@ class Trial:
                 if normalized_trajectory is not None:
                     artifacts = _with_artifact(artifacts, normalized_trajectory)
                 cost_usd = _trajectory_cost(artifacts)
+                phases.append(
+                    PhaseTiming(
+                        name="artifact_collection",
+                        started_at=collection_started,
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
             finally:
                 self._active.pop((provider.name, handle.sandbox_id), None)
-                await provider.destroy(handle)
+                async with phase("cleanup"):
+                    await provider.destroy(handle)
 
             if self.job_spec.mode is JobMode.TRAIN:
                 tito = _validate_tito(package, artifacts)
@@ -627,12 +686,13 @@ class Trial:
                 trial_id=self.spec.trial_id,
                 execution_id=execution_id,
             )
-            verifier_results, verifier_stdout, verifier_stderr = await self._run_verifiers(
-                artifacts,
-                trace_id,
-                observation=environment_observation,
-                state=environment_state,
-            )
+            async with phase("verification"):
+                verifier_results, verifier_stdout, verifier_stderr = await self._run_verifiers(
+                    artifacts,
+                    trace_id,
+                    observation=environment_observation,
+                    state=environment_state,
+                )
             artifacts = _with_artifact(
                 artifacts,
                 _json_artifact(
@@ -653,6 +713,7 @@ class Trial:
                 trace_id=trace_id,
                 tito=tito,
                 timings={"total_seconds": time.monotonic() - clock},
+                phases=phases,
                 cost_usd=cost_usd,
             )
             result = TrialResult(
@@ -678,6 +739,7 @@ class Trial:
                 trace_id=trace_id,
                 tito=tito,
                 timings={"total_seconds": time.monotonic() - clock},
+                phases=phases,
                 cost_usd=cost_usd,
             )
             result = TrialResult(
@@ -858,6 +920,7 @@ class Trial:
         stderr = bytearray()
         for binding in self.task.verifiers:
             verifier = binding.verifier
+            began = datetime.now(timezone.utc)
             if isinstance(verifier, HumanVerifier):
                 results.append(
                     VerifierResult(
@@ -891,6 +954,8 @@ class Trial:
                         scores=parsed.scores,
                         evidence=parsed.evidence,
                         feedback=parsed.feedback,
+                        started_at=began,
+                        completed_at=datetime.now(timezone.utc),
                     )
                 )
                 continue
@@ -920,7 +985,11 @@ class Trial:
                 observation=observation,
                 state=state,
             )
-            results.append(result)
+            results.append(
+                result.model_copy(
+                    update={"started_at": began, "completed_at": datetime.now(timezone.utc)}
+                )
+            )
             stdout.extend(out)
             stderr.extend(err)
         return tuple(results), bytes(stdout), bytes(stderr)
@@ -953,6 +1022,8 @@ class Trial:
                 except (UnicodeDecodeError, ValueError):
                     continue
                 break
+        if not trajectory:
+            trajectory = list(_episode_records(artifacts))
         outcome = _episode_outcome(artifacts)
         return Episode(
             observation=view_observation,
@@ -1098,6 +1169,7 @@ class Trial:
         tito: ArtifactReference | None,
         timings: dict[str, float],
         cost_usd: float | None,
+        phases: Sequence[PhaseTiming] = (),
     ) -> TrialReceipt:
         agent = self.agent
         return TrialReceipt(
@@ -1125,6 +1197,7 @@ class Trial:
             started_at=started,
             completed_at=datetime.now(timezone.utc),
             timings=timings,
+            phases=tuple(sorted(phases, key=lambda item: item.started_at)),
             cost_usd=cost_usd,
         )
 

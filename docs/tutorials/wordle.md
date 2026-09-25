@@ -279,10 +279,12 @@ Trial trl_4cb93aab41a7586915bcc295 (local) succeeded
     - solved in 4
 ```
 
-In the `Artifacts` directory, `trajectory.jsonl` has the board after each guess,
+In the `Artifacts` directory, `episode.jsonl` has each guess with the board the Agent
+saw after it and the Environment's display view,
 `state.json` has the secret and the guess history, `observation.json` has the final
 board the Agent saw, and `verifier-results.json` has the score and the `guesses`
-sub-score.
+sub-score. The view shows guesses and marks, never the secret; see
+[Display views](../project/environments.md#display-views).
 
 A Trial that succeeded can still score 0. That is a missed word, not a crashed run. If
 two words score differently, compare their trajectories before changing the model or
@@ -309,8 +311,8 @@ plural run --benchmark wordle --agent luna --hosted --follow
 ```
 
 This needs a Plural account. `project init --push` registers the project, named
-`wordle` in `project.yaml`, with a private hosted project and selects it as your
-scope. `--with-deps` also pushes the Tasks, Verifier, and Environment the Benchmark
+`wordle` in `project.yaml`, with a new private hosted project and selects it as your
+scope. If `wordle` already exists in the account, pass `--connect` to use it. `--with-deps` also pushes the Tasks, Verifier, and Environment the Benchmark
 uses. `--hosted` runs the pushed revisions and fails if anything the run uses is not
 pushed with identical content. Pushing never makes anything public; sharing is a
 separate action in the Plural web app.
