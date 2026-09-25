@@ -140,6 +140,20 @@ input of the run to be pushed already with identical content, and `--follow`
 streams hosted progress until the Job finishes. See
 [Push and pull resources](../guides/studio-sync.md).
 
+A run on this machine can be recorded in the hosted project too, without
+hosted infrastructure running it:
+
+```bash
+plural run -b support-triage -a careful --track
+plural job push JOB_ID
+```
+
+`--track` records the Job while it runs; `job push` records one that already
+finished. Both need the same pushed inputs as `--hosted` and produce the same
+hosted Job, so pushing a tracked Job again adds nothing. The Environment's
+Runtime still decides where Trials execute, so a tracked run against a Daytona
+Environment runs remotely. See [Jobs](../running/jobs.md#local-tracked-and-hosted).
+
 `plural auth status` shows which credential is in use, a browser login or an API
 key, and the current scope. `plural auth scope` shows or changes where hosted
 commands go:
@@ -901,6 +915,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ list   List Jobs, newest first, labeled local or hosted.                                         │
 │ show   Show a Job and its Trials (local first, then hosted).                                     │
+│ push   Record a finished local Job in the hosted project, with every Trial execution.            │
 │ rerun  Run a Job again with the exact inputs it used. Creates a new, linked Job.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -921,6 +936,27 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
+### `plural job push`
+
+```text
+
+ Usage: plural job push [OPTIONS] {job_id}
+
+ Record a finished local Job in the hosted project, with every Trial execution.
+
+ The hosted Job pins the pushed revisions the local Job ran, so push those
+ first. Pushing again, or pushing a Job that was tracked, uploads only what
+ the hosted Job does not hold yet.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    job_id      <str>  Finished local Job to record in the hosted project. [required]           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
 ### `plural job rerun`
 
 ```text
@@ -933,8 +969,9 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ *    job_id      <str>  Job to run again with its original pinned inputs. [required]             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --json          Print machine-readable JSON.                                                     │
-│ --help          Show this message and exit.                                                      │
+│ --track          Record a local rerun in the hosted project as it runs.                          │
+│ --json           Print machine-readable JSON.                                                    │
+│ --help           Show this message and exit.                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1137,6 +1174,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
 
+ Runs execute on this machine, in the Runtime each Environment declares
+ (local, docker, or a remote provider such as daytona), and stay local
+ unless you pass --track. --hosted submits to hosted workers instead.
+
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --task            -t      <str>               Task to run.                                       │
 │ --benchmark       -b      <str>               Benchmark to run.                                  │
@@ -1146,6 +1187,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --agent           -a      <str>               Saved Agent to run.                                │
 │ --hosted                                      Run on hosted infrastructure using pushed          │
 │                                               revisions.                                         │
+│ --track                                       Run here, and record the Job in the hosted project │
+│                                               as it runs. Every input must already be pushed.    │
 │ --attempts                <int range> [x>=1]  Advanced: Trials per Task (default 1).             │
 │ --concurrency     -n      <str>               Trials to run at once: a number, or auto to size   │
 │                                               it from this machine, the runtime, and where the   │
@@ -1383,8 +1426,9 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ *    trial_id      <str>  Trial to run again. [required]                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --json          Print machine-readable JSON.                                                     │
-│ --help          Show this message and exit.                                                      │
+│ --track          Record a local rerun in the hosted project as it runs.                          │
+│ --json           Print machine-readable JSON.                                                    │
+│ --help           Show this message and exit.                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

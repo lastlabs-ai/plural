@@ -169,20 +169,47 @@ loopback model URL, such as a gateway at `http://localhost:8005/v1`, to
 `host.docker.internal`, so a local API server stays reachable. On Linux, bind
 that server to an address the Docker bridge can reach, not only `127.0.0.1`.
 
-## Hosted execution
+## Record a Job in the hosted project
+
+A local Job stays on this machine until you push it. First bind the checkout
+and push its resources:
 
 ```bash
 plural project init support-eval --push
-plural benchmark push support-triage --with-deps
-plural agent push careful
+plural project push
+```
+
+Then either push a Job after it finishes, or track it while it runs:
+
+```bash
+plural run -b support-triage -a careful
+plural job push JOB_ID
+
+plural run -b support-triage -a careful --track
+```
+
+Both record the same hosted Job, marked as run by a client, with every
+execution's trajectory, usage, phases, and Verifier results. `--track` opens
+each execution as it starts, so the hosted project shows the Job running. A
+reporting failure never fails the local run; the command prints what could not
+be recorded, and `plural job push JOB_ID` fills it in. `plural job rerun` and
+`plural trial rerun` accept `--track` too.
+
+Where the Trials execute is set by each Environment's `runtime.provider`, not by
+these flags. A tracked Job against a `daytona` Environment runs its Trials in
+remote sandboxes while this machine orchestrates and records them.
+
+## Hosted execution
+
+```bash
 plural run -b support-triage -a careful --hosted --follow
 ```
 
-`--hosted` runs on hosted infrastructure using revisions you have already pushed,
-and refuses to start when any input differs from its pushed revision. `--follow`
-streams progress until the Job finishes; without it, the command returns once
-the Job is submitted, and `plural job show JOB_ID --follow` reconnects later. See
-[Push and pull resources](studio-sync.md).
+`--hosted` submits the Job for hosted infrastructure to run, using revisions you
+have already pushed, and refuses to start when any input differs from its pushed
+revision. `--follow` streams progress until the Job finishes; without it, the
+command returns once the Job is submitted, and `plural job show JOB_ID --follow`
+reconnects later. See [Push and pull resources](studio-sync.md).
 
 ## Inspect, rerun, and review
 

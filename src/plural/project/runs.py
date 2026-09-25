@@ -7,6 +7,12 @@ exact version and content hash of every resource it used.
 Local runs snapshot the Environment, Verifier, and Harness sources they
 execute into the Job directory, so a rerun uses the original files even after
 the project has changed. Hosted runs use pushed revisions only.
+
+A local run can also be recorded in the hosted project. With tracking, the
+hosted Job is created before the run starts and each execution is reported as
+it happens; ``push_local_job`` records a finished local Job afterwards. Either
+way the hosted Job has executor ``client``: this machine ran it, in whatever
+Runtime each Environment declares, and hosted workers never pick it up.
 """
 
 from __future__ import annotations
@@ -18,12 +24,13 @@ import shutil
 import sys
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
 from plural.agents import Agent
+from plural.agents.models import AgentDefinition
 from plural.common import HarnessPackage, PackageSource
 from plural.environments.definition import EnvironmentDefinition
 from plural.execution.capacity import recommend_concurrency
@@ -47,7 +54,7 @@ from plural.project.layout import (
     ResourceRef,
 )
 from plural.project.resources import Workspace
-from plural.project.sync import resolve_hosted
+from plural.project.sync import HostedRevision, resolve_hosted, resolve_pinned
 from plural.studio import Studio, slugify
 from plural.tasks import TaskDefinition
 from plural.verifiers import DeterministicVerifier, WeightedVerifier
@@ -115,6 +122,9 @@ class RunRecord:
     inputs: dict[str, dict[str, str]] = field(default_factory=dict)
     rerun_of_job_id: str | None = None
     rerun_of_trial_id: str | None = None
+    hosted_job_id: str | None = None
+    """The hosted client Job this local Job is recorded as, once tracked or pushed."""
+    hosted_project_id: str | None = None
 
     def dump(self) -> dict[str, Any]:
         """JSON form.
@@ -123,6 +133,43 @@ class RunRecord:
             A JSON-compatible mapping.
         """
         return dict(self.__dict__)
+
+
+@dataclass
+class Tracking:
+    """Record a local run in the hosted project while it executes.
+
+    Pass one to ``run_local`` or a rerun. Afterwards ``hosted_job_id`` names
+    the hosted Job, and ``errors`` lists what could not be reported; ``plural
+    job push`` uploads the rest.
+    """
+
+    studio: Studio
+    hosted_job_id: str | None = None
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ClientJob:
+    """A hosted Job that records a local one."""
+
+    record: dict[str, Any]
+    agents: dict[str, tuple[str, str]]
+    """Each local Agent binding's hosted Agent name and definition hash."""
+
+    @property
+    def job_id(self) -> str:
+        """The hosted Job id."""
+        return str(self.record["id"])
+
+
+@dataclass(frozen=True)
+class PushedJob:
+    """The outcome of ``push_local_job``."""
+
+    job: ClientJob
+    executions: int
+    """Local executions the hosted Job now records."""
 
 
 def plan_run(
@@ -214,8 +261,11 @@ def run_local(
     *,
     environ: Mapping[str, str],
     progress: Any = None,
+    tracking: Tracking | None = None,
 ) -> tuple[str, JobResult]:
     """Execute a plan on this machine and record it under ``.plural/jobs``.
+
+    With ``tracking``, the Job is also recorded in the hosted project as it runs.
 
     Returns:
         The Job id and its result.
@@ -230,7 +280,7 @@ def run_local(
         harness=plan.harness,
         inputs=plan.pins,
     )
-    return _execute(workspace, spec, record, environ=environ, progress=progress)
+    return _execute(workspace, spec, record, environ=environ, progress=progress, tracking=tracking)
 
 
 def rerun_local_job(
@@ -239,6 +289,7 @@ def rerun_local_job(
     *,
     environ: Mapping[str, str],
     progress: Any = None,
+    tracking: Tracking | None = None,
 ) -> tuple[str, JobResult]:
     """Run a recorded local Job again with its original pinned inputs.
 
@@ -254,9 +305,13 @@ def rerun_local_job(
             "created_at": _now(),
             "rerun_of_job_id": job_id,
             "rerun_of_trial_id": None,
+            "hosted_job_id": None,
+            "hosted_project_id": None,
         }
     )
-    return _execute(workspace, fresh, new_record, environ=environ, progress=progress)
+    return _execute(
+        workspace, fresh, new_record, environ=environ, progress=progress, tracking=tracking
+    )
 
 
 def rerun_local_trial(
@@ -265,6 +320,7 @@ def rerun_local_trial(
     *,
     environ: Mapping[str, str],
     progress: Any = None,
+    tracking: Tracking | None = None,
 ) -> tuple[str, JobResult]:
     """Run one recorded local Trial again as a new one-Trial Job.
 
@@ -292,9 +348,13 @@ def rerun_local_trial(
             "source": f"task/{task.task_id}",
             "rerun_of_job_id": job_id,
             "rerun_of_trial_id": trial_id,
+            "hosted_job_id": None,
+            "hosted_project_id": None,
         }
     )
-    return _execute(workspace, fresh, new_record, environ=environ, progress=progress)
+    return _execute(
+        workspace, fresh, new_record, environ=environ, progress=progress, tracking=tracking
+    )
 
 
 def submit_hosted(
@@ -316,33 +376,214 @@ def submit_hosted(
         ProjectError: When any input is not pushed with identical content.
     """
     roots = [plan.source, *([plan.agent_ref] if plan.agent_ref else [])]
-    harness = plan.agent.harness
-    harness_ref = None
-    if plan.agent_ref is None and harness is not None and not isinstance(harness, str):
-        harness_ref = ResourceRef(HARNESS.name, _harness_name(plan.agent))
+    harness_ref = _harness_ref(plan.agent) if plan.agent_ref is None else None
+    if harness_ref is not None:
         roots.append(harness_ref)
     resolved = resolve_hosted(workspace, studio, roots)
-    if plan.agent_ref is not None:
-        agent_revision_id = resolved[plan.agent_ref].revision_id
-    else:
-        name = slugify(
-            plan.agent.model.replace("/", "-")
-            + (f"-{_harness_name(plan.agent)}" if plan.agent.harness is not None else "")
+    return _submit(
+        studio,
+        plan.spec,
+        agent=plan.agent,
+        source=plan.source,
+        agent_ref=plan.agent_ref,
+        harness_ref=harness_ref,
+        resolved=resolved,
+        idempotency_key=idempotency_key or uuid.uuid4().hex,
+    ).record
+
+
+def submit_client_job(
+    workspace: Workspace,
+    studio: Studio,
+    spec: JobSpec,
+    record: RunRecord,
+    *,
+    idempotency_key: str | None = None,
+) -> ClientJob:
+    """Create the hosted Job that records a local one, from the revisions it pinned.
+
+    The hosted Job has executor ``client``, so no hosted worker runs it; the
+    local executions are reported to it. The same local Job always maps to
+    the same hosted Job.
+
+    Returns:
+        The hosted Job and the hosted Agent each local binding ran as.
+
+    Raises:
+        ProjectError: When an input the Job pinned is not pushed with the same content.
+    """
+    resolved = resolve_pinned(studio, record.inputs)
+    source = ResourceRef.parse(record.source)
+    if source not in resolved:
+        raise ProjectError(f"Job {record.job_id} does not pin its source {source}.")
+    agent_ref = (
+        ResourceRef(AGENT.name, record.agent.partition("/")[2])
+        if (record.agent.startswith(f"{AGENT.name}/"))
+        else None
+    )
+    harness_ref = (
+        next((ref for ref in resolved if ref.kind == HARNESS.name), None)
+        if agent_ref is None
+        else None
+    )
+    return _submit(
+        studio,
+        spec,
+        agent=None if agent_ref else _agent_value(workspace, spec.agents[0].agent),
+        source=source,
+        agent_ref=agent_ref,
+        harness_ref=harness_ref,
+        resolved=resolved,
+        idempotency_key=idempotency_key or f"local:{record.job_id}",
+        client_job_id=record.job_id,
+    )
+
+
+def push_local_job(workspace: Workspace, studio: Studio, job_id: str) -> PushedJob:
+    """Record a finished local Job, and every execution it ran, in the hosted project.
+
+    Pushing again, or pushing a Job that was tracked, reuses the same hosted
+    Job and uploads only what it does not hold yet.
+
+    Returns:
+        The hosted Job and how many executions it records.
+
+    Raises:
+        ProjectError: When the Job is unknown, still running, or ran inputs
+            that are not pushed.
+    """
+    from plural.execution.report import PublishError, publish_job
+    from plural.execution.store import JobStore
+
+    record = finished_local_job(workspace, job_id)
+    directory = workspace.project.jobs_dir / job_id
+    store = JobStore(workspace.project.jobs_dir)
+    client = submit_client_job(workspace, studio, store.load_spec(job_id), record)
+    try:
+        published = publish_job(
+            studio, store, job_id, client.job_id, worker_id="plural-cli", agents=client.agents
         )
-        agent = plan.agent.model_copy(update={"name": name})
-        record = studio.agents.push(
-            agent,
+    except PublishError as exc:
+        raise ProjectError(f"Could not record Job {job_id}: {exc}") from None
+    _write_record(
+        directory,
+        replace(record, hosted_job_id=client.job_id, hosted_project_id=studio.project),
+    )
+    return PushedJob(job=client, executions=len(published))
+
+
+def finished_local_job(workspace: Workspace, job_id: str) -> RunRecord:
+    """The record of a local Job that has finished running.
+
+    Returns:
+        Its run record.
+
+    Raises:
+        ProjectError: When no local Job has this id, or it has not finished.
+    """
+    directory = workspace.project.jobs_dir / job_id
+    record_path = directory / RUN_RECORD
+    if not record_path.is_file():
+        raise ProjectError(f"No local Job {job_id!r} in {workspace.project.jobs_dir}.")
+    if not (directory / "result.json").is_file():
+        raise ProjectError(
+            f"Job {job_id} has not finished, so it cannot be pushed yet. To record a run "
+            "while it happens, start it with `plural run --track`."
+        )
+    return RunRecord(**json.loads(record_path.read_text("utf-8")))
+
+
+def _harness_ref(agent: Agent) -> ResourceRef | None:
+    """The project Harness a ``--model`` run names.
+
+    Returns:
+        Its reference, or ``None`` for no Harness or a built-in one.
+    """
+    if agent.harness is None or isinstance(agent.harness, str):
+        return None
+    return ResourceRef(HARNESS.name, _harness_name(agent))
+
+
+def _agent_value(workspace: Workspace, definition: AgentDefinition) -> Agent:
+    """The Agent a ``--model`` run compiled to ``definition``, to record it hosted.
+
+    Returns:
+        An Agent whose definition hashes exactly as ``definition``.
+
+    Raises:
+        ProjectError: When the run used a project Harness, or the Agent cannot
+            be rebuilt exactly.
+    """
+    harness = None
+    if definition.harness_package is not None:
+        from plural.harness.builtins import BUILTIN_HARNESS_NAMES
+
+        harness = definition.harness_package.definition.name
+        if harness not in BUILTIN_HARNESS_NAMES:
+            raise ProjectError(
+                f"This Job ran Harness {harness!r} without a saved Agent. Save one under "
+                "agents/ and run with --agent to record runs of it."
+            )
+    agent = Agent.model_validate(
+        {
+            "name": definition.name,
+            "version": definition.revision,
+            "model": definition.model,
+            "instructions": definition.instructions,
+            "routing": definition.routing,
+            "harness": harness,
+            "harness_kwargs": definition.harness_kwargs,
+            "auth_mode": definition.auth_mode,
+            "secret_names": definition.secret_names,
+            "metadata": definition.metadata,
+        },
+        context={"catalog": workspace.catalog, "root": workspace.project.root},
+    )
+    if agent.content_hash != definition.content_hash:
+        raise ProjectError(f"Agent {definition.name!r} cannot be recorded exactly as it ran.")
+    return agent
+
+
+def _submit(
+    studio: Studio,
+    spec: JobSpec,
+    *,
+    agent: Agent | None,
+    source: ResourceRef,
+    agent_ref: ResourceRef | None,
+    harness_ref: ResourceRef | None,
+    resolved: Mapping[ResourceRef, HostedRevision],
+    idempotency_key: str,
+    client_job_id: str | None = None,
+) -> ClientJob:
+    binding = spec.agents[0]
+    if agent_ref is not None:
+        hosted = (binding.name, binding.agent.content_hash)
+        agent_revision_id = resolved[agent_ref].revision_id
+    else:
+        assert agent is not None, "a run without a saved Agent needs its Agent value"
+        name = slugify(
+            agent.model.replace("/", "-")
+            + (f"-{_harness_name(agent)}" if agent.harness is not None else "")
+        )
+        renamed = agent.model_copy(update={"name": name})
+        pushed = studio.agents.push(
+            renamed,
             harness_revision_id=resolved[harness_ref].revision_id if harness_ref else None,
         )
-        agent_revision_id = str(record["id"])
-    _stamp_harness(studio, plan, resolved)
-    return studio.jobs.submit(
-        plan.spec,
-        source_revision_id=resolved[plan.source].revision_id,
+        hosted = (renamed.name, renamed.content_hash)
+        agent_revision_id = str(pushed["id"])
+    _stamp_harness(studio, spec, resolved)
+    record = studio.jobs.submit(
+        spec,
+        source_revision_id=resolved[source].revision_id,
         agent_revision_ids=[agent_revision_id],
-        idempotency_key=idempotency_key or uuid.uuid4().hex,
-        name=f"{plan.source.name} · {plan.agent.name}",
+        idempotency_key=idempotency_key,
+        name=f"{source.name} · {binding.name}",
+        executor="client" if client_job_id else "hosted",
+        client_job_id=client_job_id,
     )
+    return ClientJob(record=record, agents={binding.content_hash: hosted})
 
 
 def local_jobs(workspace: Workspace) -> list[dict[str, Any]]:
@@ -505,22 +746,26 @@ def _harness_name(agent: Agent) -> str:
     return package.definition.name if package is not None else DEFAULT_HARNESS
 
 
-def _stamp_harness(studio: Studio, plan: RunPlan, resolved: Mapping[ResourceRef, Any]) -> None:
+def _stamp_harness(
+    studio: Studio, spec: JobSpec, resolved: Mapping[ResourceRef, HostedRevision]
+) -> None:
     """Record that each Environment admits the Agent's custom Harness.
 
     The server refuses to schedule a custom Harness in an Environment that has
     no compatibility stamp; the grant is computed from both definitions here.
     """
+    from plural.harness.builtins import BUILTIN_HARNESS_NAMES
     from plural.jobs import resolve_trial_harness_grant
 
-    binding = plan.spec.agents[0]
-    if binding.harness_package is None or isinstance(plan.agent.harness, str):
+    binding = spec.agents[0]
+    package = binding.harness_package
+    if package is None or package.definition.name in BUILTIN_HARNESS_NAMES:
         return
     harness = next((value for ref, value in resolved.items() if ref.kind == HARNESS.name), None)
     if harness is None:
         return
     seen: set[str] = set()
-    for task in plan.spec.tasks:
+    for task in spec.tasks:
         environment = ResourceRef(ENVIRONMENT.name, task.environment.name)
         revision = resolved.get(environment)
         if revision is None or revision.revision_id in seen:
@@ -543,8 +788,10 @@ def _execute(
     *,
     environ: Mapping[str, str],
     progress: Any,
+    tracking: Tracking | None = None,
 ) -> tuple[str, JobResult]:
     from plural.execution.engine import JobRunner
+    from plural.execution.report import HostedTracker
     from plural.execution.store import JobStore
 
     needs_model = any(binding.auth_mode != "none" for binding in spec.agents)
@@ -553,17 +800,44 @@ def _execute(
             "This run calls a live model and no model credential is available. Run "
             "`plural auth login`, or export PLURAL_API_KEY or OPENAI_API_KEY."
         )
+    tracker = None
     store = JobStore(workspace.project.jobs_dir)
+    if tracking is not None:
+        client = submit_client_job(workspace, tracking.studio, spec, record)
+        tracking.hosted_job_id = client.job_id
+        record = replace(
+            record, hosted_job_id=client.job_id, hosted_project_id=tracking.studio.project
+        )
+        tracker = HostedTracker(
+            tracking.studio,
+            store,
+            spec,
+            spec.plan(workspace.catalog),
+            client.job_id,
+            agents=client.agents,
+        )
+        store.on_event = tracker.observe
     job_dir = store.job_path(spec.job_id)
     job_dir.mkdir(parents=True, exist_ok=True)
-    (job_dir / RUN_RECORD).write_text(
-        json.dumps(record.dump(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    _write_record(job_dir, record)
     options: dict[str, Any] = {"store": store, "catalog": workspace.catalog, "environ": environ}
     if progress is not None:
         options["progress"] = progress
-    result = asyncio.run(JobRunner(spec, **options).run())
+    try:
+        result = asyncio.run(JobRunner(spec, **options).run())
+    except BaseException:
+        if tracker is not None and tracking is not None:
+            tracking.errors = tracker.close(cancelled=True)
+        raise
+    if tracker is not None and tracking is not None:
+        tracking.errors = tracker.close()
     return spec.job_id, result
+
+
+def _write_record(directory: Path, record: RunRecord) -> None:
+    (directory / RUN_RECORD).write_text(
+        json.dumps(record.dump(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def _snapshot_path(workspace: Workspace, kind: str, name: str, digest: str) -> Path:
@@ -753,16 +1027,22 @@ def _now() -> str:
 
 __all__ = [
     "DEFAULT_HARNESS",
+    "ClientJob",
+    "PushedJob",
     "RunPlan",
     "RunRecord",
     "RunRequest",
+    "Tracking",
     "find_local_trial",
+    "finished_local_job",
     "local_job",
     "local_jobs",
     "local_trial",
     "plan_run",
+    "push_local_job",
     "rerun_local_job",
     "rerun_local_trial",
     "run_local",
+    "submit_client_job",
     "submit_hosted",
 ]

@@ -109,6 +109,7 @@ clock time. Each Verifier result also carries its own `started_at` and
 
 ## Publish a local run to a hosted Job
 
+`plural job push` and `plural run --track` do this for you. From Python,
 `plural.execution.report.publish_job` reports each execution of a local Job to
 a hosted Job planned from the same pushed resources. It matches Trials by Task,
 Agent name, and attempt, and replays each execution through the hosted worker
@@ -127,7 +128,8 @@ studio = Studio(api_root="https://pluralintel.com/api/v1", token=TOKEN, project=
 publish_job(studio, JobStore(Path(".plural/jobs")), LOCAL_JOB_ID, HOSTED_JOB_ID)
 ```
 
-Publishing is idempotent: running it again records nothing new. It refuses an
+Publishing is idempotent: running it again records nothing new, including for
+executions a `HostedTracker` already reported while the Job ran. It refuses an
 execution whose Environment or Verifier content hash differs from the hosted
 pins.
 

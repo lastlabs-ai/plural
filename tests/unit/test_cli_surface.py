@@ -53,7 +53,7 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
     [
         ("auth", {"login", "logout", "status", "scope"}),
         ("project", {"init", "push", "show"}),
-        ("job", {"show", "list", "rerun"}),
+        ("job", {"show", "list", "rerun", "push"}),
         ("trial", {"show", "rerun", "rescore"}),
         ("models", {"list"}),
     ],

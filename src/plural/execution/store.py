@@ -9,7 +9,7 @@ import shutil
 import tempfile
 import threading
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,8 +34,19 @@ from plural.sandbox import DownloadedFile, safe_relative_path
 class JobStore:
     """Crash-safe filesystem persistence for local execution."""
 
-    def __init__(self, root: Path = Path(".plural/jobs")) -> None:
+    def __init__(
+        self,
+        root: Path = Path(".plural/jobs"),
+        *,
+        on_event: Callable[[ProgressEvent], None] | None = None,
+    ) -> None:
+        """Open a store rooted at ``root``.
+
+        ``on_event`` receives every event after it is durably written. It runs
+        on the emitting thread, so it must return quickly.
+        """
         self.root = root
+        self.on_event = on_event
         # Serializes event sequence assignment across parallel Trials sharing
         # one event loop or threads. Cross-process writers need a file lock;
         # a single Job runner process is the supported topology.
@@ -145,6 +156,8 @@ class JobStore:
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
+        if self.on_event is not None:
+            self.on_event(event)
         return event
 
     def events(

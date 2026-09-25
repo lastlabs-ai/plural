@@ -94,13 +94,32 @@ changed.
 
 Use `await job.run_async()` inside an existing event loop.
 
-## Local and hosted
+## Local, tracked, and hosted
 
-`plural run` executes on this machine by default. The Environment can still
-select Docker or Daytona and call paid model APIs. `plural run ... --hosted`
-submits the Job to Plural Intel using revisions you have already pushed; it
-refuses to start when any input differs from its pushed revision. `--follow`
-streams hosted progress. See [Push and pull resources](../guides/studio-sync.md).
+`plural run` orchestrates the Job from this machine and records it only under
+`.plural/jobs`. Each Environment's `runtime.provider` decides where its Trials
+execute: in a local process, in Docker, or in a remote Daytona sandbox. The
+Runtime is part of the Environment, so the same command runs a Benchmark locally
+or remotely depending on how its Environments are declared.
+
+To keep a Job in the hosted project as well:
+
+| Command | What it does |
+| --- | --- |
+| `plural job push JOB_ID` | Records a finished local Job in the hosted project. |
+| `plural run ... --track` | Records the Job in the hosted project while it runs. |
+| `plural run ... --hosted` | Submits the Job for hosted infrastructure to run. |
+
+`job push` and `--track` create the same hosted Job, marked as run by a client,
+so pushing a tracked Job again records nothing twice. A tracked run opens each
+hosted execution as it starts, reports liveness while it runs, and publishes the
+trajectory, usage, and Verifier results when it ends. If the hosted service
+cannot be reached mid-run, the local Job still finishes and `plural job push`
+fills in what was missed.
+
+Both require every input to be pushed first, and refuse when any input differs
+from its pushed revision. `--follow` streams hosted progress for `--hosted`
+Jobs. See [Push and pull resources](../guides/studio-sync.md).
 
 Hosted execution also needs credentials and Runtime providers that fit the
 project's policy. A successful local run does not imply the same inputs can run

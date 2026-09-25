@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Iterator, Sequence
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 from urllib.parse import quote
 
 import httpx
@@ -438,9 +438,22 @@ class JobsAPI:
         idempotency_key: str,
         name: str = "Job",
         description: str = "",
+        executor: Literal["hosted", "client"] = "hosted",
+        client_job_id: str | None = None,
     ) -> JsonObject:
+        """Create a hosted Job from pushed revisions.
+
+        ``executor="client"`` records a Job that this client runs and reports,
+        as ``plural run --track`` does; hosted workers never claim its Trials.
+        ``client_job_id`` names the client's own record of it.
+        """
         if len(agent_revision_ids) != len(spec.agents):
             raise InvalidRequestError("agent_revision_ids must align with Job agents")
+        extra: dict[str, Any] = {}
+        if executor != "hosted":
+            extra["executor"] = executor
+        if client_job_id is not None:
+            extra["client_job_id"] = client_job_id
         return cast(
             JsonObject,
             self._studio.request(
@@ -461,6 +474,7 @@ class JobsAPI:
                     "retry": spec.retry.model_dump(mode="json"),
                     "mode": spec.mode.value,
                     "idempotency_key": idempotency_key,
+                    **extra,
                 },
             ),
         )

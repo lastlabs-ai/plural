@@ -25,6 +25,7 @@ import re
 import shutil
 import tempfile
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -577,6 +578,46 @@ def resolve_hosted(
     return resolved
 
 
+def resolve_pinned(
+    studio: Studio, pins: Mapping[str, Mapping[str, str]]
+) -> dict[ResourceRef, HostedRevision]:
+    """Find the hosted revision of every input a recorded run pinned.
+
+    ``pins`` maps ``kind/name`` to the ``version`` and ``content_hash`` the
+    run used, as ``run.json`` records them. Matching is by content, so the
+    project's current files do not matter.
+
+    Returns:
+        The matching revision for every pinned input.
+
+    Raises:
+        ProjectError: Naming each input that has no revision with that content.
+    """
+    resolved: dict[ResourceRef, HostedRevision] = {}
+    problems = []
+    for key, pin in pins.items():
+        ref = ResourceRef.parse(key)
+        digest = pin.get("content_hash")
+        match = next(
+            (item for item in _hosted_revisions(studio, ref) if item.content_hash == digest),
+            None,
+        )
+        if match is None:
+            problems.append(
+                f"{ref} {pin.get('version', '')} with the content this Job ran is not pushed"
+            )
+        else:
+            resolved[ref] = match
+    if problems:
+        raise ProjectError(
+            "The hosted project must hold the exact revisions a Job ran. Push them with "
+            "`plural project push`; if the files changed since the run, restore that "
+            "version first.",
+            problems,
+        )
+    return resolved
+
+
 def pull(
     workspace: Workspace,
     studio: Studio,
@@ -897,4 +938,5 @@ __all__ = [
     "pull",
     "push",
     "resolve_hosted",
+    "resolve_pinned",
 ]

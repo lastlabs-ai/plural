@@ -1215,7 +1215,7 @@ plural.project.layout.resource_kind(name: 'str') -> 'ResourceKind'
 Crash-safe filesystem persistence for local execution.
 
 ```python
-plural.JobStore(root: 'Path' = PosixPath('<default>')) -> 'None'
+plural.JobStore(root: 'Path' = PosixPath('<default>'), *, on_event: 'Callable[[ProgressEvent], None] | None' = None) -> 'None'
 ```
 
 ### plural.JobStore.job_path

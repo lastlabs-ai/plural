@@ -116,10 +116,15 @@ again from their source directory. See [Migrate to 0.15](../migration/projects.m
 ## Run pushed resources
 
 ```bash
+plural run -b support-triage -a careful --track
+plural job push JOB_ID
 plural run -b support-triage -a careful --hosted --follow
 ```
 
-`--hosted` uses revisions that are already pushed and refuses to run when any
-input differs from its pushed revision. Push first, then run. See
+`--track` runs here and records the Job in the hosted project as it runs.
+`job push` records a local Job that already finished. `--hosted` submits the Job
+for hosted infrastructure to run. All three use revisions that are already
+pushed and refuse to run when any input differs from its pushed revision. Push
+first, then run. See
 [Jobs](../running/jobs.md) for execution and the
 [Python SDK](../sdk/evaluation.md) for programmatic use.

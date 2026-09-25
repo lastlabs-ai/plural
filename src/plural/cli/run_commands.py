@@ -2,7 +2,9 @@
 
 Runs are local unless ``--hosted`` is given; the selected scope never moves
 a run. Local records live in ``.plural/jobs``; hosted ones in the bound
-project. Show and rerun commands look locally first and label the result.
+project. ``--track`` also records a local run in the hosted project as it
+happens, and ``plural job push`` records a finished one. Show and rerun
+commands look locally first and label the result.
 """
 
 from __future__ import annotations
@@ -31,11 +33,14 @@ from plural.project.runs import (
     DEFAULT_HARNESS,
     RunPlan,
     RunRequest,
+    Tracking,
     find_local_trial,
+    finished_local_job,
     local_job,
     local_jobs,
     local_trial,
     plan_run,
+    push_local_job,
     rerun_local_job,
     rerun_local_trial,
     run_local,
@@ -63,6 +68,14 @@ def run(
     hosted: bool = typer.Option(
         False, "--hosted", help="Run on hosted infrastructure using pushed revisions."
     ),
+    track: bool = typer.Option(
+        False,
+        "--track",
+        help=(
+            "Run here, and record the Job in the hosted project as it runs. Every input "
+            "must already be pushed."
+        ),
+    ),
     attempts: int | None = typer.Option(
         None, "--attempts", min=1, help="Advanced: Trials per Task (default 1)."
     ),
@@ -89,7 +102,17 @@ def run(
     follow: bool = typer.Option(False, "--follow", help="With --hosted, stream progress."),
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job."""
+    """Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
+
+    Runs execute on this machine, in the Runtime each Environment declares
+    (local, docker, or a remote provider such as daytona), and stay local
+    unless you pass --track. --hosted submits to hosted workers instead.
+    """
+    if hosted and track:
+        raise ProjectError(
+            "--hosted already records the Job in the hosted project. Use --track to run "
+            "here and record it, or --hosted alone."
+        )
     space = workspace()
     current = session()
     environ = _run_environ(current)
@@ -113,6 +136,7 @@ def run(
         payload = _plan_payload(plan, hosted=hosted)
         emit(payload, as_json=as_json, text=lambda: _print_plan(payload))
         return
+    tracking = _tracking(space, current) if track else None
     if hosted:
         studio, binding = project_studio(space, session())
         record = submit_hosted(space, studio, plan)
@@ -131,12 +155,14 @@ def run(
     total = len(plan.job.plan.trials)
     typer.echo(
         f"Running {plan.source} with {plan.agent.name} ({plan.agent.model}) locally: "
-        f"{total} trial(s), {_pace(plan)}.",
+        f"{total} trial(s), {_pace(plan)}."
+        + (" Recording it in the hosted project as it runs." if tracking else ""),
         err=as_json,
     )
-    job_id, result = run_local(space, plan, environ=environ, progress=_progress(as_json, total))
-    payload = {"location": "local", **local_job(space, job_id)}
-    emit(payload, as_json=as_json, text=lambda: _print_result(job_id, result))
+    job_id, result = run_local(
+        space, plan, environ=environ, progress=_progress(as_json, total), tracking=tracking
+    )
+    _finish_local(space, job_id, result, tracking, as_json=as_json)
 
 
 @job_app.command("list")
@@ -160,9 +186,11 @@ def job_list(
                 "status": item["status"],
                 "created_at": item["created_at"],
                 "rerun_of": item.get("rerun_of_job_id"),
+                "hosted_job_id": item.get("hosted_job_id"),
             }
             for item in local_jobs(space)
         )
+    recorded = {item["hosted_job_id"] for item in items if item.get("hosted_job_id")}
     note = None
     if not local:
         studio = _hosted_studio(space, required=hosted)
@@ -178,8 +206,11 @@ def job_list(
                     "status": item.get("status"),
                     "created_at": item.get("created_at"),
                     "rerun_of": item.get("rerun_of_job_id"),
+                    "executor": item.get("executor") or "hosted",
+                    "client_job_id": item.get("client_job_id"),
                 }
                 for item in studio.jobs.list()
+                if item.get("id") not in recorded
             )
 
     def text() -> None:
@@ -188,7 +219,7 @@ def job_list(
                 (
                     (
                         item["job_id"],
-                        item["location"],
+                        _where(item),
                         item["status"],
                         item["source"],
                         item["created_at"] or "",
@@ -244,20 +275,61 @@ def job_show(
     emit(payload, as_json=as_json, text=lambda: _print_job(payload))
 
 
+@job_app.command("push")
+@handled
+def job_push(
+    job_id: str = typer.Argument(help="Finished local Job to record in the hosted project."),
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Record a finished local Job in the hosted project, with every Trial execution.
+
+    The hosted Job pins the pushed revisions the local Job ran, so push those
+    first. Pushing again, or pushing a Job that was tracked, uploads only what
+    the hosted Job does not hold yet.
+    """
+    space = workspace()
+    finished_local_job(space, job_id)
+    studio, binding = project_studio(space, session())
+    pushed = push_local_job(space, studio, job_id)
+    hosted = studio.jobs.get(pushed.job.job_id)
+    payload = {
+        "job_id": job_id,
+        "hosted_job_id": pushed.job.job_id,
+        "project": binding.project_slug,
+        "executions": pushed.executions,
+        "status": hosted.get("status"),
+    }
+    emit(
+        payload,
+        as_json=as_json,
+        text=lambda: typer.echo(
+            f"Recorded local Job {job_id} as hosted Job {pushed.job.job_id} in project "
+            f"{binding.project_slug}: {pushed.executions} execution(s), {hosted.get('status')}."
+        ),
+    )
+
+
 @job_app.command("rerun")
 @handled
 def job_rerun(
     job_id: str = typer.Argument(help="Job to run again with its original pinned inputs."),
+    track: bool = typer.Option(
+        False, "--track", help="Record a local rerun in the hosted project as it runs."
+    ),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run a Job again with the exact inputs it used. Creates a new, linked Job."""
     space = workspace()
     if (space.project.jobs_dir / job_id).is_dir():
+        tracking = _tracking(space, session()) if track else None
         new_id, result = rerun_local_job(
-            space, job_id, environ=_run_environ(session()), progress=_progress(as_json)
+            space,
+            job_id,
+            environ=_run_environ(session()),
+            progress=_progress(as_json),
+            tracking=tracking,
         )
-        payload = {"location": "local", **local_job(space, new_id)}
-        emit(payload, as_json=as_json, text=lambda: _print_result(new_id, result))
+        _finish_local(space, new_id, result, tracking, as_json=as_json)
         return
     studio = _hosted_studio(space, required=True)
     assert studio is not None
@@ -302,6 +374,9 @@ def trial_show(
 @handled
 def trial_rerun(
     trial_id: str = typer.Argument(help="Trial to run again."),
+    track: bool = typer.Option(
+        False, "--track", help="Record a local rerun in the hosted project as it runs."
+    ),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run one Trial again with its pinned inputs, as a new one-Trial Job."""
@@ -312,11 +387,15 @@ def trial_rerun(
     except ProjectError:
         is_local = False
     if is_local:
+        tracking = _tracking(space, session()) if track else None
         new_id, result = rerun_local_trial(
-            space, trial_id, environ=_run_environ(session()), progress=_progress(as_json)
+            space,
+            trial_id,
+            environ=_run_environ(session()),
+            progress=_progress(as_json),
+            tracking=tracking,
         )
-        payload = {"location": "local", **local_job(space, new_id)}
-        emit(payload, as_json=as_json, text=lambda: _print_result(new_id, result))
+        _finish_local(space, new_id, result, tracking, as_json=as_json)
         return
     studio = _hosted_studio(space, required=True)
     assert studio is not None
@@ -454,6 +533,14 @@ def _scores(values: list[str], criteria: list[str] | None) -> dict[str, float]:
     return scores
 
 
+def _where(item: dict[str, Any]) -> str:
+    if item.get("hosted_job_id"):
+        return f"local, recorded as {item['hosted_job_id']}"
+    if item.get("executor") == "client":
+        return "hosted, run by a client"
+    return str(item["location"])
+
+
 def _exclusive(local: bool, hosted: bool) -> None:
     if local and hosted:
         raise ProjectError("Choose --local or --hosted, not both.")
@@ -483,6 +570,36 @@ def _run_environ(current: Session) -> dict[str, str]:
     if environ.get("PLURAL_API_KEY"):
         environ.setdefault("PLURAL_GATEWAY_URL", current.api_url.rstrip("/") + "/v1")
     return environ
+
+
+def _tracking(space: Workspace, current: Session) -> Tracking:
+    return Tracking(project_studio(space, current)[0])
+
+
+def _finish_local(
+    space: Workspace,
+    job_id: str,
+    result: JobResult,
+    tracking: Tracking | None,
+    *,
+    as_json: bool,
+) -> None:
+    payload = {"location": "local", **local_job(space, job_id)}
+    if tracking is not None:
+        payload["tracking_errors"] = tracking.errors
+
+    def text() -> None:
+        _print_result(job_id, result)
+        if tracking is None:
+            return
+        typer.echo(f"Recorded in the hosted project as Job {tracking.hosted_job_id}.")
+        if tracking.errors:
+            typer.echo("Some of it could not be reported:", err=True)
+            for error in tracking.errors:
+                typer.echo(f"  {error}", err=True)
+            typer.echo(f"Upload the rest with `plural job push {job_id}`.", err=True)
+
+    emit(payload, as_json=as_json, text=text)
 
 
 def _concurrency(value: str) -> int | Literal["auto"]:
@@ -585,6 +702,11 @@ def _print_job(payload: dict[str, Any]) -> None:
         typer.echo(f"  Model:  {payload['model']} via {payload.get('harness')}")
     if payload.get("rerun_of_job_id"):
         typer.echo(f"  Rerun of job {payload['rerun_of_job_id']}")
+    if payload.get("hosted_job_id"):
+        typer.echo(f"  Recorded as hosted Job {payload['hosted_job_id']}")
+    if payload.get("executor") == "client":
+        client = payload.get("client_job_id")
+        typer.echo("  Run by a client" + (f", as local Job {client}" if client else ""))
     progress = payload.get("progress")
     if progress:
         typer.echo(
