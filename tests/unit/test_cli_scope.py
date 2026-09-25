@@ -6,6 +6,7 @@ import json
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import pytest
 from hosted_fake import FakeHosted, Key, routed
 from project_fixtures import write_project
@@ -227,6 +228,7 @@ def test_project_push_does_not_attach_to_an_existing_hosted_project(
 
 
 def test_login_prompts_for_an_api_key(fake: FakeHosted) -> None:
+    fake.keys["plural_test"] = Key()
     code, output = cli("auth", "login", "--api-key-stdin", stdin="plural_test\n")
     assert code == 0, output
     assert "Enter API key:" in output
@@ -238,6 +240,7 @@ def test_login_reads_only_the_plural_key_from_an_env_file(
 ) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text('OPENAI_API_KEY=sk-secret\nPLURAL_API_KEY="plural_from_file"\n')
+    fake.keys["plural_from_file"] = Key()
     monkeypatch.delenv("PLURAL_API_KEY", raising=False)
     code, output = cli("auth", "login", "--env-file", str(env_file))
     assert code == 0, output
@@ -247,3 +250,42 @@ def test_login_reads_only_the_plural_key_from_an_env_file(
     from plural.auth import resolve_session
 
     assert resolve_session().api_key == "plural_from_file"
+
+
+def test_login_refuses_a_key_the_service_rejects(fake: FakeHosted) -> None:
+    code, output = cli("auth", "login", "--api-key-stdin", stdin="plural_unknown\n")
+    assert code == 1
+    assert "rejected this API key" in output
+    assert "plural_unknown" not in output
+    assert "api_key" not in json.dumps(scope())
+
+
+def test_login_refuses_a_key_when_the_service_is_down(
+    fake: FakeHosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise httpx.ConnectError("[Errno 61] Connection refused")
+
+    monkeypatch.setattr("plural.auth.AuthClient.status", refuse)
+    code, output = cli("auth", "login", "--api-key-stdin", stdin="token\n")
+    assert code == 1
+    assert "Could not reach" in output
+    assert "not saved" in output
+    assert "Signed in" not in output
+
+
+def test_login_hides_a_key_typed_at_a_terminal(
+    fake: FakeHosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prompts: list[str] = []
+
+    def hidden(prompt: str) -> str:
+        prompts.append(prompt)
+        return "token"
+
+    monkeypatch.setattr("plural.cli.auth_commands._at_terminal", lambda: True)
+    monkeypatch.setattr("plural.cli.auth_commands.getpass.getpass", hidden)
+    code, output = cli("auth", "login", "--api-key-stdin")
+    assert code == 0, output
+    assert prompts == [">> "]
+    assert "token" not in output.replace("Signed in", "")

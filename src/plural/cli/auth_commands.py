@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import getpass
 import os
 import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
 import typer
 
 from plural.auth import (
     AuthClient,
+    AuthHTTPError,
     AuthStatus,
     Credential,
     Profile,
@@ -62,10 +65,10 @@ def login(
     sources = sum((api_key_stdin, from_env, env_file is not None))
     if sources > 1:
         raise ProjectError("Choose one of --api-key-stdin, --from-env, or --env-file.")
-    if api_key_stdin:
-        credential = Credential(api_key=_prompt_api_key())
-    elif from_env or env_file is not None:
-        credential = Credential(api_key=_key_from_env(env_file))
+    if api_key_stdin or from_env or env_file is not None:
+        key = _prompt_api_key() if api_key_stdin else _key_from_env(env_file)
+        _verify_api_key(target, key)
+        credential = Credential(api_key=key)
     else:
         with AuthClient(target) as client:
             _device, tokens = client.login(
@@ -284,13 +287,43 @@ def _local_binding() -> dict[str, Any] | None:
 
 
 def _prompt_api_key() -> str:
-    """Read one API key from stdin after telling the user what to paste."""
+    """Read one API key from stdin after telling the user what to paste.
+
+    At a terminal the key is not echoed; piped input is read as it is.
+    """
     typer.echo("Enter API key:")
-    typer.echo(">> ", nl=False)
-    key = sys.stdin.readline().strip()
+    if _at_terminal():
+        key = getpass.getpass(">> ").strip()
+    else:
+        typer.echo(">> ", nl=False)
+        key = sys.stdin.readline().strip()
     if not key:
         raise ProjectError("No API key on standard input.")
     return key
+
+
+def _at_terminal() -> bool:
+    return sys.stdin.isatty()
+
+
+def _verify_api_key(target: str, key: str) -> None:
+    """Check an API key against the service before saving it.
+
+    Raises:
+        ProjectError: When the service is unreachable or rejects the key.
+    """
+    try:
+        with AuthClient(target) as client:
+            client.status(key)
+    except httpx.HTTPError as exc:
+        raise ProjectError(
+            f"Could not reach {target}: {exc}. The key was not saved. "
+            "Start the service, or pass the right --api-url."
+        ) from None
+    except AuthHTTPError as exc:
+        if exc.status_code in {401, 403}:
+            raise ProjectError(f"{target} rejected this API key. The key was not saved.") from None
+        raise
 
 
 def _key_from_env(env_file: Path | None) -> str:
