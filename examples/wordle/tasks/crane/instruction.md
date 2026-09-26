@@ -1,1 +1,1 @@
-Guess the hidden five-letter word. The board lists the allowed words. Call `guess` with one word at a time and stop as soon as the board says solved.
+Guess the hidden five-letter word. Call `guess` with one five-letter word at a time and stop as soon as the board says solved.

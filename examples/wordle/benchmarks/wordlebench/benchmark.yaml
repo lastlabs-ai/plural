@@ -2,8 +2,8 @@
 # Results rank on the Verifier score only; step rewards never contribute.
 name: wordlebench
 version: 0.1.0
-description: Seven Wordle tasks, from a short word list to an unlisted dictionary.
-purpose: Measure whether an Agent can use letter marks to find a hidden five-letter word. Easy and medium tasks name the allowed words. Hard tasks do not.
+description: Seven Wordle tasks against the full Wordle word list.
+purpose: Measure whether an Agent can use letter marks to find a hidden five-letter word. Every task accepts the same 14,855 words and shows none of them.
 tasks:
   - case-01
   - case-02

@@ -1,7 +1,7 @@
 # Benchmark: a named collection of Tasks and the rules for ranking results.
 name: wordle
 version: 1.0.0
-description: Solve Wordle puzzles from a five-word dictionary.
+description: Solve three Wordle puzzles against the full Wordle word list.
 purpose: >-
   Checks that an Agent reads feedback from an Environment and uses it to narrow
   its next action, on a problem small enough to inspect by hand.

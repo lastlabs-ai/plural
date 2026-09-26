@@ -2,15 +2,19 @@
 
 ## Overview
 
-Guess a hidden five-letter word in six tries. The Environment decides whether the board lists a short set of words or none. A Task only sets the secret.
+Guess a hidden five-letter word in six tries. A Task only sets the secret.
 
 ## Actions
 
-`guess(word)` is the only move. The result marks each letter: `+` correct, `?` present in the word, `-` absent. A word outside the dictionary is rejected.
+`guess(word)` is the only move. The result marks each letter: `+` correct, `?` present in the word, `-` absent. A word that is not in `words.txt` is rejected. It does not use a guess, but it does use one of the Trial's turns.
+
+## Word list
+
+`words.txt` holds every accepted word, one per line: the 14,855 guesses Wordle accepts, from [tabatkins/wordle-list](https://github.com/tabatkins/wordle-list) (MIT). `Wordle.words()` reads it once per process. A Task's secret must be in it.
 
 ## State
 
-`secret` is the hidden word. A Task sets it with `initial_state`; a blank secret is chosen from the word list using the seed. `guesses`, `remaining`, and `solved` are episode progress. The Agent never sees State. A Verifier does.
+`secret` is the hidden word. A Task sets it with `initial_state`; a blank secret is chosen from `words.txt` using the seed. `guesses`, `remaining`, and `solved` are episode progress. The Agent never sees State. A Verifier does.
 
 ## Observations
 

@@ -46,8 +46,8 @@ project.
 
 `environments/wordle/environment.py` separates what the game knows from what the
 Agent sees. The secret and the guess history are State. The Observation is only the
-board: its text (the allowed words at the start, then the last guess and its marks),
-the guesses remaining, and whether the puzzle is solved:
+board: its text (the last guess and its marks), the guesses remaining, and whether
+the puzzle is solved:
 
 ```python
 class Board(Observation):
@@ -67,19 +67,34 @@ class Game(State):
     guesses: list[str] = Field(default_factory=list)
 ```
 
-`initial()` marks `secret` as a field a Task may set. The dictionary is five words:
-crane, slate, audio, point, and heart. The one action checks the guess against the
-dictionary, marks each letter, and updates the board:
+`initial()` marks `secret` as a field a Task may set. The accepted words live in
+`words.txt` next to the Environment, one per line: the 14,855 guesses Wordle accepts.
+`words()` reads the file once, and the one action checks the guess against it, marks
+each letter, and updates the board:
 
 ```python
-@action
-def guess(self, word: str) -> Board:
-    """Guess one word; + is right, ? is elsewhere in the word, - is absent."""
-    word = word.strip().lower()
-    if word not in WORDS:
-        raise ValueError(f"{word!r} is not in the dictionary")
-    ...
+WORDS_FILE = Path(__file__).with_name("words.txt")
+
+
+class Wordle(Environment[Board, Game]):
+    @staticmethod
+    @cache
+    def words() -> frozenset[str]:
+        """Every word the game accepts, one per line in words.txt. Read once per process."""
+        lines = WORDS_FILE.read_text(encoding="utf-8").splitlines()
+        return frozenset(line.strip().lower() for line in lines if line.strip())
+
+    @action
+    def guess(self, word: str) -> Board:
+        """Guess one word. + is correct, ? is elsewhere in the word, - is absent."""
+        word = word.strip().lower()
+        if word not in self.words():
+            raise ValueError(f"{word!r} is not in the word list")
+        ...
 ```
+
+Files beside `environment.py` travel with the Environment, so the list is there in a
+container or a hosted run too.
 
 `+` is the right letter in the right place, `?` is in the word elsewhere, and `-` is
 absent. The docstring is the description the Agent reads. The episode ends when
@@ -201,9 +216,9 @@ Job job_26cbf6d030b5aa44bbddb22f succeeded.
 Details: plural job show job_26cbf6d030b5aa44bbddb22f
 ```
 
-Three Tasks and one Agent make three Trials. The word list contains every secret, so
-this Agent always wins; it checks that the project is wired correctly, not how well
-anything plays.
+Three Tasks and one Agent make three Trials. The `word-list` Harness guesses crane,
+slate, audio, point, and heart in order, which covers these three secrets, so it always
+wins; it checks that the project is wired correctly, not how well anything plays.
 
 ## Run it from Python
 

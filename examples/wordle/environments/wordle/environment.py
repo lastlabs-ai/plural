@@ -1,29 +1,14 @@
 """Wordle as a Plural Environment. The secret stays on State, never on Observation."""
 
 import random
+from functools import cache
+from pathlib import Path
 
 from pydantic import Field
 
 from plural import Environment, Observation, State, action, initial
 
-# Legal guesses. The Environment chooses which of these, if any, to print.
-EASY = ("crane", "slate", "audio", "point", "heart")
-MEDIUM = ("storm", "grape", "flame", "brick", "smile", "cabin", "river", "crane", "slate", "audio")
-WORDS = EASY + (
-    "storm",
-    "grape",
-    "flame",
-    "brick",
-    "smile",
-    "cabin",
-    "river",
-    "crypt",
-    "nymph",
-    "fjord",
-    "glyph",
-    "axiom",
-    "bayou",
-)
+WORDS_FILE = Path(__file__).with_name("words.txt")
 
 
 class Board(Observation):
@@ -38,22 +23,13 @@ class Game(State):
 
     secret: str = initial(
         "",
-        description="The hidden five-letter word. Empty picks one from the word list using the seed.",
+        description="The hidden five-letter word. Empty picks one from words.txt using the seed.",
         max_length=5,
         pattern=r"^([a-z]{5})?$",
     )
     remaining: int = 6
     solved: bool = False
     guesses: list[str] = Field(default_factory=list)
-
-
-def _shown(secret: str) -> tuple[str, ...] | None:
-    """The list the board prints. None means the Environment keeps the dictionary private."""
-    if secret in EASY:
-        return EASY
-    if secret in MEDIUM:
-        return MEDIUM
-    return None
 
 
 def marks(secret: str, guess: str) -> list[str]:
@@ -76,26 +52,30 @@ class Wordle(Environment[Board, Game]):
     name = "wordle"
     overview = "Guess a hidden five-letter word in six tries."
 
+    @staticmethod
+    @cache
+    def words() -> frozenset[str]:
+        """Every word the game accepts, one per line in words.txt. Read once per process."""
+        lines = WORDS_FILE.read_text(encoding="utf-8").splitlines()
+        return frozenset(line.strip().lower() for line in lines if line.strip())
+
     def reset(self, *, seed=None, options=None):
-        """Start an episode. A blank secret is chosen from the word list."""
+        """Start an episode. A blank secret is chosen from words.txt using the seed."""
         super().reset(seed=seed, options=options)
-        secret = self.state.secret or random.Random(self.state.seed).choice(WORDS)
+        words = self.words()
+        secret = self.state.secret or random.Random(self.state.seed).choice(sorted(words))
+        if secret not in words:
+            raise ValueError(f"The secret {secret!r} is not in words.txt")
         self.state = Game(secret=secret, remaining=6, seed=self.state.seed)
-        shown = _shown(secret)
-        if shown:
-            listed = f" Words: {', '.join(shown)}."
-        else:
-            listed = " Guess any five-letter dictionary word."
-        self.observation = Board(text=f"6 guesses left.{listed}", remaining=6)
+        self.observation = Board(text="6 guesses left. Guess any five-letter word.", remaining=6)
         return self.observation, {}
 
     @action
     def guess(self, word: str) -> Board:
         """Guess one word. + is correct, ? is elsewhere in the word, - is absent."""
         word = word.strip().lower()
-        allowed = _shown(self.state.secret) or WORDS
-        if word not in allowed:
-            raise ValueError(f"{word!r} is not in the dictionary")
+        if word not in self.words():
+            raise ValueError(f"{word!r} is not in the word list")
         scored = marks(self.state.secret, word)
         self.state.guesses.append(word)
         self.state.remaining -= 1
