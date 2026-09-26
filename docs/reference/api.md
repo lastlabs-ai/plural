@@ -528,15 +528,18 @@ Token usage for a completion.
 ```text
 Attributes:
     prompt_tokens: Input token count.
-    completion_tokens: Output token count.
+    completion_tokens: Output token count. Includes reasoning tokens when the
+        provider bills them as output.
     total_tokens: Sum of prompt and completion tokens.
     cost: Estimated USD cost when known.
+    reasoning_tokens: How many completion tokens were reasoning, when the
+        provider reports the split. ``None`` means unreported, not zero.
 ```
 
 ### plural.types.Usage.from_counts
 
 ```python
-from_counts(prompt: 'int', completion: 'int', cost: 'float | None' = None) -> 'Usage'
+from_counts(prompt: 'int', completion: 'int', cost: 'float | None' = None, *, reasoning_tokens: 'int | None' = None) -> 'Usage'
 ```
 
 Build a :class:`Usage` from prompt/completion counts.
@@ -546,6 +549,7 @@ Args:
     prompt: Prompt token count.
     completion: Completion token count.
     cost: Optional USD cost.
+    reasoning_tokens: Reasoning tokens included in ``completion``, when reported.
 
 Returns:
     A populated :class:`Usage` instance.
@@ -553,6 +557,26 @@ Returns:
 Examples:
     >>> Usage.from_counts(10, 5).total_tokens
     15
+```
+
+## plural.types.reasoning_tokens_of
+
+The reasoning-token count a provider reported.
+
+```text
+OpenAI Chat Completions uses ``completion_tokens_details.reasoning_tokens`` and
+the Responses API uses ``output_tokens_details.reasoning_tokens``. Gemini reports
+``thoughtsTokenCount``. A host may also send ``reasoning_tokens`` directly.
+
+Args:
+    raw: A provider usage object.
+
+Returns:
+    The count, or ``None`` when the provider reported none.
+```
+
+```python
+plural.types.reasoning_tokens_of(raw: 'Mapping[str, Any] | None') -> 'int | None'
 ```
 
 ## plural.types.text_content

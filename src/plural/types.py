@@ -15,6 +15,7 @@ Examples:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import Enum
 from typing import Any, Literal
 
@@ -274,24 +275,36 @@ class Usage(BaseModel):
 
     Attributes:
         prompt_tokens: Input token count.
-        completion_tokens: Output token count.
+        completion_tokens: Output token count. Includes reasoning tokens when the
+            provider bills them as output.
         total_tokens: Sum of prompt and completion tokens.
         cost: Estimated USD cost when known.
+        reasoning_tokens: How many completion tokens were reasoning, when the
+            provider reports the split. ``None`` means unreported, not zero.
     """
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
     cost: float | None = None
+    reasoning_tokens: int | None = None
 
     @classmethod
-    def from_counts(cls, prompt: int, completion: int, cost: float | None = None) -> Usage:
+    def from_counts(
+        cls,
+        prompt: int,
+        completion: int,
+        cost: float | None = None,
+        *,
+        reasoning_tokens: int | None = None,
+    ) -> Usage:
         """Build a :class:`Usage` from prompt/completion counts.
 
         Args:
             prompt: Prompt token count.
             completion: Completion token count.
             cost: Optional USD cost.
+            reasoning_tokens: Reasoning tokens included in ``completion``, when reported.
 
         Returns:
             A populated :class:`Usage` instance.
@@ -305,7 +318,42 @@ class Usage(BaseModel):
             completion_tokens=completion,
             total_tokens=prompt + completion,
             cost=cost,
+            reasoning_tokens=reasoning_tokens,
         )
+
+
+def reasoning_tokens_of(raw: Mapping[str, Any] | None) -> int | None:
+    """The reasoning-token count a provider reported.
+
+    OpenAI Chat Completions uses ``completion_tokens_details.reasoning_tokens`` and
+    the Responses API uses ``output_tokens_details.reasoning_tokens``. Gemini reports
+    ``thoughtsTokenCount``. A host may also send ``reasoning_tokens`` directly.
+
+    Args:
+        raw: A provider usage object.
+
+    Returns:
+        The count, or ``None`` when the provider reported none.
+    """
+    if not raw:
+        return None
+    for key in ("completion_tokens_details", "output_tokens_details"):
+        details = raw.get(key)
+        if isinstance(details, Mapping):
+            count = _reasoning_count(details.get("reasoning_tokens"))
+            if count is not None:
+                return count
+    for key in ("reasoning_tokens", "thoughtsTokenCount"):
+        count = _reasoning_count(raw.get(key))
+        if count is not None:
+            return count
+    return None
+
+
+def _reasoning_count(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 class Choice(BaseModel):

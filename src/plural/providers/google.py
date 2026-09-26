@@ -39,6 +39,7 @@ from plural.types import (
     StreamDelta,
     ToolCall,
     Usage,
+    reasoning_tokens_of,
     text_content,
 )
 
@@ -209,6 +210,7 @@ class GoogleProvider:
         usage = Usage.from_counts(
             int(usage_meta.get("promptTokenCount") or 0),
             int(usage_meta.get("candidatesTokenCount") or 0),
+            reasoning_tokens=reasoning_tokens_of(usage_meta),
         )
         return ChatResponse(
             id=str(data.get("responseId") or data.get("id") or ""),
@@ -281,6 +283,7 @@ class GoogleProvider:
             usage = Usage.from_counts(
                 int(um.get("promptTokenCount") or 0),
                 int(um.get("candidatesTokenCount") or 0),
+                reasoning_tokens=reasoning_tokens_of(um),
             )
         text = "".join(text_parts)
         reasoning = "".join(reasoning_parts)

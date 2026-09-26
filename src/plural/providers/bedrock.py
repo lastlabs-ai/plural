@@ -64,6 +64,7 @@ from plural.types import (
     StreamDelta,
     ToolCall,
     Usage,
+    reasoning_tokens_of,
     text_content,
 )
 
@@ -602,7 +603,9 @@ class BedrockProvider:
     def _usage(self, raw: Mapping[str, Any] | None) -> Usage:
         data = raw or {}
         return Usage.from_counts(
-            int(data.get("inputTokens") or 0), int(data.get("outputTokens") or 0)
+            int(data.get("inputTokens") or 0),
+            int(data.get("outputTokens") or 0),
+            reasoning_tokens=reasoning_tokens_of(data),
         )
 
     def _parse_response(

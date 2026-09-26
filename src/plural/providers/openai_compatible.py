@@ -41,6 +41,7 @@ from plural.types import (
     StreamDelta,
     ToolCall,
     Usage,
+    reasoning_tokens_of,
 )
 
 
@@ -272,6 +273,7 @@ class OpenAICompatible:
         usage = Usage.from_counts(
             int(usage_raw.get("prompt_tokens") or 0),
             int(usage_raw.get("completion_tokens") or 0),
+            reasoning_tokens=reasoning_tokens_of(usage_raw),
         )
         choices = [
             Choice(
@@ -300,6 +302,7 @@ class OpenAICompatible:
             usage = Usage.from_counts(
                 int(data["usage"].get("prompt_tokens") or 0),
                 int(data["usage"].get("completion_tokens") or 0),
+                reasoning_tokens=reasoning_tokens_of(data["usage"]),
             )
         return StreamChunk(
             id=str(data.get("id") or ""),

@@ -302,7 +302,11 @@ def test_a_completed_response_is_parsed_into_content_reasoning_and_tools(
                         "arguments": '{"city":"Oslo"}',
                     },
                 ],
-                "usage": {"input_tokens": 9, "output_tokens": 5},
+                "usage": {
+                    "input_tokens": 9,
+                    "output_tokens": 5,
+                    "output_tokens_details": {"reasoning_tokens": 3},
+                },
             },
         )
     )
@@ -318,6 +322,7 @@ def test_a_completed_response_is_parsed_into_content_reasoning_and_tools(
     assert response.choices[0].finish_reason is FinishReason.TOOL_CALLS
     assert response.usage.prompt_tokens == 9
     assert response.usage.completion_tokens == 5
+    assert response.usage.reasoning_tokens == 3
 
 
 @respx.mock

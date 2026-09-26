@@ -58,6 +58,7 @@ from plural.types import (
     TextContent,
     ToolCall,
     Usage,
+    reasoning_tokens_of,
     text_content,
 )
 
@@ -145,7 +146,11 @@ def _usage(raw: dict[str, Any] | None) -> Usage | None:
     """
     if not raw:
         return None
-    return Usage.from_counts(int(raw.get("input_tokens") or 0), int(raw.get("output_tokens") or 0))
+    return Usage.from_counts(
+        int(raw.get("input_tokens") or 0),
+        int(raw.get("output_tokens") or 0),
+        reasoning_tokens=reasoning_tokens_of(raw),
+    )
 
 
 class OpenAIResponsesProvider(OpenAICompatible):

@@ -1504,7 +1504,7 @@
       "type": "object"
     },
     "Usage": {
-      "description": "Token usage for a completion.\n\nAttributes:\n    prompt_tokens: Input token count.\n    completion_tokens: Output token count.\n    total_tokens: Sum of prompt and completion tokens.\n    cost: Estimated USD cost when known.",
+      "description": "Token usage for a completion.\n\nAttributes:\n    prompt_tokens: Input token count.\n    completion_tokens: Output token count. Includes reasoning tokens when the\n        provider bills them as output.\n    total_tokens: Sum of prompt and completion tokens.\n    cost: Estimated USD cost when known.\n    reasoning_tokens: How many completion tokens were reasoning, when the\n        provider reports the split. ``None`` means unreported, not zero.",
       "properties": {
         "completion_tokens": {
           "default": 0,
@@ -1527,6 +1527,18 @@
           "default": 0,
           "title": "Prompt Tokens",
           "type": "integer"
+        },
+        "reasoning_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Tokens"
         },
         "total_tokens": {
           "default": 0,

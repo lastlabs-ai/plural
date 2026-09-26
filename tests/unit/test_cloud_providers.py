@@ -369,6 +369,17 @@ def test_bedrock_signs_when_given_iam_credentials() -> None:
     provider.close()
 
 
+def test_reasoning_token_counts_survive_each_provider_shape() -> None:
+    from plural.types import reasoning_tokens_of
+
+    assert reasoning_tokens_of({"output_tokens_details": {"reasoning_tokens": 3}}) == 3
+    assert reasoning_tokens_of({"completion_tokens_details": {"reasoning_tokens": 4}}) == 4
+    assert reasoning_tokens_of({"thoughtsTokenCount": 5}) == 5
+    assert reasoning_tokens_of({"reasoning_tokens": 6}) == 6
+    assert reasoning_tokens_of({"input_tokens": 1, "output_tokens": 2}) is None
+    assert reasoning_tokens_of({"reasoning_tokens": True}) is None
+
+
 def test_explicit_key_wins_over_ambient_iam_credentials() -> None:
     provider = BedrockProvider("bearer-key", access_key_id="AKID", secret_access_key="secret")
     assert provider._auth_headers("/model/m/converse", b"{}") == {

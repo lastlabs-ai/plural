@@ -44,6 +44,7 @@ from plural.types import (
     StreamDelta,
     ToolCall,
     Usage,
+    reasoning_tokens_of,
     text_content,
 )
 
@@ -336,6 +337,7 @@ class AnthropicProvider:
         usage = Usage.from_counts(
             int(usage_raw.get("input_tokens") or 0),
             int(usage_raw.get("output_tokens") or 0),
+            reasoning_tokens=reasoning_tokens_of(usage_raw),
         )
         message = Message(
             role="assistant",
@@ -548,6 +550,7 @@ class AnthropicProvider:
                 usage=Usage.from_counts(
                     state.prompt_tokens,
                     int(usage_raw.get("output_tokens") or 0),
+                    reasoning_tokens=reasoning_tokens_of(usage_raw),
                 ),
                 provider=self.name,
                 raw=event,
