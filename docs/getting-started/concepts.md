@@ -108,10 +108,10 @@ under uncertainty. It sees only the Task instructions and the Environment's
 Observations: scores, rewards, termination flags, and private Verifier data
 never reach its context.
 
-Model credentials do not live on the Agent. A model call needs an API key from
-`plural auth login --api-key-stdin` or `PLURAL_API_KEY`, or your own
-`OPENAI_API_KEY` for OpenAI models. A browser login is not accepted for model
-calls. The SDK also accepts `client=` or `api_key=` on the Job. An Agent whose
+Model credentials do not live on the Agent. Every model call goes through the Plural
+gateway, which bills it, so it needs a Plural API key from
+`plural auth login --api-key-stdin` or `PLURAL_API_KEY`. A browser login is not
+accepted for model calls. The SDK also accepts `client=` or `api_key=` on the Job. An Agent whose
 Harness calls no model can declare `auth_mode: none` and runs without any
 credential.
 

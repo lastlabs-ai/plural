@@ -19,6 +19,30 @@ from plural.sandbox import (
     SandboxRequirements,
 )
 
+_EPISODE = "".join(
+    json.dumps(record) + "\n"
+    for record in (
+        {
+            "schema": "plural.episode/v1",
+            "sequence": 1,
+            "kind": "model.call",
+            "turn": 1,
+            "started_at": "2026-01-01T00:00:00+00:00",
+            "ended_at": "2026-01-01T00:00:01+00:00",
+            "duration_ms": 1000,
+            "model": "model",
+            "messages_offset": 0,
+            "messages": [{"role": "user", "content": "answer"}],
+            "message_count": 1,
+            "text": "42",
+            "tool_calls": [],
+            "usage": {"input_tokens": 10, "output_tokens": 2, "cost_usd": 0.01},
+            "via_gateway": False,
+            "error": None,
+        },
+    )
+).encode()
+
 
 class FakeProvider(SandboxProvider):
     def __init__(self, name: str, *, delay: float = 0, fail_first: bool = False) -> None:
@@ -84,15 +108,13 @@ class FakeProvider(SandboxProvider):
             assert payload["model_resolution"]["catalog_model_id"] == "test/model"
             assert payload["model_resolution"]["upstream_id"] == "model"
             self.files[handle.sandbox_id]["result.json"] = b'{"answer": 42}'
-            self.files[handle.sandbox_id]["trajectory.jsonl"] = (
-                b'{"turn": 1}\n{"type": "cost", "cost_usd": 0.01}\n'
-            )
+            self.files[handle.sandbox_id]["episode.jsonl"] = _EPISODE
             self.files[handle.sandbox_id]["state.json"] = b'{"step": 1}'
             self.files[handle.sandbox_id]["observation.json"] = b'{"text": "done"}'
             self.files[handle.sandbox_id]["view.json"] = b'{"kind": "text", "text": "done"}'
             if "mode" in payload["environment"]:
                 raise AssertionError("mode must not be injected into Environment payload")
-            artifact_paths = ["trajectory.jsonl"]
+            artifact_paths = ["episode.jsonl"]
             if payload["capture_tito"]:
                 self.files[handle.sandbox_id]["tito.jsonl"] = (
                     json.dumps(

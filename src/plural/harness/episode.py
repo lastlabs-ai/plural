@@ -160,8 +160,12 @@ class EpisodeRecorder:
         finish_reason: str | None = None,
         usage: TokenUsage | None = None,
         error: str | None = None,
+        request_id: str | None = None,
     ) -> None:
         """Record one model call made through ``HarnessAgent.complete``.
+
+        ``request_id`` is the gateway's id for the call. The gateway bills and
+        records the call itself; the id links that record to the Trial.
 
         Messages already recorded by an earlier call are not repeated: when the
         new request extends the previous one, only the appended messages are
@@ -189,6 +193,7 @@ class EpisodeRecorder:
             tool_calls=list(tool_calls),
             finish_reason=finish_reason,
             usage=(usage or TokenUsage()).model_dump(mode="json"),
+            request_id=request_id,
             error=error,
         )
 

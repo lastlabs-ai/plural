@@ -20,11 +20,12 @@ Agents and Agent Verifiers name models by stable IDs from a `ModelCatalog`. A
 catalog entry says which upstream model an ID resolves to; it does not by
 itself give you access to that model.
 
-A Job makes every model call as an OpenAI-compatible `POST /chat/completions`.
-It sends the catalog ID to `PLURAL_GATEWAY_URL`, or the resolved upstream ID to
-`OPENAI_BASE_URL` or, when neither is set, to OpenAI. Anthropic, Google, Bedrock,
-and Azure native APIs are not directly executed by Job; reach those models
-through the Plural gateway or another OpenAI-compatible endpoint.
+A Job makes every model call as an OpenAI-compatible `POST /chat/completions` to
+the Plural gateway at `PLURAL_GATEWAY_URL`, naming the catalog ID. The gateway
+routes the call, bills it at the exact provider cost, and returns that cost and a
+`plural_request_id` that links the call to its Trial. Anthropic, Google, Bedrock,
+and Azure native APIs are not directly executed by Job; those models are reached
+through the gateway.
 
 `Client` is a separate application inference API with provider adapters for
 OpenAI, Anthropic, Google, Azure, Bedrock, and OpenAI-compatible services.

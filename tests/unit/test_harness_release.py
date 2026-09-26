@@ -274,19 +274,12 @@ def test_native_actions_executes_only_declared_actions(
     assert '"seen": 7' in tool["content"]
 
 
-@pytest.mark.parametrize(
-    ("gateway", "expected"),
-    ((True, "catalog/model"), (False, "upstream-model")),
-)
-def test_native_runner_selects_gateway_catalog_or_direct_upstream_model(
-    gateway: bool,
-    expected: str,
+def test_native_runner_calls_the_gateway_with_the_catalog_model(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("PLURAL_GATEWAY_URL", raising=False)
-    if gateway:
-        monkeypatch.setenv("PLURAL_GATEWAY_URL", "https://gateway.example/v1")
+    monkeypatch.setenv("PLURAL_GATEWAY_URL", "https://gateway.example/v1")
+    expected = "catalog/model"
     seen: list[str] = []
 
     def model_call(**kwargs: object) -> dict[str, object]:

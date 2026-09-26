@@ -117,7 +117,7 @@ plural run --task ticket-1 --agent support-assistant
 plural run --task ticket-1 --model openai/gpt-5.6-luna
 ```
 
-Every run is a new Job. A local run is recorded under `.plural/jobs/`; a run with `--hosted` is recorded in the hosted project. Add `--dry-run` to see the plan without calling a model. A live local run needs an API key, a Plural key or your own `OPENAI_API_KEY`; a browser login alone is not accepted for model calls.
+Every run is a new Job. A local run is recorded under `.plural/jobs/`; a run with `--hosted` is recorded in the hosted project. Add `--dry-run` to see the plan without calling a model. A live local run sends every model call through the Plural gateway, so it needs a Plural API key; a browser login alone is not accepted for model calls.
 
 In Python, given a Task named `task`, run the Agent with your Client:
 

@@ -181,8 +181,8 @@ def test_rescore_and_agent_serve_are_reserved(project: Project) -> None:
 def test_live_model_runs_need_a_model_credential(project: Project) -> None:
     code, output, _ = cli("run", "-t", "refund", "-m", "openai/gpt-5.6-luna")
     assert code == 1
-    assert "no model credential" in output
-    assert "plural auth login" in output
+    assert "Plural gateway" in output
+    assert "PLURAL_API_KEY" in output
 
 
 def test_a_provider_key_is_never_sent_to_the_plural_gateway(

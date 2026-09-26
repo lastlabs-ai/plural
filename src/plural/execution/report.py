@@ -10,8 +10,10 @@ transition with usage, phase timings, and Verifier results.
 Every write is idempotent. A hosted execution is keyed by the local Job,
 Trial, and execution number, event keys are ``{hosted execution id}:{n}``, and
 artifacts are immutable per path, so publishing the same execution twice
-records it once. Nothing is estimated: a measurement the local run did not
-record is omitted, and the server shows it as not reported.
+records it once. A measurement the local run did not record is omitted, and
+the server shows it as not reported. Tokens and cost come from the gateway,
+which billed each call; ``request_id`` on each model call links that billed
+record to the hosted Trial.
 
 ``HostedTracker`` does the same while a Job runs: attached to a ``JobStore``,
 it opens each hosted execution when the local one starts, keeps it alive with
@@ -48,7 +50,13 @@ _ROLES = {
     "rendering": "rendering",
     "trajectory": "trajectory",
     "verifier_evidence": "verifier",
+    "state": "log",
+    "observation": "log",
+    "result": "log",
+    "episode": "log",
 }
+"""Hosted roles for the files Plural records about a run. Anything else the
+Harness returned is the Agent's ``output``."""
 _LOGS = (
     ("stdout.log", "stdout", "harness"),
     ("stderr.log", "stderr", "harness"),
@@ -174,14 +182,33 @@ def log_events(
 
 
 def agent_usage(records: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Total the model calls an episode recorded. ``None`` when there were none."""
+    """Total the model calls an episode recorded. ``None`` when there were none.
+
+    ``model_calls`` lists each call with the gateway's ``request_id``, which the
+    service uses to attach the gateway's billed usage record to the Trial.
+    """
     totals = UsageTotals()
+    calls: list[dict[str, Any]] = []
     for record in records:
         if record.get("kind") != "model.call":
             continue
         raw = record.get("usage")
-        totals = totals.add(
-            TokenUsage.model_validate(raw) if isinstance(raw, dict) else TokenUsage()
+        usage = TokenUsage.model_validate(raw) if isinstance(raw, dict) else TokenUsage()
+        totals = totals.add(usage)
+        calls.append(
+            {
+                "model": record.get("model"),
+                "started_at": record.get("started_at"),
+                "duration_ms": record.get("duration_ms"),
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "cached_input_tokens": usage.cached_input_tokens,
+                "reasoning_tokens": usage.reasoning_tokens,
+                "tool_calls": len(record.get("tool_calls") or ()),
+                "cost_usd": usage.cost_usd,
+                "request_id": record.get("request_id"),
+                "error": record.get("error"),
+            }
         )
     if totals.calls == 0:
         return None
@@ -193,7 +220,7 @@ def agent_usage(records: list[dict[str, Any]]) -> dict[str, Any] | None:
         "calls_missing_tokens": totals.calls_missing_tokens,
         "calls_missing_cost": totals.calls_missing_cost,
         "cost_usd": totals.cost_usd,
-        "cost_basis": "reported",
+        "model_calls": calls,
     }
 
 
@@ -369,7 +396,7 @@ def publish_execution(
     if agent is not None:
         usage["agent"] = agent
     elif receipt.cost_usd is not None:
-        usage["agent"] = {"cost_usd": receipt.cost_usd, "cost_basis": "reported"}
+        usage["agent"] = {"cost_usd": receipt.cost_usd}
     report: dict[str, Any] = {
         **_outcome(artifacts_root, records),
         "usage": usage,

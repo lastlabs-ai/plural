@@ -23,6 +23,7 @@ from plural.common import (
     content_hash,
     stable_id,
 )
+from plural.config import resolve_gateway_url
 from plural.environments.definition import EnvironmentDefinition, EnvironmentIdentity, HarnessGrant
 from plural.sandbox.models import NetworkMode
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
@@ -772,8 +773,7 @@ class Job:
             raise ValueError(
                 "Cannot create Job.\n"
                 "Pass client=Client() or api_key=..., not both.\n"
-                "Client uses your Plural login. api_key is a bring-your-own "
-                "OpenAI-compatible key."
+                "Both select the Plural gateway; api_key is a Plural API key."
             )
         self.source = source
         self.agents = tuple(agents)
@@ -858,13 +858,13 @@ class Job:
                 current.setdefault("PLURAL_GATEWAY_URL", str(gateway))
             return current
         if self.api_key:
-            current.setdefault("OPENAI_API_KEY", self.api_key)
-            return current
-        if current.get("PLURAL_API_KEY") or current.get("OPENAI_API_KEY"):
+            current.setdefault("PLURAL_API_KEY", self.api_key)
+        if current.get("PLURAL_API_KEY"):
+            current.setdefault("PLURAL_GATEWAY_URL", resolve_gateway_url(None, current))
             return current
         raise ValueError(
             "Cannot run Job.\n"
-            "A live model call needs Plural or a bring-your-own key.\n"
+            "A live model call goes through the Plural gateway and needs a Plural API key.\n"
             "SDK:  Job(task, agents=[agent], client=Client())\n"
             "SDK:  Job(task, agents=[agent], api_key='...')\n"
             "CLI:  plural auth login && plural run --task <name> --model <model>"

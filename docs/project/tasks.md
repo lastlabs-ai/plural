@@ -314,7 +314,7 @@ plural auth login --api-key-stdin < plural-api-key.txt
 plural run --task duplicate-charge --model openai/gpt-5.6-luna
 ```
 
-`--model` without `--harness` uses `native`, Plural's built-in tool loop. A live model needs an API key: store a Plural API key with `plural auth login --api-key-stdin`, as above, or export `PLURAL_API_KEY` or `OPENAI_API_KEY`. A browser login alone is not accepted for model calls. The run is a Job recorded under `.plural/jobs/`. `plural trial show TRIAL_ID` prints the Trial's score, Verifier evidence, and artifacts directory. Open `observation.json` there to check that the issue and invoice reached the Observation, and `state.json` to check that the expected category stayed in internal State. The `local` runtime is a trusted subprocess, not a sandbox; see [Runtime](environments.md#runtime) for isolation options.
+`--model` without `--harness` uses `native`, Plural's built-in tool loop. A live model call goes through the Plural gateway and needs a Plural API key: store one with `plural auth login --api-key-stdin`, as above, or export `PLURAL_API_KEY`. A browser login alone is not accepted for model calls. The run is a Job recorded under `.plural/jobs/`. `plural trial show TRIAL_ID` prints the Trial's score, Verifier evidence, and artifacts directory. Open `observation.json` there to check that the issue and invoice reached the Observation, and `state.json` to check that the expected category stayed in internal State. The `local` runtime is a trusted subprocess, not a sandbox; see [Runtime](environments.md#runtime) for isolation options.
 
 ## Choose the right place for data
 

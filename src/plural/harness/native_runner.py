@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -11,14 +12,18 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 # This module is uploaded and run as a standalone script, so it cannot import
-# from the plural package. Keep in sync with plural.environments.runner.PROTOCOL;
-# test_episode_contract.py asserts the two match.
+# from the plural package. Keep these in sync with plural.environments.runner.PROTOCOL,
+# plural.harness.episode, and plural.usage.normalize_usage; test_episode_contract.py
+# asserts they match.
 STEP_PROTOCOL = "plural-step-v1"
+EPISODE_SCHEMA = "plural.episode/v1"
+EPISODE_FILE = "episode.jsonl"
 
 
 def _local_command(command: list[Any]) -> list[str]:
@@ -70,16 +75,91 @@ class _ToolOutcome:
     summary: str | None = None
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _started() -> tuple[str, float]:
+    return _now(), time.monotonic()
+
+
+def _count(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return int(value)
+
+
+def _cost(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return float(value)
+
+
+def _request_id(response: dict[str, Any]) -> str | None:
+    """The gateway's id for this call, which links its billed usage to the Trial."""
+    value = response.get("plural_request_id")
+    return value if isinstance(value, str) and value else None
+
+
+def _usage(raw: Any) -> dict[str, Any]:
+    """``plural.usage.normalize_usage`` for a script that cannot import the package.
+
+    Unreported values stay ``None``, never zero.
+    """
+    usage = raw if isinstance(raw, dict) else {}
+    output = _count(usage.get("completion_tokens"))
+    if output is None:
+        output = _count(usage.get("output_tokens"))
+    completion_details = usage.get("completion_tokens_details")
+    reasoning = (
+        _count(completion_details.get("reasoning_tokens"))
+        if isinstance(completion_details, dict)
+        else None
+    )
+    if "prompt_tokens" in usage:
+        prompt = _count(usage.get("prompt_tokens"))
+        details = usage.get("prompt_tokens_details")
+        cached = _count(details.get("cached_tokens")) if isinstance(details, dict) else None
+    else:
+        base = _count(usage.get("input_tokens"))
+        read = _count(usage.get("cache_read_input_tokens"))
+        written = _count(usage.get("cache_creation_input_tokens"))
+        prompt = None if base is None else base + (read or 0) + (written or 0)
+        cached = read
+    if cached is not None and prompt is not None:
+        cached = min(cached, prompt)
+    cost = _cost(usage.get("cost"))
+    if cost is None:
+        cost = _cost(usage.get("cost_usd"))
+    return {
+        "input_tokens": prompt,
+        "output_tokens": output,
+        "cached_input_tokens": cached,
+        "reasoning_tokens": reasoning,
+        "cost_usd": cost,
+    }
+
+
 @dataclass
 class _Episode:
-    """The recorded episode, kept separately from the Agent's context."""
+    """The recorded episode, kept separately from the Agent's context.
+
+    ``records`` is the ``episode.jsonl`` account of the run, in the same
+    ``plural.episode/v1`` shape a class Harness's runner writes.
+    """
 
     messages: list[dict[str, Any]] = field(default_factory=list)
     transitions: list[dict[str, Any]] = field(default_factory=list)
     rewards: list[dict[str, Any]] = field(default_factory=list)
+    records: list[dict[str, Any]] = field(default_factory=list)
+    _recorded_messages: int = 0
 
     def document(self) -> dict[str, Any]:
-        """Return the trajectory document written to ``trajectory.jsonl``."""
+        """Return the messages, transitions, and rewards of the episode."""
         return {
             "messages": self.messages,
             "transitions": self.transitions,
@@ -89,14 +169,75 @@ class _Episode:
     def total_reward(self) -> float:
         return sum(float(item.get("value") or 0) for item in self.rewards)
 
+    def record(
+        self, kind: str, started: tuple[str, float], *, turn: int | None, **fields: Any
+    ) -> None:
+        """Append one ``episode.jsonl`` record."""
+        self.records.append(
+            {
+                "schema": EPISODE_SCHEMA,
+                "sequence": len(self.records) + 1,
+                "kind": kind,
+                "turn": turn,
+                "started_at": started[0],
+                "ended_at": _now(),
+                "duration_ms": round((time.monotonic() - started[1]) * 1000, 3),
+                **fields,
+            }
+        )
+
+    def model_call(
+        self,
+        started: tuple[str, float],
+        *,
+        turn: int,
+        model: str,
+        tools: list[dict[str, Any]],
+        response: dict[str, Any],
+        message: dict[str, Any],
+    ) -> None:
+        """Record one model call, storing only the messages added since the last."""
+        offset = self._recorded_messages
+        choices = response.get("choices")
+        first = choices[0] if isinstance(choices, list) and choices else {}
+        calls = message.get("tool_calls")
+        content = message.get("content")
+        self.record(
+            "model.call",
+            started,
+            turn=turn,
+            model=str(response.get("model") or model),
+            messages_offset=offset,
+            messages=self.messages[offset:],
+            message_count=len(self.messages),
+            tools=[str((item.get("function") or {}).get("name") or "") for item in tools],
+            text=content if isinstance(content, str) else "",
+            reasoning=message.get("reasoning") or message.get("reasoning_content"),
+            tool_calls=calls if isinstance(calls, list) else [],
+            finish_reason=first.get("finish_reason") if isinstance(first, dict) else None,
+            usage=_usage(response.get("usage")),
+            request_id=_request_id(response),
+            error=None,
+        )
+        self._recorded_messages = len(self.messages)
+
+    def write(self, path: Path) -> None:
+        path.write_text(
+            "".join(json.dumps(record, sort_keys=True) + "\n" for record in self.records),
+            encoding="utf-8",
+        )
+
 
 def main() -> None:
     """Run one model-backed native profile without evaluating its own answer."""
     profile = sys.argv[1] if len(sys.argv) > 1 else "native.chat.v1"
     request = json.loads(sys.stdin.readline())
+    episode = _Episode()
     try:
-        result, episode, trace_id = _run(profile, request)
+        result, episode, trace_id = _run(profile, request, episode)
     except Exception as exc:  # noqa: BLE001
+        # Keep the steps and model calls that happened before the failure.
+        episode.write(Path(EPISODE_FILE))
         _emit({"type": "error", "message": str(exc)})
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
@@ -104,22 +245,21 @@ def main() -> None:
         json.dumps(result, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    Path("trajectory.jsonl").write_text(
-        json.dumps(episode.document(), sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    episode.write(Path(EPISODE_FILE))
     _emit(
         {
             "type": "result",
             "status": "succeeded",
             "outputs": ["result.json"],
-            "artifacts": ["trajectory.jsonl"],
+            "artifacts": [EPISODE_FILE],
             "trace_id": trace_id,
         }
     )
 
 
-def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], _Episode, str]:
+def _run(
+    profile: str, request: dict[str, Any], episode: _Episode | None = None
+) -> tuple[dict[str, Any], _Episode, str]:
     if profile not in _CHAT_PROFILES | _ACTION_PROFILES:
         raise ValueError(f"unknown native profile {profile!r}")
     agent = _mapping(request.get("agent"), "agent")
@@ -138,9 +278,19 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], _Episod
     if profile in _ACTION_PROFILES and not actions:
         raise ValueError(f"{profile} requires at least one environment native action")
     denials = _denials(request)
-    episode = _Episode()
+    episode = episode if episode is not None else _Episode()
+    started = _started()
     reset = _reset_episode(request, environment, declared)
     episode.transitions.append(reset)
+    episode.record(
+        "environment.reset",
+        started,
+        turn=None,
+        observation=reset.get("observation"),
+        info=reset.get("info") or {},
+        view=reset.get("view") or None,
+        error=None,
+    )
     prompt = _prompt(request, environment, denials)
     system = str(agent.get("instructions") or "").strip()
     if denials:
@@ -168,7 +318,7 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], _Episod
         tools.append(_FINISH_TOOL)
     catalog_model = str(agent.get("model") or "")
     execution_model = _execution_model(request, catalog_model)
-    total_cost = 0.0
+    total_cost: float | None = None
     final_message: dict[str, Any] | None = None
     summary: str | None = None
     stop_reason: str | None = None
@@ -183,23 +333,33 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], _Episod
         if remaining <= 0:
             stop_reason = "max_seconds"
             break
+        offered = tools if profile in _ACTION_PROFILES else []
+        started = _started()
         response = _model_call(
             model=execution_model,
             routing=_mapping(agent.get("routing") or {}, "agent.routing"),
             messages=messages,
-            tools=tools if profile in _ACTION_PROFILES else [],
+            tools=offered,
             timeout=remaining,
         )
         message = _response_message(response)
-        usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
-        cost = usage.get("cost_usd", usage.get("cost")) if isinstance(usage, dict) else None
+        episode.model_call(
+            started,
+            turn=turn,
+            model=execution_model,
+            tools=offered,
+            response=response,
+            message=message,
+        )
+        cost = episode.records[-1]["usage"]["cost_usd"]
         if max_cost is not None and cost is None:
             raise ValueError(
                 "max_cost_usd requires the gateway to return usage.cost_usd or usage.cost"
             )
-        total_cost += float(cost or 0)
+        if cost is not None:
+            total_cost = (total_cost or 0.0) + cost
         messages.append(message)
-        if max_cost is not None and total_cost > float(max_cost):
+        if max_cost is not None and (total_cost or 0.0) > float(max_cost):
             stop_reason = "max_cost"
             break
         calls = message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
@@ -208,7 +368,9 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], _Episod
             stop_reason = "agent_response"
             break
         for call in calls:
+            started = _started()
             outcome = _dispatch_tool(call, actions, environment, denials, deadline, turn)
+            _record_outcome(episode, started, turn, call, outcome)
             messages.append(outcome.message)
             if outcome.transition is not None:
                 episode.transitions.append(outcome.transition)
@@ -249,6 +411,62 @@ def _run(profile: str, request: dict[str, Any]) -> tuple[dict[str, Any], _Episod
     )
 
 
+def _record_outcome(
+    episode: _Episode,
+    started: tuple[str, float],
+    turn: int,
+    call: Any,
+    outcome: _ToolOutcome,
+) -> None:
+    """Record one dispatched tool call as an Environment step or the Agent finishing."""
+    call_id = str(call.get("id") or "") if isinstance(call, dict) else ""
+    function = call.get("function") if isinstance(call, dict) else None
+    name = str(function.get("name") or "") if isinstance(function, dict) else ""
+    visible = outcome.message.get("content")
+    transition = outcome.transition or {}
+    if transition.get("type") == "finish":
+        episode.record(
+            "agent.finish",
+            started,
+            turn=turn,
+            tool_call_id=call_id,
+            summary=transition.get("summary") or "",
+            content=visible,
+        )
+        return
+    try:
+        arguments = _arguments(function) if isinstance(function, dict) else {}
+    except (TypeError, ValueError):
+        arguments = {}
+    step = transition if transition.get("type") == "step" else {}
+    raw_info = step.get("info")
+    info = raw_info if isinstance(raw_info, dict) else {}
+    error = info.get("error")
+    if not step:
+        try:
+            parsed = json.loads(visible) if isinstance(visible, str) else None
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict) and parsed.get("error"):
+            error = str(parsed.get("reason") or parsed["error"])
+    episode.record(
+        "environment.step",
+        started,
+        turn=turn,
+        tool_call_id=call_id,
+        action=str(step.get("action") or name),
+        arguments=arguments,
+        observation=step.get("observation"),
+        content=visible,
+        reward=step.get("reward"),
+        terminated=step.get("terminated"),
+        truncated=step.get("truncated"),
+        info=info,
+        view=step.get("view") or None,
+        error=str(error) if error else None,
+    )
+
+
 def _final_text(
     final_message: dict[str, Any] | None,
     messages: list[dict[str, Any]],
@@ -266,9 +484,7 @@ def _final_text(
 def _execution_model(request: dict[str, Any], catalog_model: str) -> str:
     resolution = request.get("model_resolution")
     resolved = resolution if isinstance(resolution, dict) else {}
-    if os.environ.get("PLURAL_GATEWAY_URL"):
-        return str(resolved.get("catalog_model_id") or catalog_model)
-    return str(resolved.get("upstream_id") or catalog_model)
+    return str(resolved.get("catalog_model_id") or catalog_model)
 
 
 def _model_call(
@@ -281,15 +497,13 @@ def _model_call(
 ) -> dict[str, Any]:
     if not model:
         raise ValueError("Agent model is required")
-    base = (
-        os.environ.get("PLURAL_GATEWAY_URL")
-        or os.environ.get("OPENAI_BASE_URL")
-        or "https://api.openai.com/v1"
-    ).rstrip("/")
-    key = os.environ.get("PLURAL_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
+    if not base:
+        raise ValueError("native runner requires PLURAL_GATEWAY_URL for its model calls")
+    key = os.environ.get("PLURAL_API_KEY")
     if not key and os.environ.get("PLURAL_ALLOW_NO_AUTH") != "1":
         raise ValueError(
-            "native runner requires PLURAL_API_KEY or OPENAI_API_KEY "
+            "native runner requires PLURAL_API_KEY "
             "(or PLURAL_ALLOW_NO_AUTH=1 for an explicitly unauthenticated local gateway)"
         )
     body: dict[str, Any] = {"model": model, "messages": messages}
@@ -298,9 +512,11 @@ def _model_call(
     for name in ("temperature", "max_tokens"):
         if routing.get(name) is not None:
             body[name] = routing[name]
-    if os.environ.get("PLURAL_GATEWAY_URL"):
-        body["routing"] = routing
+    body["routing"] = routing
     headers = {"Content-Type": "application/json"}
+    project = os.environ.get("PLURAL_PROJECT_ID")
+    if project:
+        headers["X-Plural-Project"] = project
     if key:
         headers["Authorization"] = f"Bearer {key}"
     request = urllib.request.Request(
@@ -372,6 +588,7 @@ def _parse_envelope(text: str) -> dict[str, Any] | None:
         "terminated": bool(parsed.get("terminated")),
         "truncated": bool(parsed.get("truncated")),
         "info": info if isinstance(info, dict) else {},
+        "view": parsed.get("view") if isinstance(parsed.get("view"), dict) else None,
     }
 
 
@@ -500,6 +717,7 @@ def _run_action(
             "terminated": envelope["terminated"],
             "truncated": envelope["truncated"],
             "info": envelope["info"],
+            "view": envelope["view"],
         },
         reward=reward,
         terminated=envelope["terminated"],
@@ -594,6 +812,8 @@ def _reset_episode(
                 "info": envelope["info"],
             }
         )
+        if envelope["view"]:
+            record["view"] = envelope["view"]
         return record
     observation_path = workspace / "observation.json"
     if observation_path.exists():

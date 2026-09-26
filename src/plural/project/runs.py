@@ -795,11 +795,17 @@ def _execute(
     from plural.execution.store import JobStore
 
     needs_model = any(binding.auth_mode != "none" for binding in spec.agents)
-    if needs_model and not (environ.get("PLURAL_API_KEY") or environ.get("OPENAI_API_KEY")):
+    if needs_model and not environ.get("PLURAL_API_KEY"):
         raise ProjectError(
-            "This run calls a live model and no model credential is available. Run "
-            "`plural auth login`, or export PLURAL_API_KEY or OPENAI_API_KEY."
+            "This run calls a live model, which goes through the Plural gateway, and no "
+            "Plural API key is available. Export PLURAL_API_KEY or pass --env-file."
         )
+    bound = workspace.project.read_binding()
+    project_id = tracking.studio.project if tracking is not None else None
+    if project_id is None and bound is not None:
+        project_id = bound.project_id
+    if project_id:
+        environ = {**environ, "PLURAL_PROJECT_ID": environ.get("PLURAL_PROJECT_ID") or project_id}
     tracker = None
     store = JobStore(workspace.project.jobs_dir)
     if tracking is not None:

@@ -85,7 +85,7 @@ Setup happens inside the fresh Runtime, not on your laptop.
 
 1. Plural installs the pinned CLI. On Docker and Daytona it may install system tools as root first. The Harness itself then runs as the Runtime's default user.
 2. The CLI starts from the Environment workspace.
-3. Model authentication comes from `Job(client=...)` or `Job(api_key=...)`. Those calls set `PLURAL_API_KEY`, `OPENAI_API_KEY`, or `PLURAL_GATEWAY_URL`. If a required name is missing, the run stops and the error names it. The error does not include the value. You do not put model keys on `Agent.secret_names` for a built-in Harness. A custom Harness lists the names it reads in `secrets`, and the Agent requires that subset.
+3. Model authentication comes from `Job(client=...)` or `Job(api_key=...)`. Those calls set `PLURAL_API_KEY` and `PLURAL_GATEWAY_URL`, and every model call goes through the gateway. A vendor CLI such as Codex or Claude Code is pointed at the gateway too, even when a provider key is in the environment. If a required name is missing, the run stops and the error names it. The error does not include the value. You do not put model keys on `Agent.secret_names` for a built-in Harness. A custom Harness lists the names it reads in `secrets`, and the Agent requires that subset.
 4. Environment actions are exposed to the CLI as tools.
 5. Claude Code talks to a local compatibility service that forwards its Messages requests to the Job's OpenAI-compatible model gateway. Codex and Hermes call that gateway directly.
 
@@ -195,7 +195,7 @@ present. The Harness does not write files or emit runner events itself.
 
 The trajectory file to exchange with other tools is [`trajectory.json` in ATIF](https://docs.harborframework.com/core-concepts/agents/atif), Harbor's Agent Trajectory Interchange Format. Current ATIF is `ATIF-v1.7`: an `agent` block, ordered `steps`, and optional `final_metrics`. Put Plural-only notes in the schema's `extra` field. A reward stays on the episode, and a verifier score stays on the trial; neither is an ATIF step.
 
-`normalize_trajectory` reads an ATIF document as well as Plural's own JSON and JSONL trajectories. Built-in loops write `trajectory.jsonl`. A Harness described by a `HarnessDefinition` that writes ATIF sets its `trajectory` field to `trajectory.json`. The spec is Harbor's [ATIF RFC](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md).
+`normalize_trajectory` reads an ATIF document as well as Plural's own JSON and JSONL trajectories. For any Harness that runs through Plural's episode, including the built-in loops, Plural derives `trajectory.json` from `episode.jsonl` itself. A Harness described by a `HarnessDefinition` that writes ATIF sets its `trajectory` field to `trajectory.json`. The spec is Harbor's [ATIF RFC](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md).
 
 ### Attach the custom Harness
 

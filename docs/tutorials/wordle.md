@@ -244,10 +244,9 @@ does not appear in `plural job list`, and `plural job rerun` cannot repeat it.
 
 ## Run it with a model
 
-This calls a model and can incur charges. Store a Plural API key with
-`plural auth login --api-key-stdin`, or export `PLURAL_API_KEY` or your own
-`OPENAI_API_KEY` for `openai/` models. A browser login is not accepted for model
-calls. Then:
+This calls a model through the Plural gateway and can incur charges. Store a Plural
+API key with `plural auth login --api-key-stdin`, or export `PLURAL_API_KEY`. A
+browser login is not accepted for model calls. Then:
 
 ```bash
 plural run --task crane --model openai/gpt-5.6-luna
@@ -282,9 +281,10 @@ Trial trl_4cb93aab41a7586915bcc295 (local) succeeded
 
 In the `Artifacts` directory, `episode.jsonl` has each guess with the board the Agent
 saw after it and the Environment's display view,
-`state.json` has the secret and the guess history, `observation.json` has the final
-board the Agent saw, and `verifier-results.json` has the score and the `guesses`
-sub-score. The view shows guesses and marks, never the secret; see
+`trajectory.json` has the same guesses as the Agent's turns in ATIF,
+`state.json` has the secret and the guess history, and `observation.json` has the
+final board the Agent saw. The score and the `guesses` sub-score are in the Trial's
+`result.json`. The view shows guesses and marks, never the secret; see
 [Display views](../project/environments.md#display-views).
 
 A Trial that succeeded can still score 0. That is a missed word, not a crashed run. If

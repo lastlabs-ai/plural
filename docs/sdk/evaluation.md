@@ -97,9 +97,8 @@ workspace = Workspace(Project.find(), catalog=context.catalog)
 Passing `catalog` to `Workspace` validates the project's Agents and Verifiers
 against the same entries.
 
-The project endpoint must be reachable through `OPENAI_BASE_URL` or
-`PLURAL_GATEWAY_URL` and accept OpenAI-compatible chat completions. A Job sends
-every model call through that OpenAI-compatible endpoint. It does not call the
+A Job sends every model call through the Plural gateway at `PLURAL_GATEWAY_URL`,
+which must serve the project model. It does not call the
 Anthropic, Google, Bedrock, or Azure APIs directly, even though `Client` has
 adapters for them; see [Providers and integrations](../reference/integrations.md).
 

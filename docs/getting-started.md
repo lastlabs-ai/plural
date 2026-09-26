@@ -131,13 +131,14 @@ running anything, and needs no credential. `--model` without `--harness` uses
 `native`, Plural's built-in tool loop. `plural models list` shows the model ids you
 can use.
 
-A real run calls the model and can incur charges, so it needs an API key. Store a
-Plural API key with `plural auth login --api-key-stdin`, export `PLURAL_API_KEY`, or
-bring your own OpenAI key for `openai/` models. A browser login is enough for hosted
-commands, but the model gateway does not accept it. See [Sign in](#sign-in).
+A real run calls the model and can incur charges. Every model call goes through the
+Plural gateway, which bills it at the exact provider cost, so it needs a Plural API key.
+Store one with `plural auth login --api-key-stdin` or export `PLURAL_API_KEY`. A
+browser login is enough for hosted commands, but the model gateway does not accept it.
+See [Sign in](#sign-in).
 
 ```bash
-export OPENAI_API_KEY=...
+export PLURAL_API_KEY=...
 plural run --task refund --model openai/gpt-5.6-luna
 ```
 
@@ -274,10 +275,9 @@ result = Job(benchmark, agents=[agent]).run()
 
 That runs locally, like `plural run`, except the Job is not recorded: it does not
 appear in `plural job list`, and `plural job rerun` cannot repeat it. A Job that calls
-a model reads `OPENAI_API_KEY` or `PLURAL_API_KEY` from the environment. To send model
-calls through the Plural gateway, pass a `Client`; `Client()` reads `PLURAL_API_KEY`
-or an API key stored with `plural auth login --api-key-stdin`. A browser login is not
-accepted:
+a model sends every call through the Plural gateway, using `PLURAL_API_KEY` from the
+environment, `api_key=`, or a `Client`; `Client()` reads `PLURAL_API_KEY` or an API key
+stored with `plural auth login --api-key-stdin`. A browser login is not accepted:
 
 ```python
 from plural import Client, Job

@@ -129,19 +129,10 @@ def _from_openai(payload: dict[str, Any], *, model: str) -> dict[str, Any]:
 
 
 def _gateway_request(payload: dict[str, Any]) -> dict[str, Any]:
-    base = (os.environ.get("PLURAL_GATEWAY_URL") or os.environ.get("OPENAI_BASE_URL") or "").rstrip(
-        "/"
-    )
+    base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
     if not base:
-        raise RuntimeError(
-            "Claude Code needs PLURAL_GATEWAY_URL or OPENAI_BASE_URL from Job(client=...)"
-        )
-    key = (
-        os.environ.get("PLURAL_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-        or os.environ.get("ANTHROPIC_API_KEY")
-        or ""
-    )
+        raise RuntimeError("Claude Code needs PLURAL_GATEWAY_URL from Job(client=...)")
+    key = os.environ.get("PLURAL_API_KEY") or ""
     request = urllib.request.Request(
         f"{base}/chat/completions",
         data=json.dumps(

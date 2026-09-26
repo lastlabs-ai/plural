@@ -91,7 +91,8 @@ class ModelFixture(BaseHTTPRequestHandler):
             {
                 "model": "fixture",
                 "choices": [{"message": message}],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "cost": 0.000002},
+                "plural_request_id": f"fixture-{self.__class__.calls}",
             }
         ).encode()
         self.send_response(200)
@@ -110,12 +111,12 @@ try:
         env = {
             **os.environ,
             "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
-            "OPENAI_API_KEY": "documentation-test-only",
-            "OPENAI_BASE_URL": f"http://127.0.0.1:{server.server_port}/v1",
+            "PLURAL_API_KEY": "documentation-test-only",
+            "PLURAL_GATEWAY_URL": f"http://127.0.0.1:{server.server_port}/v1",
             # Never read this machine's Plural sign-in.
             "PLURAL_CONFIG_HOME": str(Path(temp) / "config"),
         }
-        for key in ("PLURAL_GATEWAY_URL", "PLURAL_API_KEY", "PLURAL_PROJECT", "PLURAL_PROFILE"):
+        for key in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "PLURAL_PROJECT", "PLURAL_PROFILE"):
             env.pop(key, None)
         cli = Path(sys.executable).with_name("plural")
 

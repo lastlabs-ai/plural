@@ -50,7 +50,9 @@ for monitoring, not a replacement for the receipt and artifacts.
 A trajectory records behavior such as messages, reasoning when supplied,
 actions, tool results, observations, per-step rewards, cost, and timing.
 Harnesses may emit different native formats. Plural preserves the original and
-writes `trajectory.normalized.json` when it can normalize a captured trajectory.
+derives `trajectory.json`, an ATIF document of the Agent's turns, from the
+[episode record](#the-episode-record). `normalize_trajectory` reads any of these
+formats into one event list.
 
 ```python
 from pathlib import Path

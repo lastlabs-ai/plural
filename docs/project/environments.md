@@ -435,7 +435,7 @@ Required declarations must have a nonempty value. Supported formats are `text`, 
 
 `Secret` references are also injected according to their `environment`, `harness`, or `verifier` target. Environment secret references as metadata declare names and targets only; values are supplied when the Job runs and are never stored on the Environment. Verifier credentials are supplied to the scoring process. Managed stdout and stderr redact declared secrets; Environment code must avoid writing credentials into observations or custom artifacts.
 
-Docker and Daytona connection credentials configure the machine that runs the Job, separately from these Task variables. Plural checks that the provider is available and supports the requested controls when a run starts. Authenticate model calls through the Job's `client` or `api_key` parameter. `plural run` needs an API key for model calls: a Plural API key stored with `plural auth login --api-key-stdin`, or an exported `PLURAL_API_KEY` or `OPENAI_API_KEY`. A browser login alone is not accepted for model calls.
+Docker and Daytona connection credentials configure the machine that runs the Job, separately from these Task variables. Plural checks that the provider is available and supports the requested controls when a run starts. Authenticate model calls through the Job's `client` or `api_key` parameter. Every model call goes through the Plural gateway, so `plural run` needs a Plural API key: one stored with `plural auth login --api-key-stdin`, or an exported `PLURAL_API_KEY`. A browser login alone is not accepted for model calls.
 
 ## Optional components
 

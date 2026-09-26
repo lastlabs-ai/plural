@@ -82,7 +82,7 @@ class HarnessAgent:
     ) -> HarnessCompletion:
         """Call the Job's OpenAI-compatible model gateway."""
         model = (
-            self.model_resolution.get("upstream_id")
+            self.model_resolution.get("catalog_model_id")
             or self.model_resolution.get("model")
             or self.model
         )
@@ -100,7 +100,11 @@ class HarnessAgent:
         except Exception as exc:
             if self._recorder and started:
                 self._recorder.model_call(
-                    started, model=str(model), messages=messages, tools=tools, error=str(exc)
+                    started,
+                    model=str(model),
+                    messages=messages,
+                    tools=tools,
+                    error=str(exc),
                 )
             raise
         choices = response.get("choices")
@@ -132,6 +136,7 @@ class HarnessAgent:
                 tool_calls=tool_calls,
                 finish_reason=finish_reason,
                 usage=normalize_usage(raw_usage, cost=response.get("cost")),
+                request_id=_request_id(response),
             )
         return HarnessCompletion(
             text=text,
@@ -331,22 +336,27 @@ class HarnessResult(FrozenModel):
     trace_id: str | None = None
 
 
+def _request_id(response: dict[str, Any]) -> str | None:
+    value = response.get("plural_request_id")
+    return value if isinstance(value, str) and value else None
+
+
 def _gateway_request(payload: dict[str, Any]) -> dict[str, Any]:
-    base = (os.environ.get("PLURAL_GATEWAY_URL") or os.environ.get("OPENAI_BASE_URL") or "").rstrip(
-        "/"
-    )
+    base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
     if not base:
         raise RuntimeError(
-            "HarnessAgent.complete requires Job(client=...) or Job(api_key=...) "
-            "to configure the model gateway"
+            "HarnessAgent.complete requires the Plural model gateway; "
+            "Job(client=...) and `plural run` configure it"
         )
-    key = os.environ.get("PLURAL_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+    key = os.environ.get("PLURAL_API_KEY") or ""
+    project = os.environ.get("PLURAL_PROJECT_ID")
     request = urllib.request.Request(
         f"{base}/chat/completions",
         data=json.dumps(payload).encode(),
         headers={
             "Content-Type": "application/json",
             **({"Authorization": f"Bearer {key}"} if key else {}),
+            **({"X-Plural-Project": project} if project else {}),
         },
         method="POST",
     )

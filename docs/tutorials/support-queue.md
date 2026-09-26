@@ -275,14 +275,15 @@ run each Task three times and see how stable the scores are.
 
 ## Run it with a model
 
-These runs call a model and can incur charges. Store a Plural API key with
-`plural auth login --api-key-stdin`, or export `PLURAL_API_KEY`. A browser login is
-enough to push and run hosted, but the model gateway does not accept it. Or bring
-your own OpenAI key, which works for `openai/` models:
+These runs call a model through the Plural gateway and can incur charges. Store a
+Plural API key with `plural auth login --api-key-stdin`, or export it:
 
 ```bash
-export OPENAI_API_KEY=...
+export PLURAL_API_KEY=...
 ```
+
+A browser login is enough to push and run hosted, but the model gateway does not
+accept it.
 
 Then run one Task with a model directly, or the whole Benchmark with a saved Agent:
 
@@ -338,12 +339,15 @@ Trial trl_c2f6511b9ba8e29056f007ee (local) succeeded
 
 When a score is surprising, open the files in the `Artifacts` directory:
 
-- `trajectory.jsonl`: the steps the Harness recorded, one per line, with the
-  Observation after each action.
+- `trajectory.json`: the Agent's turns in ATIF, with the Observation after each
+  action.
+- `episode.jsonl`: the underlying record of every step and model call, one per line.
 - `observation.json`: the final Observation, which is what the Agent saw.
 - `state.json`: the final State, including the `expected` category the Agent never saw.
-- `verifier-results.json`: each Verifier's score, sub-scores, evidence, and feedback.
 - `result.json`: the Agent's final response.
+
+Each Verifier's score, sub-scores, evidence, and feedback are in the Trial's
+`result.json`, which `plural trial show` prints.
 
 The `Logs` directory holds the standard output and standard error of the run
 (`stdout.log`, `stderr.log`) and of the Verifiers (`verifier.stdout.log`,

@@ -132,3 +132,13 @@ def test_episode_events_link_steps_to_the_call_that_opened_their_turn(
     assert usage["input_tokens"] == 12
     assert usage["calls_missing_cost"] == 1
     assert agent_usage(records[:1]) is None
+
+
+def test_usage_totals_reported_costs_and_lists_each_call(tmp_path: Path) -> None:
+    records = _recorded(tmp_path)
+    usage = agent_usage(records)
+    assert usage is not None
+    assert "cost_basis" not in usage
+    assert usage["calls_missing_cost"] == 1
+    assert [call["request_id"] for call in usage["model_calls"]] == [None, None]
+    assert all(call["started_at"] for call in usage["model_calls"])

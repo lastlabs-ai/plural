@@ -62,7 +62,7 @@ uses the resource directory you are in.
 
 Removed `plural run` options: `--mode`, `--per-runtime-concurrency`, `--watch` and
 `--no-watch` (use `--follow`), `--idempotency-key`, `--api-key` (export
-`OPENAI_API_KEY` instead), `--name`, `--format`, and `--catalog`. An Agent is named with
+`PLURAL_API_KEY` instead), `--name`, `--format`, and `--catalog`. An Agent is named with
 `-a`, or given inline with `-m` and an optional `-h`. Without `-h` the Agent uses
 `native`, Plural's built-in tool loop.
 

@@ -234,32 +234,29 @@ def _write_config(vendor: str, config: Any, *, root: Path | None = None) -> None
 
 
 def _map_credentials(vendor: str) -> None:
-    key = os.environ.get("PLURAL_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
-    gateway = os.environ.get("PLURAL_GATEWAY_URL") or os.environ.get("OPENAI_BASE_URL") or ""
-    if vendor == "claude-code":
-        url = _start_messages_bridge()
-        os.environ["ANTHROPIC_BASE_URL"] = url
-        os.environ["ANTHROPIC_API_KEY"] = os.environ.get("ANTHROPIC_API_KEY") or key or "plural"
-        if not gateway and not os.environ.get("PLURAL_ALLOW_NO_AUTH"):
-            raise SystemExit(
-                "Claude Code is missing PLURAL_GATEWAY_URL or OPENAI_BASE_URL in the "
-                "environment, so model calls cannot authenticate. "
-                "Job(client=...) sets PLURAL_GATEWAY_URL. "
-                "Job(api_key=...) sets OPENAI_API_KEY."
-            )
-        return
-    if key:
-        os.environ.setdefault("OPENAI_API_KEY", key)
-    if gateway:
-        os.environ.setdefault("OPENAI_BASE_URL", gateway)
-    if vendor in {"codex", "hermes"} and not (
-        os.environ.get("OPENAI_API_KEY") or os.environ.get("PLURAL_ALLOW_NO_AUTH")
-    ):
+    """Point the vendor CLI at the Plural gateway, and nowhere else.
+
+    Every model call goes through the gateway, which bills and records it, so a
+    provider key or base URL already in the environment is overwritten.
+    """
+    key = os.environ.get("PLURAL_API_KEY") or ""
+    gateway = os.environ.get("PLURAL_GATEWAY_URL") or ""
+    if not gateway:
         raise SystemExit(
-            f"{vendor} is missing a model key in the environment. "
-            "Set one of: PLURAL_API_KEY, OPENAI_API_KEY. "
-            "Job(client=...) and Job(api_key=...) set these for you."
+            f"{vendor} is missing PLURAL_GATEWAY_URL in the environment. Model calls go "
+            "through the Plural gateway; Job(client=...) and `plural run` set it."
         )
+    if not key and not os.environ.get("PLURAL_ALLOW_NO_AUTH"):
+        raise SystemExit(
+            f"{vendor} is missing PLURAL_API_KEY in the environment. "
+            "Job(client=...) and `plural run` set it."
+        )
+    if vendor == "claude-code":
+        os.environ["ANTHROPIC_BASE_URL"] = _start_messages_bridge()
+        os.environ["ANTHROPIC_API_KEY"] = key or "plural"
+        return
+    os.environ["OPENAI_API_KEY"] = key or "plural"
+    os.environ["OPENAI_BASE_URL"] = gateway
 
 
 def _response(vendor: str, stdout: str) -> str:

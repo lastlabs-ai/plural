@@ -83,6 +83,8 @@ def normalize_usage(raw: Mapping[str, Any] | None, *, cost: Any = None) -> Token
         cached = min(cached, prompt)
     reported_cost = _cost(usage.get("cost"))
     if reported_cost is None:
+        reported_cost = _cost(usage.get("cost_usd"))
+    if reported_cost is None:
         reported_cost = _cost(cost)
     return TokenUsage(
         input_tokens=prompt,

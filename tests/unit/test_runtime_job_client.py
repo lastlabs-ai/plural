@@ -93,12 +93,15 @@ def test_job_live_run_requires_credentials(monkeypatch: pytest.MonkeyPatch) -> N
     assert "plural auth login" in message
 
 
-def test_job_byo_key_injects_openai_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_job_api_key_selects_the_plural_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PLURAL_API_KEY", raising=False)
+    monkeypatch.delenv("PLURAL_GATEWAY_URL", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    job = Job(_task(), agents=[Agent(model="openai/gpt-5.6-luna")], api_key="sk-test")
+    job = Job(_task(), agents=[Agent(model="openai/gpt-5.6-luna")], api_key="pk-test")
     environ = job._credential_environ()
-    assert environ["OPENAI_API_KEY"] == "sk-test"
+    assert environ["PLURAL_API_KEY"] == "pk-test"
+    assert environ["PLURAL_GATEWAY_URL"]
+    assert "OPENAI_API_KEY" not in environ
 
 
 def test_job_client_injects_plural_env(monkeypatch: pytest.MonkeyPatch) -> None:

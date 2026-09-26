@@ -294,3 +294,77 @@ def test_trajectory_document_keeps_the_reset_record(
     }
     # The opening observation reaches the Agent's first prompt.
     assert "start here" in document["messages"][1]["content"]
+
+
+def test_native_episode_matches_the_recorded_contract() -> None:
+    from plural.harness import episode
+    from plural.usage import normalize_usage
+
+    assert native_runner.EPISODE_SCHEMA == episode.EPISODE_SCHEMA
+    assert native_runner.EPISODE_FILE == episode.EPISODE_FILE
+    for raw in (
+        {"prompt_tokens": 12, "completion_tokens": 3, "cost": 0.5},
+        {
+            "input_tokens": 7,
+            "output_tokens": 2,
+            "prompt_tokens_details": {"cached_tokens": 4},
+            "completion_tokens_details": {"reasoning_tokens": 1},
+            "cost_usd": 0.25,
+        },
+        {},
+    ):
+        assert native_runner._usage(raw) == normalize_usage(raw).model_dump(mode="json")
+
+
+def test_native_loop_records_model_calls_and_steps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from plural.atif import episode_to_atif, validate_atif
+
+    request = _request(tmp_path)
+    request["environment"]["actions"] = [
+        _action(tmp_path, _envelope(reward=0.75, observation={"text": "closer"}))
+    ]
+    first = _call("act", {"guess": "crane"})
+    first["usage"] = {"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.0003}
+    first["plural_request_id"] = "req-1"
+    second = _text("done")
+    second["usage"] = {"prompt_tokens": 140, "completion_tokens": 5, "cost": 0.0002}
+    second["plural_request_id"] = "req-2"
+    _responses(monkeypatch, first, second)
+
+    result, episode, _trace = native_runner._run("native.actions.v1", request)
+
+    kinds = [record["kind"] for record in episode.records]
+    assert kinds == ["environment.reset", "model.call", "environment.step", "model.call"]
+    assert [record["sequence"] for record in episode.records] == [1, 2, 3, 4]
+    call = episode.records[1]
+    assert call["usage"]["input_tokens"] == 100
+    assert call["usage"]["cost_usd"] == 0.0003
+    assert call["request_id"] == "req-1"
+    assert call["started_at"] <= call["ended_at"]
+    # The second call sends only the messages appended since the first.
+    assert episode.records[3]["messages_offset"] == call["message_count"]
+    step = episode.records[2]
+    assert step["action"] == "act"
+    assert step["reward"] == 0.75
+    assert step["tool_call_id"] == "call-act"
+    assert result["cost_usd"] == pytest.approx(0.0005)
+
+    trajectory = episode_to_atif(episode.records, agent_name="agent")
+    assert validate_atif(trajectory) == []
+    assert [step["source"] for step in trajectory["steps"]] == ["system", "user", "agent", "agent"]
+    agent = trajectory["steps"][2]
+    assert agent["tool_calls"][0]["arguments"] == {"guess": "crane"}
+    assert agent["observation"]["results"][0]["source_call_id"] == "call-act"
+    assert "closer" in agent["observation"]["results"][0]["content"]
+    assert agent["metrics"]["cost_usd"] == 0.0003
+    assert agent["metrics"]["extra"]["request_id"] == "req-1"
+    totals = trajectory["final_metrics"]
+    assert totals["total_prompt_tokens"] == 240
+    assert totals["total_completion_tokens"] == 25
+    assert totals["total_cost_usd"] == pytest.approx(0.0005)
+    assert totals["extra"]["calls_missing_cost"] == 0
+    # Reward is episode bookkeeping and never part of what the Agent saw.
+    assert "0.75" not in json.dumps(trajectory["steps"])
+    assert "reward" not in json.dumps(trajectory["steps"])

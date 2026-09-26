@@ -477,10 +477,12 @@ def _artifact_role(path: Path) -> str | None:
     if name in {"view.json", "rendering.json"}:
         return "rendering"
     if name == "result.json":
-        return "output"
+        return "result"
+    if name == "episode.jsonl":
+        return "episode"
     if "trajectory" in name:
         return "trajectory"
-    if name == "verifier-results.json" or name.startswith("verifier/"):
+    if name.startswith("verifier/"):
         return "verifier_evidence"
     if "tito" in name:
         return "training"

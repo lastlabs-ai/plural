@@ -110,11 +110,11 @@ If `plural run` says an Environment does not allow a Harness, the Environment's
 
 ## The model cannot authenticate or connect
 
-A run that calls a live model needs an API key. `plural run` uses a Plural API
-key stored with `plural auth login --api-key-stdin`, or an exported
-`PLURAL_API_KEY` or `OPENAI_API_KEY`. A browser login alone is enough for hosted
-commands but is not accepted for model calls, so a run can fail with "no model
-credential is available" right after a successful browser login. In Python, pass
+Every model call goes through the Plural gateway, so a run that calls a live model
+needs a Plural API key: one stored with `plural auth login --api-key-stdin`, or an
+exported `PLURAL_API_KEY`. A browser login alone is enough for hosted commands but is
+not accepted for model calls, so a run can fail with "no Plural API key is available"
+right after a successful browser login. In Python, pass
 `Job(..., client=Client())` or `api_key=`. An Agent whose Harness never calls a
 model can set `auth_mode: none` and needs no key. Check the selected model ID and
 endpoint: a direct provider may accept a different ID from a multi-provider
@@ -122,7 +122,7 @@ gateway. If a model you expect is missing from `plural models list`, your
 organization's model policy may not permit it; the service enforces the same
 policy when a run starts.
 
-`OPENAI_BASE_URL` configures the OpenAI-compatible model endpoint; `PLURAL_GATEWAY_URL` takes precedence when set. Model connectivity is separate from the hosted project API endpoint. A local run does not block network requests.
+`PLURAL_GATEWAY_URL` selects the gateway; `plural run` sets it from your profile. A provider key or `OPENAI_BASE_URL` in the environment is not used for Agent or Verifier model calls. Model connectivity is separate from the hosted project API endpoint. A local run does not block network requests.
 
 ## The native loop stops at its turn limit
 

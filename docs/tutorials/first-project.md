@@ -71,9 +71,9 @@ plural job show <job-id>
 
 `validate` checks a resource and everything it depends on, and lists every
 `PLURAL-TODO` you left unfinished. `--dry-run` shows the plan without running
-anything. The real run calls the model, so it needs an API key
-(`plural auth login --api-key-stdin`, `PLURAL_API_KEY`, or `OPENAI_API_KEY` for
-`openai/` models). A browser login is not accepted for model calls. The run prints
+anything. The real run calls the model through the Plural gateway, so it needs a
+Plural API key (`plural auth login --api-key-stdin` or `PLURAL_API_KEY`). A browser
+login is not accepted for model calls. The run prints
 the Job id to pass to
 `plural job show`. To run without any credential, add a Harness that calls no model
 and an Agent with `auth_mode: none`, like the `scripted` Agent in the finished project.

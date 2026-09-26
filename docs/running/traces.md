@@ -48,11 +48,11 @@ Execution directories are numbered from zero. Later retries append their own dir
 
 ## Read the support episode
 
-In the selected execution's `artifacts/`, open `trajectory.jsonl` to see the native loop's model messages, tool calls, and returned observations. `result.json` records its final response. Compare the action observations with the `correct-category.correct_category` score in the Trial result's `scores`.
+In the selected execution's `artifacts/`, open `trajectory.json` to see the native loop's turns: each model message, its tool calls, and the observation each call returned, with token counts and cost. `episode.jsonl` is the underlying record, including the requests sent to the model. `result.json` records its final response. Compare the action observations with the `correct-category.correct_category` score in the Trial result's `scores`.
 
-The native loop's trajectory is a JSONL record of the interaction. It is not a full trace in the tracing SDK's format, and its trace ID alone does not upload the record to Plural Intel. Inspect what your Harness or tracing integration actually records.
+The episode record is a JSONL log of the interaction. It is not a full trace in the tracing SDK's format, and its trace ID alone does not upload the record to Plural Intel. Inspect what your Harness or tracing integration actually records.
 
-`trajectory.json` is read as [ATIF](https://docs.harborframework.com/core-concepts/agents/atif), Harbor's Agent Trajectory Interchange Format (`ATIF-v1.7`). That is the document to exchange with other tools. Plural's normalized events are a view over ATIF and over the native JSONL log. Reward totals and verifier scores stay beside the trajectory.
+`trajectory.json` is read as [ATIF](https://docs.harborframework.com/core-concepts/agents/atif), Harbor's Agent Trajectory Interchange Format (`ATIF-v1.7`). That is the document to exchange with other tools. Plural derives it from the episode record, so it has every model call and step in order. Each step's `metrics.cost_usd` is the exact amount the gateway billed for that call, and `metrics.extra.request_id` is the gateway's id for it; a cost the gateway did not return stays empty rather than estimated. Rewards and Verifier scores stay beside the trajectory; neither appears in a step.
 
 When available, final Environment state, observation, rendering, trajectory, and
 Verifier results are copied into the execution artifacts and listed in the

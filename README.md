@@ -68,9 +68,10 @@ plural run --task refund --model openai/gpt-5.6-luna
 ```
 
 `--dry-run` shows the plan and the version of every input without running anything.
-`--model` without `--harness` uses `native`. A model call needs an API key:
-`plural auth login --api-key-stdin`, `PLURAL_API_KEY`, or `OPENAI_API_KEY` for
-OpenAI models. A browser login is not accepted for model calls. Every run is a new
+`--model` without `--harness` uses `native`. Every model call goes through the Plural
+gateway, which bills it at the exact provider cost, so it needs a Plural API key:
+`plural auth login --api-key-stdin` or `PLURAL_API_KEY`. A browser login is not
+accepted for model calls. Every run is a new
 Job, recorded under
 `.plural/jobs/<job-id>/` with every input pinned by version and content hash.
 

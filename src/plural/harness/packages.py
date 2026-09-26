@@ -31,19 +31,23 @@ def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> Harnes
         command=("python", "native_runner.py", profile),
         requirements=(
             "OpenAI-compatible POST /chat/completions endpoint",
-            "PLURAL_API_KEY or OPENAI_API_KEY unless explicitly unauthenticated",
+            "PLURAL_API_KEY unless explicitly unauthenticated",
         ),
         capabilities=capabilities,
-        secret_names=("PLURAL_API_KEY", "OPENAI_API_KEY"),
+        secret_names=("PLURAL_API_KEY",),
         environment_names=(
             "PLURAL_GATEWAY_URL",
-            "OPENAI_BASE_URL",
+            "PLURAL_PROJECT_ID",
             "PLURAL_ALLOW_NO_AUTH",
         ),
         auth_modes=("environment", "none"),
         outputs=(FileDeclaration(path="result.json"),),
-        artifacts=(FileDeclaration(path="trajectory.jsonl"),),
-        trajectory_path="trajectory.jsonl",
+        artifacts=(
+            FileDeclaration(
+                path="episode.jsonl",
+                media_type="application/jsonl; profile=plural.episode/v1",
+            ),
+        ),
     )
     source = Path(__file__).parent
     digest = tree_digest(source)

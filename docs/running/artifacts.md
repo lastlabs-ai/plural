@@ -34,19 +34,29 @@ A `Resource` describes an input to a Task or Environment. An artifact is an outp
       artifacts/
         manifest.json
         episode.jsonl
-        trajectory.jsonl
-        trajectory.normalized.json
+        trajectory.json
+        result.json
         state.json
         observation.json
         view.json
-        verifier-results.json
 ```
 
 A local `plural run` writes this directory at the project root. `run.json` pins
 the version and content hash of every input, which is what `plural job rerun`
 reuses. `plural trial show TRIAL_ID` prints a Trial's artifact and log paths.
 
-Only files actually produced or captured are present. The manifest records
+Only files actually produced or captured are present. `episode.jsonl` is the
+episode record: every reset, step, and model call in order, with token usage
+and timing. `trajectory.json` is the same episode as an
+[ATIF](traces.md#read-the-support-episode) document of the Agent's turns.
+`result.json` is the Harness's final response, and `state.json`,
+`observation.json`, and `view.json` are the Environment's final State,
+Observation, and display view. A Harness that returns its own trajectory events
+also gets `trajectory.jsonl`, and anything else the Agent writes is captured
+beside them. Verifier scores and evidence are in the Trial's `result.json`, not
+in an artifact.
+
+The manifest records
 each artifact's path, SHA-256, media type, byte size, and optional role.
 Receipts bind those hashes to the exact Task, Benchmark, model endpoint,
 Environment, Verifiers, Agent, Harness, mode, Runtime, timing, and cost.

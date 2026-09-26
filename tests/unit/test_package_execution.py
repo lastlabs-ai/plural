@@ -8,6 +8,7 @@ import pytest
 from fakes import FakeProvider
 
 from plural.agents import AgentBinding, AgentDefinition
+from plural.atif import validate_atif
 from plural.common import (
     ErrorCode,
     ExecutionTarget,
@@ -174,7 +175,7 @@ async def test_agent_verifier_scores_configured_criteria_with_contracted_evidenc
         spec,
         provider=provider,
         store=store,
-        environ={"OPENAI_API_KEY": "judge-secret"},
+        environ={"PLURAL_API_KEY": "judge-secret", "PLURAL_GATEWAY_URL": "https://gateway.test/v1"},
     ).run()
 
     assert result.status == "succeeded"
@@ -412,12 +413,18 @@ async def test_retries_append_trial_executions_without_new_trial_identity(
     execution = store.trial_path(trial) / "executions/1"
     manifest = json.loads((execution / "artifacts/manifest.json").read_text())
     entries = {item["path"]: item for item in manifest["artifacts"]}
-    assert entries["trajectory.jsonl"]["role"] == "trajectory"
-    assert entries["trajectory.normalized.json"]["role"] == "trajectory"
+    assert entries["episode.jsonl"]["role"] == "episode"
+    assert entries["trajectory.json"]["role"] == "trajectory"
+    assert entries["result.json"]["role"] == "result"
     assert entries["state.json"]["role"] == "state"
     assert entries["observation.json"]["role"] == "observation"
     assert entries["view.json"]["role"] == "rendering"
-    assert entries["verifier-results.json"]["role"] == "verifier_evidence"
+    assert "trajectory.normalized.json" not in entries
+    assert "verifier-results.json" not in entries
+    atif = json.loads((execution / "artifacts/trajectory.json").read_text())
+    assert validate_atif(atif) == []
+    assert atif["final_metrics"]["total_cost_usd"] == 0.01
+    assert result.trials[0].receipt.cost_usd == 0.01
     assert entries["result.json"]["sha256"].startswith("sha256:")
     assert entries["result.json"]["size"] > 0
     assert (execution / "receipt.json").exists()

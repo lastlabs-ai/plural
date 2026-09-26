@@ -153,7 +153,7 @@ plural run --benchmark support-triage --agent careful --attempts 2 --concurrency
 plural run --benchmark support-triage --agent concise --attempts 2 --concurrency 2
 ```
 
-Pass `--model` instead of `--agent` to run a catalog model with no saved Agent; without `--harness` it uses `native`, Plural's built-in tool loop. A dry-run validates the inputs and prints the plan without calling a model. Live runs need an API key, a Plural key or your own `OPENAI_API_KEY` (a browser login alone is not accepted for model calls), and can incur charges. Runs are local by default and recorded under `.plural/jobs/`; `--hosted` runs the pushed revisions on hosted infrastructure instead.
+Pass `--model` instead of `--agent` to run a catalog model with no saved Agent; without `--harness` it uses `native`, Plural's built-in tool loop. A dry-run validates the inputs and prints the plan without calling a model. Live runs send every model call through the Plural gateway, so they need a Plural API key (a browser login alone is not accepted for model calls), and they are billed at the exact provider cost. Runs are local by default and recorded under `.plural/jobs/`; `--hosted` runs the pushed revisions on hosted infrastructure instead.
 
 A Python `Job` can compare several Agents in one Job. `job.run()` returns the results directly:
 
@@ -243,9 +243,9 @@ plural trial show TRIAL_ID
 
 When a score is surprising, open the artifacts directory that `trial show` prints. For a local Trial it is `.plural/jobs/JOB_ID/trials/TRIAL_ID/executions/0/artifacts/`:
 
-1. **Trajectory** (`trajectory.jsonl`): what the agent saw, which actions it took, and the feedback it received.
+1. **Trajectory** (`trajectory.json`): what the agent saw, which actions it took, and the feedback it received.
 2. **Final State and Observation** (`state.json`, `observation.json`): what actually changed in the Environment.
-3. **Verifier results** (`verifier-results.json`): which checks passed and the evidence behind the score.
+3. **Verifier results** (`trial show`, or the Trial's `result.json`): which checks passed and the evidence behind the score.
 4. **Receipt** (`receipt.json`, one directory up): which Agent, Task, and Runtime produced the result.
 
 For a misrouted ticket, inspect whether the agent skipped the policy, misunderstood it, chose an invalid action, or stopped early. These traces explain the observed score. They do not reveal every internal reason a model made its decision.

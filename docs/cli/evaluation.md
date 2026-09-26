@@ -74,9 +74,9 @@ machine, the Runtime, and where the model runs; see
 see [Plural inside Docker and remote sandboxes](../guides/jobs.md#plural-inside-docker-and-remote-sandboxes).
 
 Every run is a new Job. A local run executes on this machine and records the Job
-under `.plural/jobs/<job-id>/` in the project. A run that calls a live model
-needs an API key: `plural auth login --api-key-stdin`, `PLURAL_API_KEY`, or your
-own `OPENAI_API_KEY` for `openai/` models. A browser login is enough for hosted
+under `.plural/jobs/<job-id>/` in the project. A run that calls a live model sends
+every call through the Plural gateway, so it needs a Plural API key:
+`plural auth login --api-key-stdin` or `PLURAL_API_KEY`. A browser login is enough for hosted
 commands, but the model gateway does not accept it. `--dry-run` needs none, and
 neither does an Agent with `auth_mode: none`.
 

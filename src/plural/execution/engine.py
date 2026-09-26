@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from plural.agents import AgentBinding
+from plural.atif import ATIF_FILE, episode_to_atif
 from plural.benchmarks.results import AttemptEvidence, aggregate_configuration
 from plural.benchmarks.rules import BenchmarkScoring
 from plural.catalog import ModelCatalog
@@ -141,11 +142,8 @@ def _harness_environment(
         name
         for name in (
             "PLURAL_API_KEY",
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
             "PLURAL_GATEWAY_URL",
-            "OPENAI_BASE_URL",
-            "ANTHROPIC_BASE_URL",
+            "PLURAL_PROJECT_ID",
             "PLURAL_ALLOW_NO_AUTH",
         )
         if environ.get(name)
@@ -373,14 +371,15 @@ def _episode_records(artifacts: Sequence[DownloadedFile]) -> list[dict[str, Any]
 def _step_rewards(artifacts: Sequence[DownloadedFile]) -> tuple[dict[str, Any], ...]:
     """Return the per-step reward records for this episode.
 
-    A Harness-written trajectory takes precedence. Without one, rewards come
-    from the steps Plural recorded in ``episode.jsonl``.
+    The steps Plural recorded in ``episode.jsonl`` take precedence. Without
+    them, rewards come from a Harness-written trajectory.
     """
+    records = _episode_records(artifacts)
     source = _trajectory_source(artifacts)
-    if source is None:
+    if records or source is None:
         return tuple(
             {"reward": record["reward"], "step": record.get("sequence"), "action": record["action"]}
-            for record in _episode_records(artifacts)
+            for record in records
             if record.get("kind") == "environment.step"
             and isinstance(record.get("reward"), (int, float))
             and record.get("error") is None
@@ -677,10 +676,15 @@ class Trial:
                         artifacts,
                         _json_artifact("view.json", environment_view_doc),
                     )
-                normalized_trajectory = _normalized_trajectory_artifact(artifacts)
-                if normalized_trajectory is not None:
-                    artifacts = _with_artifact(artifacts, normalized_trajectory)
-                cost_usd = _trajectory_cost(artifacts)
+                atif = self._atif(artifacts, execution_id)
+                if atif is not None:
+                    artifacts = _with_artifact(artifacts, _json_artifact(ATIF_FILE, atif))
+                    cost_usd = atif["final_metrics"].get("total_cost_usd")
+                else:
+                    normalized_trajectory = _normalized_trajectory_artifact(artifacts)
+                    if normalized_trajectory is not None:
+                        artifacts = _with_artifact(artifacts, normalized_trajectory)
+                    cost_usd = _trajectory_cost(artifacts)
                 phases.append(
                     PhaseTiming(
                         name="artifact_collection",
@@ -711,13 +715,6 @@ class Trial:
                     observation=environment_observation,
                     state=environment_state,
                 )
-            artifacts = _with_artifact(
-                artifacts,
-                _json_artifact(
-                    "verifier-results.json",
-                    [item.model_dump(mode="json") for item in verifier_results],
-                ),
-            )
             awaiting = any(item.status == "awaiting_review" for item in verifier_results)
             score, scores = _aggregate(task, verifier_results)
             status: Literal["succeeded", "awaiting_review"] = (
@@ -1033,8 +1030,8 @@ class Trial:
         view_state = dict(state or {}) or first_json_mapping(
             artifacts, ("final-state.json", "state.json")
         )
-        trajectory: list[Any] = []
-        for item in artifacts:
+        trajectory: list[Any] = list(_episode_records(artifacts))
+        for item in () if trajectory else artifacts:
             if item.path in {"trajectory.normalized.json", "trajectory.jsonl", "trajectory.json"}:
                 try:
                     text = item.data.decode()
@@ -1048,8 +1045,6 @@ class Trial:
                 except (UnicodeDecodeError, ValueError):
                     continue
                 break
-        if not trajectory:
-            trajectory = list(_episode_records(artifacts))
         outcome = _episode_outcome(artifacts)
         return Episode(
             observation=view_observation,
@@ -1192,9 +1187,42 @@ class Trial:
     def _verifier_env(self, verifier: VerifierDefinition | None) -> dict[str, str]:
         values, _ = runtime_values(self.task.environment, self.environ, target="verifier")
         if isinstance(verifier, AgentVerifier):
-            names = ("PLURAL_GATEWAY_URL", "OPENAI_BASE_URL", "PLURAL_API_KEY", "OPENAI_API_KEY")
+            names = ("PLURAL_GATEWAY_URL", "PLURAL_API_KEY", "PLURAL_PROJECT_ID")
             values.update({name: self.environ[name] for name in names if self.environ.get(name)})
         return values
+
+    def _atif(
+        self, artifacts: Sequence[DownloadedFile], execution_id: int
+    ) -> dict[str, Any] | None:
+        """The ATIF trajectory of this execution, built from its ``episode.jsonl``.
+
+        ``None`` when the Harness wrote its own ``trajectory.json`` or recorded no
+        episode.
+        """
+        if any(item.path == ATIF_FILE for item in artifacts):
+            return None
+        records = _episode_records(artifacts)
+        if not records:
+            return None
+        binding = self.agent
+        resolution = self.spec.model
+        return episode_to_atif(
+            records,
+            agent_name=binding.name,
+            agent_version=binding.agent.revision,
+            model_name=resolution.catalog_model_id,
+            session_id=self.spec.trial_id,
+            trajectory_id=f"{self.spec.job_id}:{self.spec.trial_id}:{execution_id}",
+            extra={
+                "plural": {
+                    "job_id": self.spec.job_id,
+                    "trial_id": self.spec.trial_id,
+                    "execution_id": execution_id,
+                    "task": self.task.task_id,
+                    "harness": self.spec.harness.name if self.spec.harness else "native",
+                }
+            },
+        )
 
     def _receipt(
         self,
@@ -1741,11 +1769,9 @@ _AGENT_VERIFIER_SCRIPT = r"""
 import json, math, os, urllib.request
 data = json.load(open(".plural/verifier-input.json"))
 spec = data["agent_verifier"]
-base = (
-    os.getenv("PLURAL_GATEWAY_URL")
-    or os.getenv("OPENAI_BASE_URL")
-    or "https://api.openai.com/v1"
-).rstrip("/")
+base = (os.getenv("PLURAL_GATEWAY_URL") or "").rstrip("/")
+if not base:
+    raise SystemExit("AgentVerifier requires PLURAL_GATEWAY_URL for its model call")
 judge_input = data["judge_input"]
 prompt = json.dumps({
     "instructions": spec["instructions"],
@@ -1779,8 +1805,9 @@ body = json.dumps({
     },
 }).encode()
 headers = {"Content-Type": "application/json"}
-key = os.getenv("PLURAL_API_KEY") or os.getenv("OPENAI_API_KEY")
+key = os.getenv("PLURAL_API_KEY")
 if key: headers["Authorization"] = "Bearer " + key
+if os.getenv("PLURAL_PROJECT_ID"): headers["X-Plural-Project"] = os.getenv("PLURAL_PROJECT_ID")
 req = urllib.request.Request(base + "/chat/completions", data=body, headers=headers)
 response = json.load(urllib.request.urlopen(req))
 content = response["choices"][0]["message"]["content"]
