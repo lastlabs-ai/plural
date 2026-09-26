@@ -481,7 +481,7 @@ def _load_task(workspace: Workspace, ref: ResourceRef, directory: Path) -> Local
             try:
                 task = Task.model_validate(
                     {
-                        "name": manifest.name,
+                        "name": manifest.title or manifest.name,
                         "version": manifest.version,
                         "instructions": instructions,
                         "goals": manifest.goals,
@@ -574,6 +574,12 @@ def _load_agent(workspace: Workspace, ref: ResourceRef, directory: Path) -> Loca
     if payload:
         _check_identity(str(payload.get("name") or ""), ref, problems)
         prepared = dict(payload)
+        title = prepared.pop("title", None)
+        if title is not None:
+            if isinstance(title, str) and title.strip():
+                prepared["name"] = title
+            else:
+                problems.append("title: must be a non-empty display name")
         harness = prepared.get("harness")
         if dependencies:
             loaded = _dependency(workspace, dependencies[0])
@@ -624,7 +630,7 @@ def _load_benchmark(workspace: Workspace, ref: ResourceRef, directory: Path) -> 
             try:
                 benchmark = Benchmark.model_validate(
                     {
-                        "name": manifest.name,
+                        "name": manifest.title or manifest.name,
                         "version": manifest.version,
                         "description": manifest.description,
                         "metadata": manifest.metadata,

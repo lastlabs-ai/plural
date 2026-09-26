@@ -102,16 +102,26 @@ plural benchmark pull support-triage
 plural benchmark pull support-triage --version 1.2.0 --with-deps
 ```
 
-A pull restores the current revision, or the one named by `--version`.
-`--with-deps` also restores the exact dependency revisions it pins. Local files
+A pull restores the current revision, or the one named by `--version`, along
+with any dependency this project does not have yet. `--with-deps` also replaces
+dependencies you already have with the exact revisions it pins. Local files
 that differ from the revision are never overwritten silently: the pull stops,
 changes nothing, and names the directory. Commit or move your edits, or pass
 `--force` to replace the directory; the previous copy is kept under
 `.plural/backups/`.
 
-Revisions created in the web app, or pushed before Plural 0.15, store only the
-compiled definition and have no package, so they cannot be pulled. Push them
-again from their source directory. See [Migrate to 0.15](../migration/projects.md).
+`plural run` pulls the Task, Benchmark, or Agent it names when only the hosted
+project has it, so `plural run -t ui-task -m openai/gpt-5.6-luna` works on a Task
+created in the web app without a separate pull.
+
+Revisions created in the web app, or pushed before Plural 0.15, have no source
+package. A Task, Agent, or Benchmark is only data, so a pull writes its manifest
+and instructions from the stored definition. The directory is the hosted slug,
+such as `tasks/ui-task/`, and `title:` keeps the display name, such as `UI Task`,
+so the pulled files match the hosted revision exactly. To rename it later, change
+`title:` and bump `version:`; the push renames the hosted resource. An Environment, Verifier, or
+Harness carries code and still cannot be pulled without a package; push it again
+from its source directory. See [Migrate to 0.15](../migration/projects.md).
 
 ## Run pushed resources
 

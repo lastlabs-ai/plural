@@ -283,7 +283,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --with-deps               Also replace dependencies you already have with the exact revisions it │
+│                           pins. Missing dependencies are always restored.                        │
 │ --force                   Replace local files that differ. The old copy is kept under            │
 │                           .plural/backups.                                                       │
 │ --json                    Print machine-readable JSON.                                           │
@@ -547,7 +548,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --with-deps               Also replace dependencies you already have with the exact revisions it │
+│                           pins. Missing dependencies are always restored.                        │
 │ --force                   Replace local files that differ. The old copy is kept under            │
 │                           .plural/backups.                                                       │
 │ --json                    Print machine-readable JSON.                                           │
@@ -699,7 +701,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --with-deps               Also replace dependencies you already have with the exact revisions it │
+│                           pins. Missing dependencies are always restored.                        │
 │ --force                   Replace local files that differ. The old copy is kept under            │
 │                           .plural/backups.                                                       │
 │ --json                    Print machine-readable JSON.                                           │
@@ -833,7 +836,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --with-deps               Also replace dependencies you already have with the exact revisions it │
+│                           pins. Missing dependencies are always restored.                        │
 │ --force                   Replace local files that differ. The old copy is kept under            │
 │                           .plural/backups.                                                       │
 │ --json                    Print machine-readable JSON.                                           │
@@ -1329,7 +1333,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --with-deps               Also replace dependencies you already have with the exact revisions it │
+│                           pins. Missing dependencies are always restored.                        │
 │ --force                   Replace local files that differ. The old copy is kept under            │
 │                           .plural/backups.                                                       │
 │ --json                    Print machine-readable JSON.                                           │
@@ -1533,7 +1538,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also restore the exact dependency revisions it pins.                   │
+│ --with-deps               Also replace dependencies you already have with the exact revisions it │
+│                           pins. Missing dependencies are always restored.                        │
 │ --force                   Replace local files that differ. The old copy is kept under            │
 │                           .plural/backups.                                                       │
 │ --json                    Print machine-readable JSON.                                           │

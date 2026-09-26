@@ -78,7 +78,7 @@ instructions: >-
   reports that the ticket is done.
 ```
 
-`name` must match the directory name. `harness` is optional: it names a Harness in the project's `harnesses/` directory or a built-in (`hermes`, `claude-code`, or `codex`), and `harness_kwargs` sets a built-in's options. `auth_mode: none` marks an Agent whose Harness never calls a model, so it runs without credentials. Model keys and other credentials are never written in `agent.yaml`.
+`name` must match the directory name, which is the hosted slug; an optional `title` sets the display name. `harness` is optional: it names a Harness in the project's `harnesses/` directory or a built-in (`hermes`, `claude-code`, or `codex`), and `harness_kwargs` sets a built-in's options. `auth_mode: none` marks an Agent whose Harness never calls a model, so it runs without credentials. Model keys and other credentials are never written in `agent.yaml`.
 
 `plural agent validate support-assistant` checks the model id, the Harness, and its options. `plural agent push support-assistant --with-deps` saves a private revision, together with a project Harness that is not hosted yet.
 

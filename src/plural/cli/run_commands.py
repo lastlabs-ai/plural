@@ -29,6 +29,7 @@ from plural.cli.common import (
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.jobs import JobResult, TrialResult, TrialSpec
 from plural.project import ProjectError, Workspace
+from plural.project.layout import AGENT, BENCHMARK, TASK, ResourceRef
 from plural.project.runs import (
     DEFAULT_HARNESS,
     RunPlan,
@@ -47,7 +48,7 @@ from plural.project.runs import (
     run_local,
     submit_hosted,
 )
-from plural.project.sync import ProjectPushStep
+from plural.project.sync import REBUILT_NOTE, ProjectPushStep, PullStep, pull_missing
 from plural.studio import Studio
 
 job_app = typer.Typer(help="List, inspect, and rerun Jobs.", no_args_is_help=True)
@@ -132,6 +133,11 @@ def run(
         concurrency=_concurrency(concurrency),
         hosted=hosted,
     )
+    if not dry_run:
+        pulled = _pull_run_sources(space, request)
+        if pulled:
+            _print_pulled(pulled, err=as_json)
+            space = workspace()
     plan = plan_run(space, request, environ=environ)
     if dry_run:
         payload = _plan_payload(plan, hosted=hosted)
@@ -552,6 +558,32 @@ def _where(item: dict[str, Any]) -> str:
 def _exclusive(local: bool, hosted: bool) -> None:
     if local and hosted:
         raise ProjectError("Choose --local or --hosted, not both.")
+
+
+def _pull_run_sources(space: Workspace, request: RunRequest) -> list[PullStep]:
+    """Pull the named Task, Benchmark, or Agent when only the hosted project has it."""
+    refs = [
+        ResourceRef(TASK.name, request.task)
+        if request.task
+        else ResourceRef(BENCHMARK.name, str(request.benchmark))
+    ]
+    if request.agent:
+        refs.append(ResourceRef(AGENT.name, request.agent))
+    if all(space.project.manifest_path(ref).is_file() for ref in refs):
+        return []
+    studio = _hosted_studio(space, required=False)
+    binding = space.project.read_binding()
+    if studio is None or binding is None:
+        return []
+    return pull_missing(space, studio, refs, project_id=binding.project_id)
+
+
+def _print_pulled(steps: list[PullStep], *, err: bool) -> None:
+    typer.echo("Pulled from the hosted project, since this project did not have them:", err=err)
+    for step in steps:
+        typer.echo(f"  {step.ref} {step.version}", err=err)
+    if any(step.rebuilt for step in steps):
+        typer.echo(REBUILT_NOTE, err=err)
 
 
 def _hosted_studio(space: Workspace, *, required: bool) -> Studio | None:

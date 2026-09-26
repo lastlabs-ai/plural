@@ -34,7 +34,7 @@ from plural.project import (
 )
 from plural.project.layout import AGENT, BENCHMARK, HARNESS, TASK
 from plural.project.membership import add_task, remove_task
-from plural.project.sync import hosted_list, hosted_resource, pull, push
+from plural.project.sync import REBUILT_NOTE, hosted_list, hosted_resource, pull, push
 from plural.project.templates import resource_scaffold
 
 NAME_HELP = "Resource name. Defaults to the resource directory you are in."
@@ -118,7 +118,12 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         name: str | None = typer.Argument(None, help=NAME_HELP),
         version: str | None = typer.Option(None, "--version", help="Version to restore."),
         with_deps: bool = typer.Option(
-            False, "--with-deps", help="Also restore the exact dependency revisions it pins."
+            False,
+            "--with-deps",
+            help=(
+                "Also replace dependencies you already have with the exact revisions it pins. "
+                "Missing dependencies are always restored."
+            ),
         ),
         force: bool = typer.Option(
             False,
@@ -146,6 +151,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                 "version": step.version,
                 "status": step.status,
                 "backup": str(step.backup) if step.backup else None,
+                "rebuilt": step.rebuilt,
             }
             for step in steps
         ]
@@ -157,6 +163,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                         step.ref,
                         step.version,
                         step.status
+                        + (" (rebuilt from its definition)" if step.rebuilt else "")
                         + (
                             f" (backup: {relative(step.backup, space.project.root)})"
                             if step.backup
@@ -167,6 +174,8 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                 ),
                 ("resource", "version", "result"),
             )
+            if any(step.rebuilt for step in steps):
+                typer.echo(REBUILT_NOTE)
 
         emit(payload, as_json=as_json, text=text)
 

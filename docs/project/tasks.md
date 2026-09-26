@@ -62,7 +62,7 @@ initial_state:
   ticket_id: ticket-1
 ```
 
-- `name` must match the directory name.
+- `name` must match the directory name, which is also the Task's slug in the hosted project. The optional `title` is its display name there, such as `title: Refund triage`; without it the display name is `name`. The title is part of the Task's content, so changing it needs a new `version:`, and pushing that version renames the hosted Task while its slug stays the same.
 - `instructions` is the path of a UTF-8 file in the Task directory, `instruction.md` by default. Its contents are the Task's instructions.
 - `environment` is the name of one Environment in `environments/`, and `verifiers` lists at least one Verifier in `verifiers/`, each once. References between resources are always by name within the project.
 - `initial_state`, `info`, `goals`, `metadata`, and `reset_options` have the same meaning as the `Task` fields described on this page.
@@ -86,7 +86,7 @@ plural task push ticket-1 --with-deps
 
 `--with-deps` also pushes the Environment and Verifiers when they are not hosted yet. Without it, each dependency must already be pushed with identical content, and the push stops before uploading anything if one is not. Pushing unchanged content reuses the existing revision. If you change a file but keep the same `version`, the push is refused; bump `version` first. A pushed revision is available in its project immediately and becomes the Task's current version. Pushing never makes a Task public.
 
-`plural task pull ticket-1` restores a hosted revision into `tasks/ticket-1/`. It refuses to overwrite local files that differ unless you pass `--force`, which keeps the old copy under `.plural/backups`.
+`plural task pull ticket-1` restores a hosted revision into `tasks/ticket-1/`, plus its Environment and Verifiers if this project lacks them. A Task created in the web app is written from its stored definition. It refuses to overwrite local files that differ unless you pass `--force`, which keeps the old copy under `.plural/backups`.
 
 ## Load a Task from Python
 

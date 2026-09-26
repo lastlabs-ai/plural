@@ -160,6 +160,107 @@ def test_pull_restores_files_and_protects_local_edits(hosted: Hosted) -> None:
     assert tree_digest(root / "tasks/refund") == original
 
 
+def _web_app_task(hosted: Hosted, slug: str) -> None:
+    """A Task saved in the web app: a definition and dependency pins, no package."""
+    fake = hosted.fake
+    source = fake.revisions[fake.parents[(hosted.project_id, "tasks", "refund")]["id"]][0]
+    parent = {"id": f"tas_{slug}", "slug": slug, "name": "Web Task", "visibility": "private"}
+    fake.parents[(hosted.project_id, "tasks", slug)] = parent
+    fake.revisions[parent["id"]] = [
+        {
+            "id": f"rev_{slug}",
+            "version": "0.1.0",
+            "content_hash": "sha256:" + "a" * 64,
+            "package_digest": None,
+            "status": "available",
+            "dependencies": source["dependencies"],
+            "definition": {
+                "name": "Web Task",
+                "version": "0.1.0",
+                "instructions": "Review order C-3 and submit refunded or denied.",
+                "info": {"authors": [], "keywords": []},
+                "goals": [],
+                "resources": [],
+                "initial_state": {"order": "C-3", "refundable": True},
+                "reset_options": {},
+            },
+        }
+    ]
+
+
+def test_pull_writes_a_web_app_task_and_the_dependencies_it_lacks(hosted: Hosted) -> None:
+    import shutil
+
+    assert hosted.cli("task", "push", "refund", "--with-deps")[0] == 0
+    _web_app_task(hosted, "web-task")
+    root = hosted.project.root
+    shutil.rmtree(root / "environments/queue")
+
+    code, output = hosted.cli("task", "pull", "web-task", "--json")
+    assert code == 0, output
+    steps = json.loads(output)
+    assert [step["resource"] for step in steps] == ["environment/queue", "task/web-task"]
+    assert [step["rebuilt"] for step in steps] == [False, True]
+    manifest = (root / "tasks/web-task/task.yaml").read_text()
+    assert "name: web-task" in manifest
+    assert "title: Web Task" in manifest
+    assert "environment: queue" in manifest
+    assert "order: C-3" in manifest
+    # Stored values that differ from the manifest default are kept, since they are hashed.
+    assert "keywords: []" in manifest
+    assert "goals" not in manifest
+    assert (root / "tasks/web-task/instruction.md").read_text().startswith("Review order C-3")
+    assert hosted.cli("task", "validate", "web-task")[0] == 0
+    assert hosted.project.read_lock().resources["task/web-task"].revision_id == "rev_web-task"
+
+
+def test_a_title_is_the_hosted_name_and_the_directory_is_the_slug(hosted: Hosted) -> None:
+    manifest = hosted.project.root / "tasks/refund/task.yaml"
+    text = manifest.read_text().replace("name: refund", "name: refund\ntitle: Refund A-1")
+    manifest.write_text(text)
+    code, output = hosted.cli("task", "push", "refund", "--with-deps")
+    assert code == 0, output
+    parent = hosted.fake.parents[(hosted.project_id, "tasks", "refund")]
+    assert parent["name"] == "Refund A-1"
+    assert hosted.cli("task", "validate", "refund")[0] == 0
+
+    code, output = hosted.cli("task", "push", "refund", "--json")
+    assert {step["status"] for step in json.loads(output)["steps"]} == {"unchanged"}
+
+    manifest.write_text(text.replace("Refund A-1", "Refund triage"))
+    code, output = hosted.cli("task", "push", "refund")
+    assert code == 1
+    assert "Bump `version:`" in output
+    manifest.write_text(manifest.read_text().replace("version: 0.1.0", "version: 0.1.1"))
+    code, output = hosted.cli("task", "push", "refund")
+    assert code == 0, output
+    assert parent["name"] == "Refund triage"
+    assert parent["slug"] == "refund"
+    assert [item["version"] for item in hosted.fake.revisions[parent["id"]]] == ["0.1.0", "0.1.1"]
+
+
+def test_a_run_pulls_a_task_that_only_the_hosted_project_has(hosted: Hosted) -> None:
+    assert hosted.cli("task", "push", "refund", "--with-deps")[0] == 0
+    _web_app_task(hosted, "web-task")
+    code, output = hosted.cli("run", "--task", "web-task", "--agent", "baseline", "--hosted")
+    assert code == 0, output
+    assert "Pulled from the hosted project" in output
+    assert "task/web-task 0.1.0" in output
+    assert (hosted.project.root / "tasks/web-task/task.yaml").is_file()
+
+
+def test_a_web_app_environment_without_files_still_cannot_be_pulled(hosted: Hosted) -> None:
+    assert hosted.cli("env", "push", "queue")[0] == 0
+    parent = hosted.fake.parents[(hosted.project_id, "environments", "queue")]
+    hosted.fake.revisions[parent["id"]][0]["package_digest"] = None
+    import shutil
+
+    shutil.rmtree(hosted.project.root / "environments/queue")
+    code, output = hosted.cli("env", "pull", "queue")
+    assert code == 1
+    assert "carries code" in output
+
+
 def test_hosted_show_and_list_are_labeled(hosted: Hosted) -> None:
     assert hosted.cli("verifier", "push", "resolved")[0] == 0
     code, output = hosted.cli("verifier", "show", "resolved", "--hosted", "--json")

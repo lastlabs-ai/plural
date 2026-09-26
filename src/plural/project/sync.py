@@ -30,6 +30,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+import yaml
+from pydantic import BaseModel
+
+from plural.agents import Agent
 from plural.common import PackageSource
 from plural.errors import NotFoundError
 from plural.harness.models import PLURAL_PACKAGE_PREFIX, HarnessDefinition
@@ -48,12 +52,19 @@ from plural.project.layout import (
     HARNESS,
     KINDS,
     TASK,
+    VERIFIER,
     Project,
     ProjectError,
     ResourceKind,
     ResourceRef,
 )
-from plural.project.manifests import LockEntry, LockFile, ProjectBinding
+from plural.project.manifests import (
+    BenchmarkManifest,
+    LockEntry,
+    LockFile,
+    ProjectBinding,
+    TaskManifest,
+)
 from plural.project.resources import LocalResource, Workspace
 from plural.studio import RevisionResourceAPI, Studio, slugify
 
@@ -124,6 +135,8 @@ class PullStep:
     revision_id: str
     status: Literal["restored", "unchanged", "replaced"]
     backup: Path | None = None
+    # Written from the stored definition because the revision has no package.
+    rebuilt: bool = False
 
 
 def push(
@@ -663,8 +676,10 @@ def pull(
             return
         seen.add(item)
         revision = _hosted_revision(studio, item, version=wanted_version, revision_id=wanted_id)
-        if with_deps:
-            for dependency, dependency_id in revision.dependencies:
+        for dependency, dependency_id in revision.dependencies:
+            # A dependency this project lacks is always restored; one it has is
+            # replaced only when asked, so local edits are never lost.
+            if with_deps or not _is_local(workspace, dependency):
                 restore(dependency, None, dependency_id)
         steps.append(_restore(workspace, studio, item, revision, force=force))
 
@@ -787,7 +802,7 @@ def _push_one(
     elif resource.ref.kind == BENCHMARK.name:
         references = {"task_revision_ids": ids}
     api = _api(studio, resource.ref)
-    record = api.push(value, package_digest=digest, **references)
+    record = api.push(value, package_digest=digest, slug=slugify(resource.ref.name), **references)
     parent_id = str(record.get(f"{resource.ref.kind}_id") or record.get("resource_id") or "")
     revision = HostedRevision.from_payload(parent_id, record)
     if revision.content_hash != resource.content_hash:
@@ -817,29 +832,36 @@ def _restore(
     *,
     force: bool,
 ) -> PullStep:
-    if not revision.package_digest:
-        raise ProjectError(
-            f"{ref} {revision.version} has no source package, so its files cannot be restored. "
-            "Revisions created in the web app or before plural 0.15 store only the compiled "
-            "definition. Push it again from its source directory."
-        )
-    payload = studio.packages.download(revision.package_digest)
-    actual = f"sha256:{hashlib.sha256(payload).hexdigest()}"
-    if actual != revision.package_digest:
-        raise ProjectError(
-            f"The package for {ref} {revision.version} failed verification: expected "
-            f"{revision.package_digest}, received {actual}. Nothing was written."
-        )
+    files: dict[str, str] | None = None
+    payload = b""
+    if revision.package_digest:
+        payload = studio.packages.download(revision.package_digest)
+        actual = f"sha256:{hashlib.sha256(payload).hexdigest()}"
+        if actual != revision.package_digest:
+            raise ProjectError(
+                f"The package for {ref} {revision.version} failed verification: expected "
+                f"{revision.package_digest}, received {actual}. Nothing was written."
+            )
+    else:
+        files = _files_from_definition(studio, ref, revision)
     target = workspace.project.resource_dir(ref)
     workspace.project.state_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=workspace.project.state_dir) as scratch:
         staged = Path(scratch) / ref.name
-        extract_archive(payload, staged)
+        if files is None:
+            extract_archive(payload, staged)
+        else:
+            staged.mkdir(parents=True)
+            for name, text in files.items():
+                (staged / name).write_text(text, encoding="utf-8")
         if not (staged / ref.info.manifest).is_file():
             raise ProjectError(f"The package for {ref} has no {ref.info.manifest}.")
+        rebuilt = files is not None
         if target.exists():
             if tree_digest(target) == tree_digest(staged):
-                return PullStep(ref, revision.version, revision.revision_id, "unchanged")
+                return PullStep(
+                    ref, revision.version, revision.revision_id, "unchanged", rebuilt=rebuilt
+                )
             if not force:
                 relative = target.relative_to(workspace.project.root)
                 raise ProjectError(
@@ -856,10 +878,150 @@ def _restore(
             shutil.move(str(target), backup)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(staged), target)
-            return PullStep(ref, revision.version, revision.revision_id, "replaced", backup)
+            return PullStep(
+                ref, revision.version, revision.revision_id, "replaced", backup, rebuilt=rebuilt
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(staged), target)
-    return PullStep(ref, revision.version, revision.revision_id, "restored")
+    return PullStep(ref, revision.version, revision.revision_id, "restored", rebuilt=rebuilt)
+
+
+REBUILT_NOTE = (
+    "Revisions created in the web app have no source files, so these were written from "
+    "their stored definition. `title:` keeps the hosted name; the directory is the slug."
+)
+
+
+def pull_missing(
+    workspace: Workspace, studio: Studio, refs: list[ResourceRef], *, project_id: str
+) -> list[PullStep]:
+    """Pull each of ``refs`` that this project lacks but the hosted project holds.
+
+    Nothing local is replaced. A ref the hosted project does not hold either is
+    skipped, so the caller reports it the usual way.
+
+    Returns:
+        One step per restored resource, dependencies first.
+    """
+    steps: list[PullStep] = []
+    for ref in refs:
+        if _is_local(workspace, ref):
+            continue
+        parent, _revisions = _hosted_state(studio, ref)
+        if parent is None:
+            continue
+        steps.extend(pull(workspace, studio, ref, project_id=project_id))
+    return steps
+
+
+def _is_local(workspace: Workspace, ref: ResourceRef) -> bool:
+    return workspace.project.manifest_path(ref).is_file()
+
+
+def _is_default(model: type[BaseModel], key: str, value: Any) -> bool:
+    default = model.model_fields[key].get_default(call_default_factory=True)
+    if isinstance(default, BaseModel):
+        default = default.model_dump(mode="json")
+    if isinstance(default, tuple):
+        default = list(default)
+    return bool(value == default)
+
+
+def _files_from_definition(
+    studio: Studio, ref: ResourceRef, revision: HostedRevision
+) -> dict[str, str]:
+    """Rebuild a manifest-only resource from the definition the server stored.
+
+    Tasks, Agents, and Benchmarks created in the web app have no source package,
+    but everything in them is data, so their files can be written back. Other
+    kinds carry code that only a push from their source directory uploads.
+
+    Returns:
+        File contents keyed by path relative to the resource directory.
+
+    Raises:
+        ProjectError: When the revision cannot be written as files.
+    """
+    label = ref.info.label
+    if ref.kind not in {TASK.name, AGENT.name, BENCHMARK.name}:
+        raise ProjectError(
+            f"{ref} {revision.version} has no source package, so its files cannot be "
+            f"restored. An {label} carries code, which only a push from its source directory "
+            "uploads. Push it again from there."
+        )
+    record = _api(studio, ref).revision(revision.resource_id, revision.revision_id)
+    definition: dict[str, Any] = dict(record.get("definition") or {})
+
+    def named(kind: str) -> list[str]:
+        return [item.name for item, _id in revision.dependencies if item.kind == kind]
+
+    manifest: dict[str, Any] = {"name": ref.name}
+    title = definition.get("name")
+    if isinstance(title, str) and title and title != ref.name:
+        manifest["title"] = title
+    manifest["version"] = revision.version
+    files: dict[str, str] = {}
+    if ref.kind == TASK.name:
+        if definition.get("resources"):
+            raise ProjectError(
+                f"{ref} {revision.version} lists resource files, and their contents were "
+                "never uploaded. Recreate the Task locally and push it."
+            )
+        environments, verifiers = named(ENVIRONMENT.name), named(VERIFIER.name)
+        if not environments or not verifiers:
+            raise ProjectError(
+                f"{ref} {revision.version} does not name a hosted Environment and Verifier, "
+                "so it cannot be written as a task.yaml."
+            )
+        manifest |= {
+            "instructions": "instruction.md",
+            "environment": environments[0],
+            "verifiers": verifiers,
+        }
+        for key in ("goals", "info", "metadata", "initial_state", "reset_options"):
+            if key in definition and not _is_default(TaskManifest, key, definition[key]):
+                manifest[key] = definition[key]
+        TaskManifest.model_validate(manifest)
+        files["instruction.md"] = str(definition.get("instructions") or "")
+    elif ref.kind == AGENT.name:
+        manifest["model"] = definition.get("model")
+        harness = definition.get("harness")
+        harnesses = named(HARNESS.name)
+        if harnesses:
+            manifest["harness"] = harnesses[0]
+        elif isinstance(harness, str):
+            manifest["harness"] = harness
+        elif harness:
+            raise ProjectError(
+                f"{ref} {revision.version} embeds a Harness that is not in the hosted project, "
+                "so it cannot be written as an agent.yaml."
+            )
+        for key in (
+            "provider",
+            "instructions",
+            "fallback_models",
+            "temperature",
+            "max_tokens",
+            "harness_kwargs",
+            "auth_mode",
+            "secret_names",
+            "metadata",
+        ):
+            if key in definition and not _is_default(Agent, key, definition[key]):
+                manifest[key] = definition[key]
+    else:
+        manifest["tasks"] = named(TASK.name)
+        for key in BenchmarkManifest.model_fields:
+            if key in manifest or key == "primary_metric":
+                continue
+            if key in definition and not _is_default(BenchmarkManifest, key, definition[key]):
+                manifest[key] = definition[key]
+        BenchmarkManifest.model_validate(manifest)
+    files[ref.info.manifest] = (
+        f"# {label} restored from a hosted revision that was created without source files.\n"
+        + yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True)
+    )
+    return files
 
 
 def _lock_for(workspace: Workspace, binding: ProjectBinding) -> LockFile:

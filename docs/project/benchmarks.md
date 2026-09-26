@@ -86,7 +86,7 @@ scoring:
   infrastructure_error: exclude
 ```
 
-`name` must match the directory name, and each entry in `tasks` names a Task in `tasks/`. Validation requires a `README.md`, a `purpose`, a `scoring.description`, and at least one Task. The release fields in the next section, such as `categories` and `tracks`, are written in `benchmark.yaml` with the same names and nesting as the Python arguments.
+`name` must match the directory name, which is the hosted slug; an optional `title` sets the display name. Each entry in `tasks` names a Task in `tasks/`. Validation requires a `README.md`, a `purpose`, a `scoring.description`, and at least one Task. The release fields in the next section, such as `categories` and `tracks`, are written in `benchmark.yaml` with the same names and nesting as the Python arguments.
 
 ```bash
 plural benchmark validate support-triage

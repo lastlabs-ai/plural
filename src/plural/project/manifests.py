@@ -76,6 +76,11 @@ class TaskManifest(ManifestModel):
     """``task.yaml``: instructions, one Environment, and its Verifiers."""
 
     name: str = Field(min_length=1)
+    title: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Display name in the hosted project. Defaults to name.",
+    )
     version: str = "0.1.0"
     instructions: str = "instruction.md"
     environment: str = Field(min_length=1)
@@ -110,6 +115,11 @@ class BenchmarkManifest(BenchmarkRelease):
     """
 
     name: str = Field(min_length=1)
+    title: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Display name in the hosted project. Defaults to name.",
+    )
     version: str = "0.1.0"
     description: str = ""
     tasks: list[str] = Field(default_factory=list)

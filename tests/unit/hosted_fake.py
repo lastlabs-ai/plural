@@ -211,6 +211,8 @@ class FakeHosted:
                 "payload": body,
             }
             revisions.append(revision)
+            if body.get("name"):
+                parent["name"] = body["name"]
             return _ok(revision)
         found = next((r for r in revisions if r["id"] == parts[3]), None)
         return _ok(found) if found else _error(404, "Not found")

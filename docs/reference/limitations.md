@@ -20,8 +20,10 @@ Use this page to check whether a planned workflow is supported. The guides expla
 - `plural run --hosted` and `--track` push what the run needs first, bumping the
   patch version of any resource whose files changed. `plural job push` pushes
   nothing: the revisions a finished Job ran must already be hosted.
-- Revisions saved in the web app, or pushed before 0.15, have no source package
-  and cannot be pulled. See [Migrate to 0.15](../migration/projects.md).
+- Revisions saved in the web app, or pushed before 0.15, have no source package.
+  Tasks, Agents, and Benchmarks are rebuilt from their stored definition on pull;
+  Environments, Verifiers, and Harnesses cannot be pulled. See
+  [Migrate to 0.15](../migration/projects.md).
 - `.pluralignore` matches exact file paths only; it does not support patterns or
   directory entries.
 - Package digests verify integrity only. Signatures, attestations, publisher

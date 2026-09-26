@@ -144,9 +144,12 @@ class RevisionResourceAPI(Generic[T]):
             ),
         )
 
-    def parent(self, name: str, *, description: str = "") -> JsonObject:
-        """Return the parent with this name's slug, creating it if needed."""
-        slug = slugify(name, fallback=self.collection.rstrip("s"))
+    def parent(self, name: str, *, slug: str | None = None, description: str = "") -> JsonObject:
+        """Return the parent with this slug, creating it if needed.
+
+        The slug defaults to one derived from ``name``.
+        """
+        slug = slug or slugify(name, fallback=self.collection.rstrip("s"))
         return self.find(slug) or self.create(name=name, slug=slug, description=description)
 
     @staticmethod
@@ -160,11 +163,20 @@ class RevisionResourceAPI(Generic[T]):
         del references
         return _dump(value, exclude={"name", "description"})
 
-    def push(self, value: T, *, package_digest: str | None = None, **references: Any) -> JsonObject:
+    def push(
+        self,
+        value: T,
+        *,
+        package_digest: str | None = None,
+        slug: str | None = None,
+        **references: Any,
+    ) -> JsonObject:
         if not isinstance(value, self.model_type):
             raise InvalidRequestError(f"{self.collection} push requires {self.model_type.__name__}")
         parent = self.parent(
-            self._name(value), description=str(getattr(value, "description", "") or "")
+            self._name(value),
+            slug=slug,
+            description=str(getattr(value, "description", "") or ""),
         )
         payload = self._revision_payload(value, **references)
         return cast(
@@ -228,6 +240,7 @@ class TasksAPI(RevisionResourceAPI[Task]):
             value,
             exclude={"name", "environment", "verifiers"},
         )
+        payload["name"] = value.name
         payload["environment_revision_id"] = environment_revision_id
         payload["verifier_revision_ids"] = ids
         return payload
@@ -258,7 +271,7 @@ class AgentsAPI(RevisionResourceAPI[Agent]):
         builtin = value.harness if isinstance(value.harness, str) else None
         if value.harness is not None and builtin is None and not harness_revision_id:
             raise InvalidRequestError("An Agent with a custom Harness needs harness_revision_id")
-        payload = _dump(value, exclude={"name", "harness"})
+        payload = _dump(value, exclude={"harness"})
         payload["harness"] = builtin
         payload["harness_revision_id"] = harness_revision_id
         return payload
@@ -286,7 +299,7 @@ class BenchmarksAPI(RevisionResourceAPI[Benchmark]):
         ids = [str(item) for item in task_revision_ids]
         if len(ids) != len(value.tasks):
             raise InvalidRequestError("task_revision_ids must align with Benchmark tasks")
-        payload = _dump(value, exclude={"name", "tasks"})
+        payload = _dump(value, exclude={"tasks"})
         payload["task_revision_ids"] = ids
         return payload
 
