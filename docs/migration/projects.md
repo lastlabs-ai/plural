@@ -72,8 +72,8 @@ Removed `plural run` options: `--mode`, `--per-runtime-concurrency`, `--watch` a
 `.plural/jobs/<job-id>/` with the version and content hash of every input it used.
 `plural job rerun` and `plural trial rerun` run those pinned inputs again as a new Job
 linked to the original, even if the files on disk have changed since. Runs are local
-unless you pass `--hosted`, which uses pushed revisions only and fails if a local
-input differs from what was pushed.
+unless you pass `--hosted`, which first pushes any input the hosted project does
+not hold yet, giving a changed resource the next patch version.
 
 ### Revisions are no longer published
 

@@ -123,8 +123,14 @@ plural run -b support-triage -a careful --hosted --follow
 
 `--track` runs here and records the Job in the hosted project as it runs.
 `job push` records a local Job that already finished. `--hosted` submits the Job
-for hosted infrastructure to run. All three use revisions that are already
-pushed and refuse to run when any input differs from its pushed revision. Push
-first, then run. See
+for hosted infrastructure to run. A hosted Job pins exact revisions, so
+`--track` and `--hosted` first push whatever the run needs that the hosted
+project does not hold: its source, its Agent or Harness, and their dependencies.
+A resource whose files changed while its `version` stayed the same gets the next
+patch version in its manifest, as `plural project push --bump` does, and the
+command prints each one. If someone changed a resource in the hosted project
+since this checkout last synced it, the run stops before uploading anything; pull
+it first. `job push` uploads nothing new: the revisions a finished Job ran must
+already be hosted, so restore those files and push them if they are not. See
 [Jobs](../running/jobs.md) for execution and the
 [Python SDK](../sdk/evaluation.md) for programmatic use.

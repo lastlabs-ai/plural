@@ -198,18 +198,11 @@ def test_push_is_refused_when_the_scope_selects_another_project(hosted: Hosted, 
     assert hosted.fake.writes == []
 
 
-def test_hosted_runs_use_pushed_revisions_only(hosted: Hosted) -> None:
+def test_a_hosted_run_pushes_the_revisions_it_needs_first(hosted: Hosted) -> None:
     code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")
-    assert code == 1
-    assert "Hosted runs use pushed revisions only" in output
-    assert hosted.fake.jobs == []
-
-    assert hosted.cli("task", "push", "refund", "--with-deps")[0] == 0
-    assert hosted.cli("agent", "push", "baseline", "--with-deps")[0] == 0
-    code, output = hosted.cli(
-        "run", "--task", "refund", "--agent", "baseline", "--hosted", "--json"
-    )
     assert code == 0, output
+    assert "Pushed to the hosted project first" in output
+    assert "task/refund 0.1.0 (new)" in output
     job = hosted.fake.jobs[-1]
     task_parent = hosted.fake.parents[(hosted.project_id, "tasks", "refund")]
     agent_parent = hosted.fake.parents[(hosted.project_id, "agents", "baseline")]
@@ -218,6 +211,20 @@ def test_hosted_runs_use_pushed_revisions_only(hosted: Hosted) -> None:
         "revision_id": hosted.fake.revisions[task_parent["id"]][0]["id"],
     }
     assert job["agent_revision_ids"] == [hosted.fake.revisions[agent_parent["id"]][0]["id"]]
+
+    instruction = hosted.project.root / "tasks/refund/instruction.md"
+    instruction.write_text("Review order A-1 carefully.\n")
+    code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")
+    assert code == 0, output
+    assert "task/refund 0.1.1 (was 0.1.0; its content changed)" in output
+    assert "version: 0.1.1" in (hosted.project.root / "tasks/refund/task.yaml").read_text()
+    newest = hosted.fake.revisions[task_parent["id"]][-1]
+    assert newest["version"] == "0.1.1"
+    assert hosted.fake.jobs[-1]["source"]["revision_id"] == newest["id"]
+
+    code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")
+    assert code == 0, output
+    assert "Pushed to the hosted project first" not in output
 
 
 def test_hosted_model_run_records_an_agent_named_after_the_model(hosted: Hosted) -> None:

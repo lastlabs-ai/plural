@@ -1185,10 +1185,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --harness         -h      <str>               Harness for --model. Default: native (Plural's     │
 │                                               built-in tool loop).                               │
 │ --agent           -a      <str>               Saved Agent to run.                                │
-│ --hosted                                      Run on hosted infrastructure using pushed          │
-│                                               revisions.                                         │
+│ --hosted                                      Run on hosted infrastructure. Inputs the hosted    │
+│                                               project lacks are pushed first.                    │
 │ --track                                       Run here, and record the Job in the hosted project │
-│                                               as it runs. Every input must already be pushed.    │
+│                                               as it runs. Inputs the hosted project lacks are    │
+│                                               pushed first.                                      │
 │ --attempts                <int range> [x>=1]  Advanced: Trials per Task (default 1).             │
 │ --concurrency     -n      <str>               Trials to run at once: a number, or auto to size   │
 │                                               it from this machine, the runtime, and where the   │

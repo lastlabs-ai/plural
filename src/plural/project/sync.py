@@ -292,8 +292,9 @@ def plan_project_push(
     *,
     bump: bool = False,
     force: bool = False,
+    roots: list[ResourceRef] | None = None,
 ) -> ProjectPushPlan:
-    """Plan pushing every local resource without writing anything.
+    """Plan pushing every local resource, or ``roots`` and their dependencies, without writing.
 
     A Task's content hash includes its dependencies, so changing an
     Environment changes each Task and Benchmark that pins it. With ``bump``,
@@ -310,6 +311,8 @@ def plan_project_push(
         bump: Give conflicting resources the next patch version.
         force: Allow new revisions on top of hosted changes this checkout has
             not synced.
+        roots: Plan only these resources and their dependencies. The plan
+            then lists no hosted-only resources.
 
     Returns:
         The plan.
@@ -318,7 +321,8 @@ def plan_project_push(
         ProjectError: Listing every problem, before anything is uploaded.
     """
     project = workspace.project
-    roots = local_refs(project)
+    partial = roots is not None
+    roots = roots if roots is not None else local_refs(project)
     if not roots:
         raise ProjectError(
             "This project has no resources to push yet. Create one with `plural env init <name>`."
@@ -360,7 +364,7 @@ def plan_project_push(
         )
 
     hosted_only: list[ResourceRef] = []
-    if studio is not None:
+    if studio is not None and not partial:
         local = set(order)
         for kind in KINDS:
             for record in hosted_list(studio, kind):

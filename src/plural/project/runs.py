@@ -53,8 +53,16 @@ from plural.project.layout import (
     ProjectError,
     ResourceRef,
 )
+from plural.project.manifests import ProjectBinding
 from plural.project.resources import Workspace
-from plural.project.sync import HostedRevision, resolve_hosted, resolve_pinned
+from plural.project.sync import (
+    HostedRevision,
+    ProjectPushStep,
+    apply_project_push,
+    plan_project_push,
+    resolve_hosted,
+    resolve_pinned,
+)
 from plural.studio import Studio, slugify
 from plural.tasks import TaskDefinition
 from plural.verifiers import DeterministicVerifier, WeightedVerifier
@@ -357,6 +365,44 @@ def rerun_local_trial(
     )
 
 
+def run_roots(plan: RunPlan) -> list[ResourceRef]:
+    """The saved resources a run depends on directly: its source, and its Agent or Harness.
+
+    Returns:
+        The references, without their dependencies.
+    """
+    roots = [plan.source, *([plan.agent_ref] if plan.agent_ref else [])]
+    harness_ref = _harness_ref(plan.agent) if plan.agent_ref is None else None
+    if harness_ref is not None:
+        roots.append(harness_ref)
+    return roots
+
+
+def push_run_inputs(
+    workspace: Workspace, studio: Studio, binding: ProjectBinding, plan: RunPlan
+) -> list[ProjectPushStep]:
+    """Push every revision a run needs that the hosted project does not hold yet.
+
+    A resource whose content changed while its version stayed the same gets
+    the next patch version, as ``plural project push --bump`` does. A resource
+    someone else changed in the hosted project since this checkout synced it
+    stops the push, so nothing is written on top of their work.
+
+    Returns:
+        The steps that added a revision; empty when everything was pushed already.
+
+    Raises:
+        ProjectError: When a resource cannot be pushed, before anything is uploaded.
+    """
+    push_plan = plan_project_push(
+        workspace, studio, binding.project_id, bump=True, roots=run_roots(plan)
+    )
+    if not push_plan.changes:
+        return []
+    apply_project_push(workspace, studio, binding, push_plan)
+    return push_plan.changes
+
+
 def submit_hosted(
     workspace: Workspace,
     studio: Studio,
@@ -375,10 +421,8 @@ def submit_hosted(
     Raises:
         ProjectError: When any input is not pushed with identical content.
     """
-    roots = [plan.source, *([plan.agent_ref] if plan.agent_ref else [])]
+    roots = run_roots(plan)
     harness_ref = _harness_ref(plan.agent) if plan.agent_ref is None else None
-    if harness_ref is not None:
-        roots.append(harness_ref)
     resolved = resolve_hosted(workspace, studio, roots)
     return _submit(
         studio,

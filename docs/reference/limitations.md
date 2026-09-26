@@ -17,8 +17,9 @@ Use this page to check whether a planned workflow is supported. The guides expla
   `job`, `trial`, and `review` commands) need `plural auth login` and a project
   registered with `plural project init <name> --push`. Local commands need
   neither.
-- `plural run --hosted` runs only revisions that are already pushed with
-  identical content. Push first.
+- `plural run --hosted` and `--track` push what the run needs first, bumping the
+  patch version of any resource whose files changed. `plural job push` pushes
+  nothing: the revisions a finished Job ran must already be hosted.
 - Revisions saved in the web app, or pushed before 0.15, have no source package
   and cannot be pulled. See [Migrate to 0.15](../migration/projects.md).
 - `.pluralignore` matches exact file paths only; it does not support patterns or

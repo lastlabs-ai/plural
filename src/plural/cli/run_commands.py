@@ -41,11 +41,13 @@ from plural.project.runs import (
     local_trial,
     plan_run,
     push_local_job,
+    push_run_inputs,
     rerun_local_job,
     rerun_local_trial,
     run_local,
     submit_hosted,
 )
+from plural.project.sync import ProjectPushStep
 from plural.studio import Studio
 
 job_app = typer.Typer(help="List, inspect, and rerun Jobs.", no_args_is_help=True)
@@ -66,14 +68,16 @@ def run(
     ),
     agent: str | None = typer.Option(None, "--agent", "-a", help="Saved Agent to run."),
     hosted: bool = typer.Option(
-        False, "--hosted", help="Run on hosted infrastructure using pushed revisions."
+        False,
+        "--hosted",
+        help="Run on hosted infrastructure. Inputs the hosted project lacks are pushed first.",
     ),
     track: bool = typer.Option(
         False,
         "--track",
         help=(
-            "Run here, and record the Job in the hosted project as it runs. Every input "
-            "must already be pushed."
+            "Run here, and record the Job in the hosted project as it runs. Inputs the "
+            "hosted project lacks are pushed first."
         ),
     ),
     attempts: int | None = typer.Option(
@@ -118,27 +122,31 @@ def run(
     environ = _run_environ(current)
     if plural_version:
         environ[RUNTIME_VERSION_VARIABLE] = plural_version
-    plan = plan_run(
-        space,
-        RunRequest(
-            task=task,
-            benchmark=benchmark,
-            model=model,
-            harness=harness,
-            agent=agent,
-            attempts=attempts,
-            concurrency=_concurrency(concurrency),
-            hosted=hosted,
-        ),
-        environ=environ,
+    request = RunRequest(
+        task=task,
+        benchmark=benchmark,
+        model=model,
+        harness=harness,
+        agent=agent,
+        attempts=attempts,
+        concurrency=_concurrency(concurrency),
+        hosted=hosted,
     )
+    plan = plan_run(space, request, environ=environ)
     if dry_run:
         payload = _plan_payload(plan, hosted=hosted)
         emit(payload, as_json=as_json, text=lambda: _print_plan(payload))
         return
-    tracking = _tracking(space, current) if track else None
+    tracking = None
+    if hosted or track:
+        studio, binding = project_studio(space, current)
+        pushed = push_run_inputs(space, studio, binding, plan)
+        if pushed:
+            _print_pushed(pushed, err=as_json)
+            space = workspace()
+            plan = plan_run(space, request, environ=environ)
+        tracking = Tracking(studio) if track else None
     if hosted:
-        studio, binding = project_studio(space, session())
         record = submit_hosted(space, studio, plan)
         job_id = str(record.get("id"))
         emit(
@@ -568,6 +576,18 @@ def _run_environ(current: Session) -> dict[str, str]:
     if environ.get("PLURAL_API_KEY"):
         environ.setdefault("PLURAL_GATEWAY_URL", current.api_url.rstrip("/") + "/v1")
     return environ
+
+
+def _print_pushed(steps: list[ProjectPushStep], *, err: bool) -> None:
+    typer.echo("Pushed to the hosted project first, so the Job can pin them:", err=err)
+    for step in steps:
+        if step.bumped:
+            note = f" (was {step.previous_version}; its content changed)"
+        elif step.action == "new":
+            note = " (new)"
+        else:
+            note = ""
+        typer.echo(f"  {step.ref} {step.version}{note}", err=err)
 
 
 def _tracking(space: Workspace, current: Session) -> Tracking:
