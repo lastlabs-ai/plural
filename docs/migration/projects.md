@@ -8,11 +8,17 @@ nav: false
 ---
 # Migrate to 0.15
 
+If you used Plural before 0.15, this page tells you what moved and walks you through
+updating your project. Your Environments, Tasks, Verifiers, and Agents keep working
+the same way. What changed is where their files live and which commands you type.
+
 Plural 0.15 organizes everything around a project directory and one command shape.
 Each resource lives in its own directory and is addressed by kind and name, as in
 `plural task validate refund`. The SDK objects you author (`Environment`, `Task`, the
 Verifiers, `Harness`, `Agent`, `Benchmark`, and `Job`) are unchanged. What changed is
 how files are laid out, how the CLI finds them, and how they reach a hosted project.
+
+> **Tip:** to jump straight to the steps, see [Migrate a project](#migrate-a-project).
 
 ## Breaking changes
 
@@ -130,7 +136,8 @@ can restrict that list; runs, reruns, and gateway calls enforce it on the server
 
 `Job(source, agents=[agent]).run()` still runs locally and is not recorded under
 `.plural/jobs`, so `plural job list` does not show it. `Job(..., client=Client())`
-still sends model calls through the Plural gateway with your login.
+still sends model calls through the Plural gateway, using your Plural API key from
+`PLURAL_API_KEY` or the key stored with `plural auth login --api-key-stdin`.
 
 ```python
 from plural import Job
@@ -144,6 +151,8 @@ result = Job(benchmark, agents=[agent]).run()
 
 ## Migrate a project
 
+Follow these steps in order. Validation in step 5 reports anything you missed.
+
 1. Upgrade: `python -m pip install --upgrade "plural>=0.15"`, or `uv add "plural>=0.15"`
    in a uv-managed project.
 2. Create the project: `plural project init <name>` makes `./<name>` with the standard
@@ -152,8 +161,8 @@ result = Job(benchmark, agents=[agent]).run()
    generated directory. Until you fill a template in, `validate` reports what is still
    missing. A new Environment's template uses the `docker` runtime; set
    `runtime.provider` to what your old project used. Python behavior, such as an
-   Environment class or a Verifier
-   check, stays Python and is referenced from the manifest, for example
+   Environment class or a Verifier check, stays Python and is referenced from the
+   manifest, for example
    `python: environment.py:SupportQueue` or `check: verify.py:verify`.
 4. Replace object references with names: a Task lists `environment: <name>` and
    `verifiers: [<name>]`, and a Benchmark lists `tasks: [<name>, ...]`.

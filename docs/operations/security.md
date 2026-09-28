@@ -2,16 +2,44 @@
 route: /docs/operations/security
 title: Security
 order: 934
-description: Choose isolation, credential handling, and evidence access for your evaluation workflow.
+description: What Plural keeps private, where your keys live, what the AI never sees, and how to choose isolation and data access for your evaluations.
 audience: all
 nav: false
 nav_group: Operations
 ---
 # Security
 
-Choose isolation and data access to match the code and information in your evaluation. Plural checks declared Runtime controls and records what ran; you remain responsible for which code, providers, and people you trust.
+Plural keeps your work private by default, keeps your keys out of your project, and
+never shows the AI anything beyond the Task's instructions and what the Environment
+lets it see. This page explains those guarantees in plain words first, then the
+settings you choose for isolation and data access.
+
+Plural checks the safety controls you ask for and keeps a record of what ran. You
+still decide which code, model providers, and people you trust.
+
+## The short version
+
+- **Your work stays private.** Pushing to Plural saves a private copy inside your
+  hosted project. Nothing becomes public unless you publish it yourself in the web
+  app.
+- **Your keys never live in your project.** `plural auth login` keeps your
+  credential in your computer's keyring (the operating system's password store) or a
+  private file in your user settings folder. A push refuses files that look like
+  credentials, such as `.env` files and private keys.
+- **The AI sees only what it is meant to see.** An Agent (the contestant: a model
+  plus its instructions) sees the Task's instructions and the Environment's
+  Observations, and nothing else. It never sees its score, its rewards, the hidden
+  State of the world, or what the grader knows.
+- **Other secrets arrive when a run starts.** An API key a tool needs is declared by
+  name only, and its value is supplied when the run begins. Plural hides those exact
+  values in the logs it captures.
+
+The rest of this page is for when you are running code or data you need to protect.
 
 ## Choose the process boundary
+
+A **Runtime** is where the world runs. Each option draws the safety line in a
+different place:
 
 - `local` runs the Environment, Harness, and Verifiers as a trusted subprocess
   on your machine, under your user account. It is not a sandbox; use it only for
@@ -27,15 +55,16 @@ implementation.
 
 ## Separate information
 
-After each action the agent sees only the Observation. Scores, rewards,
+After each action the Agent sees only the Observation. Scores, rewards,
 termination flags, State, and Verifier data never enter the model's context.
+
 That separation governs what Plural shows the model; it is not process
 isolation. Code running in the same Runtime can still read a staged file or
 process memory. Use separate processes, minimal staged files, and Runtime
 controls for actual isolation.
 
-Verifiers receive the full final Episode, including State. Isolate untrusted
-Verifier code and avoid capturing secrets.
+Verifiers (the graders) receive the full final Episode, including State. Isolate
+untrusted Verifier code and avoid capturing secrets.
 
 ## Handle secrets
 
@@ -60,9 +89,11 @@ Supply other secrets when the Job runs:
   Verifiers itself; you do not list them in `secret_names`.
 
 Never store values in YAML, Task info, State, Observation, resources, logs, or
-artifacts. Plural replaces the exact values of injected secrets in the Harness
-and Verifier logs it captures. It cannot catch an encoded or transformed
-secret, and it does not redact artifacts or data your code sends elsewhere.
+artifacts.
+
+> **Good to know:** Plural replaces the exact values of injected secrets in the
+> Harness and Verifier logs it captures. It cannot catch an encoded or transformed
+> secret, and it does not redact artifacts or data your code sends elsewhere.
 
 ## Hosted access
 
@@ -80,6 +111,9 @@ secret, and it does not redact artifacts or data your code sends elsewhere.
 
 ## Lock code and output
 
+Plural fingerprints your code and results so you can tell if something changed.
+Those fingerprints prove *what* ran, not *who* made it or whether it is safe.
+
 Environment and Harness source digests detect changes. Remote archives and OCI
 sources require digests. These are integrity checks, not signatures,
 attestations, publisher identity, or malware scanning.
@@ -90,7 +124,14 @@ unsigned; a local run reports `self_reported` trust, and imported runs report
 
 ## Minimize capability
 
-Use a pinned image, modest compute and time limits, focused actions, and a read-only root where supported. Allow access to the model endpoint and other services the Task needs. For a fully offline workflow, block networking with a Runtime that supports it. Grant optional Harness capabilities only when the workflow requires them; see [Harness and Environment policy](../concepts/harness-policy.md).
+Give each run only what it needs:
+
+- Use a pinned image, modest compute and time limits, focused actions, and a
+  read-only root where supported.
+- Allow access to the model endpoint and other services the Task needs. For a fully
+  offline workflow, block networking with a Runtime that supports it.
+- Grant optional Harness capabilities only when the workflow requires them; see
+  [Harness and Environment policy](../concepts/harness-policy.md).
 
 A hosted project's policy is an additional ceiling. It cannot enforce a control
 that the selected Runtime provider does not support.

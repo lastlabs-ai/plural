@@ -9,11 +9,41 @@ nav_group: Interfaces
 ---
 # CLI guide
 
-The CLI works on a project directory: a `project.yaml` file with one directory per
-resource beside it, such as `environments/wordle/` or `tasks/crane/`. Commands
-name resources by their directory name, and most resource commands default to the
-resource directory you are in. Commands that print data, such as `validate`,
-`show`, `list`, and `run`, accept `--json` for machine-readable output.
+The `plural` command-line tool (CLI) runs Plural from your terminal. With it you set
+up a project, check your work, run models against your Tasks, and read back the
+scores. This page is for anyone comfortable typing commands; it starts with the few
+you need and ends with a complete reference for power users.
+
+## What the CLI is
+
+Everything you build in Plural lives in a **project**. On your computer, that is a
+folder with a `project.yaml` file and one subfolder per resource, such as
+`environments/wordle/` or `tasks/crane/`. The CLI reads and writes that folder.
+
+Commands name a resource by its folder name. Most resource commands also work with no
+name at all, and then act on the resource folder you are in. If words like Task,
+Agent, or Benchmark are new, read [Core concepts](../getting-started/concepts.md)
+first.
+
+## The commands most people need
+
+Most days you only need these:
+
+```bash
+plural project init support-eval
+plural task validate ticket-1
+plural run -t ticket-1 -m openai/gpt-5.6-luna
+plural job list
+plural job show JOB_ID
+```
+
+In order: create a project, check a Task is ready, run it with one model, list your
+runs, and open one to see its scores. Every run is recorded as a **Job**, and each
+attempt inside it is a **Trial**. A live run needs a Plural API key; see
+[Run](#run).
+
+Commands that print data, such as `validate`, `show`, `list`, and `run`, accept
+`--json` for machine-readable output.
 
 Projects written for Plural 0.14 or earlier use a different layout; see
 [Migrate to 0.15](../migration/projects.md).
@@ -31,19 +61,25 @@ plural benchmark add ticket-1 -b support-triage
 plural agent init careful -m openai/gpt-5.6-luna
 ```
 
-`plural project init` works offline. Each resource `init` command writes a
-template with places marked `PLURAL-TODO` for you to fill in; a new Environment
-and Verifier need real behavior before a run means anything. The
-[support queue tutorial](../tutorials/support-queue.md) provides both. Without
-`-m`, `agent init` leaves the model for you to choose from `plural models list`.
-A new Environment uses the `docker` runtime, so Docker must be running when you
-run it; the `local` runtime avoids Docker but is a trusted subprocess on your
-machine, not a sandbox.
+This builds the support queue example: a world (the Environment), a grader (the
+Verifier), one ticket to work (the Task), an exam that holds it (the Benchmark), and a
+contestant (the Agent).
 
-`validate` checks a resource and everything it depends on without uploading
-anything, and reports every `PLURAL-TODO` that is still unfinished. `show` prints
-the local copy of a resource, or the hosted one when there is no local copy. A
-local copy that is not valid yet is reported as an error instead:
+`plural project init` works offline. Each resource `init` command writes a template
+with places marked `PLURAL-TODO` for you to fill in. A new Environment and Verifier
+need real behavior before a run means anything; the
+[support queue tutorial](../tutorials/support-queue.md) provides both. Without `-m`,
+`agent init` leaves the model for you to choose from `plural models list`.
+
+> **Good to know:** A new Environment uses the `docker` runtime, so Docker must be
+> running when you run it. The `local` runtime avoids Docker, but it is a trusted
+> subprocess on your machine, not a sandbox.
+
+To check your work, use `validate` and `show`. `validate` checks a resource and
+everything it depends on without uploading anything, and reports every `PLURAL-TODO`
+that is still unfinished. `show` prints the local copy of a resource, or the hosted
+one when there is no local copy. A local copy that is not valid yet is reported as an
+error instead:
 
 ```bash
 plural benchmark validate support-triage
@@ -53,8 +89,11 @@ plural project show support-eval
 
 ## Run
 
-A run selects exactly one source, a Task (`-t`) or a Benchmark (`-b`), and
-exactly one way to act: a catalog model (`-m`) or a saved Agent (`-a`).
+`plural run` answers two questions: *what* to run and *who* runs it. Pick exactly
+one of each:
+
+- **What:** one Task (`-t`) or a whole Benchmark (`-b`).
+- **Who:** a catalog model (`-m`) or a saved Agent (`-a`).
 
 ```bash
 plural run -t ticket-1 -m openai/gpt-5.6-luna
@@ -62,29 +101,43 @@ plural run -b support-triage -a careful
 plural run -b support-triage -m openai/gpt-5.6-luna -h codex
 ```
 
-Add `@version` to a Task, Benchmark, or Agent to run that exact pushed version,
-such as `plural run -b support-triage@1.0.0 -a careful`, even after your files
-have moved on; see [Calling a version by name](../project/updating.md#calling-a-version-by-name).
-
-`-m` without `-h` uses `native`, Plural's built-in tool loop. `-h` names a
-Harness in `harnesses/` or a built-in one such as `codex` or `claude-code`. Add
-`--dry-run` to validate the inputs and print the plan, including the version
-and content hash of every input, without running anything. `--attempts N` plans
-N independent Trials per Task and defaults to 1. `--concurrency N` (or `-n N`)
-runs up to N Trials at once and defaults to `auto`, which sizes it from this
-machine, the Runtime, and where the model runs; see
-[Attempts and concurrency](../guides/jobs.md#attempts-and-concurrency).
-`--plural-version` selects the Plural installed in Docker and remote sandboxes;
-see [Plural inside Docker and remote sandboxes](../guides/jobs.md#plural-inside-docker-and-remote-sandboxes).
-
 Every run is a new Job. A local run executes on this machine and records the Job
-under `.plural/jobs/<job-id>/` in the project. A run that calls a live model sends
-every call through the Plural gateway, so it needs a Plural API key:
-`plural auth login --api-key-stdin` or `PLURAL_API_KEY`. A browser login is enough for hosted
-commands, but the model gateway does not accept it. `--dry-run` needs none, and
-neither does an Agent with `auth_mode: none`.
+under `.plural/jobs/<job-id>/` in the project.
+
+A run that calls a live model sends every call through the Plural gateway, so it
+needs a Plural API key: `plural auth login --api-key-stdin` or `PLURAL_API_KEY`. A
+browser login is enough for hosted commands, but the model gateway does not accept
+it. `--dry-run` needs no key, and neither does an Agent with `auth_mode: none`.
+
+### Run options
+
+These options change what a run does. Most people only reach for `--dry-run` and
+`--attempts`.
+
+- **`-h HARNESS`** picks the Harness, the loop that decides what the model does next.
+  `-m` without `-h` uses `native`, Plural's built-in tool loop. `-h` names a Harness
+  in `harnesses/` or a built-in one such as `codex` or `claude-code`.
+- **`--dry-run`** validates the inputs and prints the plan, including the version and
+  content hash of every input, without running anything.
+- **`--attempts N`** plans N independent Trials per Task. It defaults to 1.
+- **`--concurrency N`** (or `-n N`) runs up to N Trials at once. It defaults to
+  `auto`, which sizes it from this machine, the Runtime, and where the model runs;
+  see [Attempts and concurrency](../guides/jobs.md#attempts-and-concurrency).
+- **`--plural-version`** selects the Plural installed in Docker and remote sandboxes:
+  a version, or `latest`. By default it is this CLI's own code; see
+  [Plural inside Docker and remote sandboxes](../guides/jobs.md#plural-inside-docker-and-remote-sandboxes).
+- **`--hosted`**, **`--follow`**, and **`--track`** decide where the run happens and
+  where it is recorded; see [Hosted projects](#hosted-projects).
+
+Add `@version` to a Task, Benchmark, or Agent to run that exact pushed version, such
+as `plural run -b support-triage@1.0.0 -a careful`, even after your files have moved
+on. The version is restored under `.plural/versions` without touching your files; see
+[Calling a version by name](../project/updating.md#calling-a-version-by-name).
 
 ## Jobs, Trials, and reviews
+
+After a run, these commands let you look back at what happened, run it again, or add
+a human's score.
 
 ```bash
 plural job list
@@ -97,16 +150,24 @@ plural review submit TRIAL_ID --verifier policy-review --score 2 \
   --feedback "Meets policy."
 ```
 
-`job list` shows local and hosted Jobs, labeled by where they ran. `job show` and
-`trial show` look for a local record first and then ask the hosted project.
-`job rerun` runs a Job again with the exact pinned inputs it used and creates a
-new Job linked to the original. `trial rerun` runs one Trial again as a new
-one-Trial Job. `review list` shows Trials waiting for a HumanVerifier score, and
-`review submit` records one; add `--hosted` to either for hosted review
-assignments. Submissions are append-only. See [Jobs](../running/jobs.md) and
-[Reviews](../running/reviews.md).
+- `job list` shows local and hosted Jobs, newest first, labeled by where they ran.
+- `job show` and `trial show` look for a local record first and then ask the hosted
+  project. `trial show` includes the Verifier's evidence and the Trial's artifacts.
+  Add `--follow` to either to stream progress until it finishes.
+- `job rerun` runs a Job again with the exact pinned inputs it used and creates a new
+  Job linked to the original. `trial rerun` runs one Trial again as a new one-Trial
+  Job. Add `--track` to either to record a local rerun in the hosted project as it
+  runs.
+- `review list` shows Trials waiting for a HumanVerifier score, and `review submit`
+  records one. Use one `--score criterion=value` per rubric criterion, or a bare value
+  for a one-criterion rubric. Add `--hosted` to either for hosted review assignments.
+  Submissions are append-only.
+
+See [Jobs](../running/jobs.md) and [Reviews](../running/reviews.md).
 
 ## Models
+
+To see which models you can run, list them:
 
 ```bash
 plural models list
@@ -114,17 +175,20 @@ plural models list --provider openai
 plural models list --all
 ```
 
-Signed in to an organization, `plural models list` shows the models your
-organization offers: its own endpoints and private models, and any an admin has
-explicitly allowed. `--all` shows the whole catalog and marks models your
-organization does not permit, which the hosted service refuses on runs and
-gateway calls. Outside an organization, and signed out, it shows the whole
-catalog.
+Outside an organization, and when you are signed out, it shows the whole catalog.
+`--provider` narrows the list to one provider.
+
+Signed in to an organization, `plural models list` shows the models your organization
+offers: its own endpoints and private models, and any an admin has explicitly
+allowed. `--all` shows the whole catalog and marks models your organization does not
+permit, which the hosted service refuses on runs and gateway calls. The same list,
+with prices, is in the model Catalog in the web app.
 
 ## Hosted projects
 
-Local runs need no hosted project. To share resources with your team or run on
-hosted infrastructure, sign in and push:
+Local runs need no hosted project. A hosted project is a private copy of your project
+on Plural, which lets your team share resources and lets Plural's infrastructure run
+Jobs for you. To use one, sign in and push:
 
 ```bash
 plural auth login
@@ -134,36 +198,63 @@ plural agent push careful
 plural run -b support-triage -a careful --hosted --follow
 ```
 
-`plural project init --push` creates the hosted project. If that name already
-exists, pass `--connect` to bind to it or `--name` to create a different one.
-`plural project push` then uploads every local resource. The hosted project is
-private. The command records the binding in `.plural/project.json` and selects
-the project as your scope. A push creates an immutable, private revision that is
-usable in that project immediately; pushing never makes anything public, and
-sharing is a separate action in the Plural web app. A push validates first,
-uploads nothing unless the whole push can succeed, and refuses files that look
-like credentials, such as `.env` or private keys. `--hosted` requires every
-input of the run to be pushed already with identical content, and `--follow`
-streams hosted progress until the Job finishes. See
+> **Good to know:** Pushing never makes anything public. The hosted project is
+> private, and sharing is a separate action in the Plural web app.
+
+`plural project init --push` creates the hosted project. If that name already exists,
+pass `--connect` to bind to it or `--name` to create a different one. The command
+records the binding in `.plural/project.json` and selects the project as your scope.
+`plural project push` then uploads every local resource.
+
+A push creates an immutable, private revision that is usable in that project
+immediately. A push validates first, uploads nothing unless the whole push can
+succeed, and refuses files that look like credentials, such as `.env` or private
+keys. `project push` refuses a resource whose files changed while its version did
+not, until you bump the version or pass `--bump`. See
 [Push and pull resources](../guides/studio-sync.md).
 
-A run on this machine can be recorded in the hosted project too, without
-hosted infrastructure running it:
+`--hosted` runs the Job on hosted infrastructure, and `--follow` streams hosted
+progress until the Job finishes. Before submitting, `--hosted` pushes any input of
+the run that the hosted project does not hold yet. An input whose files changed while
+its version stayed the same gets the next patch version, as `project push --bump`
+does, and an input someone else changed in the hosted project since you last synced
+stops the push before anything is uploaded.
+
+A run on this machine can be recorded in the hosted project too, without hosted
+infrastructure running it:
 
 ```bash
 plural run -b support-triage -a careful --track
 plural job push JOB_ID
 ```
 
-`--track` records the Job while it runs; `job push` records one that already
-finished. Both need the same pushed inputs as `--hosted` and produce the same
-hosted Job, so pushing a tracked Job again adds nothing. The Environment's
-Runtime still decides where Trials execute, so a tracked run against a Daytona
-Environment runs remotely. See [Jobs](../running/jobs.md#local-tracked-and-hosted).
+`--track` records the Job while it runs, and pushes missing inputs first the same way
+`--hosted` does. `job push` records a local Job that already finished; it pins the
+revisions that Job ran, so push those first. Both produce the same hosted Job, so
+pushing a tracked Job again uploads only what the hosted Job does not hold yet. The
+Environment's Runtime still decides where Trials execute, so a tracked run against a
+Daytona Environment runs remotely. See
+[Jobs](../running/jobs.md#local-tracked-and-hosted).
 
-`plural auth status` shows which credential is in use, a browser login or an API
-key, and the current scope. `plural auth scope` shows or changes where hosted
-commands go:
+### Sign-in and scope
+
+There are two ways to sign in. A browser login acts as you, and is enough for hosted
+commands. An API key is what model calls need:
+
+```bash
+plural auth login
+plural auth login --api-key-stdin
+plural auth login --from-env
+plural auth status
+```
+
+`--api-key-stdin` reads the key from standard input, `--from-env` stores
+`PLURAL_API_KEY` from your environment without printing it, and `--env-file PATH`
+reads `PLURAL_API_KEY` from a file. `plural auth logout` revokes and removes the
+stored credential. `plural auth status` shows which credential is in use, a browser
+login or an API key, and the current scope.
+
+`plural auth scope` shows or changes where hosted commands go:
 
 ```bash
 plural auth scope
@@ -172,15 +263,28 @@ plural auth scope .
 plural auth scope --org acme
 ```
 
-`-p` selects an existing hosted project, `.` or `--account` selects account
-scope, and `--org` switches between organization accounts (`personal` selects
-your own). A new scope is checked with the service before it is saved; if the
-check fails, the previous scope stays in place. Scope selects a destination and
-never changes what your credential may do. An API key limited to one project
-can only reach that project. Credentials are stored in your OS keyring or a
-private file in your user config directory, never in the project.
+`-p` selects an existing hosted project, `.` or `--account` selects account scope, and
+`--org` switches between organization accounts (`personal` selects your own). A new
+scope is checked with the service before it is saved; if the check fails, the
+previous scope stays in place.
+
+Scope selects a destination and never changes what your credential may do. An API key
+limited to one project can only reach that project. Credentials are stored in your OS
+keyring or a private file in your user config directory, never in the project.
+
+## Portable sessions
+
+`plural session export` bundles an Agent's session, from a hosted Trial
+(`--trial TRIAL_ID`) or from local files (`--agent`, `--environment`, `--state`), into a
+directory you can move elsewhere. `plural session import BUNDLE` redeploys that bundle
+as a separate instance directory. The reference below lists every option.
 
 ## Command reference
+
+The rest of this page is for power users and scripts: the full help text of every
+command and option, exactly as the CLI prints it. Two commands are listed but
+reserved for later, and print that they are not available yet: `plural agent serve`
+and `plural trial rescore`.
 
 <!-- generated-cli-reference -->
 This section is generated from the Typer application. Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.

@@ -8,17 +8,24 @@ nav: false
 ---
 # Benchmark publications
 
-This document is the contract for publishing a Benchmark release with results.
+Publishing a Benchmark is how you share an exam and its leaderboard with the world.
+Until you publish, everything stays private to your project. When you do, others can
+see which models did well on which Tasks, and exactly which evidence those results
+came from, without seeing the private material behind the Tasks.
+
+This page is for maintainers. It is the contract for publishing a Benchmark release
+with results. For the author-facing guide, see
+[Benchmarks](../project/benchmarks.md#publish-a-release-with-results).
+
 The SDK defines the release rules (`plural.benchmarks.rules`), result
 aggregation (`plural.benchmarks.results`), and the public manifest
 (`plural.benchmarks.publication`). The hosted service persists them and serves
-the public pages. For the author-facing guide, see
-[Benchmarks](../project/benchmarks.md#publish-a-release-with-results).
+the public pages.
 
 Publication is the only way a Benchmark release or its results become public.
 Pushing a Benchmark, or running it, keeps everything private to its project.
 A publisher publishes explicitly in the web app, after a preview of exactly what
-becomes public, and no CLI command publishes.
+becomes public. No CLI command publishes.
 
 ## Identity
 
@@ -57,8 +64,8 @@ A configuration that falls back to another model, or reports calling more than
 one model, is a system. It can rank on an Agents track. A Models track rejects
 a configured fallback when the Job is created, and marks an entry not ranked
 when its attempts reported calling another model, so a multi-model score is
-never credited to one model. Configured
-and actually-called models are both recorded (`trials.usage.models_used`).
+never credited to one model. Configured and actually-called models are both
+recorded (`trials.usage.models_used`).
 
 ## Provenance
 

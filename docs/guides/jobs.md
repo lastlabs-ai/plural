@@ -2,18 +2,24 @@
 route: /docs/guides/jobs
 title: Build and run a job
 order: 270
-description: Start with the complete CLI walkthrough to create the files used here, configure model credentials, and grant the harness secret. Add a verifier before treating a job as a scored evaluation. This page covers operations after your first run.
+description: "After your first run: check a Job before it starts, choose where its Trials run, size how many run at once, record it in your hosted project, and rerun or review it."
 audience: all
 nav: false
 ---
 # Build and run a job
 
-Start with the [complete CLI walkthrough](../tutorials/cli-walkthrough.md) to
-create the files used here, configure model credentials, and grant the harness
-secret. Add a [verifier](../project/verifiers.md) before treating a job as
-a scored evaluation. This page covers operations after your first run.
+This guide picks up after your first run. It covers checking a Job before it
+starts, choosing where its Trials run (on your machine, in Docker, or in a remote
+sandbox), how many run at once, and how to record, rerun, and review Jobs.
+
+If you haven't run anything yet, start with the
+[complete CLI walkthrough](../tutorials/cli-walkthrough.md). It creates the files
+used here, configures model credentials, and grants the Harness its secret. Add a
+[Verifier](../project/verifiers.md) before treating a Job as a scored evaluation.
 
 ## Validate and preview
+
+Check everything before spending anything:
 
 ```bash
 plural env validate support-queue
@@ -41,16 +47,20 @@ in the project, with a `run.json` that pins the version and content hash of ever
 input. Before running, Plural copies each input's source into `.plural/packages/`,
 so later edits to your working files do not change what a recorded Job used.
 
-The `local` Runtime provider is a trusted subprocess, not a sandbox. It runs
-resource code as child processes under your user account and cannot enforce network, resource, or
-filesystem boundaries, or a read-only root. An Environment selects it with
-`provider: local` under `runtime:` in its `environment.yaml`. Verifiers declare
-their Runtime independently.
+Where a Trial runs is decided by its Environment, not by the command. An
+Environment picks a Runtime with `provider:` under `runtime:` in its
+`environment.yaml`. Verifiers declare their Runtime independently.
+
+> **Good to know:** The `local` Runtime provider is a trusted subprocess, not a
+> sandbox. It runs resource code as child processes under your user account and
+> cannot enforce network, resource, or filesystem boundaries, or a read-only root.
+> Use it only for code you trust.
 
 ## Docker
 
-Install Docker and make sure the daemon is healthy. Then set `provider: docker`
-in the Environment's `runtime:` and run as usual:
+Docker runs each Trial in a sealed container on your machine. Install Docker and
+make sure the daemon is healthy. Then set `provider: docker` in the Environment's
+`runtime:` and run as usual:
 
 ```bash
 plural run -b support-triage -a careful --concurrency 4
@@ -60,16 +70,21 @@ Without `image`, the `docker` preset uses `python:3.12-slim`. Set `runtime.image
 to a pinned image reference, or set `dockerfile` (and optionally `build_context`,
 which defaults to the Environment directory) to build one. Container, network,
 and compute settings live on the Environment; the Job does not override them.
-`network: no-network` is the strongest Docker network policy; Docker does not
-enforce an `allowlist` of hosts. Docker supports CPU, memory, and process-count
-limits, not per-container disk limits. Plural records the image ID in the
-receipt.
+
+- `network: no-network` is the strongest Docker network policy. Docker does not
+  enforce an `allowlist` of hosts.
+- Docker supports CPU, memory, and process-count limits, not per-container disk
+  limits.
+- Plural records the image ID in the receipt.
 
 The Docker daemon is a privileged trust boundary. A hardened container reduces
 what the code inside can do, but it does not make an untrusted daemon or host
 safe.
 
 ## Daytona
+
+Daytona runs each Trial in a remote sandbox, so nothing heavy runs on your
+machine.
 
 ```bash
 pip install "plural[daytona]"
@@ -93,7 +108,7 @@ plural run -b support-triage -a careful --attempts 3 --concurrency 8
 `--attempts` plans independent Trials per Task, and `--concurrency` (or `-n`)
 bounds how many run at once. Ten Tasks with three attempts plan thirty Trials. A
 run uses one Agent or model; to compare several, run each one and compare the
-Jobs. Retry policy may append executions to a Trial but does not add Trials.
+Jobs. Retry policy may add executions to a Trial but does not add Trials.
 
 `--concurrency` defaults to `auto`, which sizes it before the run and prints the
 number and the reason:
@@ -171,8 +186,9 @@ that server to an address the Docker bridge can reach, not only `127.0.0.1`.
 
 ## Record a Job in the hosted project
 
-A local Job stays on this machine until you push it. First bind the checkout
-and push its resources:
+A local Job stays on this machine until you push it. Recording it in your private
+hosted project lets your team see it in the web app under Jobs. First bind the
+checkout and push its resources:
 
 ```bash
 plural project init support-eval --push
@@ -205,11 +221,13 @@ remote sandboxes while this machine orchestrates and records them.
 plural run -b support-triage -a careful --hosted --follow
 ```
 
-`--hosted` submits the Job for hosted infrastructure to run, using revisions you
-have already pushed, and refuses to start when any input differs from its pushed
-revision. `--follow` streams progress until the Job finishes; without it, the
-command returns once the Job is submitted, and `plural job show JOB_ID --follow`
-reconnects later. See [Push and pull resources](studio-sync.md).
+`--hosted` submits the Job for hosted infrastructure to run, using pushed
+revisions. It first pushes any input the hosted project lacks, as `--track` does,
+and stops before uploading anything if someone changed a resource in the hosted
+project since this checkout last synced it. `--follow` streams progress until the
+Job finishes; without it, the command returns once the Job is submitted, and
+`plural job show JOB_ID --follow` reconnects later. See
+[Push and pull resources](studio-sync.md#run-pushed-resources).
 
 ## Inspect, rerun, and review
 
@@ -232,7 +250,8 @@ Each Job's `events.jsonl` is an append-only record of planning, provisioning,
 execution, verification, retries, human review, and the final status. A retry is
 a new execution inside the same Trial, not a new attempt. From Python,
 `job.run(resume=True)` keeps the Trials that already succeeded. A review
-submission completes only a Trial that is waiting at `awaiting_review`.
+submission completes only a Trial that is waiting at `awaiting_review`; see
+[Reviews](../running/reviews.md).
 
 Runnable offline Python examples are in
 [`examples/jobs`](https://github.com/lastlabs-ai/plural/tree/main/examples/jobs).

@@ -2,20 +2,27 @@
 route: /docs/running/sessions
 title: Sessions
 order: 86
-description: Stop an agent instance and redeploy it later from a portable session bundle.
+description: Save where an Agent left off as a portable folder, then pick it up again later as a separate copy, with a record of the run it came from.
 audience: all
 nav: true
 nav_group: Run
 ---
 # Sessions
 
-A session snapshot captures everything needed to stop an agent instance and
-redeploy it later as a separate instance: the agent revision, the environment
-revision, the accumulated environment state, data references, and provenance
-pointing back at the source job or trial.
+A **session** is a saved snapshot of an Agent at work: which Agent it was, which
+world it was in, and how that world looked when you stopped. Think of it as saving
+a game. You can stop an Agent instance and later start a fresh copy exactly where
+it left off.
 
-Snapshots are plain directory bundles, so you can read and diff them with
-ordinary tools.
+A session snapshot captures everything needed to redeploy it later as a separate
+instance: the Agent revision, the Environment revision, the accumulated
+Environment State, data references, and provenance pointing back at the Job or
+Trial it came from.
+
+## What a session looks like
+
+A snapshot is an ordinary folder, so you can read it and compare two of them with
+everyday tools:
 
 ```text
 support-session/
@@ -32,22 +39,22 @@ files.
 
 ## Export from a hosted trial
 
-Snapshot the agent, environment, and latest state of a finished hosted trial.
-This needs `plural auth login` and the trial's project selected with
-`plural auth scope --project <name>`. The state is the state recorded by the
-trial's newest trace, or an empty object when no trace recorded one.
+Save the Agent, Environment, and latest State of a finished hosted Trial. This
+needs `plural auth login` and the Trial's project selected with
+`plural auth scope --project <name>`.
 
 ```bash
 plural session export --trial <trial-id> --out sessions/support
 ```
 
-The bundle manifest records the source job and trial ids, the export time,
-and the package version, so you can always trace a redeployed instance back
-to the run it came from.
+The State is the one recorded by the Trial's newest trace, or an empty object
+when no trace recorded one. The bundle's manifest records the source Job and
+Trial IDs, the export time, and the package version, so you can always trace a
+redeployed instance back to the run it came from.
 
 ## Export from local files
 
-Bundle definitions you already have on disk, such as the manifests in your
+You can also bundle files you already have on disk, such as the manifests in your
 project. `--data` records a data reference by name without copying it; pass
 `--data-dir` to copy a directory into the bundle's `data/` folder.
 
@@ -64,16 +71,19 @@ plural session export \
 
 ## Redeploy as a separate instance
 
-Import copies the bundle to a new timestamped instance directory, such as
+Importing makes a new copy to work from. It copies the bundle to a new timestamped
+instance folder, such as
 `sessions/instances/support-session-20260923-202646/`, and records the import in
-`instance.json`. The original bundle is never modified, so each
-import is a distinct instance you can start, stop, and diff independently.
+`instance.json`. The original bundle is never modified, so each import is a
+distinct instance you can start, stop, and compare independently.
 
 ```bash
 plural session import sessions/support --dest sessions/instances
 ```
 
 ## Python API
+
+The same operations are available from Python:
 
 ```python
 from plural import SessionSnapshot

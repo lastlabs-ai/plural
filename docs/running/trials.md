@@ -2,18 +2,26 @@
 route: /docs/running/trials
 title: Trials and trajectories
 order: 85
-description: Understand Trial identity, independent attempts, retry executions, normalized trajectories, status, and inspection.
+description: One Trial is one Agent's attempt at one Task. See how it went, step by step, what it cost, why it stopped, and why it scored what it did.
 audience: all
 nav: true
 nav_group: Run
 ---
 # Trials and trajectories
 
-A Trial is one Agent completing one Task once. For example, two Agents evaluated on three Tasks create six Trials. A second planned attempt doubles that to twelve.
+A **Trial** is one attempt: one Agent, one Task, one try. In Wordle, it is one
+contestant playing one game once. Every Trial keeps a full record of that attempt,
+so you can see what the Agent did, what it cost, why it stopped, and why it scored
+what it did.
 
-A Trial’s ID is stable across
-Runtime retries. A Trial execution is one actual attempt to run that Trial and
-uses a zero-based `execution_id`.
+Trials add up fast. Two Agents evaluated on three Tasks create six Trials. A second
+planned attempt doubles that to twelve.
+
+## Attempts and executions
+
+Sometimes an attempt fails for a reason that has nothing to do with the Agent, such
+as the model provider timing out. Plural can retry it. The retry is another
+**execution** of the same Trial, not a new Trial:
 
 ```text
 Job
@@ -22,13 +30,13 @@ Job
     └── execution 1  succeeded and selected
 ```
 
-This distinction prevents a transient provider failure from being counted as a
-new statistical sample.
+This keeps your results honest: a passing provider failure is never counted as an
+extra sample. A Trial's ID stays the same across retries, and executions are
+numbered from zero with an `execution_id`.
 
 ## Status and inspection
 
-Trials move through planned, queued, provisioning, running, verifying,
-awaiting_review, and terminal states. Inspect them with:
+To see how a run went, start with the Job, then open one Trial:
 
 ```bash
 plural job show JOB_ID
@@ -39,20 +47,74 @@ plural trial show TRIAL_ID --follow
 `plural job show` lists each Trial's Task, status, and score. `plural trial show`
 prints one Trial's result, each Verifier's score and feedback, and the paths of
 its artifacts and logs. Both look for a local record first and then ask the
-hosted project. `--follow` streams progress until the Trial finishes.
+hosted project. `--follow` streams progress until the Trial finishes. For a
+tracked or hosted Job, you can see the same Trials in the web app under Jobs.
+
+A Trial moves through these states: planned, queued, provisioning, running,
+verifying, awaiting_review, and then a terminal state. It waits in
+`awaiting_review` only when a person needs to grade it; see [Reviews](reviews.md).
 
 Progress events are append-only status updates, written to the Job's
 `events.jsonl`. They carry status changes, not model inputs or outputs, and are
 for monitoring, not a replacement for the receipt and artifacts.
 
+## Interpret results
+
+A low score can mean the Agent did poor work, or that the run itself broke. Check
+them separately, in this order:
+
+1. Confirm the execution succeeded and the expected artifacts exist.
+2. Confirm the receipt's pins and the model endpoint that actually ran.
+3. Read the actions, tool errors, observations, and stop reason.
+4. Read each Verifier's score, criterion scores, evidence, and feedback.
+5. Compare score, cost, and latency only across compatible Benchmark pins.
+
+`plural trial rerun TRIAL_ID` runs one Trial again with its pinned inputs as a
+new one-Trial Job. Rerunning a stochastic model creates new behavior. Stored
+trajectories support inspection and import; they do not promise deterministic
+replay.
+
+## How the episode ended
+
+Alongside the score, each Trial records why the attempt stopped. Did the game end,
+did the Agent decide it was done, or did it run out of turns, time, or money? That
+is the `stop_reason`. Read it before concluding an Agent failed the work: a
+truncated Trial still has a trajectory and Verifier results, but it may have
+been cut short.
+
+`stop_reason` takes one of the values in `plural.STOP_REASONS`:
+
+| Value | Meaning |
+| --- | --- |
+| `environment_terminated` | The world declared the Task over. |
+| `environment_truncated` | The world could not continue. |
+| `agent_finished`, `agent_response` | The Agent chose to stop. |
+| `max_turns`, `max_seconds`, `max_cost` | A budget cut the run short. |
+| `error` | The run failed. |
+
+The Trial also records whether the Environment `terminated` or `truncated` the
+run, and the total per-step reward, which a hosted Trial shows as
+`step_reward_total`. The reward total is recorded for training and never
+contributes to the score. See
+[How an episode ends](../project/environments.md#how-an-episode-ends).
+
+Plural's native loop always reports these values. A custom Harness reports them
+by returning `HarnessResult(metadata={"stop_reason": ..., "terminated": ...,
+"truncated": ..., "turns": ..., "total_reward": ...})`; without them, its Trials
+have no stop reason, and a value not in `plural.STOP_REASONS` is treated as
+unreported.
+
 ## Trajectories
 
-A trajectory records behavior such as messages, reasoning when supplied,
-actions, tool results, observations, per-step rewards, cost, and timing.
+A **trajectory** is the step-by-step story of an attempt: the messages, reasoning
+when the model supplies it, the actions, tool results, observations, per-step
+rewards, cost, and timing. It is where you look to understand *why* a Trial scored
+what it did.
+
 Harnesses may emit different native formats. Plural preserves the original and
 derives `trajectory.json`, an ATIF document of the Agent's turns, from the
 [episode record](#the-episode-record). `normalize_trajectory` reads any of these
-formats into one event list.
+formats into one event list:
 
 ```python
 from pathlib import Path
@@ -69,11 +131,13 @@ upload local files.
 
 ## The episode record
 
+This section and the ones after it are for readers who want the exact record
+formats.
+
 When a Harness runs through `HarnessAgent` and `HarnessEnvironment`, Plural
 itself records the episode in `episode.jsonl`, whatever the Harness writes. Each
-line is one record with `schema: "plural.episode/v1"`, a `sequence` that orders
-the episode, a `turn`, `started_at`, `ended_at`, and `duration_ms`. There are
-three kinds:
+line is one record with a `schema` field, a `sequence` that orders the episode, a
+`turn`, `started_at`, `ended_at`, and `duration_ms`. There are three kinds:
 
 - `environment.reset` has the first `observation`, `info`, and `view`.
 - `environment.step` has the `action` and its `arguments`, the `observation`
@@ -84,9 +148,9 @@ three kinds:
   messages that are new since the previous call are stored; `messages_offset`
   gives their position in the full request.
 
-A model call opens a turn, and the steps it causes belong to that turn. A
-Harness that never calls a model gets one turn per step. A failed call or step
-is recorded with its `error`.
+The `schema` value is `"plural.episode/v1"`. A model call opens a turn, and the
+steps it causes belong to that turn. A Harness that never calls a model gets one
+turn per step. A failed call or step is recorded with its `error`.
 
 Of a step's fields, only the observation went to the Harness and therefore
 possibly to the model. The reward, the episode flags, `info`, and the view are
@@ -134,40 +198,3 @@ Publishing is idempotent: running it again records nothing new, including for
 executions a `HostedTracker` already reported while the Job ran. It refuses an
 execution whose Environment or Verifier content hash differs from the hosted
 pins.
-
-## How the episode ended
-
-Alongside the score, each Trial records why the episode stopped: a
-`stop_reason`, whether the Environment `terminated` or `truncated` the run, and
-the total per-step reward, which a hosted Trial shows as `step_reward_total`.
-The reward total is recorded for training and never contributes to the score. A
-truncated Trial still has a trajectory and Verifier results, so read the stop
-reason before concluding an agent failed the work.
-
-`stop_reason` takes one of the values in `plural.STOP_REASONS`. It distinguishes
-a world that declared the Task over (`environment_terminated`) or could not
-continue (`environment_truncated`), an agent that chose to stop
-(`agent_finished`, `agent_response`), a budget that cut the run short
-(`max_turns`, `max_seconds`, `max_cost`), and a run that failed (`error`). See
-[How an episode ends](../project/environments.md#how-an-episode-ends).
-
-Plural's native loop always reports these values. A custom Harness reports them
-by returning `HarnessResult(metadata={"stop_reason": ..., "terminated": ...,
-"truncated": ..., "turns": ..., "total_reward": ...})`; without them, its Trials
-have no stop reason, and a value not in `plural.STOP_REASONS` is treated as
-unreported.
-
-## Interpret results
-
-Separate execution completeness from quality:
-
-1. Confirm the execution succeeded and the expected artifacts exist.
-2. Confirm receipt pins and actual model endpoint.
-3. Read actions, tool errors, observations, and stop reason.
-4. Read each Verifier's score, criterion scores, evidence, and feedback.
-5. Compare score, cost, and latency only across compatible Benchmark pins.
-
-`plural trial rerun TRIAL_ID` runs one Trial again with its pinned inputs as a
-new one-Trial Job. Rerunning a stochastic model creates new behavior. Stored
-trajectories support inspection and import; they do not promise deterministic
-replay.

@@ -8,10 +8,15 @@ nav: false
 ---
 # Evaluation contract
 
-This document is the implementation contract for Plural's evaluation foundation.
-The Python SDK defines the semantics. A project stores each resource as a
-directory with a YAML manifest, and the CLI loads, validates, pushes, and runs
-those same objects.
+Plural promises that the same experiment means the same thing everywhere: whether you
+write it in Python, keep it as files in a project folder, or run it from the command
+line, you get the same resources, the same validation, and the same planned run,
+pinned to the same versions. This page spells out that promise in detail.
+
+This page is for maintainers. It is the implementation contract for Plural's
+evaluation foundation. The Python SDK defines the semantics. A project stores each
+resource as a directory with a YAML manifest, and the CLI loads, validates, pushes,
+and runs those same objects.
 
 ## Product boundary
 
@@ -169,8 +174,8 @@ result = Job(benchmark, agents=[agent]).run()
 
 The equivalent project directories use the same field names and values. An
 Agent with no Harness uses `native`; a custom Harness is one additional value on
-the Agent. Advanced runtime, routing, hosted, and
-training options are introduced only when needed.
+the Agent. Advanced runtime, routing, hosted, and training options are introduced
+only when needed.
 
 ## Implementation rules
 

@@ -2,18 +2,26 @@
 route: /docs/guides/studio-sync
 title: "Push and pull resources"
 order: 300
-description: "Push project resources to a private hosted project as immutable revisions, pull them back, and keep plural.lock in step."
+description: "Share your project with your team by pushing it to a private hosted project as saved revisions, pull revisions back, and keep plural.lock in step."
 audience: all
 nav: false
 ---
 # Push and pull resources
 
-A project lives on your machine. Pushing a resource makes an immutable revision of
-it usable in a private hosted project, where your team can run it. Pulling
-restores a revision's editable files into a checkout. Nothing needs to be pushed
-to run locally.
+Your project lives on your computer. **Pushing** a resource, such as a Task or an
+Agent, saves an unchangeable snapshot of it, called a **revision**, in your private
+hosted project, where your team can see it and run it. **Pulling** brings a
+revision's editable files back into a checkout.
+
+You never need to push anything to run locally. Push when you want Plural to run
+Jobs for you, or when you want your team to see your work in the web app.
+
+> **Good to know:** Pushing never makes anything public. Sharing a Benchmark on the
+> public Hub is a separate, explicit step.
 
 ## Bind a checkout to a hosted project
+
+First, connect this folder to a hosted project:
 
 ```bash
 plural auth login
@@ -45,27 +53,35 @@ plural agent push careful
 
 `plural project push` pushes every local resource, dependencies first. It prints
 the plan and asks before uploading; `--yes` skips the question. Unchanged
-content reuses the existing revision. A resource whose files changed under the
-same `version` is refused; `--bump` gives each of those the next patch version
-and pushes a new revision. Old revisions stay, so earlier Jobs still point at
-what they ran. Hosted resources that are not in this checkout are left as they
-are. Push refuses when the hosted project has a newer revision this checkout
-has not pulled, unless you pass `--force`.
+content reuses the existing revision. Old revisions stay, so earlier Jobs still
+point at what they ran. Hosted resources that are not in this checkout are left
+as they are.
 
-A push validates the resource and plans the whole dependency graph before it
-writes anything. If a dependency is not pushed yet or has changed locally, the
-push stops with nothing uploaded. `--with-deps` pushes those dependencies too,
-dependencies first, so a revision is never saved pointing at one that is missing.
+A few rules keep revisions trustworthy:
+
+- **Changed files need a new version.** A resource whose files changed under the
+  same `version` is refused. `--bump` gives each of those the next patch version
+  and pushes a new revision.
+- **Someone else's newer work is protected.** Push refuses when the hosted project
+  has a newer revision this checkout has not pulled, unless you pass `--force`.
+- **Dependencies come first.** A push validates the resource and plans the whole
+  dependency graph before it writes anything. If a dependency is not pushed yet
+  or has changed locally, the push stops with nothing uploaded. `--with-deps`
+  pushes those dependencies too, dependencies first, so a revision is never saved
+  pointing at one that is missing.
+
+A pushed revision is usable in its private project immediately. Sharing a
+Benchmark on the public Hub is described in
+[Benchmark publications](../architecture/benchmark-publications.md).
+
+### How revisions are identified
 
 A revision is identified by its version and content hash, which the CLI and the
 service compute the same way. Pushing unchanged content reuses the existing
 revision instead of creating a duplicate. Pushing different content under a
 version that already exists is refused; bump `version:` in the manifest first.
 Pushing the same content under a new version is refused too, and the error
-names the version that already holds it. A pushed revision is usable in its private project immediately. Pushing
-never makes anything public; sharing a Benchmark on the public Hub is a separate,
-explicit step described in
-[Benchmark publications](../architecture/benchmark-publications.md).
+names the version that already holds it.
 
 ## Packages
 
@@ -90,8 +106,8 @@ with `#` are comments. Entries match exact file paths only: patterns such as
 ## The lock file
 
 `plural.lock` records, for every pushed resource, its version, content hash,
-package digest, dependencies, and hosted resource and revision ids, together with
-the hosted project those ids belong to. Commit it. Plural writes it after each
+package digest, dependencies, and hosted resource and revision IDs, together with
+the hosted project those IDs belong to. Commit it. Plural writes it after each
 push and pull; do not edit it by hand. Entries recorded for another hosted
 project are never used as dependency pins.
 
@@ -104,24 +120,28 @@ plural benchmark pull support-triage --version 1.2.0 --with-deps
 
 A pull restores the current revision, or the one named by `--version`, along
 with any dependency this project does not have yet. `--with-deps` also replaces
-dependencies you already have with the exact revisions it pins. Local files
-that differ from the revision are never overwritten silently: the pull stops,
-changes nothing, and names the directory. Commit or move your edits, or pass
-`--force` to replace the directory; the previous copy is kept under
-`.plural/backups/`.
+dependencies you already have with the exact revisions it pins.
+
+Your edits are never overwritten silently. If local files differ from the
+revision, the pull stops, changes nothing, and names the directory. Commit or
+move your edits, or pass `--force` to replace the directory; the previous copy is
+kept under `.plural/backups/`.
 
 `plural run` pulls the Task, Benchmark, or Agent it names when only the hosted
 project has it, so `plural run -t ui-task -m openai/gpt-5.6-luna` works on a Task
 created in the web app without a separate pull.
+
+### Revisions without a source package
 
 Revisions created in the web app, or pushed before Plural 0.15, have no source
 package. A Task, Agent, or Benchmark is only data, so a pull writes its manifest
 and instructions from the stored definition. The directory is the hosted slug,
 such as `tasks/ui-task/`, and `title:` keeps the display name, such as `UI Task`,
 so the pulled files match the hosted revision exactly. To rename it later, change
-`title:` and bump `version:`; the push renames the hosted resource. An Environment, Verifier, or
-Harness carries code and still cannot be pulled without a package; push it again
-from its source directory. See [Migrate to 0.15](../migration/projects.md).
+`title:` and bump `version:`; the push renames the hosted resource. An
+Environment, Verifier, or Harness carries code and still cannot be pulled without
+a package; push it again from its source directory. See
+[Migrate to 0.15](../migration/projects.md).
 
 ## Run pushed resources
 
@@ -131,16 +151,19 @@ plural job push JOB_ID
 plural run -b support-triage -a careful --hosted --follow
 ```
 
-`--track` runs here and records the Job in the hosted project as it runs.
-`job push` records a local Job that already finished. `--hosted` submits the Job
-for hosted infrastructure to run. A hosted Job pins exact revisions, so
-`--track` and `--hosted` first push whatever the run needs that the hosted
-project does not hold: its source, its Agent or Harness, and their dependencies.
-A resource whose files changed while its `version` stayed the same gets the next
-patch version in its manifest, as `plural project push --bump` does, and the
-command prints each one. If someone changed a resource in the hosted project
-since this checkout last synced it, the run stops before uploading anything; pull
-it first. `job push` uploads nothing new: the revisions a finished Job ran must
-already be hosted, so restore those files and push them if they are not. See
+- `--track` runs here and records the Job in the hosted project as it runs.
+- `job push` records a local Job that already finished.
+- `--hosted` submits the Job for hosted infrastructure to run.
+
+A hosted Job pins exact revisions, so `--track` and `--hosted` first push
+whatever the run needs that the hosted project does not hold: its source, its
+Agent or Harness, and their dependencies. A resource whose files changed while
+its `version` stayed the same gets the next patch version in its manifest, as
+`plural project push --bump` does, and the command prints each one. If someone
+changed a resource in the hosted project since this checkout last synced it, the
+run stops before uploading anything; pull it first.
+
+`job push` uploads nothing new: the revisions a finished Job ran must already be
+hosted, so restore those files and push them if they are not. See
 [Jobs](../running/jobs.md) for execution and the
 [Python SDK](../sdk/evaluation.md) for programmatic use.

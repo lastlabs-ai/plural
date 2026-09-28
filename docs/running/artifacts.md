@@ -2,20 +2,38 @@
 route: /docs/running/artifacts
 title: Artifacts and evidence
 order: 88
-description: Read trajectories, final state, and scoring evidence to understand what happened in a run.
+description: The files a run leaves behind. Use them to see what the Agent did, why it got its score, and exactly which setup produced the result.
 audience: all
 nav: true
 nav_group: Run
 ---
 # Artifacts and evidence
 
-Artifacts are the files saved from a run. Use them to understand what the agent did, why it received a score, and which configuration produced the result.
+**Artifacts** are the files saved from a run. They are the evidence: they show
+what the Agent did, why it received its score, and exactly which setup produced
+the result.
 
-Start with the trajectory for the sequence of actions, the final State for what changed, and the Verifier results for the score. The receipt identifies the exact versions used; the manifest lists captured files and their hashes.
+An artifact is an output of a run. Don't confuse it with a **Resource**, which is
+an input, such as a word list the Environment provides.
 
-A `Resource` describes an input to a Task or Environment. An artifact is an output from an execution.
+## Where to start
+
+When you want to understand one attempt, read these in order:
+
+1. **The trajectory**, for the sequence of actions the Agent took.
+2. **The final State**, for what actually changed in the world.
+3. **The Verifier results**, for the score and the grader's feedback.
+
+Two more files back those up. The **receipt** identifies the exact versions that
+were used. The **manifest** lists every captured file and its fingerprint (hash),
+so you can tell if anything changed afterwards.
+
+`plural trial show TRIAL_ID` prints the paths of a Trial's artifacts and logs. For
+a tracked or hosted Job, you can open the same evidence in the web app under Jobs.
 
 ## Local layout
+
+A local `plural run` writes this folder at the project root:
 
 ```text
 .plural/jobs/JOB_ID/
@@ -41,37 +59,41 @@ A `Resource` describes an input to a Task or Environment. An artifact is an outp
         view.json
 ```
 
-A local `plural run` writes this directory at the project root. `run.json` pins
-the version and content hash of every input, which is what `plural job rerun`
-reuses. `plural trial show TRIAL_ID` prints a Trial's artifact and log paths.
+Only files actually produced or captured are present. Here is what the main ones
+hold:
 
-Only files actually produced or captured are present. `episode.jsonl` is the
-episode record: every reset, step, and model call in order, with token usage
-and timing. `trajectory.json` is the same episode as an
-[ATIF](traces.md#read-the-support-episode) document of the Agent's turns.
-`result.json` is the Harness's final response, and `state.json`,
-`observation.json`, and `view.json` are the Environment's final State,
-Observation, and display view. A Harness that returns its own trajectory events
-also gets `trajectory.jsonl`, and anything else the Agent writes is captured
-beside them. Verifier scores and evidence are in the Trial's `result.json`, not
-in an artifact.
+- `run.json` pins the version and content hash of every input, which is what
+  `plural job rerun` reuses.
+- `episode.jsonl` is the episode record: every reset, step, and model call in
+  order, with token usage and timing.
+- `trajectory.json` is the same episode as an
+  [ATIF](traces.md#read-the-support-episode) document of the Agent's turns.
+- `result.json` in `artifacts/` is the Harness's final response.
+- `state.json`, `observation.json`, and `view.json` are the Environment's final
+  State, Observation, and display view.
 
-The manifest records
-each artifact's path, SHA-256, media type, byte size, and optional role.
-Receipts bind those hashes to the exact Task, Benchmark, model endpoint,
-Environment, Verifiers, Agent, Harness, mode, Runtime, timing, and cost.
+A Harness that returns its own trajectory events also gets `trajectory.jsonl`, and
+anything else the Agent writes is captured beside them. Verifier scores and
+evidence are in the Trial's `result.json`, not in an artifact.
+
+## Evidence never changes
 
 Execution receipts, logs, manifests, and artifact bytes are immutable. A retry
-adds a new `executions/N/` directory; it does not overwrite the failed
-execution. A human review updates `selected.json` and the Trial and Job
-`result.json` summaries, and leaves the captured evidence unchanged.
+adds a new `executions/N/` folder; it does not overwrite the failed execution. A
+human review updates `selected.json` and the Trial and Job `result.json`
+summaries, and leaves the captured evidence unchanged.
+
+The manifest records each artifact's path, SHA-256, media type, byte size, and
+optional role. Receipts bind those hashes to the exact Task, Benchmark, model
+endpoint, Environment, Verifiers, Agent, Harness, mode, Runtime, timing, and cost.
 
 ## Episode scoring
 
-A Verifier function receives the completed Episode: final Observation, full
-State, trajectory, artifacts, and usage. None of this reaches the agent. A
-Verifier that runs a command receives every captured artifact in its scoring
-workspace. Isolate untrusted scoring code with its own `VerifierRuntime`.
+The grader sees more than the Agent does. A Verifier function receives the
+completed Episode: final Observation, full State, trajectory, artifacts, and
+usage. None of this reaches the Agent. A Verifier that runs a command receives
+every captured artifact in its scoring workspace. Isolate untrusted scoring code
+with its own `VerifierRuntime`.
 
 ## Logs, secrets, and trust
 
@@ -80,15 +102,18 @@ secrets an Agent grants its Harness and the model API key a Verifier uses, in
 the stdout and stderr logs it captures. It matches exact values only, so it
 cannot catch a secret that code has encoded or transformed, and it does not
 redact custom artifacts, external systems, or anything else your code writes.
-State hidden from the agent is not a secret store.
+State hidden from the Agent is not a secret store.
 
-Receipts are unsigned, and a local run's receipt reports `self_reported` trust. Hashes detect
-content changes; they do not independently prove that a custom Harness recorded
-truthful behavior.
+Receipts are unsigned, and a local run's receipt reports `self_reported` trust.
+Hashes detect content changes; they do not independently prove that a custom
+Harness recorded truthful behavior.
 
 ## Import and derive
 
-Use `normalize_trajectory(...)` to read a captured JSON or JSONL trajectory in a common format while keeping the original file. Imported evidence remains unverified; there is no general CLI command for importing arbitrary run directories.
+Use `normalize_trajectory(...)` to read a captured JSON or JSONL trajectory in a
+common format while keeping the original file. Imported evidence remains
+unverified; there is no general CLI command for importing arbitrary run
+directories.
 
-Write analyses and exports as new derived files. Never edit a captured
-artifact and retain its old manifest or receipt.
+Write analyses and exports as new derived files. Never edit a captured artifact
+and retain its old manifest or receipt.

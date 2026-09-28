@@ -2,16 +2,22 @@
 route: /docs/reference/limitations
 title: "Known limitations"
 order: 250
-description: "Current limitations for execution providers, harnesses, TITO capture, human review, and hosted workflows."
+description: "What Plural does not do yet, or does only with extra setup: hosting, execution providers, Harnesses, token capture, human review, training, and routing."
 audience: all
 nav: false
 nav_group: Operations
 ---
 # Known limitations
 
-Use this page to check whether a planned workflow is supported. The guides explain the working path; these limits describe where additional setup or integration is needed.
+This page lists what Plural does not do yet, or does only with extra setup. Check it
+before you plan a workflow, so you find a gap now rather than halfway through a run.
+
+The guides show the working path. Each item here marks where that path ends, or where
+you need to bring your own piece.
 
 ## Projects and hosting
+
+These apply when you push, pull, or run in a hosted project.
 
 - Hosted commands (`push`, `pull`, `run --hosted`, and hosted `show`, `list`,
   `job`, `trial`, and `review` commands) need `plural auth login` and a project
@@ -32,6 +38,8 @@ Use this page to check whether a planned workflow is supported. The guides expla
   yet.
 
 ## Execution
+
+These apply to where code runs and what a run can see or measure.
 
 - The `local` Runtime is a trusted subprocess, not a sandbox. Docker trusts the
   host and its daemon and has provider-specific network and resource limits.
@@ -66,6 +74,8 @@ separately and can add their own provider requirements.
 
 ## Training
 
+Plural prepares the material for training; it does not train the model itself.
+
 Train mode requires a Harness that captures exact tokens in and tokens out
 (TITO), and stores the records as hashed artifacts. Storing an artifact does not
 replicate or attest it. Plural does not implement training algorithms, gradient
@@ -74,4 +84,7 @@ mode; use a Python `Job`.
 
 ## Routing
 
-Job results do not automatically train or configure a router. Choose model candidates and a Client routing policy in your application, and preserve the Harness behavior used in evaluation.
+Job results do not automatically train or configure a router. Choose model
+candidates and a Client routing policy in your application, and preserve the
+Harness behavior used in evaluation. See
+[Route after evaluation](integrations.md#route-after-evaluation).
