@@ -188,9 +188,17 @@ class OpenAICompatible:
             "model": self._model_id(request.model),
             # Reasoning is read back from these hosts but never sent to them:
             # OpenAI rejects unknown message keys, and no host accepts its own
-            # reasoning output replayed as input.
+            # reasoning output replayed as input. A tool call's extra_content
+            # belongs to the provider that made it, such as a Gemini signature.
             "messages": [
-                m.model_dump(exclude_none=True, exclude={"reasoning", "reasoning_signature"})
+                m.model_dump(
+                    exclude_none=True,
+                    exclude={
+                        "reasoning": True,
+                        "reasoning_signature": True,
+                        "tool_calls": {"__all__": {"extra_content"}},
+                    },
+                )
                 for m in request.messages
             ],
             "stream": stream,

@@ -397,7 +397,7 @@
         {
           "provider": "fireworks",
           "region": "us",
-          "upstream_id": "accounts/fireworks/models/deepseek-v4-flash",
+          "upstream_id": "accounts/fireworks/models/deepseek-v4-flash-0731",
           "pricing": {
             "prompt": "0.00000014",
             "completion": "0.00000028"

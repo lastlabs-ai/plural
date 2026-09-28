@@ -110,14 +110,16 @@ class GoogleProvider:
                         args = json.loads(tc.function.arguments)
                     except json.JSONDecodeError:
                         args = {"raw": tc.function.arguments}
-                    parts.append(
-                        {
-                            "functionCall": {
-                                "name": tc.function.name,
-                                "args": args,
-                            }
+                    part: dict[str, Any] = {
+                        "functionCall": {
+                            "name": tc.function.name,
+                            "args": args,
                         }
-                    )
+                    }
+                    signature = _thought_signature(tc.extra_content)
+                    if signature:
+                        part["thoughtSignature"] = signature
+                    parts.append(part)
             if msg.role == "tool":
                 parts = [
                     {
@@ -198,6 +200,7 @@ class GoogleProvider:
                             name=fc.get("name") or "",
                             arguments=json.dumps(fc.get("args") or {}),
                         ),
+                        extra_content=_signature_content(part),
                     )
                 )
         finish_map = {
@@ -269,6 +272,11 @@ class GoogleProvider:
                             "name": call.get("name") or "",
                             "arguments": json.dumps(call.get("args") or {}),
                         },
+                        **(
+                            {"extra_content": content}
+                            if (content := _signature_content(part))
+                            else {}
+                        ),
                     }
                 )
                 tool_index += 1
@@ -427,3 +435,24 @@ class GoogleProvider:
     async def aclose(self) -> None:
         """Close the async HTTP client."""
         await self._aclient.aclose()
+
+
+def _signature_content(part: dict[str, Any]) -> dict[str, Any] | None:
+    """A part's thought signature, in the tool call's ``extra_content``.
+
+    Gemini signs each function call it makes while thinking and rejects the
+    next request when a replayed call lacks that signature. The OpenAI shape
+    has no field for it, so it rides in ``extra_content`` the way Google's own
+    OpenAI-compatible endpoint carries it.
+
+    Returns:
+        ``{"google": {"thought_signature": ...}}``, or ``None`` when unsigned.
+    """
+    signature = part.get("thoughtSignature") or part.get("thought_signature")
+    return {"google": {"thought_signature": signature}} if signature else None
+
+
+def _thought_signature(extra: dict[str, Any] | None) -> str | None:
+    google = (extra or {}).get("google")
+    signature = google.get("thought_signature") if isinstance(google, dict) else None
+    return signature if isinstance(signature, str) and signature else None
