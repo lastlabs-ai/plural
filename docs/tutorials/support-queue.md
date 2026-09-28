@@ -62,7 +62,7 @@ On disk it looks like this:
 ```text
 project.yaml                  project name and description
 plural.lock                   hosted revisions; commit it
-pyproject.toml                dependencies = ["plural>=0.15"]
+pyproject.toml                dependencies = ["plural>=0.17.2"]
 environments/support-queue/   environment.yaml, environment.py, README.md, resources/policy.md
 tasks/ticket-1/, ticket-2/, ticket-3/   task.yaml, instruction.md
 verifiers/correct-category/   verifier.yaml, verify.py

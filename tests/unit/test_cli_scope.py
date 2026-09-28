@@ -149,7 +149,7 @@ def test_project_init_push_creates_a_private_project_and_selects_it(
     assert code == 0, output
     assert "(private)" in output
     [record] = fake.projects.values()
-    assert record["visibility"] == "private"
+    assert record["role"] == "manager"
     binding = Project.at(tmp_path / "support-desk").read_binding()
     assert binding is not None and binding.project_id == record["id"]
     assert scope()["project"] == "support-desk"

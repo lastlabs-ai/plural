@@ -168,7 +168,7 @@ image yourself.
   starts. This takes a few seconds and needs the sandbox's network.
 
 By default the sandbox gets the same Plural code as the CLI that planned the
-Job, so an unreleased build works too. `--plural-version 0.16.0` or
+Job, so an unreleased build works too. `--plural-version 0.17.2` or
 `--plural-version latest` installs a published release instead. From Python, set
 `PLURAL_RUNTIME_VERSION` in the Job's environment. An image that already has the
 selected version is used as it is. A `no-network` sandbox on a remote provider
@@ -176,7 +176,7 @@ needs an image with it preinstalled:
 
 ```dockerfile
 FROM python:3.12-slim
-RUN pip install --no-cache-dir plural==0.16.0
+RUN pip install --no-cache-dir plural==0.17.2
 ```
 
 Inside a Docker container, `localhost` is the container. Plural rewrites a

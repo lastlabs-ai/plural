@@ -30,7 +30,7 @@ current directory to find it, so they work from any subdirectory.
 ```text
 project.yaml             name and description
 plural.lock              hosted revisions, updated by push and pull; commit it
-pyproject.toml           dependencies = ["plural>=0.15"]
+pyproject.toml           dependencies = ["plural>=0.17.2"]
 .plural/                 local state: hosted binding, Jobs, backups (gitignored)
 environments/<name>/     environment.yaml, environment.py, README.md
 tasks/<name>/            task.yaml, instruction.md
@@ -153,7 +153,7 @@ result = Job(benchmark, agents=[agent]).run()
 
 Follow these steps in order. Validation in step 5 reports anything you missed.
 
-1. Upgrade: `python -m pip install --upgrade "plural>=0.15"`, or `uv add "plural>=0.15"`
+1. Upgrade: `python -m pip install --upgrade "plural>=0.17.2"`, or `uv add "plural>=0.17.2"`
    in a uv-managed project.
 2. Create the project: `plural project init <name>` makes `./<name>` with the standard
    files. Run the remaining commands inside it.

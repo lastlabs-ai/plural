@@ -123,7 +123,6 @@ def show(
         typer.echo(f"Project {found.get('slug')} (hosted)")
         typer.echo(f"  Name:       {found.get('name')}")
         typer.echo(f"  Id:         {found.get('id')}")
-        typer.echo(f"  Visibility: {found.get('visibility')}")
         typer.echo(f"  Your role:  {found.get('role')}")
 
     emit(payload, as_json=as_json, text=text)

@@ -72,8 +72,7 @@ class FakeHosted:
             "slug": slug,
             "name": slug,
             "owner_account_id": account_id,
-            "visibility": "private",
-            "role": "admin",
+            "role": "manager",
         }
         self.projects[project["id"]] = project
         return project

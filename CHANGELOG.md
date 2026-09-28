@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-09-28
+
+### Changed
+
+- Every model call goes through the Plural gateway, with the exact billed cost, a request id on each call, and project attribution for account keys.
+- A tracked or hosted run pushes what it needs before it starts, bumping the patch version of anything that changed.
+- Prompt caching is billed correctly. Every adapter reports cache reads and writes inside the prompt count, and `plural.catalog.billing` prices cache reads, 5-minute and 1-hour writes, and long-prompt tiers. Anthropic and Bedrock cached tokens and Gemini thinking tokens were previously unbilled.
+- `plural models list` shows the organization's configured models by default. `--all` lists the whole catalog.
+- Hosted projects are always private, and project roles are manager, contributor, and viewer. `plural project show` no longer prints a visibility.
+- The documentation is rewritten for readers who are not engineers, and Getting started follows the web app's first-run tour.
+
+### Added
+
+- A Task, Benchmark, or Agent can be named as `name@version`, so `run`, `show`, and `pull` use that exact pushed version.
+- `pull` fetches hosted Tasks, Agents, and Benchmarks that the local project lacks, including revisions made in the web app.
+- Each catalog model has a full model card: description, release date, knowledge cutoff, max output, cache prices, and per-host limits and quantization.
+- `Usage.reasoning_tokens` records how many completion tokens each provider spent on reasoning.
+
+### Fixed
+
+- Gemini tool calls carry their thought signature, so a replayed call is accepted on the next turn.
+- Wordle checks guesses against the full Wordle word list.
+
 ## [0.15.0] - 2026-09-23
 
 **0.15.0 break.** Plural is organized around a project directory and one command shape

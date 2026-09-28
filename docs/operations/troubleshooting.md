@@ -36,7 +36,7 @@ The command may be missing, or it may belong to an older version of Plural.
 Activate the environment where Plural is installed. Run
 `python -m pip show plural` and `plural --help`, then compare with the
 [CLI command reference](../cli/evaluation.md#command-reference). Projects need
-`plural>=0.15`.
+`plural>=0.17.2`.
 
 ### Removed commands
 
