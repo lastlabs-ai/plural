@@ -2,7 +2,7 @@
 route: /docs/getting-started
 title: Getting started
 order: 20
-description: Go from a new account to your first scored run. Sign up, install Plural, build a small Task, run it on your computer, then push it and run it on Plural's servers.
+description: Go from a new account to your first scored run. Sign up, install Plural, sign in with your API key, build a small Task, run it on your computer, then push it and run it on Plural's servers.
 audience: all
 nav: true
 nav_group: Start
@@ -39,8 +39,7 @@ Everything starts at [pluralintel.com](https://pluralintel.com).
 > password manager, before you leave the page. If you lose it, create a new one; you
 > can make and manage more keys under **Keys** in your account.
 
-You will use this key in [Sign in](#sign-in). You do not need it to install Plural or
-build a project.
+You will use this key in [Sign in](#sign-in), right after you install Plural.
 
 ## Install
 
@@ -71,6 +70,65 @@ For power users: to use the Python SDK from a uv-managed project, also run
 `uv add "plural>=0.15"` inside that project. Optional extras include
 `plural[daytona]` for the Daytona Runtime and `plural[keyring]` to store credentials in
 your OS keyring.
+
+## Sign in
+
+Signing in connects the `plural` command on your computer to your Plural account. Do it
+now with the `test_key` you created in the tour, and every step after this one just
+works.
+
+There are two ways to sign in, and they are good for different things:
+
+- **An API key** is a secret you create in the web app. It works for everything,
+  including model calls. Use it for any run that calls a model.
+- **A browser login** opens pluralintel.com, you approve it, and the command acts as
+  you. It works for hosted commands such as pushing and hosted runs, but the model
+  gateway does not accept it.
+
+If you only set up one, make it the API key.
+
+:::tabs
+:::tab API key
+Paste the key when prompted (it is not shown as you type), or pipe it in. Plural
+stores it for you:
+
+```bash
+plural auth login --api-key-stdin
+```
+
+Or keep it in an environment variable instead:
+
+```bash
+export PLURAL_API_KEY=plural_...
+```
+
+If the key is already in `PLURAL_API_KEY`, `plural auth login --from-env` stores it
+without printing it.
+:::tab Browser login
+This opens your browser to approve the login:
+
+```bash
+plural auth login
+plural auth status
+```
+
+`plural auth status` checks the credential with the service and shows where your
+commands are pointed.
+:::
+
+Either way, the credential is stored in your user config folder (or your OS keyring),
+never in your project files. Keep keys out of source files, Agent instructions, and
+Task files.
+
+For power users:
+
+- A browser login acts as you and reaches every account and project your roles allow.
+  It is not accepted for model calls; use an API key for those.
+- A **project key** is an API key limited to one project. It can only reach that
+  project and cannot create new ones.
+- Signed in to an organization, `plural models list` shows the models your
+  organization offers; add `--all` for the whole catalog. When a run starts, the
+  service refuses any model your organization does not permit.
 
 ## Create a project
 
@@ -190,16 +248,15 @@ exact files. A dry run needs no key. Using `--model` without `--harness` plays w
 `plural models list` or browse the [model catalog](https://pluralintel.com/models).
 
 A real run calls the model, which can cost money. Every model call goes through the
-Plural gateway, which bills it at the exact provider price, so it needs your Plural API
-key. The quickest way is to put the key you copied earlier in an environment variable
-(see [Sign in](#sign-in) for other ways):
+Plural gateway, which bills it at the exact provider price, using the API key you
+signed in with:
 
 ```bash
-export PLURAL_API_KEY=...
 plural run --task refund --model openai/gpt-5.6-luna
 ```
 
-Without a key, the run stops before calling the model and tells you how to add one.
+If you skipped [Sign in](#sign-in), the run stops before calling the model and tells
+you how to add a key.
 
 Every run is a new **Job**, and each attempt inside it is a **Trial**. The run prints
 the Job id and one line per Trial with its score. Use those ids to look at the results:
@@ -239,62 +296,6 @@ write the Agent's `instructions` in `agents/careful/agent.yaml`. Then validate a
 plural benchmark validate support
 plural run --benchmark support --agent careful
 ```
-
-## Sign in
-
-Signing in connects the `plural` command on your computer to your Plural account.
-There are two ways, and they are good for different things:
-
-- **An API key** is a secret you create in the web app. It works for everything,
-  including model calls. Use it for any run that calls a model.
-- **A browser login** opens pluralintel.com, you approve it, and the command acts as
-  you. It works for hosted commands such as pushing and hosted runs, but the model
-  gateway does not accept it.
-
-If you only set up one, make it the API key.
-
-:::tabs
-:::tab API key
-Paste the key when prompted (it is not shown as you type), or pipe it in. Plural
-stores it for you:
-
-```bash
-plural auth login --api-key-stdin
-```
-
-Or keep it in an environment variable instead:
-
-```bash
-export PLURAL_API_KEY=plural_...
-```
-
-If the key is already in `PLURAL_API_KEY`, `plural auth login --from-env` stores it
-without printing it.
-:::tab Browser login
-This opens your browser to approve the login:
-
-```bash
-plural auth login
-plural auth status
-```
-
-`plural auth status` checks the credential with the service and shows where your
-commands are pointed.
-:::
-
-Either way, the credential is stored in your user config folder (or your OS keyring),
-never in your project files. Keep keys out of source files, Agent instructions, and
-Task files.
-
-For power users:
-
-- A browser login acts as you and reaches every account and project your roles allow.
-  It is not accepted for model calls; use an API key for those.
-- A **project key** is an API key limited to one project. It can only reach that
-  project and cannot create new ones.
-- Signed in to an organization, `plural models list` shows the models your
-  organization offers; add `--all` for the whole catalog. When a run starts, the
-  service refuses any model your organization does not permit.
 
 ## Push and run hosted
 
