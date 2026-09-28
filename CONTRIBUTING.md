@@ -90,6 +90,33 @@ offers them. An endpoint whose provider has no configured key reports unavailabl
 and is skipped during routing, so listing a cloud before holding credentials for
 it is safe.
 
+### Adding a model or editing its model card
+
+Each entry is everything a model card shows: `description`, `created` (release
+date), `knowledge_cutoff`, `context_length`, `max_output_tokens`, modalities,
+`supported_parameters`, `open_weights`, `license`, `links`, and every endpoint
+with its own price and optional `context_length`, `max_output_tokens`, and
+`quantization`. Edit it with `plural.catalog.edit` rather than by hand. Every
+command prints JSON, validates the whole file before writing, and refuses a
+change that leaves it invalid, so it is safe to hand to a coding agent:
+
+```bash
+uv run python -m plural.catalog.edit schema                  # the entry's JSON Schema
+uv run python -m plural.catalog.edit providers               # valid hosts, regions, parameters
+uv run python -m plural.catalog.edit add acme/new-model --from-openrouter
+uv run python -m plural.catalog.edit add --file card.json    # or --file - for stdin
+uv run python -m plural.catalog.edit set acme/new-model created=2026-09-01 pricing.prompt=3/M
+uv run python -m plural.catalog.edit endpoint add acme/new-model --provider fireworks \
+  --upstream-id accounts/fireworks/models/new-model --prompt 0.9/M --completion 0.9/M
+uv run python -m plural.catalog.edit enrich                  # fill missing card text from OpenRouter
+uv run python -m plural.catalog.edit validate --strict       # warnings fail too
+```
+
+Prices are USD per token; write `3/M` for three dollars per million tokens.
+`template <id>` prints a complete entry to fill in. `--dry-run` validates and
+prints without writing. A new model is live on the gateway once it has a priced
+endpoint on a host the deployment holds credentials for.
+
 Two kinds of upstream endpoint are deliberately excluded from pricing:
 
 - **Service tiers** such as `flex` and `priority` are separate products with their

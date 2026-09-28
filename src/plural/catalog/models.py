@@ -76,11 +76,16 @@ class ModelPricing(BaseModel):
         prompt: USD per prompt token below the first tier threshold.
         completion: USD per completion token below the first tier threshold.
         tiers: Rates for larger prompts, if the model prices them differently.
+        cache_read: USD per prompt token served from the host's prompt cache.
+            Shown on the model card; billing charges the prompt rate.
+        cache_write: USD per prompt token written to the host's prompt cache.
     """
 
     prompt: float
     completion: float
     tiers: list[PriceTier] = Field(default_factory=list)
+    cache_read: float | None = None
+    cache_write: float | None = None
 
     def rates_for_prompt(self, prompt_tokens: int) -> tuple[float, float]:
         """Resolve the rates that apply to a request of a given prompt size.
@@ -135,12 +140,19 @@ class ModelEndpoint(BaseModel):
         region: Serving region hint (``us``, ``cn``, ``global``).
         upstream_id: Model id the host expects.
         pricing: Pass-through price at this host.
+        context_length: This host's context window, when it serves less than
+            the model's.
+        max_output_tokens: This host's completion limit, when it differs.
+        quantization: Weight precision the host serves, such as ``fp8``.
     """
 
     provider: str
     region: str = "us"
     upstream_id: str
     pricing: ModelPricing | None = None
+    context_length: int | None = None
+    max_output_tokens: int | None = None
+    quantization: str | None = None
 
 
 class ModelSpec(BaseModel):
@@ -154,6 +166,13 @@ class ModelSpec(BaseModel):
         architecture: Modality metadata.
         supported_parameters: Request parameters the model accepts.
         endpoints: Inference hosts. Empty means the author is the only host.
+        description: What the model is for, shown on its model card.
+        created: Release date, ``YYYY-MM-DD``.
+        knowledge_cutoff: Training data cutoff, ``YYYY-MM`` or ``YYYY-MM-DD``.
+        max_output_tokens: Largest completion the model produces.
+        open_weights: Whether the weights are published.
+        license: License of published weights, such as ``apache-2.0``.
+        links: Named reference URLs, such as ``homepage`` or ``model_card``.
         provider: Derived provider slug (author segment of ``id``).
     """
 
@@ -164,6 +183,13 @@ class ModelSpec(BaseModel):
     architecture: Architecture = Field(default_factory=Architecture)
     supported_parameters: list[str] = Field(default_factory=list)
     endpoints: list[ModelEndpoint] = Field(default_factory=list)
+    description: str | None = None
+    created: str | None = None
+    knowledge_cutoff: str | None = None
+    max_output_tokens: int | None = None
+    open_weights: bool | None = None
+    license: str | None = None
+    links: dict[str, str] = Field(default_factory=dict)
 
     @property
     def provider(self) -> str:
@@ -291,6 +317,24 @@ def _parse_tiers(raw: Any) -> list[PriceTier]:
     return tiers
 
 
+def _optional_rate(raw: Any) -> float | None:
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(raw: Any) -> int | None:
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_pricing(raw: dict[str, Any] | None) -> ModelPricing | None:
     if not raw:
         return None
@@ -299,6 +343,8 @@ def _parse_pricing(raw: dict[str, Any] | None) -> ModelPricing | None:
             prompt=float(raw["prompt"]),
             completion=float(raw["completion"]),
             tiers=_parse_tiers(raw.get("tiers")),
+            cache_read=_optional_rate(raw.get("cache_read")),
+            cache_write=_optional_rate(raw.get("cache_write")),
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -311,6 +357,10 @@ def _dump_pricing(pricing: ModelPricing | None) -> dict[str, Any] | None:
         "prompt": str(pricing.prompt),
         "completion": str(pricing.completion),
     }
+    if pricing.cache_read is not None:
+        payload["cache_read"] = str(pricing.cache_read)
+    if pricing.cache_write is not None:
+        payload["cache_write"] = str(pricing.cache_write)
     if pricing.tiers:
         payload["tiers"] = [
             {
@@ -333,7 +383,119 @@ def _parse_endpoint(raw: dict[str, Any]) -> ModelEndpoint | None:
         region=str(raw.get("region") or "us"),
         upstream_id=str(upstream_id),
         pricing=_parse_pricing(raw.get("pricing")),
+        context_length=_optional_int(raw.get("context_length")),
+        max_output_tokens=_optional_int(raw.get("max_output_tokens")),
+        quantization=raw.get("quantization") or None,
     )
+
+
+def _dump_endpoint(endpoint: ModelEndpoint) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "provider": endpoint.provider,
+        "region": endpoint.region,
+        "upstream_id": endpoint.upstream_id,
+        "pricing": _dump_pricing(endpoint.pricing),
+    }
+    for key in ("context_length", "max_output_tokens", "quantization"):
+        value = getattr(endpoint, key)
+        if value is not None:
+            payload[key] = value
+    return payload
+
+
+_CARD_FIELDS = (
+    "description",
+    "created",
+    "knowledge_cutoff",
+    "max_output_tokens",
+    "open_weights",
+    "license",
+)
+
+
+def _card_fields(item: Mapping[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {key: item.get(key) for key in _CARD_FIELDS}
+    fields["max_output_tokens"] = _optional_int(item.get("max_output_tokens"))
+    open_weights = item.get("open_weights")
+    fields["open_weights"] = open_weights if isinstance(open_weights, bool) else None
+    for key in ("description", "created", "knowledge_cutoff", "license"):
+        value = fields[key]
+        fields[key] = str(value) if value else None
+    links = item.get("links")
+    fields["links"] = (
+        {str(name): str(url) for name, url in links.items() if url}
+        if isinstance(links, Mapping)
+        else {}
+    )
+    return fields
+
+
+def spec_from_payload(item: Mapping[str, Any]) -> ModelSpec:
+    """Build a :class:`ModelSpec` from one ``models.json`` entry.
+
+    Malformed optional values are dropped rather than rejected, so one bad field
+    never takes a model out of the catalog. ``plural.catalog.edit validate``
+    reports them instead.
+
+    Args:
+        item: A decoded catalog entry.
+
+    Returns:
+        The model spec, priced at its default host when it has no base price.
+    """
+    endpoints = [
+        endpoint
+        for raw in item.get("endpoints") or []
+        if (endpoint := _parse_endpoint(raw)) is not None
+    ]
+    architecture = item.get("architecture") or {}
+    spec = ModelSpec(
+        id=item["id"],
+        name=item.get("name"),
+        context_length=item.get("context_length"),
+        pricing=_parse_pricing(item.get("pricing")),
+        architecture=Architecture(
+            modality=architecture.get("modality"),
+            input_modalities=list(architecture.get("input_modalities") or ["text"]),
+            output_modalities=list(architecture.get("output_modalities") or ["text"]),
+        ),
+        supported_parameters=list(item.get("supported_parameters") or []),
+        endpoints=endpoints,
+        **_card_fields(item),
+    )
+    if spec.pricing is None:
+        spec.pricing = spec.pricing_for()
+    return spec
+
+
+def spec_to_payload(spec: ModelSpec) -> dict[str, Any]:
+    """Serialize a :class:`ModelSpec` the way ``models.json`` stores it.
+
+    Returns:
+        A JSON-compatible entry. Unset card fields are omitted.
+    """
+    payload: dict[str, Any] = {
+        "id": spec.id,
+        "name": spec.name,
+    }
+    for key in ("description", "created", "knowledge_cutoff"):
+        value = getattr(spec, key)
+        if value is not None:
+            payload[key] = value
+    payload["context_length"] = spec.context_length
+    if spec.max_output_tokens is not None:
+        payload["max_output_tokens"] = spec.max_output_tokens
+    payload["pricing"] = _dump_pricing(spec.pricing)
+    payload["architecture"] = spec.architecture.model_dump()
+    payload["supported_parameters"] = spec.supported_parameters
+    if spec.open_weights is not None:
+        payload["open_weights"] = spec.open_weights
+    if spec.license is not None:
+        payload["license"] = spec.license
+    if spec.links:
+        payload["links"] = dict(spec.links)
+    payload["endpoints"] = [_dump_endpoint(endpoint) for endpoint in spec.endpoints]
+    return payload
 
 
 class ModelCatalog:
@@ -415,31 +577,7 @@ class ModelCatalog:
         self._updated_at = payload.get("updated_at")
         models: dict[str, ModelSpec] = {}
         for item in payload.get("models") or []:
-            endpoints = [
-                endpoint
-                for raw in item.get("endpoints") or []
-                if (endpoint := _parse_endpoint(raw)) is not None
-            ]
-            pricing = _parse_pricing(item.get("pricing"))
-            spec = ModelSpec(
-                id=item["id"],
-                name=item.get("name"),
-                context_length=item.get("context_length"),
-                pricing=pricing,
-                architecture=Architecture(
-                    modality=(item.get("architecture") or {}).get("modality"),
-                    input_modalities=list(
-                        (item.get("architecture") or {}).get("input_modalities") or ["text"]
-                    ),
-                    output_modalities=list(
-                        (item.get("architecture") or {}).get("output_modalities") or ["text"]
-                    ),
-                ),
-                supported_parameters=list(item.get("supported_parameters") or []),
-                endpoints=endpoints,
-            )
-            if spec.pricing is None:
-                spec.pricing = spec.pricing_for()
+            spec = spec_from_payload(item)
             models[spec.id] = spec
         self._models = models
 
@@ -544,26 +682,7 @@ class ModelCatalog:
         """
         payload = {
             "updated_at": self._updated_at,
-            "models": [
-                {
-                    "id": spec.id,
-                    "name": spec.name,
-                    "context_length": spec.context_length,
-                    "pricing": _dump_pricing(spec.pricing),
-                    "architecture": spec.architecture.model_dump(),
-                    "supported_parameters": spec.supported_parameters,
-                    "endpoints": [
-                        {
-                            "provider": endpoint.provider,
-                            "region": endpoint.region,
-                            "upstream_id": endpoint.upstream_id,
-                            "pricing": _dump_pricing(endpoint.pricing),
-                        }
-                        for endpoint in spec.endpoints
-                    ],
-                }
-                for spec in self.models()
-            ],
+            "models": [spec_to_payload(spec) for spec in self.models()],
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

@@ -2536,6 +2536,13 @@ Attributes:
     architecture: Modality metadata.
     supported_parameters: Request parameters the model accepts.
     endpoints: Inference hosts. Empty means the author is the only host.
+    description: What the model is for, shown on its model card.
+    created: Release date, ``YYYY-MM-DD``.
+    knowledge_cutoff: Training data cutoff, ``YYYY-MM`` or ``YYYY-MM-DD``.
+    max_output_tokens: Largest completion the model produces.
+    open_weights: Whether the weights are published.
+    license: License of published weights, such as ``apache-2.0``.
+    links: Named reference URLs, such as ``homepage`` or ``model_card``.
     provider: Derived provider slug (author segment of ``id``).
 ```
 
@@ -2716,10 +2723,13 @@ Attributes:
     input_modalities: Accepted input modalities.
     output_modalities: Produced output modalities.
     supported_parameters: Request parameters the model accepts.
+    description: Upstream description, a starting point for the model card.
+    created: Upstream release date, ``YYYY-MM-DD``.
+    max_output_tokens: Largest completion upstream reports.
 ```
 
 ```python
-plural.catalog.sync.UpstreamModel(id: 'str', name: 'str | None' = None, context_length: 'int | None' = None, prompt: 'float | None' = None, completion: 'float | None' = None, modality: 'str | None' = None, input_modalities: 'tuple[str, ...]' = ('text',), output_modalities: 'tuple[str, ...]' = ('text',), supported_parameters: 'tuple[str, ...]' = ()) -> None
+plural.catalog.sync.UpstreamModel(id: 'str', name: 'str | None' = None, context_length: 'int | None' = None, prompt: 'float | None' = None, completion: 'float | None' = None, modality: 'str | None' = None, input_modalities: 'tuple[str, ...]' = ('text',), output_modalities: 'tuple[str, ...]' = ('text',), supported_parameters: 'tuple[str, ...]' = (), description: 'str | None' = None, created: 'str | None' = None, max_output_tokens: 'int | None' = None) -> None
 ```
 
 ## plural.catalog.sync.UpstreamTier
@@ -3082,6 +3092,228 @@ Args:
 
 ```python
 plural.catalog.sync.write_catalog(document: 'Mapping[str, Any]', path: 'Path' = PosixPath('<default>')) -> 'None'
+```
+
+## plural.catalog.edit.ArchitectureDocument
+
+Modalities, as stored.
+
+## plural.catalog.edit.EditError
+
+A command that cannot be applied.
+
+```python
+plural.catalog.edit.EditError
+```
+
+## plural.catalog.edit.EndpointDocument
+
+One host that serves the model, at its own price.
+
+## plural.catalog.edit.Issue
+
+A validation finding.
+
+## plural.catalog.edit.ModelCardDocument
+
+One ``models.json`` entry: everything a model card shows.
+
+```text
+Unknown keys are rejected so a misspelled field fails validation instead of
+silently never reaching the card.
+```
+
+## plural.catalog.edit.PricingDocument
+
+Per-token prices in USD, as stored. Strings keep exact decimals.
+
+## plural.catalog.edit.TierDocument
+
+A prompt-length price tier as stored.
+
+## plural.catalog.edit.build_parser
+
+The command-line interface.
+
+```text
+Returns:
+    The argument parser.
+```
+
+```python
+plural.catalog.edit.build_parser() -> 'argparse.ArgumentParser'
+```
+
+## plural.catalog.edit.complete_sentences
+
+Drop a trailing fragment from a description the upstream list cut short.
+
+```text
+Returns:
+    The text ending at its last complete sentence.
+
+Examples:
+    >>> complete_sentences("Fast model. Good at code, and...")
+    'Fast model.'
+    >>> complete_sentences("Fast model.")
+    'Fast model.'
+```
+
+```python
+plural.catalog.edit.complete_sentences(text: 'str') -> 'str'
+```
+
+## plural.catalog.edit.main
+
+Run one command and print its JSON result.
+
+```text
+Returns:
+    ``0`` on success, ``1`` when the command failed or validation did.
+```
+
+```python
+plural.catalog.edit.main(argv: 'list[str] | None' = None) -> 'int'
+```
+
+## plural.catalog.edit.match_upstream
+
+Find a catalog model in the upstream list, which names some authors differently.
+
+```text
+OpenRouter lists ``x-ai/grok-4.3`` where the catalog says ``xai/grok-4.3``, and
+writes versions with dots where a lab uses dashes. An exact id wins, then an
+``alias``, then a unique match on the version-insensitive slug.
+
+Returns:
+    The upstream record, or ``None`` when there is no unambiguous match.
+
+Examples:
+    >>> match_upstream("xai/grok-4.3", {"x-ai/grok-4.3": 1})
+    1
+    >>> match_upstream("anthropic/claude-haiku-4-5", {"anthropic/claude-haiku-4.5": 2})
+    2
+    >>> match_upstream("a/x", {"b/x": 1, "c/x": 2}) is None
+    True
+```
+
+```python
+plural.catalog.edit.match_upstream(model_id: 'str', upstream: 'Mapping[str, Any]', alias: 'str | None' = None) -> 'Any'
+```
+
+## plural.catalog.edit.parse_rate
+
+Parse a price written per token or per million tokens.
+
+```text
+Args:
+    raw: ``0.000003``, ``3e-6``, or ``3/M``.
+
+Returns:
+    The per-token price as a plain decimal string.
+
+Raises:
+    ValueError: If the value is not a non-negative number.
+
+Examples:
+    >>> parse_rate("3/M")
+    '0.000003'
+    >>> parse_rate("0.0000025")
+    '0.0000025'
+    >>> parse_rate("0.15/m")
+    '0.00000015'
+```
+
+```python
+plural.catalog.edit.parse_rate(raw: 'str') -> 'str'
+```
+
+## plural.catalog.edit.parse_value
+
+Decode a ``key=value`` right-hand side for the field it targets.
+
+```text
+Prices accept ``/M``; list fields accept ``a,b,c``; anything else is read as
+JSON when it parses and as a string otherwise.
+
+Returns:
+    The value to store.
+
+Examples:
+    >>> parse_value("pricing.prompt", "3/M")
+    '0.000003'
+    >>> parse_value("supported_parameters", "tools,temperature")
+    ['tools', 'temperature']
+    >>> parse_value("context_length", "200000")
+    200000
+    >>> parse_value("description", "A small model")
+    'A small model'
+```
+
+```python
+plural.catalog.edit.parse_value(path: 'str', raw: 'str') -> 'Any'
+```
+
+## plural.catalog.edit.run
+
+Execute one parsed command against the catalog at ``args.path``.
+
+```text
+Returns:
+    The JSON result to print.
+
+Raises:
+    EditError: When the command cannot be applied or would leave the
+        catalog invalid.
+```
+
+```python
+plural.catalog.edit.run(args: 'argparse.Namespace') -> 'dict[str, Any]'
+```
+
+## plural.catalog.edit.template
+
+A complete, valid-shaped entry to fill in for a new model.
+
+```text
+Returns:
+    An entry with placeholder values for every card field.
+```
+
+```python
+plural.catalog.edit.template(model_id: 'str') -> 'dict[str, Any]'
+```
+
+## plural.catalog.edit.validate_document
+
+Validate a whole catalog document.
+
+```text
+Args:
+    document: Decoded ``models.json``.
+
+Returns:
+    Every issue across every entry.
+```
+
+```python
+plural.catalog.edit.validate_document(document: 'Mapping[str, Any]') -> 'list[Issue]'
+```
+
+## plural.catalog.edit.validate_entry
+
+Check one parsed entry beyond its shape.
+
+```text
+Args:
+    card: A parsed catalog entry.
+
+Returns:
+    Errors, which block a write, and warnings, which ``--strict`` promotes.
+```
+
+```python
+plural.catalog.edit.validate_entry(card: 'ModelCardDocument') -> 'list[Issue]'
 ```
 
 ## plural.TraceWriter

@@ -1,10 +1,13 @@
 {
-  "updated_at": "2026-08-24T13:43:51Z",
+  "updated_at": "2026-09-28T14:34:27Z",
   "models": [
     {
       "id": "anthropic/claude-fable-5",
       "name": "Anthropic: Claude Fable 5",
+      "description": "Claude Fable 5 is a Mythos-class model from Anthropic, built for autonomous knowledge work and coding.",
+      "created": "2026-06-09",
       "context_length": 1000000,
+      "max_output_tokens": 128000,
       "pricing": {
         "prompt": "0.00001",
         "completion": "0.00005"
@@ -78,7 +81,10 @@
     {
       "id": "anthropic/claude-haiku-4-5",
       "name": "Anthropic: Claude Haiku 4.5",
+      "description": "Claude Haiku 4.5 is Anthropic’s fastest and most efficient model, delivering near-frontier intelligence at a fraction of the cost and latency of larger Claude models.",
+      "created": "2025-10-15",
       "context_length": 200000,
+      "max_output_tokens": 64000,
       "pricing": {
         "prompt": "0.000001",
         "completion": "0.000005"
@@ -179,7 +185,10 @@
     {
       "id": "anthropic/claude-opus-5",
       "name": "Anthropic: Claude Opus 5",
+      "description": "Claude Opus 5 is Anthropic’s flagship model for demanding reasoning, coding, and long-horizon agentic work.",
+      "created": "2026-07-24",
       "context_length": 1000000,
+      "max_output_tokens": 128000,
       "pricing": {
         "prompt": "0.000005",
         "completion": "0.000025"
@@ -271,7 +280,10 @@
     {
       "id": "anthropic/claude-sonnet-5",
       "name": "Anthropic: Claude Sonnet 5",
+      "description": "Sonnet 5 is Anthropic's most capable Sonnet-class model, with frontier performance across coding, agents, and professional work.",
+      "created": "2026-06-30",
       "context_length": 1000000,
+      "max_output_tokens": 128000,
       "pricing": {
         "prompt": "0.000002",
         "completion": "0.00001"
@@ -372,7 +384,10 @@
     {
       "id": "deepseek/deepseek-v4-flash",
       "name": "DeepSeek: V4 Flash",
+      "description": "DeepSeek V4 Flash is an efficiency-optimized Mixture-of-Experts model from DeepSeek with 284B total parameters and 13B activated parameters, supporting a 1M-token context window.",
+      "created": "2026-04-24",
       "context_length": 1000000,
+      "max_output_tokens": 131072,
       "pricing": {
         "prompt": "0.00000021",
         "completion": "0.00000056"
@@ -435,7 +450,10 @@
     {
       "id": "deepseek/deepseek-v4-pro",
       "name": "DeepSeek: V4 Pro",
+      "description": "DeepSeek V4 Pro is a large-scale Mixture-of-Experts model from DeepSeek with 1.6T total parameters and 49B activated parameters, supporting a 1M-token context window.",
+      "created": "2026-04-24",
       "context_length": 1000000,
+      "max_output_tokens": 384000,
       "pricing": {
         "prompt": "0.00000174",
         "completion": "0.00000348"
@@ -535,7 +553,10 @@
     {
       "id": "google/gemini-3.7-flash",
       "name": "Google: Gemini 3.7 Flash",
+      "description": "Gemini 3.7 Flash is a multimodal model from Google for fast agentic workflows, coding, and complex multi-step reasoning.",
+      "created": "2026-08-13",
       "context_length": 1048576,
+      "max_output_tokens": 65536,
       "pricing": {
         "prompt": "0.0000015",
         "completion": "0.0000075"
@@ -581,7 +602,10 @@
     {
       "id": "meta/muse-spark-1.2",
       "name": "Meta: Muse Spark 1.2",
+      "description": "Muse Spark 1.2 is a reasoning model from Meta, designed for complex agentic tasks.",
+      "created": "2026-08-05",
       "context_length": 1048576,
+      "max_output_tokens": 943718,
       "pricing": {
         "prompt": "0.00000125",
         "completion": "0.00000425"
@@ -619,7 +643,10 @@
     {
       "id": "meta/muse-spark-1.2-contributor",
       "name": "Meta: Muse Spark 1.2 Contributor",
+      "description": "Muse Spark 1.2 contributor tier is a reasoning model from Meta designed for developers who want to start building at an even lower cost.",
+      "created": "2026-08-21",
       "context_length": 1048576,
+      "max_output_tokens": 943718,
       "pricing": {
         "prompt": "0.0000001",
         "completion": "0.0000002"
@@ -730,7 +757,10 @@
     {
       "id": "moonshot/kimi-k2.6",
       "name": "Moonshot: Kimi K2.6",
+      "description": "Kimi K2.6 is Moonshot AI's next-generation multimodal model, designed for long-horizon coding, coding-driven UI/UX generation, and multi-agent orchestration.",
+      "created": "2026-04-20",
       "context_length": 256000,
+      "max_output_tokens": 235929,
       "architecture": {
         "modality": "text+image->text",
         "input_modalities": [
@@ -781,7 +811,10 @@
     {
       "id": "moonshot/kimi-k2.7-code",
       "name": "Moonshot: Kimi K2.7 Code",
+      "description": "MoonshotAI: Kimi K2.7 Code is a coding-focused model in Moonshot AI's Kimi K2 family, built to complete end-to-end programming tasks reliably over long contexts.",
+      "created": "2026-06-12",
       "context_length": 256000,
+      "max_output_tokens": 235929,
       "architecture": {
         "modality": "text->text",
         "input_modalities": [
@@ -831,7 +864,10 @@
     {
       "id": "moonshot/kimi-k3",
       "name": "Moonshot: Kimi K3",
+      "description": "Kimi K3 is a 2.8T parameter open-weight multimodal reasoning model from Moonshot AI.",
+      "created": "2026-07-16",
       "context_length": 1000000,
+      "max_output_tokens": 943718,
       "architecture": {
         "modality": "text+image->text",
         "input_modalities": [
@@ -984,7 +1020,10 @@
     {
       "id": "openai/gpt-5.6-luna",
       "name": "OpenAI: GPT-5.6 Luna",
+      "description": "GPT-5.6 Luna is a fast, cost-efficient model in OpenAI's GPT-5.6 series.",
+      "created": "2026-07-09",
       "context_length": 1050000,
+      "max_output_tokens": 128000,
       "pricing": {
         "prompt": "0.0000002",
         "completion": "0.0000012",
@@ -1086,7 +1125,10 @@
     {
       "id": "openai/gpt-5.6-sol",
       "name": "OpenAI: GPT-5.6 Sol",
+      "description": "GPT-5.6 Sol is the flagship model in OpenAI's GPT-5.6 series.",
+      "created": "2026-07-09",
       "context_length": 1050000,
+      "max_output_tokens": 128000,
       "pricing": {
         "prompt": "0.000004",
         "completion": "0.00002",
@@ -1188,7 +1230,10 @@
     {
       "id": "openai/gpt-5.6-terra",
       "name": "OpenAI: GPT-5.6 Terra",
+      "description": "GPT-5.6 Terra is a balanced model in OpenAI's GPT-5.6 series, positioned between the flagship Sol tier and the cost-efficient Luna tier.",
+      "created": "2026-07-09",
       "context_length": 1050000,
+      "max_output_tokens": 128000,
       "pricing": {
         "prompt": "0.000002",
         "completion": "0.000012",
@@ -1290,7 +1335,10 @@
     {
       "id": "qwen/qwen3.7-plus",
       "name": "Qwen: 3.7 Plus",
+      "description": "Qwen3.7-Plus is a cost-effective model in Alibaba's Qwen3.7 series.",
+      "created": "2026-06-03",
       "context_length": 262144,
+      "max_output_tokens": 131072,
       "pricing": {
         "prompt": "0.00000032",
         "completion": "0.00000128",
@@ -1343,7 +1391,10 @@
     {
       "id": "xai/grok-4.3",
       "name": "xAI: Grok 4.3",
+      "description": "Grok 4.3 is a reasoning model from SpaceXAI.",
+      "created": "2026-04-30",
       "context_length": 1000000,
+      "max_output_tokens": 900000,
       "pricing": {
         "prompt": "0.00000125",
         "completion": "0.0000025"
@@ -1380,7 +1431,10 @@
     {
       "id": "xai/grok-4.6",
       "name": "xAI: Grok 4.6",
+      "description": "Grok 4.6 is a model from SpaceXAI with frontier performance on coding, knowledge work, and STEM.",
+      "created": "2026-08-12",
       "context_length": 500000,
+      "max_output_tokens": 450000,
       "pricing": {
         "prompt": "0.000002",
         "completion": "0.000006"
@@ -1417,7 +1471,10 @@
     {
       "id": "zhipu/glm-5.2",
       "name": "Zhipu: GLM-5.2",
+      "description": "GLM 5.2 is a large-scale reasoning model from Z.ai.",
+      "created": "2026-06-16",
       "context_length": 1000000,
+      "max_output_tokens": 131072,
       "architecture": {
         "modality": "text->text",
         "input_modalities": [

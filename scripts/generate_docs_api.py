@@ -38,6 +38,7 @@ TARGETS = [
     "plural.ModelSpec",
     "plural.estimate_cost",
     "plural.catalog.sync",
+    "plural.catalog.edit",
     "plural.TraceWriter",
     "plural.tracing.sinks",
     "plural.Redactor",

@@ -170,6 +170,9 @@ class UpstreamModel:
         input_modalities: Accepted input modalities.
         output_modalities: Produced output modalities.
         supported_parameters: Request parameters the model accepts.
+        description: Upstream description, a starting point for the model card.
+        created: Upstream release date, ``YYYY-MM-DD``.
+        max_output_tokens: Largest completion upstream reports.
     """
 
     id: str
@@ -181,6 +184,9 @@ class UpstreamModel:
     input_modalities: tuple[str, ...] = ("text",)
     output_modalities: tuple[str, ...] = ("text",)
     supported_parameters: tuple[str, ...] = ()
+    description: str | None = None
+    created: str | None = None
+    max_output_tokens: int | None = None
 
     @property
     def author(self) -> str:
@@ -574,7 +580,17 @@ def parse_openrouter(payload: Mapping[str, Any]) -> dict[str, UpstreamModel]:
             continue
         pricing = entry.get("pricing") or {}
         architecture = entry.get("architecture") or {}
+        top_provider = entry.get("top_provider") or {}
+        created = entry.get("created")
+        max_output = top_provider.get("max_completion_tokens")
         models[model_id] = UpstreamModel(
+            description=entry.get("description") or None,
+            created=(
+                datetime.fromtimestamp(created, timezone.utc).strftime("%Y-%m-%d")
+                if isinstance(created, int | float) and created > 0
+                else None
+            ),
+            max_output_tokens=max_output if isinstance(max_output, int) else None,
             id=model_id,
             name=entry.get("name"),
             context_length=entry.get("context_length"),
@@ -844,10 +860,17 @@ def diff_catalog(
 SPEC_KEY_ORDER = (
     "id",
     "name",
+    "description",
+    "created",
+    "knowledge_cutoff",
     "context_length",
+    "max_output_tokens",
     "pricing",
     "architecture",
     "supported_parameters",
+    "open_weights",
+    "license",
+    "links",
     "endpoints",
 )
 
@@ -888,8 +911,14 @@ def _spec_from_upstream(model: UpstreamModel) -> dict[str, Any]:
     spec: dict[str, Any] = {
         "id": model.id,
         "name": model.name or model.id,
-        "context_length": model.context_length,
     }
+    if model.description:
+        spec["description"] = model.description
+    if model.created:
+        spec["created"] = model.created
+    spec["context_length"] = model.context_length
+    if model.max_output_tokens:
+        spec["max_output_tokens"] = model.max_output_tokens
     if model.priced:
         spec["pricing"] = {
             "prompt": f"{model.prompt:.10f}".rstrip("0"),
