@@ -602,10 +602,15 @@ class BedrockProvider:
 
     def _usage(self, raw: Mapping[str, Any] | None) -> Usage:
         data = raw or {}
+        # Converse reports cached tokens outside inputTokens, as Anthropic does.
+        read = int(data.get("cacheReadInputTokens") or 0)
+        write = int(data.get("cacheWriteInputTokens") or 0)
         return Usage.from_counts(
-            int(data.get("inputTokens") or 0),
+            int(data.get("inputTokens") or 0) + read + write,
             int(data.get("outputTokens") or 0),
             reasoning_tokens=reasoning_tokens_of(data),
+            cache_read_tokens=read,
+            cache_write_tokens=write,
         )
 
     def _parse_response(

@@ -111,12 +111,15 @@ assignments. Submissions are append-only. See [Jobs](../running/jobs.md) and
 ```bash
 plural models list
 plural models list --provider openai
+plural models list --all
 ```
 
-Signed in, `plural models list` shows only the models your organization permits.
-Organization admins can restrict models, and the hosted service enforces that
-restriction on runs and gateway calls as well as on this list. Signed out, it
-shows the bundled catalog without any organization policy.
+Signed in to an organization, `plural models list` shows the models your
+organization offers: its own endpoints and private models, and any an admin has
+explicitly allowed. `--all` shows the whole catalog and marks models your
+organization does not permit, which the hosted service refuses on runs and
+gateway calls. Outside an organization, and signed out, it shows the whole
+catalog.
 
 ## Hosted projects
 
@@ -1049,12 +1052,14 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  List models your account may use.
 
- Signed in, the hosted service returns only the models your organization
- permits, and enforces that list when a run starts. Signed out, the bundled
- catalog is shown without any organization policy.
+ Signed in to an organization, this lists the models the organization offers:
+ its own endpoints and private models, and any it explicitly allows. `--all`
+ lists the whole catalog and marks models the organization does not permit.
+ Outside an organization, or signed out, it lists the whole catalog.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --provider        <str>  Only this provider.                                                     │
+│ --all                    Every catalog model, not only the ones your organization offers.        │
 │ --json                   Print machine-readable JSON.                                            │
 │ --help                   Show this message and exit.                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

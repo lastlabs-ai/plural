@@ -289,3 +289,32 @@ def test_login_hides_a_key_typed_at_a_terminal(
     assert code == 0, output
     assert prompts == [">> "]
     assert "token" not in output.replace("Signed in", "")
+
+
+def test_models_list_shows_the_whole_catalog_outside_an_organization(fake: FakeHosted) -> None:
+    login()
+    code, output = cli("models", "list", "--json")
+    assert code == 0, output
+    payload = json.loads(output)
+    assert payload["scope"] == "account"
+    assert len(payload["models"]) == 2
+
+
+def test_models_list_defaults_to_the_organization_models(fake: FakeHosted) -> None:
+    fake.organization_models = ["anthropic/claude-sonnet-5"]
+    login()
+
+    code, output = cli("models", "list")
+    assert code == 0, output
+    assert "anthropic/claude-sonnet-5" in output
+    assert "openai/gpt-5.6-luna" not in output
+    assert "--all" in output
+
+    code, output = cli("models", "list", "--all", "--json")
+    assert code == 0, output
+    payload = json.loads(output)
+    assert payload["scope"] == "all"
+    assert {item["id"] for item in payload["models"]} == {
+        "anthropic/claude-sonnet-5",
+        "openai/gpt-5.6-luna",
+    }

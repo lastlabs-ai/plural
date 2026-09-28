@@ -538,22 +538,31 @@ Attributes:
     cost: Estimated USD cost when known.
     reasoning_tokens: How many completion tokens were reasoning, when the
         provider reports the split. ``None`` means unreported, not zero.
+    cache_read_tokens: How many prompt tokens were served from the host's
+        prompt cache. Always a subset of ``prompt_tokens``.
+    cache_write_tokens: How many prompt tokens were written to the host's
+        prompt cache. Always a subset of ``prompt_tokens``.
+    cache_write_long_tokens: How many of ``cache_write_tokens`` were written
+        with a long-lived cache (Anthropic's one-hour TTL), which bills higher.
 ```
 
 ### plural.types.Usage.from_counts
 
 ```python
-from_counts(prompt: 'int', completion: 'int', cost: 'float | None' = None, *, reasoning_tokens: 'int | None' = None) -> 'Usage'
+from_counts(prompt: 'int', completion: 'int', cost: 'float | None' = None, *, reasoning_tokens: 'int | None' = None, cache_read_tokens: 'int' = 0, cache_write_tokens: 'int' = 0, cache_write_long_tokens: 'int' = 0) -> 'Usage'
 ```
 
 Build a :class:`Usage` from prompt/completion counts.
 
 ```text
 Args:
-    prompt: Prompt token count.
+    prompt: Prompt token count, including any cached tokens.
     completion: Completion token count.
     cost: Optional USD cost.
     reasoning_tokens: Reasoning tokens included in ``completion``, when reported.
+    cache_read_tokens: Prompt tokens read from the host's cache.
+    cache_write_tokens: Prompt tokens written to the host's cache.
+    cache_write_long_tokens: Cache writes with a long-lived TTL.
 
 Returns:
     A populated :class:`Usage` instance.
@@ -561,6 +570,33 @@ Returns:
 Examples:
     >>> Usage.from_counts(10, 5).total_tokens
     15
+```
+
+## plural.types.cached_prompt_tokens_of
+
+Cache reads and writes a host reported inside its prompt count.
+
+```text
+OpenAI Chat Completions and the OpenAI-compatible hosts report
+``prompt_tokens_details.cached_tokens``, the Responses API
+``input_tokens_details.cached_tokens``, DeepSeek ``prompt_cache_hit_tokens``,
+Moonshot a top-level ``cached_tokens``, and Gemini ``cachedContentTokenCount``.
+All of them count those tokens inside the prompt total. Hosts that relay
+Anthropic report writes as ``prompt_tokens_details.cache_write_tokens``.
+
+Args:
+    raw: A provider usage object.
+
+Returns:
+    A (cache read, cache write) pair of token counts, zero when unreported.
+
+Examples:
+    >>> cached_prompt_tokens_of({"prompt_tokens_details": {"cached_tokens": 64}})
+    (64, 0)
+```
+
+```python
+plural.types.cached_prompt_tokens_of(raw: 'Mapping[str, Any] | None') -> 'tuple[int, int]'
 ```
 
 ## plural.types.reasoning_tokens_of
@@ -2702,10 +2738,12 @@ Attributes:
     discount: Promotional fraction OpenRouter applied, if any.
     tiers: Prompt-length rates, ordered by threshold.
     tag: Raw upstream tag, kept for reporting unmapped hosts.
+    cache_read: Undiscounted USD per prompt token read from the cache.
+    cache_write: Undiscounted USD per prompt token written to the cache.
 ```
 
 ```python
-plural.catalog.sync.UpstreamEndpoint(provider: 'str | None', region: 'str', tier: 'str', upstream_id: 'str', prompt: 'float | None', completion: 'float | None', discount: 'float | None', tiers: 'tuple[UpstreamTier, ...]', tag: 'str') -> None
+plural.catalog.sync.UpstreamEndpoint(provider: 'str | None', region: 'str', tier: 'str', upstream_id: 'str', prompt: 'float | None', completion: 'float | None', discount: 'float | None', tiers: 'tuple[UpstreamTier, ...]', tag: 'str', cache_read: 'float | None' = None, cache_write: 'float | None' = None) -> None
 ```
 
 ## plural.catalog.sync.UpstreamModel

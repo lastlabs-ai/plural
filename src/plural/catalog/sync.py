@@ -292,6 +292,8 @@ class UpstreamEndpoint:
         discount: Promotional fraction OpenRouter applied, if any.
         tiers: Prompt-length rates, ordered by threshold.
         tag: Raw upstream tag, kept for reporting unmapped hosts.
+        cache_read: Undiscounted USD per prompt token read from the cache.
+        cache_write: Undiscounted USD per prompt token written to the cache.
     """
 
     provider: str | None
@@ -303,6 +305,8 @@ class UpstreamEndpoint:
     discount: float | None
     tiers: tuple[UpstreamTier, ...]
     tag: str
+    cache_read: float | None = None
+    cache_write: float | None = None
 
     @property
     def priced(self) -> bool:
@@ -397,6 +401,8 @@ def parse_endpoints(payload: Mapping[str, Any]) -> list[UpstreamEndpoint]:
                 discount=discount if isinstance(discount, (int, float)) else None,
                 tiers=parse_tiers(pricing, discount),
                 tag=tag,
+                cache_read=_undiscount(_price(pricing.get("input_cache_read")), discount),
+                cache_write=_undiscount(_price(pricing.get("input_cache_write")), discount),
             )
         )
     return endpoints

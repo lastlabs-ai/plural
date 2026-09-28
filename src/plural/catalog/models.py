@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
+from decimal import Decimal
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from plural.catalog.billing import PriceRates, charge_usage
 from plural.errors import NotFoundError
 from plural.types import Usage
 
@@ -77,8 +79,10 @@ class ModelPricing(BaseModel):
         completion: USD per completion token below the first tier threshold.
         tiers: Rates for larger prompts, if the model prices them differently.
         cache_read: USD per prompt token served from the host's prompt cache.
-            Shown on the model card; billing charges the prompt rate.
+            Undeclared, a cache read bills at the prompt rate.
         cache_write: USD per prompt token written to the host's prompt cache.
+            Undeclared, a write bills at 1.25 times the prompt rate; see
+            :mod:`plural.catalog.billing`.
     """
 
     prompt: float
@@ -116,6 +120,41 @@ class ModelPricing(BaseModel):
             return self.prompt, self.completion
         tier = max(applicable, key=lambda item: item.min_prompt_tokens)
         return tier.prompt, tier.completion
+
+    def rates_at(self, prompt_tokens: int) -> PriceRates:
+        """Every rate that applies to a request of a given prompt size.
+
+        A long-context tier raises the cache rates in proportion to the prompt
+        rate, as hosts that tier by prompt size do.
+
+        Args:
+            prompt_tokens: Prompt tokens in the request, cached or not.
+
+        Returns:
+            Per-token rates, including cache rates when declared.
+
+        Examples:
+            >>> pricing = ModelPricing(
+            ...     prompt=2e-06,
+            ...     completion=1e-05,
+            ...     cache_read=2e-07,
+            ...     tiers=[PriceTier(min_prompt_tokens=200000, prompt=4e-06, completion=1.5e-05)],
+            ... )
+            >>> str(pricing.rates_at(250000).cache_read)
+            '4E-7'
+        """
+        prompt, completion = self.rates_for_prompt(prompt_tokens)
+        ratio = Decimal(str(prompt)) / Decimal(str(self.prompt)) if self.prompt else Decimal(1)
+
+        def scaled(rate: float | None) -> Decimal | None:
+            return None if rate is None else Decimal(str(rate)) * ratio
+
+        return PriceRates(
+            prompt=Decimal(str(prompt)),
+            completion=Decimal(str(completion)),
+            cache_read=scaled(self.cache_read),
+            cache_write=scaled(self.cache_write),
+        )
 
 
 class Architecture(BaseModel):
@@ -295,8 +334,7 @@ def estimate_cost(
     pricing = spec.pricing_for(provider, region)
     if pricing is None:
         return None
-    prompt_rate, completion_rate = pricing.rates_for_prompt(usage.prompt_tokens)
-    return usage.prompt_tokens * prompt_rate + usage.completion_tokens * completion_rate
+    return float(charge_usage(pricing.rates_at(usage.prompt_tokens), usage).total_usd)
 
 
 def _parse_tiers(raw: Any) -> list[PriceTier]:

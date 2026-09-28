@@ -48,6 +48,29 @@ from plural.types import (
     text_content,
 )
 
+_CACHE_KEYS = ("cache_read_input_tokens", "cache_creation_input_tokens", "cache_creation")
+
+
+def _cache_counts(usage: dict[str, Any]) -> tuple[int, int, int]:
+    """Cache reads, cache writes, and one-hour writes from an Anthropic usage object.
+
+    Anthropic's ``input_tokens`` excludes both cached reads and cache writes, so
+    they must be added back to get the tokens the request actually sent.
+
+    Args:
+        usage: An Anthropic ``usage`` object.
+
+    Returns:
+        A (cache read, cache write, one-hour cache write) triple of token counts.
+    """
+    read = int(usage.get("cache_read_input_tokens") or 0)
+    write = int(usage.get("cache_creation_input_tokens") or 0)
+    creation = usage.get("cache_creation")
+    long_write = (
+        int(creation.get("ephemeral_1h_input_tokens") or 0) if isinstance(creation, dict) else 0
+    )
+    return read, write, long_write
+
 
 @dataclass
 class _StreamState:
@@ -62,6 +85,7 @@ class _StreamState:
     message_id: str = ""
     model: str = ""
     prompt_tokens: int = 0
+    cache: tuple[int, int, int] = (0, 0, 0)
     block_types: dict[int, str] = field(default_factory=dict)
     tool_slots: dict[int, int] = field(default_factory=dict)
     structured_tool: str | None = None
@@ -334,10 +358,14 @@ class AnthropicProvider:
         else:
             finish = stop
         usage_raw = data.get("usage") or {}
+        read, write, long_write = _cache_counts(usage_raw)
         usage = Usage.from_counts(
-            int(usage_raw.get("input_tokens") or 0),
+            int(usage_raw.get("input_tokens") or 0) + read + write,
             int(usage_raw.get("output_tokens") or 0),
             reasoning_tokens=reasoning_tokens_of(usage_raw),
+            cache_read_tokens=read,
+            cache_write_tokens=write,
+            cache_write_long_tokens=long_write,
         )
         message = Message(
             role="assistant",
@@ -525,6 +553,7 @@ class AnthropicProvider:
             state.model = str(msg.get("model") or state.model)
             usage_raw = msg.get("usage") or {}
             state.prompt_tokens = int(usage_raw.get("input_tokens") or state.prompt_tokens)
+            state.cache = _cache_counts(usage_raw)
             return None
         if etype == "content_block_start":
             return self._block_start(event, state)
@@ -539,6 +568,9 @@ class AnthropicProvider:
             usage_raw = event.get("usage") or {}
             if usage_raw.get("input_tokens") is not None:
                 state.prompt_tokens = int(usage_raw["input_tokens"])
+            if any(key in usage_raw for key in _CACHE_KEYS):
+                state.cache = _cache_counts(usage_raw)
+            read, write, long_write = state.cache
             stop = (event.get("delta") or {}).get("stop_reason")
             finish = self._finish_reason(stop)
             if stop == "tool_use" and state.structured_tool:
@@ -548,9 +580,12 @@ class AnthropicProvider:
                 model=state.model,
                 finish_reason=finish,
                 usage=Usage.from_counts(
-                    state.prompt_tokens,
+                    state.prompt_tokens + read + write,
                     int(usage_raw.get("output_tokens") or 0),
                     reasoning_tokens=reasoning_tokens_of(usage_raw),
+                    cache_read_tokens=read,
+                    cache_write_tokens=write,
+                    cache_write_long_tokens=long_write,
                 ),
                 provider=self.name,
                 raw=event,

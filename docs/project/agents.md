@@ -22,7 +22,12 @@ List the model IDs you may run:
 plural models list
 ```
 
-Signed out, this shows the catalog bundled with Plural. After `plural auth login`, the hosted service returns only the models your organization permits. Organization admins can restrict models, and the service enforces that list for runs, reruns, and model calls through the gateway, so a model missing from this list will be refused.
+Signed out, this shows the catalog bundled with Plural. After `plural auth login`, what you see depends on your account:
+
+- Outside an organization, you see the whole catalog.
+- In an organization, you see the models your organization offers: models it serves from its own cloud endpoints, its private models, and any models an admin has explicitly allowed. If the organization has configured none of these, you see the whole catalog.
+
+Run `plural models list --all` to see every catalog model. Models your organization does not permit are marked `not permitted`; the service refuses them for runs, reruns, and model calls through the gateway.
 
 From Python, a `Client` exposes the same catalog. `Client()` needs a Plural API key, stored with `plural auth login --api-key-stdin` or set as `PLURAL_API_KEY`:
 

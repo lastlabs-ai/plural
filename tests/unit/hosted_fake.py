@@ -63,6 +63,7 @@ class FakeHosted:
             {"id": "anthropic/claude-sonnet-5", "name": "Sonnet", "provider": "anthropic"},
         ]
     )
+    organization_models: list[str] | None = None
     _ids: Iterator[int] = field(default_factory=lambda: itertools.count(1))
 
     def add_project(self, slug: str, *, account_id: str = "acc_personal") -> dict[str, Any]:
@@ -111,7 +112,17 @@ class FakeHosted:
             return _ok(visible)
         if parts == ["models"]:
             provider = request.url.params.get("provider")
-            return _ok([m for m in self.models if provider in {None, m["provider"]}])
+            models = [m for m in self.models if provider in {None, m["provider"]}]
+            if request.url.params.get("all") == "true":
+                scope = "all"
+            elif self.organization_models is None:
+                scope = "account"
+            else:
+                scope = "organization"
+                models = [m for m in models if m["id"] in self.organization_models]
+            response = _ok(models)
+            response.headers["X-Plural-Model-Scope"] = scope
+            return response
         if parts and parts[0] == "projects":
             return self._projects(request, parts[1:], body, key, account)
         if parts and parts[0] == "packages":

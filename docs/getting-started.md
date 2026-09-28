@@ -202,9 +202,9 @@ is not accepted for model calls; use an API key for those. A project key, an API
 limited to one project, can only reach that project and cannot create new ones. Keep
 keys out of source files, Agent instructions, and Task files.
 
-Signed in, `plural models list` shows only the models your organization permits.
-Organization admins can restrict that list, and the service enforces it when a run
-starts.
+Signed in to an organization, `plural models list` shows the models your organization
+offers; add `--all` for the whole catalog. The service refuses models your organization
+does not permit when a run starts.
 
 ## Push and run hosted
 

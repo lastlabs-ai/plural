@@ -39,9 +39,33 @@ from plural.types import (
     StreamDelta,
     ToolCall,
     Usage,
+    cached_prompt_tokens_of,
     reasoning_tokens_of,
     text_content,
 )
+
+
+def _gemini_usage(meta: dict[str, Any]) -> Usage:
+    """Normalize Gemini ``usageMetadata``.
+
+    ``candidatesTokenCount`` excludes thinking, which Gemini bills as output, and
+    ``promptTokenCount`` excludes the prompt of tool calls it ran, which it bills
+    as input; both are added back. Cached content is counted inside the prompt.
+
+    Args:
+        meta: A Gemini ``usageMetadata`` object.
+
+    Returns:
+        Normalized usage.
+    """
+    reasoning = reasoning_tokens_of(meta)
+    read, _write = cached_prompt_tokens_of(meta)
+    return Usage.from_counts(
+        int(meta.get("promptTokenCount") or 0) + int(meta.get("toolUsePromptTokenCount") or 0),
+        int(meta.get("candidatesTokenCount") or 0) + (reasoning or 0),
+        reasoning_tokens=reasoning,
+        cache_read_tokens=read,
+    )
 
 
 class GoogleProvider:
@@ -209,12 +233,7 @@ class GoogleProvider:
             "SAFETY": FinishReason.CONTENT_FILTER,
         }
         finish = finish_map.get(candidate.get("finishReason"), candidate.get("finishReason"))
-        usage_meta = data.get("usageMetadata") or {}
-        usage = Usage.from_counts(
-            int(usage_meta.get("promptTokenCount") or 0),
-            int(usage_meta.get("candidatesTokenCount") or 0),
-            reasoning_tokens=reasoning_tokens_of(usage_meta),
-        )
+        usage = _gemini_usage(data.get("usageMetadata") or {})
         return ChatResponse(
             id=str(data.get("responseId") or data.get("id") or ""),
             model=model,
@@ -287,12 +306,7 @@ class GoogleProvider:
         }
         usage = None
         if data.get("usageMetadata"):
-            um = data["usageMetadata"]
-            usage = Usage.from_counts(
-                int(um.get("promptTokenCount") or 0),
-                int(um.get("candidatesTokenCount") or 0),
-                reasoning_tokens=reasoning_tokens_of(um),
-            )
+            usage = _gemini_usage(data["usageMetadata"])
         text = "".join(text_parts)
         reasoning = "".join(reasoning_parts)
         chunk = StreamChunk(

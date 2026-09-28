@@ -381,16 +381,54 @@ class PackagesAPI:
         return self._studio.request_bytes("GET", f"/packages/{quote(digest)}")
 
 
+MODEL_SCOPE_HEADER = "X-Plural-Model-Scope"
+
+
+class ModelListing(BaseModel):
+    """A model list and which list the hosted service chose.
+
+    ``scope`` is ``account`` for an account outside an organization (the whole
+    catalog), ``organization`` for the models an organization configured,
+    ``catalog`` for an organization that configured none (the whole catalog),
+    and ``all`` when every model was requested. It is ``None`` from a service
+    too old to report it.
+    """
+
+    scope: str | None = None
+    models: JsonList
+
+
 class ModelsAPI:
     """Models the selected account may use, after organization policy."""
 
     def __init__(self, studio: Studio) -> None:
         self._studio = studio
 
-    def list(self, *, provider: str | None = None) -> JsonList:
-        params = {"provider": provider} if provider else None
-        response = self._studio.request("GET", "/models", params=params)
-        return _items(response)
+    def list(self, *, provider: str | None = None, include_all: bool = False) -> JsonList:
+        return self.listing(provider=provider, include_all=include_all).models
+
+    def listing(self, *, provider: str | None = None, include_all: bool = False) -> ModelListing:
+        """List models along with the scope the service applied.
+
+        Args:
+            provider: Only models this provider makes or hosts.
+            include_all: Every catalog model rather than only the organization's.
+                Models the organization's allowlist blocks come back with
+                ``permitted: false``.
+
+        Returns:
+            The models and the scope header's value.
+        """
+        params: JsonObject = {}
+        if provider:
+            params["provider"] = provider
+        if include_all:
+            params["all"] = "true"
+        response = self._studio._send("GET", "/models", params=params or None)
+        return ModelListing(
+            scope=response.headers.get(MODEL_SCOPE_HEADER),
+            models=_items(response.json() if response.content else []),
+        )
 
 
 class TracesAPI:

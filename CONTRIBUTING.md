@@ -109,6 +109,7 @@ uv run python -m plural.catalog.edit set acme/new-model created=2026-09-01 prici
 uv run python -m plural.catalog.edit endpoint add acme/new-model --provider fireworks \
   --upstream-id accounts/fireworks/models/new-model --prompt 0.9/M --completion 0.9/M
 uv run python -m plural.catalog.edit enrich                  # fill missing card text from OpenRouter
+uv run python -m plural.catalog.edit cache-prices            # fill cache read/write prices per host
 uv run python -m plural.catalog.edit validate --strict       # warnings fail too
 ```
 

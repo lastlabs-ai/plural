@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from plural.catalog import ModelCatalog, estimate_cost
 from plural.catalog.models import ModelPricing, ModelSpec, PriceTier
 from plural.types import Usage
@@ -49,8 +51,8 @@ def test_long_prompt_tier_replaces_the_base_rate() -> None:
     short = estimate_cost(Usage.from_counts(100_000, 1_000), spec)
     long = estimate_cost(Usage.from_counts(300_000, 1_000), spec)
     assert short is not None and long is not None
-    assert short == 100_000 * 5e-6 + 1_000 * 3e-5
-    assert long == 300_000 * 1e-5 + 1_000 * 6e-5
+    assert short == pytest.approx(100_000 * 5e-6 + 1_000 * 3e-5)
+    assert long == pytest.approx(300_000 * 1e-5 + 1_000 * 6e-5)
     # Tripling the prompt across the threshold more than triples the cost.
     assert long / short > 3
 

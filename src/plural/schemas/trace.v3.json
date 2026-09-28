@@ -1517,8 +1517,23 @@
       "type": "object"
     },
     "Usage": {
-      "description": "Token usage for a completion.\n\nAttributes:\n    prompt_tokens: Input token count.\n    completion_tokens: Output token count. Includes reasoning tokens when the\n        provider bills them as output.\n    total_tokens: Sum of prompt and completion tokens.\n    cost: Estimated USD cost when known.\n    reasoning_tokens: How many completion tokens were reasoning, when the\n        provider reports the split. ``None`` means unreported, not zero.",
+      "description": "Token usage for a completion.\n\nAttributes:\n    prompt_tokens: Input token count.\n    completion_tokens: Output token count. Includes reasoning tokens when the\n        provider bills them as output.\n    total_tokens: Sum of prompt and completion tokens.\n    cost: Estimated USD cost when known.\n    reasoning_tokens: How many completion tokens were reasoning, when the\n        provider reports the split. ``None`` means unreported, not zero.\n    cache_read_tokens: How many prompt tokens were served from the host's\n        prompt cache. Always a subset of ``prompt_tokens``.\n    cache_write_tokens: How many prompt tokens were written to the host's\n        prompt cache. Always a subset of ``prompt_tokens``.\n    cache_write_long_tokens: How many of ``cache_write_tokens`` were written\n        with a long-lived cache (Anthropic's one-hour TTL), which bills higher.",
       "properties": {
+        "cache_read_tokens": {
+          "default": 0,
+          "title": "Cache Read Tokens",
+          "type": "integer"
+        },
+        "cache_write_long_tokens": {
+          "default": 0,
+          "title": "Cache Write Long Tokens",
+          "type": "integer"
+        },
+        "cache_write_tokens": {
+          "default": 0,
+          "title": "Cache Write Tokens",
+          "type": "integer"
+        },
         "completion_tokens": {
           "default": 0,
           "title": "Completion Tokens",

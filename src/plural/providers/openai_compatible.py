@@ -41,8 +41,28 @@ from plural.types import (
     StreamDelta,
     ToolCall,
     Usage,
+    cached_prompt_tokens_of,
     reasoning_tokens_of,
 )
+
+
+def _openai_usage(raw: dict[str, Any]) -> Usage:
+    """Normalize a Chat Completions ``usage`` object.
+
+    Args:
+        raw: The ``usage`` object; cached tokens are counted inside the prompt.
+
+    Returns:
+        Normalized usage.
+    """
+    read, write = cached_prompt_tokens_of(raw)
+    return Usage.from_counts(
+        int(raw.get("prompt_tokens") or 0),
+        int(raw.get("completion_tokens") or 0),
+        reasoning_tokens=reasoning_tokens_of(raw),
+        cache_read_tokens=read,
+        cache_write_tokens=write,
+    )
 
 
 @dataclass
@@ -277,12 +297,7 @@ class OpenAICompatible:
             return value
 
     def _parse_response(self, data: dict[str, Any], *, latency_ms: float) -> ChatResponse:
-        usage_raw = data.get("usage") or {}
-        usage = Usage.from_counts(
-            int(usage_raw.get("prompt_tokens") or 0),
-            int(usage_raw.get("completion_tokens") or 0),
-            reasoning_tokens=reasoning_tokens_of(usage_raw),
-        )
+        usage = _openai_usage(data.get("usage") or {})
         choices = [
             Choice(
                 index=int(c.get("index") or 0),
@@ -307,11 +322,7 @@ class OpenAICompatible:
         delta_raw = choice.get("delta") or {}
         usage = None
         if data.get("usage"):
-            usage = Usage.from_counts(
-                int(data["usage"].get("prompt_tokens") or 0),
-                int(data["usage"].get("completion_tokens") or 0),
-                reasoning_tokens=reasoning_tokens_of(data["usage"]),
-            )
+            usage = _openai_usage(data["usage"])
         return StreamChunk(
             id=str(data.get("id") or ""),
             model=str(data.get("model") or ""),

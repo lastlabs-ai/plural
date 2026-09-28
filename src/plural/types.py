@@ -286,6 +286,12 @@ class Usage(BaseModel):
         cost: Estimated USD cost when known.
         reasoning_tokens: How many completion tokens were reasoning, when the
             provider reports the split. ``None`` means unreported, not zero.
+        cache_read_tokens: How many prompt tokens were served from the host's
+            prompt cache. Always a subset of ``prompt_tokens``.
+        cache_write_tokens: How many prompt tokens were written to the host's
+            prompt cache. Always a subset of ``prompt_tokens``.
+        cache_write_long_tokens: How many of ``cache_write_tokens`` were written
+            with a long-lived cache (Anthropic's one-hour TTL), which bills higher.
     """
 
     prompt_tokens: int = 0
@@ -293,6 +299,9 @@ class Usage(BaseModel):
     total_tokens: int = 0
     cost: float | None = None
     reasoning_tokens: int | None = None
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_write_long_tokens: int = 0
 
     @classmethod
     def from_counts(
@@ -302,14 +311,20 @@ class Usage(BaseModel):
         cost: float | None = None,
         *,
         reasoning_tokens: int | None = None,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        cache_write_long_tokens: int = 0,
     ) -> Usage:
         """Build a :class:`Usage` from prompt/completion counts.
 
         Args:
-            prompt: Prompt token count.
+            prompt: Prompt token count, including any cached tokens.
             completion: Completion token count.
             cost: Optional USD cost.
             reasoning_tokens: Reasoning tokens included in ``completion``, when reported.
+            cache_read_tokens: Prompt tokens read from the host's cache.
+            cache_write_tokens: Prompt tokens written to the host's cache.
+            cache_write_long_tokens: Cache writes with a long-lived TTL.
 
         Returns:
             A populated :class:`Usage` instance.
@@ -324,7 +339,50 @@ class Usage(BaseModel):
             total_tokens=prompt + completion,
             cost=cost,
             reasoning_tokens=reasoning_tokens,
+            cache_read_tokens=min(cache_read_tokens, prompt),
+            cache_write_tokens=min(cache_write_tokens, max(prompt - cache_read_tokens, 0)),
+            cache_write_long_tokens=min(cache_write_long_tokens, cache_write_tokens),
         )
+
+
+def cached_prompt_tokens_of(raw: Mapping[str, Any] | None) -> tuple[int, int]:
+    """Cache reads and writes a host reported inside its prompt count.
+
+    OpenAI Chat Completions and the OpenAI-compatible hosts report
+    ``prompt_tokens_details.cached_tokens``, the Responses API
+    ``input_tokens_details.cached_tokens``, DeepSeek ``prompt_cache_hit_tokens``,
+    Moonshot a top-level ``cached_tokens``, and Gemini ``cachedContentTokenCount``.
+    All of them count those tokens inside the prompt total. Hosts that relay
+    Anthropic report writes as ``prompt_tokens_details.cache_write_tokens``.
+
+    Args:
+        raw: A provider usage object.
+
+    Returns:
+        A (cache read, cache write) pair of token counts, zero when unreported.
+
+    Examples:
+        >>> cached_prompt_tokens_of({"prompt_tokens_details": {"cached_tokens": 64}})
+        (64, 0)
+    """
+    if not raw:
+        return 0, 0
+    read = 0
+    write = 0
+    for key in ("prompt_tokens_details", "input_tokens_details"):
+        details = raw.get(key)
+        if isinstance(details, Mapping):
+            read = read or _count(details.get("cached_tokens"))
+            write = write or _count(details.get("cache_write_tokens"))
+    for key in ("prompt_cache_hit_tokens", "cached_tokens", "cachedContentTokenCount"):
+        read = read or _count(raw.get(key))
+    return read, write
+
+
+def _count(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
 
 
 def reasoning_tokens_of(raw: Mapping[str, Any] | None) -> int | None:

@@ -58,6 +58,7 @@ from plural.types import (
     TextContent,
     ToolCall,
     Usage,
+    cached_prompt_tokens_of,
     reasoning_tokens_of,
     text_content,
 )
@@ -146,10 +147,13 @@ def _usage(raw: dict[str, Any] | None) -> Usage | None:
     """
     if not raw:
         return None
+    read, write = cached_prompt_tokens_of(raw)
     return Usage.from_counts(
         int(raw.get("input_tokens") or 0),
         int(raw.get("output_tokens") or 0),
         reasoning_tokens=reasoning_tokens_of(raw),
+        cache_read_tokens=read,
+        cache_write_tokens=write,
     )
 
 

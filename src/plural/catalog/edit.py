@@ -11,7 +11,10 @@ Every command prints JSON on stdout. A failed command prints
 the document still validates.
 
 Prices are USD per token. Any price may instead be written per million tokens
-with an ``/M`` suffix, so ``3/M`` stores ``0.000003``.
+with an ``/M`` suffix, so ``3/M`` stores ``0.000003``. Cached prompt tokens bill
+at ``cache_read`` and cache writes at ``cache_write``; an undeclared read bills
+at the prompt rate and an undeclared write at 1.25 times it, so a missing price
+never undercharges. ``cache-prices`` fills both from OpenRouter's per-host data.
 
 Run it with::
 
@@ -21,6 +24,7 @@ Run it with::
     python -m plural.catalog.edit add --file card.json
     python -m plural.catalog.edit add acme/new-model --from-openrouter
     python -m plural.catalog.edit enrich acme/new-model --as acme-ai/new-model
+    python -m plural.catalog.edit cache-prices acme/new-model
     python -m plural.catalog.edit set acme/new-model description="..." pricing.prompt=3/M
     python -m plural.catalog.edit endpoint add acme/new-model --provider fireworks \
         --upstream-id accounts/fireworks/models/new-model --prompt 0.9/M --completion 0.9/M
@@ -38,7 +42,7 @@ import re
 import sys
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
 
@@ -260,6 +264,36 @@ def _issues_for_pricing(
                     message=f"{raw} per token is ${value * 1_000_000}/M; prices are per token",
                 )
             )
+    prompt = _rate(pricing.prompt)
+    read = _rate(pricing.cache_read) if pricing.cache_read is not None else None
+    write = _rate(pricing.cache_write) if pricing.cache_write is not None else None
+    if prompt is not None and read is not None and read > prompt:
+        issues.append(
+            Issue(
+                level="error",
+                model=model,
+                path=f"{path}.cache_read",
+                message="a cache read never costs more than a prompt token",
+            )
+        )
+    if prompt is not None and write is not None and write < prompt:
+        issues.append(
+            Issue(
+                level="error",
+                model=model,
+                path=f"{path}.cache_write",
+                message="a cache write never costs less than a prompt token",
+            )
+        )
+    if read is None:
+        issues.append(
+            Issue(
+                level="warning",
+                model=model,
+                path=f"{path}.cache_read",
+                message="no cache read price; cached tokens bill at the full prompt rate",
+            )
+        )
     thresholds = [tier.min_prompt_tokens for tier in pricing.tiers]
     if thresholds != sorted(set(thresholds)):
         issues.append(
@@ -283,6 +317,14 @@ def _issues_for_pricing(
                         message=f"bad price {raw!r}",
                     )
                 )
+
+
+CACHE_WRITE_PREMIUM = frozenset({"anthropic"})
+"""Model authors whose models bill a premium to write the prompt cache, on any host."""
+
+
+def _charges_for_cache_writes(model: str, host: str) -> bool:
+    return host in CACHE_WRITE_PREMIUM or model.split("/", 1)[0] in CACHE_WRITE_PREMIUM
 
 
 def validate_entry(card: ModelCardDocument) -> list[Issue]:
@@ -361,6 +403,16 @@ def validate_entry(card: ModelCardDocument) -> list[Issue]:
         elif endpoint.provider in ROUTABLE_HOSTS:
             live = True
         _issues_for_pricing(model, f"{path}.pricing", endpoint.pricing, issues)
+        if (
+            endpoint.pricing is not None
+            and endpoint.pricing.cache_write is None
+            and _charges_for_cache_writes(model, endpoint.provider)
+        ):
+            add(
+                "error",
+                f"{path}.pricing.cache_write",
+                "this host charges extra to write the prompt cache; declare cache_write",
+            )
         if (
             endpoint.context_length is not None
             and card.context_length is not None
@@ -695,6 +747,118 @@ def _enrich(entries: dict[str, dict[str, Any]], ids: Sequence[str], alias: str |
     return changed
 
 
+_CACHE_PRICE_STEP = Decimal("1e-12")
+
+
+def _cache_ratio(field: str, prompt: float | None, rate: float | None) -> Decimal | None:
+    """The cache price as a fraction of the prompt price, when it is a usable one.
+
+    Some hosts list a sub-prompt ``input_cache_write`` that amortizes explicit cache
+    storage rather than pricing a write; a write that costs less than a fresh prompt
+    token is never taken as the write rate.
+
+    Returns:
+        The ratio, or ``None`` when the upstream figure should not be used.
+    """
+    if not prompt or rate is None:
+        return None
+    ratio = Decimal(str(rate)) / Decimal(str(prompt))
+    if field == "cache_write" and ratio < 1:
+        return None
+    if field == "cache_read" and ratio > 1:
+        return None
+    return ratio
+
+
+def _cache_prices(
+    entries: dict[str, dict[str, Any]],
+    ids: Sequence[str],
+    alias: str | None,
+    replace: bool,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Fill cache read and write prices from OpenRouter's per-host listings.
+
+    A host's cache price is taken as the same fraction of its prompt price that
+    OpenRouter lists for that host and region, else for that host in any region,
+    rounded up to a millionth of a dollar per million tokens. One host's cache
+    discount is never assumed for another: a host with no upstream cache price is
+    left alone, so its cached tokens bill at the full prompt rate.
+
+    Returns:
+        The changed model ids and one report row per price written or model skipped.
+
+    Raises:
+        EditError: When ``alias`` is given for more than one model, or an id is unknown.
+    """
+    import httpx
+
+    from plural.catalog.sync import fetch_endpoints, fetch_openrouter
+
+    if alias and len(ids) != 1:
+        raise EditError("--as names the upstream id for exactly one model")
+    targets = list(ids) or sorted(entries)
+    for model_id in targets:
+        _require(entries, model_id)
+    changed: list[str] = []
+    report: list[dict[str, Any]] = []
+    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+        upstream = fetch_openrouter(client)
+        for model_id in targets:
+            model = match_upstream(model_id, upstream, alias)
+            if model is None:
+                report.append({"model": model_id, "skipped": "not on OpenRouter"})
+                continue
+            exact: dict[tuple[str, str], Any] = {}
+            by_provider: dict[str, Any] = {}
+            for host in fetch_endpoints(client, model.id):
+                if host.provider is None or host.tier != "standard" or not host.prompt:
+                    continue
+                exact.setdefault((host.provider, host.region), host)
+                by_provider.setdefault(host.provider, host)
+            entry = entries[model_id]
+            endpoints: list[dict[str, Any]] = entry.get("endpoints") or []
+            priced = [
+                (f"endpoints[{index}]", endpoint, endpoint.get("pricing"))
+                for index, endpoint in enumerate(endpoints)
+            ]
+            if entry.get("pricing"):
+                priced.append(("pricing", endpoints[0] if endpoints else {}, entry["pricing"]))
+            touched = False
+            for path, endpoint, pricing in priced:
+                if not isinstance(pricing, dict) or pricing.get("prompt") is None:
+                    continue
+                provider = str(endpoint.get("provider"))
+                region = str(endpoint.get("region") or "us")
+                match = exact.get((provider, region)) or by_provider.get(provider)
+                if match is None:
+                    continue
+                source = "host+region" if (provider, region) in exact else "host"
+                for field in ("cache_read", "cache_write"):
+                    if pricing.get(field) is not None and not replace:
+                        continue
+                    ratio = _cache_ratio(field, match.prompt, getattr(match, field))
+                    if ratio is None:
+                        continue
+                    exact_value = Decimal(str(pricing["prompt"])) * ratio
+                    value = _plain(exact_value.quantize(_CACHE_PRICE_STEP, rounding=ROUND_CEILING))
+                    if pricing.get(field) == value:
+                        continue
+                    pricing[field] = value
+                    touched = True
+                    report.append(
+                        {
+                            "model": model_id,
+                            "path": f"{path}.{field}",
+                            "value": value,
+                            "host": f"{provider}@{region}",
+                            "source": source,
+                        }
+                    )
+            if touched:
+                changed.append(model_id)
+    return changed, report
+
+
 def _summary(entry: Mapping[str, Any]) -> dict[str, Any]:
     endpoints = entry.get("endpoints") or []
     return {
@@ -722,6 +886,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     document = load_catalog(path)
     entries = _entries(document)
     command = args.command
+    cache_report: list[dict[str, Any]] | None = None
 
     if command == "schema":
         return {"ok": True, "schema": ModelCardDocument.model_json_schema()}
@@ -785,6 +950,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         changed = _enrich(entries, args.model_ids, args.alias)
         if not changed:
             return {"ok": True, "written": False, "changed": [], "entries": [], "warnings": []}
+    elif command == "cache-prices":
+        changed, cache_report = _cache_prices(entries, args.model_ids, args.alias, args.replace)
+        if not changed:
+            return {"ok": True, "written": False, "changed": [], "prices": cache_report}
     elif command == "remove":
         _require(entries, args.model_id)
         del entries[args.model_id]
@@ -840,11 +1009,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     issues = validate_document(updated)
     errors = [issue for issue in issues if issue.level == "error"]
     if errors:
-        return {"ok": False, "errors": [issue.model_dump() for issue in errors]}
+        rejected: dict[str, Any] = {
+            "ok": False,
+            "errors": [issue.model_dump() for issue in errors],
+        }
+        if cache_report is not None:
+            rejected["prices"] = cache_report
+        return rejected
     if not args.dry_run:
         write_catalog(updated, path)
     changed_entries = {item["id"]: item for item in updated["models"] if item["id"] in changed}
+    extra: dict[str, Any] = {"prices": cache_report} if cache_report is not None else {}
     return {
+        **extra,
         "ok": True,
         "written": not args.dry_run,
         "changed": changed,
@@ -904,6 +1081,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enrich.add_argument("model_ids", nargs="*", metavar="MODEL_ID", help="Default: every model.")
     enrich.add_argument("--as", dest="alias", help="OpenRouter id, when it differs.")
+
+    cache = commands.add_parser(
+        "cache-prices",
+        help="Fill cache read and write prices from OpenRouter's per-host listings.",
+    )
+    cache.add_argument("model_ids", nargs="*", metavar="MODEL_ID", help="Default: every model.")
+    cache.add_argument("--as", dest="alias", help="OpenRouter id, when it differs.")
+    cache.add_argument("--replace", action="store_true", help="Overwrite declared cache prices.")
 
     remove = commands.add_parser("remove", help="Drop a model from the catalog.")
     remove.add_argument("model_id")
