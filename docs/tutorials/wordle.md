@@ -207,7 +207,7 @@ plural run --benchmark wordle --agent word-list
 
 ```text
 benchmark/wordle is valid: version 1.0.0, sha256:7bc988ecca0a4884e7e4307529fa02d580241af366eea7e63ae6e9032b17c5c2
-Running benchmark/wordle with word-list (openai/gpt-5.6-luna) locally: 3 trial(s).
+Running benchmark/wordle@1.0.0 with word-list (openai/gpt-5.6-luna) locally: 3 trial(s).
   trl_5701d8ede710d21b4970ba8f  crane  succeeded  score=1.000
   trl_1616c550620b8bfbd1c16438  slate  succeeded  score=1.000
   trl_4cb93aab41a7586915bcc295  point  succeeded  score=1.000

@@ -21,6 +21,7 @@ from plural.cli.common import (
     emit,
     handled,
     project_studio,
+    relative,
     rows,
     session,
     signed_in,
@@ -29,7 +30,15 @@ from plural.cli.common import (
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.jobs import JobResult, TrialResult, TrialSpec
 from plural.project import ProjectError, Workspace
-from plural.project.layout import AGENT, BENCHMARK, TASK, ResourceRef
+from plural.project.layout import (
+    AGENT,
+    BENCHMARK,
+    HARNESS,
+    TASK,
+    Project,
+    ResourceRef,
+    split_version,
+)
 from plural.project.runs import (
     DEFAULT_HARNESS,
     RunPlan,
@@ -49,6 +58,7 @@ from plural.project.runs import (
     submit_hosted,
 )
 from plural.project.sync import REBUILT_NOTE, ProjectPushStep, PullStep, pull_missing
+from plural.project.versions import holds_version, version_workspace, versioned
 from plural.studio import Studio
 
 job_app = typer.Typer(help="List, inspect, and rerun Jobs.", no_args_is_help=True)
@@ -58,8 +68,15 @@ review_app = typer.Typer(help="List and submit human reviews.", no_args_is_help=
 
 @handled
 def run(
-    task: str | None = typer.Option(None, "--task", "-t", help="Task to run."),
-    benchmark: str | None = typer.Option(None, "--benchmark", "-b", help="Benchmark to run."),
+    task: str | None = typer.Option(
+        None, "--task", "-t", help="Task to run: a name, or name@version for a retained version."
+    ),
+    benchmark: str | None = typer.Option(
+        None,
+        "--benchmark",
+        "-b",
+        help="Benchmark to run: a name, or name@version for a retained version.",
+    ),
     model: str | None = typer.Option(None, "--model", "-m", help="Catalog model id."),
     harness: str | None = typer.Option(
         None,
@@ -67,7 +84,9 @@ def run(
         "-h",
         help=f"Harness for --model. Default: {DEFAULT_HARNESS} (Plural's built-in tool loop).",
     ),
-    agent: str | None = typer.Option(None, "--agent", "-a", help="Saved Agent to run."),
+    agent: str | None = typer.Option(
+        None, "--agent", "-a", help="Saved Agent to run: a name, or name@version."
+    ),
     hosted: bool = typer.Option(
         False,
         "--hosted",
@@ -112,6 +131,9 @@ def run(
     Runs execute on this machine, in the Runtime each Environment declares
     (local, docker, or a remote provider such as daytona), and stay local
     unless you pass --track. --hosted submits to hosted workers instead.
+
+    name@version runs that exact pushed version even after your files have
+    moved on. It is restored under .plural/versions without touching them.
     """
     if hosted and track:
         raise ProjectError(
@@ -123,6 +145,9 @@ def run(
     environ = _run_environ(current)
     if plural_version:
         environ[RUNTIME_VERSION_VARIABLE] = plural_version
+    task, task_version = _split(task, TASK.label)
+    benchmark, benchmark_version = _split(benchmark, BENCHMARK.label)
+    agent, agent_version = _split(agent, AGENT.label)
     request = RunRequest(
         task=task,
         benchmark=benchmark,
@@ -133,11 +158,30 @@ def run(
         concurrency=_concurrency(concurrency),
         hosted=hosted,
     )
+    requested = {
+        ResourceRef(kind.name, name): version
+        for kind, name, version in (
+            (TASK, task, task_version),
+            (BENCHMARK, benchmark, benchmark_version),
+            (AGENT, agent, agent_version),
+        )
+        if name and version
+    }
+    retained = {
+        ref: version for ref, version in requested.items() if not holds_version(space, ref, version)
+    }
+    if retained:
+        studio, binding = project_studio(space, current)
+        space = version_workspace(
+            space, studio, binding, retained, carry=_carried(space, request, retained)
+        )
+        _print_retained(retained, space, err=as_json)
+    root = space.project.root
     if not dry_run:
         pulled = _pull_run_sources(space, request)
         if pulled:
             _print_pulled(pulled, err=as_json)
-            space = workspace()
+            space = Workspace(Project.at(root))
     plan = plan_run(space, request, environ=environ)
     if dry_run:
         payload = _plan_payload(plan, hosted=hosted)
@@ -149,7 +193,7 @@ def run(
         pushed = push_run_inputs(space, studio, binding, plan)
         if pushed:
             _print_pushed(pushed, err=as_json)
-            space = workspace()
+            space = Workspace(Project.at(root))
             plan = plan_run(space, request, environ=environ)
         tracking = Tracking(studio) if track else None
     if hosted:
@@ -168,7 +212,8 @@ def run(
         return
     total = len(plan.job.plan.trials)
     typer.echo(
-        f"Running {plan.source} with {plan.agent.name} ({plan.agent.model}) locally: "
+        f"Running {versioned(plan.source, plan.pins[str(plan.source)]['version'])} "
+        f"with {plan.agent.name} ({plan.agent.model}) locally: "
         f"{total} trial(s), {_pace(plan)}."
         + (" Recording it in the hosted project as it runs." if tracking else ""),
         err=as_json,
@@ -576,6 +621,32 @@ def _pull_run_sources(space: Workspace, request: RunRequest) -> list[PullStep]:
     if studio is None or binding is None:
         return []
     return pull_missing(space, studio, refs, project_id=binding.project_id)
+
+
+def _split(reference: str | None, what: str) -> tuple[str | None, str | None]:
+    if reference is None:
+        return None, None
+    return split_version(reference, what)
+
+
+def _carried(
+    space: Workspace, request: RunRequest, retained: dict[ResourceRef, str]
+) -> list[ResourceRef]:
+    """Working-copy resources a run against retained versions still uses."""
+    refs = []
+    if request.agent:
+        refs.append(ResourceRef(AGENT.name, request.agent))
+    if request.harness:
+        refs.append(ResourceRef(HARNESS.name, request.harness))
+    return [ref for ref in refs if ref not in retained and space.project.has(ref)]
+
+
+def _print_retained(retained: dict[ResourceRef, str], space: Workspace, *, err: bool) -> None:
+    typer.echo("Using retained versions from the hosted project:", err=err)
+    for ref, version in sorted(retained.items()):
+        typer.echo(f"  {versioned(ref, version)}", err=err)
+    where = relative(space.project.root, space.project.root.parents[2])
+    typer.echo(f"Restored under {where}; your working copy is unchanged.", err=err)
 
 
 def _print_pulled(steps: list[PullStep], *, err: bool) -> None:

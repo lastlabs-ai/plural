@@ -29,7 +29,7 @@ without running anything. The real run creates a Job with one Trial per Task and
 prints their ids:
 
 ```text
-Running benchmark/support-triage with scripted (openai/gpt-5.6-luna) locally: 3 trial(s).
+Running benchmark/support-triage@1.0.0 with scripted (openai/gpt-5.6-luna) locally: 3 trial(s).
   trl_b6991b19a99ed402d9de2a77  ticket-1  succeeded  score=1.000
   trl_c2f6511b9ba8e29056f007ee  ticket-2  succeeded  score=1.000
   trl_3afd9a846afc6455beecec42  ticket-3  succeeded  score=1.000

@@ -21,8 +21,9 @@ still describe the earlier policy.
 
 The resource directories in your project are the working copy until you push
 them. Edit them, then check the result with `plural <kind> validate <name>`,
-which also checks everything the resource depends on. `plural run` always uses
-the local files unless you pass `--hosted`. Created SDK models are frozen
+which also checks everything the resource depends on. `plural run` uses the
+local files unless you pass `--hosted` or
+[name a retained version](#calling-a-version-by-name). Created SDK models are frozen
 values, so in Python construct a new value rather than mutating an instance.
 
 Every manifest's `version` defaults to `0.1.0`. In Python, Environment,
@@ -71,6 +72,35 @@ resource the Benchmark resolves to.
 A resource's display details in the hosted project, such as its description on
 the resource page, can change without rewriting the content of any saved
 revision.
+
+## Calling a version by name
+
+Every pushed version stays in the hosted project, so `name@version` keeps
+naming one exact revision after your files move on. Use it wherever a command
+names a Task, Benchmark, or Agent to run, show, or pull:
+
+```bash
+plural run --benchmark wordlebench@0.1.1 --model openai/gpt-5.6-luna
+plural run --task refund@0.1.0 --agent baseline@0.2.0 --hosted
+plural benchmark show wordlebench@0.1.1
+plural benchmark pull wordlebench@0.1.1 --force
+```
+
+When your working copy already is that version, with no unpushed edits, the
+run uses it. Otherwise `plural run` restores the version, and the exact
+revisions it pins, under `.plural/versions/` and runs that copy. Your working
+files are never touched, and the Job lands in `.plural/jobs` like any other.
+An input you name without a version, such as `--agent baseline` beside
+`--benchmark wordlebench@0.1.1`, still comes from your working copy. Restoring
+needs a signed-in, registered project; a version that was never pushed cannot
+be recalled.
+
+`plural <kind> show name@version` shows that one revision, and
+`plural <kind> pull name@version` replaces the working copy with it, keeping a
+backup of files that differ. The web app takes the same form: open
+`/benchmarks/wordlebench@0.1.1` to see that version's leaderboard. The API
+resolves a version wherever it takes a revision id, as in
+`GET /api/v1/benchmarks/wordlebench/revisions/0.1.1`.
 
 ## Jobs and run records
 

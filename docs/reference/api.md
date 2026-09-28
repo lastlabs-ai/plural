@@ -519,6 +519,10 @@ Attributes:
     id: Provider-assigned call id used to correlate tool responses.
     type: Tool type; currently only ``"function"``.
     function: The function call payload.
+    extra_content: Opaque provider data that must be sent back with the
+        call on the next turn, keyed by provider, such as Gemini's
+        ``{"google": {"thought_signature": ...}}``. Gemini rejects a replayed
+        function call without its signature.
 ```
 
 ## plural.types.Usage

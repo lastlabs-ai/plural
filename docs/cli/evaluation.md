@@ -62,6 +62,10 @@ plural run -b support-triage -a careful
 plural run -b support-triage -m openai/gpt-5.6-luna -h codex
 ```
 
+Add `@version` to a Task, Benchmark, or Agent to run that exact pushed version,
+such as `plural run -b support-triage@1.0.0 -a careful`, even after your files
+have moved on; see [Calling a version by name](../project/updating.md#calling-a-version-by-name).
+
 `-m` without `-h` uses `native`, Plural's built-in tool loop. `-h` names a
 Harness in `harnesses/` or a built-in one such as `codex` or `claude-code`. Add
 `--dry-run` to validate the inputs and print the plan, including the version
@@ -278,8 +282,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
+ Name a retained version as name@version or with --version.
+
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
@@ -339,9 +346,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
+ name@version shows that version: the working copy when it is exactly
+ that version, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │
@@ -543,8 +553,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
+ Name a retained version as name@version or with --version.
+
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
@@ -606,9 +619,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
+ name@version shows that version: the working copy when it is exactly
+ that version, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │
@@ -696,8 +712,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
+ Name a retained version as name@version or with --version.
+
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
@@ -741,9 +760,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
+ name@version shows that version: the working copy when it is exactly
+ that version, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │
@@ -831,8 +853,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
+ Name a retained version as name@version or with --version.
+
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
@@ -876,9 +901,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
+ name@version shows that version: the working copy when it is exactly
+ that version, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │
@@ -1182,13 +1210,18 @@ This section is generated from the Typer application. Run `uv run python scripts
  (local, docker, or a remote provider such as daytona), and stay local
  unless you pass --track. --hosted submits to hosted workers instead.
 
+ name@version runs that exact pushed version even after your files have
+ moved on. It is restored under .plural/versions without touching them.
+
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --task            -t      <str>               Task to run.                                       │
-│ --benchmark       -b      <str>               Benchmark to run.                                  │
+│ --task            -t      <str>               Task to run: a name, or name@version for a         │
+│                                               retained version.                                  │
+│ --benchmark       -b      <str>               Benchmark to run: a name, or name@version for a    │
+│                                               retained version.                                  │
 │ --model           -m      <str>               Catalog model id.                                  │
 │ --harness         -h      <str>               Harness for --model. Default: native (Plural's     │
 │                                               built-in tool loop).                               │
-│ --agent           -a      <str>               Saved Agent to run.                                │
+│ --agent           -a      <str>               Saved Agent to run: a name, or name@version.       │
 │ --hosted                                      Run on hosted infrastructure. Inputs the hosted    │
 │                                               project lacks are pushed first.                    │
 │ --track                                       Run here, and record the Job in the hosted project │
@@ -1328,8 +1361,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
+ Name a retained version as name@version or with --version.
+
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
@@ -1373,9 +1409,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
+ name@version shows that version: the working copy when it is exactly
+ that version, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │
@@ -1533,8 +1572,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
+ Name a retained version as name@version or with --version.
+
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version          <str>  Version to restore.                                                    │
@@ -1578,9 +1620,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
+ name@version shows that version: the working copy when it is exactly
+ that version, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │

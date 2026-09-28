@@ -35,7 +35,9 @@ PROJECT_FILE = "project.yaml"
 LOCK_FILE = "plural.lock"
 STATE_DIR = ".plural"
 BINDING_FILE = "project.json"
+VERSIONS_DIR = "versions"
 NAME_PATTERN = re.compile(r"^(?=.{1,63}$)[a-z0-9]+(?:-[a-z0-9]+)*$")
+VERSION_PATTERN = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]*$")
 
 
 class ProjectError(Exception):
@@ -123,6 +125,30 @@ class ResourceRef:
         """
         kind, _, name = value.partition("/")
         return cls(resource_kind(kind).name, name)
+
+
+def split_version(reference: str, what: str) -> tuple[str, str | None]:
+    """Split ``name@version`` into its name and version.
+
+    A bare ``name`` has no version. Every retained version of a resource stays
+    addressable this way, so ``wordlebench@0.1.1`` names the same revision for
+    as long as the hosted project keeps it.
+
+    Returns:
+        The validated name and the version, or ``None`` when none was given.
+
+    Raises:
+        ProjectError: When the name or the version is not valid.
+    """
+    name, separator, version = reference.partition("@")
+    check_name(name, what)
+    if not separator:
+        return name, None
+    if not VERSION_PATTERN.fullmatch(version):
+        raise ProjectError(
+            f"{what} reference {reference!r} has no valid version after '@'. Example: {name}@0.1.0"
+        )
+    return name, version
 
 
 def check_name(name: str, what: str) -> str:
@@ -275,6 +301,11 @@ class Project:
     def jobs_dir(self) -> Path:
         """Local Job records."""
         return self.state_dir / "jobs"
+
+    @property
+    def versions_dir(self) -> Path:
+        """Hosted versions restored beside the working copy, one project per version set."""
+        return self.state_dir / VERSIONS_DIR
 
     @property
     def lock_path(self) -> Path:

@@ -32,12 +32,17 @@ from plural.project import (
     Workspace,
     check_name,
 )
-from plural.project.layout import AGENT, BENCHMARK, HARNESS, TASK
+from plural.project.layout import AGENT, BENCHMARK, HARNESS, TASK, split_version
 from plural.project.membership import add_task, remove_task
 from plural.project.sync import REBUILT_NOTE, hosted_list, hosted_resource, pull, push
 from plural.project.templates import resource_scaffold
+from plural.project.versions import holds_version
 
 NAME_HELP = "Resource name. Defaults to the resource directory you are in."
+VERSIONED_NAME_HELP = (
+    "Resource name, or name@version for a retained version. "
+    "Defaults to the resource directory you are in."
+)
 
 
 def resource_app(kind: ResourceKind) -> typer.Typer:
@@ -115,7 +120,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
     @app.command("pull")
     @handled
     def pull_command(
-        name: str | None = typer.Argument(None, help=NAME_HELP),
+        name: str | None = typer.Argument(None, help=VERSIONED_NAME_HELP),
         version: str | None = typer.Option(None, "--version", help="Version to restore."),
         with_deps: bool = typer.Option(
             False,
@@ -132,9 +137,12 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         ),
         as_json: bool = JSON_OPTION,
     ) -> None:
-        """Restore a hosted revision's editable files into this project."""
+        """Restore a hosted revision's editable files into this project.
+
+        Name a retained version as name@version or with --version.
+        """
         space = workspace()
-        ref = _ref(space, kind, name, must_exist=False)
+        ref, version = _versioned_ref(space, kind, name, version)
         studio, binding = project_studio(space, session())
         steps = pull(
             space,
@@ -182,7 +190,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
     @app.command("show")
     @handled
     def show(
-        name: str | None = typer.Argument(None, help=NAME_HELP),
+        name: str | None = typer.Argument(None, help=VERSIONED_NAME_HELP),
         local: bool = typer.Option(False, "--local", help="Only read local files."),
         hosted: bool = typer.Option(False, "--hosted", help="Only read the hosted project."),
         as_json: bool = JSON_OPTION,
@@ -190,11 +198,24 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         """Show a resource: the local copy if there is one, otherwise the hosted one.
 
         An invalid local copy is an error, not a reason to show the hosted one.
+        name@version shows that version: the working copy when it is exactly
+        that version, otherwise the retained hosted revision.
         """
         if local and hosted:
             raise ProjectError("Choose --local or --hosted, not both.")
         space = workspace()
-        ref = _ref(space, kind, name, must_exist=False)
+        ref, version = _versioned_ref(space, kind, name, None)
+        if version is not None and not hosted and holds_version(space, ref, version):
+            held = _local_payload(space, space.load(ref))
+            emit(held, as_json=as_json, text=lambda: _print_local(held))
+            return
+        if version is not None and local:
+            raise ProjectError(
+                f"The working copy of {ref} is not version {version}. "
+                f"Restore it with `plural {kind.cli} pull {name}`."
+            )
+        if version is not None:
+            hosted = True
         if kind is HARNESS and ref.name in BUILTIN_HARNESS_NAMES and not space.project.has(ref):
             spec = get_builtin(ref.name)
             payload: dict[str, Any] = {
@@ -214,6 +235,11 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
             raise ProjectError(f"No local {kind.label} named {ref.name!r} in this project.")
         studio, binding = project_studio(space, session())
         parent, revisions = hosted_resource(studio, ref)
+        if version is not None:
+            known = ", ".join(item.version for item in revisions) or "none"
+            revisions = [item for item in revisions if item.version == version]
+            if not revisions:
+                raise ProjectError(f"{ref} has no version {version}. Hosted versions: {known}.")
         payload = {
             "location": "hosted",
             "resource": str(ref),
@@ -465,6 +491,13 @@ def _ref(
                 f"Name the {kind.label}, or run this inside {kind.directory}/<name>/."
             )
         return here
+    if "@" in name:
+        bare = name.partition("@")[0]
+        raise ProjectError(
+            f"This command works on the working copy of {bare!r}, which has one version. "
+            f"Drop '@...', or use `plural {kind.cli} pull {name}` or "
+            f"`plural run --{kind.name} {name}` to use a retained version."
+        )
     check_name(name, kind.label)
     ref = ResourceRef(kind.name, name)
     if must_exist and not space.project.has(ref):
@@ -475,6 +508,22 @@ def _ref(
             f"`plural {kind.cli} pull {name}`."
         )
     return ref
+
+
+def _versioned_ref(
+    space: Workspace, kind: ResourceKind, name: str | None, version: str | None
+) -> tuple[ResourceRef, str | None]:
+    """Resolve ``name`` or ``name@version``; ``--version`` must agree with ``@``.
+
+    Raises:
+        ProjectError: When ``@`` and ``--version`` name different versions.
+    """
+    if name is None or "@" not in name:
+        return _ref(space, kind, name, must_exist=False), version
+    bare, pinned = split_version(name, kind.label)
+    if version is not None and version != pinned:
+        raise ProjectError(f"{name} and --version {version} name different versions.")
+    return ResourceRef(kind.name, bare), pinned
 
 
 def _lock_status(space: Workspace, resource: LocalResource) -> str:

@@ -99,7 +99,7 @@ Jobs. Retry policy may append executions to a Trial but does not add Trials.
 number and the reason:
 
 ```text
-Running benchmark/wordle with word-list (openai/gpt-5.6-luna) locally: 3 trial(s), 3 at a time (auto: every Trial at once).
+Running benchmark/wordle@1.0.0 with word-list (openai/gpt-5.6-luna) locally: 3 trial(s), 3 at a time (auto: every Trial at once).
 ```
 
 A Trial spends most of its time waiting on the model, so `auto` takes the lowest

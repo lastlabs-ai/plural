@@ -272,7 +272,10 @@ def scaffold_problems(directory: Path, project_root: Path) -> list[str]:
             if SCAFFOLD_MARKER in line:
                 note = line.split(SCAFFOLD_MARKER, 1)[1].lstrip(":- ").strip(" #->")
                 location = f"{_display(path, project_root)}:{number}"
-                problems.append(f"{location}: unfinished scaffold: {note or 'replace this'}")
+                problems.append(
+                    f"{location}: unfinished scaffold: {note or 'replace this'} "
+                    f"Delete this {SCAFFOLD_MARKER} line once it is done."
+                )
     return problems
 
 

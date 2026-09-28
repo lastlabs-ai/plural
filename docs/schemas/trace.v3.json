@@ -1271,8 +1271,21 @@
       "type": "object"
     },
     "ToolCall": {
-      "description": "A tool call in an assistant message.\n\nAttributes:\n    id: Provider-assigned call id used to correlate tool responses.\n    type: Tool type; currently only ``\"function\"``.\n    function: The function call payload.",
+      "description": "A tool call in an assistant message.\n\nAttributes:\n    id: Provider-assigned call id used to correlate tool responses.\n    type: Tool type; currently only ``\"function\"``.\n    function: The function call payload.\n    extra_content: Opaque provider data that must be sent back with the\n        call on the next turn, keyed by provider, such as Gemini's\n        ``{\"google\": {\"thought_signature\": ...}}``. Gemini rejects a replayed\n        function call without its signature.",
       "properties": {
+        "extra_content": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extra Content"
+        },
         "function": {
           "$ref": "#/$defs/FunctionCall"
         },

@@ -328,6 +328,58 @@ def test_a_hosted_run_pushes_the_revisions_it_needs_first(hosted: Hosted) -> Non
     assert "Pushed to the hosted project first" not in output
 
 
+def test_a_retained_version_is_callable_by_name(hosted: Hosted) -> None:
+    root = hosted.project.root
+    assert hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")[0] == 0
+    instruction = root / "tasks/refund/instruction.md"
+    instruction.write_text("Review order A-1 carefully.\n")
+    assert hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")[0] == 0
+    task_parent = hosted.fake.parents[(hosted.project_id, "tasks", "refund")]
+    first, second = hosted.fake.revisions[task_parent["id"]]
+
+    code, output = hosted.cli("run", "--task", "refund@0.1.0", "--agent", "baseline", "--hosted")
+    assert code == 0, output
+    assert "task/refund@0.1.0" in output
+    assert "working copy is unchanged" in output
+    assert hosted.fake.jobs[-1]["source"]["revision_id"] == first["id"]
+    assert "version: 0.1.1" in (root / "tasks/refund/task.yaml").read_text()
+    assert instruction.read_text() == "Review order A-1 carefully.\n"
+    retained = root / ".plural/versions/task-refund@0.1.0/tasks/refund"
+    assert "version: 0.1.0" in (retained / "task.yaml").read_text()
+
+    code, output = hosted.cli("run", "--task", "refund@0.1.1", "--agent", "baseline", "--hosted")
+    assert code == 0, output
+    assert "retained" not in output
+    assert hosted.fake.jobs[-1]["source"]["revision_id"] == second["id"]
+
+    code, output = hosted.cli("run", "--task", "refund@0.1.0", "--agent", "baseline", "--json")
+    assert code == 0, output
+    assert output.startswith("Using retained versions")
+    job_id = json.loads(output[output.index("{") :])["job_id"]
+    assert (root / ".plural/jobs" / job_id).is_dir()
+
+    code, output = hosted.cli("task", "show", "refund@0.1.0", "--json")
+    assert code == 0, output
+    payload = json.loads(output)
+    assert payload["location"] == "hosted"
+    assert [item["version"] for item in payload["revisions"]] == ["0.1.0"]
+    code, output = hosted.cli("task", "show", "refund@0.1.1", "--json")
+    assert json.loads(output)["location"] == "local"
+
+    code, output = hosted.cli("task", "pull", "refund@9.9.9")
+    assert code == 1
+    assert "has no version 9.9.9" in output
+    code, output = hosted.cli("task", "pull", "refund@0.1.0", "--version", "0.1.1")
+    assert code == 1
+    assert "different versions" in output
+    code, output = hosted.cli("task", "validate", "refund@0.1.0")
+    assert code == 1
+    assert "plural task pull refund@0.1.0" in output
+    code, output = hosted.cli("run", "--task", "refund@", "--agent", "baseline")
+    assert code == 1
+    assert "no valid version" in output
+
+
 def test_hosted_model_run_records_an_agent_named_after_the_model(hosted: Hosted) -> None:
     assert hosted.cli("task", "push", "refund", "--with-deps")[0] == 0
     code, output = hosted.cli(
