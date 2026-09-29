@@ -23,7 +23,11 @@ _TAB = re.compile(r"^:::tab\s+(.+?)\s*$")
 
 
 def convert_tabs(markdown: str) -> str:
-    """Rewrite ``:::tabs`` blocks outside code fences as pymdownx tabs."""
+    """Rewrite ``:::tabs`` blocks outside code fences as pymdownx tabs.
+
+    Returns:
+        The page Markdown with every tab block rewritten.
+    """
     out: list[str] = []
     fence: str | None = None
     in_tabs = False
@@ -56,5 +60,9 @@ def convert_tabs(markdown: str) -> str:
 
 
 def on_page_markdown(markdown: str, **kwargs: Any) -> str:
-    """MkDocs hook entry point."""
+    """Rewrite each page's tab blocks before MkDocs renders it.
+
+    Returns:
+        The rewritten page Markdown.
+    """
     return convert_tabs(markdown)
