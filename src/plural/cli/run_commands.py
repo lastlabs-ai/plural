@@ -57,7 +57,7 @@ from plural.project.runs import (
     run_local,
     submit_hosted,
 )
-from plural.project.sync import REBUILT_NOTE, ProjectPushStep, PullStep, pull_missing
+from plural.project.sync import REBUILT_NOTE, PullStep, PushStep, pull_missing
 from plural.project.versions import holds_version, version_workspace, versioned
 from plural.studio import Studio
 
@@ -212,7 +212,7 @@ def run(
         return
     total = len(plan.job.plan.trials)
     typer.echo(
-        f"Running {versioned(plan.source, plan.pins[str(plan.source)]['version'])} "
+        f"Running {plan.source} {plan.pins[str(plan.source)]['revision']} "
         f"with {plan.agent.name} ({plan.agent.model}) locally: "
         f"{total} trial(s), {_pace(plan)}."
         + (" Recording it in the hosted project as it runs." if tracking else ""),
@@ -642,7 +642,7 @@ def _carried(
 
 
 def _print_retained(retained: dict[ResourceRef, str], space: Workspace, *, err: bool) -> None:
-    typer.echo("Using retained versions from the hosted project:", err=err)
+    typer.echo("Using retained revisions from the hosted project:", err=err)
     for ref, version in sorted(retained.items()):
         typer.echo(f"  {versioned(ref, version)}", err=err)
     where = relative(space.project.root, space.project.root.parents[2])
@@ -652,7 +652,7 @@ def _print_retained(retained: dict[ResourceRef, str], space: Workspace, *, err: 
 def _print_pulled(steps: list[PullStep], *, err: bool) -> None:
     typer.echo("Pulled from the hosted project, since this project did not have them:", err=err)
     for step in steps:
-        typer.echo(f"  {step.ref} {step.version}", err=err)
+        typer.echo(f"  {step.ref} {step.label}", err=err)
     if any(step.rebuilt for step in steps):
         typer.echo(REBUILT_NOTE, err=err)
 
@@ -681,16 +681,11 @@ def _run_environ(current: Session) -> dict[str, str]:
     return environ
 
 
-def _print_pushed(steps: list[ProjectPushStep], *, err: bool) -> None:
+def _print_pushed(steps: list[PushStep], *, err: bool) -> None:
     typer.echo("Pushed to the hosted project first, so the Job can pin them:", err=err)
     for step in steps:
-        if step.bumped:
-            note = f" (was {step.previous_version}; its content changed)"
-        elif step.action == "new":
-            note = " (new)"
-        else:
-            note = ""
-        typer.echo(f"  {step.ref} {step.version}{note}", err=err)
+        note = f" ({step.note})" if step.note else ""
+        typer.echo(f"  {step.ref} {step.label}{note}", err=err)
 
 
 def _tracking(space: Workspace, current: Session) -> Tracking:
@@ -796,10 +791,10 @@ def _print_plan(payload: dict[str, Any]) -> None:
     )
     rows(
         (
-            (name, pin["version"], pin["content_hash"][:19])
+            (name, pin.get("revision") or pin.get("version", ""), pin["content_hash"][:19])
             for name, pin in payload["inputs"].items()
         ),
-        ("input", "version", "content hash"),
+        ("input", "revision", "content hash"),
     )
 
 

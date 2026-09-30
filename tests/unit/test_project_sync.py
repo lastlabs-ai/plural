@@ -56,7 +56,7 @@ def test_plain_push_requires_hosted_dependencies_and_uploads_nothing(hosted: Hos
     code, output = hosted.cli("task", "push", "refund")
     assert code == 1
     assert "nothing was uploaded" in output
-    assert "environment/queue 0.1.0 is not pushed yet" in output
+    assert "environment/queue is not pushed yet" in output
     assert "--with-deps" in output
     assert hosted.fake.writes == []
 
@@ -95,23 +95,68 @@ def test_push_with_deps_orders_dependencies_and_repeats_without_duplicates(
     assert len(hosted.fake.writes) == writes
 
 
-def test_push_reports_version_conflicts_before_uploading(hosted: Hosted) -> None:
-    assert hosted.cli("task", "push", "refund", "--with-deps")[0] == 0
-    writes = len(hosted.fake.writes)
+def test_a_changed_resource_becomes_the_next_numbered_revision(hosted: Hosted) -> None:
+    code, output = hosted.cli("task", "push", "refund", "--with-deps", "--json")
+    assert code == 0, output
+    first = json.loads(output)["steps"][-1]
+    assert (first["number"], first["version"], first["revision"]) == (1, "0.1.0", "#1 (0.1.0)")
 
     instruction = hosted.project.root / "tasks/refund/instruction.md"
     instruction.write_text("Review order A-1 carefully.\n")
-    code, output = hosted.cli("task", "push", "refund")
-    assert code == 1
-    assert "Bump `version:`" in output
-    assert len(hosted.fake.writes) == writes
-
-    manifest = hosted.project.root / "tasks/refund/task.yaml"
-    manifest.write_text(manifest.read_text().replace("version: 0.1.0", "version: 0.2.0"))
     code, output = hosted.cli("task", "push", "refund", "--json")
     assert code == 0, output
-    assert json.loads(output)["steps"][-1]["status"] == "pushed"
+    step = json.loads(output)["steps"][-1]
+    assert (step["status"], step["number"], step["version"]) == ("pushed", 2, None)
+    assert step["note"] == "version 0.1.0 already names #1 (0.1.0)"
     assert hosted.fake.revision_count() == 4
+    manifest = (hosted.project.root / "tasks/refund/task.yaml").read_text()
+    assert "version: 0.1.0" in manifest
+    parent = hosted.fake.parents[(hosted.project_id, "tasks", "refund")]
+    newest = hosted.fake.revisions[parent["id"]][-1]
+    assert newest["parent_revision_id"] == first["revision_id"]
+    lock = hosted.project.read_lock().resources["task/refund"]
+    assert (lock.number, lock.version) == (2, None)
+
+
+def test_release_labels_the_revision_matching_the_local_files(hosted: Hosted) -> None:
+    assert hosted.cli("task", "push", "refund", "--with-deps")[0] == 0
+    (hosted.project.root / "tasks/refund/instruction.md").write_text("Carefully.\n")
+    code, output = hosted.cli("task", "release", "refund", "1.0.0", "--json")
+    assert code == 0, output
+    step = json.loads(output)["steps"][-1]
+    assert (step["number"], step["version"]) == (2, "1.0.0")
+    assert hosted.project.read_lock().resources["task/refund"].version == "1.0.0"
+
+    code, output = hosted.cli("task", "release", "refund", "1.0.0")
+    assert code == 0, output
+    code, output = hosted.cli("task", "release", "refund", "1.0.1")
+    assert code == 1
+    assert "already released as 1.0.0" in output
+    (hosted.project.root / "tasks/refund/instruction.md").write_text("Again.\n")
+    code, output = hosted.cli("task", "release", "refund", "1.0.0")
+    assert code == 1
+    assert "1.0.0 already names #2 (1.0.0)" in output
+    code, output = hosted.cli("task", "release", "refund", "v2")
+    assert code == 1
+    assert "MAJOR.MINOR.PATCH" in output
+
+
+def test_a_push_on_top_of_unsynced_hosted_changes_is_refused(hosted: Hosted) -> None:
+    assert hosted.cli("verifier", "push", "resolved")[0] == 0
+    parent = hosted.fake.parents[(hosted.project_id, "verifiers", "resolved")]
+    theirs = {**hosted.fake.revisions[parent["id"]][0], "id": "rev_theirs", "number": 2}
+    theirs.update(content_hash="sha256:" + "b" * 64, version=None)
+    hosted.fake.revisions[parent["id"]].append(theirs)
+    parent["current_revision_id"] = "rev_theirs"
+
+    verifier = next((hosted.project.root / "verifiers/resolved").glob("*.py"))
+    verifier.write_text(verifier.read_text() + "\n# local edit\n")
+    code, output = hosted.cli("verifier", "push", "resolved")
+    assert code == 1
+    assert "hosted #2, synced #1 (0.1.0)" in output
+    code, output = hosted.cli("verifier", "push", "resolved", "--force", "--json")
+    assert code == 0, output
+    assert json.loads(output)["steps"][-1]["number"] == 3
 
 
 def test_push_refuses_credential_files(hosted: Hosted) -> None:
@@ -228,15 +273,12 @@ def test_a_title_is_the_hosted_name_and_the_directory_is_the_slug(hosted: Hosted
     assert {step["status"] for step in json.loads(output)["steps"]} == {"unchanged"}
 
     manifest.write_text(text.replace("Refund A-1", "Refund triage"))
-    code, output = hosted.cli("task", "push", "refund")
-    assert code == 1
-    assert "Bump `version:`" in output
-    manifest.write_text(manifest.read_text().replace("version: 0.1.0", "version: 0.1.1"))
-    code, output = hosted.cli("task", "push", "refund")
+    code, output = hosted.cli("task", "push", "refund", "--json")
     assert code == 0, output
+    assert {step["status"] for step in json.loads(output)["steps"]} == {"unchanged"}
     assert parent["name"] == "Refund triage"
     assert parent["slug"] == "refund"
-    assert [item["version"] for item in hosted.fake.revisions[parent["id"]]] == ["0.1.0", "0.1.1"]
+    assert len(hosted.fake.revisions[parent["id"]]) == 1
 
 
 def test_a_run_pulls_a_task_that_only_the_hosted_project_has(hosted: Hosted) -> None:
@@ -303,7 +345,7 @@ def test_a_hosted_run_pushes_the_revisions_it_needs_first(hosted: Hosted) -> Non
     code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")
     assert code == 0, output
     assert "Pushed to the hosted project first" in output
-    assert "task/refund 0.1.0 (new)" in output
+    assert "task/refund #1 (0.1.0)" in output
     job = hosted.fake.jobs[-1]
     task_parent = hosted.fake.parents[(hosted.project_id, "tasks", "refund")]
     agent_parent = hosted.fake.parents[(hosted.project_id, "agents", "baseline")]
@@ -317,10 +359,10 @@ def test_a_hosted_run_pushes_the_revisions_it_needs_first(hosted: Hosted) -> Non
     instruction.write_text("Review order A-1 carefully.\n")
     code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")
     assert code == 0, output
-    assert "task/refund 0.1.1 (was 0.1.0; its content changed)" in output
-    assert "version: 0.1.1" in (hosted.project.root / "tasks/refund/task.yaml").read_text()
+    assert "task/refund #2 (version 0.1.0 already names #1 (0.1.0))" in output
+    assert "version: 0.1.0" in (hosted.project.root / "tasks/refund/task.yaml").read_text()
     newest = hosted.fake.revisions[task_parent["id"]][-1]
-    assert newest["version"] == "0.1.1"
+    assert (newest["number"], newest["version"]) == (2, None)
     assert hosted.fake.jobs[-1]["source"]["revision_id"] == newest["id"]
 
     code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")
@@ -337,47 +379,53 @@ def test_a_retained_version_is_callable_by_name(hosted: Hosted) -> None:
     task_parent = hosted.fake.parents[(hosted.project_id, "tasks", "refund")]
     first, second = hosted.fake.revisions[task_parent["id"]]
 
-    code, output = hosted.cli("run", "--task", "refund@0.1.0", "--agent", "baseline", "--hosted")
+    code, output = hosted.cli("run", "--task", "refund@1", "--agent", "baseline", "--hosted")
     assert code == 0, output
-    assert "task/refund@0.1.0" in output
+    assert "task/refund@1" in output
     assert "working copy is unchanged" in output
     assert hosted.fake.jobs[-1]["source"]["revision_id"] == first["id"]
-    assert "version: 0.1.1" in (root / "tasks/refund/task.yaml").read_text()
     assert instruction.read_text() == "Review order A-1 carefully.\n"
-    retained = root / ".plural/versions/task-refund@0.1.0/tasks/refund"
-    assert "version: 0.1.0" in (retained / "task.yaml").read_text()
+    retained = root / ".plural/versions/task-refund@1/tasks/refund/instruction.md"
+    assert retained.read_text() != instruction.read_text()
 
-    code, output = hosted.cli("run", "--task", "refund@0.1.1", "--agent", "baseline", "--hosted")
+    for selector in ("0.1.0", first["content_hash"]):
+        code, output = hosted.cli(
+            "run", "--task", f"refund@{selector}", "--agent", "baseline", "--hosted"
+        )
+        assert code == 0, output
+        assert hosted.fake.jobs[-1]["source"]["revision_id"] == first["id"]
+
+    code, output = hosted.cli("run", "--task", "refund@2", "--agent", "baseline", "--hosted")
     assert code == 0, output
     assert "retained" not in output
     assert hosted.fake.jobs[-1]["source"]["revision_id"] == second["id"]
 
-    code, output = hosted.cli("run", "--task", "refund@0.1.0", "--agent", "baseline", "--json")
+    code, output = hosted.cli("run", "--task", "refund@1", "--agent", "baseline", "--json")
     assert code == 0, output
-    assert output.startswith("Using retained versions")
+    assert output.startswith("Using retained revisions")
     job_id = json.loads(output[output.index("{") :])["job_id"]
     assert (root / ".plural/jobs" / job_id).is_dir()
 
-    code, output = hosted.cli("task", "show", "refund@0.1.0", "--json")
+    code, output = hosted.cli("task", "show", "refund@#1", "--json")
     assert code == 0, output
     payload = json.loads(output)
     assert payload["location"] == "hosted"
-    assert [item["version"] for item in payload["revisions"]] == ["0.1.0"]
-    code, output = hosted.cli("task", "show", "refund@0.1.1", "--json")
+    assert [item["number"] for item in payload["revisions"]] == [1]
+    code, output = hosted.cli("task", "show", "refund@2", "--json")
     assert json.loads(output)["location"] == "local"
 
-    code, output = hosted.cli("task", "pull", "refund@9.9.9")
+    code, output = hosted.cli("task", "pull", "refund@9")
     assert code == 1
-    assert "has no version 9.9.9" in output
-    code, output = hosted.cli("task", "pull", "refund@0.1.0", "--version", "0.1.1")
+    assert "has no revision 9" in output
+    code, output = hosted.cli("task", "pull", "refund@1", "--revision", "2")
     assert code == 1
-    assert "different versions" in output
-    code, output = hosted.cli("task", "validate", "refund@0.1.0")
+    assert "different revisions" in output
+    code, output = hosted.cli("task", "validate", "refund@1")
     assert code == 1
-    assert "plural task pull refund@0.1.0" in output
+    assert "plural task pull refund@1" in output
     code, output = hosted.cli("run", "--task", "refund@", "--agent", "baseline")
     assert code == 1
-    assert "no valid version" in output
+    assert "no valid revision" in output
 
 
 def test_hosted_model_run_records_an_agent_named_after_the_model(hosted: Hosted) -> None:
@@ -404,28 +452,32 @@ def test_project_push_uploads_every_resource_and_repeats_as_unchanged(hosted: Ho
     assert len(hosted.fake.writes) == writes
 
 
-def test_project_push_bumps_a_changed_resource_instead_of_overwriting(hosted: Hosted) -> None:
+def test_project_push_adds_a_revision_for_a_change_without_touching_files(
+    hosted: Hosted,
+) -> None:
     assert hosted.cli("project", "push", "--yes")[0] == 0
-    writes = len(hosted.fake.writes)
     revisions = hosted.fake.revision_count()
     instruction = hosted.project.root / "tasks/refund/instruction.md"
     instruction.write_text("Review order A-1 carefully.\n")
+    manifest = hosted.project.root / "tasks/refund/task.yaml"
+    before = manifest.read_text()
 
     code, output = hosted.cli("project", "push", "--yes")
-    assert code == 1
-    assert "nothing was uploaded" in output
-    assert "--bump" in output
-    assert len(hosted.fake.writes) == writes
-
-    code, output = hosted.cli("project", "push", "--bump", "--yes", "--json")
     assert code == 0, output
-    steps = json.loads(output)["steps"]
-    bumped = next(step for step in steps if step["resource"] == "task/refund")
-    assert bumped["status"] == "pushed"
-    assert bumped["version"] != "0.1.0"
-    manifest = (hosted.project.root / "tasks/refund/task.yaml").read_text()
-    assert f"version: {bumped['version']}" in manifest
+    assert "task/refund" in output and "new revision" in output
+    assert manifest.read_text() == before
+
+    code, output = hosted.cli("project", "push", "--yes", "--json")
+    assert code == 0, output
     assert hosted.fake.revision_count() > revisions
+    changed = [step for step in json.loads(output)["steps"] if step["action"] != "unchanged"]
+    assert changed == []
+
+
+def test_project_push_ignores_the_retired_bump_flag(hosted: Hosted) -> None:
+    code, output = hosted.cli("project", "push", "--bump", "--yes")
+    assert code == 0, output
+    assert "--bump is no longer needed" in output
 
 
 def test_project_push_asks_before_uploading_without_yes(hosted: Hosted) -> None:

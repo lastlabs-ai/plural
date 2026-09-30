@@ -91,10 +91,42 @@ def package_files(root: Path) -> list[tuple[str, Path]]:
     return files
 
 
+MANIFEST_FILES = frozenset(
+    {
+        "agent.yaml",
+        "benchmark.yaml",
+        "environment.yaml",
+        "harness.yaml",
+        "task.yaml",
+        "verifier.yaml",
+    }
+)
+"""Resource manifests. Their settings are hashed through the parsed definition."""
+
+
 def tree_digest(root: Path) -> str:
     """Hash a package tree by relative path and bytes."""
+    return _digest(root, skip=frozenset())
+
+
+def source_digest(root: Path) -> str:
+    """Hash a resource's source files: its tree without the manifest at its root.
+
+    A manifest's settings already reach the content hash through the parsed
+    definition, and its ``name``, ``title``, and ``version`` lines are labels,
+    so editing a label leaves this digest unchanged.
+
+    Returns:
+        ``sha256:`` and 64 lowercase hex characters.
+    """
+    return _digest(root, skip=MANIFEST_FILES)
+
+
+def _digest(root: Path, *, skip: frozenset[str]) -> str:
     digest = hashlib.sha256()
     for relative, path in package_files(root):
+        if relative in skip:
+            continue
         digest.update(relative.encode())
         digest.update(b"\0")
         digest.update(path.read_bytes())

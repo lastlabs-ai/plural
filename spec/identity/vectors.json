@@ -1,0 +1,131 @@
+{
+  "identity_scheme": 2,
+  "canonical_json": [
+    {
+      "name": "key order by UTF-16 code units",
+      "input": "{\"\\u20ac\":1,\"\\ud83d\\ude00\":2,\"\\ufb33\":3,\"b\":[],\"a\":{}}",
+      "expected": "{\"a\":{},\"b\":[],\"€\":1,\"😀\":2,\"דּ\":3}"
+    },
+    {
+      "name": "integral doubles drop the fraction",
+      "input": "[1.0, -0.0, 100.0, 1e20, 1e21]",
+      "expected": "[1,0,100,100000000000000000000,1e+21]"
+    },
+    {
+      "name": "shortest ECMAScript number form",
+      "input": "[4.50, 0.002, 1e-6, 1e-7, 1e30, 333333333.33333329, 5e-324, 1.7976931348623157e308]",
+      "expected": "[4.5,0.002,0.000001,1e-7,1e+30,333333333.3333333,5e-324,1.7976931348623157e+308]"
+    },
+    {
+      "name": "strings escape only what JSON requires",
+      "input": "[\"quote \\\" backslash \\\\ slash /\", \"\\b\\f\\n\\r\\t\", \"\\u0001\\u001f\", \"\\u007f\\u2028 é 😀\"]",
+      "expected": "[\"quote \\\" backslash \\\\ slash /\",\"\\b\\f\\n\\r\\t\",\"\\u0001\\u001f\",\"  é 😀\"]"
+    },
+    {
+      "name": "literals and nesting",
+      "input": "{\"t\":true,\"f\":false,\"n\":null,\"nested\":[[1,[2,{\"z\":0,\"y\":1}]]]}",
+      "expected": "{\"f\":false,\"n\":null,\"nested\":[[1,[2,{\"y\":1,\"z\":0}]]],\"t\":true}"
+    }
+  ],
+  "revision_hash": [
+    {
+      "name": "labels are left out",
+      "kind": "task",
+      "content": {
+        "name": "refund",
+        "title": "Refund A-1",
+        "version": "1.2.0",
+        "instructions": "Decide the refund.",
+        "environment": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "verifiers": [
+          "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ]
+      },
+      "expected": "sha256:616860dac738643aeb14d447472c3768518c0b164222bd4b50bdbca075d76257"
+    },
+    {
+      "name": "the same content under other labels",
+      "kind": "task",
+      "content": {
+        "name": "refund-fork",
+        "version": "0.1.0",
+        "instructions": "Decide the refund.",
+        "environment": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "verifiers": [
+          "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ]
+      },
+      "expected": "sha256:616860dac738643aeb14d447472c3768518c0b164222bd4b50bdbca075d76257"
+    },
+    {
+      "name": "the kind is part of the identity",
+      "kind": "verifier",
+      "content": {
+        "instructions": "Decide the refund.",
+        "environment": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "verifiers": [
+          "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ]
+      },
+      "expected": "sha256:13369d1d8670dab67177f6261c1e6207e963f097989c32664c1945fae2ac8192"
+    },
+    {
+      "name": "set-valued fields are sorted",
+      "kind": "harness",
+      "content": {
+        "capabilities": [
+          "tools",
+          "files",
+          "network"
+        ],
+        "command": [
+          "python",
+          "run.py"
+        ],
+        "source_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "expected": "sha256:f1c4b5ee3a3b87b7c24477cbbd5f4a71b30da1c3801864a5278f2fb3f0ddc1a4"
+    },
+    {
+      "name": "dependency order is kept",
+      "kind": "benchmark",
+      "content": {
+        "tasks": [
+          "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ],
+        "primary_metric": "score",
+        "description": "",
+        "metadata": {}
+      },
+      "expected": "sha256:f8649d03fff2e0ac5b9e0c6045f5c314eaaa1d1bbe1e4450c77fbc512e085d0f"
+    }
+  ],
+  "tree_digest": [
+    {
+      "name": "files sorted by path, framed by NUL",
+      "files": {
+        "b.txt": "second\n",
+        "a/one.py": "print(1)\n",
+        "a-b.txt": "dash\n"
+      },
+      "expected": "sha256:f3bfe847c593d82348a854034d920f846393f2955db3530f8e62cb06c4c411ec"
+    },
+    {
+      "name": "generated and listed paths are skipped",
+      "files": {
+        "env.py": "x = 1\n",
+        "__pycache__/env.cpython-313.pyc": "junk",
+        ".git/HEAD": "ref",
+        "data/big.csv": "1,2\n",
+        ".pluralignore": "# comment\ndata/big.csv\n"
+      },
+      "expected": "sha256:7d81a83be16416d06d3cd549d92d6b660fb6d8e57b4cd6e1fb6b192017e567ae"
+    },
+    {
+      "name": "an empty tree",
+      "files": {},
+      "expected": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

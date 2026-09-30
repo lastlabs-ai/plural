@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from plural.common import HarnessPackage
-from plural.harness.retrieval import package_files, tree_digest
+from plural.harness.retrieval import package_files, source_digest
 from plural.sandbox import SandboxProvider
 from plural.sandbox.models import (
     ExecRequest,
@@ -111,7 +111,7 @@ class PluralDistribution:
     @functools.cached_property
     def key(self) -> str:
         """Identity of the exact code, for reusing an image built from it."""
-        digest = tree_digest(self.source) if self.source is not None else ""
+        digest = source_digest(self.source) if self.source is not None else ""
         return "\n".join((self.version, *self.requirements, digest))
 
     def files(self) -> list[tuple[str, bytes]]:

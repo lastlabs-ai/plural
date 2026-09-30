@@ -11,6 +11,8 @@ from typing import Any, Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_core import to_jsonable_python
 
+from plural.identity import revision_hash
+
 SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 SEMANTIC_VERSION_PATTERN = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
@@ -281,14 +283,12 @@ class HarnessPackage(FrozenModel):
     @property
     def content_hash(self) -> str:
         """Stable package hash: the protocol plus the source contents, not its location."""
+        payload = self.definition.model_dump(mode="json")
         if self.source.digest is None:
-            return content_hash(self)
-        return content_hash(
-            {
-                "definition": self.definition.model_dump(mode="json"),
-                "source_digest": self.source.digest,
-            }
-        )
+            payload["source"] = self.source.model_dump(mode="json")
+        else:
+            payload["source_digest"] = self.source.digest
+        return revision_hash("harness", payload)
 
     @property
     def package_id(self) -> str:

@@ -14,7 +14,8 @@ from typing import Annotated, Any, Literal
 from pydantic import Field, PrivateAttr, ValidationInfo, field_serializer, model_validator
 
 from plural.catalog import ModelCatalog
-from plural.common import FrozenModel, RoutingSpec, content_hash
+from plural.common import FrozenModel, RoutingSpec
+from plural.identity import revision_hash
 from plural.sandbox.models import NetworkMode, ResourceRequirements
 
 
@@ -319,7 +320,7 @@ class Verifier(FrozenModel):
     @property
     def content_hash(self) -> str:
         """Stable Verifier version digest."""
-        return content_hash(self._hash_payload())
+        return revision_hash("verifier", self._hash_payload())
 
 
 class DeterministicVerifier(Verifier):

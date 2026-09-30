@@ -42,7 +42,7 @@ from plural.execution.store import JobStore
 from plural.harness.episode import EPISODE_FILE
 from plural.harness.packages import BUILTIN_PROFILES, native_actions_v1, native_chat_v1
 from plural.harness.protocol import HarnessProtocolError, HarnessRunRequest
-from plural.harness.retrieval import materialize_package, retrieve_archive, tree_digest
+from plural.harness.retrieval import materialize_package, retrieve_archive, source_digest
 from plural.harness.runner import HarnessExecutionError, HarnessRunner
 from plural.jobs import (
     AgentAggregate,
@@ -854,7 +854,7 @@ class Trial:
         if (
             source is not None
             and package.source.digest is not None
-            and tree_digest(source) != package.source.digest
+            and source_digest(source) != package.source.digest
         ):
             raise ValueError(f"Harness source lock mismatch for {agent.name!r}")
 
@@ -879,7 +879,7 @@ class Trial:
                 if source.kind == "local"
                 else retrieve_archive(source.uri, source.digest or "")
             )
-            if source.digest is not None and tree_digest(root) != source.digest:
+            if source.digest is not None and source_digest(root) != source.digest:
                 raise ValueError("Environment source lock mismatch")
             await provider.upload_bundle(handle, root, root="/workspace/environment")
         uploads = await asyncio.to_thread(

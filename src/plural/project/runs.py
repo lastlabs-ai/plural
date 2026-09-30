@@ -34,7 +34,7 @@ from plural.agents.models import AgentDefinition
 from plural.common import HarnessPackage, PackageSource
 from plural.environments.definition import EnvironmentDefinition
 from plural.execution.capacity import recommend_concurrency
-from plural.harness.retrieval import tree_digest
+from plural.harness.retrieval import source_digest
 from plural.jobs import (
     BenchmarkJobSource,
     Job,
@@ -57,11 +57,12 @@ from plural.project.manifests import ProjectBinding
 from plural.project.resources import Workspace
 from plural.project.sync import (
     HostedRevision,
-    ProjectPushStep,
+    PushStep,
     apply_project_push,
     plan_project_push,
     resolve_hosted,
     resolve_pinned,
+    revision_label,
 )
 from plural.studio import Studio, slugify
 from plural.tasks import TaskDefinition
@@ -245,13 +246,18 @@ def plan_run(
     inputs = workspace.dependency_order(
         [source, *([agent_ref] if agent_ref else []), *([harness_ref] if harness_ref else [])]
     )
-    pins = {
-        str(item): {
-            "version": workspace.load(item).version,
-            "content_hash": workspace.load(item).content_hash,
+    locked = workspace.project.read_lock().resources
+    pins = {}
+    for item in inputs:
+        digest = workspace.load(item).content_hash
+        entry = locked.get(str(item))
+        pushed = entry is not None and entry.content_hash == digest
+        pins[str(item)] = {
+            "revision": revision_label(entry.number, entry.version, "pushed")
+            if pushed and entry is not None
+            else "local",
+            "content_hash": digest,
         }
-        for item in inputs
-    }
     return RunPlan(
         source=source,
         agent=agent,
@@ -380,13 +386,12 @@ def run_roots(plan: RunPlan) -> list[ResourceRef]:
 
 def push_run_inputs(
     workspace: Workspace, studio: Studio, binding: ProjectBinding, plan: RunPlan
-) -> list[ProjectPushStep]:
+) -> list[PushStep]:
     """Push every revision a run needs that the hosted project does not hold yet.
 
-    A resource whose content changed while its version stayed the same gets
-    the next patch version, as ``plural project push --bump`` does. A resource
-    someone else changed in the hosted project since this checkout synced it
-    stops the push, so nothing is written on top of their work.
+    Changed content becomes a new numbered revision. A resource someone else
+    changed in the hosted project since this checkout synced it stops the
+    push, so nothing is written on top of their work.
 
     Returns:
         The steps that added a revision; empty when everything was pushed already.
@@ -394,13 +399,11 @@ def push_run_inputs(
     Raises:
         ProjectError: When a resource cannot be pushed, before anything is uploaded.
     """
-    push_plan = plan_project_push(
-        workspace, studio, binding.project_id, bump=True, roots=run_roots(plan)
-    )
+    push_plan = plan_project_push(workspace, studio, binding.project_id, roots=run_roots(plan))
     if not push_plan.changes:
         return []
-    apply_project_push(workspace, studio, binding, push_plan)
-    return push_plan.changes
+    steps = apply_project_push(workspace, studio, binding, push_plan)
+    return [step for step in steps if step.status == "pushed"]
 
 
 def submit_hosted(
@@ -906,14 +909,14 @@ def _snapshot_sources(workspace: Workspace, spec: JobSpec) -> JobSpec:
     """
 
     def snapshot(kind: str, name: str, source: Path, digest: str | None) -> Path:
-        expected = digest or tree_digest(source)
+        expected = digest or source_digest(source)
         target = _snapshot_path(workspace, kind, name, expected)
-        if target.exists() and tree_digest(target) == expected:
+        if target.exists() and source_digest(target) == expected:
             return target
         shutil.rmtree(target, ignore_errors=True)
         staging = target.with_name(f".{target.name}.{uuid.uuid4().hex}")
         shutil.copytree(source, staging, ignore=shutil.ignore_patterns(*_SNAPSHOT_IGNORED))
-        if tree_digest(staging) != expected:
+        if source_digest(staging) != expected:
             shutil.rmtree(staging, ignore_errors=True)
             raise ProjectError(
                 f"{kind} {name!r} changed while the run was being prepared. Run again."

@@ -1,18 +1,22 @@
 """Push project resources to a hosted project and pull them back.
 
 A push makes one immutable, private revision usable in the bound project. A
-revision is identified by its version and canonical content hash, which the
-SDK and the server compute identically, so pushing unchanged content reuses
-the existing revision rather than creating a duplicate.
+revision is identified by its content hash alone, which the SDK and the
+server compute identically (see :mod:`plural.identity`), so pushing unchanged
+content reuses the existing revision rather than creating a duplicate. The
+server numbers revisions in order; a version such as ``1.2.0`` is an optional
+release label, never a reason a push fails.
 
 Every push is planned in full before anything is written: unresolved
-references, cycles, dependencies that are not already hosted, and version
-conflicts all fail with no upload. Resources are then pushed dependencies
-first, so a parent is never saved pointing at a dependency that is missing.
+references, cycles, and dependencies that are not already hosted all fail
+with no upload. Resources are then pushed dependencies first, so a parent is
+never saved pointing at a dependency that is missing. A push never edits
+local files.
 
-A push never overwrites or deletes. It refuses to add a revision on top of a
-hosted change this checkout has not synced, the way git refuses a
-non-fast-forward push, unless the caller forces it.
+A push never overwrites or deletes. Each new revision names the revision it
+was based on, and a push refuses to add a revision on top of a hosted change
+this checkout has not synced, the way git refuses a non-fast-forward push,
+unless the caller forces it.
 
 Each revision also stores the resource's exact source package, addressed by
 the SHA-256 of its archive, so ``pull`` restores the editable files.
@@ -75,10 +79,12 @@ class HostedRevision:
 
     resource_id: str
     revision_id: str
-    version: str
+    version: str | None
     content_hash: str
     package_digest: str | None
     dependencies: tuple[tuple[ResourceRef, str], ...] = ()
+    number: int | None = None
+    legacy_content_hash: str | None = None
 
     @classmethod
     def from_payload(cls, resource_id: str, payload: dict[str, Any]) -> HostedRevision:
@@ -92,14 +98,42 @@ class HostedRevision:
             for item in payload.get("dependencies") or ()
             if isinstance(item, dict)
         )
+        number = payload.get("number")
         return cls(
             resource_id=resource_id,
             revision_id=str(payload["id"]),
-            version=str(payload.get("version") or ""),
+            version=str(payload["version"]) if payload.get("version") else None,
             content_hash=str(payload.get("content_hash") or ""),
             package_digest=payload.get("package_digest"),
             dependencies=dependencies,
+            number=int(number) if isinstance(number, int) else None,
+            legacy_content_hash=payload.get("legacy_content_hash") or None,
         )
+
+    @property
+    def label(self) -> str:
+        """``#3``, or ``#3 (1.2.0)`` once it is released under a version."""
+        return revision_label(self.number, self.version, self.revision_id)
+
+    def holds(self, digest: str | None) -> bool:
+        """Whether ``digest`` names this revision, under the current or the legacy identity rules.
+
+        Returns:
+            ``True`` when either hash matches.
+        """
+        return digest is not None and digest in {self.content_hash, self.legacy_content_hash}
+
+
+def revision_label(number: int | None, version: str | None, fallback: str = "") -> str:
+    """How a revision is named to people: its number and, if released, its version.
+
+    Returns:
+        ``#3 (1.2.0)``, ``#3``, ``1.2.0``, or ``fallback``.
+    """
+    base = f"#{number}" if number is not None else ""
+    if version:
+        return f"{base} ({version})" if base else version
+    return base or fallback
 
 
 @dataclass(frozen=True)
@@ -107,10 +141,18 @@ class PushStep:
     """What push did, or will do, for one resource."""
 
     ref: ResourceRef
-    version: str
+    version: str | None
     content_hash: str
     status: Literal["unchanged", "pushed", "planned"]
     revision_id: str | None = None
+    number: int | None = None
+    # Why a requested version label was not applied.
+    note: str | None = None
+
+    @property
+    def label(self) -> str:
+        """The revision's number and release version, as people read it."""
+        return revision_label(self.number, self.version, self.revision_id or "")
 
 
 @dataclass
@@ -131,12 +173,18 @@ class PullStep:
     """What pull did for one resource."""
 
     ref: ResourceRef
-    version: str
+    version: str | None
     revision_id: str
     status: Literal["restored", "unchanged", "replaced"]
     backup: Path | None = None
     # Written from the stored definition because the revision has no package.
     rebuilt: bool = False
+    number: int | None = None
+
+    @property
+    def label(self) -> str:
+        """The revision as people read it, like ``#3 (1.2.0)``."""
+        return revision_label(self.number, self.version, self.revision_id)
 
 
 def push(
@@ -178,17 +226,15 @@ def push(
     for item in order:
         resource = resources[item]
         parent, revisions = hosted[item]
-        match, problem = _match(resource, revisions, workspace)
-        if problem:
-            problems.append(problem)
-        elif match is not None:
+        match = _match(resource.content_hash, parent, revisions)
+        if match is not None:
             resolved[item] = match
         elif item != ref and not with_deps:
-            latest = revisions[-1].version if revisions else None
+            current = _current(parent, revisions)
             state = (
-                f"changed locally since version {latest} was pushed" if latest else "not pushed yet"
+                f"changed locally since {current.label} was pushed" if current else "not pushed yet"
             )
-            problems.append(f"{item} {resource.version} is {state}")
+            problems.append(f"{item} is {state}")
         else:
             to_push.append(item)
             if not force:
@@ -203,8 +249,93 @@ def push(
         raise ProjectError(f"Cannot push {ref}; nothing was uploaded.{hint}", problems)
 
     result = PushResult(target=ref)
-    result.steps = _commit(workspace, studio, binding, order, resources, resolved, to_push)
+    result.steps = _commit(
+        workspace, studio, binding, order, resources, hosted, resolved, to_push, force=force
+    )
     return result
+
+
+def release(
+    workspace: Workspace,
+    studio: Studio,
+    binding: ProjectBinding,
+    ref: ResourceRef,
+    version: str,
+) -> PushResult:
+    """Push ``ref`` if needed, then label the revision matching the local files ``version``.
+
+    A version names one revision forever: it cannot move to other content,
+    and a revision keeps the first version it is released under.
+
+    Returns:
+        The push steps, the last one carrying the release.
+
+    Raises:
+        ProjectError: When ``version`` is not ``MAJOR.MINOR.PATCH`` or already
+            names a different revision.
+    """
+    if _SEMVER.fullmatch(version) is None:
+        raise ProjectError(
+            f"{version!r} is not a release version. Use MAJOR.MINOR.PATCH, like 1.0.0."
+        )
+    result = push(workspace, studio, binding, ref, with_deps=True)
+    step = result.steps[-1]
+    if step.version == version:
+        return result
+    if step.version is not None:
+        raise ProjectError(f"{ref} {step.label} is already released as {step.version}.")
+    parent, revisions = _hosted_state(studio, ref)
+    taken = next((item for item in revisions if item.version == version), None)
+    if taken is not None:
+        raise ProjectError(
+            f"{ref} version {version} already names {taken.label}. A version names one "
+            "revision forever; choose another."
+        )
+    assert parent is not None and step.revision_id is not None
+    labeled = HostedRevision.from_payload(
+        str(parent["id"]), _api(studio, ref).release(str(parent["id"]), step.revision_id, version)
+    )
+    lock = _lock_for(workspace, binding)
+    entry = lock.resources.get(str(ref))
+    if entry is not None:
+        lock.resources[str(ref)] = entry.model_copy(update={"version": version})
+        workspace.project.write_lock(lock)
+    result.steps[-1] = PushStep(
+        ref=ref,
+        version=labeled.version,
+        content_hash=step.content_hash,
+        status=step.status,
+        revision_id=labeled.revision_id,
+        number=labeled.number,
+    )
+    return result
+
+
+def declared_version(project: Project, ref: ResourceRef) -> str | None:
+    """The ``version:`` a manifest spells out, or ``None`` when it leaves it out.
+
+    Returns:
+        The version text as written.
+    """
+    path = project.manifest_path(ref)
+    if not path.is_file():
+        return None
+    found = _VERSION_LINE.search(path.read_text(encoding="utf-8"))
+    return found.group(2) if found else None
+
+
+def _label(wanted: str | None, revisions: list[HostedRevision]) -> tuple[str | None, str | None]:
+    """The release version to give a new revision, and why a wanted one was skipped.
+
+    Returns:
+        ``(version, note)``: the manifest's version when no revision has it yet.
+    """
+    if wanted is None:
+        return None, None
+    taken = next((item for item in revisions if item.version == wanted), None)
+    if taken is None:
+        return wanted, None
+    return None, f"version {wanted} already names {taken.label}"
 
 
 def _commit(
@@ -213,10 +344,17 @@ def _commit(
     binding: ProjectBinding,
     order: list[ResourceRef],
     resources: dict[ResourceRef, LocalResource],
+    hosted: dict[ResourceRef, tuple[dict[str, Any] | None, list[HostedRevision]]],
     resolved: dict[ResourceRef, HostedRevision],
     to_push: list[ResourceRef],
+    *,
+    force: bool = False,
 ) -> list[PushStep]:
     """Push ``to_push`` dependencies first and record every revision in the lock.
+
+    A manifest's ``version:`` labels the new revision when no revision has that
+    version yet. A title change renames the hosted resource even when its
+    content, and so its revision, is unchanged.
 
     Returns:
         One step per resource in ``order``.
@@ -225,15 +363,28 @@ def _commit(
     lock = _lock_for(workspace, binding)
     for item in order:
         resource = resources[item]
+        parent, revisions = hosted[item]
+        wanted = declared_version(workspace.project, item)
+        note = None
         if item in to_push:
-            revision = _push_one(studio, resource, resolved)
+            version, note = _label(wanted, revisions)
+            revision = _push_one(
+                studio,
+                resource,
+                resolved,
+                version=version,
+                parent_revision_id=_base(lock.resources.get(str(item)), parent, revisions),
+                force=force,
+            )
             resolved[item] = revision
             status: Literal["unchanged", "pushed"] = "pushed"
         else:
             revision = resolved[item]
             status = "unchanged"
+            _rename(studio, item, parent, resource)
         lock.resources[str(item)] = LockEntry(
-            version=resource.version,
+            version=revision.version,
+            number=revision.number,
             content_hash=resource.content_hash,
             package_digest=revision.package_digest,
             dependencies=[str(dependency) for dependency in resource.dependencies],
@@ -243,14 +394,44 @@ def _commit(
         steps.append(
             PushStep(
                 ref=item,
-                version=resource.version,
+                version=revision.version,
                 content_hash=resource.content_hash,
                 status=status,
                 revision_id=revision.revision_id,
+                number=revision.number,
+                note=note,
             )
         )
         workspace.project.write_lock(lock)
     return steps
+
+
+def _base(
+    pinned: LockEntry | None,
+    parent: dict[str, Any] | None,
+    revisions: list[HostedRevision],
+) -> str | None:
+    """The revision a new one is based on: what this checkout last synced, else the current one.
+
+    Returns:
+        A revision id, or ``None`` for the first revision.
+    """
+    known = {item.revision_id for item in revisions}
+    if pinned is not None and pinned.revision_id in known:
+        return pinned.revision_id
+    current = _current(parent, revisions)
+    return current.revision_id if current else None
+
+
+def _rename(
+    studio: Studio, ref: ResourceRef, parent: dict[str, Any] | None, resource: LocalResource
+) -> None:
+    """Give the hosted resource the local display name when only the title changed."""
+    name = getattr(resource.value, "name", None)
+    if parent is None or not isinstance(name, str) or not name or parent.get("name") == name:
+        return
+    _api(studio, ref).update(str(parent["id"]), name=name)
+    parent["name"] = name
 
 
 @dataclass(frozen=True)
@@ -258,17 +439,15 @@ class ProjectPushStep:
     """What a project push will do for one resource."""
 
     ref: ResourceRef
-    version: str
     content_hash: str
     action: Literal["new", "update", "unchanged"]
-    previous_version: str | None = None
-    hosted_version: str | None = None
+    current: HostedRevision | None = None
     match: HostedRevision | None = None
 
     @property
-    def bumped(self) -> bool:
-        """Whether push gives this resource a new version."""
-        return self.previous_version is not None and self.previous_version != self.version
+    def hosted_label(self) -> str | None:
+        """The hosted revision this push builds on, as people read it."""
+        return self.current.label if self.current is not None else None
 
 
 @dataclass
@@ -277,16 +456,14 @@ class ProjectPushPlan:
 
     steps: list[ProjectPushStep]
     hosted_only: list[ResourceRef] = field(default_factory=list)
+    hosted: dict[ResourceRef, tuple[dict[str, Any] | None, list[HostedRevision]]] = field(
+        default_factory=dict
+    )
 
     @property
     def changes(self) -> list[ProjectPushStep]:
         """Steps that add a revision."""
         return [step for step in self.steps if step.action != "unchanged"]
-
-    @property
-    def bumps(self) -> dict[ResourceRef, str]:
-        """New versions to write into local manifests before pushing."""
-        return {step.ref: step.version for step in self.steps if step.bumped}
 
 
 def local_refs(project: Project) -> list[ResourceRef]:
@@ -303,25 +480,20 @@ def plan_project_push(
     studio: Studio | None,
     project_id: str | None,
     *,
-    bump: bool = False,
     force: bool = False,
     roots: list[ResourceRef] | None = None,
 ) -> ProjectPushPlan:
     """Plan pushing every local resource, or ``roots`` and their dependencies, without writing.
 
     A Task's content hash includes its dependencies, so changing an
-    Environment changes each Task and Benchmark that pins it. With ``bump``,
-    every resource whose version is taken by different content gets the next
-    free patch version, repeated until its dependents settle. The plan is
-    computed on a scratch copy, so local files change only in
-    :func:`apply_project_push`.
+    Environment gives each Task and Benchmark that uses it a new revision too.
+    Versions never block a push: new revisions are numbered by the service.
 
     Args:
         workspace: Project resources.
         studio: Hosted API addressed to the target project, or ``None`` for a
             hosted project that does not exist yet.
         project_id: Target hosted project, used to trust ``plural.lock`` pins.
-        bump: Give conflicting resources the next patch version.
         force: Allow new revisions on top of hosted changes this checkout has
             not synced.
         roots: Plan only these resources and their dependencies. The plan
@@ -345,36 +517,33 @@ def plan_project_push(
         item: _hosted_state(studio, item) if studio is not None else (None, []) for item in order
     }
     pins = _pins(project, project_id)
-    original = {item: workspace.load(item).version for item in order}
-
-    with tempfile.TemporaryDirectory() as scratch:
-        root = Path(scratch) / project.root.name
-        shutil.copytree(project.root, root, ignore=shutil.ignore_patterns(*_SCRATCH_IGNORED))
-        for _ in range(len(order) + 1):
-            space = Workspace(Project.at(root), catalog=workspace.catalog)
-            steps, conflicts, problems = _classify(space, order, hosted, pins, original, force)
-            if not bump or not conflicts or problems:
-                break
-            for item in conflicts:
-                taken = {revision.version for revision in hosted[item][1]}
-                version = _next_patch(space.load(item).version, taken, item)
-                _write_version(space.project.manifest_path(item), version)
-
-    if conflicts and not bump:
-        problems.extend(
-            f"{item} {original[item]} is already pushed with different content; its files "
-            "or a dependency changed."
-            for item in conflicts
+    steps: list[ProjectPushStep] = []
+    problems: list[str] = []
+    for item in order:
+        resource = workspace.load(item)
+        parent, revisions = hosted[item]
+        problems.extend(_package_problems(resource, workspace))
+        match = _match(resource.content_hash, parent, revisions)
+        action: Literal["new", "update", "unchanged"]
+        if match is not None:
+            action = "unchanged"
+        elif not revisions:
+            action = "new"
+        else:
+            action = "update"
+            if not force:
+                problems.extend(_diverged(item, parent, revisions, pins))
+        steps.append(
+            ProjectPushStep(
+                ref=item,
+                content_hash=resource.content_hash,
+                action=action,
+                current=_current(parent, revisions),
+                match=match,
+            )
         )
     if problems:
-        hint = (
-            "\nRun again with --bump to give each changed resource the next patch version."
-            if conflicts and not bump
-            else ""
-        )
-        raise ProjectError(
-            f"Cannot push project {project.name}; nothing was uploaded.{hint}", problems
-        )
+        raise ProjectError(f"Cannot push project {project.name}; nothing was uploaded.", problems)
 
     hosted_only: list[ResourceRef] = []
     if studio is not None and not partial:
@@ -384,7 +553,7 @@ def plan_project_push(
                 ref = ResourceRef(kind.name, str(record.get("slug") or record.get("name")))
                 if ref not in local:
                     hosted_only.append(ref)
-    return ProjectPushPlan(steps=steps, hosted_only=hosted_only)
+    return ProjectPushPlan(steps=steps, hosted_only=hosted_only, hosted=hosted)
 
 
 def apply_project_push(
@@ -392,20 +561,19 @@ def apply_project_push(
     studio: Studio,
     binding: ProjectBinding,
     plan: ProjectPushPlan,
+    *,
+    force: bool = False,
 ) -> list[PushStep]:
-    """Write planned version bumps, then push every change dependencies first.
+    """Push every planned change, dependencies first.
 
     Returns:
         One step per resource.
 
     Raises:
-        ProjectError: When local files changed after the plan was made.
+        ProjectError: When files were edited between planning and pushing.
     """
-    for ref, version in plan.bumps.items():
-        _write_version(workspace.project.manifest_path(ref), version)
-    space = Workspace(workspace.project, catalog=workspace.catalog)
     order = [step.ref for step in plan.steps]
-    resources = {ref: space.load(ref) for ref in order}
+    resources = {ref: workspace.load(ref) for ref in order}
     moved = [
         str(step.ref)
         for step in plan.steps
@@ -413,74 +581,19 @@ def apply_project_push(
     ]
     if moved:
         raise ProjectError(
-            "Local files changed after the push was planned; nothing was uploaded. "
-            "Run the push again.",
+            "These files were edited while the push was being prepared, so nothing was "
+            "uploaded. Push again once your edits are saved.",
             moved,
         )
     resolved = {step.ref: step.match for step in plan.steps if step.match is not None}
     to_push = [step.ref for step in plan.changes]
-    return _commit(space, studio, binding, order, resources, resolved, to_push)
+    return _commit(
+        workspace, studio, binding, order, resources, plan.hosted, resolved, to_push, force=force
+    )
 
 
-_SCRATCH_IGNORED = (".git", ".plural", ".venv", "__pycache__", "node_modules")
 _VERSION_LINE = re.compile(r"^version:[ \t]*(['\"]?)([^'\"\s#]+)\1", re.MULTILINE)
 _SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
-
-
-def _classify(
-    space: Workspace,
-    order: list[ResourceRef],
-    hosted: dict[ResourceRef, tuple[dict[str, Any] | None, list[HostedRevision]]],
-    pins: dict[str, LockEntry],
-    original: dict[ResourceRef, str],
-    force: bool,
-) -> tuple[list[ProjectPushStep], list[ResourceRef], list[str]]:
-    steps: list[ProjectPushStep] = []
-    conflicts: list[ResourceRef] = []
-    problems: list[str] = []
-    for item in order:
-        resource = space.load(item)
-        parent, revisions = hosted[item]
-        current = _current(parent, revisions)
-        problems.extend(_package_problems(resource, space))
-        same = next(
-            (
-                revision
-                for revision in revisions
-                if revision.version == resource.version
-                and revision.content_hash == resource.content_hash
-            ),
-            None,
-        )
-        action: Literal["new", "update", "unchanged"]
-        if same is not None:
-            action = "unchanged"
-        elif any(revision.version == resource.version for revision in revisions):
-            conflicts.append(item)
-            action = "update"
-        elif taken := next((r for r in revisions if r.content_hash == resource.content_hash), None):
-            manifest = space.project.manifest_path(item).relative_to(space.project.root)
-            problems.append(
-                f"{item} is already pushed with this content as version {taken.version}. "
-                f"Set `version: {taken.version}` in {manifest}."
-            )
-            action = "update"
-        else:
-            action = "new" if not revisions else "update"
-        if action == "update" and not force:
-            problems.extend(_diverged(item, parent, revisions, pins))
-        steps.append(
-            ProjectPushStep(
-                ref=item,
-                version=resource.version,
-                content_hash=resource.content_hash,
-                action=action,
-                previous_version=original[item],
-                hosted_version=current.version if current else None,
-                match=same,
-            )
-        )
-    return steps, conflicts, problems
 
 
 def _diverged(
@@ -501,15 +614,16 @@ def _diverged(
     pull = f"`plural {ref.info.cli} pull {ref.name}`"
     if pinned is None or pinned.revision_id is None:
         return [
-            f"{ref} already exists in the hosted project at version {current.version}, but "
-            f"this checkout has never pushed or pulled it. Pull it with {pull} to start from "
-            "the hosted copy, or pass --force to add your version on top."
+            f"{ref} already exists in the hosted project at {current.label}, but this "
+            f"checkout has never pushed or pulled it. Pull it with {pull} to start from the "
+            "hosted copy, or pass --force to add your revision on top."
         ]
     if pinned.revision_id != current.revision_id:
+        synced = revision_label(pinned.number, pinned.version, pinned.revision_id)
         return [
             f"{ref} changed in the hosted project since this checkout last synced it "
-            f"(hosted {current.version}, synced {pinned.version}). Pull it with {pull}, or "
-            "pass --force to add your version on top."
+            f"(hosted {current.label}, synced {synced}). Pull it with {pull}, or pass "
+            "--force to add your revision on top."
         ]
     return []
 
@@ -532,33 +646,51 @@ def _current(
     if not revisions:
         return None
     wanted = parent.get("current_revision_id") if parent else None
-    return next((item for item in revisions if item.revision_id == wanted), revisions[-1])
+    found = next((item for item in revisions if item.revision_id == wanted), None)
+    return found or max(revisions, key=lambda item: item.number or 0)
 
 
-def _next_patch(version: str, taken: set[str], ref: ResourceRef) -> str:
-    match = _SEMVER.match(version)
-    if match is None:
-        raise ProjectError(
-            f"Cannot bump {ref}: version {version!r} is not MAJOR.MINOR.PATCH. "
-            f"Set a new `version:` in {ref.info.directory}/{ref.name}/{ref.info.manifest}."
-        )
-    major, minor, patch = (int(part) for part in match.groups())
-    while True:
-        patch += 1
-        candidate = f"{major}.{minor}.{patch}"
-        if candidate not in taken:
-            return candidate
+def _match(
+    digest: str, parent: dict[str, Any] | None, revisions: list[HostedRevision]
+) -> HostedRevision | None:
+    """The hosted revision holding exactly ``digest``: the current one if it does, else the newest.
+
+    Returns:
+        The revision, or ``None`` when no revision has this content.
+    """
+    same = [item for item in revisions if item.content_hash == digest]
+    if not same:
+        return None
+    current = _current(parent, revisions)
+    if current is not None and current in same:
+        return current
+    return max(same, key=lambda item: item.number or 0)
 
 
-def _write_version(manifest: Path, version: str) -> None:
-    """Replace the top-level ``version:`` in one manifest, keeping comments and layout."""
-    text = manifest.read_text(encoding="utf-8")
-    updated, count = _VERSION_LINE.subn(
-        lambda m: f"version: {m.group(1)}{version}{m.group(1)}", text, count=1
-    )
-    if count == 0:
-        raise ProjectError(f"Cannot bump {manifest}: it has no top-level `version:` line.")
-    manifest.write_text(updated, encoding="utf-8")
+def select_revision(
+    ref: ResourceRef, revisions: list[HostedRevision], selector: str
+) -> HostedRevision:
+    """The revision ``selector`` names: a number (``3`` or ``#3``), a version, or a content hash.
+
+    Returns:
+        The revision.
+
+    Raises:
+        ProjectError: When no revision matches, listing the ones that exist.
+    """
+    wanted = selector.strip()
+    found: HostedRevision | None
+    if wanted.lstrip("#").isdigit():
+        number = int(wanted.lstrip("#"))
+        found = next((item for item in revisions if item.number == number), None)
+    elif wanted.startswith("sha256:"):
+        found = next((item for item in revisions if item.holds(wanted)), None)
+    else:
+        found = next((item for item in revisions if item.version == wanted), None)
+    if found is None:
+        known = ", ".join(item.label for item in revisions) or "none"
+        raise ProjectError(f"{ref} has no revision {selector}. Hosted revisions: {known}.")
+    return found
 
 
 def resolve_hosted(
@@ -580,11 +712,17 @@ def resolve_hosted(
     resolved: dict[ResourceRef, HostedRevision] = {}
     for item in order:
         resource = workspace.load(item)
-        match, problem = _match(resource, _hosted_revisions(studio, item), workspace)
+        parent, revisions = _hosted_state(studio, item)
+        match = _match(resource.content_hash, parent, revisions)
         if match is not None:
             resolved[item] = match
         else:
-            problems.append(problem or f"{item} {resource.version} is not pushed")
+            current = _current(parent, revisions)
+            problems.append(
+                f"{item} is changed locally since {current.label} was pushed"
+                if current
+                else f"{item} is not pushed yet"
+            )
     if problems:
         targets = " ".join(f"`plural {ref.info.cli} push {ref.name} --with-deps`" for ref in refs)
         raise ProjectError(
@@ -600,9 +738,10 @@ def resolve_pinned(
 ) -> dict[ResourceRef, HostedRevision]:
     """Find the hosted revision of every input a recorded run pinned.
 
-    ``pins`` maps ``kind/name`` to the ``version`` and ``content_hash`` the
-    run used, as ``run.json`` records them. Matching is by content, so the
-    project's current files do not matter.
+    ``pins`` maps ``kind/name`` to the ``content_hash`` the run used, as
+    ``run.json`` records them. Matching is by content, so the project's current
+    files do not matter. Hashes from before revision identity 2 still match
+    through each revision's legacy hash.
 
     Returns:
         The matching revision for every pinned input.
@@ -616,20 +755,18 @@ def resolve_pinned(
         ref = ResourceRef.parse(key)
         digest = pin.get("content_hash")
         match = next(
-            (item for item in _hosted_revisions(studio, ref) if item.content_hash == digest),
+            (item for item in _hosted_revisions(studio, ref) if digest and item.holds(digest)),
             None,
         )
         if match is None:
-            problems.append(
-                f"{ref} {pin.get('version', '')} with the content this Job ran is not pushed"
-            )
+            problems.append(f"{ref} with the content this Job ran is not pushed")
         else:
             resolved[ref] = match
     if problems:
         raise ProjectError(
             "The hosted project must hold the exact revisions a Job ran. Push them with "
-            "`plural project push`; if the files changed since the run, restore that "
-            "version first.",
+            "`plural project push`; if the files changed since the run, restore those "
+            "files first.",
             problems,
         )
     return resolved
@@ -640,7 +777,7 @@ def pull(
     studio: Studio,
     ref: ResourceRef,
     *,
-    version: str | None = None,
+    selector: str | None = None,
     revision_id: str | None = None,
     force: bool = False,
     with_deps: bool = False,
@@ -656,7 +793,8 @@ def pull(
         workspace: Project resources.
         studio: Hosted API addressed to the source project.
         ref: Resource to restore.
-        version: Revision version. Defaults to the current revision.
+        selector: Revision number (``3``), version, or content hash.
+            Defaults to the current revision.
         revision_id: Exact revision, used when following dependency pins.
         force: Replace local files that differ.
         with_deps: Also restore the exact dependency revisions it pins.
@@ -671,11 +809,11 @@ def pull(
     steps: list[PullStep] = []
     seen: set[ResourceRef] = set()
 
-    def restore(item: ResourceRef, wanted_version: str | None, wanted_id: str | None) -> None:
+    def restore(item: ResourceRef, wanted: str | None, wanted_id: str | None) -> None:
         if item in seen:
             return
         seen.add(item)
-        revision = _hosted_revision(studio, item, version=wanted_version, revision_id=wanted_id)
+        revision = _hosted_revision(studio, item, selector=wanted, revision_id=wanted_id)
         for dependency, dependency_id in revision.dependencies:
             # A dependency this project lacks is always restored; one it has is
             # replaced only when asked, so local edits are never lost.
@@ -683,7 +821,7 @@ def pull(
                 restore(dependency, None, dependency_id)
         steps.append(_restore(workspace, studio, item, revision, force=force))
 
-    restore(ref, version, revision_id)
+    restore(ref, selector, revision_id)
     lock = workspace.project.read_lock()
     if project_id and lock.project_id not in {None, project_id}:
         lock = LockFile(project_id=project_id)
@@ -693,6 +831,7 @@ def pull(
         revision = _hosted_revision(studio, step.ref, revision_id=step.revision_id)
         lock.resources[str(step.ref)] = LockEntry(
             version=revision.version,
+            number=revision.number,
             content_hash=revision.content_hash,
             package_digest=revision.package_digest,
             dependencies=[str(dependency) for dependency, _ in revision.dependencies],
@@ -731,28 +870,6 @@ def hosted_list(studio: Studio, kind: ResourceKind) -> list[dict[str, Any]]:
     return [dict(item) for item in api.list()]
 
 
-def _match(
-    resource: LocalResource, hosted: list[HostedRevision], workspace: Workspace
-) -> tuple[HostedRevision | None, str | None]:
-    manifest = workspace.project.manifest_path(resource.ref).relative_to(workspace.project.root)
-    for revision in hosted:
-        same_version = revision.version == resource.version
-        same_content = revision.content_hash == resource.content_hash
-        if same_version and same_content:
-            return revision, None
-        if same_version:
-            return None, (
-                f"{resource.ref} version {resource.version} is already pushed with different "
-                f"content. Bump `version:` in {manifest}."
-            )
-        if same_content:
-            return None, (
-                f"{resource.ref} is already pushed with this content as version "
-                f"{revision.version}. Set `version: {revision.version}` in {manifest}."
-            )
-    return None, None
-
-
 def _package_problems(resource: LocalResource, workspace: Workspace) -> list[str]:
     problems = []
     for relative, _path in package_files(resource.directory):
@@ -766,7 +883,13 @@ def _package_problems(resource: LocalResource, workspace: Workspace) -> list[str
 
 
 def _push_one(
-    studio: Studio, resource: LocalResource, resolved: dict[ResourceRef, HostedRevision]
+    studio: Studio,
+    resource: LocalResource,
+    resolved: dict[ResourceRef, HostedRevision],
+    *,
+    version: str | None = None,
+    parent_revision_id: str | None = None,
+    force: bool = False,
 ) -> HostedRevision:
     payload = archive_bytes(resource.directory)
     if len(payload) > MAX_ARCHIVE_BYTES:
@@ -802,7 +925,15 @@ def _push_one(
     elif resource.ref.kind == BENCHMARK.name:
         references = {"task_revision_ids": ids}
     api = _api(studio, resource.ref)
-    record = api.push(value, package_digest=digest, slug=slugify(resource.ref.name), **references)
+    record = api.push(
+        value,
+        package_digest=digest,
+        slug=slugify(resource.ref.name),
+        version=version,
+        parent_revision_id=parent_revision_id,
+        force=force,
+        **references,
+    )
     parent_id = str(record.get(f"{resource.ref.kind}_id") or record.get("resource_id") or "")
     revision = HostedRevision.from_payload(parent_id, record)
     if revision.content_hash != resource.content_hash:
@@ -820,6 +951,8 @@ def _push_one(
             content_hash=revision.content_hash,
             package_digest=revision.package_digest or digest,
             dependencies=revision.dependencies,
+            number=revision.number,
+            legacy_content_hash=revision.legacy_content_hash,
         )
     return revision
 
@@ -839,7 +972,7 @@ def _restore(
         actual = f"sha256:{hashlib.sha256(payload).hexdigest()}"
         if actual != revision.package_digest:
             raise ProjectError(
-                f"The package for {ref} {revision.version} failed verification: expected "
+                f"The package for {ref} {revision.label} failed verification: expected "
                 f"{revision.package_digest}, received {actual}. Nothing was written."
             )
     else:
@@ -860,12 +993,17 @@ def _restore(
         if target.exists():
             if tree_digest(target) == tree_digest(staged):
                 return PullStep(
-                    ref, revision.version, revision.revision_id, "unchanged", rebuilt=rebuilt
+                    ref,
+                    revision.version,
+                    revision.revision_id,
+                    "unchanged",
+                    rebuilt=rebuilt,
+                    number=revision.number,
                 )
             if not force:
                 relative = target.relative_to(workspace.project.root)
                 raise ProjectError(
-                    f"{relative}/ differs from {ref} {revision.version}. Nothing was changed. "
+                    f"{relative}/ differs from {ref} {revision.label}. Nothing was changed. "
                     f"Commit or move your local edits, or pass --force to replace the directory "
                     f"(the current files are kept under .plural/backups/)."
                 )
@@ -879,11 +1017,24 @@ def _restore(
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(staged), target)
             return PullStep(
-                ref, revision.version, revision.revision_id, "replaced", backup, rebuilt=rebuilt
+                ref,
+                revision.version,
+                revision.revision_id,
+                "replaced",
+                backup,
+                rebuilt=rebuilt,
+                number=revision.number,
             )
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(staged), target)
-    return PullStep(ref, revision.version, revision.revision_id, "restored", rebuilt=rebuilt)
+    return PullStep(
+        ref,
+        revision.version,
+        revision.revision_id,
+        "restored",
+        rebuilt=rebuilt,
+        number=revision.number,
+    )
 
 
 REBUILT_NOTE = (
@@ -945,7 +1096,7 @@ def _files_from_definition(
     label = ref.info.label
     if ref.kind not in {TASK.name, AGENT.name, BENCHMARK.name}:
         raise ProjectError(
-            f"{ref} {revision.version} has no source package, so its files cannot be "
+            f"{ref} {revision.label} has no source package, so its files cannot be "
             f"restored. An {label} carries code, which only a push from its source directory "
             "uploads. Push it again from there."
         )
@@ -959,18 +1110,19 @@ def _files_from_definition(
     title = definition.get("name")
     if isinstance(title, str) and title and title != ref.name:
         manifest["title"] = title
-    manifest["version"] = revision.version
+    if revision.version:
+        manifest["version"] = revision.version
     files: dict[str, str] = {}
     if ref.kind == TASK.name:
         if definition.get("resources"):
             raise ProjectError(
-                f"{ref} {revision.version} lists resource files, and their contents were "
+                f"{ref} {revision.label} lists resource files, and their contents were "
                 "never uploaded. Recreate the Task locally and push it."
             )
         environments, verifiers = named(ENVIRONMENT.name), named(VERIFIER.name)
         if not environments or not verifiers:
             raise ProjectError(
-                f"{ref} {revision.version} does not name a hosted Environment and Verifier, "
+                f"{ref} {revision.label} does not name a hosted Environment and Verifier, "
                 "so it cannot be written as a task.yaml."
             )
         manifest |= {
@@ -993,7 +1145,7 @@ def _files_from_definition(
             manifest["harness"] = harness
         elif harness:
             raise ProjectError(
-                f"{ref} {revision.version} embeds a Harness that is not in the hosted project, "
+                f"{ref} {revision.label} embeds a Harness that is not in the hosted project, "
                 "so it cannot be written as an agent.yaml."
             )
         for key in (
@@ -1066,7 +1218,7 @@ def _hosted_revision(
     studio: Studio,
     ref: ResourceRef,
     *,
-    version: str | None = None,
+    selector: str | None = None,
     revision_id: str | None = None,
 ) -> HostedRevision:
     parent, revisions = hosted_resource(studio, ref)
@@ -1079,19 +1231,12 @@ def _hosted_revision(
         except NotFoundError:
             raise ProjectError(f"{ref} has no revision {revision_id}.") from None
         return HostedRevision.from_payload(str(parent["id"]), payload)
-    if version is not None:
-        for revision in revisions:
-            if revision.version == version:
-                return revision
-        known = ", ".join(revision.version for revision in revisions) or "none"
-        raise ProjectError(f"{ref} has no version {version}. Hosted versions: {known}.")
-    current = parent.get("current_revision_id")
-    for revision in revisions:
-        if revision.revision_id == current:
-            return revision
-    if revisions:
-        return revisions[-1]
-    raise ProjectError(f"{ref} has no revisions in the hosted project.")
+    if selector is not None:
+        return select_revision(ref, revisions, selector)
+    current = _current(parent, revisions)
+    if current is None:
+        raise ProjectError(f"{ref} has no revisions in the hosted project.")
+    return current
 
 
 __all__ = [
@@ -1101,8 +1246,12 @@ __all__ = [
     "PushStep",
     "hosted_list",
     "hosted_resource",
+    "declared_version",
     "pull",
     "push",
+    "release",
     "resolve_hosted",
     "resolve_pinned",
+    "revision_label",
+    "select_revision",
 ]

@@ -30,7 +30,12 @@ from plural.project import (
     check_name,
     find_project_root,
 )
-from plural.project.sync import ProjectPushPlan, apply_project_push, plan_project_push
+from plural.project.sync import (
+    ProjectPushPlan,
+    ProjectPushStep,
+    apply_project_push,
+    plan_project_push,
+)
 from plural.project.templates import project_scaffold
 
 project_app = typer.Typer(help="Create, register, and inspect projects.", no_args_is_help=True)
@@ -132,11 +137,7 @@ def show(
 @handled
 def push(
     yes: bool = typer.Option(False, "--yes", "-y", help="Push without asking."),
-    bump: bool = typer.Option(
-        False,
-        "--bump",
-        help="Give each changed resource the next patch version.",
-    ),
+    bump: bool = typer.Option(False, "--bump", hidden=True),
     force: bool = typer.Option(
         False,
         "--force",
@@ -156,15 +157,17 @@ def push(
 ) -> None:
     """Push every local resource to the bound hosted project.
 
-    New revisions are added dependencies first. Existing revisions are never
-    overwritten or deleted. A resource whose files changed but whose version
-    did not is refused until you bump the version or pass --bump.
+    Each changed resource becomes a new numbered revision, dependencies first.
+    Existing revisions are never overwritten or deleted, and versions never
+    block a push. Label a revision with `plural <kind> release NAME VERSION`.
     """
+    if bump and not as_json:
+        note("--bump is no longer needed: pushes number revisions automatically.")
     space = workspace()
     project = space.project
     binding = _register(project, signed_in(session()), connect=connect, hosted_name=hosted_name)
     studio = session().studio(project=binding.project_id)
-    plan = plan_project_push(space, studio, binding.project_id, bump=bump, force=force)
+    plan = plan_project_push(space, studio, binding.project_id, force=force)
     payload = _push_payload(binding, plan)
     if not as_json:
         _print_push_plan(binding, plan)
@@ -176,24 +179,32 @@ def push(
         else:
             success("Everything is already pushed.")
         return
-    steps = apply_project_push(space, studio, binding, plan)
+    steps = apply_project_push(space, studio, binding, plan, force=force)
     payload["steps"] = [
         {
             "resource": str(step.ref),
+            "revision": step.label,
+            "number": step.number,
             "version": step.version,
             "status": step.status,
             "revision_id": step.revision_id,
+            "note": step.note,
         }
         for step in steps
     ]
-    emit(
-        payload,
-        as_json=as_json,
-        text=lambda: success(
+
+    def text() -> None:
+        for step in steps:
+            if step.status == "pushed":
+                typer.echo(f"  {step.ref} {step.label}")
+            if step.note:
+                note(f"{step.ref}: {step.note}, so the new revision has no version.")
+        success(
             f"Pushed {sum(step.status == 'pushed' for step in steps)} revisions "
             f"to {binding.project_slug}."
-        ),
-    )
+        )
+
+    emit(payload, as_json=as_json, text=text)
 
 
 def _existing(name: str) -> Project | None:
@@ -334,9 +345,9 @@ def _push_payload(binding: ProjectBinding, plan: ProjectPushPlan) -> dict[str, A
         "steps": [
             {
                 "resource": str(step.ref),
-                "version": step.version,
-                "previous_version": step.previous_version,
                 "action": step.action,
+                "hosted": step.hosted_label,
+                "revision": step.match.label if step.match is not None else None,
             }
             for step in plan.steps
         ],
@@ -350,17 +361,25 @@ def _print_push_plan(binding: ProjectBinding, plan: ProjectPushPlan) -> None:
         (
             (
                 step.ref,
-                f"{step.previous_version} -> {step.version}" if step.bumped else step.version,
-                step.action,
+                step.hosted_label or "-",
+                _describe(step),
             )
             for step in plan.steps
         ),
-        ("resource", "version", "result"),
+        ("resource", "hosted", "push"),
     )
     if plan.hosted_only:
         note("These hosted resources are not in this checkout and will be left as they are:")
         for ref in plan.hosted_only:
             typer.echo(f"  {ref}")
+
+
+def _describe(step: ProjectPushStep) -> str:
+    if step.action == "unchanged":
+        return f"unchanged ({step.match.label})" if step.match is not None else "unchanged"
+    if step.action == "new":
+        return "new resource"
+    return "new revision"
 
 
 def _confirm_push() -> None:

@@ -22,6 +22,7 @@ from plural.environments.definition import (
     ExecutionLimits,
 )
 from plural.environments.env import Environment
+from plural.identity import revision_hash
 from plural.verifiers import DeterministicVerifier, VerifierDefinition, WeightedVerifier
 
 
@@ -340,10 +341,9 @@ class Task(FrozenModel):
     def content_hash(self) -> str:
         """Stable Task version digest."""
         environment = self._environment_definition()
-        return content_hash(
+        return revision_hash(
+            "task",
             {
-                "name": self.name,
-                "version": self.version,
                 "instructions": self.instructions,
                 "goals": self.goals,
                 "info": self.info,
@@ -353,7 +353,7 @@ class Task(FrozenModel):
                 "resources": self.resources,
                 "initial_state": self.initial_state,
                 "reset_options": self.reset_options,
-            }
+            },
         )
 
     @property
@@ -639,16 +639,17 @@ class Benchmark(BenchmarkRelease):
     @property
     def content_hash(self) -> str:
         """Stable Benchmark version digest."""
-        return content_hash(
+        release = self._release_payload()
+        release.pop("forked_from", None)
+        return revision_hash(
+            "benchmark",
             {
-                "name": self.name,
-                "version": self.version,
-                "task_pins": self.task_pins,
+                "tasks": [task.content_hash for task in self.tasks],
                 "primary_metric": self.primary_metric,
                 "description": self.description,
                 "metadata": self.metadata,
-                **self._release_payload(),
-            }
+                **release,
+            },
         )
 
     @property

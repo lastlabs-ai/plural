@@ -37,7 +37,7 @@ STATE_DIR = ".plural"
 BINDING_FILE = "project.json"
 VERSIONS_DIR = "versions"
 NAME_PATTERN = re.compile(r"^(?=.{1,63}$)[a-z0-9]+(?:-[a-z0-9]+)*$")
-VERSION_PATTERN = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]*$")
+VERSION_PATTERN = re.compile(r"^(#?[0-9]+|sha256:[0-9a-f]{7,64}|[0-9A-Za-z][0-9A-Za-z.+_-]*)$")
 
 
 class ProjectError(Exception):
@@ -128,14 +128,15 @@ class ResourceRef:
 
 
 def split_version(reference: str, what: str) -> tuple[str, str | None]:
-    """Split ``name@version`` into its name and version.
+    """Split ``name@revision`` into its name and revision selector.
 
-    A bare ``name`` has no version. Every retained version of a resource stays
-    addressable this way, so ``wordlebench@0.1.1`` names the same revision for
-    as long as the hosted project keeps it.
+    The selector is a revision number (``wordlebench@3``), a release version
+    (``wordlebench@1.0.0``), or a content hash (``wordlebench@sha256:9f2c...``).
+    Every retained revision stays addressable this way for as long as the
+    hosted project keeps it. A bare ``name`` has no selector.
 
     Returns:
-        The validated name and the version, or ``None`` when none was given.
+        The validated name and the selector, or ``None`` when none was given.
 
     Raises:
         ProjectError: When the name or the version is not valid.
@@ -146,7 +147,8 @@ def split_version(reference: str, what: str) -> tuple[str, str | None]:
         return name, None
     if not VERSION_PATTERN.fullmatch(version):
         raise ProjectError(
-            f"{what} reference {reference!r} has no valid version after '@'. Example: {name}@0.1.0"
+            f"{what} reference {reference!r} has no valid revision after '@'. Examples: "
+            f"{name}@3, {name}@1.0.0"
         )
     return name, version
 

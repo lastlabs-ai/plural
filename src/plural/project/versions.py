@@ -1,12 +1,13 @@
-"""Resolve ``name@version`` to an exact retained version.
+"""Resolve ``name@revision`` to an exact retained revision.
 
-The working copy holds one version of each resource. Every pushed version
-stays in the hosted project, immutable, so ``wordlebench@0.1.1`` keeps naming
-the same revision after the working copy moves on. When a reference names a
-version the working copy does not hold, that version and the exact revisions
-it pins are restored into ``.plural/versions/<refs>/``, a project of their
-own that shares this project's binding and Job records. The working copy is
-never touched.
+The working copy holds one revision of each resource. Every pushed revision
+stays in the hosted project, immutable, so ``wordlebench@3``,
+``wordlebench@1.0.0``, and ``wordlebench@sha256:...`` keep naming the same
+revision after the working copy moves on. When a reference names a revision
+the working copy does not hold, that revision and the exact revisions it pins
+are restored into ``.plural/versions/<refs>/``, a project of their own that
+shares this project's binding and Job records. The working copy is never
+touched.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from plural.project.layout import (
     ProjectError,
     ResourceRef,
 )
-from plural.project.manifests import ProjectBinding
+from plural.project.manifests import LockEntry, ProjectBinding
 from plural.project.resources import Workspace
 from plural.project.sync import pull
 from plural.studio import Studio
@@ -31,31 +32,47 @@ from plural.studio import Studio
 _PROJECT_FILES = (PROJECT_FILE, "pyproject.toml")
 
 
-def versioned(ref: ResourceRef, version: str) -> str:
-    """``benchmark/wordlebench@0.1.1``: a resource reference with its version.
+def versioned(ref: ResourceRef, selector: str) -> str:
+    """``benchmark/wordlebench@3``: a resource reference with a revision selector.
 
     Returns:
         The reference text.
     """
-    return f"{ref}@{version}"
+    return f"{ref}@{selector}"
 
 
-def holds_version(workspace: Workspace, ref: ResourceRef, version: str) -> bool:
-    """Whether the working copy of ``ref`` is exactly ``version``.
-
-    A local copy that declares the version but no longer matches what was
-    pushed under it has been edited without a bump, so it is not that version.
+def names(entry: LockEntry | None, selector: str) -> bool:
+    """Whether ``selector`` (a number, version, or content hash) names the locked revision.
 
     Returns:
-        ``True`` when running the working copy runs ``version``.
+        ``True`` on a match.
+    """
+    if entry is None:
+        return False
+    wanted = selector.strip().lstrip("#")
+    if wanted.isdigit():
+        return entry.number == int(wanted)
+    if wanted.startswith("sha256:"):
+        return entry.content_hash == wanted
+    return entry.version == wanted
+
+
+def holds_version(workspace: Workspace, ref: ResourceRef, selector: str) -> bool:
+    """Whether the working copy of ``ref`` is exactly the revision ``selector`` names.
+
+    Content decides: the working copy holds a revision only when its files
+    hash to what that revision holds, so an edited copy never passes for it.
+
+    Returns:
+        ``True`` when running the working copy runs that revision.
     """
     if not workspace.project.has(ref):
         return False
-    resource = workspace.load(ref)
-    if resource.version != version:
-        return False
+    digest = workspace.load(ref).content_hash
+    if selector.startswith("sha256:"):
+        return digest == selector
     entry = workspace.project.read_lock().resources.get(str(ref))
-    return entry is None or entry.version != version or entry.content_hash == resource.content_hash
+    return names(entry, selector) and entry is not None and entry.content_hash == digest
 
 
 def version_workspace(
@@ -66,7 +83,7 @@ def version_workspace(
     *,
     carry: Iterable[ResourceRef] = (),
 ) -> Workspace:
-    """A workspace holding the requested hosted versions.
+    """A workspace holding the requested hosted revisions, keyed by revision selector.
 
     ``carry`` names working-copy resources to use alongside them, such as an
     unversioned Agent run against a retained Benchmark. They are copied fresh
@@ -76,23 +93,23 @@ def version_workspace(
         A workspace rooted under ``.plural/versions``.
 
     Raises:
-        ProjectError: When a version is not in the hosted project.
+        ProjectError: When a revision is not in the hosted project.
     """
     if not versions:
-        raise ProjectError("Name at least one version to restore.")
+        raise ProjectError("Name at least one revision to restore.")
     root = workspace.project.versions_dir / "+".join(
-        f"{ref.kind}-{ref.name}@{version}" for ref, version in sorted(versions.items())
+        f"{ref.kind}-{ref.name}@{_safe(selector)}" for ref, selector in sorted(versions.items())
     )
     _prepare(workspace.project, root)
     shadow = Workspace(Project.at(root), catalog=workspace.catalog)
-    for ref, version in sorted(versions.items()):
-        if shadow.project.has(ref) and shadow.load(ref).version == version:
+    for ref, selector in sorted(versions.items()):
+        if holds_version(shadow, ref, selector):
             continue
         pull(
             shadow,
             studio,
             ref,
-            version=version,
+            selector=selector,
             force=True,
             with_deps=True,
             project_id=binding.project_id,
@@ -107,6 +124,10 @@ def version_workspace(
             shutil.rmtree(target)
         shutil.copytree(workspace.project.resource_dir(ref), target)
     return Workspace(Project.at(root), catalog=workspace.catalog)
+
+
+def _safe(selector: str) -> str:
+    return selector.strip().lstrip("#").replace(":", "-")[:23]
 
 
 def _prepare(project: Project, root: Path) -> None:

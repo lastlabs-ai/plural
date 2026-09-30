@@ -340,6 +340,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ init      Create a saved Agent: a model, instructions, and an optional Harness.                  │
 │ validate  Check a resource and everything it depends on, without uploading.                      │
 │ push      Validate and push an immutable, private revision to the bound project.                 │
+│ release   Label the revision matching your files with a release version, pushing it first.       │
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
@@ -389,20 +390,21 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained version as name@version or with --version.
+ Name a retained revision as name@REVISION or with --revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also replace dependencies you already have with the exact revisions it │
-│                           pins. Missing dependencies are always restored.                        │
-│ --force                   Replace local files that differ. The old copy is kept under            │
-│                           .plural/backups.                                                       │
-│ --json                    Print machine-readable JSON.                                           │
-│ --help                    Show this message and exit.                                            │
+│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
+│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
+│                             it pins. Missing dependencies are always restored.                   │
+│ --force                     Replace local files that differ. The old copy is kept under          │
+│                             .plural/backups.                                                     │
+│ --json                      Print machine-readable JSON.                                         │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -414,17 +416,41 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Validate and push an immutable, private revision to the bound project.
 
- Pushing unchanged content reuses the existing revision. Without
- --with-deps, every dependency must already be pushed with identical
- content. Nothing is uploaded unless the whole push can succeed.
+ The hosted project numbers revisions. Pushing content it already holds
+ reuses that revision. Without --with-deps, every dependency must
+ already be pushed with identical content. Nothing is uploaded unless
+ the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --force              Add a revision even though the hosted resource moved since you last synced. │
 │ --json               Print machine-readable JSON.                                                │
 │ --help               Show this message and exit.                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent release`
+
+```text
+
+ Usage: plural agent release [OPTIONS] {name} {version}
+
+ Label the revision matching your files with a release version, pushing it first.
+
+ A version names one revision forever, so collaborators and Jobs can
+ refer to it as name@VERSION.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
+│                          [required]                                                              │
+│ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -453,11 +479,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
- name@version shows that version: the working copy when it is exactly
- that version, otherwise the retained hosted revision.
+ name@REVISION shows that revision: the working copy when it holds
+ exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -594,6 +621,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ init      Create a new Benchmark from the standard template.                                     │
 │ validate  Check a resource and everything it depends on, without uploading.                      │
 │ push      Validate and push an immutable, private revision to the bound project.                 │
+│ release   Label the revision matching your files with a release version, pushing it first.       │
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
@@ -660,20 +688,21 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained version as name@version or with --version.
+ Name a retained revision as name@REVISION or with --revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also replace dependencies you already have with the exact revisions it │
-│                           pins. Missing dependencies are always restored.                        │
-│ --force                   Replace local files that differ. The old copy is kept under            │
-│                           .plural/backups.                                                       │
-│ --json                    Print machine-readable JSON.                                           │
-│ --help                    Show this message and exit.                                            │
+│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
+│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
+│                             it pins. Missing dependencies are always restored.                   │
+│ --force                     Replace local files that differ. The old copy is kept under          │
+│                             .plural/backups.                                                     │
+│ --json                      Print machine-readable JSON.                                         │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -685,17 +714,41 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Validate and push an immutable, private revision to the bound project.
 
- Pushing unchanged content reuses the existing revision. Without
- --with-deps, every dependency must already be pushed with identical
- content. Nothing is uploaded unless the whole push can succeed.
+ The hosted project numbers revisions. Pushing content it already holds
+ reuses that revision. Without --with-deps, every dependency must
+ already be pushed with identical content. Nothing is uploaded unless
+ the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --force              Add a revision even though the hosted resource moved since you last synced. │
 │ --json               Print machine-readable JSON.                                                │
 │ --help               Show this message and exit.                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark release`
+
+```text
+
+ Usage: plural benchmark release [OPTIONS] {name} {version}
+
+ Label the revision matching your files with a release version, pushing it first.
+
+ A version names one revision forever, so collaborators and Jobs can
+ refer to it as name@VERSION.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
+│                          [required]                                                              │
+│ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -726,11 +779,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
- name@version shows that version: the working copy when it is exactly
- that version, otherwise the retained hosted revision.
+ name@REVISION shows that revision: the working copy when it holds
+ exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -773,6 +827,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ init      Create a new Environment from the standard template.                                   │
 │ validate  Check a resource and everything it depends on, without uploading.                      │
 │ push      Validate and push an immutable, private revision to the bound project.                 │
+│ release   Label the revision matching your files with a release version, pushing it first.       │
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
@@ -819,20 +874,21 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained version as name@version or with --version.
+ Name a retained revision as name@REVISION or with --revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also replace dependencies you already have with the exact revisions it │
-│                           pins. Missing dependencies are always restored.                        │
-│ --force                   Replace local files that differ. The old copy is kept under            │
-│                           .plural/backups.                                                       │
-│ --json                    Print machine-readable JSON.                                           │
-│ --help                    Show this message and exit.                                            │
+│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
+│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
+│                             it pins. Missing dependencies are always restored.                   │
+│ --force                     Replace local files that differ. The old copy is kept under          │
+│                             .plural/backups.                                                     │
+│ --json                      Print machine-readable JSON.                                         │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -844,17 +900,41 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Validate and push an immutable, private revision to the bound project.
 
- Pushing unchanged content reuses the existing revision. Without
- --with-deps, every dependency must already be pushed with identical
- content. Nothing is uploaded unless the whole push can succeed.
+ The hosted project numbers revisions. Pushing content it already holds
+ reuses that revision. Without --with-deps, every dependency must
+ already be pushed with identical content. Nothing is uploaded unless
+ the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --force              Add a revision even though the hosted resource moved since you last synced. │
 │ --json               Print machine-readable JSON.                                                │
 │ --help               Show this message and exit.                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env release`
+
+```text
+
+ Usage: plural env release [OPTIONS] {name} {version}
+
+ Label the revision matching your files with a release version, pushing it first.
+
+ A version names one revision forever, so collaborators and Jobs can
+ refer to it as name@VERSION.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
+│                          [required]                                                              │
+│ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -867,11 +947,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
- name@version shows that version: the working copy when it is exactly
- that version, otherwise the retained hosted revision.
+ name@REVISION shows that revision: the working copy when it holds
+ exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -914,6 +995,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ init      Create a new Harness from the standard template.                                       │
 │ validate  Check a resource and everything it depends on, without uploading.                      │
 │ push      Validate and push an immutable, private revision to the bound project.                 │
+│ release   Label the revision matching your files with a release version, pushing it first.       │
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
@@ -960,20 +1042,21 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained version as name@version or with --version.
+ Name a retained revision as name@REVISION or with --revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also replace dependencies you already have with the exact revisions it │
-│                           pins. Missing dependencies are always restored.                        │
-│ --force                   Replace local files that differ. The old copy is kept under            │
-│                           .plural/backups.                                                       │
-│ --json                    Print machine-readable JSON.                                           │
-│ --help                    Show this message and exit.                                            │
+│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
+│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
+│                             it pins. Missing dependencies are always restored.                   │
+│ --force                     Replace local files that differ. The old copy is kept under          │
+│                             .plural/backups.                                                     │
+│ --json                      Print machine-readable JSON.                                         │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -985,17 +1068,41 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Validate and push an immutable, private revision to the bound project.
 
- Pushing unchanged content reuses the existing revision. Without
- --with-deps, every dependency must already be pushed with identical
- content. Nothing is uploaded unless the whole push can succeed.
+ The hosted project numbers revisions. Pushing content it already holds
+ reuses that revision. Without --with-deps, every dependency must
+ already be pushed with identical content. Nothing is uploaded unless
+ the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --force              Add a revision even though the hosted resource moved since you last synced. │
 │ --json               Print machine-readable JSON.                                                │
 │ --help               Show this message and exit.                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural harness release`
+
+```text
+
+ Usage: plural harness release [OPTIONS] {name} {version}
+
+ Label the revision matching your files with a release version, pushing it first.
+
+ A version names one revision forever, so collaborators and Jobs can
+ refer to it as name@VERSION.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
+│                          [required]                                                              │
+│ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1008,11 +1115,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
- name@version shows that version: the working copy when it is exactly
- that version, otherwise the retained hosted revision.
+ name@REVISION shows that revision: the working copy when it holds
+ exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -1219,13 +1327,12 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Push every local resource to the bound hosted project.
 
- New revisions are added dependencies first. Existing revisions are never
- overwritten or deleted. A resource whose files changed but whose version
- did not is refused until you bump the version or pass --bump.
+ Each changed resource becomes a new numbered revision, dependencies first.
+ Existing revisions are never overwritten or deleted, and versions never
+ block a push. Label a revision with `plural <kind> release NAME VERSION`.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --yes      -y             Push without asking.                                                   │
-│ --bump                    Give each changed resource the next patch version.                     │
 │ --force                   Add revisions even if the hosted copy changed since this checkout last │
 │                           synced.                                                                │
 │ --connect                 Bind to the hosted project that already has this name.                 │
@@ -1422,6 +1529,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ init      Create a Task with instructions, one Environment, and its Verifiers.                   │
 │ validate  Check a resource and everything it depends on, without uploading.                      │
 │ push      Validate and push an immutable, private revision to the bound project.                 │
+│ release   Label the revision matching your files with a release version, pushing it first.       │
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
@@ -1470,20 +1578,21 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained version as name@version or with --version.
+ Name a retained revision as name@REVISION or with --revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also replace dependencies you already have with the exact revisions it │
-│                           pins. Missing dependencies are always restored.                        │
-│ --force                   Replace local files that differ. The old copy is kept under            │
-│                           .plural/backups.                                                       │
-│ --json                    Print machine-readable JSON.                                           │
-│ --help                    Show this message and exit.                                            │
+│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
+│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
+│                             it pins. Missing dependencies are always restored.                   │
+│ --force                     Replace local files that differ. The old copy is kept under          │
+│                             .plural/backups.                                                     │
+│ --json                      Print machine-readable JSON.                                         │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1495,17 +1604,41 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Validate and push an immutable, private revision to the bound project.
 
- Pushing unchanged content reuses the existing revision. Without
- --with-deps, every dependency must already be pushed with identical
- content. Nothing is uploaded unless the whole push can succeed.
+ The hosted project numbers revisions. Pushing content it already holds
+ reuses that revision. Without --with-deps, every dependency must
+ already be pushed with identical content. Nothing is uploaded unless
+ the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --force              Add a revision even though the hosted resource moved since you last synced. │
 │ --json               Print machine-readable JSON.                                                │
 │ --help               Show this message and exit.                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task release`
+
+```text
+
+ Usage: plural task release [OPTIONS] {name} {version}
+
+ Label the revision matching your files with a release version, pushing it first.
+
+ A version names one revision forever, so collaborators and Jobs can
+ refer to it as name@VERSION.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
+│                          [required]                                                              │
+│ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1518,11 +1651,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
- name@version shows that version: the working copy when it is exactly
- that version, otherwise the retained hosted revision.
+ name@REVISION shows that revision: the working copy when it holds
+ exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -1635,6 +1769,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ init      Create a new Verifier from the standard template.                                      │
 │ validate  Check a resource and everything it depends on, without uploading.                      │
 │ push      Validate and push an immutable, private revision to the bound project.                 │
+│ release   Label the revision matching your files with a release version, pushing it first.       │
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
@@ -1681,20 +1816,21 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained version as name@version or with --version.
+ Name a retained revision as name@REVISION or with --revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --version          <str>  Version to restore.                                                    │
-│ --with-deps               Also replace dependencies you already have with the exact revisions it │
-│                           pins. Missing dependencies are always restored.                        │
-│ --force                   Replace local files that differ. The old copy is kept under            │
-│                           .plural/backups.                                                       │
-│ --json                    Print machine-readable JSON.                                           │
-│ --help                    Show this message and exit.                                            │
+│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
+│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
+│                             it pins. Missing dependencies are always restored.                   │
+│ --force                     Replace local files that differ. The old copy is kept under          │
+│                             .plural/backups.                                                     │
+│ --json                      Print machine-readable JSON.                                         │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1706,17 +1842,41 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Validate and push an immutable, private revision to the bound project.
 
- Pushing unchanged content reuses the existing revision. Without
- --with-deps, every dependency must already be pushed with identical
- content. Nothing is uploaded unless the whole push can succeed.
+ The hosted project numbers revisions. Pushing content it already holds
+ reuses that revision. Without --with-deps, every dependency must
+ already be pushed with identical content. Nothing is uploaded unless
+ the whole push can succeed.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --force              Add a revision even though the hosted resource moved since you last synced. │
 │ --json               Print machine-readable JSON.                                                │
 │ --help               Show this message and exit.                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier release`
+
+```text
+
+ Usage: plural verifier release [OPTIONS] {name} {version}
+
+ Label the revision matching your files with a release version, pushing it first.
+
+ A version names one revision forever, so collaborators and Jobs can
+ refer to it as name@VERSION.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
+│                          [required]                                                              │
+│ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1729,11 +1889,12 @@ This section is generated from the Typer application. Run `uv run python scripts
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
  An invalid local copy is an error, not a reason to show the hosted one.
- name@version shows that version: the working copy when it is exactly
- that version, otherwise the retained hosted revision.
+ name@REVISION shows that revision: the working copy when it holds
+ exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@version for a retained version. Defaults to the        │
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
 │                    resource directory you are in.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮

@@ -32,7 +32,7 @@ from plural.benchmarks.publication import (
     ManifestTask,
 )
 from plural.benchmarks.results import MeasuredMean
-from plural.common import content_hash
+from plural.identity import revision_hash
 from plural.verifiers import DeterministicVerifier, RubricCriterion
 
 
@@ -64,27 +64,26 @@ def attempt(task_name: str, score: float | None, **fields: object) -> AttemptEvi
 SPECS = ("a", "b")
 
 
-def test_release_fields_leave_existing_benchmark_digests_unchanged() -> None:
+def test_default_release_fields_stay_out_of_the_benchmark_digest() -> None:
     plain = Benchmark(name="suite", version="1.0.0", tasks=(task("a"),))
-    legacy = content_hash(
+    expected = revision_hash(
+        "benchmark",
         {
-            "name": "suite",
-            "version": "1.0.0",
-            "task_pins": plain.task_pins,
+            "tasks": [pin.content_hash for pin in plain.task_pins],
             "primary_metric": "score",
             "description": "",
             "metadata": {},
-        }
+        },
     )
-    assert plain.content_hash == legacy
-    assert plain._definition().content_hash == legacy
+    assert plain.content_hash == expected
+    assert plain._definition().content_hash == expected
     released = Benchmark(
         name="suite",
         version="1.0.0",
         tasks=(task("a"),),
         purpose="Measure puzzle solving.",
     )
-    assert released.content_hash != legacy
+    assert released.content_hash != expected
     assert plain.diff(released).configuration_changes["purpose"] == (
         "",
         "Measure puzzle solving.",

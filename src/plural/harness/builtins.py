@@ -17,7 +17,7 @@ from plural.common import (
     HarnessProtocol,
     PackageSource,
 )
-from plural.harness.retrieval import tree_digest
+from plural.harness.retrieval import source_digest
 
 BUILTIN_HARNESS_NAMES = ("hermes", "claude-code", "codex")
 LEGACY_DECLARED_HARNESS_NAMES = frozenset({*BUILTIN_HARNESS_NAMES, "cursor"})
@@ -290,7 +290,7 @@ def resolve_builtin_package(name: str, kwargs: dict[str, Any] | None = None) -> 
         source=PackageSource(
             kind="local",
             uri=str(source),
-            digest=tree_digest(source),
+            digest=source_digest(source),
             trusted=True,
         ),
     )

@@ -130,7 +130,8 @@ class BenchmarkManifest(BenchmarkRelease):
 class LockEntry(ManifestModel):
     """One resolved resource: its local identity and, once pushed, its revision."""
 
-    version: str
+    version: str | None = None
+    number: int | None = None
     content_hash: str
     package_digest: str | None = None
     dependencies: list[str] = Field(default_factory=list)

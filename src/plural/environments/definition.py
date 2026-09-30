@@ -16,9 +16,9 @@ from plural.common import (
     HarnessBinding,
     HarnessCapability,
     PackageSource,
-    content_hash,
     semantic_version,
 )
+from plural.identity import revision_hash
 from plural.sandbox.models import (
     Capability,
     DeclarativeImage,
@@ -578,8 +578,13 @@ class EnvironmentDefinition(FrozenModel):
     def content_hash(self) -> str:
         """Stable Environment revision digest."""
         payload = self.model_dump(mode="json", exclude={"source"})
-        payload["source_digest"] = self.source.digest if self.source else None
-        return content_hash(payload)
+        digest = self.source.digest if self.source else None
+        payload["source_digest"] = digest
+        if digest is not None:
+            # The source files already cover a Python rewarder's code.
+            for rewarder in payload["rewarders"]:
+                rewarder.pop("implementation_digest", None)
+        return revision_hash("environment", payload)
 
     @property
     def identity(self) -> EnvironmentIdentity:

@@ -30,7 +30,7 @@ from plural.catalog import ModelCatalog
 from plural.environments import Environment
 from plural.environments.definition import EnvironmentResource, EnvironmentRuntime
 from plural.harness.models import Harness
-from plural.harness.retrieval import tree_digest
+from plural.harness.retrieval import source_digest
 from plural.project.layout import (
     AGENT,
     BENCHMARK,
@@ -403,7 +403,7 @@ def _build_verifier(
         problems.extend(validation_problems(exc))
         return None
     if bound_check and isinstance(verifier, DeterministicVerifier):
-        verifier.bind_source_digest(tree_digest(directory))
+        verifier.bind_source_digest(source_digest(directory))
     return verifier
 
 

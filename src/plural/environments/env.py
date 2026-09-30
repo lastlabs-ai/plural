@@ -244,7 +244,7 @@ class Environment(Generic[ObsT, StateT]):
 
     def _bind_source(self, source: str | Path | None = None) -> None:
         """Hash the class directory so a Job can upload and run this Environment."""
-        from plural.harness.retrieval import tree_digest
+        from plural.harness.retrieval import source_digest
 
         class_file = self._class_source_file()
         if source is None:
@@ -266,7 +266,7 @@ class Environment(Generic[ObsT, StateT]):
         self.source = PackageSource(
             kind="local",
             uri=str(root),
-            digest=tree_digest(root),
+            digest=source_digest(root),
             trusted=True,
         )
         self._package_root = root

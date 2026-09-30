@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 from urllib.parse import quote
 
@@ -85,9 +85,9 @@ def _dump(value: Any, *, exclude: set[str] | None = None) -> JsonObject:
 class RevisionResourceAPI(Generic[T]):
     """Parents addressed by slug, each with immutable revisions.
 
-    A pushed revision is usable as soon as it is saved. Pushing the same
-    version with the same content returns the existing revision; the same
-    version with different content is rejected by the server.
+    A pushed revision is usable as soon as it is saved. The service numbers
+    revisions and matches them by content hash: pushing content it already
+    holds returns that revision. A version is an optional release label.
     """
 
     collection: str
@@ -144,6 +144,27 @@ class RevisionResourceAPI(Generic[T]):
             ),
         )
 
+    def release(self, resource_id: str, revision_id: str, version: str) -> JsonObject:
+        """Label a revision with a release version. A version names one revision forever."""
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                (f"/{self.collection}/{quote(resource_id)}/revisions/{quote(revision_id)}/release"),
+                json={"version": version},
+            ),
+        )
+
+    def lineage(self, resource_id: str, revision_id: str) -> JsonObject:
+        """The revisions this one was edited, forked, or derived from, and those derived from it."""
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "GET",
+                (f"/{self.collection}/{quote(resource_id)}/revisions/{quote(revision_id)}/lineage"),
+            ),
+        )
+
     def parent(self, name: str, *, slug: str | None = None, description: str = "") -> JsonObject:
         """Return the parent with this slug, creating it if needed.
 
@@ -169,8 +190,33 @@ class RevisionResourceAPI(Generic[T]):
         *,
         package_digest: str | None = None,
         slug: str | None = None,
+        version: str | None = None,
+        parent_revision_id: str | None = None,
+        lineage: Sequence[Mapping[str, str]] = (),
+        force: bool = False,
         **references: Any,
     ) -> JsonObject:
+        """Add a revision, or return the existing one holding the same content.
+
+        Args:
+            value: The resource.
+            package_digest: Uploaded source package.
+            slug: Parent slug; derived from the name when omitted.
+            version: Release label for a new revision, if still free.
+            parent_revision_id: The revision this edit started from. The
+                service rejects the push when the current revision moved
+                past it, unless ``force`` is set.
+            lineage: Extra ``{"relation", "revision_id"}`` links, where
+                ``relation`` is ``forked_from`` or ``derived_from``.
+            force: Add the revision even though the current one moved.
+            **references: Revision ids of dependencies.
+
+        Returns:
+            The revision.
+
+        Raises:
+            InvalidRequestError: When ``value`` is not this collection's type.
+        """
         if not isinstance(value, self.model_type):
             raise InvalidRequestError(f"{self.collection} push requires {self.model_type.__name__}")
         parent = self.parent(
@@ -179,13 +225,21 @@ class RevisionResourceAPI(Generic[T]):
             description=str(getattr(value, "description", "") or ""),
         )
         payload = self._revision_payload(value, **references)
+        payload["version"] = version
+        payload["parent_revision_id"] = parent_revision_id
+        payload["lineage"] = [dict(item) for item in lineage]
+        params: dict[str, Any] = {}
+        if package_digest:
+            params["package_digest"] = package_digest
+        if force:
+            params["force"] = "true"
         return cast(
             JsonObject,
             self._studio.request(
                 "POST",
                 f"/{self.collection}/{quote(str(parent['id']))}/revisions",
                 json=payload,
-                params={"package_digest": package_digest} if package_digest else None,
+                params=params or None,
             ),
         )
 

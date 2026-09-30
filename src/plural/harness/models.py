@@ -102,14 +102,14 @@ class HarnessDefinition(FrozenModel):
             if self.digest is None:
                 raise ValueError("A Plural package Harness source requires its tree digest")
         elif "://" not in self.source:
-            from plural.harness.retrieval import tree_digest
+            from plural.harness.retrieval import source_digest
 
             root = Path(self.source).expanduser().resolve()
             if not root.is_dir():
                 raise ValueError(f"Harness source directory does not exist: {root}")
             object.__setattr__(self, "source", str(root))
             if self.digest is None:
-                object.__setattr__(self, "digest", tree_digest(root))
+                object.__setattr__(self, "digest", source_digest(root))
         artifact_paths = {item.path for item in self.artifacts}
         if self.trajectory is not None and self.trajectory not in artifact_paths:
             raise ValueError("trajectory must name a declared artifact")
@@ -303,9 +303,9 @@ class Harness(BaseModel, ABC):
             self._bind_source()
         assert self._package_root is not None
         assert self._runner_ref is not None
-        from plural.harness.retrieval import tree_digest
+        from plural.harness.retrieval import source_digest
 
-        digest = tree_digest(self._package_root)
+        digest = source_digest(self._package_root)
         artifacts = [
             FileDeclaration(
                 path="trajectory.jsonl",

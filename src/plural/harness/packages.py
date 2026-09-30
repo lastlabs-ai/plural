@@ -19,7 +19,7 @@ from plural.harness.builtins import (
     list_builtin_harnesses,
     resolve_builtin_package,
 )
-from plural.harness.retrieval import tree_digest
+from plural.harness.retrieval import source_digest
 
 
 def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> HarnessPackage:
@@ -50,7 +50,7 @@ def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> Harnes
         ),
     )
     source = Path(__file__).parent
-    digest = tree_digest(source)
+    digest = source_digest(source)
     return HarnessPackage(
         definition=definition,
         source=PackageSource(

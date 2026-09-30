@@ -225,7 +225,6 @@ _ENVIRONMENT_YAML = """\
 # Behavior (actions, state, observations, rewards) is Python in environment.py.
 # README.md explains both to the people who use this Environment.
 name: {name}
-version: 0.1.0
 description: ""
 overview: ""
 python: environment.py:{cls}
@@ -343,7 +342,6 @@ _TASK_YAML = """\
 # Task: instructions for the Agent, the one Environment it runs in, and the
 # Verifiers that score it. Files under resources/ are given to the Agent.
 name: {name}
-version: 0.1.0
 instructions: instruction.md
 {environment}{verifiers}# Values for the Environment State fields marked initial().
 initial_state: {{}}
@@ -359,7 +357,6 @@ _VERIFIER_YAML = """\
 # Verifier: scores a finished episode. Its score, never the step rewards, is
 # what Tasks and Benchmarks rank on.
 name: {name}
-version: 0.1.0
 kind: deterministic
 check: verify.py:verify
 weight: 1
@@ -381,7 +378,6 @@ def verify(episode: Episode) -> VerifierOutput:
 _HARNESS_YAML = """\
 # Harness: the loop that connects an Agent's model to an Environment.
 name: {name}
-version: 0.1.0
 description: ""
 python: harness.py:{cls}Harness
 config: {{}}
@@ -404,7 +400,6 @@ class {cls}Harness(Harness):
 _AGENT_YAML = """\
 # Agent: a model, its instructions, and an optional harness.
 name: {name}
-version: 0.1.0
 {model}instructions: ""
 {harness}"""
 
@@ -412,7 +407,6 @@ _BENCHMARK_YAML = """\
 # Benchmark: a named collection of Tasks and the rules for ranking results.
 # Results rank on the Verifier score only; step rewards never contribute.
 name: {name}
-version: 0.1.0
 description: ""
 # PLURAL-TODO: state the motivation: what this Benchmark measures and why it matters.
 purpose: ""

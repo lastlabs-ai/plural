@@ -18,6 +18,7 @@ from plural.common import (
     semantic_version,
 )
 from plural.harness.models import Harness, HarnessDefinition
+from plural.identity import revision_hash
 
 
 @lru_cache(maxsize=1)
@@ -222,11 +223,12 @@ class AgentDefinition(FrozenModel):
     @property
     def content_hash(self) -> str:
         """Stable Agent revision digest, independent of where the Harness is stored."""
-        payload = self.model_dump(mode="json", exclude={"harness_package"})
-        payload["harness_package"] = (
-            self.harness_package.content_hash if self.harness_package is not None else None
-        )
-        return content_hash(payload)
+        payload = self.model_dump(mode="json", exclude={"harness", "harness_package"})
+        if self.harness_package is not None:
+            payload["harness"] = self.harness_package.content_hash
+        else:
+            payload["harness"] = self.harness.digest if self.harness is not None else None
+        return revision_hash("agent", payload)
 
     @property
     def agent_id(self) -> str:

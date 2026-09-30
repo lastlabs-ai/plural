@@ -1,8 +1,8 @@
 """Resource commands: the same verbs for every kind of project resource.
 
-``plural <kind> init|validate|push|pull|show|list`` for ``env``, ``task``,
-``verifier``, ``harness``, ``agent``, and ``benchmark``. Resources are named
-by their directory, never by revision id.
+``plural <kind> init|validate|push|release|pull|show|list`` for ``env``,
+``task``, ``verifier``, ``harness``, ``agent``, and ``benchmark``. Resources
+are named by their directory; revisions by number, release version, or hash.
 """
 
 from __future__ import annotations
@@ -34,14 +34,25 @@ from plural.project import (
 )
 from plural.project.layout import AGENT, BENCHMARK, HARNESS, TASK, split_version
 from plural.project.membership import add_task, remove_task
-from plural.project.sync import REBUILT_NOTE, hosted_list, hosted_resource, pull, push
+from plural.project.sync import (
+    REBUILT_NOTE,
+    PushStep,
+    hosted_list,
+    hosted_resource,
+    pull,
+    push,
+    release,
+    revision_label,
+    select_revision,
+)
 from plural.project.templates import resource_scaffold
 from plural.project.versions import holds_version
 
 NAME_HELP = "Resource name. Defaults to the resource directory you are in."
 VERSIONED_NAME_HELP = (
-    "Resource name, or name@version for a retained version. "
-    "Defaults to the resource directory you are in."
+    "Resource name, or name@REVISION for a retained revision: a number (@3), a release "
+    "version (@1.0.0), or a content hash (@sha256:...). Defaults to the resource directory "
+    "you are in."
 )
 
 
@@ -71,9 +82,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         emit(
             payload,
             as_json=as_json,
-            text=lambda: typer.echo(
-                f"{ref} is valid: version {resource.version}, {resource.content_hash}"
-            ),
+            text=lambda: typer.echo(f"{ref} is valid: {resource.content_hash}"),
         )
 
     @app.command("push")
@@ -83,45 +92,52 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         with_deps: bool = typer.Option(
             False, "--with-deps", help="Also push local dependencies that are not hosted yet."
         ),
+        force: bool = typer.Option(
+            False,
+            "--force",
+            help="Add a revision even though the hosted resource moved since you last synced.",
+        ),
         as_json: bool = JSON_OPTION,
     ) -> None:
         """Validate and push an immutable, private revision to the bound project.
 
-        Pushing unchanged content reuses the existing revision. Without
-        --with-deps, every dependency must already be pushed with identical
-        content. Nothing is uploaded unless the whole push can succeed.
+        The hosted project numbers revisions. Pushing content it already holds
+        reuses that revision. Without --with-deps, every dependency must
+        already be pushed with identical content. Nothing is uploaded unless
+        the whole push can succeed.
         """
         space = workspace()
         ref = _ref(space, kind, name)
         studio, binding = project_studio(space, session())
-        result = push(space, studio, binding, ref, with_deps=with_deps)
-        payload = {
-            "project": binding.project_slug,
-            "steps": [
-                {
-                    "resource": str(step.ref),
-                    "version": step.version,
-                    "status": step.status,
-                    "revision_id": step.revision_id,
-                }
-                for step in result.steps
-            ],
-        }
+        result = push(space, studio, binding, ref, with_deps=with_deps, force=force)
+        _emit_push(binding.project_slug, result.steps, as_json=as_json)
 
-        def text() -> None:
-            typer.echo(f"Pushed to hosted project {binding.project_slug} (private):")
-            rows(
-                ((step.ref, step.version, step.status) for step in result.steps),
-                ("resource", "version", "result"),
-            )
+    @app.command("release")
+    @handled
+    def release_command(
+        name: str = typer.Argument(help=NAME_HELP),
+        version: str = typer.Argument(help="Release version, MAJOR.MINOR.PATCH."),
+        as_json: bool = JSON_OPTION,
+    ) -> None:
+        """Label the revision matching your files with a release version, pushing it first.
 
-        emit(payload, as_json=as_json, text=text)
+        A version names one revision forever, so collaborators and Jobs can
+        refer to it as name@VERSION.
+        """
+        space = workspace()
+        ref = _ref(space, kind, name)
+        studio, binding = project_studio(space, session())
+        result = release(space, studio, binding, ref, version)
+        _emit_push(binding.project_slug, result.steps, as_json=as_json)
 
     @app.command("pull")
     @handled
     def pull_command(
         name: str | None = typer.Argument(None, help=VERSIONED_NAME_HELP),
-        version: str | None = typer.Option(None, "--version", help="Version to restore."),
+        revision: str | None = typer.Option(
+            None, "--revision", "-r", help="Revision to restore: a number, version, or hash."
+        ),
+        version: str | None = typer.Option(None, "--version", hidden=True),
         with_deps: bool = typer.Option(
             False,
             "--with-deps",
@@ -139,16 +155,16 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
     ) -> None:
         """Restore a hosted revision's editable files into this project.
 
-        Name a retained version as name@version or with --version.
+        Name a retained revision as name@REVISION or with --revision.
         """
         space = workspace()
-        ref, version = _versioned_ref(space, kind, name, version)
+        ref, selector = _versioned_ref(space, kind, name, revision or version)
         studio, binding = project_studio(space, session())
         steps = pull(
             space,
             studio,
             ref,
-            version=version,
+            selector=selector,
             force=force,
             with_deps=with_deps,
             project_id=binding.project_id,
@@ -156,6 +172,8 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         payload = [
             {
                 "resource": str(step.ref),
+                "revision": step.label,
+                "number": step.number,
                 "version": step.version,
                 "status": step.status,
                 "backup": str(step.backup) if step.backup else None,
@@ -169,7 +187,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                 (
                     (
                         step.ref,
-                        step.version,
+                        step.label,
                         step.status
                         + (" (rebuilt from its definition)" if step.rebuilt else "")
                         + (
@@ -180,7 +198,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                     )
                     for step in steps
                 ),
-                ("resource", "version", "result"),
+                ("resource", "revision", "result"),
             )
             if any(step.rebuilt for step in steps):
                 typer.echo(REBUILT_NOTE)
@@ -198,8 +216,8 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         """Show a resource: the local copy if there is one, otherwise the hosted one.
 
         An invalid local copy is an error, not a reason to show the hosted one.
-        name@version shows that version: the working copy when it is exactly
-        that version, otherwise the retained hosted revision.
+        name@REVISION shows that revision: the working copy when it holds
+        exactly that content, otherwise the retained hosted revision.
         """
         if local and hosted:
             raise ProjectError("Choose --local or --hosted, not both.")
@@ -211,7 +229,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
             return
         if version is not None and local:
             raise ProjectError(
-                f"The working copy of {ref} is not version {version}. "
+                f"The working copy of {ref} is not revision {version}. "
                 f"Restore it with `plural {kind.cli} pull {name}`."
             )
         if version is not None:
@@ -236,10 +254,8 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         studio, binding = project_studio(space, session())
         parent, revisions = hosted_resource(studio, ref)
         if version is not None:
-            known = ", ".join(item.version for item in revisions) or "none"
-            revisions = [item for item in revisions if item.version == version]
-            if not revisions:
-                raise ProjectError(f"{ref} has no version {version}. Hosted versions: {known}.")
+            revisions = [select_revision(ref, revisions, version)]
+        current_id = parent.get("current_revision_id")
         payload = {
             "location": "hosted",
             "resource": str(ref),
@@ -248,9 +264,11 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
             "description": parent.get("description"),
             "revisions": [
                 {
+                    "number": item.number,
                     "version": item.version,
                     "revision_id": item.revision_id,
                     "content_hash": item.content_hash,
+                    "current": item.revision_id == current_id,
                     "restorable": item.package_digest is not None,
                 }
                 for item in revisions
@@ -261,10 +279,16 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
             typer.echo(f"{kind.label} {ref.name} (hosted, project {binding.project_slug})")
             rows(
                 (
-                    (item.version, item.revision_id, "yes" if item.package_digest else "no")
+                    (
+                        f"#{item.number}" if item.number is not None else "-",
+                        item.version or "-",
+                        item.content_hash[:19],
+                        "current" if item.revision_id == current_id else "",
+                        "yes" if item.package_digest else "no",
+                    )
                     for item in revisions
                 ),
-                ("version", "revision", "pullable"),
+                ("revision", "version", "content hash", "", "pullable"),
             )
 
         emit(payload, as_json=as_json, text=text)
@@ -290,7 +314,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                         {
                             "location": "local",
                             "name": resource_name,
-                            "version": resource.version,
+                            "revision": _locked_label(space, resource),
                             "status": _lock_status(space, resource),
                         }
                     )
@@ -299,7 +323,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                         {
                             "location": "local",
                             "name": resource_name,
-                            "version": None,
+                            "revision": None,
                             "status": f"invalid ({len(exc.problems) or 1} problem(s))",
                         }
                     )
@@ -308,7 +332,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                 {
                     "location": "built-in",
                     "name": builtin,
-                    "version": get_builtin(builtin).pinned_version,
+                    "revision": get_builtin(builtin).pinned_version,
                     "status": "available",
                 }
                 for builtin in BUILTIN_HARNESS_NAMES
@@ -327,7 +351,11 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                         {
                             "location": "hosted",
                             "name": record.get("slug") or record.get("name"),
-                            "version": record.get("current_version") or record.get("version"),
+                            "revision": revision_label(
+                                record.get("current_revision_number"),
+                                record.get("current_version"),
+                            )
+                            or None,
                             "status": "hosted",
                         }
                     )
@@ -340,10 +368,10 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
             else:
                 rows(
                     (
-                        (item["name"], item["location"], item["version"] or "-", item["status"])
+                        (item["name"], item["location"], item["revision"] or "-", item["status"])
                         for item in items
                     ),
-                    ("name", "where", "version", "status"),
+                    ("name", "where", "revision", "status"),
                 )
             if note:
                 typer.echo(note)
@@ -472,7 +500,7 @@ def _maybe_push(space: Workspace, ref: ResourceRef, enabled: bool) -> None:
     studio, binding = project_studio(space, session())
     result = push(space, studio, binding, ref)
     step = result.steps[-1]
-    typer.echo(f"Pushed {ref} {step.version} to {binding.project_slug} ({step.status}).")
+    typer.echo(f"Pushed {ref} {step.label} to {binding.project_slug} ({step.status}).")
 
 
 def _ref(
@@ -494,9 +522,9 @@ def _ref(
     if "@" in name:
         bare = name.partition("@")[0]
         raise ProjectError(
-            f"This command works on the working copy of {bare!r}, which has one version. "
+            f"This command works on the working copy of {bare!r}, which has one revision. "
             f"Drop '@...', or use `plural {kind.cli} pull {name}` or "
-            f"`plural run --{kind.name} {name}` to use a retained version."
+            f"`plural run --{kind.name} {name}` to use a retained revision."
         )
     check_name(name, kind.label)
     ref = ResourceRef(kind.name, name)
@@ -513,16 +541,16 @@ def _ref(
 def _versioned_ref(
     space: Workspace, kind: ResourceKind, name: str | None, version: str | None
 ) -> tuple[ResourceRef, str | None]:
-    """Resolve ``name`` or ``name@version``; ``--version`` must agree with ``@``.
+    """Resolve ``name`` or ``name@REVISION``; ``--revision`` must agree with ``@``.
 
     Raises:
-        ProjectError: When ``@`` and ``--version`` name different versions.
+        ProjectError: When ``@`` and ``--revision`` name different revisions.
     """
     if name is None or "@" not in name:
         return _ref(space, kind, name, must_exist=False), version
     bare, pinned = split_version(name, kind.label)
     if version is not None and version != pinned:
-        raise ProjectError(f"{name} and --version {version} name different versions.")
+        raise ProjectError(f"{name} and --revision {version} name different revisions.")
     return ResourceRef(kind.name, bare), pinned
 
 
@@ -530,9 +558,47 @@ def _lock_status(space: Workspace, resource: LocalResource) -> str:
     entry = space.project.read_lock().resources.get(str(resource.ref))
     if entry is None:
         return "not pushed"
-    if entry.content_hash == resource.content_hash and entry.version == resource.version:
-        return f"pushed ({entry.version})"
-    return f"changed since push ({entry.version})"
+    label = revision_label(entry.number, entry.version, "pushed")
+    if entry.content_hash == resource.content_hash:
+        return f"pushed ({label})"
+    return f"changed since push ({label})"
+
+
+def _locked_label(space: Workspace, resource: LocalResource) -> str | None:
+    entry = space.project.read_lock().resources.get(str(resource.ref))
+    if entry is None or entry.content_hash != resource.content_hash:
+        return None
+    return revision_label(entry.number, entry.version) or None
+
+
+def _emit_push(project_slug: str, steps: list[PushStep], *, as_json: bool) -> None:
+    payload = {
+        "project": project_slug,
+        "steps": [
+            {
+                "resource": str(step.ref),
+                "revision": step.label,
+                "number": step.number,
+                "version": step.version,
+                "status": step.status,
+                "revision_id": step.revision_id,
+                "note": step.note,
+            }
+            for step in steps
+        ],
+    }
+
+    def text() -> None:
+        typer.echo(f"Pushed to hosted project {project_slug} (private):")
+        rows(
+            ((step.ref, step.label, step.status) for step in steps),
+            ("resource", "revision", "result"),
+        )
+        for step in steps:
+            if step.note:
+                typer.echo(f"Note: {step.ref} {step.note}, so the new revision has no version.")
+
+    emit(payload, as_json=as_json, text=text)
 
 
 def _local_payload(space: Workspace, resource: LocalResource) -> dict[str, Any]:
@@ -541,7 +607,7 @@ def _local_payload(space: Workspace, resource: LocalResource) -> dict[str, Any]:
         "location": "local",
         "resource": str(resource.ref),
         "path": relative(resource.directory, space.project.root),
-        "version": resource.version,
+        "revision": _locked_label(space, resource),
         "content_hash": resource.content_hash,
         "description": getattr(value, "description", None) or None,
         "depends_on": [str(item) for item in resource.dependencies],
@@ -564,7 +630,7 @@ def _print_local(payload: dict[str, Any]) -> None:
     kind, _, name = str(payload["resource"]).partition("/")
     label = next(item.label for item in KINDS if item.name == kind)
     typer.echo(f"{label} {name} (local, {payload['path']})")
-    typer.echo(f"  Version:      {payload['version']}")
+    typer.echo(f"  Revision:     {payload['revision'] or 'not pushed'}")
     typer.echo(f"  Content hash: {payload['content_hash']}")
     if payload["description"]:
         typer.echo(f"  Description:  {payload['description']}")

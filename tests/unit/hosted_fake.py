@@ -1,8 +1,9 @@
 """An in-memory hosted Plural API for CLI and sync tests.
 
 It follows the hosted contract the SDK depends on: parents addressed by slug,
-immutable revisions deduplicated by version and content hash, conflicts as
-409, content-addressed packages, project-limited API keys, and accounts.
+immutable numbered revisions deduplicated by content hash, optional unique
+release versions, stale pushes refused with 409 unless forced,
+content-addressed packages, project-limited API keys, and accounts.
 Content hashes come from ``hasher`` because recomputing them is the real
 server's job and is verified against it separately.
 """
@@ -182,7 +183,7 @@ class FakeHosted:
         collection = parts[0]
         parents = {k[2]: v for k, v in self.parents.items() if k[:2] == (project_id, collection)}
         if len(parts) == 1 and request.method == "GET":
-            return _ok(list(parents.values()))
+            return _ok([self._parent_view(item) for item in parents.values()])
         if len(parts) == 1 and request.method == "POST":
             parent = {
                 "id": f"{collection[:3]}_{next(self._ids)}",
@@ -190,6 +191,7 @@ class FakeHosted:
                 "name": body["name"],
                 "description": body.get("description", ""),
                 "visibility": "private",
+                "current_revision_id": None,
             }
             self.parents[(project_id, collection, parent["slug"])] = parent
             self.revisions[parent["id"]] = []
@@ -197,35 +199,71 @@ class FakeHosted:
         parent = next((p for p in parents.values() if parts[1] in {p["id"], p["slug"]}), None)
         if parent is None:
             return _error(404, "Not found")
-        if len(parts) == 2:
-            return _ok(parent)
         revisions = self.revisions[parent["id"]]
+        if len(parts) == 2 and request.method == "PATCH":
+            parent.update({key: body[key] for key in ("name", "description") if key in body})
+            return _ok(self._parent_view(parent))
+        if len(parts) == 2:
+            return _ok(self._parent_view(parent))
         if len(parts) == 3 and request.method == "GET":
             return _ok(revisions)
         if len(parts) == 3 and request.method == "POST":
             content_hash = self.hasher(collection, parent["slug"], body)
-            for existing in revisions:
-                same_version = existing["version"] == body["version"]
-                same_hash = existing["content_hash"] == content_hash
-                if same_version and same_hash:
-                    return _ok(existing)
-                if same_version or same_hash:
-                    return _error(409, "revision conflict")
+            same = [r for r in revisions if r["content_hash"] == content_hash]
+            if same:
+                current = [r for r in same if r["id"] == parent.get("current_revision_id")]
+                return _ok((current or same)[-1])
+            current_id = parent.get("current_revision_id")
+            forced = request.url.params.get("force") == "true"
+            if current_id and body.get("parent_revision_id") != current_id and not forced:
+                return _error(409, "stale revision: the resource changed since this edit began")
+            version = body.get("version")
+            if version and any(r["version"] == version for r in revisions):
+                return _error(409, f"version {version} already names another revision")
             revision = {
                 "id": f"rev_{next(self._ids)}",
-                "version": body["version"],
+                "number": len(revisions) + 1,
+                "version": version,
                 "content_hash": content_hash,
                 "package_digest": request.url.params.get("package_digest"),
                 "status": "available",
                 "dependencies": self._dependencies(project_id, body),
+                "parent_revision_id": body.get("parent_revision_id"),
+                "lineage": body.get("lineage") or [],
                 "payload": body,
             }
             revisions.append(revision)
+            parent["current_revision_id"] = revision["id"]
             if body.get("name"):
                 parent["name"] = body["name"]
             return _ok(revision)
         found = next((r for r in revisions if r["id"] == parts[3]), None)
-        return _ok(found) if found else _error(404, "Not found")
+        if found is None:
+            return _error(404, "Not found")
+        if len(parts) == 5 and parts[4] == "release" and request.method == "POST":
+            version = body["version"]
+            if found["version"] == version:
+                return _ok(found)
+            if found["version"] or any(r["version"] == version for r in revisions):
+                return _error(409, f"version {version} is taken")
+            found["version"] = version
+            return _ok(found)
+        return _ok(found)
+
+    def _parent_view(self, parent: dict[str, Any]) -> dict[str, Any]:
+        current = next(
+            (
+                r
+                for r in self.revisions[parent["id"]]
+                if r["id"] == parent.get("current_revision_id")
+            ),
+            None,
+        )
+        return {
+            **parent,
+            "current_revision_number": current["number"] if current else None,
+            "current_version": current["version"] if current else None,
+        }
 
     def _dependencies(self, project_id: str, body: dict[str, Any]) -> list[dict[str, Any]]:
         ids: list[str] = []

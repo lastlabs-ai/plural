@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 from plural.cli.main import app
 
 RESOURCE_GROUPS = ("env", "task", "verifier", "harness", "agent", "benchmark")
-RESOURCE_VERBS = {"init", "validate", "push", "pull", "show", "list"}
+RESOURCE_VERBS = {"init", "validate", "push", "release", "pull", "show", "list"}
 
 
 def _root() -> TyperGroup:
