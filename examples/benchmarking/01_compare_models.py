@@ -30,5 +30,5 @@ job = Job(
 
 plan = job.plan
 assert plan.trial_count == 8
-assert len({trial.environment.digest for trial in plan.trials}) == 2
+assert len({trial.environment.name for trial in plan.trials}) == 2
 print(plan.model_dump_json(indent=2))
