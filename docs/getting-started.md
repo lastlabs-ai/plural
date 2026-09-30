@@ -337,16 +337,15 @@ gets uploaded.
 - Each push saves an unchangeable snapshot called a **revision**. A pushed revision is
   available in its private project immediately.
 - A push validates first and uploads nothing unless the whole push can succeed.
-- Pushing unchanged content reuses the existing revision. Pushing changed content under
-  the same `version` is refused, so bump `version` when you edit a resource (or run
-  `plural project push --bump`, which gives each changed resource the next patch
-  version).
+- Pushing unchanged content reuses the existing revision. Changed content becomes the
+  resource's next numbered revision, such as `#4`; you never bump a version. To give a
+  revision a name people can cite, run `plural <kind> release NAME 1.0.0`.
 - Push refuses files that look like credentials, such as `.env` or private keys, and
   manifest paths that point outside the resource folder. To leave a file out of a push,
   list it in a `.pluralignore` file in the resource folder.
 - `--hosted` runs pushed revisions. If the hosted project is missing anything the run
-  uses, `plural run --hosted` pushes it first, giving a resource whose files changed
-  under the same `version` the next patch version. If someone else changed a resource
+  uses, `plural run --hosted` pushes it first, as a new numbered revision of any
+  resource whose files changed. If someone else changed a resource
   in the hosted project since you last synced, the push stops so nothing is written on
   top of their work.
 - Listing a project on the Hub or publishing a Benchmark is a separate, explicit action

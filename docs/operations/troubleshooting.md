@@ -85,7 +85,7 @@ error names the cause:
 - **A package over 100 MiB compressed** needs large files listed in `.pluralignore`.
 
 `plural run ... --hosted` pushes any input the hosted project does not hold yet,
-giving a changed resource the next patch version. It stops, before uploading
+as the resource's next numbered revision. It stops, before uploading
 anything, when someone else changed that resource in the hosted project since your
 checkout synced it; pull their revision first. A pull refuses to overwrite local files that differ from the
 revision; pass `--force` to replace them, keeping the old copy under
@@ -215,7 +215,7 @@ A digest is a fingerprint of the Harness files. A mismatch means the files chang
 after the Agent that uses it was validated or pushed, or a different copy of the
 files was used.
 
-Validate the Harness again, bump its `version`, and push it with the Agent. Keep
+Validate the Harness again and push it with the Agent. Keep
 generated files out of the source tree. Do not bypass integrity checks to make a
 stale comparison run.
 

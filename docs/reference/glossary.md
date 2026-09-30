@@ -106,14 +106,22 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
 
 ## Versions and sharing
 
-- **Version:** the number you give each piece, like `1.0.0`, so you can tell editions
-  apart. *Precisely:* a semantic version of an authored resource; its content hash
-  identifies the resolved content.
 - **Push:** saving a copy of your work to your private hosted project. It never makes
   anything public. *Precisely:* saving a resource to its hosted project as an immutable
   revision that stays private to the project.
-- **Revision:** one saved copy from a push. It can never be changed afterwards.
-  *Precisely:* one pushed version of a resource. It never changes after it is saved.
+- **Revision:** one saved copy from a push, numbered `#1`, `#2`, `#3` in push order. It
+  can never be changed afterwards. *Precisely:* one immutable snapshot of a resource,
+  numbered per resource by the hosted project and identified by its content hash.
+- **Content hash:** the fingerprint of what a revision contains. *Precisely:* a SHA-256
+  over the canonical JSON of its definition, leaving out labels such as name and
+  version, with dependencies included by their own hashes. See
+  [Revision identity](../architecture/revision-identity.md).
+- **Version:** an optional name you give one revision, like `1.0.0`, so people can cite
+  it. *Precisely:* a release label that names one revision of a resource forever and
+  never affects its content hash. Publishing a Benchmark requires one.
+- **Lineage:** where a revision came from: the revision it was edited from, forked
+  from, or derived from. *Precisely:* typed `edited_from`, `forked_from`, and
+  `derived_from` links recorded by the hosted project.
 - **Scope:** which account or hosted project your commands go to. *Precisely:* the
   account or hosted project that hosted commands go to. It never changes what your
   credential may do.

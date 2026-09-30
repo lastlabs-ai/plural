@@ -143,8 +143,8 @@ fills in what was missed.
 
 A hosted Job pins pushed revisions. `plural job push` needs the revisions the
 local Job ran to be pushed already. `--track` and `--hosted` push whatever the
-hosted project lacks first, giving a resource whose files changed under the same
-version the next patch version. `--follow` streams hosted progress for `--hosted`
+hosted project lacks first, as a new numbered revision of any resource whose files
+changed. `--follow` streams hosted progress for `--hosted`
 Jobs. See [Push and pull resources](../guides/studio-sync.md).
 
 Hosted execution also needs credentials and Runtime providers that fit the

@@ -79,7 +79,7 @@ Removed `plural run` options: `--mode`, `--per-runtime-concurrency`, `--watch` a
 `plural job rerun` and `plural trial rerun` run those pinned inputs again as a new Job
 linked to the original, even if the files on disk have changed since. Runs are local
 unless you pass `--hosted`, which first pushes any input the hosted project does
-not hold yet, giving a changed resource the next patch version.
+not hold yet, as the resource's next numbered revision.
 
 ### Revisions are no longer published
 
@@ -90,8 +90,9 @@ published before the upgrade are now reported as `available`.
 Pushing never makes anything public. Listing a Benchmark on the Hub, or publishing its
 results, is a separate action in the Plural web app.
 
-Pushes are duplicate-free: unchanged content reuses the existing revision. Changing a
-file without changing `version` is refused, so bump `version` when content changes.
+Pushes are duplicate-free: unchanged content reuses the existing revision, and changed
+content becomes the next numbered revision. You never bump `version`; since 0.18 it is
+an optional release label.
 Without `--with-deps`, every dependency must already be pushed with identical content.
 Nothing is uploaded unless the whole push can succeed.
 

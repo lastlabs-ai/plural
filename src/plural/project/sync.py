@@ -332,6 +332,8 @@ def _label(wanted: str | None, revisions: list[HostedRevision]) -> tuple[str | N
     """
     if wanted is None:
         return None, None
+    if wanted.isdigit():
+        return None, f"version {wanted} is only digits, which reads as revision #{wanted}"
     taken = next((item for item in revisions if item.version == wanted), None)
     if taken is None:
         return wanted, None

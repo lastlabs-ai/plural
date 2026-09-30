@@ -19,17 +19,20 @@ to it.
 
 ## Why it matters
 
-Say your support policy changes. You save a new Environment version with the new
-policy, update the affected Tasks, and save a new Benchmark version. Results from
+Say your support policy changes. You save the Environment with the new policy,
+update the affected Tasks, and save the Benchmark again. Results from
 last month still describe last month's policy, and new results describe the new one.
 Nothing gets mixed up.
 
 Here is the short version of how it works:
 
 - Your files on your computer are a **working copy**. Edit them as much as you like.
-- When you want to record a setup, you **save a version**. A saved version is current
-  immediately and never changes afterwards.
-- Every run remembers the exact versions it used. Earlier runs keep the versions they
+- When you want to record a setup, you **push** it. Each push that changes something
+  saves a numbered **revision**, such as `#4`, which is current immediately and never
+  changes afterwards.
+- When you want a name people can cite, you **release** a revision as a version, such
+  as `1.2.0`.
+- Every run remembers the exact revisions it used. Earlier runs keep the revisions they
   started with.
 
 ## Local files
@@ -44,38 +47,45 @@ plural benchmark validate support-triage
 
 `plural <kind> validate <name>` also checks everything the resource depends on.
 `plural run` uses your local files unless you pass `--hosted` or
-[name a retained version](#calling-a-version-by-name). In Python, created SDK objects
+[name a retained revision](#calling-a-revision-by-name). In Python, created SDK objects
 are frozen values, so construct a new value rather than changing an existing one.
 
-Every manifest's `version` defaults to `0.1.0`. In Python, Environment, Harness,
-Agent, Verifier, and Task default to `0.1.0`, and `Benchmark` requires an explicit
-version.
+Plural keeps a **content hash** for each resource: a fingerprint of its resolved
+fields and of the content hashes of the resources it refers to. Editing source or
+configuration creates a different hash. Names, titles, and versions are labels and
+are left out, so renaming a resource keeps its hash. See
+[Revision identity](../architecture/revision-identity.md) for the exact rules.
 
-Plural also keeps a **content hash** for each resource: a fingerprint of its resolved
-fields and of the resources it refers to. Editing source or configuration creates a
-different hash even if the version string is unchanged.
+## Revisions and versions
 
-> **Good to know:** Do not give two different setups the same version. One version
-> should always mean one thing.
+Saving in the web app, or pushing with `plural <kind> push`, records an immutable
+revision (a saved snapshot) in the hosted project and makes it current. The revision
+is available in the project immediately and stays private to it.
 
-## Versions
+- The hosted project numbers revisions in push order: `#1`, `#2`, `#3`. You never
+  bump anything.
+- Pushing content the resource already holds reuses that revision and makes it
+  current, so undoing an edit and pushing restores the earlier revision.
+- A push is refused, before anything is uploaded, when someone else pushed a newer
+  revision after the one you edited. Pull theirs and reapply your change, or pass
+  `--force`.
 
-Saving in the web app, or pushing with `plural <kind> push`, records a version as an
-immutable revision (a saved snapshot) in the hosted project and makes it current. The
-revision is available in the project immediately and stays private to it.
+A **release version** is an optional, permanent name for one revision:
 
-- The web app increments the last number: `1.0.0` becomes `1.0.1`.
-- From the command line, you set `version` in the manifest yourself.
-- Pushing the same version and the same content again reuses the existing revision.
-- A push is refused, before anything is uploaded, when the content changed but the
-  version did not, or when the same content was already pushed under another version.
+```bash
+plural benchmark release support-triage 1.2.0
+```
+
+A version names one revision forever and is never only digits. Publishing a
+Benchmark requires one. A `version:` line in a manifest asks for that version on the
+next push; it is applied when no other revision already has it.
 
 A resource's display details in the hosted project, such as its description on the
 resource page, can change without rewriting the content of any saved revision.
 
-### What needs a new version
+### What makes a new revision
 
-Saved versions are immutable. These changes each need a new version:
+Saved revisions are immutable. Each of these changes makes a new one when you push:
 
 - **Environment**: source, Runtime, actions, resources, or policy.
 - **Harness**: code or declarations need a new Harness version and digest.
@@ -91,8 +101,8 @@ Resources refer to each other by name, so a change ripples upward. An Environmen
 update changes the hash of every Task that uses it, which changes the Benchmarks that
 contain those Tasks.
 
-1. Bump each affected version, starting with the one you changed.
-2. Push the top of the chain with `--with-deps`, which pushes dependencies first:
+Push the top of the chain with `--with-deps`, which pushes every changed
+dependency first:
 
 ```bash
 plural benchmark push support-triage --with-deps
@@ -103,41 +113,41 @@ content. `plural.lock` records the exact revision each pushed resource pins; com
 it to version control.
 
 In Python, `benchmark.diff(other)` reports which Tasks changed between two Benchmark
-versions, and `benchmark.export()` captures every resource the Benchmark resolves to.
+revisions, and `benchmark.export()` captures every resource the Benchmark resolves to.
 
-## Calling a version by name
+## Calling a revision by name
 
-Every pushed version stays in the hosted project, so `name@version` keeps naming one
-exact revision after your files move on. Use it wherever a command names a Task,
-Benchmark, or Agent to run, show, or pull:
+Every pushed revision stays in the hosted project, so `name@3` or `name@1.2.0` keeps
+naming one exact revision after your files move on. After `@`, give a revision
+number, a release version, or a content hash of at least 7 hex digits. Use it
+wherever a command names a Task, Benchmark, or Agent to run, show, or pull:
 
 ```bash
-plural run --benchmark wordlebench@0.1.1 --model openai/gpt-5.6-luna
-plural run --task refund@0.1.0 --agent baseline@0.2.0 --hosted
-plural benchmark show wordlebench@0.1.1
-plural benchmark pull wordlebench@0.1.1 --force
+plural run --benchmark wordlebench@1.0.0 --model openai/gpt-5.6-luna
+plural run --task refund@2 --agent baseline@sha256:61d8a0c --hosted
+plural benchmark show wordlebench@3
+plural benchmark pull wordlebench@1.0.0 --force
 ```
 
 What happens when you run one:
 
-- If your working copy already is that version, with no unpushed edits, the run uses
-  it.
-- Otherwise `plural run` restores the version, and the exact revisions it pins, under
+- If your working copy already holds that revision's content, the run uses it.
+- Otherwise `plural run` restores the revision, and the exact revisions it pins, under
   `.plural/versions/` and runs that copy. Your working files are never touched, and the
   Job lands in `.plural/jobs` like any other.
 - An input you name without a version, such as `--agent baseline` beside
-  `--benchmark wordlebench@0.1.1`, still comes from your working copy.
+  `--benchmark wordlebench@1.0.0`, still comes from your working copy.
 
-Restoring needs a signed-in, registered project. A version that was never pushed
+Restoring needs a signed-in, registered project. A revision that was never pushed
 cannot be recalled.
 
-`plural <kind> show name@version` shows that one revision, and
-`plural <kind> pull name@version` replaces the working copy with it, keeping a backup
-of files that differ.
+`plural <kind> show name@3` shows that one revision, and `plural <kind> pull name@3`
+replaces the working copy with it, keeping a backup of files that differ.
 
-The web app takes the same form: open `/benchmarks/wordlebench@0.1.1` to see that
-version's leaderboard. The API resolves a version wherever it takes a revision id, as
-in `GET /api/v1/benchmarks/wordlebench/revisions/0.1.1`.
+The web app takes the same form: open `/benchmarks/wordlebench@1.0.0` or
+`/benchmarks/wordlebench@3` to see that revision's leaderboard. The API resolves a
+number, version, or hash wherever it takes a revision id, as in
+`GET /api/v1/benchmarks/wordlebench/revisions/1.0.0`.
 
 ## Going deeper
 
@@ -147,7 +157,7 @@ can and cannot change afterwards. Most readers can stop here.
 ### Jobs and run records
 
 `plural run` creates a new Job every time, under `.plural/jobs/<job-id>/`, and records
-the version and content hash of every input it used. The Job's `config.json` and
+the revision and content hash of every input it used. The Job's `config.json` and
 `lock.json` are written when it is planned and never change. `plural job rerun` and
 `plural trial rerun` run those pinned inputs again as a new Job linked to the
 original, even if the project files have changed since.
@@ -179,7 +189,7 @@ store rejects a second submission for the same Human Verifier.
 
 An authored `Resource` is a file you provide, such as a word list or a policy
 document. It belongs to an Environment or Task and contributes to its owner's hash.
-Update it by creating a new owner version.
+Update it by pushing a new revision of its owner.
 
 A run artifact is output captured from an execution. Its manifest records path, media
 type, role, size, and SHA-256 digest. It cannot be updated. Produce a new execution or

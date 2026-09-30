@@ -23,8 +23,8 @@ These apply when you push, pull, or run in a hosted project.
   `job`, `trial`, and `review` commands) need `plural auth login` and a project
   registered with `plural project init <name> --push`. Local commands need
   neither.
-- `plural run --hosted` and `--track` push what the run needs first, bumping the
-  patch version of any resource whose files changed. `plural job push` pushes
+- `plural run --hosted` and `--track` push what the run needs first, as a new
+  numbered revision of any resource whose files changed. `plural job push` pushes
   nothing: the revisions a finished Job ran must already be hosted.
 - Revisions saved in the web app, or pushed before 0.15, have no source package.
   Tasks, Agents, and Benchmarks are rebuilt from their stored definition on pull;

@@ -16,6 +16,7 @@ from plural.common import (
     RoutingSpec,
     content_hash,
     semantic_version,
+    stable_id,
 )
 from plural.harness.models import Harness, HarnessDefinition
 from plural.identity import revision_hash
@@ -232,8 +233,13 @@ class AgentDefinition(FrozenModel):
 
     @property
     def agent_id(self) -> str:
-        """Stable Agent revision identifier."""
-        return f"agt_{self.content_hash.removeprefix('sha256:')[:24]}"
+        """Stable Job participant identifier.
+
+        The content hash leaves the name out, so two identically configured
+        Agents under different names would share it; a Job still needs to tell
+        them apart.
+        """
+        return stable_id("agt", {"name": self.name, "content_hash": self.content_hash})
 
 
 class AgentBinding(FrozenModel):

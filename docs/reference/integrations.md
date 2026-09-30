@@ -148,7 +148,7 @@ hosted runs.
 
 `plural run` is local. `plural run ... --hosted` submits to Plural Intel using
 pushed revisions. It first pushes any input the hosted project does not hold yet,
-giving a resource whose files changed the next patch version, and stops before
+as a new numbered revision of any resource whose files changed, and stops before
 uploading anything if someone else changed that resource in the hosted project
 since your checkout synced it. Hosted runs also need Runtime providers configured
 for the project. See

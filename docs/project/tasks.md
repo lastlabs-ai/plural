@@ -140,10 +140,10 @@ push stops before uploading anything if one is not.
 A few more rules:
 
 - Pushing unchanged content reuses the existing revision.
-- If you change a file but keep the same `version`, the push is refused. Bump
-  `version` first.
+- Changed content becomes the Task's next numbered revision. You never bump
+  `version`.
 - A pushed revision is available in its project right away and becomes the Task's
-  current version.
+  current revision.
 - Pushing never makes a Task public.
 
 To bring a hosted Task back down, pull it:

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The hosted project numbers revisions (`#1`, `#2`, `#3`) in push order, so you never bump a version to push a change. Pushing content a resource already holds makes that revision current again. `project push --bump` is no longer needed and is ignored.
+- A content hash covers only what a revision contains: names, titles, and versions are left out, and dependencies are included by their own hashes. The rules and shared test vectors are in [Revision identity](docs/architecture/revision-identity.md). Existing revisions were rehashed and keep their earlier hash, so old pins still resolve.
+- `version:` in a manifest is an optional release label. It is applied on push when no other revision already has it, and otherwise the push says which revision does.
+- A push is refused when someone pushed a newer revision after the one you edited. Pull theirs, or pass `--force` to add yours on top.
+- In a Job, an Agent's identity includes its name, so two identically configured Agents under different names can run side by side.
+- Upgrade the SDK and CLI with this release: earlier versions compute the old hashes and the service refuses their pushes.
+
+### Added
+
+- `plural <kind> release NAME VERSION` gives the current revision a version people can cite, pushing it first if needed. Publishing a Benchmark requires one.
+- `name@3`, `name@1.0.0`, and `name@sha256:61d8a0c` select a revision by number, release version, or content hash in `run`, `show`, `pull`, web links, and the API. `pull --revision` takes the same values.
+- The hosted project records lineage for every revision, as `edited_from`, `forked_from`, and `derived_from` links, and marks each resource as sealed or referenced.
+
 ## [0.17.2] - 2026-09-28
 
 ### Changed

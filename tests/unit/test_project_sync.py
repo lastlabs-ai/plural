@@ -493,3 +493,15 @@ def test_models_list_comes_from_the_hosted_policy(hosted: Hosted) -> None:
     payload = json.loads(output)
     assert payload["source"] == "hosted"
     assert [item["id"] for item in payload["models"]] == ["anthropic/claude-sonnet-5"]
+
+
+def test_a_wanted_version_labels_only_when_free_and_not_a_number() -> None:
+    from plural.project.sync import HostedRevision, _label
+
+    released = HostedRevision("res", "rev-1", "1.0.0", "sha256:a", None, number=1)
+    assert _label(None, [released]) == (None, None)
+    assert _label("1.1.0", [released]) == ("1.1.0", None)
+    assert _label("1.0.0", [released]) == (None, "version 1.0.0 already names #1 (1.0.0)")
+    version, note = _label("7", [released])
+    assert version is None
+    assert note is not None and "#7" in note

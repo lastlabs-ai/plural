@@ -494,10 +494,8 @@ You should now see four Trials instead of three.
 
 `validate` does not run the Environment, so a missing `initial_state.ticket_id` or
 `TICKETS` entry only shows up as a failed Trial. If you have already pushed the
-project, bump `version` in `environment.yaml` and `benchmark.yaml` before you push
-again, because `plural <kind> push` refuses changed content under an existing version.
-(`plural project push --bump` can give each changed resource the next patch version
-for you.)
+project, push again after the fix: each changed resource becomes its next numbered
+revision, and earlier results keep pointing at the revisions they ran.
 
 To judge how *good* the reply is, not only whether there is one, add an
 [AgentVerifier](../project/verifiers.md#agentverifier) with a rubric, or a
@@ -549,8 +547,8 @@ For readers who want the precise rules:
 - Push refuses files that look like credentials, such as `.env` or `id_rsa`, and
   manifest paths that point outside the resource directory.
 - `plural run --hosted` runs pushed revisions. Before it submits, it pushes any input
-  the hosted project does not hold yet; a resource whose content changed while its
-  version stayed the same gets the next patch version. If someone else changed that
+  the hosted project does not hold yet, as each changed resource's next numbered
+  revision. If someone else changed that
   resource in the hosted project since your checkout last synced, it stops rather than
   write over their work.
 

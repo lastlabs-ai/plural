@@ -129,10 +129,12 @@ These options change what a run does. Most people only reach for `--dry-run` and
 - **`--hosted`**, **`--follow`**, and **`--track`** decide where the run happens and
   where it is recorded; see [Hosted projects](#hosted-projects).
 
-Add `@version` to a Task, Benchmark, or Agent to run that exact pushed version, such
-as `plural run -b support-triage@1.0.0 -a careful`, even after your files have moved
-on. The version is restored under `.plural/versions` without touching your files; see
-[Calling a version by name](../project/updating.md#calling-a-version-by-name).
+Add `@` and a revision to a Task, Benchmark, or Agent to run that exact pushed
+revision, such as `plural run -b support-triage@1.0.0 -a careful` or
+`plural run -b support-triage@3 -a careful`, even after your files have moved on.
+After `@`, give a revision number, a release version, or a content hash. The revision
+is restored under `.plural/versions` without touching your files; see
+[Calling a revision by name](../project/updating.md#calling-a-revision-by-name).
 
 ## Jobs, Trials, and reviews
 
@@ -209,15 +211,14 @@ records the binding in `.plural/project.json` and selects the project as your sc
 A push creates an immutable, private revision that is usable in that project
 immediately. A push validates first, uploads nothing unless the whole push can
 succeed, and refuses files that look like credentials, such as `.env` or private
-keys. `project push` refuses a resource whose files changed while its version did
-not, until you bump the version or pass `--bump`. See
+keys. Changed content becomes the resource's next numbered revision, and
+`plural <kind> release NAME VERSION` names one with a version people can cite. See
 [Push and pull resources](../guides/studio-sync.md).
 
 `--hosted` runs the Job on hosted infrastructure, and `--follow` streams hosted
 progress until the Job finishes. Before submitting, `--hosted` pushes any input of
-the run that the hosted project does not hold yet. An input whose files changed while
-its version stayed the same gets the next patch version, as `project push --bump`
-does, and an input someone else changed in the hosted project since you last synced
+the run that the hosted project does not hold yet, as a new numbered revision of any
+input whose files changed, and an input someone else changed in the hosted project since you last synced
 stops the push before anything is uploaded.
 
 A run on this machine can be recorded in the hosted project too, without hosted

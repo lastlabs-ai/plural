@@ -50,8 +50,9 @@ fill something in. Validation reports every marker that is left.
 Every manifest follows the same rules:
 
 - `name` must match the folder name.
-- `version` defaults to `0.1.0`. Bump it whenever you change a resource you have
-  pushed.
+- `version` is optional. It asks for a release version on the next push, and you
+  never need to change it when you edit a resource: the hosted project numbers each
+  pushed revision itself.
 - Other resources are referenced by name within the project, such as
   `environment: support-queue`.
 - Python behavior is referenced as `file.py:Object`, relative to the manifest.

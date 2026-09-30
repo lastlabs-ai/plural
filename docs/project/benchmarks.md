@@ -295,8 +295,10 @@ leaderboard.
 ## Use the findings
 
 Keep the Tasks and scoring stable while you compare Agents. When you add cases, change
-a Verifier, or edit the Environment, save a new Benchmark version so earlier results
-keep their meaning: bump `version` in `benchmark.yaml` and push it again.
+a Verifier, or edit the Environment, push the Benchmark again with `--with-deps`. It
+becomes a new numbered revision, so earlier results keep their meaning. When the
+revision is ready to cite or publish, give it a version with
+`plural benchmark release NAME 1.1.0`.
 
 A newer Task or Environment version never changes an existing release. Plural Intel
 offers it as an update you review and save as the next release. Scores from different
