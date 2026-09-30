@@ -50,13 +50,13 @@ need Python 3.10 or newer.
 Install it with pip:
 
 ```bash
-python -m pip install "plural>=0.17.2"
+python -m pip install "plural>=0.18.0"
 ```
 
 Or, if you use uv, install the `plural` command as a tool:
 
 ```bash
-uv tool install "plural>=0.17.2"
+uv tool install "plural>=0.18.0"
 ```
 
 To check that it worked, run `plural --help`. It prints the list of commands.
@@ -67,7 +67,7 @@ the rest of your computer. Install [Docker](https://www.docker.com/) and make su
 is running before you run anything that uses the default runtime.
 
 For power users: to use the Python SDK from a uv-managed project, also run
-`uv add "plural>=0.17.2"` inside that project. Optional extras include
+`uv add "plural>=0.18.0"` inside that project. Optional extras include
 `plural[daytona]` for the Daytona Runtime and `plural[keyring]` to store credentials in
 your OS keyring.
 
@@ -157,7 +157,7 @@ for reference:
 ```text
 project.yaml            name and description
 plural.lock             hosted revisions; commit it
-pyproject.toml          dependencies = ["plural>=0.17.2"]
+pyproject.toml          dependencies = ["plural>=0.18.0"]
 .plural/                local state: hosted binding, jobs/, backups/ (gitignored)
 environments/<name>/    environment.yaml, environment.py, README.md, resources/
 tasks/<name>/           task.yaml, instruction.md, resources/

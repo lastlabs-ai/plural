@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-29
+
 ### Changed
 
 - The hosted project numbers revisions (`#1`, `#2`, `#3`) in push order, so you never bump a version to push a change. Pushing content a resource already holds makes that revision current again. `project push --bump` is no longer needed and is ignored.
