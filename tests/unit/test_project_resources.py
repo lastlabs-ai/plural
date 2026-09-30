@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,28 @@ def test_the_sample_project_is_valid(project: Project) -> None:
         resource = workspace.load(ResourceRef(kind, name))
         assert resource.version == "0.1.0"
         assert resource.content_hash.startswith("sha256:")
+
+
+def test_rewarders_hash_the_same_on_every_load_and_location(
+    project: Project, tmp_path: Path
+) -> None:
+    source = project.root / "environments/queue/environment.py"
+    edit(source, "action, initial", "action, initial, rewarder")
+    edit(
+        source,
+        "    def terminated(self) -> bool:",
+        "    @rewarder\n"
+        "    def finished(self, previous_state, current_state, action, result) -> float:\n"
+        '        """Reward finishing."""\n'
+        '        return float(current_state["done"])\n'
+        "\n"
+        "    def terminated(self) -> bool:",
+    )
+    copy = Project.at(shutil.copytree(project.root, tmp_path / "copy" / project.root.name))
+    for kind, name in (("environment", "queue"), ("task", "refund")):
+        ref = ResourceRef(kind, name)
+        hashes = {Workspace(where).load(ref).content_hash for where in (project, project, copy)}
+        assert len(hashes) == 1, ref
 
 
 def test_python_sdk_addresses_resources_like_the_cli(project: Project) -> None:

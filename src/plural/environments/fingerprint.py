@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import json
 import math
+import re
 import textwrap
 import types
 from dataclasses import fields, is_dataclass
@@ -15,6 +16,18 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
+
+# Resource and rerun files are imported under a fresh random module name on every
+# load, so the suffix must not reach a digest.
+_LOADED_MODULE = re.compile(r"^(_plural_(?:resource|rerun))_[0-9a-f]{32}(?=\.|$)")
+
+
+def _module_name(name: Any) -> Any:
+    return _LOADED_MODULE.sub(r"\1", name) if isinstance(name, str) else name
+
+
+def _type_name(value_type: type) -> str:
+    return f"{_module_name(value_type.__module__)}.{value_type.__qualname__}"
 
 
 def stable_fingerprint_value(value: Any, *, _seen: set[int] | None = None) -> Any:
@@ -31,7 +44,7 @@ def stable_fingerprint_value(value: Any, *, _seen: set[int] | None = None) -> An
         return {"path": value.as_posix()}
     if isinstance(value, Enum):
         return {
-            "enum": f"{type(value).__module__}.{type(value).__qualname__}",
+            "enum": _type_name(type(value)),
             "value": stable_fingerprint_value(value.value, _seen=_seen),
         }
     if isinstance(value, types.CodeType):
@@ -39,8 +52,7 @@ def stable_fingerprint_value(value: Any, *, _seen: set[int] | None = None) -> An
 
     seen = _seen if _seen is not None else set()
     value_id = id(value)
-    value_type = type(value)
-    type_name = f"{value_type.__module__}.{value_type.__qualname__}"
+    type_name = _type_name(type(value))
     if value_id in seen:
         return {"recursive": type_name}
     seen.add(value_id)
@@ -201,14 +213,13 @@ def callable_implementation_digest(fn: Any) -> str:
         target = inspect.unwrap(type(target).__call__)
 
     payload: dict[str, Any] = {
-        "module": getattr(target, "__module__", None),
+        "module": _module_name(getattr(target, "__module__", None)),
         "qualname": getattr(target, "__qualname__", getattr(target, "__name__", None)),
         "defaults": stable_fingerprint_value(getattr(target, "__defaults__", None)),
         "kwdefaults": stable_fingerprint_value(getattr(target, "__kwdefaults__", None)),
     }
     if callable_instance is not None:
-        instance_type = type(callable_instance)
-        payload["callable_type"] = f"{instance_type.__module__}.{instance_type.__qualname__}"
+        payload["callable_type"] = _type_name(type(callable_instance))
         payload_hook = getattr(callable_instance, "fingerprint_payload", None)
         payload["configuration"] = (
             stable_fingerprint_value(payload_hook())
