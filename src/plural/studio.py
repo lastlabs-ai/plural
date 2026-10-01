@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 from urllib.parse import quote
@@ -190,6 +191,7 @@ class RevisionResourceAPI(Generic[T]):
         *,
         package_digest: str | None = None,
         slug: str | None = None,
+        resource_id: str | None = None,
         version: str | None = None,
         parent_revision_id: str | None = None,
         lineage: Sequence[Mapping[str, str]] = (),
@@ -202,6 +204,8 @@ class RevisionResourceAPI(Generic[T]):
             value: The resource.
             package_digest: Uploaded source package.
             slug: Parent slug; derived from the name when omitted.
+            resource_id: The parent's id when the caller already has it,
+                which saves looking it up by slug.
             version: Release label for a new revision, if still free.
             parent_revision_id: The revision this edit started from. The
                 service rejects the push when the current revision moved
@@ -219,11 +223,14 @@ class RevisionResourceAPI(Generic[T]):
         """
         if not isinstance(value, self.model_type):
             raise InvalidRequestError(f"{self.collection} push requires {self.model_type.__name__}")
-        parent = self.parent(
-            self._name(value),
-            slug=slug,
-            description=str(getattr(value, "description", "") or ""),
-        )
+        if resource_id is None:
+            resource_id = str(
+                self.parent(
+                    self._name(value),
+                    slug=slug,
+                    description=str(getattr(value, "description", "") or ""),
+                )["id"]
+            )
         payload = self._revision_payload(value, **references)
         payload["version"] = version
         payload["parent_revision_id"] = parent_revision_id
@@ -237,7 +244,7 @@ class RevisionResourceAPI(Generic[T]):
             JsonObject,
             self._studio.request(
                 "POST",
-                f"/{self.collection}/{quote(str(parent['id']))}/revisions",
+                f"/{self.collection}/{quote(resource_id)}/revisions",
                 json=payload,
                 params=params or None,
             ),
@@ -737,7 +744,8 @@ class Studio:
         account: Account id sent as ``X-Account-Id`` to act for an
             organization. The server still applies the user's permissions.
         refresh: Called once after a 401 to obtain a fresh access token.
-        http: HTTP client, injectable for tests.
+        http: HTTP client, injectable for tests. Without one, the Studio opens
+            its own on first use and keeps its connections alive.
     """
 
     def __init__(
@@ -756,6 +764,7 @@ class Studio:
         self.account = account
         self._refresh = refresh
         self._http = http
+        self._http_lock = threading.Lock()
         self.projects = ProjectsAPI(self)
         self.accounts = AccountsAPI(self)
         self.packages = PackagesAPI(self)
@@ -790,6 +799,12 @@ class Studio:
             refresh=self._refresh,
             http=self._http,
         )
+
+    def _client(self) -> httpx.Client:
+        with self._http_lock:
+            if self._http is None:
+                self._http = httpx.Client()
+            return self._http
 
     def _headers(self, *, project: bool = True) -> dict[str, str]:
         if not self.token:
@@ -828,11 +843,7 @@ class Studio:
                 "content": content,
                 "timeout": 60,
             }
-            response = (
-                self._http.request(method, url, **kwargs)
-                if self._http is not None
-                else httpx.request(method, url, **kwargs)
-            )
+            response = self._client().request(method, url, **kwargs)
             if response.status_code == 401 and attempt == 0 and self._refresh is not None:
                 token = self._refresh()
                 if token:
@@ -873,10 +884,8 @@ class Studio:
     def watch(self, path: str, *, cursor: int = 0) -> Iterator[JsonObject]:
         headers = {**self._headers(), "Accept": "text/event-stream"}
         url = f"{self.api_root}{path}"
-        stream = (
-            self._http.stream("GET", url, headers=headers, params={"cursor": cursor}, timeout=None)
-            if self._http is not None
-            else httpx.stream("GET", url, headers=headers, params={"cursor": cursor}, timeout=None)
+        stream = self._client().stream(
+            "GET", url, headers=headers, params={"cursor": cursor}, timeout=None
         )
         with stream as response:
             if response.status_code >= 400:

@@ -487,6 +487,39 @@ def test_project_push_asks_before_uploading_without_yes(hosted: Hosted) -> None:
     assert hosted.fake.writes == []
 
 
+def test_project_push_looks_each_resource_up_once(hosted: Hosted) -> None:
+    assert hosted.cli("project", "push", "--yes")[0] == 0
+    (hosted.project.root / "tasks/refund/instruction.md").write_text(
+        "Review order A-1 carefully.\n"
+    )
+    hosted.fake.requests.clear()
+
+    code, output = hosted.cli("project", "push", "--yes")
+    assert code == 0, output
+    lookups = [
+        path
+        for method, path in hosted.fake.requests
+        if method == "GET" and path.endswith("/tasks/refund")
+    ]
+    assert len(lookups) == 1
+
+
+def test_a_failed_push_keeps_the_revisions_pushed_alongside_it(hosted: Hosted) -> None:
+    hosted.fake.failing.add("tasks/deny")
+
+    code, _output = hosted.cli("project", "push", "--yes")
+    assert code != 0
+    pinned = hosted.project.read_lock().resources
+    assert {"environment/queue", "verifier/resolved", "task/refund", "agent/baseline"} <= set(
+        pinned
+    )
+    assert "task/deny" not in pinned
+    assert "benchmark/basics" not in pinned
+    assert not any(
+        collection == "benchmarks" for _project, collection, _slug in hosted.fake.parents
+    )
+
+
 def test_models_list_comes_from_the_hosted_policy(hosted: Hosted) -> None:
     code, output = hosted.cli("models", "list", "--provider", "anthropic", "--json")
     assert code == 0, output

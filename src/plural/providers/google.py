@@ -100,18 +100,18 @@ class GoogleProvider:
             timeout_s=timeout_s,
             default_headers=default_headers or {},
         )
-        headers = {"Content-Type": "application/json", **self.config.default_headers}
+        # The key goes in a header: a query parameter lands in every request
+        # log line httpx and proxies write.
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+            **self.config.default_headers,
+        }
         self._client = httpx.Client(
-            base_url=self.config.base_url,
-            headers=headers,
-            timeout=timeout_s,
-            params={"key": api_key},
+            base_url=self.config.base_url, headers=headers, timeout=timeout_s
         )
         self._aclient = httpx.AsyncClient(
-            base_url=self.config.base_url,
-            headers=headers,
-            timeout=timeout_s,
-            params={"key": api_key},
+            base_url=self.config.base_url, headers=headers, timeout=timeout_s
         )
 
     def _model_id(self, model: str) -> str:

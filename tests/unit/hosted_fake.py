@@ -65,6 +65,8 @@ class FakeHosted:
         ]
     )
     organization_models: list[str] | None = None
+    # ``collection/slug`` pairs whose revision pushes fail with a 500.
+    failing: set[str] = field(default_factory=set)
     _ids: Iterator[int] = field(default_factory=lambda: itertools.count(1))
 
     def add_project(self, slug: str, *, account_id: str = "acc_personal") -> dict[str, Any]:
@@ -208,6 +210,8 @@ class FakeHosted:
         if len(parts) == 3 and request.method == "GET":
             return _ok(revisions)
         if len(parts) == 3 and request.method == "POST":
+            if f"{collection}/{parent['slug']}" in self.failing:
+                return _error(500, "Internal Server Error")
             content_hash = self.hasher(collection, parent["slug"], body)
             same = [r for r in revisions if r["content_hash"] == content_hash]
             if same:

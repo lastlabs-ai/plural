@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-09-30
+
+### Changed
+
+- `project push` and `<kind> push` look up hosted resources in parallel, push resources whose dependencies are in place together, and reuse one connection, so a project with a few dozen resources plans and pushes in seconds rather than most of a minute. When one resource fails to push, `plural.lock` still records every revision pushed alongside it.
+
+### Security
+
+- The Google provider and catalog sync send the API key in the `x-goog-api-key` header instead of the URL, so it no longer appears in request logs.
+
 ## [0.18.0] - 2026-09-29
 
 ### Changed

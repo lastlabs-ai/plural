@@ -642,7 +642,7 @@ def fetch_provider_models(client: httpx.Client, slug: str, api_key: str) -> set[
                 headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
             )
         elif slug == "google":
-            response = client.get(GOOGLE_MODELS_URL, params={"key": api_key})
+            response = client.get(GOOGLE_MODELS_URL, headers={"x-goog-api-key": api_key})
         else:
             base = OPENAI_COMPATIBLE_BASES.get(slug)
             if base is None:

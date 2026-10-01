@@ -28,11 +28,13 @@ import hashlib
 import re
 import shutil
 import tempfile
+import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import yaml
 from pydantic import BaseModel
@@ -71,6 +73,44 @@ from plural.project.manifests import (
 )
 from plural.project.resources import LocalResource, Workspace
 from plural.studio import RevisionResourceAPI, Studio, slugify
+
+# Concurrent requests per push or plan; each hosted call is one round trip.
+_WORKERS = 8
+
+_T = TypeVar("_T")
+_R = TypeVar("_R")
+
+
+def _parallel(work: Callable[[_T], _R], items: Sequence[_T]) -> list[_R]:
+    """``work`` over ``items`` on a few threads, results in input order.
+
+    Returns:
+        One result per item.
+    """
+    if len(items) <= 1:
+        return [work(item) for item in items]
+    with ThreadPoolExecutor(max_workers=min(_WORKERS, len(items))) as pool:
+        return list(pool.map(work, items))
+
+
+class _Uploads:
+    """Uploads each package once, even when resources pushed together share one."""
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+        self._guard = threading.Lock()
+        self._locks: dict[str, threading.Lock] = {}
+        self._done: set[str] = set()
+
+    def ensure(self, digest: str, payload: bytes) -> None:
+        with self._guard:
+            lock = self._locks.setdefault(digest, threading.Lock())
+        with lock:
+            if digest in self._done:
+                return
+            if not self._studio.packages.exists(digest):
+                self._studio.packages.upload(digest, payload)
+            self._done.add(digest)
 
 
 @dataclass(frozen=True)
@@ -217,7 +257,9 @@ def push(
     """
     order = workspace.dependency_order([ref])
     resources = {item: workspace.load(item) for item in order}
-    hosted = {item: _hosted_state(studio, item) for item in order}
+    hosted = dict(
+        zip(order, _parallel(lambda item: _hosted_state(studio, item), order), strict=True)
+    )
     pins = _pins(workspace.project, binding.project_id)
 
     problems: list[str] = []
@@ -358,54 +400,95 @@ def _commit(
     version yet. A title change renames the hosted resource even when its
     content, and so its revision, is unchanged.
 
+    Resources whose dependencies are all in place are pushed together. When
+    one fails, the lock still records every revision that was pushed.
+
     Returns:
         One step per resource in ``order``.
     """
-    steps: list[PushStep] = []
+    steps: dict[ResourceRef, PushStep] = {}
     lock = _lock_for(workspace, binding)
-    for item in order:
+    uploads = _Uploads(studio)
+
+    def one(item: ResourceRef) -> PushStep:
         resource = resources[item]
         parent, revisions = hosted[item]
-        wanted = declared_version(workspace.project, item)
         note = None
         if item in to_push:
-            version, note = _label(wanted, revisions)
+            version, note = _label(declared_version(workspace.project, item), revisions)
             revision = _push_one(
                 studio,
                 resource,
                 resolved,
+                uploads=uploads,
+                resource_id=str(parent["id"]) if parent else None,
                 version=version,
                 parent_revision_id=_base(lock.resources.get(str(item)), parent, revisions),
                 force=force,
             )
-            resolved[item] = revision
             status: Literal["unchanged", "pushed"] = "pushed"
         else:
             revision = resolved[item]
             status = "unchanged"
             _rename(studio, item, parent, resource)
+        resolved[item] = revision
+        return PushStep(
+            ref=item,
+            version=revision.version,
+            content_hash=resource.content_hash,
+            status=status,
+            revision_id=revision.revision_id,
+            number=revision.number,
+            note=note,
+        )
+
+    def record(item: ResourceRef, step: PushStep) -> None:
+        revision = resolved[item]
         lock.resources[str(item)] = LockEntry(
             version=revision.version,
             number=revision.number,
-            content_hash=resource.content_hash,
+            content_hash=resources[item].content_hash,
             package_digest=revision.package_digest,
-            dependencies=[str(dependency) for dependency in resource.dependencies],
+            dependencies=[str(dependency) for dependency in resources[item].dependencies],
             resource_id=revision.resource_id,
             revision_id=revision.revision_id,
         )
-        steps.append(
-            PushStep(
-                ref=item,
-                version=revision.version,
-                content_hash=resource.content_hash,
-                status=status,
-                revision_id=revision.revision_id,
-                number=revision.number,
-                note=note,
-            )
-        )
+        steps[item] = step
+
+    for level in _levels(order, resources):
+        with ThreadPoolExecutor(max_workers=min(_WORKERS, len(level))) as pool:
+            futures = [(item, pool.submit(one, item)) for item in level]
+        failure: BaseException | None = None
+        for item, future in futures:
+            error = future.exception()
+            if error is None:
+                record(item, future.result())
+            elif failure is None:
+                failure = error
         workspace.project.write_lock(lock)
-    return steps
+        if failure is not None:
+            raise failure
+    return [steps[item] for item in order]
+
+
+def _levels(
+    order: list[ResourceRef], resources: dict[ResourceRef, LocalResource]
+) -> list[list[ResourceRef]]:
+    """``order`` grouped so each group depends only on earlier groups.
+
+    Returns:
+        The groups, each in ``order``'s order.
+    """
+    depth: dict[ResourceRef, int] = {}
+    for item in order:
+        below = [
+            depth[dependency] for dependency in resources[item].dependencies if dependency in depth
+        ]
+        depth[item] = 1 + max(below, default=-1)
+    levels: list[list[ResourceRef]] = [[] for _ in range(1 + max(depth.values(), default=-1))]
+    for item in order:
+        levels[depth[item]].append(item)
+    return levels
 
 
 def _base(
@@ -515,9 +598,11 @@ def plan_project_push(
             "This project has no resources to push yet. Create one with `plural env init <name>`."
         )
     order = workspace.dependency_order(roots)
-    hosted = {
-        item: _hosted_state(studio, item) if studio is not None else (None, []) for item in order
-    }
+    hosted: dict[ResourceRef, tuple[dict[str, Any] | None, list[HostedRevision]]] = (
+        dict(zip(order, _parallel(lambda item: _hosted_state(studio, item), order), strict=True))
+        if studio is not None
+        else {item: (None, []) for item in order}
+    )
     pins = _pins(project, project_id)
     steps: list[ProjectPushStep] = []
     problems: list[str] = []
@@ -550,8 +635,9 @@ def plan_project_push(
     hosted_only: list[ResourceRef] = []
     if studio is not None and not partial:
         local = set(order)
-        for kind in KINDS:
-            for record in hosted_list(studio, kind):
+        listed = _parallel(lambda kind: hosted_list(studio, kind), list(KINDS))
+        for kind, records in zip(KINDS, listed, strict=True):
+            for record in records:
                 ref = ResourceRef(kind.name, str(record.get("slug") or record.get("name")))
                 if ref not in local:
                     hosted_only.append(ref)
@@ -889,6 +975,8 @@ def _push_one(
     resource: LocalResource,
     resolved: dict[ResourceRef, HostedRevision],
     *,
+    uploads: _Uploads,
+    resource_id: str | None = None,
     version: str | None = None,
     parent_revision_id: str | None = None,
     force: bool = False,
@@ -900,8 +988,7 @@ def _push_one(
             f"{MAX_ARCHIVE_BYTES}-byte package limit. List large data in .pluralignore."
         )
     digest = f"sha256:{hashlib.sha256(payload).hexdigest()}"
-    if not studio.packages.exists(digest):
-        studio.packages.upload(digest, payload)
+    uploads.ensure(digest, payload)
     value = resource.value
     references: dict[str, Any] = {}
     ids = [resolved[dependency].revision_id for dependency in resource.dependencies]
@@ -931,12 +1018,15 @@ def _push_one(
         value,
         package_digest=digest,
         slug=slugify(resource.ref.name),
+        resource_id=resource_id,
         version=version,
         parent_revision_id=parent_revision_id,
         force=force,
         **references,
     )
-    parent_id = str(record.get(f"{resource.ref.kind}_id") or record.get("resource_id") or "")
+    parent_id = str(
+        record.get(f"{resource.ref.kind}_id") or record.get("resource_id") or resource_id or ""
+    )
     revision = HostedRevision.from_payload(parent_id, record)
     if revision.content_hash != resource.content_hash:
         raise ProjectError(

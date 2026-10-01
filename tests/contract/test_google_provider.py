@@ -34,6 +34,31 @@ def test_google_chat() -> None:
 
 
 @respx.mock
+def test_the_api_key_travels_in_a_header_never_the_url() -> None:
+    provider = GoogleProvider("secret", base_url="https://generativelanguage.googleapis.com/v1beta")
+    route = respx.post(url__regex=r".*/models/gemini-2.5-flash:generateContent.*").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "content": {"parts": [{"text": "Hey"}], "role": "model"},
+                        "finishReason": "STOP",
+                    }
+                ],
+                "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 1},
+            },
+        )
+    )
+    provider.chat(
+        ChatRequest(model="google/gemini-2.5-flash", messages=[Message(role="user", content="Hi")])
+    )
+    sent = route.calls.last.request
+    assert sent.headers["x-goog-api-key"] == "secret"
+    assert "secret" not in str(sent.url)
+
+
+@respx.mock
 def test_a_thought_signature_survives_the_tool_call_round_trip() -> None:
     """Gemini 400s when a replayed function call lacks the signature it was made with."""
     route = respx.post(url__regex=r".*/models/gemini-3.7-flash:generateContent.*").mock(
