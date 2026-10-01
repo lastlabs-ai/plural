@@ -92,8 +92,8 @@ plural job show <job-id>
   `PLURAL-TODO` you left unfinished.
 - `--dry-run` shows the plan without running anything.
 - The real run calls the model through the Plural gateway, so it needs a Plural API key
-  (`plural auth login --api-key-stdin` or `PLURAL_API_KEY`). A browser login is not
-  accepted for model calls. The run prints the Job id to pass to `plural job show`.
+  (`plural auth login`, `plural auth login --api-key-stdin`, or `PLURAL_API_KEY`). The
+  run prints the Job id to pass to `plural job show`.
 
 To run without any credential, add a Harness that calls no model and an Agent with
 `auth_mode: none`, like the `scripted` Agent in the finished project.

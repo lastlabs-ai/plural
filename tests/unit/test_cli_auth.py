@@ -115,6 +115,52 @@ def test_no_browser_still_reports_device_before_polling() -> None:
     assert events == ["CODE", "poll"]
 
 
+def test_a_device_login_stores_its_account_api_key() -> None:
+    revoked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/device/start"):
+            return httpx.Response(
+                200,
+                json={
+                    "device_code": "secret",
+                    "user_code": "CODE",
+                    "verification_uri": "https://login.example",
+                    "expires_in": 10,
+                    "interval": 1,
+                },
+            )
+        if request.url.path.endswith("/revoke"):
+            revoked.append(json.loads(request.content)["token"])
+            return httpx.Response(204)
+        return httpx.Response(
+            200,
+            json={
+                "api_key": "plural_minted",
+                "access_token": "plural_minted",
+                "key_id": "key_1",
+                "expires_at": "2026-10-31T00:00:00Z",
+                "account": {
+                    "id": "acc_org",
+                    "type": "organization",
+                    "slug": "acme",
+                    "display_name": "Acme",
+                },
+            },
+        )
+
+    with AuthClient("https://api.example", transport=httpx.MockTransport(handler)) as client:
+        _device, tokens = client.login(
+            no_browser=True, sleep=lambda _seconds: None, monotonic=lambda: 0.0
+        )
+        credential = tokens.credential()
+        assert credential == Credential(api_key="plural_minted")
+        assert tokens.account is not None and tokens.account.slug == "acme"
+        client.revoke(credential)
+    assert revoked == ["plural_minted"]
+    assert "plural_minted" not in repr(tokens)
+
+
 def test_credential_repr_never_exposes_tokens() -> None:
     credential = Credential(access_token="top-secret")
     assert "top-secret" not in repr(credential)

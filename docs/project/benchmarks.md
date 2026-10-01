@@ -176,8 +176,8 @@ plural run --benchmark support-triage --agent concise --attempts 2 --concurrency
 - Pass `--model` instead of `--agent` to run a catalog model with no saved Agent.
   Without `--harness` it uses `native`, Plural's built-in tool loop.
 - Live runs send every model call through the Plural gateway, so they need a Plural
-  API key. A browser login alone is not accepted for model calls. Calls are billed at
-  the exact provider cost.
+  API key, such as the one `plural auth login` stores. Calls are billed at the exact
+  provider cost.
 - Runs are local by default and recorded under `.plural/jobs/`. `--hosted` runs the
   pushed revisions on hosted infrastructure instead.
 
@@ -274,7 +274,7 @@ also appear in the web app under Jobs.
 When a score is surprising, open the artifacts folder that `trial show` prints. For a
 local Trial it is `.plural/jobs/JOB_ID/trials/TRIAL_ID/executions/0/artifacts/`:
 
-1. **Trajectory** (`trajectory.json`): what the Agent saw, which actions it took, and
+1. **Trajectory** (`trajectory.json`, or `atif-trajectory.json` in ATIF): what the Agent saw, which actions it took, and
    the feedback it received.
 2. **Final State and Observation** (`state.json`, `observation.json`): what actually
    changed in the Environment.

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from plural import Environment, Runtime
+from plural import Environment, Observation, Runtime
 
 PROTOCOL = "plural-step-v1"
 
@@ -87,6 +87,10 @@ def _envelope(
         "protocol": PROTOCOL,
         "kind": kind,
         "observation": world.observation_snapshot(),
+        # What a Harness should show the Agent: ``Observation.render()``.
+        "rendered": (
+            world.observation.render() if isinstance(world.observation, Observation) else None
+        ),
         "reward": reward,
         "terminated": world.terminated() if terminated is None else terminated,
         "truncated": world.truncated() if truncated is None else truncated,

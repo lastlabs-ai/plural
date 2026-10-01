@@ -291,7 +291,7 @@ def _run(
         view=reset.get("view") or None,
         error=None,
     )
-    prompt = _prompt(request, environment, denials)
+    prompt = _prompt(request, environment)
     system = str(agent.get("instructions") or "").strip()
     if denials:
         system = "\n\n".join(part for part in (system, _denial_text(denials)) if part)
@@ -561,12 +561,36 @@ def _denial_text(denials: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def _tool_observation(call: dict[str, Any], name: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _tool_observation(
+    call: dict[str, Any], name: str, payload: dict[str, Any] | str
+) -> dict[str, Any]:
+    content = payload if isinstance(payload, str) else json.dumps(payload)
     return {
         "role": "tool",
         "tool_call_id": str(call.get("id") or name),
-        "content": json.dumps(payload)[:100_000],
+        "content": content[:100_000],
     }
+
+
+def _observation_text(observation: Any, rendered: Any = None) -> str:
+    """The Agent's view of an observation: its ``render()`` text.
+
+    Falls back to the ``text`` field, then to the populated fields as JSON for an
+    Environment that renders nothing. Empty fields are never sent.
+    """
+    if isinstance(rendered, str) and rendered.strip():
+        return rendered
+    if not isinstance(observation, dict):
+        return "" if observation is None else str(observation)
+    text = observation.get("text")
+    if isinstance(text, str) and text.strip():
+        return text
+    fields = {
+        key: value
+        for key, value in observation.items()
+        if key != "text" and value not in (None, "", {}, [])
+    }
+    return json.dumps(fields, sort_keys=True) if fields else ""
 
 
 def _parse_envelope(text: str) -> dict[str, Any] | None:
@@ -582,8 +606,10 @@ def _parse_envelope(text: str) -> dict[str, Any] | None:
         return None
     observation = parsed.get("observation")
     info = parsed.get("info")
+    rendered = parsed.get("rendered")
     return {
         "observation": observation if isinstance(observation, dict) else {},
+        "rendered": rendered if isinstance(rendered, str) else None,
         "reward": float(parsed.get("reward") or 0),
         "terminated": bool(parsed.get("terminated")),
         "truncated": bool(parsed.get("truncated")),
@@ -689,12 +715,12 @@ def _run_action(
             }
         )
     environment["observation"] = envelope["observation"]
-    # The Agent sees the observation and its own errors. Reward stays out of
-    # context so it cannot be used to infer the answer.
-    visible = dict(envelope["observation"])
+    # The Agent sees the rendered observation and its own errors. Reward stays
+    # out of context so it cannot be used to infer the answer.
+    visible = _observation_text(envelope["observation"], envelope["rendered"])
     error = envelope["info"].get("error")
     if error:
-        visible["error"] = error
+        visible = "\n\n".join(part for part in (f"Error: {error}", visible) if part)
     signals = envelope["info"].get("rewards")
     reward = None
     if envelope["reward"] or signals:
@@ -735,27 +761,26 @@ def _response_message(response: dict[str, Any]) -> dict[str, Any]:
     return dict(message)
 
 
-def _prompt(
-    request: dict[str, Any],
-    environment: dict[str, Any],
-    denials: list[dict[str, str]],
-) -> str:
+def _prompt(request: dict[str, Any], environment: dict[str, Any]) -> str:
+    """The opening user message: the Task, then the first observation, as text.
+
+    Tools reach the model as tool schemas and denials in the system prompt, so
+    neither is repeated here.
+    """
     task = _mapping(request.get("task"), "task")
-    payload = {
-        "instructions": task.get("instructions"),
-        "task_info": task.get("info"),
-        "metadata": task.get("metadata", {}),
-        "observation": environment.get("observation"),
-        "tools": {
-            "environment": [
-                str(item.get("name"))
-                for item in environment.get("actions") or []
-                if isinstance(item, dict) and item.get("name")
-            ],
-            "harness_denied": denials,
-        },
-    }
-    return json.dumps(payload, sort_keys=True)
+    parts: list[str] = []
+    instructions = task.get("instructions")
+    if isinstance(instructions, str) and instructions.strip():
+        parts.append(instructions.strip())
+    for label, value in (("Task info", task.get("info")), ("Metadata", task.get("metadata"))):
+        if value not in (None, "", {}, []):
+            parts.append(f"{label}:\n{json.dumps(value, sort_keys=True, indent=2)}")
+    observation = _observation_text(
+        environment.get("observation"), environment.get("observation_rendered")
+    )
+    if observation:
+        parts.append(observation)
+    return "\n\n".join(parts)
 
 
 def _mapping(value: Any, name: str) -> dict[str, Any]:
@@ -804,6 +829,7 @@ def _reset_episode(
     envelope = _parse_envelope(completed.stdout.decode(errors="replace"))
     if envelope is not None:
         environment["observation"] = envelope["observation"]
+        environment["observation_rendered"] = envelope["rendered"]
         record.update(
             {
                 "observation": envelope["observation"],

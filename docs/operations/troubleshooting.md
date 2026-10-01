@@ -157,10 +157,11 @@ If `plural run` says an Environment does not allow a Harness, the Environment's
 The most common cause is a missing Plural API key.
 
 Every model call goes through the Plural gateway, so a run that calls a live model
-needs a Plural API key: one stored with `plural auth login --api-key-stdin`, or an
-exported `PLURAL_API_KEY`. A browser login alone is enough for hosted commands but is
-not accepted for model calls, so a run can fail with "no Plural API key is available"
-right after a successful browser login. You can create a key in the web app under
+needs a Plural API key: the one `plural auth login` stores, one stored with
+`plural auth login --api-key-stdin`, or an exported `PLURAL_API_KEY`. A browser login
+from an older `plural` stored a session instead of a key, which the gateway does not
+accept; run `plural auth login` again. The key a browser login stores lasts 30 days,
+so a run can also fail once it expires. You can create a key in the web app under
 Keys.
 
 - In Python, pass `Job(..., client=Client())` or `api_key=`.

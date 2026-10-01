@@ -670,8 +670,8 @@ def _hosted_studio(space: Workspace, *, required: bool) -> Studio | None:
 def _run_environ(current: Session) -> dict[str, str]:
     """Process environment for a local run, with the gateway credential added.
 
-    Every model call goes through the gateway, which accepts API keys, not
-    browser logins, so a login-only session needs PLURAL_API_KEY.
+    Every model call goes through the gateway, which accepts API keys, not the
+    session a browser login from an older CLI stored.
     """
     environ = dict(os.environ)
     if current.api_key and not environ.get("PLURAL_API_KEY"):

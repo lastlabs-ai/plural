@@ -157,7 +157,7 @@ def _atif_events(value: Mapping[str, Any]) -> list[TrajectoryEvent] | None:
         message = step.get("message")
         if isinstance(message, str):
             add("message", {"source": step.get("source"), "message": message}, step)
-        reasoning = step.get("reasoning")
+        reasoning = step.get("reasoning_content") or step.get("reasoning")
         if isinstance(reasoning, str):
             add("reasoning", {"reasoning": reasoning}, step)
         calls = step.get("tool_calls")

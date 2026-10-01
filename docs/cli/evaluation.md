@@ -105,9 +105,9 @@ Every run is a new Job. A local run executes on this machine and records the Job
 under `.plural/jobs/<job-id>/` in the project.
 
 A run that calls a live model sends every call through the Plural gateway, so it
-needs a Plural API key: `plural auth login --api-key-stdin` or `PLURAL_API_KEY`. A
-browser login is enough for hosted commands, but the model gateway does not accept
-it. `--dry-run` needs no key, and neither does an Agent with `auth_mode: none`.
+needs a Plural API key: the one `plural auth login` stores,
+`plural auth login --api-key-stdin`, or `PLURAL_API_KEY`. `--dry-run` needs no key,
+and neither does an Agent with `auth_mode: none`.
 
 ### Run options
 
@@ -239,8 +239,9 @@ Daytona Environment runs remotely. See
 
 ### Sign-in and scope
 
-There are two ways to sign in. A browser login acts as you, and is enough for hosted
-commands. An API key is what model calls need:
+There are two ways to sign in. A browser login stores a 30-day API key for the
+account selected in the browser that approves it. Or store an API key you created
+under Keys:
 
 ```bash
 plural auth login
@@ -540,9 +541,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Sign in with your browser (or store an API key).
 
- A browser login acts as you: it reaches every account and project your
- roles allow. Credentials are stored in your OS keyring or a private file
- in your user config directory, never in a project.
+ A browser login mints a 30-day API key for the account (personal or an
+ organization) selected in the browser that approves it. Credentials are
+ stored in your OS keyring or a private file in your user config
+ directory, never in a project.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --no-browser                   Print the URL only.                                               │

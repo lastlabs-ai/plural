@@ -48,8 +48,8 @@ exact inputs, as a new Job linked to the original. `plural trial rerun TRIAL_ID`
 does the same for a single Trial, as a new one-Trial Job.
 
 > **Good to know:** A real run calls models through the Plural gateway, so it
-> needs a Plural API key. Store one with `plural auth login --api-key-stdin` or
-> set `PLURAL_API_KEY`. A browser login alone is not accepted for model calls.
+> needs a Plural API key. `plural auth login` stores one, or store your own with
+> `plural auth login --api-key-stdin` or set `PLURAL_API_KEY`.
 
 ## Run one from Python
 

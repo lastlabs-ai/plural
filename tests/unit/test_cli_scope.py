@@ -12,7 +12,7 @@ from hosted_fake import FakeHosted, Key, routed
 from project_fixtures import write_project
 from typer.testing import CliRunner
 
-from plural.auth import load_config
+from plural.auth import AuthClient, AuthTokens, DeviceAuthorization, LoginAccount, load_config
 from plural.cli.main import app
 from plural.project import Project
 
@@ -111,6 +111,32 @@ def test_scope_keeps_the_organization_context(fake: FakeHosted) -> None:
     assert code == 1
     assert "Available: me, acme" in output
     assert scope()["project"] == "evals"
+
+
+def test_browser_login_selects_the_account_its_key_was_minted_for(
+    fake: FakeHosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake.keys["plural_minted"] = Key(kind="api_key", account_id="acc_org")
+    tokens = AuthTokens(
+        access_token="plural_minted",
+        api_key="plural_minted",
+        expires_at="2026-10-31T00:00:00Z",
+        account=LoginAccount(id="acc_org", type="organization", slug="acme"),
+    )
+    device = DeviceAuthorization(device_code="d", user_code="CODE", verification_uri="u")
+    monkeypatch.setattr(AuthClient, "login", lambda self, **_kwargs: (device, tokens))
+
+    code, output = cli("auth", "login", "--no-browser")
+    assert code == 0, output
+    assert "valid until 2026-10-31" in output
+    assert scope()["account_id"] == "acc_org"
+    assert scope()["credential"] == "api_key"
+    assert load_config().profiles["default"].account_slug == "acme"
+
+    code, output = cli("auth", "scope", "--org", "personal")
+    assert code == 1
+    assert "run `plural auth login` again" in output
+    assert scope()["account_id"] == "acc_org"
 
 
 def test_scope_never_widens_a_project_limited_key(fake: FakeHosted) -> None:

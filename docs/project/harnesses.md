@@ -366,7 +366,7 @@ This section is for readers exchanging records with other tools. A *trajectory* 
 the step-by-step record of what the Agent saw and did.
 
 The trajectory file to exchange with other tools is
-[`trajectory.json` in ATIF](https://docs.harborframework.com/core-concepts/agents/atif),
+[`atif-trajectory.json` in ATIF](https://docs.harborframework.com/core-concepts/agents/atif),
 Harbor's Agent Trajectory Interchange Format. Current ATIF is `ATIF-v1.7`: an `agent`
 block, ordered `steps`, and optional `final_metrics`. Put Plural-only notes in the
 format's `extra` field. A reward stays on the episode, and a verifier score stays on
@@ -374,9 +374,10 @@ the Trial; neither is an ATIF step.
 
 `normalize_trajectory` reads an ATIF document as well as Plural's own JSON and JSONL
 trajectories. For any Harness that runs through Plural's episode, including the
-built-in loops, Plural derives `trajectory.json` from `episode.jsonl` itself. A
+built-in loops, Plural derives `atif-trajectory.json` from `episode.jsonl` itself, along with
+`trajectory.json`, the same turns as plain chat messages. A
 command-based Harness spec (`HarnessDefinition`) that writes ATIF sets its
-`trajectory` field to `trajectory.json`. The spec is Harbor's
+`trajectory` field to `atif-trajectory.json`. The spec is Harbor's
 [ATIF RFC](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md).
 
 Next, choose a model and instructions in [Agents](agents.md).

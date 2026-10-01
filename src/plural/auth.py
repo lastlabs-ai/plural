@@ -329,13 +329,30 @@ class DeviceAuthorization(_AuthModel):
     interval: int = Field(default=5, gt=0)
 
 
+class LoginAccount(_AuthModel):
+    """The account a device login's API key acts for: personal or an organization."""
+
+    id: str
+    type: str
+    slug: str
+    display_name: str | None = None
+
+
 class AuthTokens(_AuthModel):
-    """Access and refresh tokens from device or refresh flow."""
+    """Tokens from the device or refresh flow.
+
+    A completed device login returns ``api_key``: an expiring API key that
+    acts for the one ``account`` selected in the browser that approved it.
+    ``access_token`` repeats it for older clients.
+    """
 
     access_token: str = Field(repr=False)
     refresh_token: str | None = Field(default=None, repr=False)
     token_type: str = "Bearer"
     expires_in: int | None = None
+    api_key: str | None = Field(default=None, repr=False)
+    expires_at: str | None = None
+    account: LoginAccount | None = None
 
     def credential(self) -> Credential:
         """Convert the token response into stored credentials.
@@ -343,6 +360,8 @@ class AuthTokens(_AuthModel):
         Returns:
             The credential to store.
         """
+        if self.api_key:
+            return Credential(api_key=self.api_key)
         return Credential(access_token=self.access_token, refresh_token=self.refresh_token)
 
 
@@ -470,8 +489,11 @@ class AuthClient:
         return AuthTokens.model_validate(self._json(response))
 
     def revoke(self, credential: Credential) -> None:
-        """Revoke available hosted tokens without exposing them."""
-        token = credential.refresh_token or credential.access_token
+        """Revoke available hosted tokens without exposing them.
+
+        The service deletes an API key only if a device login minted it.
+        """
+        token = credential.refresh_token or credential.access_token or credential.api_key
         if token is None:
             return
         response = self._client.post("/api/v1/auth/revoke", json={"token": token})
@@ -649,6 +671,7 @@ __all__ = [
     "FallbackCredentialStore",
     "FileCredentialStore",
     "KeyringCredentialStore",
+    "LoginAccount",
     "Profile",
     "Session",
     "config_home",

@@ -1,6 +1,6 @@
 """Export an episode as Harbor's Agent Trajectory Interchange Format (ATIF).
 
-Every execution that records ``episode.jsonl`` also gets ``trajectory.json``,
+Every execution that records ``episode.jsonl`` also gets ``atif-trajectory.json``,
 an ATIF document of what the Agent did: the system prompt and Task, then one
 ``agent`` step per model call with its message, reasoning, tool calls, the
 results the Agent saw, and that call's tokens and cost. See the
@@ -20,7 +20,7 @@ from typing import Any
 from plural.usage import TokenUsage
 
 ATIF_VERSION = "ATIF-v1.7"
-ATIF_FILE = "trajectory.json"
+ATIF_FILE = "atif-trajectory.json"
 
 
 def _text(value: Any) -> str:

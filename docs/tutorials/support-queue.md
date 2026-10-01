@@ -348,15 +348,13 @@ Add `--attempts 3` to run each Task three times and see how steady the scores ar
 Now swap the keyword rules for a real model. These runs call a model through the
 Plural gateway and can incur charges.
 
-Every model call needs a Plural API key. You can create one in the web app under Keys.
-Store it with `plural auth login --api-key-stdin`, or export it for this terminal:
+Every model call needs a Plural API key. `plural auth login` stores one for you. Or
+create one in the web app under Keys, and store it with
+`plural auth login --api-key-stdin` or export it for this terminal:
 
 ```bash
 export PLURAL_API_KEY=...
 ```
-
-A browser login is enough to push and run hosted, but the model gateway does not
-accept it.
 
 Try one ticket with a model first, then the whole Benchmark with each saved Agent:
 
@@ -426,8 +424,9 @@ wrong, compare their trajectories side by side.
 
 The `Artifacts` directory holds the full record of the attempt:
 
-- `trajectory.json`: the Agent's turns in ATIF, with the Observation after each
-  action.
+- `trajectory.json`: the Agent's turns as chat messages, with the Observation after
+  each action.
+- `atif-trajectory.json`: the same turns in ATIF, with each call's tokens and cost.
 - `episode.jsonl`: the underlying record of every step and model call, one per line.
 - `observation.json`: the final Observation, which is what the Agent saw.
 - `state.json`: the final State, including the `expected` category the Agent never saw.
@@ -519,8 +518,9 @@ plural run --benchmark support-triage --agent scripted --hosted --follow
 
 Here is what each line does:
 
-1. `plural auth login` opens your browser to sign in. The credential is stored in your
-   user config directory or OS keyring, never in the project.
+1. `plural auth login` opens your browser to sign in, and stores a 30-day API key for
+   the account selected there in your user config directory or OS keyring, never in
+   the project.
 2. `project init --push` takes the name in `project.yaml` (`support-queue`) and
    registers the existing project as it is, without changing any local file. It
    creates a private hosted project, stores the connection in `.plural/project.json`,

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-01
+
+### Changed
+
+- `trajectory.json` is now the plain chat transcript: `messages` with `role`, `content`, `reasoning_content`, and `tool_calls`, beside `status`, `time_elapsed`, and `finalized`. It is exactly what the model was sent, followed by its final reply. The ATIF document moves to `atif-trajectory.json`; a command-based Harness that writes ATIF should set its `trajectory` field to that name.
+- The native loop sends the model each Observation's `render()` text instead of every Observation field as JSON, and the first prompt is the instructions, Task info, and the first rendered Observation. Empty fields are never sent. Prompts are much smaller, so token counts are not comparable with earlier runs.
+- `plural auth login` stores a 30-day API key for the account selected in the browser that approves it, and says which account and when it expires. `plural auth scope --org` explains how to switch accounts when the credential acts for one.
+- Action parameter schemas keep their constraints and nested models, so `Annotated[str, Field(min_length=5)]`, Pydantic models, and typed dictionaries reach the model as written. The Wordle tutorial's `guess` declares a five-letter lowercase word.
+
 ## [0.18.1] - 2026-09-30
 
 ### Changed

@@ -664,8 +664,8 @@ supports the requested controls when a run starts.
 
 Model calls are authenticated through the Job's `client` or `api_key` parameter. Every
 model call goes through the Plural gateway, so `plural run` needs a Plural API key:
-one stored with `plural auth login --api-key-stdin`, or an exported `PLURAL_API_KEY`. A
-browser login alone is not accepted for model calls.
+one stored with `plural auth login` or `plural auth login --api-key-stdin`, or an
+exported `PLURAL_API_KEY`.
 
 ## Optional components
 

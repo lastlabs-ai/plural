@@ -99,9 +99,10 @@ artifacts.
 
 - `plural auth scope` selects where hosted commands go. It never changes what
   your credential may do.
-- A browser login acts as you and reaches every account and project your roles
-  allow. An API key limited to one project reaches only that project; use one
-  for CI.
+- A browser login stores a 30-day API key for the one account, personal or an
+  organization, that was selected in the browser that approved it. It appears
+  under Keys in that account, and `plural auth logout` deletes it. An API key
+  limited to one project reaches only that project; use one for CI.
 - Pushing saves a private revision in your project and never makes anything
   public. Listing a resource on the Hub and
   [publishing a Benchmark release](../architecture/benchmark-publications.md)

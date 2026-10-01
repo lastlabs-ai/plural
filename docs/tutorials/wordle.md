@@ -120,13 +120,19 @@ class Wordle(Environment[Board, Game]):
         return frozenset(line.strip().lower() for line in lines if line.strip())
 
     @action
-    def guess(self, word: str) -> Board:
+    def guess(
+        self,
+        word: Annotated[str, Field(min_length=5, max_length=5, pattern=r"^[a-z]{5}$")],
+    ) -> Board:
         """Guess one word. + is correct, ? is elsewhere in the word, - is absent."""
         word = word.strip().lower()
         if word not in self.words():
             raise ValueError(f"{word!r} is not in the word list")
         ...
 ```
+
+`word` has to be exactly five lowercase letters. That limit is part of the action
+schema, so the model and the Actions tab both see it.
 
 The marks are Wordle's colors written as symbols: `+` is the right letter in the right
 place (green), `?` is in the word somewhere else (yellow), and `-` is not in the word
@@ -319,10 +325,10 @@ point: score=1.0
 Now let a real model play. This calls a model through the Plural gateway and can
 incur charges.
 
-Every model call needs a Plural API key, which you can create in the web app under
-Keys. Store it with `plural auth login --api-key-stdin`, or export `PLURAL_API_KEY`. A
-browser login is not accepted for model calls. Then try one game, and the whole
-Benchmark:
+Every model call needs a Plural API key. `plural auth login` stores one for you, or
+create one in the web app under Keys and store it with
+`plural auth login --api-key-stdin` or export `PLURAL_API_KEY`. Then try one game, and
+the whole Benchmark:
 
 ```bash
 plural run --task crane --model openai/gpt-5.6-luna
@@ -372,7 +378,8 @@ The `Artifacts` directory holds the full record of the game:
 
 - `episode.jsonl`: each guess, with the board the AI saw after it and the
   Environment's display view.
-- `trajectory.json`: the same guesses as the AI's turns in ATIF.
+- `trajectory.json`: the same guesses as the AI's chat messages, turn by turn.
+- `atif-trajectory.json`: the same turns in ATIF, with each call's tokens and cost.
 - `state.json`: the secret and the guess history.
 - `observation.json`: the final board the AI saw.
 - `view.json`: the final display view, the grid of guesses and marks that the run

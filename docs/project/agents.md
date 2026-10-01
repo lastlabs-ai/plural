@@ -196,7 +196,7 @@ A few things to know:
 - A local run is recorded under `.plural/jobs/`. A run with `--hosted` is recorded in
   the hosted project, where you can also see it in the web app under Jobs.
 - A live local run sends every model call through the Plural gateway, so it needs a
-  Plural API key. A browser login alone is not accepted for model calls.
+  Plural API key, such as the one `plural auth login` stores.
 
 In Python, given a Task named `task`, run the Agent with your Client:
 

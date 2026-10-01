@@ -296,6 +296,101 @@ def test_trajectory_document_keeps_the_reset_record(
     assert "start here" in document["messages"][1]["content"]
 
 
+def test_the_agent_sees_rendered_text_not_the_observation_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _request(tmp_path)
+    request["task"]["instructions"] = "Guess the word."
+    request["environment"]["actions"] = [
+        _action(
+            tmp_path,
+            _envelope(
+                observation={"text": "", "history": ["no"], "metadata": {}},
+                rendered="1. no -> Is it alive?",
+            ),
+        )
+    ]
+    request["environment"]["reset_command"] = ["python", str(tmp_path / "reset.py")]
+    (tmp_path / "reset.py").write_text(
+        _emitter(
+            {
+                "protocol": PROTOCOL,
+                "kind": "reset",
+                "observation": {"text": "", "history": [], "metadata": {}},
+                "rendered": "No questions yet.",
+                "reward": 0.0,
+                "terminated": False,
+                "truncated": False,
+                "info": {},
+            },
+            read_stdin=False,
+        ),
+        encoding="utf-8",
+    )
+    _responses(monkeypatch, _call("act"), _text("done"))
+
+    _result, episode, _trace = native_runner._run("native.actions.v1", request)
+
+    assert episode.messages[1]["content"] == "Guess the word.\n\nNo questions yet."
+    tool = next(item for item in episode.messages if item.get("role") == "tool")
+    assert tool["content"] == "1. no -> Is it alive?"
+
+
+def test_an_unrendered_observation_sends_only_its_populated_fields() -> None:
+    assert native_runner._observation_text({"text": "", "left": 3, "metadata": {}}) == (
+        '{"left": 3}'
+    )
+    assert native_runner._observation_text({"text": "board", "left": 3}) == "board"
+
+
+def test_trajectory_reads_as_chat_turns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from plural.transcript import episode_to_messages
+
+    request = _request(tmp_path)
+    request["task"]["instructions"] = "Solve it."
+    request["environment"]["actions"] = [
+        _action(tmp_path, _envelope(reward=0.75, observation={"text": "closer"}))
+    ]
+    first = _call("act", {"guess": "crane"})
+    first["choices"][0]["message"]["reasoning"] = "Start broad."
+    _responses(monkeypatch, first, _text("done"))
+
+    _result, episode, _trace = native_runner._run("native.actions.v1", request)
+    document = episode_to_messages(episode.records)
+
+    assert list(document) == ["messages", "status", "time_elapsed", "finalized"]
+    assert document["status"] == "completed"
+    assert document["finalized"] is True
+    assert [message["role"] for message in document["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+    assistant = document["messages"][2]
+    assert assistant == {
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "Start broad.",
+        "tool_calls": [
+            {
+                "id": "call-act",
+                "type": "function",
+                "function": {"name": "act", "arguments": '{"guess": "crane"}'},
+            }
+        ],
+    }
+    assert document["messages"][3] == {
+        "role": "tool",
+        "tool_call_id": "call-act",
+        "name": "act",
+        "content": "closer",
+    }
+    assert document["messages"][4] == {"role": "assistant", "content": "done"}
+    assert "0.75" not in json.dumps(document)
+
+
 def test_native_episode_matches_the_recorded_contract() -> None:
     from plural.harness import episode
     from plural.usage import normalize_usage

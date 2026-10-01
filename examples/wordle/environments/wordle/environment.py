@@ -3,6 +3,7 @@
 import random
 from functools import cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field
 
@@ -71,7 +72,10 @@ class Wordle(Environment[Board, Game]):
         return self.observation, {}
 
     @action
-    def guess(self, word: str) -> Board:
+    def guess(
+        self,
+        word: Annotated[str, Field(min_length=5, max_length=5, pattern=r"^[a-z]{5}$")],
+    ) -> Board:
         """Guess one word. + is correct, ? is elsewhere in the word, - is absent."""
         word = word.strip().lower()
         if word not in self.words():

@@ -79,13 +79,11 @@ works.
 
 There are two ways to sign in, and they are good for different things:
 
-- **An API key** is a secret you create in the web app. It works for everything,
-  including model calls. Use it for any run that calls a model.
-- **A browser login** opens pluralintel.com, you approve it, and the command acts as
-  you. It works for hosted commands such as pushing and hosted runs, but the model
-  gateway does not accept it.
-
-If you only set up one, make it the API key.
+- **A browser login** opens pluralintel.com and you approve it there. Plural then
+  stores a 30-day API key for the account selected in the browser, your personal
+  account or an organization. It works for everything, including model calls.
+- **An API key** is a secret you create in the web app under Keys. Use one for CI, or
+  when you want a key that does not expire or is limited to one project.
 
 :::tabs
 :::tab API key
@@ -122,8 +120,9 @@ Task files.
 
 For power users:
 
-- A browser login acts as you and reaches every account and project your roles allow.
-  It is not accepted for model calls; use an API key for those.
+- A browser login acts for one account. To work in another organization, select it in
+  the web app and run `plural auth login` again. The key it stores is listed under
+  Keys in that account, and `plural auth logout` deletes it.
 - A **project key** is an API key limited to one project. It can only reach that
   project and cannot create new ones.
 - Signed in to an organization, `plural models list` shows the models your
@@ -394,8 +393,7 @@ it.
 
 A Job that calls a model sends every call through the Plural gateway with your API key.
 It finds the key in `PLURAL_API_KEY`, in `api_key=`, or through a `Client`.
-`Client()` reads `PLURAL_API_KEY` or an API key stored with
-`plural auth login --api-key-stdin`. A browser login is not accepted:
+`Client()` reads `PLURAL_API_KEY` or the API key `plural auth login` stored:
 
 ```python
 from plural import Client, Job

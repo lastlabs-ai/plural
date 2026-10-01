@@ -73,6 +73,7 @@ from plural.sandbox import (
 )
 from plural.tasks import TaskDefinition, validate_task_state
 from plural.trajectory import normalize_trajectory
+from plural.transcript import TRAJECTORY_FILE, episode_to_messages
 from plural.verifiers import (
     STOP_REASONS,
     AgentVerifier,
@@ -327,15 +328,12 @@ def _final_evidence(artifacts: Sequence[DownloadedFile]) -> dict[str, Any] | Non
 
 
 def _trajectory_source(artifacts: Sequence[DownloadedFile]) -> DownloadedFile | None:
-    return next(
-        (
-            item
-            for item in artifacts
-            if Path(item.path).name in {"trajectory.json", "trajectory.jsonl"}
-            and item.path != "trajectory.normalized.json"
-        ),
-        None,
-    )
+    """The Harness's own trajectory, preferring its ATIF document."""
+    for name in (ATIF_FILE, "trajectory.json", "trajectory.jsonl"):
+        found = next((item for item in artifacts if Path(item.path).name == name), None)
+        if found is not None:
+            return found
+    return None
 
 
 def _normalized_trajectory_artifact(
@@ -366,6 +364,20 @@ def _episode_records(artifacts: Sequence[DownloadedFile]) -> list[dict[str, Any]
     except (UnicodeDecodeError, json.JSONDecodeError):
         return []
     return records
+
+
+def _transcript(artifacts: Sequence[DownloadedFile]) -> dict[str, Any] | None:
+    """The chat transcript built from ``episode.jsonl``.
+
+    ``None`` when the Harness wrote its own ``trajectory.json`` or no model call
+    was recorded.
+    """
+    if any(item.path == TRAJECTORY_FILE for item in artifacts):
+        return None
+    records = _episode_records(artifacts)
+    if not any(record.get("kind") == "model.call" for record in records):
+        return None
+    return episode_to_messages(records)
 
 
 def _step_rewards(artifacts: Sequence[DownloadedFile]) -> tuple[dict[str, Any], ...]:
@@ -675,6 +687,11 @@ class Trial:
                     artifacts = _with_artifact(
                         artifacts,
                         _json_artifact("view.json", environment_view_doc),
+                    )
+                transcript = _transcript(artifacts)
+                if transcript is not None:
+                    artifacts = _with_artifact(
+                        artifacts, _json_artifact(TRAJECTORY_FILE, transcript)
                     )
                 atif = self._atif(artifacts, execution_id)
                 if atif is not None:
@@ -1196,8 +1213,8 @@ class Trial:
     ) -> dict[str, Any] | None:
         """The ATIF trajectory of this execution, built from its ``episode.jsonl``.
 
-        ``None`` when the Harness wrote its own ``trajectory.json`` or recorded no
-        episode.
+        ``None`` when the Harness wrote its own ``atif-trajectory.json`` or recorded
+        no episode.
         """
         if any(item.path == ATIF_FILE for item in artifacts):
             return None

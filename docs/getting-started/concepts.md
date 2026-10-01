@@ -141,10 +141,11 @@ Observations. It never sees the score, the rewards, the hidden State, or anythin
 Verifier knows.
 
 Every model call goes through the Plural gateway, which bills it at the provider's
-price. That is why a real run needs a **Plural API key**. You can create one in the web
-app under Keys, then store it with `plural auth login --api-key-stdin` or put it in
-the `PLURAL_API_KEY` environment variable. A browser login is not accepted for model
-calls. An Agent that never calls a model, like a scripted one, can declare
+price. That is why a real run needs a **Plural API key**. `plural auth login` stores
+one for you: it mints a 30-day key for the account you approve it from. You can also
+create one in the web app under Keys, then store it with
+`plural auth login --api-key-stdin` or put it in the `PLURAL_API_KEY` environment
+variable. An Agent that never calls a model, like a scripted one, can declare
 `auth_mode: none` and needs no key at all.
 
 See [Agents](../project/agents.md).

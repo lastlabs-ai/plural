@@ -19,7 +19,9 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, get_type_hints
+
+from pydantic import TypeAdapter
 
 from plural.tracing.schema import ActionStep
 from plural.types import FunctionDefinition, Tool
@@ -156,25 +158,37 @@ def call_arguments(
 def function_schema(fn: Callable[..., Any]) -> dict[str, Any]:
     """Build a JSON-schema object from an action callable's signature.
 
+    Constraints such as ``min_length`` and nested models are kept, so a
+    five-letter word or a dictionary parameter stays visible to the model
+    and to the Actions tab.
+
     Returns:
         A JSON Schema object describing the callable's parameters.
     """
     sig = inspect.signature(fn)
+    try:
+        hints = get_type_hints(fn, include_extras=True)
+    except Exception:
+        hints = {}
     properties: dict[str, Any] = {}
     required: list[str] = []
-    hints = getattr(fn, "__annotations__", {})
+    defs: dict[str, Any] = {}
     for param in sig.parameters.values():
         if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
             continue
         if param.name in {"self", "cls"}:
             continue
-        ann = hints.get(param.name, str)
-        properties[param.name] = _annotation_to_json_schema(ann)
+        ann = hints.get(param.name, param.annotation)
+        if ann is inspect.Parameter.empty:
+            ann = str
+        properties[param.name] = _parameter_schema(ann, defs)
         if param.default is inspect.Parameter.empty:
             required.append(param.name)
     schema: dict[str, Any] = {"type": "object", "properties": properties}
     if required:
         schema["required"] = required
+    if defs:
+        schema["$defs"] = defs
     return schema
 
 
@@ -191,6 +205,22 @@ def make_action_def(name: str, source: Callable[..., Any]) -> Tool:
             parameters=function_schema(source),
         )
     )
+
+
+def _parameter_schema(ann: Any, defs: dict[str, Any]) -> dict[str, Any]:
+    """JSON Schema for one parameter, including constraints and nested models.
+
+    Returns:
+        The parameter schema. Nested ``$defs`` are copied into ``defs``.
+    """
+    try:
+        schema = TypeAdapter(ann).json_schema()
+    except Exception:
+        return _annotation_to_json_schema(ann)
+    nested = schema.pop("$defs", None)
+    if isinstance(nested, dict):
+        defs.update(nested)
+    return schema
 
 
 def _annotation_to_json_schema(ann: Any) -> dict[str, Any]:

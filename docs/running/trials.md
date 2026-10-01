@@ -112,7 +112,7 @@ rewards, cost, and timing. It is where you look to understand *why* a Trial scor
 what it did.
 
 Harnesses may emit different native formats. Plural preserves the original and
-derives `trajectory.json`, an ATIF document of the Agent's turns, from the
+derives `atif-trajectory.json`, an ATIF document of the Agent's turns, from the
 [episode record](#the-episode-record). `normalize_trajectory` reads any of these
 formats into one event list:
 

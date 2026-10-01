@@ -57,7 +57,8 @@ execution numbers. See [Artifacts and evidence](artifacts.md) for every file.
 
 In the selected execution's `artifacts/`, open `trajectory.json`. It shows the
 native loop's turns: each model message, its tool calls, and the observation each
-call returned, with token counts and cost. `result.json` records the final
+call returned. `atif-trajectory.json` holds the same turns with token counts and
+cost. `result.json` records the final
 response. Compare what the Agent saw after each action with the
 `correct-category.correct_category` score in the Trial result's `scores`.
 
@@ -66,7 +67,7 @@ model. It is a JSONL log of the interaction, not a full trace in the tracing SDK
 format, and its trace ID alone does not upload the record to Plural Intel. Check
 what your Harness or tracing integration actually records.
 
-`trajectory.json` is written as [ATIF](https://docs.harborframework.com/core-concepts/agents/atif),
+`atif-trajectory.json` is written as [ATIF](https://docs.harborframework.com/core-concepts/agents/atif),
 Harbor's Agent Trajectory Interchange Format (`ATIF-v1.7`). That is the document
 to share with other tools. Plural derives it from the episode record, so it has
 every model call and step in order. Each step's `metrics.cost_usd` is the exact

@@ -415,13 +415,16 @@ async def test_retries_append_trial_executions_without_new_trial_identity(
     entries = {item["path"]: item for item in manifest["artifacts"]}
     assert entries["episode.jsonl"]["role"] == "episode"
     assert entries["trajectory.json"]["role"] == "trajectory"
+    assert entries["atif-trajectory.json"]["role"] == "trajectory"
     assert entries["result.json"]["role"] == "result"
     assert entries["state.json"]["role"] == "state"
     assert entries["observation.json"]["role"] == "observation"
     assert entries["view.json"]["role"] == "rendering"
     assert "trajectory.normalized.json" not in entries
     assert "verifier-results.json" not in entries
-    atif = json.loads((execution / "artifacts/trajectory.json").read_text())
+    messages = json.loads((execution / "artifacts/trajectory.json").read_text())
+    assert "user" in [message["role"] for message in messages["messages"]]
+    atif = json.loads((execution / "artifacts/atif-trajectory.json").read_text())
     assert validate_atif(atif) == []
     assert atif["final_metrics"]["total_cost_usd"] == 0.01
     assert result.trials[0].receipt.cost_usd == 0.01

@@ -15,6 +15,7 @@ from plural.auth import (
     AuthClient,
     AuthHTTPError,
     AuthStatus,
+    AuthTokens,
     Credential,
     Profile,
     Session,
@@ -52,9 +53,10 @@ def login(
 ) -> None:
     """Sign in with your browser (or store an API key).
 
-    A browser login acts as you: it reaches every account and project your
-    roles allow. Credentials are stored in your OS keyring or a private file
-    in your user config directory, never in a project.
+    A browser login mints a 30-day API key for the account (personal or an
+    organization) selected in the browser that approves it. Credentials are
+    stored in your OS keyring or a private file in your user config
+    directory, never in a project.
     """
     config = load_config()
     current = resolve_session(config=config)
@@ -65,6 +67,7 @@ def login(
     sources = sum((api_key_stdin, from_env, env_file is not None))
     if sources > 1:
         raise ProjectError("Choose one of --api-key-stdin, --from-env, or --env-file.")
+    tokens: AuthTokens | None = None
     if api_key_stdin or from_env or env_file is not None:
         key = _prompt_api_key() if api_key_stdin else _key_from_env(env_file)
         _verify_api_key(target, key)
@@ -78,6 +81,15 @@ def login(
                 ),
             )
         credential = tokens.credential()
+        if tokens.account is not None and tokens.account.id != profile.account_id:
+            profile = profile.model_copy(
+                update={
+                    "account_id": tokens.account.id,
+                    "account_slug": tokens.account.slug,
+                    "project_id": None,
+                    "project_slug": None,
+                }
+            )
     assert current.store is not None
     current.store.set(current.profile, credential)
     save_config(config.with_profile(current.profile, profile))
@@ -86,6 +98,12 @@ def login(
     save_config(load_config().with_profile(current.profile, profile))
     success(f"Signed in to {target}")
     _print_scope(resolve_session(), header=False, service=True)
+    if tokens is not None and tokens.account is not None and tokens.expires_at:
+        note(
+            f"This login is an API key for {tokens.account.slug}, valid until "
+            f"{tokens.expires_at[:10]}. To use another account, select it in the web "
+            "app and run `plural auth login` again."
+        )
 
 
 @auth_app.command("logout")
@@ -162,7 +180,15 @@ def scope(
     config = load_config()
     profile = config.profiles.get(current.profile, Profile())
     restriction = _restriction(current)
-    account_record = _account(current, org) if org else None
+    try:
+        account_record = _account(current, org) if org else None
+    except ProjectError as exc:
+        if restriction.credential != "api_key":
+            raise
+        raise ProjectError(
+            f"{exc} This credential acts for one account. To use another, select it "
+            "in the web app and run `plural auth login` again."
+        ) from None
     account_id = account_record["id"] if account_record else current.account_id
     account_slug = account_record["slug"] if account_record else profile.account_slug
     if project:
@@ -252,9 +278,10 @@ def _describe_credential(current: Session, remote: AuthStatus | None = None) -> 
     source = "PLURAL_API_KEY" if current.environment_key else "stored"
     if kind == "login":
         return f"browser login ({source}); acts with your roles"
+    expiry = f", expires {remote.expires_at[:10]}" if remote and remote.expires_at else ""
     if remote is not None and remote.project_id:
-        return f"API key ({source}); limited to project {remote.project_id}"
-    return f"API key ({source})"
+        return f"API key ({source}{expiry}); limited to project {remote.project_id}"
+    return f"API key ({source}{expiry})"
 
 
 def _scope_payload(current: Session) -> dict[str, Any]:

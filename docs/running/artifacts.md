@@ -53,6 +53,7 @@ A local `plural run` writes this folder at the project root:
         manifest.json
         episode.jsonl
         trajectory.json
+        atif-trajectory.json
         result.json
         state.json
         observation.json
@@ -66,8 +67,13 @@ hold:
   `plural job rerun` reuses.
 - `episode.jsonl` is the episode record: every reset, step, and model call in
   order, with token usage and timing.
-- `trajectory.json` is the same episode as an
-  [ATIF](traces.md#read-the-support-episode) document of the Agent's turns.
+- `trajectory.json` is the Agent's conversation as plain chat messages: each has
+  a `role` and `content`, plus `reasoning_content` and `tool_calls` on the
+  model's turns. It is exactly what the model was sent, followed by its final
+  reply, beside the episode's `status`, `time_elapsed`, and `finalized`.
+- `atif-trajectory.json` is the same episode as an
+  [ATIF](traces.md#read-the-support-episode) document of the Agent's turns, with
+  each call's tokens, cost, and timing.
 - `result.json` in `artifacts/` is the Harness's final response.
 - `state.json`, `observation.json`, and `view.json` are the Environment's final
   State, Observation, and display view.
