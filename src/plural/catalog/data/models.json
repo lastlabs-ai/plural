@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-28T15:27:32Z",
+  "updated_at": "2026-10-05T21:04:17Z",
   "models": [
     {
       "id": "anthropic/claude-fable-5",
@@ -271,8 +271,8 @@
           "region": "us",
           "upstream_id": "claude-opus-5-20260723",
           "pricing": {
-            "prompt": "0.000005",
-            "completion": "0.000025",
+            "prompt": "0.0000055",
+            "completion": "0.0000275",
             "cache_read": "0.0000005",
             "cache_write": "0.00000625"
           }
@@ -382,8 +382,8 @@
           "region": "us",
           "upstream_id": "claude-sonnet-5-20260630",
           "pricing": {
-            "prompt": "0.000002",
-            "completion": "0.00001",
+            "prompt": "0.0000022",
+            "completion": "0.000011",
             "cache_read": "0.0000002",
             "cache_write": "0.0000025"
           }
@@ -520,8 +520,8 @@
       "context_length": 1000000,
       "max_output_tokens": 384000,
       "pricing": {
-        "prompt": "0.00000174",
-        "completion": "0.00000348"
+        "prompt": "0.00000191",
+        "completion": "0.00000383"
       },
       "architecture": {
         "modality": "text->text",
@@ -1046,13 +1046,13 @@
           "region": "eu",
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
-            "prompt": "0.0000055",
-            "completion": "0.000033",
+            "prompt": "0.0000044",
+            "completion": "0.000022",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.000011",
-                "completion": "0.0000495"
+                "prompt": "0.0000088",
+                "completion": "0.000033"
               }
             ]
           }
@@ -1062,13 +1062,13 @@
           "region": "us",
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
-            "prompt": "0.000005",
-            "completion": "0.00003",
+            "prompt": "0.000004",
+            "completion": "0.00002",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.00001",
-                "completion": "0.000045"
+                "prompt": "0.000008",
+                "completion": "0.00003"
               }
             ]
           }
@@ -1078,13 +1078,13 @@
           "region": "us",
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
-            "prompt": "0.0000055",
-            "completion": "0.000033",
+            "prompt": "0.0000044",
+            "completion": "0.000022",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.000011",
-                "completion": "0.0000495"
+                "prompt": "0.0000088",
+                "completion": "0.000033"
               }
             ]
           }
@@ -1270,13 +1270,13 @@
           "region": "eu",
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
-            "prompt": "0.0000055",
-            "completion": "0.000033",
+            "prompt": "0.0000044",
+            "completion": "0.000022",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.000011",
-                "completion": "0.0000495"
+                "prompt": "0.0000088",
+                "completion": "0.000033"
               }
             ],
             "cache_read": "0.00000055",
@@ -1288,13 +1288,13 @@
           "region": "us",
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
-            "prompt": "0.000005",
-            "completion": "0.00003",
+            "prompt": "0.000004",
+            "completion": "0.00002",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.00001",
-                "completion": "0.000045"
+                "prompt": "0.000008",
+                "completion": "0.00003"
               }
             ],
             "cache_read": "0.0000005",
@@ -1306,13 +1306,13 @@
           "region": "us",
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
-            "prompt": "0.0000055",
-            "completion": "0.000033",
+            "prompt": "0.0000044",
+            "completion": "0.000022",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.000011",
-                "completion": "0.0000495"
+                "prompt": "0.0000088",
+                "completion": "0.000033"
               }
             ],
             "cache_read": "0.00000055",
