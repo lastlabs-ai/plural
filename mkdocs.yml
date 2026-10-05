@@ -37,6 +37,7 @@ plugins:
           - getting-started.md
         Build:
           - project/environments.md
+          - project/runtimes.md
           - project/tasks.md
           - project/verifiers.md
           - project/harnesses.md
@@ -90,6 +91,7 @@ nav:
       - Getting started: getting-started.md
   - Build:
       - Environments: project/environments.md
+      - Runtimes: project/runtimes.md
       - Tasks: project/tasks.md
       - Verifiers: project/verifiers.md
       - Harnesses: project/harnesses.md

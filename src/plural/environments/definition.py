@@ -19,6 +19,7 @@ from plural.common import (
     semantic_version,
 )
 from plural.identity import revision_hash
+from plural.sandbox.catalog import runtime_provider
 from plural.sandbox.models import (
     Capability,
     DeclarativeImage,
@@ -209,9 +210,16 @@ class RewarderDefinition(FrozenModel):
 
 
 class EnvironmentRuntime(FrozenModel):
-    """Where an Environment runs: Docker, a trusted local process, or Daytona."""
+    """Where an Environment runs: Docker, a trusted local process, or a remote sandbox."""
 
     provider: str = Field(default="docker", min_length=1)
+    ref: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9-]{0,79}$",
+        description="Slug of the project Runtime this configuration was copied from. "
+        "The machine fields hold that Runtime's settings as of the copy; credentials "
+        "come from the project Runtime when a Job starts.",
+    )
     placement: dict[str, str] = Field(default_factory=dict)
     variables: tuple[RuntimeVariable, ...] = ()
     image: str | None = None
@@ -402,7 +410,8 @@ class EnvironmentRuntime(FrozenModel):
         """Execution target implied by the Environment provider."""
         if self.provider == "local":
             return ExecutionTarget.LOCAL
-        if self.provider in {"remote", "daytona"}:
+        spec = runtime_provider(self.provider)
+        if self.provider == "remote" or (spec is not None and spec.target == "remote"):
             return ExecutionTarget.REMOTE
         return ExecutionTarget.DOCKER
 
@@ -578,6 +587,9 @@ class EnvironmentDefinition(FrozenModel):
     def content_hash(self) -> str:
         """Stable Environment revision digest."""
         payload = self.model_dump(mode="json", exclude={"source"})
+        if payload["runtime"]["ref"] is None:
+            # Revisions from before runtime references keep their hash.
+            del payload["runtime"]["ref"]
         digest = self.source.digest if self.source else None
         payload["source_digest"] = digest
         if digest is not None:

@@ -30,6 +30,7 @@ PACKAGE_NAV = [
     ("Start", "/docs/getting-started/concepts", "getting-started/concepts.md"),
     ("Start", "/docs/getting-started", "getting-started.md"),
     ("Build", "/docs/project/environments", "project/environments.md"),
+    ("Build", "/docs/project/runtimes", "project/runtimes.md"),
     ("Build", "/docs/project/tasks", "project/tasks.md"),
     ("Build", "/docs/project/verifiers", "project/verifiers.md"),
     ("Build", "/docs/project/harnesses", "project/harnesses.md"),

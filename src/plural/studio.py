@@ -492,6 +492,88 @@ class ModelsAPI:
         )
 
 
+class RuntimesAPI:
+    """Runtime providers, account templates and policy, and project Runtimes.
+
+    Templates and policy belong to the selected account; Runtimes belong to the
+    selected project. Credentials are write-only except through
+    :meth:`credentials`, which the service grants only when the Runtime's
+    owner allows local runs to use them.
+    """
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def providers(self) -> JsonList:
+        return cast(JsonList, self._studio.request("GET", "/runtime-providers", project=False))
+
+    def policy(self) -> JsonObject:
+        return cast(JsonObject, self._studio.request("GET", "/runtime-policy", project=False))
+
+    def set_policy(self, *, mode: str, allowed_providers: list[str] | None) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "PUT",
+                "/runtime-policy",
+                json={"mode": mode, "allowed_providers": allowed_providers},
+                project=False,
+            ),
+        )
+
+    def templates(self) -> JsonList:
+        return cast(JsonList, self._studio.request("GET", "/runtime-templates", project=False))
+
+    def template(self, ref: str) -> JsonObject:
+        """One template by id or slug."""
+        return cast(
+            JsonObject,
+            self._studio.request("GET", f"/runtime-templates/{quote(ref)}", project=False),
+        )
+
+    def create_template(self, payload: JsonObject) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request("POST", "/runtime-templates", json=payload, project=False),
+        )
+
+    def update_template(self, ref: str, payload: JsonObject) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "PATCH", f"/runtime-templates/{quote(ref)}", json=payload, project=False
+            ),
+        )
+
+    def delete_template(self, ref: str) -> None:
+        self._studio.request("DELETE", f"/runtime-templates/{quote(ref)}", project=False)
+
+    def list(self) -> JsonList:
+        return cast(JsonList, self._studio.request("GET", "/runtimes"))
+
+    def get(self, ref: str) -> JsonObject:
+        """One project Runtime by id or slug."""
+        return cast(JsonObject, self._studio.request("GET", f"/runtimes/{quote(ref)}"))
+
+    def create(self, payload: JsonObject) -> JsonObject:
+        return cast(JsonObject, self._studio.request("POST", "/runtimes", json=payload))
+
+    def update(self, ref: str, payload: JsonObject) -> JsonObject:
+        return cast(
+            JsonObject, self._studio.request("PATCH", f"/runtimes/{quote(ref)}", json=payload)
+        )
+
+    def delete(self, ref: str) -> None:
+        self._studio.request("DELETE", f"/runtimes/{quote(ref)}")
+
+    def credentials(self, ref: str) -> JsonObject:
+        """Provider credentials for a local run, as environment variables."""
+        return cast(
+            JsonObject,
+            self._studio.request("POST", f"/runtimes/{quote(ref)}/credentials", json={}),
+        )
+
+
 class TracesAPI:
     """Canonical Trace ingest, TITO upload, and reads."""
 
@@ -769,6 +851,7 @@ class Studio:
         self.accounts = AccountsAPI(self)
         self.packages = PackagesAPI(self)
         self.models = ModelsAPI(self)
+        self.runtimes = RuntimesAPI(self)
         self.environments = EnvironmentsAPI(self)
         self.tasks = TasksAPI(self)
         self.verifiers = VerifiersAPI(self)
@@ -949,6 +1032,7 @@ __all__ = [
     "PackagesAPI",
     "ProjectsAPI",
     "ReviewsAPI",
+    "RuntimesAPI",
     "Studio",
     "TasksAPI",
     "TracesAPI",

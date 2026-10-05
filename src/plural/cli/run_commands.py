@@ -27,6 +27,7 @@ from plural.cli.common import (
     signed_in,
     workspace,
 )
+from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.jobs import JobResult, TrialResult, TrialSpec
 from plural.project import ProjectError, Workspace
@@ -59,6 +60,7 @@ from plural.project.runs import (
 )
 from plural.project.sync import REBUILT_NOTE, PullStep, PushStep, pull_missing
 from plural.project.versions import holds_version, version_workspace, versioned
+from plural.sandbox.catalog import runtime_provider
 from plural.studio import Studio
 
 job_app = typer.Typer(help="List, inspect, and rerun Jobs.", no_args_is_help=True)
@@ -218,6 +220,7 @@ def run(
         + (" Recording it in the hosted project as it runs." if tracking else ""),
         err=as_json,
     )
+    _runtime_credentials(space, plan, err=as_json)
     job_id, result = run_local(
         space, plan, environ=environ, progress=_progress(as_json, total), tracking=tracking
     )
@@ -665,6 +668,41 @@ def _hosted_studio(space: Workspace, *, required: bool) -> Studio | None:
             project_studio(space, current)
         return None
     return project_studio(space, current)[0]
+
+
+def _runtime_credentials(space: Workspace, plan: RunPlan, *, err: bool) -> None:
+    """Load provider credentials for Environments that use a project Runtime.
+
+    Sandbox providers read credentials from this process's environment, so
+    missing ones are set there, never in the Job's environment. Variables you
+    already exported always win, and nothing is fetched when they cover the
+    provider or when the Runtime's owner does not allow local runs to use its
+    credentials.
+    """
+    refs = {
+        task.environment.runtime.ref: task.environment.runtime.provider
+        for task in plan.spec.tasks
+        if task.environment.runtime.ref
+    }
+    if not refs:
+        return
+    studio = _hosted_studio(space, required=False)
+    if studio is None:
+        return
+    for ref, provider in sorted(refs.items()):
+        spec = runtime_provider(provider)
+        if spec is None or not any(
+            item.required and not os.environ.get(item.key) for item in spec.credentials
+        ):
+            continue
+        try:
+            grant = studio.runtimes.credentials(ref)
+        except PluralError as exc:
+            typer.echo(f"! Runtime {ref}: {exc} Using credentials from your environment.", err=True)
+            continue
+        for key, value in (grant.get("environ") or {}).items():
+            os.environ.setdefault(str(key), str(value))
+        typer.echo(f"Using credentials from project Runtime {ref}.", err=err)
 
 
 def _run_environ(current: Session) -> dict[str, str]:

@@ -21,6 +21,8 @@ from typing import Any
 import httpx
 import pytest
 
+from plural.sandbox.catalog import RUNTIME_PROVIDERS, runtime_from_settings
+
 Hasher = Callable[[str, str, dict[str, Any]], str]
 COLLECTIONS = ("environments", "verifiers", "harnesses", "tasks", "agents", "benchmarks")
 KIND = {
@@ -65,6 +67,16 @@ class FakeHosted:
         ]
     )
     organization_models: list[str] | None = None
+    runtime_policy: dict[str, Any] = field(
+        default_factory=lambda: {
+            "account_type": "user",
+            "can_manage": True,
+            "mode": "open",
+            "allowed_providers": None,
+        }
+    )
+    runtime_templates: list[dict[str, Any]] = field(default_factory=list)
+    runtimes: list[dict[str, Any]] = field(default_factory=list)
     # ``collection/slug`` pairs whose revision pushes fail with a 500.
     failing: set[str] = field(default_factory=set)
     _ids: Iterator[int] = field(default_factory=lambda: itertools.count(1))
@@ -125,6 +137,14 @@ class FakeHosted:
             response = _ok(models)
             response.headers["X-Plural-Model-Scope"] = scope
             return response
+        if parts == ["runtime-providers"]:
+            return _ok([item.model_dump(mode="json") for item in RUNTIME_PROVIDERS])
+        if parts == ["runtime-policy"]:
+            if request.method == "PUT":
+                self.runtime_policy.update(body)
+            return _ok(self.runtime_policy)
+        if parts and parts[0] == "runtime-templates":
+            return self._runtime_templates(request, parts[1:], body)
         if parts and parts[0] == "projects":
             return self._projects(request, parts[1:], body, key, account)
         if parts and parts[0] == "packages":
@@ -134,6 +154,8 @@ class FakeHosted:
             return _error(400, "Project is required")
         if parts and parts[0] in COLLECTIONS:
             return self._collection(request, project_id, parts, body)
+        if parts and parts[0] == "runtimes":
+            return self._runtimes(request, parts[1:], body)
         if parts == ["jobs"] and request.method == "POST":
             job = {"id": f"job_{next(self._ids)}", "status": "queued", **(body or {})}
             self.jobs.append(job)
@@ -166,6 +188,87 @@ class FakeHosted:
         if project is None or key.project_id not in {None, project["id"]}:
             return _error(404, "Project not found")
         return _ok(project)
+
+    def _runtime_templates(
+        self, request: httpx.Request, rest: list[str], body: Any
+    ) -> httpx.Response:
+        if not rest and request.method == "GET":
+            return _ok(self.runtime_templates)
+        if not rest and request.method == "POST":
+            credentials = body.pop("credentials", {})
+            template = {
+                "id": f"rtt_{next(self._ids)}",
+                "slug": body["name"].lower().replace(" ", "-"),
+                "status": "active",
+                "project_runtime_count": 0,
+                "credential_hints": {key: "…" + value[-4:] for key, value in credentials.items()},
+                **body,
+            }
+            self.runtime_templates.append(template)
+            return _ok(template)
+        template = next(
+            (t for t in self.runtime_templates if rest[0] in {t["id"], t["slug"]}), None
+        )
+        if template is None:
+            return _error(404, "Runtime template not found")
+        if request.method == "PATCH":
+            body.pop("credentials", None)
+            template.update(body)
+        if request.method == "DELETE":
+            self.runtime_templates.remove(template)
+            return httpx.Response(204)
+        return _ok(template)
+
+    def _runtime_view(self, runtime: dict[str, Any]) -> dict[str, Any]:
+        template = next(
+            (t for t in self.runtime_templates if t["id"] == runtime.get("template_id")), None
+        )
+        settings = {**(template["settings"] if template else {}), **runtime["overrides"]}
+        return {
+            **runtime,
+            "template": template,
+            "settings": settings,
+            "locked_fields": template["locked_fields"] if template else [],
+            "credential_source": "template" if template else "runtime",
+            "credentials_ready": bool(template or runtime["credential_hints"]),
+            "environment_count": 0,
+            "environment_runtime": runtime_from_settings(
+                runtime["provider"], settings, ref=runtime["slug"]
+            ).model_dump(mode="json"),
+        }
+
+    def _runtimes(self, request: httpx.Request, rest: list[str], body: Any) -> httpx.Response:
+        if not rest and request.method == "GET":
+            return _ok([self._runtime_view(item) for item in self.runtimes])
+        if not rest and request.method == "POST":
+            template = next(
+                (t for t in self.runtime_templates if t["id"] == body.get("template_id")), None
+            )
+            credentials = body.get("credentials") or {}
+            runtime = {
+                "id": f"rt_{next(self._ids)}",
+                "slug": body["name"].lower().replace(" ", "-"),
+                "name": body["name"],
+                "description": body.get("description", ""),
+                "provider": template["provider"] if template else body["provider"],
+                "template_id": template["id"] if template else None,
+                "overrides": body.get("settings") or {},
+                "credential_hints": {key: "…" + value[-4:] for key, value in credentials.items()},
+                "secrets": credentials,
+            }
+            self.runtimes.append(runtime)
+            return _ok(self._runtime_view(runtime))
+        runtime = next((r for r in self.runtimes if rest[0] in {r["id"], r["slug"]}), None)
+        if runtime is None:
+            return _error(404, "Runtime not found")
+        if rest[1:] == ["credentials"]:
+            return _ok({"provider": runtime["provider"], "environ": runtime["secrets"]})
+        if request.method == "PATCH" and "settings" in body:
+            runtime["overrides"] = body["settings"]
+        if request.method == "DELETE":
+            self.runtimes.remove(runtime)
+            return httpx.Response(204)
+        return _ok(self._runtime_view(runtime))
 
     def _packages(self, request: httpx.Request, digest: str) -> httpx.Response:
         if request.method == "PUT":
