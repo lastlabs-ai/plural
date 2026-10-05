@@ -681,6 +681,11 @@ def use_command(
     current: Session = signed_in(session())
     studio, _ = project_studio(space, current)
     item = studio.runtimes.get(runtime)
+    if item.get("environment_runtime") is None:
+        fail(
+            f"Runtime {item['slug']}'s settings no longer validate against its template. "
+            f"Fix them with `plural runtime edit {item['slug']}`."
+        )
     names = space.project.names(ENVIRONMENT)
     targets = names if every else list(environments or [])
     if not targets:
