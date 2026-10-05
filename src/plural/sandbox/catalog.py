@@ -272,6 +272,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
         description="Firecracker microVM sandboxes started from templates. CPU and memory "
         "are fixed when a template is built, so pick a template sized for the work.",
         category="sandbox",
+        status="coming_soon",
         docs_url="https://e2b.dev/docs",
         credentials_url="https://e2b.dev/dashboard?tab=keys",
         network_modes=("public", "no-network"),
@@ -314,6 +315,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
         description="Sandboxes on Modal's serverless platform, from any registry image, "
         "with optional GPUs. Good for Environments that train or serve models.",
         category="sandbox",
+        status="coming_soon",
         docs_url="https://modal.com/docs/guide/sandbox",
         credentials_url="https://modal.com/settings/tokens",
         network_modes=("public", "no-network"),
@@ -404,6 +406,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
         description="Sandboxes that suspend when idle and resume almost instantly, "
         "close to your agents. Good for long-lived, interactive Environments.",
         category="sandbox",
+        status="coming_soon",
         docs_url="https://docs.blaxel.ai/Sandboxes/Overview",
         credentials_url="https://app.blaxel.ai",
         credentials=(
@@ -453,6 +456,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
         "Sandbox SDK. Plural talks to that Worker, so sandboxes run in your own "
         "Cloudflare account.",
         category="sandbox",
+        status="coming_soon",
         docs_url="https://developers.cloudflare.com/sandbox/",
         credentials_url="https://dash.cloudflare.com/profile/api-tokens",
         credentials=(

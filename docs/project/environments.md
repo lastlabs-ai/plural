@@ -211,8 +211,8 @@ What each field means:
   rewards, and settings to the people who use the Environment.
 - `resources` lists files to stage, relative to the folder. A path is the
   [short form](#the-short-form); a mapping takes the same fields as `Resource`.
-- `runtime` picks a provider with `provider`, such as `docker`, `local`, `daytona`,
-  or `modal`. The other keys are that provider's settings, such as `image` or `cpus`;
+- `runtime` picks a provider with `provider`, such as `docker`, `local`, or
+  `daytona`. The other keys are that provider's settings, such as `image` or `cpus`;
   `plural runtime provider <provider>` lists them. The template uses `docker` with the
   `python:3.12-slim` image. To reuse a project [Runtime](runtimes.md), run
   `plural runtime use <runtime> <environment>`, which fills this block in for you.
@@ -442,8 +442,8 @@ Runtime.daytona(image="python:3.12-slim")
 Remote execution needs an image or snapshot the provider can reach. It can't build
 from a Dockerfile on your laptop. See
 [Providers and integrations](../reference/integrations.md) for setup and extensions,
-and [Runtimes](runtimes.md) to set up E2B, Modal, Blaxel, or Cloudflare once and
-reuse it across Environments.
+and [Runtimes](runtimes.md) to set up a Daytona sandbox once and reuse it across
+Environments.
 
 ### Network
 

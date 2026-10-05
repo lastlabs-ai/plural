@@ -137,6 +137,14 @@ def _provider(providers: list[dict[str, Any]], provider_id: str) -> dict[str, An
     raise ProjectError(f"Unknown provider {provider_id!r}. Choose one of: {known}.")
 
 
+def _usable(providers: list[dict[str, Any]], provider_id: str) -> dict[str, Any]:
+    spec = _provider(providers, provider_id)
+    if spec["status"] != "available":
+        known = ", ".join(item["id"] for item in providers if item["status"] == "available")
+        raise ProjectError(f"{spec['name']} Runtimes are coming soon. Choose one of: {known}.")
+    return spec
+
+
 def _parse_settings(values: list[str] | None) -> dict[str, Any]:
     settings: dict[str, Any] = {}
     for item in values or []:
@@ -359,7 +367,7 @@ def providers_command(as_json: bool = JSON_OPTION) -> None:
 @runtime_app.command("provider")
 @handled
 def provider_command(
-    provider: str = typer.Argument(help="Provider id, such as daytona or modal."),
+    provider: str = typer.Argument(help="Provider id, such as daytona or docker."),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Explain one provider: its credentials and every setting."""
@@ -540,7 +548,7 @@ def create_command(
         ) or studio.runtimes.template(template)
         provider = chosen_template["provider"]
     assert provider is not None
-    spec = _provider(providers, provider)
+    spec = _usable(providers, provider)
     chosen = _parse_settings(settings)
     locked = frozenset(chosen_template["locked_fields"]) if chosen_template else frozenset()
     if interactive and not settings:
@@ -816,7 +824,7 @@ def template_create(
             "Provider",
             [(item["id"], item["name"], item["tagline"]) for item in _available(providers, policy)],
         )
-    spec = _provider(providers, provider)
+    spec = _usable(providers, provider)
     chosen = _parse_settings(settings)
     credentials = _parse_credentials(spec, credential, from_env=credentials_from_env)
     locked = list(lock or [])

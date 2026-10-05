@@ -1631,7 +1631,7 @@ This section is generated from the Typer application. Run `uv run python scripts
  Explain one provider: its credentials and every setting.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    provider      <str>  Provider id, such as daytona or modal. [required]                      │
+│ *    provider      <str>  Provider id, such as daytona or docker. [required]                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │

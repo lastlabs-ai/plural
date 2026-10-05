@@ -39,15 +39,7 @@ runner = CliRunner()
 
 def test_every_available_provider_explains_each_field_and_credential() -> None:
     available = [item for item in RUNTIME_PROVIDERS if item.status == "available"]
-    assert {item.id for item in available} >= {
-        "daytona",
-        "e2b",
-        "modal",
-        "blaxel",
-        "cloudflare",
-        "docker",
-        "local",
-    }
+    assert {item.id for item in available} == {"daytona", "docker", "local"}
     for provider in available:
         assert provider.fields, provider.id
         for field in provider.fields:
@@ -57,20 +49,20 @@ def test_every_available_provider_explains_each_field_and_credential() -> None:
         for credential in provider.credentials:
             assert credential.help, (provider.id, credential.key)
     coming = {item.id for item in RUNTIME_PROVIDERS if item.status == "coming_soon"}
-    assert coming == {"aws", "gcp", "azure"}
+    assert coming == {"e2b", "modal", "blaxel", "cloudflare", "aws", "gcp", "azure"}
 
 
 @pytest.mark.parametrize(
     ("provider", "settings", "message"),
     [
-        ("modal", {"gpus": "A10G"}, "has no setting 'gpus'"),
-        ("modal", {"gpu": "Z80"}, "GPU must be one of"),
+        ("daytona", {"gpus": "A10G"}, "has no setting 'gpus'"),
+        ("daytona", {"target": "mars"}, "Region must be one of"),
         ("docker", {"cpus": "lots"}, "CPU cores must be a number"),
         ("docker", {"memory_mb": 16}, "Memory must be at least 128 MB"),
-        ("blaxel", {}, "Blaxel needs: Workspace"),
-        ("cloudflare", {"worker_url": "ftp://x"}, "Worker URL must be a URL"),
+        ("daytona", {"api_url": "ftp://x"}, "API URL must be a URL"),
         ("daytona", {"allowed_hosts": "not a host"}, "is not a host name"),
         ("aws", {}, "coming soon"),
+        ("modal", {}, "Modal Runtimes are coming soon"),
         ("nope", {}, "Unknown Runtime provider"),
     ],
 )
@@ -82,41 +74,39 @@ def test_settings_are_validated_with_readable_errors(
 
 
 def test_partial_settings_skip_required_fields_for_template_overrides() -> None:
-    assert clean_settings("blaxel", {"memory_mb": "2048"}, partial=True) == {"memory_mb": 2048}
+    assert clean_settings("daytona", {"memory_mb": "2048"}, partial=True) == {"memory_mb": 2048}
 
 
 def test_resolved_settings_fill_defaults_and_check_the_network() -> None:
-    assert resolved_settings("modal", {})["app"] == "plural-sandboxes"
-    assert "gpu" not in resolved_settings("modal", {"gpu": "none"})
+    assert resolved_settings("daytona", {})["image"] == "python:3.12-slim"
     assert "image" not in resolved_settings("daytona", {"snapshot": "warm"})
     with pytest.raises(RuntimeSettingsError, match="at least one allowed host"):
         resolved_settings("daytona", {"network": "allowlist"})
     with pytest.raises(RuntimeSettingsError, match="must be one of: public, no-network"):
-        resolved_settings("e2b", {"network": "allowlist"})
+        resolved_settings("docker", {"network": "allowlist"})
 
 
 def test_credentials_require_every_required_key_unless_already_stored() -> None:
-    with pytest.raises(RuntimeSettingsError, match="Token secret"):
-        clean_credentials("modal", {"MODAL_TOKEN_ID": "ak-1"})
-    assert clean_credentials(
-        "modal",
-        {"MODAL_TOKEN_ID": "ak-2", "MODAL_TOKEN_SECRET": ""},
-        stored=frozenset({"MODAL_TOKEN_SECRET"}),
-    ) == {"MODAL_TOKEN_ID": "ak-2"}
+    with pytest.raises(RuntimeSettingsError, match="API key"):
+        clean_credentials("daytona", {})
+    assert (
+        clean_credentials("daytona", {"DAYTONA_API_KEY": ""}, stored=frozenset({"DAYTONA_API_KEY"}))
+        == {}
+    )
     with pytest.raises(RuntimeSettingsError, match="no credential"):
-        clean_credentials("e2b", {"OPENAI_API_KEY": "x"})
+        clean_credentials("daytona", {"OPENAI_API_KEY": "x"})
 
 
 def test_runtime_from_settings_maps_fields_and_placement() -> None:
     runtime = runtime_from_settings(
-        "modal", {"gpu": "H100", "cpus": "4", "memory_mb": 8192}, ref="gpu-box"
+        "daytona", {"target": "eu", "cpus": "4", "memory_mb": 8192}, ref="big-box"
     )
-    assert runtime.provider == "modal"
-    assert runtime.ref == "gpu-box"
-    assert runtime.placement == {"app": "plural-sandboxes", "gpu": "H100"}
+    assert runtime.provider == "daytona"
+    assert runtime.ref == "big-box"
+    assert runtime.placement == {"target": "eu"}
     assert runtime.resources.cpu == 4 and runtime.resources.memory_mb == 8192
     assert runtime.requested_target is ExecutionTarget.REMOTE
-    assert settings_from_runtime(runtime)["gpu"] == "H100"
+    assert settings_from_runtime(runtime)["target"] == "eu"
     assert runtime_environ("daytona", {"target": "eu"}) == {"DAYTONA_TARGET": "eu"}
 
 
@@ -129,9 +119,9 @@ def test_sizes_come_in_steps_and_provider_defaults_are_never_applied() -> None:
         clean_settings("daytona", {"cpus": 1.5})
     with pytest.raises(RuntimeSettingsError, match="multiple of 1024"):
         clean_settings("daytona", {"memory_mb": 1500})
-    with pytest.raises(RuntimeSettingsError, match="multiple of 0.25"):
-        clean_settings("modal", {"cpus": 0.3})
-    assert clean_settings("modal", {"cpus": "1.75"}) == {"cpus": 1.75}
+    with pytest.raises(RuntimeSettingsError, match="multiple of 0.5"):
+        clean_settings("docker", {"cpus": 0.7})
+    assert clean_settings("docker", {"cpus": "1.5"}) == {"cpus": 1.5}
     resolved = resolved_settings("daytona", {})
     assert "cpus" not in resolved and "memory_mb" not in resolved
 
@@ -201,18 +191,18 @@ def test_use_runtime_replaces_only_the_runtime_block(tmp_path: Path) -> None:
         + "runtime:\n  provider: local\n  variables:\n    - name: SUPPORT_API_URL\n"
     )
     before = read_yaml_mapping(path)
-    runtime = runtime_from_settings("modal", {"gpu": "A10G"}, ref="gpu-box")
+    runtime = runtime_from_settings("daytona", {"target": "eu"}, ref="eu-box")
     assert use_runtime(project, "queue", runtime.model_dump(mode="json"))
     after = read_yaml_mapping(path)
     assert {key: value for key, value in after.items() if key != "runtime"} == {
         key: value for key, value in before.items() if key != "runtime"
     }
-    assert after["runtime"]["provider"] == "modal"
-    assert after["runtime"]["ref"] == "gpu-box"
-    assert after["runtime"]["gpu"] == "A10G"
+    assert after["runtime"]["provider"] == "daytona"
+    assert after["runtime"]["ref"] == "eu-box"
+    assert after["runtime"]["target"] == "eu"
     assert after["runtime"]["variables"][0]["name"] == "SUPPORT_API_URL"
     rebuilt = runtime_from_manifest(after["runtime"])
-    assert rebuilt.ref == "gpu-box" and rebuilt.placement["gpu"] == "A10G"
+    assert rebuilt.ref == "eu-box" and rebuilt.placement["target"] == "eu"
     assert not use_runtime(project, "queue", runtime.model_dump(mode="json"))
 
 
@@ -251,25 +241,29 @@ def hosted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path) -> Itera
 def test_providers_lists_what_each_provider_needs(hosted: Hosted) -> None:
     code, output = hosted.cli("runtime", "providers")
     assert code == 0, output
-    assert "MODAL_TOKEN_ID, MODAL_TOKEN_SECRET" in output
+    assert "DAYTONA_API_KEY" in output
     assert "coming soon" in output
-    code, output = hosted.cli("runtime", "provider", "e2b")
+    code, output = hosted.cli("runtime", "provider", "daytona")
     assert code == 0, output
-    assert "E2B_API_KEY" in output and "template" in output
+    assert "DAYTONA_API_KEY" in output and "target" in output
 
 
 def test_create_from_a_provider_then_use_it_in_an_environment(
     hosted: Hosted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("E2B_API_KEY", "e2b_secret_1234")
+    code, output = hosted.cli("runtime", "create", "GPU box", "--provider", "modal", "--no-input")
+    assert code != 0 and "coming soon" in output
+    assert not hosted.fake.runtimes
+
+    monkeypatch.setenv("DAYTONA_API_KEY", "dtn_secret_1234")
     code, output = hosted.cli(
         "runtime",
         "create",
         "Agent box",
         "--provider",
-        "e2b",
+        "daytona",
         "--set",
-        "template=code-interpreter-v1",
+        "target=eu",
         "--credentials-from-env",
         "--no-input",
         "--json",
@@ -277,7 +271,7 @@ def test_create_from_a_provider_then_use_it_in_an_environment(
     assert code == 0, output
     created = json.loads(output)
     assert created["slug"] == "agent-box"
-    assert hosted.fake.runtimes[0]["secrets"] == {"E2B_API_KEY": "e2b_secret_1234"}
+    assert hosted.fake.runtimes[0]["secrets"] == {"DAYTONA_API_KEY": "dtn_secret_1234"}
 
     code, output = hosted.cli("runtime", "list")
     assert code == 0, output
@@ -289,9 +283,9 @@ def test_create_from_a_provider_then_use_it_in_an_environment(
     manifest = read_yaml_mapping(
         hosted.project.manifest_path(ResourceRef(ENVIRONMENT.name, "queue"))
     )
-    assert manifest["runtime"]["provider"] == "e2b"
+    assert manifest["runtime"]["provider"] == "daytona"
     assert manifest["runtime"]["ref"] == "agent-box"
-    assert manifest["runtime"]["template"] == "code-interpreter-v1"
+    assert manifest["runtime"]["target"] == "eu"
     code, output = hosted.cli("env", "validate", "queue")
     assert code == 0, output
 

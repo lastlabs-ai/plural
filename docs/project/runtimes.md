@@ -19,7 +19,7 @@ There are three layers:
 
 | Layer | Who manages it | What it holds |
 | --- | --- | --- |
-| **Provider** | Plural | A place sandboxes can start, such as Daytona or Modal, and the settings and credentials it needs |
+| **Provider** | Plural | A place sandboxes can start, such as Daytona or Docker, and the settings and credentials it needs |
 | **Runtime template** | Account owners and admins | An approved configuration of one provider, credentials included. Some settings can be locked |
 | **Project Runtime** | Anyone who can edit the project | What Environments use. Starts from a template, or from a provider directly when the account allows it |
 
@@ -28,25 +28,18 @@ There are three layers:
 | Provider | Runs on | Needs |
 | --- | --- | --- |
 | Daytona | Cloud sandbox | `DAYTONA_API_KEY` |
-| E2B | Cloud sandbox | `E2B_API_KEY` |
-| Modal | Cloud sandbox, with optional GPUs | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` |
-| Blaxel | Cloud sandbox | `BL_API_KEY` and a workspace |
-| Cloudflare | Cloud sandbox on your Worker | `CLOUDFLARE_SANDBOX_TOKEN` and the Worker URL |
 | Docker | The machine running the Job | Docker |
 | Local | The machine running the Job | Nothing; no isolation |
 
-AWS, Google Cloud, and Azure deployments in your own cloud account are coming soon.
-
-The SDK starts Daytona, Docker, and Local sandboxes itself. You can configure E2B,
-Modal, Blaxel, and Cloudflare Runtimes today. To run on them locally you need a
-provider plugin that registers the provider; see
-[Providers and integrations](../reference/integrations.md).
+E2B, Modal, Blaxel, and Cloudflare sandboxes are coming soon, as are deployments in
+your own AWS, Google Cloud, or Azure account. They are listed so you can see what each
+will need, but Runtimes can't be created on them yet.
 
 See every setting a provider takes, with an explanation of each:
 
 ```bash
 plural runtime providers
-plural runtime provider modal
+plural runtime provider daytona
 ```
 
 ## Create a Runtime
@@ -61,8 +54,8 @@ plural runtime create
 In a script, name the provider or template and pass settings as `key=value`:
 
 ```bash
-export MODAL_TOKEN_ID=ak-... MODAL_TOKEN_SECRET=as-...
-plural runtime create "GPU box" --provider modal --set gpu=A10G --set memory_mb=16384 \
+export DAYTONA_API_KEY=dtn_...
+plural runtime create "Big box" --provider daytona --set cpus=4 --set memory_mb=8192 \
   --credentials-from-env --no-input
 ```
 
@@ -88,7 +81,7 @@ afterwards, and never stores them in an Environment.
 `environment.yaml`:
 
 ```bash
-plural runtime use gpu-box ticket-triage
+plural runtime use big-box ticket-triage
 plural env push ticket-triage
 ```
 
@@ -96,12 +89,11 @@ The `runtime` block then records which Runtime it came from:
 
 ```yaml
 runtime:
-  provider: modal
-  ref: gpu-box
-  app: plural-sandboxes
+  provider: daytona
+  ref: big-box
   image: python:3.12-slim
-  gpu: A10G
-  memory_mb: 16384
+  cpus: 4
+  memory_mb: 8192
   network: public
   timeout_seconds: 300
 ```
@@ -140,7 +132,7 @@ The organization's **Runtime policy** decides what members may do:
 
 ```bash
 plural runtime policy
-plural runtime policy set --mode templates-only --allow daytona --allow modal
+plural runtime policy set --mode templates-only --allow daytona
 ```
 
 - `open`, the default, lets members configure any allowed provider directly.
