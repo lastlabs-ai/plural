@@ -27,6 +27,7 @@ from plural.sandbox.catalog import (
     RuntimeSettingsError,
     clean_credentials,
     clean_settings,
+    require_provider,
     resolved_settings,
     runtime_environ,
     runtime_from_settings,
@@ -117,6 +118,22 @@ def test_runtime_from_settings_maps_fields_and_placement() -> None:
     assert runtime.requested_target is ExecutionTarget.REMOTE
     assert settings_from_runtime(runtime)["gpu"] == "H100"
     assert runtime_environ("daytona", {"target": "eu"}) == {"DAYTONA_TARGET": "eu"}
+
+
+def test_sizes_come_in_steps_and_provider_defaults_are_never_applied() -> None:
+    daytona = require_provider("daytona")
+    cpus, memory = daytona.field("cpus"), daytona.field("memory_mb")
+    assert cpus is not None and cpus.kind == "integer" and cpus.provider_default == 1
+    assert memory is not None and memory.step == 1024
+    with pytest.raises(RuntimeSettingsError, match="whole number"):
+        clean_settings("daytona", {"cpus": 1.5})
+    with pytest.raises(RuntimeSettingsError, match="multiple of 1024"):
+        clean_settings("daytona", {"memory_mb": 1500})
+    with pytest.raises(RuntimeSettingsError, match="multiple of 0.25"):
+        clean_settings("modal", {"cpus": 0.3})
+    assert clean_settings("modal", {"cpus": "1.75"}) == {"cpus": 1.75}
+    resolved = resolved_settings("daytona", {})
+    assert "cpus" not in resolved and "memory_mb" not in resolved
 
 
 @pytest.mark.parametrize(

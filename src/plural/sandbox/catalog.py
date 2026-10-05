@@ -72,10 +72,20 @@ class RuntimeField(SandboxModel):
     group: FieldGroup = "machine"
     required: bool = False
     default: str | int | float | bool | None = None
+    provider_default: str | int | float | None = Field(
+        default=None,
+        description="What the provider itself uses when the field is left unset. Shown "
+        "to people, never applied: unlike default, it does not enter resolved settings.",
+    )
     placeholder: str = ""
     unit: str = ""
     minimum: float | None = None
     maximum: float | None = None
+    step: float | None = Field(
+        default=None,
+        description="Increment between allowed values, counted from zero. "
+        "None means 1 for integers and any value for numbers.",
+    )
     options: tuple[RuntimeFieldOption, ...] = ()
     advanced: bool = False
 
@@ -135,30 +145,14 @@ def _image(default: str | None, help: str, placeholder: str = "") -> RuntimeFiel
 
 
 def _cpus(help: str = "Virtual CPU cores for each sandbox.", **extra: Any) -> RuntimeField:
-    return RuntimeField(
-        key="cpus",
-        label="CPU cores",
-        help=help,
-        kind="number",
-        unit="cores",
-        minimum=0.125,
-        maximum=64,
-        placeholder="Provider default",
-        **extra,
-    )
+    options: dict[str, Any] = {"kind": "integer", "minimum": 1, "maximum": 64, **extra}
+    return RuntimeField(key="cpus", label="CPU cores", help=help, unit="cores", **options)
 
 
 def _memory(help: str = "Memory for each sandbox.", **extra: Any) -> RuntimeField:
+    options: dict[str, Any] = {"minimum": 1024, "maximum": 524288, "step": 1024, **extra}
     return RuntimeField(
-        key="memory_mb",
-        label="Memory",
-        help=help,
-        kind="integer",
-        unit="MB",
-        minimum=128,
-        maximum=524288,
-        placeholder="Provider default",
-        **extra,
+        key="memory_mb", label="Memory", help=help, kind="integer", unit="MB", **options
     )
 
 
@@ -255,8 +249,8 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
                 group="image",
                 placeholder="my-snapshot",
             ),
-            _cpus(),
-            _memory(),
+            _cpus(provider_default=1),
+            _memory(provider_default=1024),
             *_network(("public", "no-network", "allowlist")),
             _timeout(),
             RuntimeField(
@@ -358,8 +352,14 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
                 advanced=True,
             ),
             _image("python:3.12-slim", "A registry image Modal pulls for each sandbox."),
-            _cpus(),
-            _memory(),
+            _cpus(
+                "CPU cores reserved for each sandbox, in steps of a quarter core.",
+                kind="number",
+                minimum=0.25,
+                step=0.25,
+                placeholder="Modal default",
+            ),
+            _memory(minimum=256, step=256, placeholder="Modal default"),
             RuntimeField(
                 key="gpu",
                 label="GPU",
@@ -428,7 +428,11 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
                 "A Blaxel sandbox image. Leave empty for Blaxel's base image.",
                 placeholder="blaxel/base-image:latest",
             ),
-            _memory("Memory for each sandbox. CPU scales with memory on Blaxel.", default=4096),
+            _memory(
+                "Memory for each sandbox. CPU scales with memory on Blaxel.",
+                minimum=2048,
+                default=4096,
+            ),
             RuntimeField(
                 key="region",
                 label="Region",
@@ -491,8 +495,20 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
         network_modes=("public", "no-network"),
         fields=(
             _image("python:3.12-slim", "The image each Trial's container starts from."),
-            _cpus("CPU cores the container may use."),
-            _memory("Memory the container may use."),
+            _cpus(
+                "CPU cores the container may use, in steps of half a core. Leave empty "
+                "for no limit.",
+                kind="number",
+                minimum=0.5,
+                step=0.5,
+                placeholder="No limit",
+            ),
+            _memory(
+                "Memory the container may use. Leave empty for no limit.",
+                minimum=128,
+                step=128,
+                placeholder="No limit",
+            ),
             RuntimeField(
                 key="pids",
                 label="Process limit",
@@ -601,6 +617,10 @@ def _number(field: RuntimeField, value: Any) -> int | float:
         )
     if field.maximum is not None and number > field.maximum:
         raise RuntimeSettingsError(f"{field.label} must be at most {field.maximum:g}{_unit(field)}")
+    if field.step and abs(number / field.step - round(number / field.step)) > 1e-9:
+        raise RuntimeSettingsError(
+            f"{field.label} must be a multiple of {field.step:g}{_unit(field)}"
+        )
     return number
 
 
