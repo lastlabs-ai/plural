@@ -373,3 +373,79 @@ def test_local_runs_load_missing_credentials_from_the_project_runtime(
     assert os.environ["DAYTONA_TARGET"] == "eu"
     monkeypatch.delenv("DAYTONA_API_KEY")
     monkeypatch.delenv("DAYTONA_TARGET")
+
+
+def test_daytona_runtimes_default_to_plurals_account(
+    hosted: Hosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, output = hosted.cli("runtime", "create", "Box", "--provider", "daytona", "--no-input")
+    assert code == 0, output
+    assert "billed to your credits as compute usage" in output
+    assert hosted.fake.runtimes[0]["credential_mode"] == "plural"
+    code, output = hosted.cli("runtime", "list")
+    assert "plural" in output
+
+    monkeypatch.setenv("DAYTONA_API_KEY", "dtn_secret_1234")
+    code, output = hosted.cli(
+        "runtime", "create", "Own", "--provider", "daytona", "--credentials-from-env", "--no-input"
+    )
+    assert code == 0, output
+    assert hosted.fake.runtimes[1]["credential_mode"] == "own"
+    code, output = hosted.cli(
+        "runtime",
+        "create",
+        "Both",
+        "--provider",
+        "daytona",
+        "--plural-credentials",
+        "--credentials-from-env",
+        "--no-input",
+    )
+    assert code == 1 and "--own-credentials" in output
+    code, output = hosted.cli(
+        "runtime", "create", "Docker", "--provider", "docker", "--plural-credentials", "--no-input"
+    )
+    assert code == 1 and "cannot start Docker sandboxes" in output
+
+
+def test_plural_account_runtimes_start_sandboxes_through_plural(
+    hosted: Hosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from plural.cli.run_commands import _runtime_credentials
+    from plural.sandbox import DaytonaProvider, default_registry
+    from plural.sandbox.models import ExecRequest, FileUpload, SandboxRequirements
+
+    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
+    code, output = hosted.cli("runtime", "create", "Day", "--provider", "daytona", "--no-input")
+    assert code == 0, output
+    runtime = runtime_from_settings("daytona", {}, ref="day")
+
+    class Plan:
+        class spec:  # noqa: N801
+            tasks = [type("Task", (), {"environment": type("Env", (), {"runtime": runtime})()})()]
+
+    try:
+        _runtime_credentials(Workspace(hosted.project), Plan(), err=True)  # type: ignore[arg-type]
+        assert "DAYTONA_API_KEY" not in os.environ
+        provider = default_registry.get("daytona")
+
+        async def run() -> tuple[bytes, str]:
+            assert (await provider.capabilities()).available
+            handle = await provider.create(SandboxRequirements(image="python:3.12-slim"))
+            await provider.upload_files(handle, [FileUpload(path="a.txt", data=b"hello")])
+            result = await provider.exec(handle, ExecRequest(command=("echo", "hi")))
+            (downloaded,) = await provider.download_files(handle, ["a.txt"])
+            await provider.destroy(handle)
+            return downloaded.data, result.stdout.decode()
+
+        data, stdout = asyncio.run(run())
+    finally:
+        default_registry.register(DaytonaProvider(), replace=True)
+    assert (data, stdout) == (b"hello", "echo hi")
+    (sandbox,) = hosted.fake.sandboxes.values()
+    assert sandbox["runtime"] == "day"
+    assert sandbox["requirements"]["image"] == "python:3.12-slim"
+    assert sandbox["files"] == {"/workspace/a.txt": b"hello"}
+    assert sandbox["status"] == "ended"

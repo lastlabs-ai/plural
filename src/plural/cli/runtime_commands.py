@@ -76,6 +76,13 @@ FROM_ENV_OPTION = typer.Option(
     "--credentials-from-env",
     help="Read every credential the provider needs from environment variables of the same name.",
 )
+PLURAL_OPTION = typer.Option(
+    None,
+    "--plural-credentials/--own-credentials",
+    help="Start sandboxes on Plural's account, billed to your credits as compute usage, "
+    "or with your own provider credentials. Defaults to Plural's account where the "
+    "provider offers it, unless you pass credentials.",
+)
 NO_INPUT_OPTION = typer.Option(
     False, "--no-input", help="Never prompt; fail when something required is missing."
 )
@@ -286,6 +293,39 @@ def _ask_credentials(
     return credentials
 
 
+def _credential_mode(
+    spec: dict[str, Any],
+    plural: bool | None,
+    credentials: dict[str, str],
+    *,
+    interactive: bool,
+) -> str | None:
+    """``plural`` or ``own`` for a provider Plural can run on its account, else None."""
+    if not spec.get("plural_credentials"):
+        if plural:
+            fail(f"Plural cannot start {spec['name']} sandboxes on its account.")
+        return None
+    if plural is not None:
+        if plural and credentials:
+            fail("Pass credentials only with --own-credentials.")
+        return "plural" if plural else "own"
+    if credentials:
+        return "own"
+    if not interactive:
+        return "plural"
+    return _choose(
+        "Credentials",
+        [
+            (
+                "plural",
+                f"Plural's {spec['name']} account",
+                "No account needed; billed to your credits as compute usage",
+            ),
+            ("own", f"Your own {spec['name']} credentials", f"Billed by {spec['name']}"),
+        ],
+    )
+
+
 def _choose(prompt: str, choices: list[tuple[str, str, str]]) -> str:
     """Pick one of ``(value, label, detail)`` by number."""
     typer.echo("")
@@ -330,6 +370,8 @@ def _print_settings(spec: dict[str, Any], settings: dict[str, Any], locked: list
 
 
 def _credential_line(item: dict[str, Any]) -> str:
+    if item.get("credential_mode") == "plural":
+        return "Plural's account"
     hints = item.get("credential_hints") or {}
     if not hints:
         return "none saved"
@@ -438,7 +480,13 @@ def list_command(as_json: bool = JSON_OPTION) -> None:
                     item["name"],
                     item["provider"],
                     item["template"]["slug"] if item.get("template") else "custom",
-                    "ready" if item["credentials_ready"] else "missing",
+                    (
+                        "plural"
+                        if item["credential_source"] == "plural"
+                        else "ready"
+                        if item["credentials_ready"]
+                        else "missing"
+                    ),
                     item["environment_count"],
                 )
                 for item in items
@@ -474,7 +522,9 @@ def show_command(
                 ),
                 (
                     "Credentials",
-                    ("ready" if item["credentials_ready"] else "missing")
+                    f"Plural's {spec['name']} account, billed as compute usage"
+                    if item["credential_source"] == "plural"
+                    else ("ready" if item["credentials_ready"] else "missing")
                     + f" · from the {item['credential_source']}",
                 ),
                 ("Environments", str(item["environment_count"])),
@@ -500,6 +550,7 @@ def create_command(
     settings: list[str] | None = SET_OPTION,
     credential: list[str] | None = CREDENTIAL_OPTION,
     credentials_from_env: bool = FROM_ENV_OPTION,
+    plural: bool | None = PLURAL_OPTION,
     description: str = typer.Option("", "--description", help="What this Runtime is for."),
     advanced: bool = typer.Option(False, "--advanced", help="Also prompt for advanced settings."),
     no_input: bool = NO_INPUT_OPTION,
@@ -559,11 +610,13 @@ def create_command(
         answered = _ask_settings(spec, base, locked=locked, advanced=advanced)
         chosen = {key: value for key, value in answered.items() if base.get(key) != value}
     credentials: dict[str, str] = {}
+    mode: str | None = None
     if chosen_template is None:
         credentials = _parse_credentials(spec, credential, from_env=credentials_from_env)
-        if interactive and spec["credentials"]:
+        mode = _credential_mode(spec, plural, credentials, interactive=interactive)
+        if interactive and spec["credentials"] and mode != "plural":
             credentials = _ask_credentials(spec, credentials, keeping=False)
-    elif credential or credentials_from_env:
+    elif credential or credentials_from_env or plural is not None:
         fail("A Runtime from a template uses the template's credentials.")
     payload: dict[str, Any] = {
         "name": name,
@@ -571,6 +624,8 @@ def create_command(
         "settings": chosen,
         "credentials": credentials,
     }
+    if mode is not None:
+        payload["credential_mode"] = mode
     if chosen_template is not None:
         payload["template_id"] = chosen_template["id"]
     else:
@@ -580,7 +635,12 @@ def create_command(
     def text() -> None:
         origin = f"from template {chosen_template['slug']}" if chosen_template else "custom"
         success(f"Created Runtime {item['slug']} in project {project} ({spec['name']}, {origin}).")
-        if not item["credentials_ready"]:
+        if item["credential_source"] == "plural":
+            note(
+                f"Its sandboxes start on Plural's {spec['name']} account and are billed to "
+                "your credits as compute usage."
+            )
+        elif not item["credentials_ready"]:
             note(
                 "It has no credentials yet. Add them with `plural runtime edit "
                 f"{item['slug']} --credential <KEY>`."
@@ -602,6 +662,7 @@ def edit_command(
     ),
     credential: list[str] | None = CREDENTIAL_OPTION,
     credentials_from_env: bool = FROM_ENV_OPTION,
+    plural: bool | None = PLURAL_OPTION,
     name: str | None = typer.Option(None, "--name", help="A new name."),
     description: str | None = typer.Option(None, "--description", help="A new description."),
     advanced: bool = typer.Option(False, "--advanced", help="Also prompt for advanced settings."),
@@ -621,11 +682,13 @@ def edit_command(
         overrides.pop(key, None)
     overrides.update(_parse_settings(settings))
     custom = item.get("template") is None
-    changed_anything = any((settings, unset, credential, credentials_from_env, name, description))
+    changed_anything = any(
+        (settings, unset, credential, credentials_from_env, name, description)
+    ) or (plural is not None)
     credentials = (
         _parse_credentials(spec, credential, from_env=credentials_from_env) if custom else {}
     )
-    if not custom and (credential or credentials_from_env):
+    if not custom and (credential or credentials_from_env or plural is not None):
         fail("This Runtime uses its template's credentials. Ask an admin to change them.")
     if _interactive(no_input) and not changed_anything:
         locked = frozenset(item.get("locked_fields") or [])
@@ -637,6 +700,10 @@ def edit_command(
     payload: dict[str, Any] = {"settings": overrides}
     if credentials:
         payload["credentials"] = credentials
+    if plural is not None or credentials:
+        mode = _credential_mode(spec, plural, credentials, interactive=False)
+        if mode is not None:
+            payload["credential_mode"] = mode
     if name is not None:
         payload["name"] = name
     if description is not None:
@@ -801,6 +868,7 @@ def template_create(
         "--share-credentials/--no-share-credentials",
         help="Let members' local runs use this template's credentials.",
     ),
+    plural: bool | None = PLURAL_OPTION,
     description: str = typer.Option("", "--description", help="What this template is for."),
     advanced: bool = typer.Option(False, "--advanced", help="Also prompt for advanced settings."),
     no_input: bool = NO_INPUT_OPTION,
@@ -830,7 +898,8 @@ def template_create(
     locked = list(lock or [])
     if interactive and not settings:
         chosen = _ask_settings(spec, {}, advanced=advanced)
-    if interactive and spec["credentials"]:
+    mode = _credential_mode(spec, plural, credentials, interactive=interactive)
+    if interactive and spec["credentials"] and mode != "plural":
         credentials = _ask_credentials(spec, credentials, keeping=False)
     if interactive and not lock and spec["fields"]:
         typer.echo("")
@@ -847,21 +916,22 @@ def template_create(
             show_default=False,
         )
         locked = [item.strip() for item in answer.split(",") if item.strip()]
-    if interactive and spec["credentials"] and not share_credentials:
+    if interactive and spec["credentials"] and mode != "plural" and not share_credentials:
         share_credentials = typer.confirm(
             "\nLet members' local `plural run` use these credentials?", default=False
         )
-    item = studio.runtimes.create_template(
-        {
-            "name": name,
-            "description": description,
-            "provider": provider,
-            "settings": chosen,
-            "credentials": credentials,
-            "locked_fields": locked,
-            "share_credentials": share_credentials,
-        }
-    )
+    payload: dict[str, Any] = {
+        "name": name,
+        "description": description,
+        "provider": provider,
+        "settings": chosen,
+        "credentials": credentials,
+        "locked_fields": locked,
+        "share_credentials": share_credentials,
+    }
+    if mode is not None:
+        payload["credential_mode"] = mode
+    item = studio.runtimes.create_template(payload)
 
     def text() -> None:
         success(f"Created Runtime template {item['slug']} ({spec['name']}).")
@@ -888,6 +958,7 @@ def template_edit(
         "--share-credentials/--no-share-credentials",
         help="Whether members' local runs may use this template's credentials.",
     ),
+    plural: bool | None = PLURAL_OPTION,
     name: str | None = typer.Option(None, "--name", help="A new name."),
     description: str | None = typer.Option(None, "--description", help="A new description."),
     as_json: bool = JSON_OPTION,
@@ -904,6 +975,10 @@ def template_edit(
     credentials = _parse_credentials(spec, credential, from_env=credentials_from_env)
     if credentials:
         payload["credentials"] = credentials
+    if plural is not None or credentials:
+        mode = _credential_mode(spec, plural, credentials, interactive=False)
+        if mode is not None:
+            payload["credential_mode"] = mode
     if lock is not None:
         payload["locked_fields"] = lock
     if share_credentials is not None:

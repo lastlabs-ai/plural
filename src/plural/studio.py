@@ -911,6 +911,7 @@ class Studio:
         content: bytes | None = None,
         content_type: str | None = None,
         project: bool = True,
+        timeout: float | None = 60,
     ) -> httpx.Response:
         if json is not None and content is not None:
             raise InvalidRequestError("hosted request cannot contain JSON and raw content")
@@ -924,7 +925,7 @@ class Studio:
                 "json": json,
                 "params": params,
                 "content": content,
-                "timeout": 60,
+                "timeout": timeout,
             }
             response = self._client().request(method, url, **kwargs)
             if response.status_code == 401 and attempt == 0 and self._refresh is not None:
@@ -947,6 +948,7 @@ class Studio:
         content: bytes | None = None,
         content_type: str | None = None,
         project: bool = True,
+        timeout: float | None = 60,
     ) -> Any:
         response = self._send(
             method,
@@ -956,13 +958,14 @@ class Studio:
             content=content,
             content_type=content_type,
             project=project,
+            timeout=timeout,
         )
         if response.status_code == 204 or not response.content or method == "HEAD":
             return {}
         return response.json()
 
-    def request_bytes(self, method: str, path: str) -> bytes:
-        return self._send(method, path).content
+    def request_bytes(self, method: str, path: str, *, params: JsonObject | None = None) -> bytes:
+        return self._send(method, path, params=params).content
 
     def watch(self, path: str, *, cursor: int = 0) -> Iterator[JsonObject]:
         headers = {**self._headers(), "Accept": "text/event-stream"}

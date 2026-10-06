@@ -80,6 +80,15 @@ class _OfficialSandbox:
         self.value = value
 
     @property
+    def resources(self) -> tuple[float, float, float]:
+        """vCPUs, memory GiB, and disk GiB Daytona allotted."""
+        return (
+            float(getattr(self.value, "cpu", 0) or 0),
+            float(getattr(self.value, "memory", 0) or 0),
+            float(getattr(self.value, "disk", 0) or 0),
+        )
+
+    @property
     def sandbox_id(self) -> str:
         return str(getattr(self.value, "id", None) or getattr(self.value, "sandbox_id", None))
 
@@ -123,16 +132,43 @@ class _OfficialSandbox:
 
 
 class OfficialDaytonaAdapter:
-    """Lazy adapter for the official ``daytona`` async SDK."""
+    """Lazy adapter for the official ``daytona`` async SDK.
 
-    def __init__(self) -> None:
+    Args:
+        api_key: Use this key instead of ``DAYTONA_API_KEY``.
+        api_url: Use this API instead of ``DAYTONA_API_URL`` or Daytona Cloud.
+        target: Use this region instead of ``DAYTONA_TARGET``.
+        create_options: Extra sandbox parameters for every create, such as
+            ``labels``, ``auto_stop_interval``, ``ttl_minutes``, or ``ephemeral``.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        api_url: str | None = None,
+        target: str | None = None,
+        create_options: Mapping[str, Any] | None = None,
+    ) -> None:
         try:
-            from daytona import AsyncDaytona
+            from daytona import AsyncDaytona, DaytonaConfig
         except ImportError as exc:  # pragma: no cover - dependency-gated
             raise ProviderUnavailableError("install plural[daytona]") from exc
-        self._client = AsyncDaytona()
+        if api_key or api_url or target:
+            self._client = AsyncDaytona(
+                DaytonaConfig(api_key=api_key, api_url=api_url, target=target)
+            )
+        else:
+            self._client = AsyncDaytona()
+        self._create_options = dict(create_options or {})
 
-    async def create(self, requirements: SandboxRequirements) -> DaytonaSandboxAdapter:
+    async def create(
+        self,
+        requirements: SandboxRequirements,
+        *,
+        options: Mapping[str, Any] | None = None,
+    ) -> DaytonaSandboxAdapter:
+        """Create one sandbox; ``options`` add to the adapter's create options."""
         from daytona import (
             CreateSandboxFromImageParams,
             CreateSandboxFromSnapshotParams,
@@ -151,15 +187,19 @@ class OfficialDaytonaAdapter:
                 network["domain_allow_list"] = values
         resources = None
         if requirements.resources.configured:
+            cpu = requirements.resources.cpu
+            memory_mb = requirements.resources.memory_mb
+            # Daytona sizes sandboxes in whole vCPUs and whole GiB.
             resources = Resources(
-                cpu=requirements.resources.cpu,
-                memory=(
-                    requirements.resources.memory_mb / 1024
-                    if requirements.resources.memory_mb is not None
-                    else None
-                ),
+                cpu=max(1, round(cpu)) if cpu is not None else None,
+                memory=max(1, round(memory_mb / 1024)) if memory_mb is not None else None,
             )
-        common = {**network, "resources": resources}
+        common = {
+            **self._create_options,
+            **dict(options or {}),
+            **network,
+            "resources": resources,
+        }
         image: Any = requirements.image
         if requirements.declarative_image is not None:
             specification = requirements.declarative_image
@@ -178,9 +218,17 @@ class OfficialDaytonaAdapter:
         value = await self._client.create(params, timeout=timeout)
         return _OfficialSandbox(value)
 
+    async def get(self, sandbox_id: str) -> DaytonaSandboxAdapter:
+        """Reattach to a sandbox this client's account owns."""
+        return _OfficialSandbox(await self._client.get(sandbox_id))
+
     async def delete(self, sandbox: DaytonaSandboxAdapter) -> None:
         official = cast(_OfficialSandbox, sandbox)
         await self._client.delete(official.value)
+
+    async def close(self) -> None:
+        """Close the client's HTTP connections."""
+        await self._client.close()
 
 
 class DaytonaProvider(SandboxProvider):

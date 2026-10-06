@@ -1507,20 +1507,33 @@ This section is generated from the Typer application. Run `uv run python scripts
 │   name      <str>  Runtime name, such as 'GPU sandbox'.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --template              -t      <str>  Start from this Runtime template (slug or id).            │
-│ --provider              -p      <str>  Configure a provider directly instead of a template.      │
-│ --set                           <str>  A setting as key=value, such as --set cpus=2. Repeat for  │
-│                                        more. See `plural runtime provider <id>` for every key.   │
-│ --credential                    <str>  A credential name, such as DAYTONA_API_KEY, to be         │
-│                                        prompted for without echoing; KEY=VALUE also works but    │
-│                                        leaves the value in your shell history.                   │
-│ --credentials-from-env                 Read every credential the provider needs from environment │
-│                                        variables of the same name.                               │
-│ --description                   <str>  What this Runtime is for.                                 │
-│ --advanced                             Also prompt for advanced settings.                        │
-│ --no-input                             Never prompt; fail when something required is missing.    │
-│ --json                                 Print machine-readable JSON.                              │
-│ --help                                 Show this message and exit.                               │
+│ --template              -t                       <str>  Start from this Runtime template (slug   │
+│                                                         or id).                                  │
+│ --provider              -p                       <str>  Configure a provider directly instead of │
+│                                                         a template.                              │
+│ --set                                            <str>  A setting as key=value, such as --set    │
+│                                                         cpus=2. Repeat for more. See `plural     │
+│                                                         runtime provider <id>` for every key.    │
+│ --credential                                     <str>  A credential name, such as               │
+│                                                         DAYTONA_API_KEY, to be prompted for      │
+│                                                         without echoing; KEY=VALUE also works    │
+│                                                         but leaves the value in your shell       │
+│                                                         history.                                 │
+│ --credentials-from-env                                  Read every credential the provider needs │
+│                                                         from environment variables of the same   │
+│                                                         name.                                    │
+│ --plural-credentials        --own-credentials           Start sandboxes on Plural's account,     │
+│                                                         billed to your credits as compute usage, │
+│                                                         or with your own provider credentials.   │
+│                                                         Defaults to Plural's account where the   │
+│                                                         provider offers it, unless you pass      │
+│                                                         credentials.                             │
+│ --description                                    <str>  What this Runtime is for.                │
+│ --advanced                                              Also prompt for advanced settings.       │
+│ --no-input                                              Never prompt; fail when something        │
+│                                                         required is missing.                     │
+│ --json                                                  Print machine-readable JSON.             │
+│ --help                                                  Show this message and exit.              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1556,20 +1569,30 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ *    runtime      <str>  Runtime slug or id. [required]                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --set                         <str>  A setting as key=value, such as --set cpus=2. Repeat for    │
-│                                      more. See `plural runtime provider <id>` for every key.     │
-│ --unset                       <str>  Return a setting to its default.                            │
-│ --credential                  <str>  A credential name, such as DAYTONA_API_KEY, to be prompted  │
-│                                      for without echoing; KEY=VALUE also works but leaves the    │
-│                                      value in your shell history.                                │
-│ --credentials-from-env               Read every credential the provider needs from environment   │
-│                                      variables of the same name.                                 │
-│ --name                        <str>  A new name.                                                 │
-│ --description                 <str>  A new description.                                          │
-│ --advanced                           Also prompt for advanced settings.                          │
-│ --no-input                           Never prompt; fail when something required is missing.      │
-│ --json                               Print machine-readable JSON.                                │
-│ --help                               Show this message and exit.                                 │
+│ --set                                          <str>  A setting as key=value, such as --set      │
+│                                                       cpus=2. Repeat for more. See `plural       │
+│                                                       runtime provider <id>` for every key.      │
+│ --unset                                        <str>  Return a setting to its default.           │
+│ --credential                                   <str>  A credential name, such as                 │
+│                                                       DAYTONA_API_KEY, to be prompted for        │
+│                                                       without echoing; KEY=VALUE also works but  │
+│                                                       leaves the value in your shell history.    │
+│ --credentials-from-env                                Read every credential the provider needs   │
+│                                                       from environment variables of the same     │
+│                                                       name.                                      │
+│ --plural-credentials      --own-credentials           Start sandboxes on Plural's account,       │
+│                                                       billed to your credits as compute usage,   │
+│                                                       or with your own provider credentials.     │
+│                                                       Defaults to Plural's account where the     │
+│                                                       provider offers it, unless you pass        │
+│                                                       credentials.                               │
+│ --name                                         <str>  A new name.                                │
+│ --description                                  <str>  A new description.                         │
+│ --advanced                                            Also prompt for advanced settings.         │
+│ --no-input                                            Never prompt; fail when something required │
+│                                                       is missing.                                │
+│ --json                                                Print machine-readable JSON.               │
+│ --help                                                Show this message and exit.                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1722,6 +1745,13 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --share-credentials         --no-share-credentials           Let members' local runs use this    │
 │                                                              template's credentials.             │
 │                                                              [default: no-share-credentials]     │
+│ --plural-credentials        --own-credentials                Start sandboxes on Plural's         │
+│                                                              account, billed to your credits as  │
+│                                                              compute usage, or with your own     │
+│                                                              provider credentials. Defaults to   │
+│                                                              Plural's account where the provider │
+│                                                              offers it, unless you pass          │
+│                                                              credentials.                        │
 │ --description                                         <str>  What this template is for.          │
 │ --advanced                                                   Also prompt for advanced settings.  │
 │ --no-input                                                   Never prompt; fail when something   │
@@ -1792,6 +1822,12 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --lock                                              <str>  Replace the locked settings.          │
 │ --share-credentials       --no-share-credentials           Whether members' local runs may use   │
 │                                                            this template's credentials.          │
+│ --plural-credentials      --own-credentials                Start sandboxes on Plural's account,  │
+│                                                            billed to your credits as compute     │
+│                                                            usage, or with your own provider      │
+│                                                            credentials. Defaults to Plural's     │
+│                                                            account where the provider offers it, │
+│                                                            unless you pass credentials.          │
 │ --name                                              <str>  A new name.                           │
 │ --description                                       <str>  A new description.                    │
 │ --json                                                     Print machine-readable JSON.          │

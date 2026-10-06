@@ -60,7 +60,9 @@ from plural.project.runs import (
 )
 from plural.project.sync import REBUILT_NOTE, PullStep, PushStep, pull_missing
 from plural.project.versions import holds_version, version_workspace, versioned
+from plural.sandbox import DaytonaProvider, default_registry
 from plural.sandbox.catalog import runtime_provider
+from plural.sandbox.hosted_daytona import HostedDaytonaAdapter
 from plural.studio import Studio
 
 job_app = typer.Typer(help="List, inspect, and rerun Jobs.", no_args_is_help=True)
@@ -677,7 +679,8 @@ def _runtime_credentials(space: Workspace, plan: RunPlan, *, err: bool) -> None:
     missing ones are set there, never in the Job's environment. Variables you
     already exported always win, and nothing is fetched when they cover the
     provider or when the Runtime's owner does not allow local runs to use its
-    credentials.
+    credentials. A Runtime on Plural's own account gets no credentials at all:
+    its sandboxes start through Plural, which bills them as compute usage.
     """
     refs = {
         task.environment.runtime.ref: task.environment.runtime.provider
@@ -689,6 +692,8 @@ def _runtime_credentials(space: Workspace, plan: RunPlan, *, err: bool) -> None:
     studio = _hosted_studio(space, required=False)
     if studio is None:
         return
+    hosted: dict[str, str] = {}
+    own: dict[str, str] = {}
     for ref, provider in sorted(refs.items()):
         spec = runtime_provider(provider)
         if spec is None or not any(
@@ -700,9 +705,29 @@ def _runtime_credentials(space: Workspace, plan: RunPlan, *, err: bool) -> None:
         except PluralError as exc:
             typer.echo(f"! Runtime {ref}: {exc} Using credentials from your environment.", err=True)
             continue
+        if grant.get("credentials") == "plural":
+            hosted.setdefault(provider, ref)
+            continue
+        own.setdefault(provider, ref)
         for key, value in (grant.get("environ") or {}).items():
             os.environ.setdefault(str(key), str(value))
         typer.echo(f"Using credentials from project Runtime {ref}.", err=err)
+    for provider, ref in sorted(hosted.items()):
+        if provider in own:
+            raise ProjectError(
+                f"Runtime {ref} starts {provider} sandboxes on Plural's account and "
+                f"Runtime {own[provider]} on your own. Run their Environments separately."
+            )
+        if provider != "daytona":
+            continue
+        default_registry.register(
+            DaytonaProvider(adapter=HostedDaytonaAdapter(studio, runtime=ref)), replace=True
+        )
+        typer.echo(
+            f"Starting Daytona sandboxes on Plural's account for Runtime {ref}. "
+            "They are billed to your credits as compute usage.",
+            err=err,
+        )
 
 
 def _run_environ(current: Session) -> dict[str, str]:

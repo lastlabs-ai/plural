@@ -27,7 +27,7 @@ There are three layers:
 
 | Provider | Runs on | Needs |
 | --- | --- | --- |
-| Daytona | Cloud sandbox | `DAYTONA_API_KEY` |
+| Daytona | Cloud sandbox | Nothing on Plural's account, or your own `DAYTONA_API_KEY` |
 | Docker | The machine running the Job | Docker |
 | Local | The machine running the Job | Nothing; no isolation |
 
@@ -54,10 +54,31 @@ plural runtime create
 In a script, name the provider or template and pass settings as `key=value`:
 
 ```bash
+plural runtime create "Big box" --provider daytona --set cpus=4 --set memory_mb=8192 --no-input
+```
+
+### Plural's Daytona account or your own
+
+A Daytona Runtime starts its sandboxes on Plural's Daytona account unless you give it
+your own API key. You don't need a Daytona account, and sandboxes are billed to your
+credits as compute usage, by the vCPU, memory, and disk they use for as long as they
+run. The **Usage** page shows compute separately from model usage.
+
+On Plural's account, `plural run` asks Plural to start each sandbox and relays commands
+and files to it. The API key never reaches your machine. A sandbox that sits idle for
+30 minutes is stopped, and one that runs for 6 hours is ended. Custom API URLs and
+snapshots need your own key, because they belong to your Daytona organization.
+
+To use your own Daytona account instead, pass credentials, or `--own-credentials`:
+
+```bash
 export DAYTONA_API_KEY=dtn_...
 plural runtime create "Big box" --provider daytona --set cpus=4 --set memory_mb=8192 \
   --credentials-from-env --no-input
 ```
+
+`plural runtime edit big-box --plural-credentials` switches back and deletes the saved
+key.
 
 `--credentials-from-env` reads every credential the provider needs from environment
 variables of the same name. `--credential DAYTONA_API_KEY` prompts for one value
@@ -106,8 +127,7 @@ editing a Runtime later does not change Environments that already use it. Run
 On pluralintel.com, open an Environment, go to its **Runtime** tab, and choose a
 project Runtime.
 
-When you run a Job on your machine and the provider's credentials are not already set
-in your shell, `plural run` fetches them from the project Runtime, if you are allowed
+When a Runtime uses your own credentials and they are not already set in your shell, `plural run` fetches them from the project Runtime, if you are allowed
 to use them. They are used only for that run and are never saved in the Job.
 
 ## Runtime templates and policy

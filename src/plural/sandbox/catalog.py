@@ -88,6 +88,11 @@ class RuntimeField(SandboxModel):
     )
     options: tuple[RuntimeFieldOption, ...] = ()
     advanced: bool = False
+    own_credentials_only: bool = Field(
+        default=False,
+        description="Only settable with the person's own credentials, because the value "
+        "belongs to their provider account. Refused on Plural's account.",
+    )
 
     @property
     def placement(self) -> bool:
@@ -121,6 +126,12 @@ class RuntimeProviderSpec(SandboxModel):
         "plugin when an installed provider plugin must register it.",
     )
     target: Literal["local", "docker", "remote"] = "remote"
+    plural_credentials: bool = Field(
+        default=False,
+        description="Plural can start this provider's sandboxes on its own account, "
+        "so a Runtime needs no credentials of its own. That usage is billed to the "
+        "account's credits as compute.",
+    )
     docs_url: str | None = None
     credentials_url: str | None = None
     network_modes: tuple[str, ...] = ("public",)
@@ -209,6 +220,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
         "image or a prebuilt snapshot. Supports compute limits and host allowlists.",
         category="sandbox",
         runner="built_in",
+        plural_credentials=True,
         docs_url="https://www.daytona.io/docs",
         credentials_url="https://app.daytona.io/dashboard/keys",
         network_modes=("public", "no-network", "allowlist"),
@@ -248,6 +260,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
                 "image or a snapshot, not both.",
                 group="image",
                 placeholder="my-snapshot",
+                own_credentials_only=True,
             ),
             _cpus(provider_default=1),
             _memory(provider_default=1024),
@@ -262,6 +275,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
                 group="placement",
                 placeholder="https://app.daytona.io/api",
                 advanced=True,
+                own_credentials_only=True,
             ),
         ),
     ),
