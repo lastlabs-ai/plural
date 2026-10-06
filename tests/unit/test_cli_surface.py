@@ -34,6 +34,7 @@ def test_top_level_commands_are_the_documented_set() -> None:
         "trial",
         "review",
         "models",
+        "runtime",
         "session",
     }
 
@@ -56,6 +57,21 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
         ("job", {"show", "list", "rerun", "push"}),
         ("trial", {"show", "rerun", "rescore"}),
         ("models", {"list"}),
+        (
+            "runtime",
+            {
+                "providers",
+                "provider",
+                "list",
+                "show",
+                "create",
+                "edit",
+                "delete",
+                "use",
+                "template",
+                "policy",
+            },
+        ),
     ],
 )
 def test_auth_project_job_and_model_verbs(group: str, verbs: set[str]) -> None:

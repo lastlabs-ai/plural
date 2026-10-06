@@ -21,6 +21,8 @@ from typing import Any
 import httpx
 import pytest
 
+from plural.sandbox.catalog import RUNTIME_PROVIDERS, runtime_from_settings, runtime_provider
+
 Hasher = Callable[[str, str, dict[str, Any]], str]
 COLLECTIONS = ("environments", "verifiers", "harnesses", "tasks", "agents", "benchmarks")
 KIND = {
@@ -65,6 +67,17 @@ class FakeHosted:
         ]
     )
     organization_models: list[str] | None = None
+    runtime_policy: dict[str, Any] = field(
+        default_factory=lambda: {
+            "account_type": "user",
+            "can_manage": True,
+            "mode": "open",
+            "allowed_providers": None,
+        }
+    )
+    runtime_templates: list[dict[str, Any]] = field(default_factory=list)
+    runtimes: list[dict[str, Any]] = field(default_factory=list)
+    sandboxes: dict[str, dict[str, Any]] = field(default_factory=dict)
     # ``collection/slug`` pairs whose revision pushes fail with a 500.
     failing: set[str] = field(default_factory=set)
     _ids: Iterator[int] = field(default_factory=lambda: itertools.count(1))
@@ -125,6 +138,14 @@ class FakeHosted:
             response = _ok(models)
             response.headers["X-Plural-Model-Scope"] = scope
             return response
+        if parts == ["runtime-providers"]:
+            return _ok([item.model_dump(mode="json") for item in RUNTIME_PROVIDERS])
+        if parts == ["runtime-policy"]:
+            if request.method == "PUT":
+                self.runtime_policy.update(body)
+            return _ok(self.runtime_policy)
+        if parts and parts[0] == "runtime-templates":
+            return self._runtime_templates(request, parts[1:], body)
         if parts and parts[0] == "projects":
             return self._projects(request, parts[1:], body, key, account)
         if parts and parts[0] == "packages":
@@ -134,6 +155,10 @@ class FakeHosted:
             return _error(400, "Project is required")
         if parts and parts[0] in COLLECTIONS:
             return self._collection(request, project_id, parts, body)
+        if parts and parts[0] == "runtimes":
+            return self._runtimes(request, parts[1:], body)
+        if parts[:2] == ["compute", "sandboxes"]:
+            return self._sandboxes(request, parts[2:], body)
         if parts == ["jobs"] and request.method == "POST":
             job = {"id": f"job_{next(self._ids)}", "status": "queued", **(body or {})}
             self.jobs.append(job)
@@ -166,6 +191,129 @@ class FakeHosted:
         if project is None or key.project_id not in {None, project["id"]}:
             return _error(404, "Project not found")
         return _ok(project)
+
+    def _runtime_templates(
+        self, request: httpx.Request, rest: list[str], body: Any
+    ) -> httpx.Response:
+        if not rest and request.method == "GET":
+            return _ok(self.runtime_templates)
+        if not rest and request.method == "POST":
+            credentials = body.pop("credentials", {})
+            body["credential_mode"] = _mode(body, credentials)
+            template = {
+                "id": f"rtt_{next(self._ids)}",
+                "slug": body["name"].lower().replace(" ", "-"),
+                "status": "active",
+                "project_runtime_count": 0,
+                "credential_hints": {key: "…" + value[-4:] for key, value in credentials.items()},
+                **body,
+            }
+            self.runtime_templates.append(template)
+            return _ok(template)
+        template = next(
+            (t for t in self.runtime_templates if rest[0] in {t["id"], t["slug"]}), None
+        )
+        if template is None:
+            return _error(404, "Runtime template not found")
+        if request.method == "PATCH":
+            body.pop("credentials", None)
+            template.update(body)
+        if request.method == "DELETE":
+            self.runtime_templates.remove(template)
+            return httpx.Response(204)
+        return _ok(template)
+
+    def _runtime_view(self, runtime: dict[str, Any]) -> dict[str, Any]:
+        template = next(
+            (t for t in self.runtime_templates if t["id"] == runtime.get("template_id")), None
+        )
+        settings = {**(template["settings"] if template else {}), **runtime["overrides"]}
+        mode = (template or runtime).get("credential_mode", "own")
+        return {
+            **runtime,
+            "template": template,
+            "settings": settings,
+            "locked_fields": template["locked_fields"] if template else [],
+            "credential_mode": mode,
+            "credential_source": (
+                "plural" if mode == "plural" else "template" if template else "runtime"
+            ),
+            "credentials_ready": mode == "plural" or bool(template or runtime["credential_hints"]),
+            "environment_count": 0,
+            "environment_runtime": runtime_from_settings(
+                runtime["provider"], settings, ref=runtime["slug"]
+            ).model_dump(mode="json"),
+        }
+
+    def _runtimes(self, request: httpx.Request, rest: list[str], body: Any) -> httpx.Response:
+        if not rest and request.method == "GET":
+            return _ok([self._runtime_view(item) for item in self.runtimes])
+        if not rest and request.method == "POST":
+            template = next(
+                (t for t in self.runtime_templates if t["id"] == body.get("template_id")), None
+            )
+            credentials = body.get("credentials") or {}
+            runtime = {
+                "id": f"rt_{next(self._ids)}",
+                "slug": body["name"].lower().replace(" ", "-"),
+                "name": body["name"],
+                "description": body.get("description", ""),
+                "provider": template["provider"] if template else body["provider"],
+                "template_id": template["id"] if template else None,
+                "overrides": body.get("settings") or {},
+                "credential_hints": {key: "…" + value[-4:] for key, value in credentials.items()},
+                "credential_mode": "own" if template else _mode(body, credentials),
+                "secrets": credentials,
+            }
+            self.runtimes.append(runtime)
+            return _ok(self._runtime_view(runtime))
+        runtime = next((r for r in self.runtimes if rest[0] in {r["id"], r["slug"]}), None)
+        if runtime is None:
+            return _error(404, "Runtime not found")
+        if rest[1:] == ["credentials"]:
+            mode = self._runtime_view(runtime)["credential_mode"]
+            return _ok(
+                {
+                    "provider": runtime["provider"],
+                    "credentials": mode,
+                    "environ": {} if mode == "plural" else runtime["secrets"],
+                }
+            )
+        if request.method == "PATCH" and "settings" in body:
+            runtime["overrides"] = body["settings"]
+        if request.method == "DELETE":
+            self.runtimes.remove(runtime)
+            return httpx.Response(204)
+        return _ok(self._runtime_view(runtime))
+
+    def _sandboxes(self, request: httpx.Request, rest: list[str], body: Any) -> httpx.Response:
+        if not rest and request.method == "POST":
+            sandbox = {
+                "id": f"cs_{next(self._ids)}",
+                "runtime": body["runtime"],
+                "requirements": body["requirements"],
+                "status": "running",
+                "files": {},
+                "commands": [],
+                "image_identity": body["requirements"].get("image"),
+            }
+            self.sandboxes[sandbox["id"]] = sandbox
+            return _ok({key: value for key, value in sandbox.items() if key != "files"})
+        sandbox = self.sandboxes.get(rest[0])
+        if sandbox is None:
+            return _error(404, "Sandbox not found")
+        if rest[1:] == ["exec"]:
+            sandbox["commands"].append(body)
+            return _ok({"exit_code": 0, "stdout": " ".join(body["command"]), "stderr": ""})
+        if rest[1:] == ["files"]:
+            path = request.url.params["path"]
+            if request.method == "PUT":
+                sandbox["files"][path] = request.content
+                return httpx.Response(204)
+            return httpx.Response(200, content=sandbox["files"][path])
+        if request.method == "DELETE":
+            sandbox["status"] = "ended"
+        return _ok({key: value for key, value in sandbox.items() if key != "files"})
 
     def _packages(self, request: httpx.Request, digest: str) -> httpx.Response:
         if request.method == "PUT":
@@ -314,3 +462,11 @@ def routed(monkeypatch: pytest.MonkeyPatch, fake: FakeHosted) -> Iterator[FakeHo
     monkeypatch.setattr(httpx, "request", client.request)
     monkeypatch.setattr(httpx, "stream", client.stream)
     yield fake
+
+
+def _mode(body: dict[str, Any], credentials: dict[str, str]) -> str:
+    """What the service stores: Plural's account by default where it is offered."""
+    if body.get("credential_mode"):
+        return str(body["credential_mode"])
+    spec = runtime_provider(str(body.get("provider") or ""))
+    return "plural" if spec and spec.plural_credentials and not credentials else "own"

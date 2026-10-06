@@ -181,13 +181,27 @@
       },
       "EnvironmentRuntime": {
         "additionalProperties": false,
-        "description": "Where an Environment runs: Docker, a trusted local process, or Daytona.",
+        "description": "Where an Environment runs: Docker, a trusted local process, or a remote sandbox.",
         "properties": {
           "provider": {
             "default": "docker",
             "minLength": 1,
             "title": "Provider",
             "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z0-9][a-z0-9-]{0,79}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Slug of the project Runtime this configuration was copied from. The machine fields hold that Runtime's settings as of the copy; credentials come from the project Runtime when a Job starts.",
+            "title": "Ref"
           },
           "placement": {
             "additionalProperties": {

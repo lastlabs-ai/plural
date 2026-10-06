@@ -28,7 +28,11 @@ from pydantic import TypeAdapter, ValidationError
 from plural.agents import Agent
 from plural.catalog import ModelCatalog
 from plural.environments import Environment
-from plural.environments.definition import EnvironmentResource, EnvironmentRuntime
+from plural.environments.definition import (
+    EnvironmentResource,
+    EnvironmentRuntime,
+    RuntimeVariable,
+)
 from plural.harness.models import Harness
 from plural.harness.retrieval import source_digest
 from plural.project.layout import (
@@ -51,6 +55,7 @@ from plural.project.manifests import (
     read_yaml_mapping,
     validation_problems,
 )
+from plural.sandbox.catalog import RuntimeSettingsError, runtime_from_settings, runtime_provider
 from plural.tasks import RELEASE_FIELDS, Benchmark, Task
 from plural.verifiers import (
     AgentVerifier,
@@ -350,18 +355,51 @@ def _build_environment(
     return environment
 
 
-def runtime_from_manifest(spec: Mapping[str, Any]) -> EnvironmentRuntime:
+def runtime_from_manifest(spec: Mapping[str, Any] | str) -> EnvironmentRuntime:
     """Build a Runtime from its preset keyword arguments.
 
     ``provider`` selects ``Runtime.docker()``, ``Runtime.local()``, or
     ``Runtime.daytona()``, so a manifest states only what differs from the
-    preset. Other providers take the full ``EnvironmentRuntime`` fields.
+    preset. Another catalog provider, such as ``modal``, takes its catalog
+    settings as flat keys (``gpu: A10G``). Other providers take the full
+    ``EnvironmentRuntime`` fields.
+
+    A bare string, or a mapping with only ``ref``, names a project Runtime
+    without copying its settings; run `plural runtime use` to copy them.
 
     Returns:
         The validated Runtime.
+
+    Raises:
+        ValueError: When the settings are invalid for the provider.
     """
+    if isinstance(spec, str):
+        spec = {"ref": spec}
     payload = dict(spec)
+    if "provider" not in payload and set(payload) <= {"ref", "variables"} and payload.get("ref"):
+        raise ValueError(
+            f"runtime names project Runtime {payload['ref']!r} but not its settings. "
+            f"Run `plural runtime use {payload['ref']}` to copy them into environment.yaml."
+        )
     provider = str(payload.pop("provider", "docker"))
+    catalog = runtime_provider(provider)
+    if (
+        catalog is not None
+        and set(payload)
+        <= {"ref", "variables", "placement", *(item.key for item in catalog.fields)}
+        and None not in payload.values()
+    ):
+        ref = payload.pop("ref", None)
+        variables = tuple(
+            RuntimeVariable.model_validate(item) for item in payload.pop("variables", ()) or ()
+        )
+        placement = payload.pop("placement", None) or {}
+        try:
+            return runtime_from_settings(
+                provider, {**placement, **payload}, ref=ref, variables=variables
+            )
+        except RuntimeSettingsError as exc:
+            raise ValueError(f"runtime: {exc}") from exc
     presets: dict[str, Callable[..., EnvironmentRuntime]] = {
         "docker": EnvironmentRuntime.docker,
         "local": EnvironmentRuntime.local,

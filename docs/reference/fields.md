@@ -237,9 +237,10 @@ Data or application supplied by an Environment.
 
 ## Runtime
 
-Where an Environment runs: Docker, a trusted local process, or Daytona.
+Where an Environment runs: Docker, a trusted local process, or a remote sandbox.
 
 - **`provider`** — `string`; optional. Default: `"docker"`. Constraints: `{"minLength": 1}`.
+- **`ref`** — `string | null`; optional. Default: `null`. Slug of the project Runtime this configuration was copied from. The machine fields hold that Runtime's settings as of the copy; credentials come from the project Runtime when a Job starts.
 - **`placement`** — `object`; optional.
 - **`variables`** — `array of RuntimeVariable`; optional. Default: `[]`.
 - **`image`** — `string | null`; optional. Default: `null`.

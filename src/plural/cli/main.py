@@ -9,6 +9,7 @@ from plural.cli.models_commands import models_app
 from plural.cli.project_commands import project_app
 from plural.cli.resource_commands import resource_app
 from plural.cli.run_commands import job_app, review_app, run, trial_app
+from plural.cli.runtime_commands import runtime_app
 from plural.cli.session import session_app
 from plural.project import KINDS
 
@@ -32,6 +33,7 @@ app.add_typer(job_app, name="job")
 app.add_typer(trial_app, name="trial")
 app.add_typer(review_app, name="review")
 app.add_typer(models_app, name="models")
+app.add_typer(runtime_app, name="runtime")
 app.add_typer(session_app, name="session")
 
 

@@ -323,6 +323,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ trial      Inspect and rerun Trials.                                                             │
 │ review     List and submit human reviews.                                                        │
 │ models     List the models you may run.                                                          │
+│ runtime    Choose where Environments run.                                                        │
 │ session    Export and redeploy portable agent sessions.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -1459,6 +1460,446 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --follow                                      With --hosted, stream progress.                    │
 │ --json                                        Print machine-readable JSON.                       │
 │ --help                                        Show this message and exit.                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime`
+
+```text
+
+ Usage: plural runtime [OPTIONS] COMMAND [ARGS]...
+
+ Choose where Environments run.
+
+ Start with `plural runtime providers` to see what each provider needs, then `plural runtime
+ create` to add a Runtime to your project and `plural runtime use <runtime> <environment>` to run
+ an Environment on it.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ providers  List the providers a Runtime can use and what each needs.                             │
+│ provider   Explain one provider: its credentials and every setting.                              │
+│ list       List the current project's Runtimes.                                                  │
+│ show       Show one project Runtime and the settings Environments copy from it.                  │
+│ create     Add a Runtime to the current project.                                                 │
+│ edit       Change a project Runtime's settings or credentials.                                   │
+│ delete     Delete a project Runtime and its saved credentials.                                   │
+│ use        Run Environments on a project Runtime by copying its settings into environment.yaml.  │
+│ template   Runtime templates: an account's approved provider configurations. Admins only.        │
+│ policy     Which Runtimes an organization's members may create and run on.                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime create`
+
+```text
+
+ Usage: plural runtime create [OPTIONS] [name]
+
+ Add a Runtime to the current project.
+
+ Run it with no options for a guided setup that explains each setting. In a
+ script, pass --template or --provider with --set and --credentials-from-env.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Runtime name, such as 'GPU sandbox'.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --template              -t                       <str>  Start from this Runtime template (slug   │
+│                                                         or id).                                  │
+│ --provider              -p                       <str>  Configure a provider directly instead of │
+│                                                         a template.                              │
+│ --set                                            <str>  A setting as key=value, such as --set    │
+│                                                         cpus=2. Repeat for more. See `plural     │
+│                                                         runtime provider <id>` for every key.    │
+│ --credential                                     <str>  A credential name, such as               │
+│                                                         DAYTONA_API_KEY, to be prompted for      │
+│                                                         without echoing; KEY=VALUE also works    │
+│                                                         but leaves the value in your shell       │
+│                                                         history.                                 │
+│ --credentials-from-env                                  Read every credential the provider needs │
+│                                                         from environment variables of the same   │
+│                                                         name.                                    │
+│ --plural-credentials        --own-credentials           Start sandboxes on Plural's account,     │
+│                                                         billed to your credits as compute usage, │
+│                                                         or with your own provider credentials.   │
+│                                                         Defaults to Plural's account where the   │
+│                                                         provider offers it, unless you pass      │
+│                                                         credentials.                             │
+│ --description                                    <str>  What this Runtime is for.                │
+│ --advanced                                              Also prompt for advanced settings.       │
+│ --no-input                                              Never prompt; fail when something        │
+│                                                         required is missing.                     │
+│ --json                                                  Print machine-readable JSON.             │
+│ --help                                                  Show this message and exit.              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime delete`
+
+```text
+
+ Usage: plural runtime delete [OPTIONS] {runtime}
+
+ Delete a project Runtime and its saved credentials.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    runtime      <str>  Runtime slug or id. [required]                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --yes   -y        Do not ask for confirmation.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime edit`
+
+```text
+
+ Usage: plural runtime edit [OPTIONS] {runtime}
+
+ Change a project Runtime's settings or credentials.
+
+ Environments keep the settings they copied. Run `plural runtime use` again
+ to update them.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    runtime      <str>  Runtime slug or id. [required]                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --set                                          <str>  A setting as key=value, such as --set      │
+│                                                       cpus=2. Repeat for more. See `plural       │
+│                                                       runtime provider <id>` for every key.      │
+│ --unset                                        <str>  Return a setting to its default.           │
+│ --credential                                   <str>  A credential name, such as                 │
+│                                                       DAYTONA_API_KEY, to be prompted for        │
+│                                                       without echoing; KEY=VALUE also works but  │
+│                                                       leaves the value in your shell history.    │
+│ --credentials-from-env                                Read every credential the provider needs   │
+│                                                       from environment variables of the same     │
+│                                                       name.                                      │
+│ --plural-credentials      --own-credentials           Start sandboxes on Plural's account,       │
+│                                                       billed to your credits as compute usage,   │
+│                                                       or with your own provider credentials.     │
+│                                                       Defaults to Plural's account where the     │
+│                                                       provider offers it, unless you pass        │
+│                                                       credentials.                               │
+│ --name                                         <str>  A new name.                                │
+│ --description                                  <str>  A new description.                         │
+│ --advanced                                            Also prompt for advanced settings.         │
+│ --no-input                                            Never prompt; fail when something required │
+│                                                       is missing.                                │
+│ --json                                                Print machine-readable JSON.               │
+│ --help                                                Show this message and exit.                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime list`
+
+```text
+
+ Usage: plural runtime list [OPTIONS]
+
+ List the current project's Runtimes.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime policy`
+
+```text
+
+ Usage: plural runtime policy [OPTIONS] COMMAND [ARGS]...
+
+ Which Runtimes an organization's members may create and run on.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ set  Set the organization's Runtime policy. Owners and admins only.                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime policy set`
+
+```text
+
+ Usage: plural runtime policy set [OPTIONS]
+
+ Set the organization's Runtime policy. Owners and admins only.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --mode         <str>  open lets members configure any allowed provider; templates-only limits │
+│                          them to the account's templates.                                        │
+│                          [required]                                                              │
+│    --allow        <str>  A provider members may use. Repeat for more. Omit for all.              │
+│    --json                Print machine-readable JSON.                                            │
+│    --help                Show this message and exit.                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime provider`
+
+```text
+
+ Usage: plural runtime provider [OPTIONS] {provider}
+
+ Explain one provider: its credentials and every setting.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    provider      <str>  Provider id, such as daytona or docker. [required]                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime providers`
+
+```text
+
+ Usage: plural runtime providers [OPTIONS]
+
+ List the providers a Runtime can use and what each needs.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime show`
+
+```text
+
+ Usage: plural runtime show [OPTIONS] {runtime}
+
+ Show one project Runtime and the settings Environments copy from it.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    runtime      <str>  Runtime slug or id. [required]                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime template`
+
+```text
+
+ Usage: plural runtime template [OPTIONS] COMMAND [ARGS]...
+
+ Runtime templates: an account's approved provider configurations. Admins only.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ list     List the account's Runtime templates.                                                   │
+│ show     Show one Runtime template.                                                              │
+│ create   Add a Runtime template to the account. Organization owners and admins only.             │
+│ edit     Change a Runtime template. Project Runtimes made from it follow the change.             │
+│ disable  Stop a template from being used, without deleting it.                                   │
+│ enable   Allow a disabled template to be used again.                                             │
+│ delete   Delete a template and its credentials. Refused while project Runtimes use it.           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime template create`
+
+```text
+
+ Usage: plural runtime template create [OPTIONS] [name]
+
+ Add a Runtime template to the account. Organization owners and admins only.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Template name, such as 'Daytona US'.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --provider              -p                            <str>  Provider id.                        │
+│ --set                                                 <str>  A setting as key=value, such as     │
+│                                                              --set cpus=2. Repeat for more. See  │
+│                                                              `plural runtime provider <id>` for  │
+│                                                              every key.                          │
+│ --credential                                          <str>  A credential name, such as          │
+│                                                              DAYTONA_API_KEY, to be prompted for │
+│                                                              without echoing; KEY=VALUE also     │
+│                                                              works but leaves the value in your  │
+│                                                              shell history.                      │
+│ --credentials-from-env                                       Read every credential the provider  │
+│                                                              needs from environment variables of │
+│                                                              the same name.                      │
+│ --lock                                                <str>  A setting project Runtimes may not  │
+│                                                              change. Repeat for more.            │
+│ --share-credentials         --no-share-credentials           Let members' local runs use this    │
+│                                                              template's credentials.             │
+│                                                              [default: no-share-credentials]     │
+│ --plural-credentials        --own-credentials                Start sandboxes on Plural's         │
+│                                                              account, billed to your credits as  │
+│                                                              compute usage, or with your own     │
+│                                                              provider credentials. Defaults to   │
+│                                                              Plural's account where the provider │
+│                                                              offers it, unless you pass          │
+│                                                              credentials.                        │
+│ --description                                         <str>  What this template is for.          │
+│ --advanced                                                   Also prompt for advanced settings.  │
+│ --no-input                                                   Never prompt; fail when something   │
+│                                                              required is missing.                │
+│ --json                                                       Print machine-readable JSON.        │
+│ --help                                                       Show this message and exit.         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime template delete`
+
+```text
+
+ Usage: plural runtime template delete [OPTIONS] {template}
+
+ Delete a template and its credentials. Refused while project Runtimes use it.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    template      <str>  Template slug or id. [required]                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --yes   -y        Do not ask for confirmation.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime template disable`
+
+```text
+
+ Usage: plural runtime template disable [OPTIONS] {template}
+
+ Stop a template from being used, without deleting it.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    template      <str>  Template slug or id. [required]                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime template edit`
+
+```text
+
+ Usage: plural runtime template edit [OPTIONS] {template}
+
+ Change a Runtime template. Project Runtimes made from it follow the change.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    template      <str>  Template slug or id. [required]                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --set                                               <str>  A setting as key=value, such as --set │
+│                                                            cpus=2. Repeat for more. See `plural  │
+│                                                            runtime provider <id>` for every key. │
+│ --unset                                             <str>  Return a setting to its default.      │
+│ --credential                                        <str>  A credential name, such as            │
+│                                                            DAYTONA_API_KEY, to be prompted for   │
+│                                                            without echoing; KEY=VALUE also works │
+│                                                            but leaves the value in your shell    │
+│                                                            history.                              │
+│ --credentials-from-env                                     Read every credential the provider    │
+│                                                            needs from environment variables of   │
+│                                                            the same name.                        │
+│ --lock                                              <str>  Replace the locked settings.          │
+│ --share-credentials       --no-share-credentials           Whether members' local runs may use   │
+│                                                            this template's credentials.          │
+│ --plural-credentials      --own-credentials                Start sandboxes on Plural's account,  │
+│                                                            billed to your credits as compute     │
+│                                                            usage, or with your own provider      │
+│                                                            credentials. Defaults to Plural's     │
+│                                                            account where the provider offers it, │
+│                                                            unless you pass credentials.          │
+│ --name                                              <str>  A new name.                           │
+│ --description                                       <str>  A new description.                    │
+│ --json                                                     Print machine-readable JSON.          │
+│ --help                                                     Show this message and exit.           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime template enable`
+
+```text
+
+ Usage: plural runtime template enable [OPTIONS] {template}
+
+ Allow a disabled template to be used again.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    template      <str>  Template slug or id. [required]                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime template list`
+
+```text
+
+ Usage: plural runtime template list [OPTIONS]
+
+ List the account's Runtime templates.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime template show`
+
+```text
+
+ Usage: plural runtime template show [OPTIONS] {template}
+
+ Show one Runtime template.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    template      <str>  Template slug or id. [required]                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime use`
+
+```text
+
+ Usage: plural runtime use [OPTIONS] {runtime} [environments]...
+
+ Run Environments on a project Runtime by copying its settings into environment.yaml.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    runtime           <str>  Runtime slug or id. [required]                                     │
+│      environments      <str>  Environments to run on it. Defaults to the only Environment, if    │
+│                               there is one.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --all           Every Environment in the project.                                                │
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

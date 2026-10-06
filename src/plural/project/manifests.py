@@ -53,7 +53,9 @@ class EnvironmentManifest(ManifestModel):
     Actions, State, Observations, and rewards are Python behavior in the class
     named by ``python``. ``runtime`` takes the keyword arguments of the matching
     ``Runtime`` preset (``Runtime.docker()``, ``Runtime.local()``, or
-    ``Runtime.daytona()``), selected by its ``provider``.
+    ``Runtime.daytona()``), selected by its ``provider``, or another catalog
+    provider's settings. ``ref`` records the project Runtime the settings were
+    copied from by `plural runtime use`.
     """
 
     name: str = Field(min_length=1)
