@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-06
+
+### Added
+
+- Runtimes: a reusable sandbox configuration a project's Environments run on. `plural runtime providers` and `plural runtime provider <provider>` explain every provider's settings and credentials; `plural runtime create`, `edit`, `show`, `list`, and `delete` manage a project's Runtimes, guided or with `--set key=value --no-input`; `plural runtime use <runtime> <environment>` copies one into an Environment's `runtime` block, recording its `ref`.
+- Runtime templates and policy for accounts: `plural runtime template` saves approved provider configurations, credentials included, with settings members can't change, and `plural runtime policy set --mode templates-only` keeps members on them.
+- Daytona Runtimes start their sandboxes on Plural's Daytona account by default, billed to your credits as compute usage, so no Daytona account is needed. `plural run` asks Plural to start each sandbox and relays commands and files to it; the API key never reaches your machine. Pass credentials or `--own-credentials` to use your own Daytona account, and `plural runtime edit <runtime> --plural-credentials` to switch back.
+- When a Runtime uses your own credentials and they aren't set in your shell, `plural run` fetches them from the project Runtime for that run only.
+
+### Changed
+
+- Machine sizes come in whole steps: whole CPU cores, and memory in GiB on Daytona.
+- E2B, Modal, Blaxel, and Cloudflare are listed as coming soon, as are AWS, Google Cloud, and Azure deployments. Runtimes can't be created on them yet.
+
 ## [0.19.0] - 2026-10-01
 
 ### Changed
