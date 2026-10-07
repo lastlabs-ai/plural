@@ -80,6 +80,8 @@ class _HostedSandbox:
             },
             timeout=(timeout or DEFAULT_EXEC_TIMEOUT_SECONDS) + EXEC_GRACE_SECONDS,
         )
+        if result.get("timed_out"):
+            raise TimeoutError(f"command timed out after {timeout} seconds")
         return (
             int(result.get("exit_code", 0)),
             str(result.get("stdout") or ""),

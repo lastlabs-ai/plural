@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 import os
 import shlex
 import time
@@ -116,15 +117,21 @@ class _OfficialSandbox:
         kwargs: dict[str, Any] = {
             "cwd": cwd,
             "env": dict(env),
-            "timeout": timeout,
+            # Daytona's API rejects fractional seconds.
+            "timeout": math.ceil(timeout) if timeout is not None else None,
         }
         if user:
             kwargs["user"] = user
         try:
-            result = await self.value.process.exec(shlex.join(command), **kwargs)
-        except TypeError:
-            kwargs.pop("user", None)
-            result = await self.value.process.exec(shlex.join(command), **kwargs)
+            try:
+                result = await self.value.process.exec(shlex.join(command), **kwargs)
+            except TypeError:
+                kwargs.pop("user", None)
+                result = await self.value.process.exec(shlex.join(command), **kwargs)
+        except Exception as exc:
+            if any(kind.__name__ == "DaytonaTimeoutError" for kind in type(exc).__mro__):
+                raise TimeoutError(str(exc)) from exc
+            raise
         exit_code = int(getattr(result, "exit_code", getattr(result, "code", 0)))
         stdout = str(getattr(result, "result", getattr(result, "stdout", "")) or "")
         stderr = str(getattr(result, "stderr", "") or "")
@@ -353,13 +360,20 @@ class DaytonaProvider(SandboxProvider):
         if request.stdin is not None:
             raise CapabilityError("Daytona process.exec does not support stdin in this adapter")
         started = time.monotonic()
-        code, stdout, stderr = await self._remote(handle).exec(
-            request.command,
-            cwd=request.cwd,
-            env=request.env,
-            timeout=request.timeout_seconds,
-            user=request.user,
-        )
+        try:
+            code, stdout, stderr = await self._remote(handle).exec(
+                request.command,
+                cwd=request.cwd,
+                env=request.env,
+                timeout=request.timeout_seconds,
+                user=request.user,
+            )
+        except TimeoutError:
+            return ExecResult(
+                exit_code=-1,
+                duration_seconds=time.monotonic() - started,
+                timed_out=True,
+            )
         return ExecResult(
             exit_code=code,
             stdout=stdout.encode(),
