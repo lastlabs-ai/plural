@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-10-07
+
 ### Fixed
 
 - Daytona commands with a timeout no longer fail: timeouts are sent to Daytona in whole seconds, which is all its API accepts. Every Job passes the Runtime's command timeout, so Environments on Daytona could not run before this.
