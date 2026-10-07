@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Daytona commands with a timeout no longer fail: timeouts are sent to Daytona in whole seconds, which is all its API accepts. Every Job passes the Runtime's command timeout, so Environments on Daytona could not run before this.
+- A Daytona command that runs past its timeout now reports `timed_out` like the local and Docker providers, so a run records a timeout instead of a provider error, and the sandbox stays usable. This holds on your own Daytona account and on Plural's.
+
 ## [0.20.0] - 2026-10-06
 
 ### Added

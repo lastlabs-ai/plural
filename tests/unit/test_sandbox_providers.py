@@ -4,6 +4,7 @@ import asyncio
 import os
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -19,7 +20,8 @@ from plural.sandbox import (
     NetworkMode,
     SandboxRequirements,
 )
-from plural.sandbox.daytona import DaytonaSandboxAdapter
+from plural.sandbox.daytona import DaytonaSandboxAdapter, _OfficialSandbox
+from plural.sandbox.hosted_daytona import _HostedSandbox
 
 
 async def test_local_provider_exec_timeout_transfer_and_cleanup(tmp_path: Path) -> None:
@@ -208,3 +210,36 @@ async def test_daytona_harness_request_redirect_matches_custom_workspace() -> No
     command = client.sandbox.commands[-1][0]
     assert command[4] == "/workspace/custom/.plural/request.jsonl"
     assert "/workspace/.plural/request.jsonl" not in command
+
+
+async def test_daytona_sends_whole_seconds_and_reports_timeouts() -> None:
+    sent: list[dict[str, object]] = []
+
+    class DaytonaTimeoutError(Exception):
+        pass
+
+    class Process:
+        async def exec(self, command: str, **kwargs: object) -> object:
+            sent.append(kwargs)
+            if command == "sleep 5":
+                raise DaytonaTimeoutError("command execution timeout")
+            return type("Result", (), {"exit_code": 0, "result": "ok"})()
+
+    official = _OfficialSandbox(type("Value", (), {"process": Process()})())
+    await official.exec(("true",), cwd="/workspace", env={}, timeout=120.5)
+    await official.exec(("true",), cwd="/workspace", env={}, timeout=None)
+    assert [item["timeout"] for item in sent] == [121, None]
+
+    class Studio:
+        def request(self, method: str, path: str, **kwargs: object) -> object:
+            return {"exit_code": -1, "stdout": "", "stderr": "", "timed_out": True}
+
+    hosted = _HostedSandbox(cast(Any, Studio()), {"id": "sb-1"})
+    for sandbox in (official, hosted):
+        client = FakeDaytonaClient()
+        client.sandbox = cast(Any, sandbox)
+        provider = DaytonaProvider(adapter=client)
+        handle = await provider.create(SandboxRequirements(image="python:3.12-slim"))
+        result = await provider.exec(handle, ExecRequest(command=("sleep", "5"), timeout_seconds=2))
+        assert result.timed_out
+        assert result.exit_code == -1
