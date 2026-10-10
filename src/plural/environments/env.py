@@ -253,7 +253,7 @@ class Environment:
         return compiled
 
     @classmethod
-    def from_definition(
+    def _from_definition(
         cls, definition: EnvironmentDefinition, root: str | Path | None = None
     ) -> Environment:
         """Rebuild an Environment and its Apps from a compiled definition.

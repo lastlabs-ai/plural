@@ -169,7 +169,7 @@ def test_rebuilt_environment_matches_definition() -> None:
     definition = environment.definition()
     restored = EnvironmentDefinition.model_validate_json(definition.model_dump_json())
     assert restored.content_hash == definition.content_hash
-    rebuilt = Environment.from_definition(restored)
+    rebuilt = Environment._from_definition(restored)
     assert type(rebuilt).__name__ == "Desk"
     rebuilt.reset()
     _, reward, _, _, _ = rebuilt.step("wordle__guess", word="crane")

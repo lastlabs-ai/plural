@@ -1498,22 +1498,6 @@ truncated(self) -> 'bool'
 
 Return whether the episode was cut short. Default: any App says so.
 
-### plural.Environment.from_definition
-
-```python
-from_definition(definition: 'EnvironmentDefinition', root: 'str | Path | None' = None) -> 'Environment'
-```
-
-Rebuild an Environment and its Apps from a compiled definition.
-
-```text
-``root`` is the folder holding the Environment's source files, where
-each Python App class and the optional Environment subclass live.
-
-Returns:
-    The rebuilt Environment, ready to reset.
-```
-
 ### plural.Environment.reset
 
 ```python

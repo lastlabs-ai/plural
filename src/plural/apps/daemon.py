@@ -102,7 +102,7 @@ def _load_host(root: Path) -> Any:
     if not path.is_file():
         raise FileNotFoundError(f"{path} is missing; the Job writes it before starting the host")
     definition = EnvironmentDefinition.model_validate_json(path.read_text(encoding="utf-8"))
-    environment = Environment.from_definition(definition, root=root)
+    environment = Environment._from_definition(definition, root=root)
     return AppHost(environment, workspace=root)
 
 
