@@ -27,17 +27,27 @@ from plural.tracing.schema import ActionStep
 from plural.types import FunctionDefinition, Tool
 
 _ACTION_ATTR = "__plural_action__"
+_ACTION_OPTIONS = "__plural_action_options__"
 _INSTRUMENTED = "_plural_instrumented"
 _action_stack: ContextVar[list[ActionStep] | None] = ContextVar("plural_action_stack", default=None)
 _action_roots: ContextVar[list[ActionStep] | None] = ContextVar("plural_action_roots", default=None)
 
 
-def action(fn: Callable[..., Any] | None = None, *, name: str | None = None) -> Any:
-    """Mark an :class:`~plural.environments.env.Environment` method as a native action.
+def action(
+    fn: Callable[..., Any] | None = None,
+    *,
+    name: str | None = None,
+    read_only: bool = False,
+    timeout_seconds: float = 30,
+) -> Any:
+    """Mark an :class:`~plural.apps.App` method as an action the Agent can take.
 
     Args:
         fn: Method to register (decorator usage).
         name: Optional explicit action name. Defaults to the method name.
+        read_only: The action never changes state. Verifiers may call only
+            read-only actions after the episode.
+        timeout_seconds: How long one call may run.
 
     Returns:
         The original method (decorator) or a decorator.
@@ -45,6 +55,11 @@ def action(fn: Callable[..., Any] | None = None, *, name: str | None = None) -> 
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         setattr(func, _ACTION_ATTR, name or func.__name__)
+        setattr(
+            func,
+            _ACTION_OPTIONS,
+            {"read_only": read_only, "timeout_seconds": float(timeout_seconds)},
+        )
         return func
 
     if fn is not None:
@@ -55,6 +70,12 @@ def action(fn: Callable[..., Any] | None = None, *, name: str | None = None) -> 
 def is_env_action(fn: Callable[..., Any]) -> bool:
     """Return whether ``fn`` was decorated with :func:`action`."""
     return hasattr(fn, _ACTION_ATTR)
+
+
+def action_options(fn: Callable[..., Any]) -> dict[str, Any]:
+    """Return the ``read_only`` and ``timeout_seconds`` given to :func:`action`."""
+    options = getattr(fn, _ACTION_OPTIONS, None)
+    return dict(options) if isinstance(options, dict) else {}
 
 
 def iter_env_actions(env_cls: type) -> Iterable[tuple[str, Callable[..., Any]]]:

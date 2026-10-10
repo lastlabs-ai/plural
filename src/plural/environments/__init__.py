@@ -1,9 +1,9 @@
-"""Canonical Python Environment authoring and Trace datasets."""
+"""Environments compose Apps; Trace datasets collect what happened in them."""
 
+from plural.apps.definition import AppAction, AppDefinition, RewarderDefinition
 from plural.environments.action_registry import action
 from plural.environments.dataset import TraceDataset, TraceFilter
 from plural.environments.definition import (
-    Action,
     EnvironmentDefinition,
     EnvironmentIdentity,
     EnvironmentResource,
@@ -12,19 +12,19 @@ from plural.environments.definition import (
     Guardrail,
     HarnessGrant,
     HarnessPolicy,
-    NativeAction,
     Resource,
-    RewarderDefinition,
     Runtime,
     RuntimeVariable,
     Secret,
     SecretReference,
 )
-from plural.environments.env import Environment, rewarder
+from plural.environments.env import ActionCall, Environment, rewarder
 from plural.environments.types import Observation, State, initial
 
 __all__ = [
-    "Action",
+    "ActionCall",
+    "AppAction",
+    "AppDefinition",
     "Environment",
     "EnvironmentIdentity",
     "EnvironmentDefinition",
@@ -34,7 +34,6 @@ __all__ = [
     "Guardrail",
     "HarnessPolicy",
     "HarnessGrant",
-    "NativeAction",
     "Observation",
     "RewarderDefinition",
     "Resource",

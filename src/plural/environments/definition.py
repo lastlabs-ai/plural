@@ -9,6 +9,12 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 
+from plural.apps.definition import (
+    AppDefinition,
+    ExposedAction,
+    SecretReference,
+    exposed_name,
+)
 from plural.common import (
     SHA256_PATTERN,
     ExecutionTarget,
@@ -42,27 +48,6 @@ class EnvironmentIdentity(FrozenModel):
         if SHA256_PATTERN.fullmatch(value) is None:
             raise ValueError("digest must be sha256:<64 lowercase hex characters>")
         return value
-
-
-class NativeAction(FrozenModel):
-    """An action owned by an Environment."""
-
-    name: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-    kind: Literal["command", "python"] = "command"
-    command: tuple[str, ...] = ()
-    parameters: dict[str, Any] = Field(
-        default_factory=lambda: {"type": "object", "additionalProperties": True}
-    )
-    observation_schema: dict[str, Any] = Field(default_factory=dict)
-    mutates_state: bool = True
-    timeout_seconds: float = Field(default=30, gt=0)
-
-    @model_validator(mode="after")
-    def _command_required(self) -> NativeAction:
-        if self.kind == "command" and not self.command:
-            raise ValueError("kind='command' requires a non-empty command")
-        return self
 
 
 class Guardrail(FrozenModel):
@@ -173,40 +158,6 @@ class RuntimeVariable(FrozenModel):
         } or value.startswith(("DYLD_", "PLURAL_")):
             raise ValueError("Runtime variables cannot replace execution or resource controls")
         return value
-
-
-class SecretReference(FrozenModel):
-    """A named credential supplied when a Job runs, with an explicit execution target."""
-
-    name: str = Field(pattern=r"^[A-Z_][A-Z0-9_]*$")
-    required: bool = True
-    target: Literal["environment", "harness", "verifier"] = "environment"
-    description: str = ""
-
-    @field_validator("name")
-    @classmethod
-    def _application_name(cls, value: str) -> str:
-        return RuntimeVariable._application_name(value)
-
-
-class RewarderDefinition(FrozenModel):
-    """A named state-transition reward signal scored inside each step."""
-
-    name: str = Field(min_length=1)
-    description: str = ""
-    kind: Literal["command", "python"] = "command"
-    command: tuple[str, ...] = ()
-    implementation_digest: str = ""
-    weight: float = Field(default=1, gt=0)
-    timeout_seconds: float = Field(default=30, gt=0)
-
-    @model_validator(mode="after")
-    def _implementation(self) -> RewarderDefinition:
-        if self.kind == "command" and not self.command:
-            raise ValueError("command rewarders require a command")
-        if self.kind == "python" and not self.implementation_digest:
-            raise ValueError("python rewarders require an implementation_digest")
-        return self
 
 
 class EnvironmentRuntime(FrozenModel):
@@ -511,22 +462,23 @@ class ExecutionLimits(FrozenModel):
 
 
 class EnvironmentDefinition(FrozenModel):
-    """Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent."""
+    """Schema-v2 Environment: Apps composed with one Runtime and one set of limits.
+
+    Tasks, Verifiers, and mode are intentionally absent. Every action belongs
+    to exactly one App; ``python`` optionally names an Environment subclass
+    whose ``on_step``, ``terminated``, or ``truncated`` span several Apps.
+    """
 
     name: str = Field(min_length=1)
     version: str = "0.1.0"
     description: str = ""
     overview: str = ""
     readme: str = ""
-    actions: tuple[NativeAction, ...] = ()
-    reset_command: tuple[str, ...] = ()
-    observation_schema: dict[str, Any] = Field(default_factory=dict)
-    state_schema: dict[str, Any] = Field(default_factory=dict)
-    rewarders: tuple[RewarderDefinition, ...] = ()
+    apps: tuple[AppDefinition, ...] = ()
+    python: str | None = None
     guardrails: tuple[Guardrail, ...] = ()
     resources: tuple[EnvironmentResource, ...] = ()
     runtime: EnvironmentRuntime = Field(default_factory=EnvironmentRuntime)
-    secrets: tuple[SecretReference, ...] = ()
     harness_policy: HarnessPolicy = Field(default_factory=HarnessPolicy)
     limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -547,8 +499,29 @@ class EnvironmentDefinition(FrozenModel):
             stale = {"tasks", "verifier", "mode", "context"} & set(value)
             if stale:
                 raise ValueError("schema-v2 Environment cannot own " + ", ".join(sorted(stale)))
-            payload = dict(value)
-            payload.pop("schema_version", None)
+            moved = {"actions", "rewarders", "secrets", "state_schema", "observation_schema"} & {
+                key for key, item in value.items() if item
+            }
+            if moved:
+                raise ValueError(
+                    "An Environment no longer owns "
+                    + ", ".join(sorted(moved))
+                    + ". Declare them on an App and list it in apps."
+                )
+            payload = {
+                key: item
+                for key, item in value.items()
+                if key
+                not in {
+                    "schema_version",
+                    "actions",
+                    "rewarders",
+                    "secrets",
+                    "state_schema",
+                    "observation_schema",
+                    "reset_command",
+                }
+            }
             if "version" not in payload and "revision" in payload:
                 payload["version"] = payload.pop("revision")
             return payload
@@ -557,21 +530,73 @@ class EnvironmentDefinition(FrozenModel):
     @model_validator(mode="after")
     def _unique_names(self) -> EnvironmentDefinition:
         semantic_version(self.version)
-        overlap = {item.name for item in self.runtime.variables} & {
-            item.name for item in self.secrets
-        }
+        app_names = [item.name for item in self.apps]
+        if len(app_names) != len(set(app_names)):
+            raise ValueError("App names must be unique within an Environment")
+        resource_names = [item.name for item in self.resources]
+        if len(resource_names) != len(set(resource_names)):
+            raise ValueError("resource names must be unique")
+        variables = {item.name for item in self.runtime.variables}
+        overlap = sorted(variables & {item.name for item in self.secrets})
         if overlap:
-            raise ValueError("Declare each runtime variable or secret only once")
-        for label, values in (
-            ("action", self.actions),
-            ("resource", self.resources),
-            ("rewarder", self.rewarders),
-            ("secret", self.secrets),
-        ):
-            names = [item.name for item in values]
-            if len(names) != len(set(names)):
-                raise ValueError(f"{label} names must be unique")
+            raise ValueError(
+                f"{overlap[0]} is both a Runtime variable and an App secret; declare it once"
+            )
+        exposed = [item.name for item in self.actions]
+        clashes = sorted({name for name in exposed if exposed.count(name) > 1})
+        if clashes:
+            raise ValueError(f"Environment exposes duplicate action names: {clashes}")
         return self
+
+    @property
+    def actions(self) -> tuple[ExposedAction, ...]:
+        """Every App action under the name the Agent sees.
+
+        With one App the names are the App's own. With several, each is
+        prefixed ``<app>__`` so two Apps may offer an action of the same name.
+        """
+        prefixed = len(self.apps) > 1
+        return tuple(
+            ExposedAction(
+                name=exposed_name(app.name, item.name, prefixed=prefixed),
+                app=app.name,
+                action=item.name,
+                description=item.description,
+                parameters=item.parameters,
+                mutates_state=item.mutates_state,
+                timeout_seconds=item.timeout_seconds,
+            )
+            for app in self.apps
+            for item in app.actions
+        )
+
+    @property
+    def secrets(self) -> tuple[SecretReference, ...]:
+        """Every secret the Environment's Apps need, each listed once."""
+        seen: dict[str, SecretReference] = {}
+        for app in self.apps:
+            for item in app.secrets:
+                current = seen.get(item.name)
+                if current is None or (item.required and not current.required):
+                    seen[item.name] = item
+        return tuple(seen.values())
+
+    def app(self, name: str) -> AppDefinition:
+        """Return one App by name.
+
+        Raises:
+            KeyError: When the Environment has no App of that name.
+        """
+        for item in self.apps:
+            if item.name == name:
+                return item
+        available = ", ".join(item.name for item in self.apps) or "none"
+        raise KeyError(f"Environment {self.name!r} has no App {name!r}; Apps: {available}")
+
+    @property
+    def reproducible(self) -> bool:
+        """Whether every App starts each Trial from the same state."""
+        return all(item.reproducible for item in self.apps)
 
     @property
     def revision(self) -> str:
@@ -588,14 +613,14 @@ class EnvironmentDefinition(FrozenModel):
         """Stable Environment revision digest."""
         payload = self.model_dump(mode="json", exclude={"source"})
         if payload["runtime"]["ref"] is None:
-            # Revisions from before runtime references keep their hash.
             del payload["runtime"]["ref"]
         digest = self.source.digest if self.source else None
         payload["source_digest"] = digest
         if digest is not None:
             # The source files already cover a Python rewarder's code.
-            for rewarder in payload["rewarders"]:
-                rewarder.pop("implementation_digest", None)
+            for app in payload["apps"]:
+                for rewarder in app["rewarders"]:
+                    rewarder.pop("implementation_digest", None)
         return revision_hash("environment", payload)
 
     @property
@@ -604,14 +629,12 @@ class EnvironmentDefinition(FrozenModel):
         return EnvironmentIdentity(name=self.name, revision=self.version, digest=self.content_hash)
 
 
-Action = NativeAction
 Resource = EnvironmentResource
 Runtime = EnvironmentRuntime
 Secret = SecretReference
 
 
 __all__ = [
-    "Action",
     "EnvironmentIdentity",
     "EnvironmentDefinition",
     "EnvironmentResource",
@@ -620,8 +643,6 @@ __all__ = [
     "Guardrail",
     "HarnessPolicy",
     "HarnessGrant",
-    "NativeAction",
-    "RewarderDefinition",
     "Resource",
     "Runtime",
     "Secret",

@@ -9,23 +9,8 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 # Authoring: worlds (Environment owns Runtime, Resources, Rewarders).
-from plural.agents import Agent
-from plural.benchmarks import BenchmarkCategory, BenchmarkScoring, EvaluationTrack
-
-# Hosting and models.
-from plural.catalog import CatalogContext, ModelCatalog, ModelSpec, estimate_cost
-from plural.client import Client, Plural
-
-# Advanced: harness protocol, sandbox providers, tracing, errors, utilities.
-from plural.common import (
-    ErrorCode,
-    ExecutionTarget,
-    HarnessCapability,
-    content_hash,
-    stable_id,
-)
-from plural.environments import (
-    Action,
+from plural.environments import (  # noqa: I001 - Environments load before Apps
+    ActionCall,
     Environment,
     ExecutionLimits,
     HarnessPolicy,
@@ -40,6 +25,22 @@ from plural.environments import (
     action,
     initial,
     rewarder,
+)
+from plural.agents import Agent
+from plural.apps import App, AppDefinition
+from plural.benchmarks import BenchmarkCategory, BenchmarkScoring, EvaluationTrack
+
+# Hosting and models.
+from plural.catalog import CatalogContext, ModelCatalog, ModelSpec, estimate_cost
+from plural.client import Client, Plural
+
+# Advanced: harness protocol, sandbox providers, tracing, errors, utilities.
+from plural.common import (
+    ErrorCode,
+    ExecutionTarget,
+    HarnessCapability,
+    content_hash,
+    stable_id,
 )
 from plural.errors import (
     AuthenticationError,
@@ -138,8 +139,10 @@ except PackageNotFoundError:
 
 __all__ = [
     # Authoring.
-    "Action",
+    "ActionCall",
     "Agent",
+    "App",
+    "AppDefinition",
     "AgentVerifier",
     "Benchmark",
     "BenchmarkCategory",
