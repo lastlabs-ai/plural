@@ -32,7 +32,7 @@ from plural.project import (
     Workspace,
     check_name,
 )
-from plural.project.layout import AGENT, BENCHMARK, HARNESS, TASK, split_version
+from plural.project.layout import AGENT, BENCHMARK, ENVIRONMENT, HARNESS, TASK, split_version
 from plural.project.membership import add_task, remove_task
 from plural.project.sync import (
     REBUILT_NOTE,
@@ -54,6 +54,36 @@ VERSIONED_NAME_HELP = (
     "version (@1.0.0), or a content hash (@sha256:...). Defaults to the resource directory "
     "you are in."
 )
+
+
+def _app_summary(environment: Any) -> list[dict[str, Any]]:
+    """Each App's kind, control level, actions, and secrets, never their values.
+
+    Returns:
+        One entry per App.
+    """
+    import os
+
+    definition = environment.definition()
+    return [
+        {
+            "name": app.name,
+            "kind": app.kind,
+            "control": app.control,
+            "actions": [
+                {"name": item.name, "mutates_state": item.mutates_state} for item in app.actions
+            ],
+            "secrets": [
+                {
+                    "name": item.name,
+                    "required": item.required,
+                    "set": bool(os.environ.get(item.name)),
+                }
+                for item in app.secrets
+            ],
+        }
+        for app in definition.apps
+    ]
 
 
 def resource_app(kind: ResourceKind) -> typer.Typer:
@@ -79,11 +109,22 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         ref = _ref(space, kind, name)
         resource = space.load(ref)
         payload = _local_payload(space, resource)
-        emit(
-            payload,
-            as_json=as_json,
-            text=lambda: typer.echo(f"{ref} is valid: {resource.content_hash}"),
-        )
+        apps = _app_summary(resource.value) if kind is ENVIRONMENT else None
+        if apps is not None:
+            payload = {**payload, "apps": apps}
+
+        def text() -> None:
+            typer.echo(f"{ref} is valid: {resource.content_hash}")
+            for app in apps or ():
+                typer.echo(f"\nApp {app['name']} ({app['kind']}, {app['control']})")
+                for action in app["actions"]:
+                    marker = "" if action["mutates_state"] else "  [read-only]"
+                    typer.echo(f"  {action['name']}{marker}")
+                for secret in app["secrets"]:
+                    status = "set" if secret["set"] else "NOT SET"
+                    typer.echo(f"  secret {secret['name']}: {status}")
+
+        emit(payload, as_json=as_json, text=text)
 
     @app.command("push")
     @handled

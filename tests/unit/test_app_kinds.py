@@ -300,7 +300,9 @@ def test_data_app_needs_a_source() -> None:
         DataApp(name="empty")
 
 
-def test_environment_yaml_lists_apps_of_every_connected_kind(tmp_path: Path, api: str) -> None:
+def test_environment_yaml_lists_apps_of_every_connected_kind(
+    tmp_path: Path, api: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import textwrap
 
     from project_fixtures import write_project
@@ -332,6 +334,7 @@ def test_environment_yaml_lists_apps_of_every_connected_kind(tmp_path: Path, api
                 data:
                   tables:
                     customers: data/customers.csv
+                  secrets: [CRM_EXPORT_TOKEN]
               - name: payments
                 replay:
                   recordings: trace.json
@@ -348,3 +351,17 @@ def test_environment_yaml_lists_apps_of_every_connected_kind(tmp_path: Path, api
     assert "orders__getOrder" in {item.name for item in definition.actions}
     assert "crm__create_customers" in {item.name for item in definition.actions}
     assert "payments__refund" in {item.name for item in definition.actions}
+
+    from typer.testing import CliRunner
+
+    from plural.cli.main import app
+
+    monkeypatch.chdir(project.root)
+    monkeypatch.delenv("CRM_EXPORT_TOKEN", raising=False)
+    result = CliRunner().invoke(app, ["env", "validate", "backoffice", "--json"])
+    assert result.exit_code == 0, result.output
+    summary = {item["name"]: item for item in json.loads(result.output)["apps"]}
+    assert summary["crm"]["secrets"] == [
+        {"name": "CRM_EXPORT_TOKEN", "required": True, "set": False}
+    ]
+    assert {"name": "getOrder", "mutates_state": False} in summary["orders"]["actions"]
