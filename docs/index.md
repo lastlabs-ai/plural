@@ -97,6 +97,8 @@ project. Nothing you push is ever public unless you choose to publish it.
   minutes and explains every word above.
 - Ready to try it? [Getting started](getting-started.md) walks you from sign-up to
   your first scored run.
+- Know what you have? [Start here](start/index.md) has a path for each starting point:
+  traces from an agent you already run, a system your work happens in, or nothing yet.
 - Want to see a finished project first? The
   [support queue tutorial](tutorials/support-queue.md) runs completely offline, with
   no account or key.

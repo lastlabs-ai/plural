@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `plural env from-mcp`, `from-openapi`, `from-data`, and `from-traces` draft an Environment from a system you already have. `from-traces` also drafts one Task per trace, a model-judge Verifier, and a Benchmark.
 - `plural env validate` lists each App's kind, control level, actions, and secrets.
 - Documentation: [Apps](docs/concepts/apps.md) and [Connect an MCP server](docs/guides/connect-mcp-server.md).
+- Documentation: [Start here](docs/start/index.md), with a path from traces, from a system, and from scratch, each ending at a Benchmark you can rerun.
 
 ### Changed
 
@@ -38,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Model-judge Verifiers (`kind: agent`) failed on every run: the judge read a field Verifiers no longer have, and its structured-output schema was one OpenAI rejects.
 - `Job(..., client=Client())` with `PLURAL_API_URL` set sent Harness model calls to the API root instead of its `/v1` gateway.
+- `Job.from_traces` with a model-judge Verifier now passes the judge the gateway and key; replayed traces were treated as needing no credentials.
 - Applying a hindsight rewarder again no longer duplicates its records, locally or in the hosted ledger; each record's id comes from the Trial, rewarder, version, and target. `plural rewards apply` no longer warns about the hosted project for a Job that was never pushed.
 - `plural run` with an endpoint Agent no longer asks for a Plural API key, and a missing `endpoint_key` value stops the run before it starts.
 - An App's `close()` runs before the App host answers `stop`, so it is no longer cut off when the Runtime is torn down.

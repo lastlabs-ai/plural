@@ -97,7 +97,8 @@ plural env validate memory
 ```
 
 `validate` connects to the server and prints each App's kind, control level, actions,
-and secrets, with whether each secret is set in your shell. It never prints a value.
+and secrets, with where each secret comes from: your shell, the hosted project, or
+nowhere yet. It never prints a value.
 Run it after every change.
 
 ## 3. Choose the tools

@@ -923,7 +923,12 @@ class Job:
         ):
             return current
         agents = getattr(self.spec, "agents", ())
-        if agents and all(binding.auth_mode == "none" for binding in agents):
+        judged = any(
+            getattr(binding.verifier, "kind", None) == "agent"
+            for task in getattr(self.spec, "tasks", ())
+            for binding in task.verifiers
+        )
+        if agents and not judged and all(binding.auth_mode == "none" for binding in agents):
             # Credential-free Jobs never call a live model endpoint, so no
             # Plural or provider key is required to run them.
             return current
@@ -946,14 +951,20 @@ class Job:
         if current.get("PLURAL_API_KEY"):
             current.setdefault("PLURAL_GATEWAY_URL", resolve_gateway_url(None, current))
             return current
-        if agents and all(
-            binding.auth_mode == "none" or binding.agent.endpoint is not None for binding in agents
+        if (
+            agents
+            and not judged
+            and all(
+                binding.auth_mode == "none" or binding.agent.endpoint is not None
+                for binding in agents
+            )
         ):
             # Agents with their own endpoint call it directly, not the gateway.
             return current
         raise ValueError(
             "Cannot run Job.\n"
-            "A live model call goes through the Plural gateway and needs a Plural API key.\n"
+            "A live model call, by an Agent or a model-judge Verifier, goes through the "
+            "Plural gateway and needs a Plural API key.\n"
             "SDK:  Job(task, agents=[agent], client=Client())\n"
             "SDK:  Job(task, agents=[agent], api_key='...')\n"
             "CLI:  plural auth login && plural run --task <name> --model <model>"

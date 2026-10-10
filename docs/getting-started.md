@@ -22,6 +22,10 @@ you would rather watch a finished project run before building your own, try the
 [support queue tutorial](tutorials/support-queue.md). It runs offline, with no account
 or key.
 
+Already have traces from an agent, or a system such as an MCP server to connect? Do
+the first three sections here (create an account, install, and sign in), then follow
+the matching path in [Start here](start/index.md).
+
 ## Create an account
 
 Everything starts at [pluralintel.com](https://pluralintel.com).
@@ -406,6 +410,8 @@ the rest of the SDK.
 
 ## Where to go next
 
+- [Start here](start/index.md) picks up from what you already have: traces from an
+  agent you run, a system your work happens in such as an MCP server, or nothing yet.
 - Walk through a complete, finished project in the
   [support queue tutorial](tutorials/support-queue.md).
 - Read the [CLI guide](cli/evaluation.md) for every command.
