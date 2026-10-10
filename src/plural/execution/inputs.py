@@ -17,19 +17,24 @@ MAX_RESOURCE_BYTES = 16 * 1024 * 1024
 
 
 def runtime_values(
-    environment: EnvironmentDefinition, environ: Mapping[str, str], *, target: str = "environment"
+    environment: EnvironmentDefinition, environ: Mapping[str, str]
 ) -> tuple[dict[str, str], dict[str, str]]:
+    """Values for the Runtime's declared variables, and which of them are secret.
+
+    App secrets are resolved separately, because only the App host receives them.
+
+    Returns:
+        All values, and the secret subset for redaction.
+    """
     values: dict[str, str] = {}
     secrets: dict[str, str] = {}
-    declarations: list[Any] = list(environment.runtime.variables) if target == "environment" else []
-    declarations += [item for item in environment.secrets if item.target == target]
-    for item in declarations:
+    for item in environment.runtime.variables:
         value = environ.get(item.name)
         if value is None or value == "":
             if item.required:
                 raise ValueError(f"Missing required runtime variable: {item.name}")
             continue
-        kind = getattr(item, "format", "text")
+        kind = item.format
         try:
             if kind == "integer":
                 int(value)
@@ -40,7 +45,7 @@ def runtime_values(
         except (ValueError, TypeError):
             raise ValueError(f"Runtime variable {item.name} must contain {kind}") from None
         values[item.name] = value
-        if getattr(item, "secret", True):
+        if item.secret:
             secrets[item.name] = value
     return values, secrets
 

@@ -10,6 +10,7 @@ import pytest
 from fakes import FakeProvider
 
 from plural.agents import AgentBinding, AgentDefinition
+from plural.apps.definition import AppDefinition
 from plural.common import ExecutionTarget
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
 from plural.execution import JobRunner, JobStore
@@ -41,7 +42,7 @@ def _task(
     name: str,
     provider: str = "docker",
     *,
-    reset: tuple[str, ...] = (),
+    apps: tuple[AppDefinition, ...] = (),
     resources: ResourceRequirements | None = None,
 ) -> TaskDefinition:
     target = {
@@ -60,7 +61,7 @@ def _task(
                 resources=resources or ResourceRequirements(),
                 **local,
             ),
-            reset_command=reset,
+            apps=apps,
         ),
         verifiers=(
             WeightedVerifier(
@@ -173,7 +174,8 @@ async def test_job_progress_reports_partial_results_while_trials_run(tmp_path: P
 def test_only_sandboxes_that_run_plural_code_need_it() -> None:
     plain = _task("plain")
     runner = _task(
-        "runner", reset=("python", "-m", "plural.environments.runner", "env.py:Env", "reset")
+        "runner",
+        apps=(AppDefinition(name="game", kind="python", python="env.py:Game", actions=()),),
     )
 
     assert not needs_plural(plain)

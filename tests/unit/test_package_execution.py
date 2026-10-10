@@ -8,6 +8,7 @@ import pytest
 from fakes import FakeProvider
 
 from plural.agents import AgentBinding, AgentDefinition
+from plural.apps.definition import AppAction, AppDefinition
 from plural.atif import validate_atif
 from plural.common import (
     ErrorCode,
@@ -33,8 +34,10 @@ from plural.tasks import BenchmarkDefinition, TaskDefinition
 from plural.verifiers import (
     AgentVerifier,
     DeterministicVerifier,
+    Episode,
     HumanVerifier,
     RubricCriterion,
+    VerifierOutput,
     VerifierRuntime,
     WeightedVerifier,
 )
@@ -48,9 +51,10 @@ class JudgeProvider(FakeProvider):
         self.judge_input: dict[str, Any] | None = None
 
     async def exec(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
-        if request.stdin is not None:
+        files = self.files[handle.sandbox_id]
+        if request.stdin is not None or ".plural/verifier-input.json" not in files:
             return await super().exec(handle, request)
-        payload = json.loads(self.files[handle.sandbox_id][".plural/verifier-input.json"])
+        payload = json.loads(files[".plural/verifier-input.json"])
         verifier = payload["agent_verifier"]
         self.judge_input = payload["judge_input"]
         assert verifier["criteria"] == [
@@ -63,9 +67,10 @@ class JudgeProvider(FakeProvider):
             }
         ]
         assert self.judge_input["environment_view"] == {
-            "observation": {"text": "done"},
+            "observation": {"text": "board"},
             "state": {"step": 1},
         }
+        assert self.judge_input["episode"]["apps"]["game"]["final"] == {"step": 1}
         requested = self.judge_input["requested_artifacts"]
         assert requested[0]["name"] == "result.json"
         assert json.loads(requested[0]["content"]) == {"answer": 42}
@@ -83,6 +88,14 @@ class JudgeProvider(FakeProvider):
             stdout=b"judge used judge-secret",
             duration_seconds=0.001,
         )
+
+
+GAME_APP = AppDefinition(
+    name="game",
+    kind="python",
+    python="game.py:Game",
+    actions=(AppAction(name="move", description="Make a move."),),
+)
 
 
 def exact_verifier(provider: str) -> DeterministicVerifier:
@@ -135,14 +148,7 @@ async def test_agent_verifier_scores_configured_criteria_with_contracted_evidenc
     provider = JudgeProvider()
     environment = EnvironmentDefinition(
         name="judge-world",
-        observation_schema={
-            "type": "object",
-            "properties": {"text": {"type": "string"}},
-        },
-        state_schema={
-            "type": "object",
-            "properties": {"step": {"type": "integer"}},
-        },
+        apps=(GAME_APP,),
         runtime=EnvironmentRuntime(
             provider="docker",
             targets=frozenset({ExecutionTarget.DOCKER}),
@@ -417,7 +423,6 @@ async def test_retries_append_trial_executions_without_new_trial_identity(
     assert entries["trajectory.json"]["role"] == "trajectory"
     assert entries["atif-trajectory.json"]["role"] == "trajectory"
     assert entries["result.json"]["role"] == "result"
-    assert entries["state.json"]["role"] == "state"
     assert entries["observation.json"]["role"] == "observation"
     assert entries["view.json"]["role"] == "rendering"
     assert "trajectory.normalized.json" not in entries
@@ -454,3 +459,93 @@ def test_event_store_redacts_hidden_state_and_secrets(tmp_path: Path) -> None:
     )
     assert "secret-value" not in event.model_dump_json()
     assert event.data["hidden_state"] == "[redacted]"
+
+
+def _app_task(verifier: DeterministicVerifier) -> TaskDefinition:
+    crm = AppDefinition(
+        name="crm",
+        kind="mcp",
+        config={"url": "https://crm.example/mcp"},
+        actions=(
+            AppAction(name="get_record", description="Read.", mutates_state=False),
+            AppAction(name="create_record", description="Write."),
+        ),
+        secrets=("CRM_TOKEN",),
+        has_reset=True,
+        control="sandboxed",
+    )
+    environment = EnvironmentDefinition(
+        name="desk",
+        apps=(GAME_APP, crm),
+        runtime=EnvironmentRuntime(provider="docker", targets=frozenset({ExecutionTarget.DOCKER})),
+    )
+    return TaskDefinition(
+        task_id="desk-task",
+        instructions="Do the work.",
+        environment=environment,
+        verifiers=(WeightedVerifier(verifier=verifier),),
+        state={"game": {"step": 0}},
+    )
+
+
+async def test_app_host_holds_secrets_and_verifiers_query_it_before_teardown(
+    tmp_path: Path,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def check(episode: Episode) -> VerifierOutput:
+        seen["record"] = episode.apps["crm"].query("get_record", id="7")
+        seen["state"] = episode.state
+        return VerifierOutput(score=1, evidence=("queried",))
+
+    task = _app_task(DeterministicVerifier(name="queried", check=check))
+    spec = JobSpec(
+        source=TaskJobSource(task=task),
+        agents=(AgentBinding(agent=AgentDefinition(name="agent", model="test/model")),),
+    )
+    provider = FakeProvider("docker")
+    store = JobStore(tmp_path / "jobs")
+    result = await JobRunner(
+        spec, provider=provider, store=store, environ={"CRM_TOKEN": "token-in-host-only"}
+    ).run()
+
+    assert result.status == "succeeded", result.trials[0].error_message
+    operations = [item.command[3] for item in provider.host_calls]
+    assert operations == ["start", "finish", "query", "stop"]
+    start = provider.host_calls[0]
+    assert json.loads(start.stdin or b"{}") == {"CRM_TOKEN": "token-in-host-only"}
+    assert "CRM_TOKEN" not in start.env
+    harness = provider.harness_requests[0]
+    assert "CRM_TOKEN" not in harness.env
+    assert b"token-in-host-only" not in (harness.stdin or b"")
+    payload = json.loads(harness.stdin or b"{}")["environment"]
+    commands = {item["name"]: item["command"] for item in payload["actions"]}
+    assert commands["crm__get_record"] == [
+        "python",
+        "-m",
+        "plural.apps.daemon",
+        "step",
+        "crm__get_record",
+    ]
+    assert payload["reset_command"][-1] == "reset"
+    assert seen["record"] == {"app": "crm", "action": "get_record", "id": "7"}
+    assert seen["state"]["game"] == {"step": 1}
+    execution = store.trial_path(spec.plan().trials[0]) / "executions/0/artifacts"
+    assert json.loads((execution / "apps.json").read_text())["game"]["final"] == {"step": 1}
+    uploaded = provider.files["docker-0"]
+    assert json.loads(uploaded[".plural/apps/task.json"])["initial_state"] == {"game": {"step": 0}}
+
+
+async def test_missing_app_secrets_fail_before_a_runtime_starts(tmp_path: Path) -> None:
+    task = _app_task(exact_verifier("docker"))
+    spec = JobSpec(
+        source=TaskJobSource(task=task),
+        agents=(AgentBinding(agent=AgentDefinition(name="agent", model="test/model")),),
+    )
+    provider = FakeProvider("docker")
+    result = await JobRunner(spec, provider=provider, store=JobStore(tmp_path / "jobs")).run()
+
+    assert result.status == "failed"
+    assert result.trials[0].error_code == ErrorCode.AUTHENTICATION
+    assert "App 'crm' needs CRM_TOKEN" in (result.trials[0].error_message or "")
+    assert provider.created == []

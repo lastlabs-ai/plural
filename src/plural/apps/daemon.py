@@ -1,7 +1,7 @@
 """The App host process inside a Runtime, and the client every action command uses.
 
 A Job starts one App host per Trial, in the Environment workspace, before the
-Harness runs::
+Harness runs, with the Apps' secret values as JSON on stdin::
 
     python -m plural.apps.daemon start
 
@@ -33,23 +33,35 @@ import tempfile
 import time
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from plural.apps.host import AppHost
 
 ENVIRONMENT_FILE = ".plural/apps/environment.json"
-INITIAL_STATE_FILE = ".plural/apps/initial_state.json"
+TASK_FILE = ".plural/apps/task.json"
 LOG_FILE = ".plural/apps/host.log"
 IDLE_SECONDS = float(os.environ.get("PLURAL_APPS_IDLE_SECONDS") or 3600)
 START_SECONDS = float(os.environ.get("PLURAL_APPS_START_SECONDS") or 120)
 _MAX_MESSAGE = 64 * 1024 * 1024
+_SECRETS_ON_STDIN = "PLURAL_APPS_SECRETS_ON_STDIN"
 
 
 def workspace() -> Path:
-    """The Environment workspace: ``PLURAL_APPS_WORKSPACE`` or the current folder."""
+    """The Environment workspace: ``PLURAL_APPS_WORKSPACE`` or the current folder.
+
+    Returns:
+        The resolved workspace folder.
+    """
     return Path(os.environ.get("PLURAL_APPS_WORKSPACE") or os.getcwd()).resolve()
 
 
 def socket_path(root: Path) -> str:
-    """A short socket path for one workspace, within the Unix path length limit."""
+    """A short socket path for one workspace, within the Unix path length limit.
+
+    Returns:
+        The socket path for ``root``.
+    """
     digest = hashlib.sha256(str(root).encode()).hexdigest()[:16]
     return str(Path(tempfile.gettempdir()) / f"plural-apps-{digest}.sock")
 
@@ -94,16 +106,23 @@ def _load_host(root: Path) -> Any:
     return AppHost(environment, workspace=root)
 
 
-def _task_inputs(root: Path) -> tuple[dict[str, Any], Any]:
-    state_path = root / INITIAL_STATE_FILE
-    state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
-    info = None
-    task_path = root / "task.json"
-    if task_path.is_file():
-        task = json.loads(task_path.read_text(encoding="utf-8"))
-        if isinstance(task, dict):
-            info = task.get("info")
-    return (state if isinstance(state, dict) else {}), info
+def _task_inputs(root: Path) -> dict[str, Any]:
+    """The Task's initial state, info, and seed, written by the Job.
+
+    Returns:
+        Keyword arguments for :meth:`AppHost.reset`.
+    """
+    path = root / TASK_FILE
+    task = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    if not isinstance(task, dict):
+        raise ValueError(f"{path} must hold an object")
+    state = task.get("initial_state")
+    seed = task.get("seed")
+    return {
+        "initial_state": state if isinstance(state, dict) else {},
+        "info": task.get("info"),
+        "seed": seed if isinstance(seed, int) else None,
+    }
 
 
 def _handle(host: Any, root: Path, request: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -111,8 +130,7 @@ def _handle(host: Any, root: Path, request: dict[str, Any]) -> tuple[dict[str, A
     if operation == "ping":
         return {"ok": True, "result": "pong"}, False
     if operation == "reset":
-        state, info = _task_inputs(root)
-        return {"ok": True, "result": host.reset(initial_state=state, info=info)}, False
+        return {"ok": True, "result": host.reset(**_task_inputs(root))}, False
     if operation == "step":
         arguments = request.get("arguments")
         if not isinstance(arguments, dict):
@@ -130,7 +148,7 @@ def _handle(host: Any, root: Path, request: dict[str, Any]) -> tuple[dict[str, A
     return {"ok": False, "error": f"unknown App host operation {operation!r}"}, False
 
 
-def _argument_error(host: Any, request: dict[str, Any]) -> dict[str, Any]:
+def _argument_error(host: AppHost, request: dict[str, Any]) -> dict[str, Any]:
     return host._envelope(
         "step",
         action=str(request.get("action")),
@@ -142,6 +160,10 @@ def _argument_error(host: Any, request: dict[str, Any]) -> dict[str, Any]:
 
 def serve(root: Path) -> None:
     """Run the App host for one workspace until stopped or idle."""
+    if os.environ.pop(_SECRETS_ON_STDIN, None) == "1":
+        received = json.loads(sys.stdin.read() or "{}")
+        if isinstance(received, dict):
+            os.environ.update({str(key): str(value) for key, value in received.items()})
     path = socket_path(root)
     with contextlib.suppress(FileNotFoundError):
         os.unlink(path)
@@ -156,7 +178,7 @@ def serve(root: Path) -> None:
         while time.monotonic() - last < IDLE_SECONDS and root.exists():
             try:
                 connection, _ = server.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             last = time.monotonic()
             with connection:
@@ -197,15 +219,22 @@ def _request(root: Path, payload: dict[str, Any], *, timeout: float | None) -> d
 
 
 def running(root: Path) -> bool:
-    """Whether an App host answers for this workspace."""
+    """Whether an App host answers for this workspace.
+
+    Returns:
+        True when a host replied to a ping.
+    """
     try:
         return _request(root, {"op": "ping"}, timeout=5).get("ok") is True
     except (OSError, ValueError, ConnectionError):
         return False
 
 
-def start(root: Path) -> None:
+def start(root: Path, secrets: dict[str, str] | None = None) -> None:
     """Start the App host for ``root`` in the background and wait until it answers.
+
+    ``secrets`` reach the host through a pipe rather than its environment, so
+    they do not appear in the host's process listing.
 
     Raises:
         RuntimeError: When the host exits or does not answer in time.
@@ -215,15 +244,20 @@ def start(root: Path) -> None:
     log = root / LOG_FILE
     log.parent.mkdir(parents=True, exist_ok=True)
     command = [sys.executable, "-m", "plural.apps.daemon", "serve", str(root)]
+    env = {**os.environ, _SECRETS_ON_STDIN: "1"} if secrets else None
     with log.open("ab") as stream:
         process = subprocess.Popen(  # noqa: S603 - the interpreter running Plural
             command,
             cwd=str(root),
-            stdin=subprocess.DEVNULL,
+            env=env,
+            stdin=subprocess.PIPE if secrets else subprocess.DEVNULL,
             stdout=stream,
             stderr=stream,
             start_new_session=True,
         )
+    if secrets and process.stdin is not None:
+        process.stdin.write(json.dumps(secrets).encode())
+        process.stdin.close()
     deadline = time.monotonic() + START_SECONDS
     while time.monotonic() < deadline:
         if running(root):
@@ -280,7 +314,11 @@ def main(argv: list[str] | None = None) -> None:
         serve(Path(rest[0]).resolve() if rest else root)
         return
     if operation == "start":
-        start(root)
+        raw = "" if sys.stdin.isatty() else sys.stdin.read().strip()
+        received = json.loads(raw) if raw else {}
+        if not isinstance(received, dict):
+            raise SystemExit("start reads a JSON object of secret values on stdin")
+        start(root, {str(key): str(value) for key, value in received.items()} or None)
         print(json.dumps({"ok": True}))
         return
     timeout = float(os.environ.get("PLURAL_APPS_CALL_TIMEOUT") or 0) or None

@@ -48,6 +48,9 @@ class MCPError(RuntimeError):
 def expand(value: str, environ: Mapping[str, str] | None = None) -> str:
     """Replace ``${NAME}`` with the value of that environment variable.
 
+    Returns:
+        ``value`` with every reference replaced.
+
     Raises:
         MCPError: When a referenced variable is not set.
     """
@@ -261,7 +264,7 @@ class MCPClient:
         self.timeout_seconds = timeout_seconds
         self._next_id = 0
         self.transport: _Stdio | _Http = (
-            _Stdio(command, env=env or {}, cwd=cwd, log=log)  # type: ignore[arg-type]
+            _Stdio(command, env=env or {}, cwd=cwd, log=log)
             if command
             else _Http(str(url), headers=headers or {})
         )
@@ -443,7 +446,9 @@ class MCPApp(App[State]):
         description: str | None = None,
         timeout_seconds: float = 60,
     ) -> None:
-        super().__init__(name=name or type(self).name or None, description=description, secrets=secrets)
+        super().__init__(
+            name=name or type(self).name or None, description=description, secrets=secrets
+        )
         self.command = _argv(command)
         self.url = url
         if bool(self.command) == bool(url):
@@ -471,7 +476,7 @@ class MCPApp(App[State]):
         self._client: MCPClient | None = None
         undeclared = sorted(
             referenced_variables([*self.headers.values(), *self.env.values()])
-            - {item.name for item in self.secrets}
+            - {SecretReference.model_validate(item).name for item in self.secrets}
         )
         if undeclared:
             raise ValueError(
@@ -524,7 +529,11 @@ class MCPApp(App[State]):
     # App interface.
 
     def actions(self) -> tuple[AppAction, ...]:
-        """The server's tools, filtered by ``tools`` and ``exclude``."""
+        """The server's tools, filtered by ``tools`` and ``exclude``.
+
+        Returns:
+            One action per offered tool.
+        """
         if self._pinned is not None:
             offered = self._pinned
         else:
@@ -570,7 +579,11 @@ class MCPApp(App[State]):
         return opening
 
     def snapshot(self) -> Any:
-        """Run the ``snapshot`` command and return its JSON output, or ``None``."""
+        """Run the ``snapshot`` command.
+
+        Returns:
+            Its JSON output, or ``None`` without a snapshot command.
+        """
         if not self.snapshot_command:
             return None
         output = self._run(self.snapshot_command, stdin="")
@@ -580,15 +593,27 @@ class MCPApp(App[State]):
             raise ValueError(f"MCP App {self.name!r} snapshot did not print JSON: {exc}") from exc
 
     def has_reset(self) -> bool:
-        """Whether a reset command or Python ``reset`` override sets up each episode."""
+        """Whether a reset command or Python ``reset`` override sets up each episode.
+
+        Returns:
+            True when episodes start from a known state.
+        """
         return bool(self.reset_command) or type(self).reset is not MCPApp.reset
 
     def has_snapshot(self) -> bool:
-        """Whether a snapshot command or Python override reports state."""
+        """Whether a snapshot command or Python override reports state.
+
+        Returns:
+            True when the App can report its state.
+        """
         return bool(self.snapshot_command) or type(self).snapshot is not MCPApp.snapshot
 
     def is_local(self) -> bool:
-        """A server started as a command lives inside the Runtime."""
+        """Whether the server runs inside the Runtime.
+
+        Returns:
+            True for a server started as a command.
+        """
         return bool(self.command)
 
     def close(self) -> None:

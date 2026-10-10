@@ -11,6 +11,7 @@ Rewards, snapshots, and views are bookkeeping and never reach the Agent.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from collections.abc import Mapping
@@ -43,7 +44,11 @@ class AppHandle:
         return self._app.state
 
     def snapshot(self) -> Any:
-        """The App's current snapshot, or ``None``."""
+        """Read the App's current state.
+
+        Returns:
+            The App's snapshot, or ``None`` when it cannot report one.
+        """
         return self._app.snapshot() if self._app.has_snapshot() else None
 
     def call(self, action: str, **arguments: Any) -> Any:
@@ -96,7 +101,7 @@ class AppHost:
             app_state = dict(state.get(name) or {})
             if seed is not None and "seed" not in app_state and _accepts_seed(app):
                 app_state["seed"] = seed
-            app.task_info = info  # type: ignore[attr-defined]
+            app.task_info = info
             opening = app.reset(app_state)
             payload, rendered = observation_payload(opening)
             if payload is not None:
@@ -111,7 +116,6 @@ class AppHost:
             rendered = "\n\n".join(f"## {name}\n{text}" for name, _, text in texts if text)
         else:
             observation, rendered = None, ""
-        self._persist()
         return self._envelope(
             "reset",
             observation=observation,
@@ -184,7 +188,6 @@ class AppHost:
         info: dict[str, Any] = {"latency_ms": latency_ms}
         if self._effects:
             info["effects"] = list(self._effects)
-        self._persist()
         return self._envelope(
             "step",
             app=app_name,
@@ -241,10 +244,8 @@ class AppHost:
     def close(self) -> None:
         """Close every App, ignoring failures so each one gets the chance."""
         for app in self.apps.values():
-            try:
+            with contextlib.suppress(Exception):
                 app.close()
-            except Exception:  # noqa: BLE001, S110 - closing must reach every App
-                pass
 
     # Helpers.
 
@@ -282,7 +283,7 @@ class AppHost:
         info: dict[str, Any] | None = None,
         view: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        envelope = {
             "protocol": STEP_PROTOCOL,
             "kind": kind,
             "app": app,
@@ -296,12 +297,33 @@ class AppHost:
             "info": info or {},
             "view": view,
         }
+        self._persist(envelope)
+        return envelope
 
-    def _persist(self) -> None:
+    def _persist(self, envelope: Mapping[str, Any]) -> None:
+        """Write the last observation and view, and cheap snapshots, for the run viewer."""
         if self.workspace is None:
             return
         root = self.workspace / ".plural" / "apps"
+        root.mkdir(parents=True, exist_ok=True)
+        if envelope.get("observation") is not None:
+            (root / "observation.json").write_text(
+                json.dumps(
+                    {"observation": envelope["observation"], "rendered": envelope["rendered"]},
+                    sort_keys=True,
+                    default=str,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        if envelope.get("view"):
+            (root / "view.json").write_text(
+                json.dumps(envelope["view"], sort_keys=True, default=str) + "\n",
+                encoding="utf-8",
+            )
         for name, app in self.apps.items():
+            if not app.snapshot_on_step:
+                continue
             directory = root / name
             directory.mkdir(parents=True, exist_ok=True)
             snapshot = self._snapshot(app)

@@ -65,6 +65,14 @@
         "runtime": {
           "$ref": "#/$defs/VerifierRuntime"
         },
+        "secrets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SecretReference"
+          },
+          "title": "Secrets",
+          "type": "array"
+        },
         "version": {
           "default": "0.1.0",
           "title": "Version",
@@ -269,6 +277,14 @@
         },
         "runtime": {
           "$ref": "#/$defs/VerifierRuntime"
+        },
+        "secrets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SecretReference"
+          },
+          "title": "Secrets",
+          "type": "array"
         },
         "version": {
           "default": "0.1.0",
@@ -579,6 +595,14 @@
           "title": "Name",
           "type": "string"
         },
+        "secrets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SecretReference"
+          },
+          "title": "Secrets",
+          "type": "array"
+        },
         "version": {
           "default": "0.1.0",
           "title": "Version",
@@ -720,6 +744,32 @@
         "description"
       ],
       "title": "RubricCriterion",
+      "type": "object"
+    },
+    "SecretReference": {
+      "additionalProperties": false,
+      "description": "A named credential an App needs, supplied by the Job when it runs.\n\nThe value reaches only the App host that runs the App and the Verifier\nqueries made against it. It never reaches the Harness or the model.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Z_][A-Z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SecretReference",
       "type": "object"
     },
     "Task": {

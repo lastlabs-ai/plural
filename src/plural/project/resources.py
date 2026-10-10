@@ -20,12 +20,13 @@ import sys
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from pydantic import TypeAdapter, ValidationError
 
 from plural.agents import Agent
+from plural.apps import App
 from plural.catalog import ModelCatalog
 from plural.environments import Environment
 from plural.environments.definition import (
@@ -48,6 +49,7 @@ from plural.project.layout import (
     resource_kind,
 )
 from plural.project.manifests import (
+    AppManifest,
     BenchmarkManifest,
     EnvironmentManifest,
     HarnessManifest,
@@ -287,7 +289,7 @@ def scaffold_problems(directory: Path, project_root: Path) -> list[str]:
 def _load_environment(workspace: Workspace, ref: ResourceRef, directory: Path) -> LocalResource:
     problems, payload = _begin(workspace, ref, directory)
     manifest = _parse(EnvironmentManifest, payload, problems)
-    environment: Environment[Any, Any] | None = None
+    environment: Environment | None = None
     if manifest is not None:
         _check_identity(manifest.name, ref, problems)
         environment = _build_environment(manifest, directory, workspace.project.root, problems)
@@ -296,7 +298,7 @@ def _load_environment(workspace: Workspace, ref: ResourceRef, directory: Path) -
 
 def _build_environment(
     manifest: EnvironmentManifest, directory: Path, project_root: Path, problems: list[str]
-) -> Environment[Any, Any] | None:
+) -> Environment | None:
     readme = ""
     if manifest.readme:
         readme_path = _inside(directory, manifest.readme, "readme", problems)
@@ -317,17 +319,36 @@ def _build_environment(
     except (TypeError, ValueError) as exc:
         problems.append(f"runtime: {_first_line(exc)}")
         return None
-    cls = _import_reference(directory, manifest.python, "python", problems)
-    if cls is None:
+    environment_cls: type[Environment] = Environment
+    apps: list[App[Any]] = []
+    if manifest.python:
+        target = _import_reference(directory, manifest.python, "python", problems)
+        if target is None:
+            return None
+        if inspect.isclass(target) and issubclass(target, App):
+            try:
+                apps.append(target())
+            except (TypeError, ValueError) as exc:
+                problems.append(f"python: {manifest.python}: {_first_line(exc)}")
+                return None
+        elif inspect.isclass(target) and issubclass(target, Environment):
+            environment_cls = target
+        else:
+            problems.append(
+                f"python: {manifest.python} is not an App or Environment subclass. Point it "
+                "at an App class, or at an Environment subclass and list its apps."
+            )
+            return None
+    for index, spec in enumerate(manifest.apps):
+        app = _build_app(spec, directory, f"apps.{index}", problems)
+        if app is not None:
+            apps.append(app)
+    if problems:
         return None
-    if not (inspect.isclass(cls) and issubclass(cls, Environment)):
-        problems.append(f"python: {manifest.python} is not an Environment subclass")
-        return None
-    source, object_path = _split_reference(directory, manifest.python)
-    cls._python_source = source
-    cls._python_object = object_path
+    environment: Environment | None = None
     try:
-        environment = cls(
+        environment = environment_cls(
+            apps=apps,
             name=manifest.name,
             version=manifest.version,
             description=manifest.description,
@@ -335,24 +356,48 @@ def _build_environment(
             readme=readme,
             resources=resources,
             runtime=runtime,
-            secrets=manifest.secrets,
             guardrails=manifest.guardrails,
             harness_policy=manifest.harness_policy,
             limits=manifest.limits,
             metadata=manifest.metadata,
-            reset_command=manifest.reset_command or None,
+            source=directory,
         )
-        environment._bind_source(directory)
-        if not type(environment)._actions():
+        definition = environment.definition()
+        if not definition.actions:
             problems.append(
-                f"{_display(source, project_root)}: {object_path} declares no actions. "
-                "Add at least one method decorated with @action."
+                f"{_display(directory / 'environment.yaml', project_root)}: the Environment's "
+                "Apps offer no actions. Add an @action method, or connect a system with tools."
             )
-        environment.definition()
-    except (TypeError, ValueError) as exc:
-        problems.append(f"{_display(source, project_root)}: {_first_line(exc)}")
+    except (TypeError, ValueError, RuntimeError) as exc:
+        problems.append(f"{_display(directory, project_root)}: {_first_line(exc)}")
         return None
+    finally:
+        if environment is not None:
+            environment.close()
     return environment
+
+
+def _build_app(
+    spec: AppManifest, directory: Path, field: str, problems: list[str]
+) -> App[Any] | None:
+    try:
+        if spec.python:
+            target = _import_reference(directory, spec.python, f"{field}.python", problems)
+            if target is None:
+                return None
+            if not (inspect.isclass(target) and issubclass(target, App)):
+                problems.append(f"{field}.python: {spec.python} is not an App subclass")
+                return None
+            settings = dict(spec.config)
+            if spec.name:
+                settings["name"] = spec.name
+            return target(**settings)
+        factory = getattr(App, spec.kind)
+        settings = dict(getattr(spec, spec.kind) or {})
+        return cast(App[Any], factory(spec.name, **settings))
+    except (TypeError, ValueError, RuntimeError) as exc:
+        problems.append(f"{field}: {_first_line(exc)}")
+        return None
 
 
 def runtime_from_manifest(spec: Mapping[str, Any] | str) -> EnvironmentRuntime:

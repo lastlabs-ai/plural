@@ -78,7 +78,7 @@ def test_public_docs_and_examples_do_not_regress_to_internal_authoring_api() -> 
         assert STALE_PUBLIC_API.search(source.read_text(encoding="utf-8")) is None, source
 
 
-def test_environment_actions_run_through_the_class_reference(tmp_path: Path) -> None:
+def test_environment_apps_load_through_the_class_reference(tmp_path: Path) -> None:
     project = write_project(tmp_path / "support-desk")
     directory = project.root / "environments/queue"
     (directory / ".pluralignore").write_text("notes.txt\n")
@@ -86,20 +86,9 @@ def test_environment_actions_run_through_the_class_reference(tmp_path: Path) -> 
     environment = space.load(ResourceRef("environment", "queue")).value
     assert isinstance(environment, Environment)
     definition = environment.definition()
-    assert definition.actions[0].command == (
-        "python",
-        "-m",
-        "plural.environments.runner",
-        "environment.py:Queue",
-        "submit",
-    )
-    assert definition.reset_command == (
-        "python",
-        "-m",
-        "plural.environments.runner",
-        "environment.py:Queue",
-        "reset",
-    )
+    assert [item.name for item in definition.actions] == ["submit"]
+    assert definition.apps[0].python == "environment.py:Queue"
+    assert definition.apps[0].control == "owned"
     before = environment.content_hash
     (directory / "notes.txt").write_text("scratch\n")
     assert Workspace(project).load(ResourceRef("environment", "queue")).content_hash == before

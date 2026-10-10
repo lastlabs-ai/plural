@@ -27,6 +27,8 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HumanVerifier](#humanverifier)
 - [Agent](#agent)
 - [Benchmark](#benchmark)
+- [AppAction](#appaction)
+- [AppDefinition](#appdefinition)
 - [BenchmarkCategory](#benchmarkcategory)
 - [BenchmarkScoring](#benchmarkscoring)
 - [Capability](#capability)
@@ -41,7 +43,6 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HarnessCapability](#harnesscapability)
 - [HarnessDefinition](#harnessdefinition)
 - [HarnessPolicy](#harnesspolicy)
-- [Action](#action)
 - [NetworkMode](#networkmode)
 - [ResourceRequirements](#resourcerequirements)
 - [Rewarder](#rewarder)
@@ -52,22 +53,18 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 
 ## Environment
 
-Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent.
+Schema-v2 Environment: Apps composed with one Runtime and one set of limits.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`overview`** — `string`; optional. Default: `""`.
 - **`readme`** — `string`; optional. Default: `""`.
-- **`actions`** — `array of Action`; optional. Default: `[]`.
-- **`reset_command`** — `array of string`; optional. Default: `[]`.
-- **`observation_schema`** — `object`; optional.
-- **`state_schema`** — `object`; optional.
-- **`rewarders`** — `array of Rewarder`; optional. Default: `[]`.
+- **`apps`** — `array of AppDefinition`; optional. Default: `[]`.
+- **`python`** — `string | null`; optional. Default: `null`.
 - **`guardrails`** — `array of Guardrail`; optional. Default: `[]`.
 - **`resources`** — `array of Resource`; optional. Default: `[]`.
 - **`runtime`** — `Runtime`; optional.
-- **`secrets`** — `array of Secret`; optional. Default: `[]`.
 - **`harness_policy`** — `HarnessPolicy`; optional.
 - **`limits`** — `ExecutionLimits`; optional.
 - **`metadata`** — `object`; optional.
@@ -104,6 +101,7 @@ Function or command that scores a completed Episode.
 - **`criteria`** — `array of RubricCriterion`; optional. Default: `[]`.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
+- **`secrets`** — `array of Secret`; optional. Default: `[]`.
 - **`kind`** — `"deterministic"`; optional. Default: `"deterministic"`.
 - **`check`** — `JSON value`; required.
 - **`runtime`** — `VerifierRuntime`; optional.
@@ -120,6 +118,7 @@ Model-judge verifier with its own runtime and connectivity policy.
 - **`criteria`** — `array of RubricCriterion`; required. Constraints: `{"minItems": 1}`.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
+- **`secrets`** — `array of Secret`; optional. Default: `[]`.
 - **`kind`** — `"agent"`; optional. Default: `"agent"`.
 - **`model`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`instructions`** — `string`; required. Constraints: `{"minLength": 1}`.
@@ -137,6 +136,7 @@ Human review verifier.
 - **`criteria`** — `array of RubricCriterion`; required. Constraints: `{"minItems": 1}`.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
+- **`secrets`** — `array of Secret`; optional. Default: `[]`.
 - **`kind`** — `"human"`; optional. Default: `"human"`.
 - **`instructions`** — `string`; optional. Default: `""`.
 
@@ -177,6 +177,33 @@ A semantic version that pins an ordered set of Tasks.
 - **`primary_metric`** — `string`; optional. Default: `"score"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`metadata`** — `object`; optional.
+
+## AppAction
+
+One move an App offers the Agent.
+
+- **`name`** — `string`; required. Constraints: `{"maxLength": 64, "minLength": 1}`.
+- **`description`** — `string`; optional. Default: `""`.
+- **`parameters`** — `object`; optional.
+- **`mutates_state`** — `boolean`; optional. Default: `true`.
+- **`timeout_seconds`** — `number`; optional. Default: `30`. Constraints: `{"exclusiveMinimum": 0}`.
+
+## AppDefinition
+
+One App inside an Environment.
+
+- **`name`** — `string`; required.
+- **`kind`** — `"python" | "mcp" | "openapi" | "data" | "replay"`; optional. Default: `"python"`.
+- **`description`** — `string`; optional. Default: `""`.
+- **`python`** — `string | null`; optional. Default: `null`.
+- **`config`** — `object`; optional.
+- **`actions`** — `array of AppAction`; optional. Default: `[]`.
+- **`secrets`** — `array of Secret`; optional. Default: `[]`.
+- **`rewarders`** — `array of Rewarder`; optional. Default: `[]`.
+- **`state_schema`** — `object`; optional.
+- **`has_reset`** — `boolean`; optional. Default: `false`.
+- **`has_snapshot`** — `boolean`; optional. Default: `false`.
+- **`control`** — `"owned" | "sandboxed" | "live" | "replayed"`; optional. Default: `"owned"`.
 
 ## BenchmarkCategory
 
@@ -348,19 +375,6 @@ Environment ceiling for a Trial's optional Agent harness.
 - **`allowed_capabilities`** — `array of HarnessCapability | null`; optional. Default: `null`.
 - **`denied_capabilities`** — `array of HarnessCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
 
-## Action
-
-An action owned by an Environment.
-
-- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`description`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`kind`** — `"command" | "python"`; optional. Default: `"command"`.
-- **`command`** — `array of string`; optional. Default: `[]`.
-- **`parameters`** — `object`; optional.
-- **`observation_schema`** — `object`; optional.
-- **`mutates_state`** — `boolean`; optional. Default: `true`.
-- **`timeout_seconds`** — `number`; optional. Default: `30`. Constraints: `{"exclusiveMinimum": 0}`.
-
 ## NetworkMode
 
 Requested sandbox network policy.
@@ -380,12 +394,10 @@ Optional compute limits.
 
 ## Rewarder
 
-A named state-transition reward signal scored inside each step.
+A named reward signal an App computes for each of its own actions.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`description`** — `string`; optional. Default: `""`.
-- **`kind`** — `"command" | "python"`; optional. Default: `"command"`.
-- **`command`** — `array of string`; optional. Default: `[]`.
 - **`implementation_digest`** — `string`; optional. Default: `""`.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`timeout_seconds`** — `number`; optional. Default: `30`. Constraints: `{"exclusiveMinimum": 0}`.
@@ -412,11 +424,10 @@ A launch-time variable declaration. Values are supplied to Job, never saved here
 
 ## Secret
 
-A named credential supplied when a Job runs, with an explicit execution target.
+A named credential an App needs, supplied by the Job when it runs.
 
 - **`name`** — `string`; required. Constraints: `{"pattern": "^[A-Z_][A-Z0-9_]*$"}`.
 - **`required`** — `boolean`; optional. Default: `true`.
-- **`target`** — `"environment" | "harness" | "verifier"`; optional. Default: `"environment"`.
 - **`description`** — `string`; optional. Default: `""`.
 
 ## VerifierRuntime

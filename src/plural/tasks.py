@@ -21,7 +21,7 @@ from plural.environments.definition import (
     EnvironmentResource,
     ExecutionLimits,
 )
-from plural.environments.env import Environment
+from plural.environments.env import Environment, normalize_initial_state
 from plural.identity import revision_hash
 from plural.verifiers import DeterministicVerifier, VerifierDefinition, WeightedVerifier
 
@@ -60,26 +60,58 @@ def _schema_types(spec: Mapping[str, Any]) -> set[str]:
 def validate_task_state(
     *,
     task_id: str,
-    environment_name: str,
+    environment: EnvironmentDefinition,
     state: Any,
-    state_schema: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Validate Task-injected Environment state against the pinned schema.
+) -> dict[str, dict[str, Any]]:
+    """Validate a Task's initial state against each App's state schema.
+
+    The state is keyed by App name. With one App it may be that App's state
+    directly. An App with no state schema, such as an MCP App, accepts any
+    object and hands it to its reset hook.
 
     Returns:
-        The accepted state mapping, or an empty mapping when ``state`` is omitted.
+        The initial state keyed by App name, or an empty mapping when omitted.
 
     Raises:
-        ValueError: When ``state`` has unknown keys, wrong types, or is missing
-            a required field that has no default.
+        ValueError: When the state names no App, or an App's part has unknown
+            keys, wrong types, or misses a required field.
     """
     if state is None:
         return {}
     if not isinstance(state, dict):
         raise ValueError(
-            f"Cannot create Task {task_id!r} on Environment {environment_name!r}.\n"
+            f"Cannot create Task {task_id!r} on Environment {environment.name!r}.\n"
             f"initial_state must be an object, got {_json_type_name(state)}."
         )
+    try:
+        keyed = normalize_initial_state(environment, state)
+    except ValueError as exc:
+        raise ValueError(
+            f"Cannot create Task {task_id!r} on Environment {environment.name!r}.\n{exc}"
+        ) from None
+    for app_name, app_state in keyed.items():
+        schema = environment.app(app_name).state_schema
+        if schema:
+            _validate_app_state(
+                task_id=task_id,
+                label=app_name if len(environment.apps) > 1 else environment.name,
+                prefix=f"initial_state.{app_name}"
+                if len(environment.apps) > 1
+                else "initial_state",
+                state=app_state,
+                state_schema=schema,
+            )
+    return keyed
+
+
+def _validate_app_state(
+    *,
+    task_id: str,
+    label: str,
+    prefix: str,
+    state: Mapping[str, Any],
+    state_schema: Mapping[str, Any],
+) -> None:
     properties = state_schema.get("properties")
     fields = properties if isinstance(properties, dict) else {}
     settable = {
@@ -91,7 +123,7 @@ def validate_task_state(
     errors: list[str] = []
     if unknown:
         errors.append(
-            "initial_state has fields the Environment State does not define: "
+            f"{prefix} has fields the App State does not define: "
             + ", ".join(repr(key) for key in unknown)
             + "."
         )
@@ -101,7 +133,7 @@ def validate_task_state(
             continue
         if settable and key not in settable:
             errors.append(
-                f"initial_state cannot set {key!r}. "
+                f"{prefix} cannot set {key!r}. "
                 "Only State fields marked with initial() can be supplied by a Task."
             )
             continue
@@ -109,7 +141,7 @@ def validate_task_state(
         actual = _json_type_name(value)
         if expected and actual not in expected and not (value is None and "null" in expected):
             errors.append(
-                f"initial_state {key!r} expected {' or '.join(sorted(expected))}, got {actual}."
+                f"{prefix} {key!r} expected {' or '.join(sorted(expected))}, got {actual}."
             )
             continue
         errors.extend(_constraint_errors(key, value, spec))
@@ -121,15 +153,14 @@ def validate_task_state(
                 continue
             if settable and key not in settable:
                 continue
-            errors.append(f"initial_state is missing required State field {key!r}.")
+            errors.append(f"{prefix} is missing required State field {key!r}.")
     if errors:
         available = ", ".join(sorted(fields)) if fields else "(none)"
         raise ValueError(
-            f"Cannot create Task {task_id!r} on Environment {environment_name!r}.\n"
+            f"Cannot create Task {task_id!r} on {label!r}.\n"
             + "\n".join(errors)
-            + f"\n{environment_name} State fields: {available}"
+            + f"\n{label} State fields: {available}"
         )
-    return {str(key): value for key, value in state.items()}
 
 
 def _constraint_errors(key: str, value: Any, spec: Mapping[str, Any]) -> list[str]:
@@ -197,6 +228,31 @@ def _constraint_phrase(spec: Mapping[str, Any]) -> str | None:
     return None
 
 
+def live_app_problems(task_name: str, environment: EnvironmentDefinition) -> list[str]:
+    """Why a Benchmark cannot include this Task's Environment, if it cannot.
+
+    A ``live`` App has no reset hook, so Plural cannot return it to the Task's
+    starting point. One whose actions can change state would let one attempt
+    change what the next one sees, so results would not be comparable.
+
+    Returns:
+        One message per ``live`` App with an action that can change state.
+    """
+    problems: list[str] = []
+    for app in environment.apps:
+        if app.control != "live":
+            continue
+        changing = [item.name for item in app.actions if item.mutates_state]
+        if changing:
+            problems.append(
+                f"Task {task_name!r} uses live App {app.name!r}, whose actions "
+                f"{', '.join(changing)} can change state that Plural cannot reset. "
+                "Give the App a reset hook so each attempt starts from the Task's state, "
+                "or limit it to read-only tools."
+            )
+    return problems
+
+
 def _task_bind_errors(task: Task) -> list[str]:
     errors: list[str] = []
     environment = task.environment
@@ -216,17 +272,6 @@ def _task_bind_errors(task: Task) -> list[str]:
         if isinstance(environment, EnvironmentDefinition)
         else None
     )
-    if (
-        isinstance(environment, Environment)
-        and environment._actions()
-        and environment.source is None
-    ):
-        errors.append(
-            f"Cannot create Task {task.name!r}.\n"
-            f"Environment {environment.name!r} has @action methods but no source "
-            "tree, so a Job cannot execute them.\n"
-            "Define the Environment class in a .py file next to the files it needs."
-        )
     if not task.verifiers:
         errors.append(
             f"{header}\nA Task needs at least one Verifier that scores the completed Episode."
@@ -242,7 +287,7 @@ def _task_bind_errors(task: Task) -> list[str]:
                 errors.append(
                     f"{header}\n"
                     f"Verifier {verifier.name!r} check must be a function that accepts an Episode\n"
-                    "(observation, state, trajectory, artifacts, usage).\n"
+                    "(observation, state, apps, trajectory, artifacts, usage).\n"
                     f"Got: {type(check).__name__}. Define it like:\n"
                     "  def solved(episode: Episode) -> VerifierOutput: ...\n"
                     "  DeterministicVerifier(name='solved', check=solved)"
@@ -251,9 +296,8 @@ def _task_bind_errors(task: Task) -> list[str]:
         try:
             validate_task_state(
                 task_id=task.name,
-                environment_name=definition.name,
+                environment=definition,
                 state=task.initial_state,
-                state_schema=definition.state_schema,
             )
         except ValueError as exc:
             errors.append(str(exc))
@@ -419,12 +463,7 @@ class TaskDefinition(FrozenModel):
 
     @model_validator(mode="after")
     def _state_fits_environment(self) -> TaskDefinition:
-        validate_task_state(
-            task_id=self.task_id,
-            environment_name=self.environment.name,
-            state=self.state,
-            state_schema=self.environment.state_schema,
-        )
+        validate_task_state(task_id=self.task_id, environment=self.environment, state=self.state)
         return self
 
     @property
@@ -545,10 +584,22 @@ class BenchmarkDefinition(BenchmarkRelease):
         identities = [task.identity for task in self.tasks]
         if len(identities) != len(set(identities)):
             raise ValueError("benchmark Task revisions must be unique")
+        problems = [
+            problem
+            for task in self.tasks
+            for problem in live_app_problems(task.task_id, task.environment)
+        ]
+        if problems:
+            raise ValueError(f"Cannot create Benchmark {self.name!r}.\n" + "\n".join(problems))
         self._validate_release(
             self.name, [(task.task_id, task.environment.limits) for task in self.tasks]
         )
         return self
+
+    @property
+    def reproducible(self) -> bool:
+        """Whether every Task starts from state Plural controls; false with a live App."""
+        return all(task.environment.reproducible for task in self.tasks)
 
     @property
     def content_hash(self) -> str:
@@ -620,6 +671,13 @@ class Benchmark(BenchmarkRelease):
         names = [task.name for task in self.tasks]
         if len(names) != len(set(names)):
             raise ValueError("benchmark Task names must be unique")
+        problems = [
+            problem
+            for task in self.tasks
+            for problem in live_app_problems(task.name, task._environment_definition())
+        ]
+        if problems:
+            raise ValueError(f"Cannot create Benchmark {self.name!r}.\n" + "\n".join(problems))
         self._validate_release(
             self.name,
             [(task.name, task._environment_definition().limits) for task in self.tasks]
@@ -627,6 +685,11 @@ class Benchmark(BenchmarkRelease):
             else [(name, ExecutionLimits()) for name in names],
         )
         return self
+
+    @property
+    def reproducible(self) -> bool:
+        """Whether every Task starts from state Plural controls; false with a live App."""
+        return all(task._environment_definition().reproducible for task in self.tasks)
 
     @property
     def task_pins(self) -> tuple[TaskPin, ...]:

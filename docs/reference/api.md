@@ -1444,110 +1444,42 @@ Read hosted upload metadata when a prior sync was registered.
 
 ## plural.Environment
 
-A Task-bound world with a ``reset`` / ``step`` episode API.
+Apps the Agent acts in, with one Runtime, policy, and set of limits.
 
 ```text
-Compile typed declarations into one immutable execution view. A Task pins
-one Environment version. The Job or Harness constructs this instance for
-that Task, calls :meth:`reset`, then applies Agent moves with :meth:`step`.
-``reset`` and ``step`` are not Agent-facing ``@action`` tools.
+An Environment owns the episode: ``reset`` and ``step``, the table of
+actions every App offers, and the rule that the Agent only ever sees an
+action's observation. Most Environments need no subclass::
+
+    environment = Environment(apps=[Wordle()], runtime=Runtime.docker())
+
+Subclass it only when Apps affect one another. Override :meth:`on_step`
+to react after any App's action, or :meth:`terminated` to end the episode
+from the state of several Apps.
 ```
 
 ```python
-plural.Environment(*, name: 'str | None' = None, version: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'tuple[EnvironmentResource, ...] | list[EnvironmentResource]' = (), runtime: 'EnvironmentRuntime | None' = None, secrets: 'tuple[SecretReference, ...] | list[SecretReference]' = (), guardrails: 'tuple[Guardrail, ...] | list[Guardrail]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, metadata: 'dict[str, Any] | None' = None, state: 'StateT | None' = None, observation: 'ObsT | None' = None, info: 'Any' = None, reset_command: 'tuple[str, ...] | list[str] | None' = None) -> 'None'
+plural.Environment(*, apps: 'Iterable[App[Any]]' = (), runtime: 'EnvironmentRuntime | Mapping[str, Any] | None' = None, name: 'str | None' = None, version: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'Iterable[EnvironmentResource]' = (), guardrails: 'Iterable[Guardrail]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, metadata: 'dict[str, Any] | None' = None, source: 'str | Path | None' = None) -> 'None'
 ```
 
-### plural.Environment.observation_snapshot
+### plural.Environment.on_step
 
 ```python
-observation_snapshot(self) -> 'Any'
+on_step(self, call: 'ActionCall', result: 'Any', apps: 'Mapping[str, Any]') -> 'float | None'
 ```
 
-Return a detached, JSON-safe agent-visible observation.
-
-### plural.Environment.state_snapshot
-
-```python
-state_snapshot(self) -> 'Any'
-```
-
-Return a detached, JSON-safe internal state snapshot.
-
-### plural.Environment.view
-
-```python
-view(self) -> 'dict[str, Any]'
-```
-
-Return an optional Environment-owned render document.
+React after any App's action, for effects that span Apps.
 
 ```text
-Returns:
-    A JSON-safe view. Empty means Intel falls back to the observation.
-```
+``apps`` maps each App's name to a handle with ``call(action, **args)``,
+``snapshot()``, and ``state``. An effect here is not an Agent action and
+is not shown to the Agent. Apps never call each other directly.
 
-### plural.Environment.persist
-
-```python
-persist(self, directory: 'str | Path' = '.') -> 'None'
-```
-
-Write ``state.json``, ``observation.json``, and ``view.json``.
-
-### plural.Environment.from_config
-
-```python
-from_config(**fields: 'Any') -> 'Environment[Any, Any]'
-```
-
-Restore a serialized public Environment configuration.
-
-```text
-This is primarily used by :mod:`plural.project`; users normally author
-Python subclasses.
+Return a number to record an Environment reward for this step, or
+``None``. Like every reward, it never reaches the Agent or a score.
 
 Returns:
-    An Environment backed by the validated serialized configuration.
-```
-
-### plural.Environment.reset
-
-```python
-reset(self, *, seed: 'int | None' = None, options: 'dict[str, Any] | None' = None) -> 'tuple[ObsT, dict[str, Any]]'
-```
-
-Start a new episode.
-
-```text
-Returns ``(observation, info)``. The Job
-or Harness calls this after attaching the Environment to a Task. It is
-not an Agent action and does not take a Task name. Subclasses override
-this to load the bound Task's initial state. ``options`` is harness
-configuration, not an Agent argument.
-
-Returns:
-    The initial observation and reset information.
-```
-
-### plural.Environment.step
-
-```python
-step(self, action: 'Any' = None, /, **kwargs: 'Any') -> 'tuple[ObsT, float, bool, bool, dict[str, Any]]'
-```
-
-Apply one Agent action.
-
-```text
-Returns ``(observation, reward,
-terminated, truncated, info)``. ``action`` is a mapping with
-``name`` plus parameters, an action name plus kwargs, or kwargs
-alone when the Environment has a single ``@action``.
-
-``reward`` sums :meth:`reward` and every ``@rewarder`` for this one
-transition. ``info["rewards"]`` breaks the total down by name.
-
-Returns:
-    Observation, reward, terminal flags, and step information.
+    An optional reward.
 ```
 
 ### plural.Environment.terminated
@@ -1556,13 +1488,7 @@ Returns:
 terminated(self) -> 'bool'
 ```
 
-Return whether the Environment ended the episode.
-
-```text
-Override this to end the episode when the world reaches a Task success
-or failure state. The default never terminates, which leaves the stop
-decision to the Agent or the Harness budget.
-```
+Return whether the episode is over. Default: any App says it is.
 
 ### plural.Environment.truncated
 
@@ -1570,54 +1496,110 @@ decision to the Agent or the Harness budget.
 truncated(self) -> 'bool'
 ```
 
-Return whether the Environment cut the episode short.
+Return whether the episode was cut short. Default: any App says so.
 
-```text
-Override this to stop an episode that cannot usefully continue but did
-not reach a success or failure state. Harness turn, time, and cost
-budgets truncate independently of this method.
-```
-
-### plural.Environment.reward
+### plural.Environment.from_definition
 
 ```python
-reward(self, previous_state: 'Any', current_state: 'Any', action: 'Mapping[str, Any]', result: 'Any') -> 'float'
+from_definition(definition: 'EnvironmentDefinition', root: 'str | Path | None' = None) -> 'Environment'
 ```
 
-Return the step reward. Default is ``0``.
+Rebuild an Environment and its Apps from a compiled definition.
+
+```text
+``root`` is the folder holding the Environment's source files, where
+each Python App class and the optional Environment subclass live.
+
+Returns:
+    The rebuilt Environment, ready to reset.
+```
+
+### plural.Environment.reset
+
+```python
+reset(self, *, initial_state: 'Mapping[str, Any] | None' = None, info: 'Any' = None, seed: 'int | None' = None) -> 'tuple[Any, dict[str, Any]]'
+```
+
+Start an episode in this process.
+
+```text
+``initial_state`` maps each App's name to its starting state; with one
+App it may be that App's state directly.
+
+Returns:
+    The opening observation and reset information.
+```
+
+### plural.Environment.step
+
+```python
+step(self, action: 'str | Mapping[str, Any] | None' = None, /, **kwargs: 'Any') -> 'tuple[Any, float, bool, bool, dict[str, Any]]'
+```
+
+Apply one Agent action in this process.
+
+```text
+``action`` is an exposed action name with keyword arguments, or a
+mapping with ``name`` and the arguments. With exactly one action the
+name may be omitted.
+
+Returns:
+    Observation, reward, terminated, truncated, and step information.
+```
+
+### plural.Environment.snapshot
+
+```python
+snapshot(self) -> 'dict[str, Any]'
+```
+
+Return each App's state, as a Verifier receives it after the episode.
+
+### plural.Environment.close
+
+```python
+close(self) -> 'None'
+```
+
+End the in-process episode and release every App's connections.
 
 ## plural.action
 
-Mark an :class:`~plural.environments.env.Environment` method as a native action.
+Mark an :class:`~plural.apps.App` method as an action the Agent can take.
 
 ```text
 Args:
     fn: Method to register (decorator usage).
     name: Optional explicit action name. Defaults to the method name.
+    read_only: The action never changes state. Verifiers may call only
+        read-only actions after the episode.
+    timeout_seconds: How long one call may run.
 
 Returns:
     The original method (decorator) or a decorator.
 ```
 
 ```python
-plural.action(fn: 'Callable[..., Any] | None' = None, *, name: 'str | None' = None) -> 'Any'
+plural.action(fn: 'Callable[..., Any] | None' = None, *, name: 'str | None' = None, read_only: 'bool' = False, timeout_seconds: 'float' = 30) -> 'Any'
 ```
 
 ## plural.rewarder
 
-Declare a named state-transition reward signal.
+Declare a reward signal for each action of the App that defines it.
 
 ```text
-The callable must accept ``previous_state, current_state, action, result``.
-Every rewarder runs inside :meth:`Environment.step` immediately after the
-action that changed the world, so it scores one transition and supports
-credit assignment. ``weight`` scales its contribution to the step reward.
+The method accepts ``previous_state, current_state, action, result``.
+``action`` is ``{"name": ..., **arguments}`` and ``result`` is what the
+action returned, which is what the Agent saw. The two states are the App's
+snapshots before and after the action, or ``None`` when the App does not
+snapshot on each step, so a rewarder on a connected system can still judge
+the system's response.
 
-Rewards are recorded on the episode. They never contribute to a Verifier
-score.
+Rewards are recorded for credit assignment. They never contribute to a
+Verifier score and never reach the Agent.
 
 Returns:
-    A decorated rewarder callable.
+    The decorated method.
 ```
 
 ```python

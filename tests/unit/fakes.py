@@ -54,6 +54,8 @@ class FakeProvider(SandboxProvider):
         self.active = 0
         self.max_active = 0
         self.harness_runs = 0
+        self.host_calls: list[ExecRequest] = []
+        self.harness_requests: list[ExecRequest] = []
 
     async def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(
@@ -87,6 +89,14 @@ class FakeProvider(SandboxProvider):
             self.files[handle.sandbox_id][item.path] = item.data
 
     async def exec(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
+        if request.command[:3] == ("python", "-m", "plural.apps.daemon"):
+            return self._app_host(handle, request)
+        if request.command[:2] == ("python", "-c"):
+            # Plural's install probe: report this machine's version as installed.
+            import plural
+
+            version = json.dumps({"version": plural.__version__}).encode()
+            return ExecResult(exit_code=0, stdout=version + b"\n", duration_seconds=0.001)
         if request.stdin is None:
             self.files[handle.sandbox_id]["verifier-result.json"] = json.dumps(
                 {
@@ -97,6 +107,7 @@ class FakeProvider(SandboxProvider):
             ).encode()
             return ExecResult(exit_code=0, duration_seconds=0.001)
         self.harness_runs += 1
+        self.harness_requests.append(request)
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
@@ -112,6 +123,10 @@ class FakeProvider(SandboxProvider):
             self.files[handle.sandbox_id]["state.json"] = b'{"step": 1}'
             self.files[handle.sandbox_id]["observation.json"] = b'{"text": "done"}'
             self.files[handle.sandbox_id]["view.json"] = b'{"kind": "text", "text": "done"}'
+            if payload["environment"].get("apps"):
+                self.files[handle.sandbox_id][".plural/apps/observation.json"] = (
+                    b'{"observation": {"text": "board"}, "rendered": "board"}'
+                )
             if "mode" in payload["environment"]:
                 raise AssertionError("mode must not be injected into Environment payload")
             artifact_paths = ["episode.jsonl"]
@@ -157,6 +172,29 @@ class FakeProvider(SandboxProvider):
         finally:
             self.active -= 1
 
+    def _app_host(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
+        """Answer App host commands as one App named ``game`` would."""
+        self.host_calls.append(request)
+        operation = request.command[3]
+        result: object = {"ok": True}
+        if operation == "finish":
+            declared = json.loads(
+                self.files[handle.sandbox_id].get(".plural/apps/environment.json") or b"{}"
+            )
+            result = {
+                app["name"]: {"control": app.get("control", "owned"), "initial": {}, "final": {}}
+                for app in declared.get("apps") or []
+            }
+            result["game"] = {"control": "owned", "initial": {"step": 0}, "final": {"step": 1}}
+        elif operation == "query":
+            arguments = json.loads(request.stdin or b"{}")
+            result = {"app": request.command[4], "action": request.command[5], **arguments}
+        elif operation == "stop":
+            result = "stopped"
+        return ExecResult(
+            exit_code=0, stdout=(json.dumps(result) + "\n").encode(), duration_seconds=0.001
+        )
+
     async def download_files(
         self,
         handle: SandboxHandle,
@@ -164,9 +202,11 @@ class FakeProvider(SandboxProvider):
         *,
         root: str = "/workspace",
     ) -> tuple[DownloadedFile, ...]:
-        return tuple(
-            DownloadedFile(path=path, data=self.files[handle.sandbox_id][path]) for path in paths
-        )
+        files = self.files[handle.sandbox_id]
+        missing = [path for path in paths if path not in files]
+        if missing:
+            raise FileNotFoundError(missing[0])
+        return tuple(DownloadedFile(path=path, data=files[path]) for path in paths)
 
     async def cancel(self, handle: SandboxHandle) -> None:
         return

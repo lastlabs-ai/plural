@@ -426,6 +426,14 @@ class JobSpec(FrozenModel):
                 raise ValueError(
                     f"Environment {task.environment.name!r} provider is not enforceable: {reason}"
                 )
+            if self.mode is JobMode.TRAIN:
+                live = [item.name for item in task.environment.apps if item.control == "live"]
+                if live:
+                    raise ValueError(
+                        f"A train Job cannot use Task {task.task_id!r}: its Environment has "
+                        f"live Apps ({', '.join(live)}) that Plural cannot reset, so episodes "
+                        "would not start from the Task's state. Give each a reset hook."
+                    )
             for agent in self.agents:
                 resolve_trial_harness_grant(task.environment, agent.agent)
         return self

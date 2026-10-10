@@ -1,4 +1,4 @@
-"""Wordle as a Plural Environment. The secret stays on State, never on Observation."""
+"""Wordle as a Plural App. The secret stays on State; the Agent only sees what guess returns."""
 
 import random
 from functools import cache
@@ -7,20 +7,13 @@ from typing import Annotated
 
 from pydantic import Field
 
-from plural import Environment, Observation, State, action, initial
+from plural import App, State, action, initial, rewarder
 
 WORDS_FILE = Path(__file__).with_name("words.txt")
 
 
-class Board(Observation):
-    """The board the Agent sees. It never includes the secret."""
-
-    remaining: int = 6
-    solved: bool = False
-
-
 class Game(State):
-    """Private world. A Task may set the secret; the Environment owns the rest."""
+    """Private world. A Task may set the secret; the App owns the rest."""
 
     secret: str = initial(
         "",
@@ -49,9 +42,8 @@ def marks(secret: str, guess: str) -> list[str]:
     return scored
 
 
-class Wordle(Environment[Board, Game]):
-    name = "wordle"
-    overview = "Guess a hidden five-letter word in six tries."
+class Wordle(App[Game]):
+    """Guess a hidden five-letter word in six tries."""
 
     @staticmethod
     @cache
@@ -60,22 +52,21 @@ class Wordle(Environment[Board, Game]):
         lines = WORDS_FILE.read_text(encoding="utf-8").splitlines()
         return frozenset(line.strip().lower() for line in lines if line.strip())
 
-    def reset(self, *, seed=None, options=None):
+    def reset(self, initial_state):
         """Start an episode. A blank secret is chosen from words.txt using the seed."""
-        super().reset(seed=seed, options=options)
+        super().reset(initial_state)
         words = self.words()
         secret = self.state.secret or random.Random(self.state.seed).choice(sorted(words))
         if secret not in words:
             raise ValueError(f"The secret {secret!r} is not in words.txt")
         self.state = Game(secret=secret, remaining=6, seed=self.state.seed)
-        self.observation = Board(text="6 guesses left. Guess any five-letter word.", remaining=6)
-        return self.observation, {}
+        return "6 guesses left. Guess any five-letter word."
 
     @action
     def guess(
         self,
         word: Annotated[str, Field(min_length=5, max_length=5, pattern=r"^[a-z]{5}$")],
-    ) -> Board:
+    ) -> str:
         """Guess one word. + is correct, ? is elsewhere in the word, - is absent."""
         word = word.strip().lower()
         if word not in self.words():
@@ -87,17 +78,13 @@ class Wordle(Environment[Board, Game]):
         glyphs = {"correct": "+", "present": "?", "absent": "-"}
         marks_text = " ".join(glyphs[mark] for mark in scored)
         status = "solved" if self.state.solved else f"{self.state.remaining} left"
-        self.observation = Board(
-            text=f"{word}  {marks_text}\n{status}",
-            remaining=self.state.remaining,
-            solved=self.state.solved,
-        )
-        return self.observation
+        return f"{word}  {marks_text}\n{status}"
 
     def terminated(self) -> bool:
         return self.state.solved or self.state.remaining <= 0
 
-    def reward(self, previous_state, current_state, action, result) -> float:
+    @rewarder
+    def solved(self, previous_state, current_state, action, result) -> float:
         """One point for the guess that solves the word. Never part of the score."""
         return 1.0 if current_state["solved"] and not previous_state["solved"] else 0.0
 

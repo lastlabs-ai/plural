@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fnmatch
+import functools
 import json
 import math
 import os
@@ -22,6 +23,16 @@ from plural.benchmarks.rules import BenchmarkScoring
 from plural.catalog import ModelCatalog
 from plural.common import ErrorCode, HarnessPackage, content_hash
 from plural.evidence import first_json_mapping
+from plural.execution.apps import (
+    WORKSPACE,
+    app_secret_values,
+    environment_payload,
+    finish_host,
+    host_files,
+    query_host,
+    start_host,
+    stop_host,
+)
 from plural.execution.bootstrap import (
     RUNTIME_VERSION_VARIABLE,
     PluralDistribution,
@@ -85,7 +96,6 @@ from plural.verifiers import (
     VerifierDefinition,
     VerifierOutput,
     VerifierRuntime,
-    score_from_rewards,
 )
 
 
@@ -184,30 +194,6 @@ def _redact_bytes(value: bytes, secrets: Mapping[str, str]) -> bytes:
         if secret:
             output = output.replace(secret.encode(), b"***")
     return output
-
-
-def _environment_payload(task: TaskDefinition) -> dict[str, Any]:
-    environment = task.environment
-    properties = environment.observation_schema.get("properties", {})
-    observation = {
-        name: schema["default"]
-        for name, schema in properties.items()
-        if isinstance(schema, dict) and "default" in schema
-    }
-    return {
-        "name": environment.name,
-        "overview": environment.overview,
-        "observation": observation,
-        "observation_schema": environment.observation_schema,
-        "limits": environment.limits.model_dump(mode="json"),
-        "guardrails": [item.model_dump(mode="json") for item in environment.guardrails],
-        "resources": [item.model_dump(mode="json") for item in environment.resources],
-        "workspace": "/workspace/environment",
-        "variable_names": [item.name for item in environment.runtime.variables]
-        + [item.name for item in environment.secrets if item.target == "environment"],
-        "actions": [item.model_dump(mode="json") for item in environment.actions],
-        "reset_command": list(environment.reset_command),
-    }
 
 
 async def _optional_json(
@@ -525,9 +511,9 @@ class Trial:
         verifier_stdout = b""
         verifier_stderr = b""
         artifacts: tuple[DownloadedFile, ...] = ()
-        environment_state: dict[str, Any] = {}
         environment_observation: dict[str, Any] = {}
         environment_view_doc: dict[str, Any] = {}
+        app_report: dict[str, Any] = {}
         trace_id: str | None = None
         verifier_results: tuple[VerifierResult, ...] = ()
         tito: ArtifactReference | None = None
@@ -557,14 +543,16 @@ class Trial:
         )
         try:
             harness_env, secrets = _harness_environment(agent, package, self.environ)
-            for target in ("environment", "harness"):
-                values, declared_secrets = runtime_values(
-                    task.environment, self.environ, target=target
-                )
-                harness_env.update(values)
-                secrets.update(declared_secrets)
-            runtime_values(task.environment, self.environ, target="verifier")
+            host_env, runtime_secrets = runtime_values(task.environment, self.environ)
+            try:
+                app_secrets = app_secret_values(task.environment, self.environ)
+            except ValueError as exc:
+                raise ExecutionFailure(ErrorCode.AUTHENTICATION, str(exc)) from None
+            self._verifier_secret_values()
+            secrets.update(runtime_secrets)
+            secrets.update(app_secrets)
             harness_env["PLURAL_RESOURCES_DIR"] = "/workspace/resources"
+            host_env["PLURAL_RESOURCES_DIR"] = "/workspace/resources"
             async with phase("agent_setup"):
                 await self._preflight_harness(provider, package)
                 source = materialize_package(package)
@@ -590,11 +578,14 @@ class Trial:
                 async with phase("environment_setup"):
                     await self._stage_environment(provider, handle)
                     if distribution is not None:
-                        harness_env.update(
-                            await install_plural(
-                                provider, handle, distribution, network=requirements.network
-                            )
+                        plural_env = await install_plural(
+                            provider, handle, distribution, network=requirements.network
                         )
+                        harness_env.update(plural_env)
+                        host_env.update(plural_env)
+                    if task.environment.apps:
+                        await provider.upload_files(handle, host_files(task), root=WORKSPACE)
+                        await start_host(provider, handle, env=host_env, secrets=app_secrets)
                 request = HarnessRunRequest(
                     request_id=self.spec.trial_id,
                     task=task.public_payload,
@@ -608,7 +599,7 @@ class Trial:
                         "harness_kwargs": agent.harness_kwargs,
                     },
                     model_resolution=self.spec.model.model_dump(mode="json"),
-                    environment=_environment_payload(task),
+                    environment=environment_payload(task),
                     mode=self.job_spec.mode.value,
                     capture_tito=self.job_spec.mode is JobMode.TRAIN,
                     workspace="/workspace/harness",
@@ -662,22 +653,27 @@ class Trial:
                 artifacts = await provider.download_artifacts(
                     handle, paths, root="/workspace/harness"
                 )
-                environment_state = await _optional_json(
-                    provider, handle, "state.json", root="/workspace/environment"
-                ) or await _optional_json(provider, handle, "state.json", root="/workspace/harness")
-                environment_observation = await _optional_json(
-                    provider, handle, "observation.json", root="/workspace/environment"
-                ) or await _optional_json(
+                if task.environment.apps:
+                    app_report = await finish_host(provider, handle, env=host_env)
+                    last = await _optional_json(
+                        provider, handle, ".plural/apps/observation.json", root=WORKSPACE
+                    )
+                    observed = last.get("observation")
+                    environment_observation = dict(observed) if isinstance(observed, dict) else {}
+                    environment_view_doc = await _optional_json(
+                        provider, handle, ".plural/apps/view.json", root=WORKSPACE
+                    )
+                environment_observation = environment_observation or await _optional_json(
                     provider, handle, "observation.json", root="/workspace/harness"
                 )
-                environment_view_doc = await _optional_json(
-                    provider, handle, "view.json", root="/workspace/environment"
-                ) or await _optional_json(provider, handle, "view.json", root="/workspace/harness")
-                if environment_state:
-                    artifacts = _with_artifact(
-                        artifacts,
-                        _json_artifact("state.json", environment_state),
-                    )
+                environment_view_doc = environment_view_doc or await _optional_json(
+                    provider, handle, "view.json", root="/workspace/harness"
+                )
+                if app_report:
+                    artifacts = _with_artifact(artifacts, _json_artifact("apps.json", app_report))
+                    state = Episode.from_apps(app_report).state
+                    if state:
+                        artifacts = _with_artifact(artifacts, _json_artifact("state.json", state))
                 if environment_observation:
                     artifacts = _with_artifact(
                         artifacts,
@@ -709,29 +705,39 @@ class Trial:
                         completed_at=datetime.now(timezone.utc),
                     )
                 )
+
+                if self.job_spec.mode is JobMode.TRAIN:
+                    tito = _validate_tito(package, artifacts)
+                self._emit_step_rewards(_step_rewards(artifacts))
+
+                self.store.emit(
+                    self.spec.job_id,
+                    "verifying",
+                    "verifying",
+                    trial_id=self.spec.trial_id,
+                    execution_id=execution_id,
+                )
+                # Verifiers run while the Runtime is up, so they can query the Apps.
+                async with phase("verification"):
+                    (
+                        verifier_results,
+                        verifier_stdout,
+                        verifier_stderr,
+                    ) = await self._run_verifiers(
+                        artifacts,
+                        trace_id,
+                        observation=environment_observation,
+                        apps=app_report,
+                        query=self._app_query(provider, handle, host_env)
+                        if task.environment.apps
+                        else None,
+                    )
             finally:
                 self._active.pop((provider.name, handle.sandbox_id), None)
                 async with phase("cleanup"):
+                    if task.environment.apps:
+                        await stop_host(provider, handle, env=host_env)
                     await provider.destroy(handle)
-
-            if self.job_spec.mode is JobMode.TRAIN:
-                tito = _validate_tito(package, artifacts)
-            self._emit_step_rewards(_step_rewards(artifacts))
-
-            self.store.emit(
-                self.spec.job_id,
-                "verifying",
-                "verifying",
-                trial_id=self.spec.trial_id,
-                execution_id=execution_id,
-            )
-            async with phase("verification"):
-                verifier_results, verifier_stdout, verifier_stderr = await self._run_verifiers(
-                    artifacts,
-                    trace_id,
-                    observation=environment_observation,
-                    state=environment_state,
-                )
             awaiting = any(item.status == "awaiting_review" for item in verifier_results)
             score, scores = _aggregate(task, verifier_results)
             status: Literal["succeeded", "awaiting_review"] = (
@@ -910,20 +916,63 @@ class Trial:
         if self.task.state:
             validate_task_state(
                 task_id=self.task.task_id,
-                environment_name=self.task.environment.name,
+                environment=self.task.environment,
                 state=self.task.state,
-                state_schema=self.task.environment.state_schema,
             )
-            await provider.upload_files(
-                handle,
-                (
-                    FileUpload(
-                        path="state.json",
-                        data=(json.dumps(self.task.state, sort_keys=True) + "\n").encode(),
-                    ),
+
+    def _app_query(
+        self,
+        provider: SandboxProvider,
+        handle: SandboxHandle,
+        env: Mapping[str, str],
+    ) -> Callable[[str, str, dict[str, Any]], Any]:
+        """A blocking App query for function Verifiers, which run in a worker thread."""
+        loop = asyncio.get_running_loop()
+        timeouts = {
+            (item.app, item.action): item.timeout_seconds for item in self.task.environment.actions
+        }
+
+        def query(app: str, action: str, arguments: dict[str, Any]) -> Any:
+            future = asyncio.run_coroutine_threadsafe(
+                query_host(
+                    provider,
+                    handle,
+                    app,
+                    action,
+                    arguments,
+                    env=env,
+                    timeout=timeouts.get((app, action), 60.0) + 30,
                 ),
-                root="/workspace/environment",
+                loop,
             )
+            return future.result()
+
+        return query
+
+    def _verifier_secret_values(self) -> dict[str, str]:
+        """Secret values the Task's Verifiers declared.
+
+        Returns:
+            Name to value.
+
+        Raises:
+            ExecutionFailure: When a required one is missing.
+        """
+        values: dict[str, str] = {}
+        missing: list[str] = []
+        for binding in self.task.verifiers:
+            for item in binding.verifier.secrets:
+                value = self.environ.get(item.name)
+                if value:
+                    values[item.name] = value
+                elif item.required:
+                    missing.append(f"Verifier {binding.verifier.name!r} needs {item.name}")
+        if missing:
+            raise ExecutionFailure(
+                ErrorCode.AUTHENTICATION,
+                "Missing Verifier secrets:\n  " + "\n  ".join(missing),
+            )
+        return values
 
     def _emit_step_rewards(self, rewards: Sequence[Mapping[str, Any]]) -> None:
         """Publish recorded per-step rewards as training signal.
@@ -953,7 +1002,8 @@ class Trial:
         trace_id: str | None,
         *,
         observation: Mapping[str, Any] | None = None,
-        state: Mapping[str, Any] | None = None,
+        apps: Mapping[str, Any] | None = None,
+        query: Callable[[str, str, dict[str, Any]], Any] | None = None,
     ) -> tuple[tuple[VerifierResult, ...], bytes, bytes]:
         results: list[VerifierResult] = []
         stdout = bytearray()
@@ -971,16 +1021,10 @@ class Trial:
                     )
                 )
                 continue
-            if isinstance(verifier, DeterministicVerifier) and (
-                verifier.checker is not None or verifier.reward_source is not None
-            ):
-                episode = self._episode(artifacts, observation=observation, state=state)
+            if isinstance(verifier, DeterministicVerifier) and verifier.checker is not None:
+                episode = self._episode(artifacts, observation=observation, apps=apps, query=query)
                 try:
-                    scored = (
-                        score_from_rewards(episode, verifier.reward_source)
-                        if verifier.reward_source
-                        else verifier.invoke(episode)
-                    )
+                    scored = await asyncio.to_thread(verifier.invoke, episode)
                     parsed = scored.validated_finite()
                 except ValueError as exc:
                     raise ExecutionFailure(ErrorCode.VERIFIER_FAILED, str(exc)) from exc
@@ -1023,7 +1067,7 @@ class Trial:
                 evidence_required=evidence_required,
                 verifier=verifier,
                 observation=observation,
-                state=state,
+                apps=apps,
             )
             results.append(
                 result.model_copy(
@@ -1039,13 +1083,11 @@ class Trial:
         artifacts: Sequence[DownloadedFile],
         *,
         observation: Mapping[str, Any] | None = None,
-        state: Mapping[str, Any] | None = None,
+        apps: Mapping[str, Any] | None = None,
+        query: Callable[[str, str, dict[str, Any]], Any] | None = None,
     ) -> Episode:
-        view_observation = first_json_mapping(
+        view_observation = dict(observation or {}) or first_json_mapping(
             artifacts, ("final-observation.json", "observation.json")
-        ) or dict(observation or {})
-        view_state = dict(state or {}) or first_json_mapping(
-            artifacts, ("final-state.json", "state.json")
         )
         trajectory: list[Any] = list(_episode_records(artifacts))
         for item in () if trajectory else artifacts:
@@ -1063,9 +1105,9 @@ class Trial:
                     continue
                 break
         outcome = _episode_outcome(artifacts)
-        return Episode(
+        episode = Episode.from_apps(
+            apps or {},
             observation=view_observation,
-            state=view_state,
             trajectory=trajectory,
             artifacts={item.path: item.path for item in artifacts},
             usage=EpisodeUsage(
@@ -1075,6 +1117,14 @@ class Trial:
             outcome=outcome,
             rewards=list(_step_rewards(artifacts)),
         )
+        if not episode.apps and not episode.state:
+            fallback = first_json_mapping(artifacts, ("final-state.json", "state.json"))
+            if fallback:
+                episode = episode.model_copy(update={"state": fallback})
+        if query is not None:
+            for name, snapshot in episode.apps.items():
+                snapshot._query = functools.partial(_bound_query, query, name)
+        return episode
 
     async def _run_score_command(
         self,
@@ -1090,7 +1140,7 @@ class Trial:
         evidence_required: bool,
         verifier: VerifierDefinition | None = None,
         observation: Mapping[str, Any] | None = None,
-        state: Mapping[str, Any] | None = None,
+        apps: Mapping[str, Any] | None = None,
     ) -> tuple[VerifierResult, bytes, bytes]:
         provider_name, requirements = verifier_score_sandbox(self.task.environment, runtime)
         provider = self.provider_for(provider_name)
@@ -1110,13 +1160,7 @@ class Trial:
                 if distribution is not None
                 else {}
             )
-            view_observation = first_json_mapping(
-                artifacts, ("final-observation.json", "observation.json")
-            ) or dict(observation or {})
-            view_state = dict(state or {})
-            if not view_state:
-                view_state = first_json_mapping(artifacts, ("final-state.json", "state.json"))
-            episode = self._episode(artifacts, observation=view_observation, state=view_state)
+            episode = self._episode(artifacts, observation=observation, apps=apps)
             payload: dict[str, Any] = {
                 "task": self.task.public_payload,
                 "trace_id": trace_id,
@@ -1155,14 +1199,11 @@ class Trial:
                     timeout_seconds=runtime.timeout_seconds,
                 ),
             )
+            declared = {item.name for item in verifier.secrets} if verifier is not None else set()
             verifier_secrets = {
                 name: value
                 for name, value in verifier_env.items()
-                if name.endswith("_API_KEY")
-                or name
-                in {
-                    item.name for item in self.task.environment.secrets if item.target == "verifier"
-                }
+                if name.endswith("_API_KEY") or name in declared
             }
             verifier_stdout = _redact_bytes(execution.stdout, verifier_secrets)
             verifier_stderr = _redact_bytes(execution.stderr, verifier_secrets)
@@ -1202,7 +1243,8 @@ class Trial:
             await provider.destroy(handle)
 
     def _verifier_env(self, verifier: VerifierDefinition | None) -> dict[str, str]:
-        values, _ = runtime_values(self.task.environment, self.environ, target="verifier")
+        declared = {item.name for item in verifier.secrets} if verifier is not None else set()
+        values = {name: self.environ[name] for name in declared if self.environ.get(name)}
         if isinstance(verifier, AgentVerifier):
             names = ("PLURAL_GATEWAY_URL", "PLURAL_API_KEY", "PLURAL_PROJECT_ID")
             values.update({name: self.environ[name] for name in names if self.environ.get(name)})
@@ -1283,6 +1325,15 @@ class Trial:
             phases=tuple(sorted(phases, key=lambda item: item.started_at)),
             cost_usd=cost_usd,
         )
+
+
+def _bound_query(
+    query: Callable[[str, str, dict[str, Any]], Any],
+    app: str,
+    action: str,
+    arguments: dict[str, Any],
+) -> Any:
+    return query(app, action, arguments)
 
 
 def _aggregate(

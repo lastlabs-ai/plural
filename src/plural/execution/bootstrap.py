@@ -149,14 +149,12 @@ def needs_plural(
     """Whether a Trial's sandbox runs any ``plural`` module.
 
     Returns:
-        True when an Environment action or reset, the Harness, or one of the
-        ``extra`` commands runs Plural code.
+        True when the Environment has Apps, whose host is Plural code, or when
+        the Harness or one of the ``extra`` commands runs Plural code.
     """
-    environment = task.environment
-    if any(action.kind == "python" for action in environment.actions):
+    if task.environment.apps:
         return True
-    commands = [environment.reset_command, *extra]
-    commands.extend(action.command for action in environment.actions)
+    commands = list(extra)
     if package is not None:
         commands.append(package.definition.command)
     return any(part.startswith("plural.") for command in commands for part in command)

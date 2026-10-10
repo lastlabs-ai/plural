@@ -221,14 +221,28 @@ def resource_scaffold(
 
 
 _ENVIRONMENT_YAML = """\
-# Environment: identity, resources, runtime, and settings.
-# Behavior (actions, state, observations, rewards) is Python in environment.py.
+# Environment: the Apps an Agent works with, plus runtime and settings.
 # README.md explains both to the people who use this Environment.
 name: {name}
 description: ""
 overview: ""
+
+# An App is a named bundle of actions. This one is the Python class in
+# environment.py. To compose several Apps, list them under apps instead.
 python: environment.py:{cls}
 readme: README.md
+
+# Connect an existing system as another App. Any MCP server works:
+# apps:
+#   - python: environment.py:{cls}
+#   - name: files
+#     mcp:
+#       command: [npx, -y, "@modelcontextprotocol/server-filesystem", "."]
+#   - name: crm
+#     mcp:
+#       url: https://mcp.example.com/v1
+#       headers: {{Authorization: "Bearer ${{CRM_TOKEN}}"}}
+#       secrets: [CRM_TOKEN]
 
 # Files staged into the runtime, relative to this directory.
 resources: []
@@ -249,19 +263,18 @@ limits:
 """
 
 _ENVIRONMENT_PY = '''\
-"""{title} Environment.
+"""{title}.
 
-Actions are the moves an Agent can make. State is private to the Environment;
-Verifiers read it and the Agent never does. The Observation is the only thing
-the Agent sees. Rewards are per-step credit for training and never contribute
-to a Verifier score.
+An App is the moves an Agent can make. What an action returns is what the
+Agent sees next. State is private: Verifiers read it and the Agent never does.
+Rewards are per-step credit for training and never contribute to a score.
 """
 
-from plural import Environment, Observation, State, action, initial
+from plural import App, State, action, initial, rewarder
 
 
 class {cls}State(State):
-    """Private world state."""
+    """Private state for one episode."""
 
     # PLURAL-TODO: declare the fields a Task starts from (with initial()) and the fields actions change.
     goal: str = initial("", description="What this Task asks the Agent to achieve.")
@@ -269,19 +282,13 @@ class {cls}State(State):
     done: bool = False
 
 
-class {cls}Observation(Observation):
-    """What the Agent sees. Never put answers, scores, or rewards here."""
+class {cls}(App[{cls}State]):
+    """PLURAL-TODO: one sentence the Agent reads about this App."""
 
-    goal: str = ""
-    done: bool = False
-
-
-class {cls}(Environment[{cls}Observation, {cls}State]):
-    def reset(self, *, seed=None, options=None):
-        """Start an episode from the Task's initial state. Called by the Job, not the Agent."""
-        _, info = super().reset(seed=seed, options=options)
-        self.observation = {cls}Observation(goal=self.state.goal)
-        return self.observation, info
+    def reset(self, initial_state):
+        """Start an episode from the Task's initial state. Return what the Agent sees first."""
+        super().reset(initial_state)
+        return f"Goal: {{self.state.goal}}"
 
     # PLURAL-TODO: replace this action with the moves your Agent needs. Its docstring is the Agent's description.
     @action
@@ -289,15 +296,15 @@ class {cls}(Environment[{cls}Observation, {cls}State]):
         """Submit a final answer and end the episode."""
         self.state.answer = answer
         self.state.done = True
-        self.observation = {cls}Observation(goal=self.state.goal, done=True)
         return "Submitted."
 
     def terminated(self) -> bool:
         return self.state.done
 
-    def reward(self, previous_state, current_state, action, result) -> float:
+    @rewarder
+    def submitted(self, previous_state, current_state, action, result) -> float:
         """Per-step credit for one transition. Recorded for training; never part of the score."""
-        return 0.0
+        return float(current_state["done"] and not previous_state["done"])
 '''
 
 _ENVIRONMENT_README = """\
@@ -307,22 +314,24 @@ _ENVIRONMENT_README = """\
 
 <!-- PLURAL-TODO: describe the world this Environment simulates and what an Agent does in it. -->
 
+## Apps
+
+Each App is a named bundle of actions. `environment.py` defines a Python App;
+`apps:` in `environment.yaml` can add others, such as an MCP server.
+
 ## Actions
 
-Methods marked `@action` in `environment.py`. Their docstrings are what the Agent reads.
+Methods marked `@action`. Their docstrings are what the Agent reads, and what
+each returns is what the Agent sees next.
 
 ## State
 
 Private fields in the `State` class. Fields marked `initial()` are set by each Task's
 `initial_state`. The Agent never sees State; Verifiers do.
 
-## Observations
-
-Fields in the `Observation` class: the only thing the Agent sees after each action.
-
 ## Rewards
 
-`reward()` returns per-step credit for training. Rewards never contribute to a score.
+`@rewarder` methods return per-step credit for training. Rewards never contribute to a score.
 
 ## Resources
 
@@ -343,7 +352,8 @@ _TASK_YAML = """\
 # Verifiers that score it. Files under resources/ are given to the Agent.
 name: {name}
 instructions: instruction.md
-{environment}{verifiers}# Values for the Environment State fields marked initial().
+{environment}{verifiers}# Values for the App State fields marked initial(). With several Apps,
+# key them by App name: {{crm: {{...}}, wordle: {{...}}}}.
 initial_state: {{}}
 """
 
@@ -363,7 +373,7 @@ weight: 1
 """
 
 _VERIFIER_PY = '''\
-"""Score a finished episode from its final State and Observation."""
+"""Score a finished episode from its Apps' final state."""
 
 from plural import Episode, VerifierOutput
 

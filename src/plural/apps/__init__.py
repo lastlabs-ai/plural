@@ -8,7 +8,7 @@ Python by subclassing :class:`App`, or connect an existing system with
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from plural.apps.definition import (
     AppAction,
@@ -19,6 +19,14 @@ from plural.apps.definition import (
     RewarderDefinition,
     SecretReference,
 )
+
+if TYPE_CHECKING:
+    from plural.apps.base import App, rewarder
+    from plural.apps.data import DataApp
+    from plural.apps.host import AppHost
+    from plural.apps.mcp import MCPApp
+    from plural.apps.openapi import OpenAPIApp
+    from plural.apps.replay import ReplayApp
 
 _LAZY = {
     "App": "plural.apps.base",

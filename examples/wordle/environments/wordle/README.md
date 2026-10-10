@@ -4,6 +4,11 @@
 
 Guess a hidden five-letter word in six tries. A Task only sets the secret.
 
+## Apps
+
+One Python App, `Wordle` in `environment.py`. Its actions are the Agent's moves, and its
+State is the hidden game.
+
 ## Actions
 
 `guess(word)` is the only move. The result marks each letter: `+` correct, `?` present in the word, `-` absent. A word that is not in `words.txt` is rejected. It does not use a guess, but it does use one of the Trial's turns.
@@ -16,13 +21,14 @@ Guess a hidden five-letter word in six tries. A Task only sets the secret.
 
 `secret` is the hidden word. A Task sets it with `initial_state`; a blank secret is chosen from `words.txt` using the seed. `guesses`, `remaining`, and `solved` are episode progress. The Agent never sees State. A Verifier does.
 
-## Observations
+## What the Agent sees
 
-The Agent sees the board text, how many guesses remain, and whether the word is solved. The secret is not on the Observation.
+What `guess` returns: the guessed word, its marks, and how many guesses remain or that the
+word is solved. The secret never appears in it.
 
 ## Rewards
 
-`reward()` returns per-step credit for training. Rewards never contribute to a score.
+The `solved` rewarder gives per-step credit for training. Rewards never contribute to a score.
 
 ## Resources
 

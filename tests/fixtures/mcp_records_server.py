@@ -151,7 +151,11 @@ def http(port: int, token_variable: str | None) -> None:
 if __name__ == "__main__":
     if "--http" in sys.argv:
         port = int(sys.argv[sys.argv.index("--http") + 1])
-        token = sys.argv[sys.argv.index("--require-token") + 1] if "--require-token" in sys.argv else None
+        token = (
+            sys.argv[sys.argv.index("--require-token") + 1]
+            if "--require-token" in sys.argv
+            else None
+        )
         http(port, token)
     else:
         stdio()

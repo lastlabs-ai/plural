@@ -10,7 +10,7 @@ from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from plural.apps.base import App, rewarder
 from plural.common import PackageSource
@@ -39,7 +39,11 @@ class ActionCall:
 
 
 def _caller_root() -> Path | None:
-    """The folder of the first user file on the call stack, outside Plural."""
+    """The folder of the first user file on the call stack, outside Plural.
+
+    Returns:
+        That folder, or ``None`` when every frame is library code.
+    """
     frame = sys._getframe(1)
     package = Path(__file__).resolve().parents[1]
     stdlib = Path(sysconfig.get_paths()["stdlib"]).resolve()
@@ -73,6 +77,7 @@ class Environment:
     description = ""
     overview = ""
     readme = ""
+    _source_file: ClassVar[Path | None] = None
     metadata: dict[str, Any] = {}
 
     def __init__(
@@ -100,9 +105,7 @@ class Environment:
                     "Subclass plural.App, or use App.mcp(...) to connect a server."
                 )
         default_name = self.apps[0].name if len(self.apps) == 1 else type(self).name
-        self.name = name or (
-            type(self).name if type(self).name != "environment" else default_name
-        )
+        self.name = name or (type(self).name if type(self).name != "environment" else default_name)
         self.version = version or type(self).version
         self.description = type(self).description if description is None else description
         self.overview = type(self).overview if overview is None else overview
@@ -168,7 +171,10 @@ class Environment:
             self._source_bound = True
             if self._root is not None:
                 self._source = PackageSource(
-                    kind="local", uri=str(self._root), digest=source_digest(self._root), trusted=True
+                    kind="local",
+                    uri=str(self._root),
+                    digest=source_digest(self._root),
+                    trusted=True,
                 )
         return self._source
 
@@ -182,9 +188,8 @@ class Environment:
             requested = Path(source).expanduser().resolve()
             root: Path | None = requested.parent if requested.is_file() else requested
         elif type(self) is not Environment and type(self).__module__ != "__main__":
-            module = sys.modules.get(type(self).__module__)
-            filename = getattr(module, "__file__", None) if module is not None else None
-            root = Path(filename).resolve().parent if filename else _caller_root()
+            defined = type(self).__dict__.get("_source_file")
+            root = defined.parent if defined else _caller_root()
         else:
             root = _caller_root()
         self._root = root if root is not None and root.is_dir() else None
@@ -192,17 +197,22 @@ class Environment:
         self._source_bound = False
         self._compiled = None
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        module = sys.modules.get(cls.__module__)
+        filename = getattr(module, "__file__", None) if module is not None else None
+        cls._source_file = Path(filename).resolve() if filename else None
+
     def _python_reference(self) -> str | None:
         if type(self) is Environment:
             return None
-        module = sys.modules.get(type(self).__module__)
-        filename = getattr(module, "__file__", None) if module is not None else None
+        filename = type(self).__dict__.get("_source_file")
         if not filename or self._root is None:
             raise ValueError(
                 f"Environment subclass {type(self).__name__} must be defined in a .py file "
                 "inside its source folder so a Job can run its hooks"
             )
-        relative = Path(filename).resolve().relative_to(self._root).as_posix()
+        relative = filename.relative_to(self._root).as_posix()
         return f"{relative}:{type(self).__qualname__}"
 
     @property

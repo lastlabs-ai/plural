@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import random
+from typing import Any
 
 import pytest
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from plural import (
     Agent,
+    App,
     DeterministicVerifier,
     Environment,
     Episode,
     Job,
-    Observation,
     Runtime,
     State,
     Task,
@@ -117,30 +118,26 @@ def test_wordle_pins_or_randomizes_secret() -> None:
     words = ("crane", "slate", "audio")
 
     class Game(State):
-        secret: str = ""
+        secret: str = Field(default="", json_schema_extra={"x-plural-initial": True})
+        seed: int | None = None
 
-    class Board(Observation):
-        solved: bool = False
-
-    class Wordle(Environment[Board, Game]):
+    class Wordle(App[Game]):
         name = "wordle"
 
-        def reset(self, *, seed=None, options=None):
-            super().reset(seed=seed)
-            secret = (options or {}).get("secret") or self.state.secret
-            if not secret:
-                secret = random.Random(self.state.seed).choice(words)
-            self.state = Game(secret=secret, seed=self.state.seed)
-            return self.observation, {}
+        def reset(self, initial_state: dict[str, Any]) -> str:
+            super().reset(initial_state)
+            if not self.state.secret:
+                self.state.secret = random.Random(self.state.seed).choice(words)
+            return "Guess the word."
 
         @action
-        def guess(self, word: str) -> Board:
-            return self.observation
+        def guess(self, word: str) -> str:
+            return word
 
-    pinned = Wordle(runtime=Runtime.local(), state=Game(secret="crane"))
-    pinned.reset()
-    assert pinned.state.secret == "crane"
+    pinned = Environment(name="wordle", apps=[Wordle()], runtime=Runtime.local())
+    pinned.reset(initial_state={"secret": "crane"})
+    assert pinned.apps[0].state.secret == "crane"
 
-    seeded = Wordle(runtime=Runtime.local())
+    seeded = Environment(name="wordle", apps=[Wordle()], runtime=Runtime.local())
     seeded.reset(seed=7)
-    assert seeded.state.secret == random.Random(7).choice(words)
+    assert seeded.apps[0].state.secret == random.Random(7).choice(words)

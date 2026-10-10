@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from plural.environments.runner import PROTOCOL
+from plural.apps.host import STEP_PROTOCOL as PROTOCOL
 from plural.harness import native_runner
 from plural.harness.protocol import HarnessRunRequest
 

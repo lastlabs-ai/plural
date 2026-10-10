@@ -382,8 +382,8 @@ def workspace(tmp_path: Path) -> Iterator[Path]:
     definition = environment.definition()
     environment.close()
     (root / ".plural/apps/environment.json").write_text(definition.model_dump_json())
-    (root / ".plural/apps/initial_state.json").write_text(
-        json.dumps({"wordle": {"secret": "slate"}})
+    (root / ".plural/apps/task.json").write_text(
+        json.dumps({"initial_state": {"wordle": {"secret": "slate"}}})
     )
     yield root
     daemon.call("stop", root=root)

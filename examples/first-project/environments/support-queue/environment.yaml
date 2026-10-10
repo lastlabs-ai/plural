@@ -1,5 +1,5 @@
-# Environment: identity, resources, runtime, and settings.
-# Behavior (actions, state, observations, rewards) is Python in environment.py.
+# Environment: the Apps an Agent works with, plus runtime and settings.
+# The support queue is one Python App: SupportQueue in environment.py.
 # README.md explains both to the people who use this Environment.
 name: support-queue
 version: 1.0.0

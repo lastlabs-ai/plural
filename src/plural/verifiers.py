@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field, PrivateAttr, ValidationInfo, field_serializer, model_validator
 
+from plural.apps.definition import SecretReference
 from plural.catalog import ModelCatalog
 from plural.common import FrozenModel, RoutingSpec
 from plural.identity import revision_hash
@@ -120,22 +121,79 @@ class EpisodeOutcome(FrozenModel):
         return self.terminated
 
 
+class AppSnapshot(FrozenModel):
+    """One App at the start and end of an episode, as a Verifier sees it.
+
+    ``initial`` and ``final`` are the App's snapshots, or ``None`` when it has
+    no ``snapshot()``. ``control`` says how far they can be trusted: an
+    ``owned`` or ``sandboxed`` App started from the Task's state; a ``live``
+    App is shared and may have changed for other reasons.
+    """
+
+    control: Literal["owned", "sandboxed", "live", "replayed"] = "owned"
+    initial: Any = None
+    final: Any = None
+
+    _query: Callable[[str, dict[str, Any]], Any] | None = PrivateAttr(default=None)
+
+    def query(self, action: str, /, **arguments: Any) -> Any:
+        """Call one of this App's read-only actions, such as ``get_record``.
+
+        Available to function Verifiers while the Trial's Runtime is still
+        running. An action that can change state is refused.
+
+        Returns:
+            The action's observation.
+
+        Raises:
+            RuntimeError: When the episode's Apps are no longer running.
+        """
+        if self._query is None:
+            raise RuntimeError(
+                "App queries are only available to function Verifiers during a Trial. "
+                "Read the App's final snapshot instead."
+            )
+        return self._query(action, arguments)
+
+
 class Episode(FrozenModel):
     """Completed Agent episode handed to a Verifier.
 
-    ``state`` is the full internal Environment snapshot. It is never shown to
-    the Agent. ``observation`` is what the Agent last saw. ``rewards`` holds the
-    per-step reward records; they support credit assignment and must not be
-    treated as a score.
+    ``apps`` holds each App's initial and final snapshots and, for function
+    Verifiers, read-only ``query`` access. ``state`` is a shortcut: the one
+    App's final snapshot when the Environment has one App, otherwise a mapping
+    of App name to final snapshot. Neither is ever shown to the Agent.
+    ``observation`` is what the Agent last saw. ``rewards`` holds the per-step
+    reward records; they support credit assignment and are never a score.
     """
 
     observation: dict[str, Any] = Field(default_factory=dict)
     state: dict[str, Any] = Field(default_factory=dict)
+    apps: dict[str, AppSnapshot] = Field(default_factory=dict)
     trajectory: list[Any] = Field(default_factory=list)
     artifacts: dict[str, Any] = Field(default_factory=dict)
     usage: EpisodeUsage = Field(default_factory=EpisodeUsage)
     outcome: EpisodeOutcome = Field(default_factory=EpisodeOutcome)
     rewards: list[dict[str, Any]] = Field(default_factory=list)
+
+    @classmethod
+    def from_apps(cls, report: Mapping[str, Any], **fields: Any) -> Episode:
+        """Build an Episode from the App host's ``finish`` report.
+
+        Returns:
+            The Episode, with ``state`` derived from the App snapshots.
+        """
+        apps = {
+            str(name): AppSnapshot.model_validate(entry)
+            for name, entry in report.items()
+            if isinstance(entry, Mapping)
+        }
+        if len(apps) == 1:
+            final = next(iter(apps.values())).final
+            state = dict(final) if isinstance(final, Mapping) else {}
+        else:
+            state = {name: entry.final for name, entry in apps.items()}
+        return cls(apps=apps, state=state, **fields)
 
 
 class VerifierOutput(FrozenModel):
@@ -181,42 +239,6 @@ class RubricCriterion(FrozenModel):
 @lru_cache(maxsize=1)
 def _bundled_catalog() -> ModelCatalog:
     return ModelCatalog()
-
-
-def score_from_rewards(episode: Episode, source: str) -> VerifierOutput:
-    """Turn recorded rewarder output into a verifier score.
-
-    ``source`` is ``total`` for the episode reward, or one rewarder's name.
-    The score is that reward summed across the episode.
-
-    Returns:
-        A score equal to the selected reward.
-    """
-    if source == "total":
-        total = float(episode.outcome.total_reward)
-        return VerifierOutput(
-            score=total,
-            evidence=(f"total reward {total}",),
-        )
-    total = 0.0
-    for record in episode.rewards:
-        if not isinstance(record, dict):
-            continue
-        signals = record.get("signals")
-        if isinstance(signals, list):
-            for signal in signals:
-                if isinstance(signal, dict) and str(signal.get("name") or "") == source:
-                    value = float(signal.get("value") or 0)
-                    weight = float(signal.get("weight") or 1)
-                    total += weight * value
-            continue
-        if str(record.get("name") or "") == source:
-            total += float(record.get("value") or 0)
-    return VerifierOutput(
-        score=total,
-        scores={source: total},
-        evidence=(f"{source} reward {total}",),
-    )
 
 
 def coerce_verifier_output(value: Any, *, verifier_name: str) -> VerifierOutput:
@@ -280,6 +302,8 @@ class Verifier(FrozenModel):
     criteria: tuple[RubricCriterion, ...] = ()
     weight: float = Field(default=1, gt=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    secrets: tuple[SecretReference, ...] = ()
+    """Names the Job supplies to this Verifier, such as a key for a system it checks."""
 
     @model_validator(mode="before")
     @classmethod
@@ -359,24 +383,22 @@ class DeterministicVerifier(Verifier):
                 raise ValueError(
                     f"Cannot create DeterministicVerifier {self.name!r}.\n"
                     "check must be a function that accepts an Episode "
-                    "(observation, state, trajectory, artifacts, usage).\n"
+                    "(observation, state, apps, trajectory, artifacts, usage).\n"
                     f"Got {check!r} with no Episode parameter.\n"
                     "Define it like:\n"
                     "  def solved(episode: Episode) -> VerifierOutput: ...\n"
                     "  DeterministicVerifier(name='solved', check=solved)"
                 )
             return self
-        if isinstance(check, dict) and (
-            check.get("python") or isinstance(check.get("reward"), str)
-        ):
+        if isinstance(check, dict) and check.get("python"):
             return self
         if isinstance(check, tuple) and check and all(isinstance(item, str) for item in check):
             return self
         raise ValueError(
             f"Cannot create DeterministicVerifier {self.name!r}.\n"
             "check must be a function that accepts an Episode, a "
-            "{'python': 'verify.py:solved'} reference, a command argv, "
-            "or {'reward': 'total'} / {'reward': 'rewarder-name'}.\n"
+            "{'python': 'verify.py:solved'} reference, or a command argv. Rewards are "
+            "never a score, so a Verifier cannot score from them.\n"
             f"Got {type(check).__name__}: {check!r}."
         )
 
@@ -422,21 +444,6 @@ class DeterministicVerifier(Verifier):
             value = check.get("python")
             return str(value) if value else None
         return None
-
-    @property
-    def reward_source(self) -> str | None:
-        """Rewarder name whose episode total is the score, if this check uses one.
-
-        ``total`` means every rewarder combined.
-        """
-        check = self.check
-        if not isinstance(check, dict) or check.get("python"):
-            return None
-        reward = check.get("reward")
-        if not isinstance(reward, str):
-            return None
-        name = reward.strip()
-        return name or "total"
 
     @property
     def checker(self) -> Callable[[Episode], Any] | None:
@@ -551,6 +558,7 @@ class WeightedVerifier(FrozenModel):
 
 __all__ = [
     "AgentVerifier",
+    "AppSnapshot",
     "DeterministicVerifier",
     "Episode",
     "EpisodeUsage",

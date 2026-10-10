@@ -172,8 +172,9 @@ def test_an_unset_ref_leaves_environment_hashes_unchanged(tmp_path: Path) -> Non
 
     payload["source_digest"] = definition.source.digest if definition.source else None
     if payload["source_digest"] is not None:
-        for rewarder in payload["rewarders"]:
-            rewarder.pop("implementation_digest", None)
+        for app in payload["apps"]:
+            for rewarder in app["rewarders"]:
+                rewarder.pop("implementation_digest", None)
     assert revision_hash("environment", payload) == definition.content_hash
 
 

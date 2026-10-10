@@ -1,6 +1,6 @@
-"""A support queue authored with Plural's typed Environment API."""
+"""A support queue authored as one Plural App."""
 
-from plural import Environment, Observation, State, action, initial
+from plural import App, State, action, initial, rewarder
 
 TICKETS = {
     "ticket-1": {
@@ -37,21 +37,12 @@ class QueueState(State):
     done: bool = False
 
 
-class QueueObservation(Observation):
-    ticket_id: str = ""
-    customer_tier: str = ""
-    issue: str = ""
-    policy: str = ""
-    category: str = ""
-    draft_reply: str = ""
-    status: str = "open"
-    done: bool = False
+class SupportQueue(App[QueueState]):
+    """A customer support queue with one open ticket."""
 
-
-class SupportQueue(Environment[QueueObservation, QueueState]):
-    def reset(self, *, seed=None, options=None):
+    def reset(self, initial_state):
         """Open the Task's ticket. Called by the Job, not the Agent."""
-        _, info = super().reset(seed=seed, options=options)
+        super().reset(initial_state)
         ticket = TICKETS.get(self.state.ticket_id)
         if ticket is None:
             raise ValueError(
@@ -61,26 +52,25 @@ class SupportQueue(Environment[QueueObservation, QueueState]):
         self.state.issue = ticket["issue"]
         self.state.expected = ticket["expected"]
         self.state.policy = ticket["policy"]
-        self._observe()
-        return self.observation, info
+        return self._visible()
 
-    def _observe(self) -> QueueObservation:
-        self.observation = QueueObservation(
-            ticket_id=self.state.ticket_id,
-            customer_tier=self.state.customer_tier,
-            issue=self.state.issue,
-            policy=self.state.policy,
-            category=self.state.category,
-            draft_reply=self.state.draft_reply,
-            status=self.state.status,
-            done=self.state.done,
-        )
-        return self.observation
+    def _visible(self) -> dict:
+        """What the Agent may see. The expected category stays hidden."""
+        return {
+            "ticket_id": self.state.ticket_id,
+            "customer_tier": self.state.customer_tier,
+            "issue": self.state.issue,
+            "policy": self.state.policy,
+            "category": self.state.category,
+            "draft_reply": self.state.draft_reply,
+            "status": self.state.status,
+            "done": self.state.done,
+        }
 
     @action
     def inspect_ticket(self) -> dict:
         """Read the ticket and the support policy that applies to it."""
-        return self._observe().model_dump()
+        return self._visible()
 
     @action
     def categorize(self, category: str) -> dict:
@@ -91,7 +81,7 @@ class SupportQueue(Environment[QueueObservation, QueueState]):
             raise ValueError("Choose billing, technical, or account")
         self.state.category = category
         self.state.status = "triaged"
-        return self._observe().model_dump()
+        return self._visible()
 
     @action
     def draft_response(self, message: str) -> dict:
@@ -102,7 +92,7 @@ class SupportQueue(Environment[QueueObservation, QueueState]):
             raise ValueError("The response must not be empty")
         self.state.draft_reply = message.strip()
         self.state.status = "drafted"
-        return self._observe().model_dump()
+        return self._visible()
 
     @action
     def resolve(self) -> dict:
@@ -111,13 +101,14 @@ class SupportQueue(Environment[QueueObservation, QueueState]):
             raise ValueError("Categorize the ticket and draft a response before resolving")
         self.state.done = True
         self.state.status = "resolved"
-        return self._observe().model_dump()
+        return self._visible()
 
     def terminated(self) -> bool:
         """End the episode once the ticket is resolved."""
         return self.state.done
 
-    def reward(self, previous_state, current_state, action, result) -> float:
+    @rewarder
+    def progress(self, previous_state, current_state, action, result) -> float:
         """Credit each step that moves the ticket forward. Never part of the score."""
         order = ("open", "triaged", "drafted", "resolved")
         before = order.index(previous_state["status"])

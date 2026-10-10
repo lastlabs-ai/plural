@@ -15,9 +15,9 @@ runner = CliRunner()
 
 ENVIRONMENT_README_SECTIONS = (
     "Overview",
+    "Apps",
     "Actions",
     "State",
-    "Observations",
     "Rewards",
     "Resources",
     "Runtime",

@@ -89,8 +89,7 @@ class App(Generic[StateT]):
 
         class Wordle(App[Game]):
             @action
-            def guess(self, word: str) -> str:
-                ...
+            def guess(self, word: str) -> str: ...
 
     A Python App is ``owned``: a fresh Runtime is a fresh App, its default
     :meth:`reset` loads the Task's initial state, and its default
@@ -101,20 +100,25 @@ class App(Generic[StateT]):
     the same App inside a Runtime. Pass settings as JSON-safe keywords.
     """
 
-    name: ClassVar[str] = ""
-    description: ClassVar[str] = ""
+    name: str = ""
+    description: str = ""
     kind: ClassVar[AppKind] = "python"
     state_type: ClassVar[type[State]] = State
-    secrets: ClassVar[Sequence[str | SecretReference]] = ()
+    secrets: Sequence[str | SecretReference] = ()
     control: ClassVar[AppControl | None] = None
     snapshot_on_step: ClassVar[bool] = True
 
     _init_config: dict[str, Any]
+    _source_file: ClassVar[Path | None] = None
     state: StateT
     task_info: Any = None
     """The Task's ``info``, available to :meth:`reset`."""
     workspace: Path
     """The Environment workspace: the folder holding its files in a Runtime."""
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls._source_file = _defining_file(cls)
 
     def __new__(cls, *args: Any, **kwargs: Any) -> App[Any]:
         """Keep the constructor keywords so the App can be rebuilt in a Runtime.
@@ -299,19 +303,35 @@ class App(Generic[StateT]):
             raise ValueError(f"invalid arguments for {action!r}: {problems}") from None
 
     def has_reset(self) -> bool:
-        """Whether this App sets up its own starting state."""
+        """Whether this App sets up its own starting state.
+
+        Returns:
+            True when ``reset`` prepares each episode.
+        """
         return True
 
     def has_snapshot(self) -> bool:
-        """Whether this App can report its state."""
+        """Whether this App can report its state.
+
+        Returns:
+            True when ``snapshot`` returns the App's state.
+        """
         return True
 
     def is_local(self) -> bool:
-        """Whether this App's state lives inside the Runtime."""
+        """Whether this App's state lives inside the Runtime.
+
+        Returns:
+            True when the App runs in the Runtime's workspace.
+        """
         return True
 
     def resolved_control(self) -> AppControl:
-        """How much of this App's state Plural controls."""
+        """How much of this App's state Plural controls.
+
+        Returns:
+            The declared control level, or the one derived from the App's hooks.
+        """
         if type(self).control is not None:
             return type(self).control  # type: ignore[return-value]
         return derive_control(self.kind, local=self.is_local(), has_reset=self.has_reset())
@@ -352,15 +372,7 @@ class App(Generic[StateT]):
             ) from exc
 
     def _class_file(self) -> Path | None:
-        module = sys.modules.get(type(self).__module__)
-        filename = getattr(module, "__file__", None) if module is not None else None
-        if filename:
-            return Path(filename).resolve()
-        try:
-            source = inspect.getsourcefile(type(self))
-        except TypeError:
-            return None
-        return Path(source).resolve() if source else None
+        return type(self).__dict__.get("_source_file") or _defining_file(type(self))
 
     def _python_reference(self, root: Path | None) -> str | None:
         """Return ``file.py:Class`` relative to the Environment source, if user code."""
@@ -402,13 +414,30 @@ class App(Generic[StateT]):
             python=self._python_reference(root),
             config=self._config(),
             actions=self.actions(),
-            secrets=self.secrets,
+            secrets=tuple(SecretReference.model_validate(item) for item in self.secrets),
             rewarders=self._rewarders(),
             state_schema=self._state_schema(),
             has_reset=self.has_reset(),
             has_snapshot=self.has_snapshot(),
             control=self.resolved_control(),
         )
+
+
+def _defining_file(cls: type) -> Path | None:
+    """The file that defines ``cls``, read while its module is still registered.
+
+    Returns:
+        The resolved path, or ``None`` for classes with no source file.
+    """
+    module = sys.modules.get(cls.__module__)
+    filename = getattr(module, "__file__", None) if module is not None else None
+    if filename:
+        return Path(filename).resolve()
+    try:
+        source = inspect.getsourcefile(cls)
+    except TypeError:
+        return None
+    return Path(source).resolve() if source else None
 
 
 def observation_payload(value: Any) -> tuple[Any, str]:

@@ -1,5 +1,142 @@
 {
   "$defs": {
+    "AppAction": {
+      "additionalProperties": false,
+      "description": "One move an App offers the Agent.\n\n``name`` is the App's own name for the action (a Python method name or an\nMCP tool name). The Environment exposes it to the Agent unprefixed when it\nhas one App, and as ``<app>__<name>`` when it has several.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "mutates_state": {
+          "default": true,
+          "title": "Mutates State",
+          "type": "boolean"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "timeout_seconds": {
+          "default": 30,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "AppAction",
+      "type": "object"
+    },
+    "AppDefinition": {
+      "additionalProperties": false,
+      "description": "One App inside an Environment.\n\n``python`` names the App class as ``file.py:Class`` inside the Environment's\nsource package. ``config`` holds the keyword arguments the App was built\nwith, so the App host can rebuild the same App inside a Runtime.",
+      "properties": {
+        "actions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AppAction"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "control": {
+          "default": "owned",
+          "enum": [
+            "owned",
+            "sandboxed",
+            "live",
+            "replayed"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "has_reset": {
+          "default": false,
+          "title": "Has Reset",
+          "type": "boolean"
+        },
+        "has_snapshot": {
+          "default": false,
+          "title": "Has Snapshot",
+          "type": "boolean"
+        },
+        "kind": {
+          "default": "python",
+          "enum": [
+            "python",
+            "mcp",
+            "openapi",
+            "data",
+            "replay"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "python": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Python"
+        },
+        "rewarders": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RewarderDefinition"
+          },
+          "title": "Rewarders",
+          "type": "array"
+        },
+        "secrets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SecretReference"
+          },
+          "title": "Secrets",
+          "type": "array"
+        },
+        "state_schema": {
+          "additionalProperties": true,
+          "title": "State Schema",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "AppDefinition",
+      "type": "object"
+    },
     "Capability": {
       "description": "Individual controls a provider can enforce.",
       "enum": [
@@ -476,66 +613,6 @@
       "title": "HarnessPolicy",
       "type": "object"
     },
-    "NativeAction": {
-      "additionalProperties": false,
-      "description": "An action owned by an Environment.",
-      "properties": {
-        "command": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Command",
-          "type": "array"
-        },
-        "description": {
-          "minLength": 1,
-          "title": "Description",
-          "type": "string"
-        },
-        "kind": {
-          "default": "command",
-          "enum": [
-            "command",
-            "python"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "mutates_state": {
-          "default": true,
-          "title": "Mutates State",
-          "type": "boolean"
-        },
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "observation_schema": {
-          "additionalProperties": true,
-          "title": "Observation Schema",
-          "type": "object"
-        },
-        "parameters": {
-          "additionalProperties": true,
-          "title": "Parameters",
-          "type": "object"
-        },
-        "timeout_seconds": {
-          "default": 30,
-          "exclusiveMinimum": 0,
-          "title": "Timeout Seconds",
-          "type": "number"
-        }
-      },
-      "required": [
-        "name",
-        "description"
-      ],
-      "title": "NativeAction",
-      "type": "object"
-    },
     "NetworkMode": {
       "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
       "enum": [
@@ -624,16 +701,8 @@
     },
     "RewarderDefinition": {
       "additionalProperties": false,
-      "description": "A named state-transition reward signal scored inside each step.",
+      "description": "A named reward signal an App computes for each of its own actions.",
       "properties": {
-        "command": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Command",
-          "type": "array"
-        },
         "description": {
           "default": "",
           "title": "Description",
@@ -642,15 +711,6 @@
         "implementation_digest": {
           "default": "",
           "title": "Implementation Digest",
-          "type": "string"
-        },
-        "kind": {
-          "default": "command",
-          "enum": [
-            "command",
-            "python"
-          ],
-          "title": "Kind",
           "type": "string"
         },
         "name": {
@@ -721,7 +781,7 @@
     },
     "SecretReference": {
       "additionalProperties": false,
-      "description": "A named credential supplied when a Job runs, with an explicit execution target.",
+      "description": "A named credential an App needs, supplied by the Job when it runs.\n\nThe value reaches only the App host that runs the App and the Verifier\nqueries made against it. It never reaches the Harness or the model.",
       "properties": {
         "description": {
           "default": "",
@@ -737,16 +797,6 @@
           "default": true,
           "title": "Required",
           "type": "boolean"
-        },
-        "target": {
-          "default": "environment",
-          "enum": [
-            "environment",
-            "harness",
-            "verifier"
-          ],
-          "title": "Target",
-          "type": "string"
         }
       },
       "required": [
@@ -757,14 +807,14 @@
     }
   },
   "additionalProperties": false,
-  "description": "Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent.",
+  "description": "Schema-v2 Environment: Apps composed with one Runtime and one set of limits.\n\nTasks, Verifiers, and mode are intentionally absent. Every action belongs\nto exactly one App; ``python`` optionally names an Environment subclass\nwhose ``on_step``, ``terminated``, or ``truncated`` span several Apps.",
   "properties": {
-    "actions": {
+    "apps": {
       "default": [],
       "items": {
-        "$ref": "#/$defs/NativeAction"
+        "$ref": "#/$defs/AppDefinition"
       },
-      "title": "Actions",
+      "title": "Apps",
       "type": "array"
     },
     "description": {
@@ -796,28 +846,27 @@
       "title": "Name",
       "type": "string"
     },
-    "observation_schema": {
-      "additionalProperties": true,
-      "title": "Observation Schema",
-      "type": "object"
-    },
     "overview": {
       "default": "",
       "title": "Overview",
       "type": "string"
     },
+    "python": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Python"
+    },
     "readme": {
       "default": "",
       "title": "Readme",
       "type": "string"
-    },
-    "reset_command": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "title": "Reset Command",
-      "type": "array"
     },
     "resources": {
       "default": [],
@@ -827,29 +876,8 @@
       "title": "Resources",
       "type": "array"
     },
-    "rewarders": {
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/RewarderDefinition"
-      },
-      "title": "Rewarders",
-      "type": "array"
-    },
     "runtime": {
       "$ref": "#/$defs/EnvironmentRuntime"
-    },
-    "secrets": {
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/SecretReference"
-      },
-      "title": "Secrets",
-      "type": "array"
-    },
-    "state_schema": {
-      "additionalProperties": true,
-      "title": "State Schema",
-      "type": "object"
     },
     "version": {
       "default": "0.1.0",
