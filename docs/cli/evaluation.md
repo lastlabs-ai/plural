@@ -1515,6 +1515,9 @@ This section is generated from the Typer application. Run `uv run python scripts
  name@version runs that exact pushed version even after your files have
  moved on. It is restored under .plural/versions without touching them.
 
+ --traces scores conversations an agent already had: each becomes a Trial
+ of --task, replayed without calling a model, and stored like any other.
+
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --task            -t      <str>               Task to run: a name, or name@version for a         │
 │                                               retained version.                                  │
@@ -1524,6 +1527,9 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --harness         -h      <str>               Harness for --model. Default: native (Plural's     │
 │                                               built-in tool loop).                               │
 │ --agent           -a      <str>               Saved Agent to run: a name, or name@version.       │
+│ --traces                  <str>               Score recorded conversations (JSONL of             │
+│                                               {"messages": [...]}, or Plural Traces) with        │
+│                                               --task's Verifiers instead of running a model.     │
 │ --hosted                                      Run on hosted infrastructure. Inputs the hosted    │
 │                                               project lacks are pushed first.                    │
 │ --track                                       Run here, and record the Job in the hosted project │

@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import math
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
@@ -855,6 +856,59 @@ class Job:
             key: value for key, value in self._runner_options.items() if value is not None
         }
 
+    @classmethod
+    def from_traces(
+        cls,
+        traces: str | Path | Iterable[Any],
+        *,
+        task: Task | None = None,
+        verifiers: Sequence[Any] = (),
+        environment: Any = None,
+        name: str | None = None,
+        **options: Any,
+    ) -> Job:
+        """Score conversations an agent already had, without running it again.
+
+        Each trace becomes a Task whose Agent replays the recorded turns: every
+        assistant message is a model call and every tool result a step. A
+        recorded call to an action the Environment declares is sent to its App,
+        so Verifiers that read App state see where the agent left it. Trials are
+        stored like any other, so ``plural rewards apply`` and ``plural rewards
+        export`` work on them. No model is called and no key is needed.
+
+        Args:
+            traces: A JSONL or JSON file, or a list, of ``{"messages": [...]}``
+                conversations in OpenAI chat format, or Plural Traces.
+            task: Score every trace as an attempt at this Task: its Verifiers,
+                Environment, and starting state.
+            verifiers: Verifiers to score with, instead of or without ``task``.
+            environment: The Environment the traces ran in, when there is no
+                ``task``. Defaults to an empty local one.
+            name: The Benchmark the traces are grouped under.
+            **options: Any other :class:`Job` option, such as ``hindsight``.
+
+        Returns:
+            The Job, ready to ``run()``.
+
+        Raises:
+            ValueError: Neither ``task`` nor ``verifiers`` was given.
+        """
+        from plural.recorded import read_traces, recorded_agent, traces_benchmark
+
+        chosen = list(verifiers) or (list(task.verifiers) if task is not None else [])
+        if not chosen:
+            raise ValueError("Cannot score traces.\nPass task=... or verifiers=[...].")
+        recorded = read_traces(traces)
+        benchmark = traces_benchmark(
+            recorded,
+            verifiers=chosen,
+            environment=environment or (task.environment if task is not None else None),
+            name=name or (f"{task.name}-traces" if task is not None else "recorded-traces"),
+            initial_state=task.initial_state if task is not None else None,
+            reset_options=task.reset_options if task is not None else None,
+        )
+        return cls(benchmark, [recorded_agent(recorded)], **options)
+
     def _credential_environ(self) -> dict[str, str]:
         configured = self._runner_options.get("environ")
         current = dict(os.environ if configured is None else configured)
@@ -886,6 +940,11 @@ class Job:
             current.setdefault("PLURAL_API_KEY", self.api_key)
         if current.get("PLURAL_API_KEY"):
             current.setdefault("PLURAL_GATEWAY_URL", resolve_gateway_url(None, current))
+            return current
+        if agents and all(
+            binding.auth_mode == "none" or binding.agent.endpoint is not None for binding in agents
+        ):
+            # Agents with their own endpoint call it directly, not the gateway.
             return current
         raise ValueError(
             "Cannot run Job.\n"

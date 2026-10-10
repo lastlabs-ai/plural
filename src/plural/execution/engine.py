@@ -195,6 +195,23 @@ def _harness_environment(
         for name in package.definition.environment_names
         if environ.get(name) is not None
     }
+    if agent.agent.endpoint is not None:
+        if package.definition.name not in {"native.chat.v1", "native.actions.v1"}:
+            raise ExecutionFailure(
+                ErrorCode.CONFIGURATION,
+                f"Agent {agent.name!r} calls its own endpoint, which only Plural's native "
+                f"Harness supports, not {package.definition.name!r}.",
+            )
+        configured["PLURAL_AGENT_ENDPOINT"] = agent.agent.endpoint
+        key_name = agent.agent.endpoint_key
+        if key_name is not None:
+            if not environ.get(key_name):
+                raise ExecutionFailure(
+                    ErrorCode.AUTHENTICATION,
+                    f"Agent {agent.name!r} needs {key_name} for its endpoint. Set it before "
+                    "the run. This error names the key and does not include its value.",
+                )
+            secrets["PLURAL_AGENT_ENDPOINT_KEY"] = environ[key_name]
     return {**configured, **secrets}, secrets
 
 

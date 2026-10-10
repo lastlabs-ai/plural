@@ -91,6 +91,14 @@ def run(
     agent: str | None = typer.Option(
         None, "--agent", "-a", help="Saved Agent to run: a name, or name@version."
     ),
+    traces: str | None = typer.Option(
+        None,
+        "--traces",
+        help=(
+            'Score recorded conversations (JSONL of {"messages": [...]}, or Plural Traces) '
+            "with --task's Verifiers instead of running a model."
+        ),
+    ),
     hosted: bool = typer.Option(
         False,
         "--hosted",
@@ -138,6 +146,9 @@ def run(
 
     name@version runs that exact pushed version even after your files have
     moved on. It is restored under .plural/versions without touching them.
+
+    --traces scores conversations an agent already had: each becomes a Trial
+    of --task, replayed without calling a model, and stored like any other.
     """
     if hosted and track:
         raise ProjectError(
@@ -161,6 +172,7 @@ def run(
         attempts=attempts,
         concurrency=_concurrency(concurrency),
         hosted=hosted,
+        traces=traces,
     )
     requested = {
         ResourceRef(kind.name, name): version

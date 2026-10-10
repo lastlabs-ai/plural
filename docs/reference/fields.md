@@ -156,6 +156,8 @@ A catalog-backed model and its optional execution harness.
 - **`harness_kwargs`** — `object`; optional.
 - **`auth_mode`** — `"environment" | "api_key" | "oauth" | "none"`; optional. Default: `"environment"`.
 - **`secret_names`** — `array of string`; optional. Default: `[]`.
+- **`endpoint`** — `string | null`; optional. Default: `null`.
+- **`endpoint_key`** — `string | null`; optional. Default: `null`.
 - **`metadata`** — `object`; optional.
 
 ## Benchmark

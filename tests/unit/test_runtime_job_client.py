@@ -25,7 +25,7 @@ from plural.sandbox import NetworkMode
 
 
 def solved(episode: Episode) -> VerifierOutput:
-    return VerifierOutput(reward=1.0)
+    return VerifierOutput(score=1.0)
 
 
 def _task() -> Task:

@@ -22,7 +22,12 @@ from plural.harness.builtins import (
 from plural.harness.retrieval import source_digest
 
 
-def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> HarnessPackage:
+def _builtin(
+    profile: str,
+    capabilities: frozenset[HarnessCapability],
+    *,
+    calls_a_model: bool = True,
+) -> HarnessPackage:
     definition = HarnessProtocol(
         name=profile,
         revision="1.0.0",
@@ -30,17 +35,21 @@ def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> Harnes
         implementation="runnable",
         command=("python", "native_runner.py", profile),
         requirements=(
-            "OpenAI-compatible POST /chat/completions endpoint",
-            "PLURAL_API_KEY unless explicitly unauthenticated",
+            (
+                "OpenAI-compatible POST /chat/completions endpoint",
+                "PLURAL_API_KEY unless explicitly unauthenticated",
+            )
+            if calls_a_model
+            else ("A recorded conversation in the Task's metadata",)
         ),
         capabilities=capabilities,
-        secret_names=("PLURAL_API_KEY",),
+        secret_names=("PLURAL_API_KEY",) if calls_a_model else (),
         environment_names=(
-            "PLURAL_GATEWAY_URL",
-            "PLURAL_PROJECT_ID",
-            "PLURAL_ALLOW_NO_AUTH",
+            ("PLURAL_GATEWAY_URL", "PLURAL_PROJECT_ID", "PLURAL_ALLOW_NO_AUTH")
+            if calls_a_model
+            else ()
         ),
-        auth_modes=("environment", "none"),
+        auth_modes=("environment", "none") if calls_a_model else ("none",),
         outputs=(FileDeclaration(path="result.json"),),
         artifacts=(
             FileDeclaration(
@@ -74,9 +83,15 @@ def native_actions_v1() -> HarnessPackage:
     )
 
 
+def native_replay_v1() -> HarnessPackage:
+    """Return the profile that replays a recorded conversation instead of calling a model."""
+    return _builtin("native.replay.v1", frozenset(), calls_a_model=False)
+
+
 BUILTIN_PROFILES = {
     "native.chat.v1": native_chat_v1,
     "native.actions.v1": native_actions_v1,
+    "native.replay.v1": native_replay_v1,
 }
 
 
@@ -89,5 +104,6 @@ __all__ = [
     "list_builtin_harnesses",
     "native_actions_v1",
     "native_chat_v1",
+    "native_replay_v1",
     "resolve_builtin_package",
 ]

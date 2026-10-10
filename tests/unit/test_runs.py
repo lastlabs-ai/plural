@@ -285,3 +285,58 @@ def test_rewards_apply_labels_a_stored_trial_and_export_joins_the_ledger(
     assert exported["trial_id"] == trial["trial_id"]
     assert exported["score"] == 1.0
     assert [item["rewarder"] for item in exported["rewards"]] == ["scored"]
+
+
+def _submitted(answer: str, *, ticket: str) -> dict[str, Any]:
+    return {
+        "id": ticket,
+        "model": "acme/support",
+        "messages": [
+            {"role": "user", "content": "Review order A-1 and submit refunded or denied."},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {
+                            "name": "submit",
+                            "arguments": json.dumps({"answer": answer}),
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "Submitted."},
+            {"role": "assistant", "content": f"I {answer} it."},
+        ],
+    }
+
+
+def test_run_traces_scores_recorded_conversations_against_a_task(project: Project) -> None:
+    traces = project.root / "traces.jsonl"
+    traces.write_text(
+        json.dumps(_submitted("refunded", ticket="good"))
+        + "\n"
+        + json.dumps(_submitted("denied", ticket="bad"))
+        + "\n"
+    )
+
+    code, output, job = cli("run", "--task", "refund", "--traces", "traces.jsonl", "--json")
+
+    assert code == 0, output
+    scores = {item["task"]: item["score"] for item in job["trials"]}
+    assert scores == {"good": 1.0, "bad": 0.0}
+    record = json.loads((project.jobs_dir / job["job_id"] / "run.json").read_text())
+    assert record["harness"] == "native.replay.v1"
+    assert record["model"] == "acme/support"
+    [good] = [item for item in job["trials"] if item["task"] == "good"]
+    code, output, ledger = cli("rewards", "show", good["trial_id"], "--json")
+    assert code == 0, output
+    assert [(item["source"], item["rewarder"]) for item in ledger] == [("app", "resolved")]
+
+    code, output, _ = cli(
+        "run", "--task", "refund", "--traces", "x.jsonl", "-m", "openai/gpt-5.6-luna"
+    )
+    assert code != 0
+    assert "takes no --agent, --model" in output

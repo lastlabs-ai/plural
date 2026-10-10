@@ -91,6 +91,8 @@ class RunRequest:
     attempts: int | None = None
     concurrency: int | Literal["auto"] = 1
     hosted: bool = False
+    traces: str | None = None
+    """Recorded conversations to score with the Task instead of running a model."""
 
 
 @dataclass
@@ -197,6 +199,8 @@ def plan_run(
     """
     if bool(request.task) == bool(request.benchmark):
         raise ProjectError("Name exactly one of --task or --benchmark.")
+    if request.traces:
+        return _plan_traces(workspace, request)
     if request.agent and (request.model or request.harness):
         raise ProjectError(
             "--agent already names a model and Harness. Use --agent alone, or --model with an "
@@ -266,6 +270,47 @@ def plan_run(
         job=job,
         pins=pins,
         concurrency_reason=reason,
+    )
+
+
+def _plan_traces(workspace: Workspace, request: RunRequest) -> RunPlan:
+    """Score recorded conversations with a Task's Verifiers and Environment.
+
+    Returns:
+        The plan, whose Agent replays each trace instead of calling a model.
+    """
+    if not request.task:
+        raise ProjectError("--traces scores conversations with one Task's Verifiers. Pass --task.")
+    if request.agent or request.model or request.harness or request.hosted:
+        raise ProjectError(
+            "--traces replays what an agent already did, so it takes no --agent, --model, "
+            "--harness, or --hosted."
+        )
+    path = Path(str(request.traces))
+    if not path.is_absolute():
+        path = workspace.project.root / path
+    if not path.is_file():
+        raise ProjectError(f"No traces file at {path}.")
+    source = ResourceRef(TASK.name, str(request.task))
+    task = workspace.load(source).value
+    try:
+        job = Job.from_traces(
+            path,
+            task=task,
+            concurrency=request.concurrency if request.concurrency != "auto" else 4,
+            catalog=workspace.catalog,
+        )
+    except ValueError as exc:
+        raise ProjectError(str(exc)) from exc
+    job.spec = job.spec.model_copy(update={"run_id": uuid.uuid4().hex})
+    job.plan = job.spec.plan(workspace.catalog)
+    return RunPlan(
+        source=source,
+        agent=job.agents[0],
+        agent_ref=None,
+        inputs=[source],
+        job=job,
+        pins={str(source): {"revision": "local", "content_hash": task.content_hash}},
     )
 
 
@@ -786,7 +831,8 @@ def _agent(
 
 def _harness_name(agent: Agent) -> str:
     if agent.harness is None:
-        return DEFAULT_HARNESS
+        package = agent._definition().harness_package
+        return package.definition.name if package is not None else DEFAULT_HARNESS
     if isinstance(agent.harness, str):
         return agent.harness
     package = agent._resolved_package()

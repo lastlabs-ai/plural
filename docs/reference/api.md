@@ -841,6 +841,40 @@ Simple public runner for a Task or Benchmark and catalog-backed Agents.
 plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, hindsight: 'Sequence[Any]' = ()) -> 'None'
 ```
 
+### plural.Job.from_traces
+
+```python
+from_traces(traces: 'str | Path | Iterable[Any]', *, task: 'Task | None' = None, verifiers: 'Sequence[Any]' = (), environment: 'Any' = None, name: 'str | None' = None, **options: 'Any') -> 'Job'
+```
+
+Score conversations an agent already had, without running it again.
+
+```text
+Each trace becomes a Task whose Agent replays the recorded turns: every
+assistant message is a model call and every tool result a step. A
+recorded call to an action the Environment declares is sent to its App,
+so Verifiers that read App state see where the agent left it. Trials are
+stored like any other, so ``plural rewards apply`` and ``plural rewards
+export`` work on them. No model is called and no key is needed.
+
+Args:
+    traces: A JSONL or JSON file, or a list, of ``{"messages": [...]}``
+        conversations in OpenAI chat format, or Plural Traces.
+    task: Score every trace as an attempt at this Task: its Verifiers,
+        Environment, and starting state.
+    verifiers: Verifiers to score with, instead of or without ``task``.
+    environment: The Environment the traces ran in, when there is no
+        ``task``. Defaults to an empty local one.
+    name: The Benchmark the traces are grouped under.
+    **options: Any other :class:`Job` option, such as ``hindsight``.
+
+Returns:
+    The Job, ready to ``run()``.
+
+Raises:
+    ValueError: Neither ``task`` nor ``verifiers`` was given.
+```
+
 ### plural.Job.run_async
 
 ```python

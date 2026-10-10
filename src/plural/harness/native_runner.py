@@ -35,6 +35,10 @@ def _local_command(command: list[Any]) -> list[str]:
 
 _CHAT_PROFILES = {"chat", "native.chat.v1"}
 _ACTION_PROFILES = {"actions", "native.actions.v1"}
+_REPLAY_PROFILE = "native.replay.v1"
+# The Task metadata key holding the conversation the replay profile walks.
+# Keep in sync with plural.recorded.RECORDING_KEY.
+RECORDING_KEY = "plural.recording"
 
 # Budgets cut an episode short without the Environment declaring completion.
 _BUDGET_STOPS = {"max_turns", "max_seconds", "max_cost"}
@@ -261,6 +265,8 @@ def main() -> None:
 def _run(
     profile: str, request: dict[str, Any], episode: _Episode | None = None
 ) -> tuple[dict[str, Any], _Episode, str]:
+    if profile == _REPLAY_PROFILE:
+        return _replay(request, episode if episode is not None else _Episode())
     if profile not in _CHAT_PROFILES | _ACTION_PROFILES:
         raise ValueError(f"unknown native profile {profile!r}")
     agent = _mapping(request.get("agent"), "agent")
@@ -412,6 +418,154 @@ def _run(
     )
 
 
+def _replay(request: dict[str, Any], episode: _Episode) -> tuple[dict[str, Any], _Episode, str]:
+    """Record a conversation that already happened, as if it were running now.
+
+    Each assistant message becomes a model call and each tool result an
+    Environment step, so Verifiers, rewarders, and exports read a recorded
+    trace exactly as they read a live run. No model is called. A recorded call
+    to an action the Environment declares is sent to its App, so the App ends
+    in the state the agent left it in; the recorded result is kept in the
+    step's ``info``.
+    """
+    task = _mapping(request.get("task"), "task")
+    raw_metadata = task.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    recording = metadata.get(RECORDING_KEY)
+    if not isinstance(recording, dict) or not isinstance(recording.get("messages"), list):
+        raise ValueError(f"{_REPLAY_PROFILE} needs Task metadata {RECORDING_KEY!r} with messages")
+    model = str(recording.get("model") or _mapping(request.get("agent"), "agent").get("model"))
+    environment = _mapping(request.get("environment"), "environment")
+    declared = {
+        str(item["name"]): item
+        for item in environment.get("actions", [])
+        if isinstance(item, dict) and item.get("name")
+    }
+    actions = {name: item for name, item in declared.items() if name not in {"reset", "step"}}
+    started = _started()
+    reset = _reset_episode(request, environment, declared) if actions else {}
+    episode.transitions.append(reset)
+    episode.record(
+        "environment.reset",
+        started,
+        turn=None,
+        observation=reset.get("observation"),
+        info={**(reset.get("info") or {}), "recorded": True},
+        view=reset.get("view") or None,
+        error=None,
+    )
+    limits = _mapping(environment.get("limits") or {}, "environment.limits")
+    deadline = time.monotonic() + float(limits.get("max_seconds", 120))
+    turn = 0
+    total_cost: float | None = None
+    pending: dict[str, dict[str, Any]] = {}
+    final_message: dict[str, Any] | None = None
+    for raw in recording["messages"]:
+        if not isinstance(raw, dict):
+            continue
+        message = {key: value for key, value in raw.items() if key != "usage"}
+        if message.get("role") != "assistant":
+            episode.messages.append(message)
+            call = pending.pop(str(message.get("tool_call_id") or ""), None)
+            if message.get("role") == "tool" and call is not None:
+                _replay_call(
+                    episode, turn, call, message.get("content"), actions, environment, deadline
+                )
+            continue
+        turn += 1
+        episode.model_call(
+            _started(),
+            turn=turn,
+            model=model,
+            tools=[],
+            response={"model": model, "choices": [{"message": message}], "usage": raw.get("usage")},
+            message=message,
+        )
+        cost = episode.records[-1]["usage"]["cost_usd"]
+        if cost is not None:
+            total_cost = (total_cost or 0.0) + cost
+        episode.messages.append(message)
+        raw_calls = message.get("tool_calls")
+        calls = raw_calls if isinstance(raw_calls, list) else []
+        pending = {str(call.get("id") or ""): call for call in calls if isinstance(call, dict)}
+        final_message = None if calls else message
+    for call in pending.values():
+        _replay_call(episode, turn, call, None, actions, environment, deadline, missing=True)
+    stop_reason = "agent_response" if final_message is not None else "recording_ended"
+    trace_id = str(recording.get("trace_id") or uuid4())
+    return (
+        {
+            "profile": _REPLAY_PROFILE,
+            "task_id": task.get("task_id"),
+            "response": _final_text(final_message, episode.messages),
+            "model": model,
+            "catalog_model": model,
+            "turns": turn,
+            "cost_usd": total_cost,
+            "stop_reason": stop_reason,
+            "terminated": False,
+            "truncated": False,
+            "total_reward": 0.0,
+            "trace_id": trace_id,
+        },
+        episode,
+        trace_id,
+    )
+
+
+def _replay_call(
+    episode: _Episode,
+    turn: int,
+    call: dict[str, Any],
+    content: Any,
+    actions: dict[str, dict[str, Any]],
+    environment: dict[str, Any],
+    deadline: float,
+    *,
+    missing: bool = False,
+) -> None:
+    raw_function = call.get("function")
+    function = raw_function if isinstance(raw_function, dict) else {}
+    name = str(function.get("name") or "")
+    if name.removeprefix("environment.") in actions:
+        started = _started()
+        outcome = _dispatch_tool(call, actions, environment, [], deadline, turn)
+        _record_outcome(episode, started, turn, call, outcome)
+        if outcome.transition is not None:
+            episode.transitions.append(outcome.transition)
+        episode.records[-1]["info"] = {
+            **(episode.records[-1].get("info") or {}),
+            "recorded": True,
+            "recorded_result": content,
+        }
+        return
+    try:
+        arguments = _arguments(function)
+    except (TypeError, ValueError):
+        arguments = {}
+    try:
+        observation = json.loads(content) if isinstance(content, str) else content
+    except json.JSONDecodeError:
+        observation = content
+    episode.record(
+        "environment.step",
+        _started(),
+        turn=turn,
+        tool_call_id=str(call.get("id") or ""),
+        action=str(function.get("name") or ""),
+        arguments=arguments,
+        observation=observation,
+        content=content,
+        reward=None,
+        rewards=[],
+        terminated=False,
+        truncated=False,
+        info={"recorded": True},
+        view=None,
+        error="the recording has no result for this call" if missing else None,
+    )
+
+
 def _record_outcome(
     episode: _Episode,
     started: tuple[str, float],
@@ -499,26 +653,32 @@ def _model_call(
 ) -> dict[str, Any]:
     if not model:
         raise ValueError("Agent model is required")
-    base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
-    if not base:
-        raise ValueError("native runner requires PLURAL_GATEWAY_URL for its model calls")
-    key = os.environ.get("PLURAL_API_KEY")
-    if not key and os.environ.get("PLURAL_ALLOW_NO_AUTH") != "1":
-        raise ValueError(
-            "native runner requires PLURAL_API_KEY "
-            "(or PLURAL_ALLOW_NO_AUTH=1 for an explicitly unauthenticated local gateway)"
-        )
+    endpoint = (os.environ.get("PLURAL_AGENT_ENDPOINT") or "").rstrip("/")
+    if endpoint:
+        base = endpoint
+        key = os.environ.get("PLURAL_AGENT_ENDPOINT_KEY")
+    else:
+        base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
+        if not base:
+            raise ValueError("native runner requires PLURAL_GATEWAY_URL for its model calls")
+        key = os.environ.get("PLURAL_API_KEY")
+        if not key and os.environ.get("PLURAL_ALLOW_NO_AUTH") != "1":
+            raise ValueError(
+                "native runner requires PLURAL_API_KEY "
+                "(or PLURAL_ALLOW_NO_AUTH=1 for an explicitly unauthenticated local gateway)"
+            )
     body: dict[str, Any] = {"model": model, "messages": messages}
     if tools:
         body["tools"] = tools
     for name in ("temperature", "max_tokens"):
         if routing.get(name) is not None:
             body[name] = routing[name]
-    body["routing"] = routing
     headers = {"Content-Type": "application/json"}
-    project = os.environ.get("PLURAL_PROJECT_ID")
-    if project:
-        headers["X-Plural-Project"] = project
+    if not endpoint:
+        body["routing"] = routing
+        project = os.environ.get("PLURAL_PROJECT_ID")
+        if project:
+            headers["X-Plural-Project"] = project
     if key:
         headers["Authorization"] = f"Bearer {key}"
     request = urllib.request.Request(

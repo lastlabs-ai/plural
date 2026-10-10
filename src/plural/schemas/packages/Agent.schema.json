@@ -224,7 +224,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "A catalog-backed model and its optional execution harness.",
+  "description": "A catalog-backed model and its optional execution harness.\n\nTo evaluate your own agent or model server instead, give ``endpoint``: the\nbase URL of an OpenAI-compatible API (one that serves\n``/chat/completions``). ``model`` is then sent to it as is and need not be\nin the catalog, and ``endpoint_key`` names the secret holding its API key.\nPlural's native Harness calls it with the Environment's actions as tools.",
   "properties": {
     "auth_mode": {
       "default": "environment",
@@ -236,6 +236,30 @@
       ],
       "title": "Auth Mode",
       "type": "string"
+    },
+    "endpoint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Endpoint"
+    },
+    "endpoint_key": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Endpoint Key"
     },
     "fallback_models": {
       "default": [],
