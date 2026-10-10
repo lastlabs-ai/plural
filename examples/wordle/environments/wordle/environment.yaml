@@ -2,7 +2,7 @@
 # Behavior (actions, state, observations, rewards) is Python in environment.py.
 # README.md explains both to the people who use this Environment.
 name: wordle
-version: 0.1.0
+version: 0.1.1
 description: Guess a hidden five-letter word. Each guess is marked correct, present, or absent.
 overview: Six guesses. The secret stays on State, and the Agent only sees the board.
 python: environment.py:Wordle

@@ -1,7 +1,7 @@
 # Benchmark: a named collection of Tasks and the rules for ranking results.
 # Results rank on the Verifier score only; step rewards never contribute.
 name: wordlebench
-version: 0.1.0
+version: 0.1.1
 description: Seven Wordle tasks against the full Wordle word list.
 purpose: Measure whether an Agent can use letter marks to find a hidden five-letter word. Every task accepts the same 14,855 words and shows none of them.
 tasks:
