@@ -1,7 +1,7 @@
 """Draft an Environment from a system you already have.
 
 Each generator returns the files to write; nothing here touches the network
-or the disk. ``plural env from-mcp``, ``from-openapi``, ``from-data``, and
+or the disk. ``plural env from-mcp``, ``from-openapi``, and
 ``from-traces`` write them and then load the result, which is when tools and
 operations are discovered.
 """
@@ -257,67 +257,6 @@ def from_openapi(
     return Generated(files=files, environment=name, secrets=names, credentials=needed)
 
 
-def from_data(
-    name: str,
-    *,
-    app: str,
-    tables: Mapping[str, tuple[str, bytes]] | None = None,
-    database: tuple[str, bytes] | None = None,
-    keys: Mapping[str, str] | None = None,
-    read_only: bool = False,
-    sql: bool = False,
-    runtime: str = "local",
-) -> Generated:
-    """An Environment with one App over tables of data, for a system with no API.
-
-    ``tables`` maps table name to ``(file name, contents)`` for CSV, JSON, or
-    JSONL files; ``database`` is a SQLite file. They are copied beside the
-    manifest, and each episode works on a fresh copy.
-
-    Returns:
-        The files to write.
-
-    Raises:
-        ValueError: There is no data.
-    """
-    if not tables and database is None:
-        raise ValueError("Give at least one table file or a SQLite --database.")
-    settings: dict[str, Any] = {}
-    files: dict[str, str | bytes] = {}
-    if database is not None:
-        settings["database"] = f"data/{database[0]}"
-        files[f"environments/{name}/data/{database[0]}"] = database[1]
-    if tables:
-        settings["tables"] = {table: f"data/{item[0]}" for table, item in tables.items()}
-        for file_name, content in tables.values():
-            files[f"environments/{name}/data/{file_name}"] = content
-    if keys:
-        settings["keys"] = dict(keys)
-    if read_only:
-        settings["read_only"] = True
-    if sql:
-        settings["sql"] = True
-    moves = "list and get rows" if read_only else "list, get, create, update, and delete rows"
-    if sql:
-        moves += ", and run read-only SQL with `query`"
-    files.update(
-        _environment(
-            name,
-            command="from-data",
-            description=f"Work done on the {app} data.",
-            apps=[{"name": app, "data": settings}],
-            runtime=runtime,
-            secrets=(),
-            connection=(
-                f"`{app}` holds the tables under `data/`. Each episode starts from a fresh "
-                f"copy, and the Agent can {moves}. A Task's `initial_state` can replace a "
-                "table's rows, and a Verifier reads every table from `episode.apps`."
-            ),
-        )
-    )
-    return Generated(files=files, environment=name)
-
-
 def _jsonl(rows: Sequence[Mapping[str, Any]]) -> str:
     return "".join(json.dumps(dict(row), sort_keys=True) + "\n" for row in rows)
 
@@ -468,7 +407,6 @@ def from_traces(
 __all__ = [
     "DEFAULT_JUDGE_MODEL",
     "Generated",
-    "from_data",
     "from_mcp",
     "from_openapi",
     "from_traces",

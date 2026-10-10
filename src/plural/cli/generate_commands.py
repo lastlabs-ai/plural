@@ -1,4 +1,4 @@
-"""``plural env from-mcp|from-openapi|from-data|from-traces``: draft an Environment.
+"""``plural env from-mcp|from-openapi|from-traces|eject-files``: draft an Environment.
 
 Each command writes ordinary project files, then loads the Environment the way
 ``plural env validate`` does, which is when an MCP server's tools and an API's
@@ -19,14 +19,16 @@ from plural.project import ProjectError, ResourceRef, Workspace, check_name
 from plural.project.generators import (
     DEFAULT_JUDGE_MODEL,
     Generated,
-    from_data,
     from_mcp,
     from_openapi,
     from_traces,
 )
 from plural.project.layout import ENVIRONMENT
 
-APP_HELP = "The App's name, which prefixes its actions when there are several. Default: NAME."
+APP_HELP = (
+    "The App's name. It prefixes an action only when another App offers the same name. "
+    "Default: NAME."
+)
 RUNTIME_HELP = "Where the Environment runs: local (a trusted subprocess), docker, or daytona."
 SECRET_HELP = (
     "A setup secret the project supplies, for reset and snapshot hooks. Repeatable. "
@@ -205,40 +207,37 @@ def add_generators(app: typer.Typer) -> None:
         )
         _write(generated, as_json=as_json)
 
-    @app.command("from-data")
+    @app.command("eject-files")
     @handled
-    def env_from_data(
-        name: str = typer.Argument(help="Environment name."),
-        files: list[str] = typer.Argument(
-            None, help="CSV, JSON, or JSONL files; each is a table named after the file."
+    def env_eject_files(
+        name: str = typer.Argument(help="Environment to copy the files server into."),
+        filename: str = typer.Option(
+            "files_server.py", "--as", help="File to write, in the Environment folder."
         ),
-        database: str | None = typer.Option(None, "--database", help="A SQLite file instead."),
-        key: list[str] = typer.Option(
-            [], "--key", help="A table's key column, TABLE=COLUMN. Default: id, else rowid."
-        ),
-        read_only: bool = typer.Option(False, "--read-only", help="Offer no writes."),
-        sql: bool = typer.Option(False, "--sql", help="Also offer read-only SQL as `query`."),
-        app_name: str | None = typer.Option(None, "--app", help=APP_HELP),
-        runtime: str = typer.Option("local", "--runtime", help=RUNTIME_HELP),
         as_json: bool = JSON_OPTION,
     ) -> None:
-        """Draft an Environment whose App is tables of data, for a system with no API."""
-        root = workspace().project.root
-        tables = {Path(item).stem.replace("-", "_"): _file(item, root=root) for item in files or ()}
-        try:
-            generated = from_data(
-                name,
-                app=app_name or name.replace("-", "_"),
-                tables=tables,
-                database=_file(database, root=root) if database else None,
-                keys=_pairs(key, "--key"),
-                read_only=read_only,
-                sql=sql,
-                runtime=runtime,
-            )
-        except ValueError as exc:
-            raise ProjectError(str(exc)) from exc
-        _write(generated, as_json=as_json)
+        """Copy Plural's ready-made files server into an Environment, to change what it offers."""
+        import plural.mcp.files
+
+        space = workspace()
+        directory = space.project.resource_dir(ResourceRef(ENVIRONMENT.name, name))
+        if not directory.is_dir():
+            raise ProjectError(f"No Environment {name}. Create it with `plural env init {name}`.")
+        target = directory / filename
+        if target.suffix != ".py" or target.parent != directory:
+            raise ProjectError("--as must be a .py file name, such as files_server.py.")
+        if target.exists():
+            raise ProjectError(f"{relative(target, space.project.root)} already exists.")
+        source = Path(plural.mcp.files.__file__).read_text(encoding="utf-8")
+        target.write_text(source, encoding="utf-8")
+        reference = f"{filename}:server"
+        payload = {"file": relative(target, space.project.root), "server": reference}
+
+        def text() -> None:
+            typer.echo(f"Wrote {payload['file']}. Point the App at it in environment.yaml:")
+            typer.echo(f"  - name: files\n    mcp:\n      server: {reference}")
+
+        emit(payload, as_json=as_json, text=text)
 
     @app.command("from-traces")
     @handled

@@ -193,7 +193,7 @@ A credential this Agent supplies to the Apps it works with.
 
 One move an App offers the Agent.
 
-- **`name`** — `string`; required. Constraints: `{"maxLength": 64, "minLength": 1}`.
+- **`name`** — `string`; required. Constraints: `{"maxLength": 128, "minLength": 1}`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`parameters`** — `object`; optional.
 - **`mutates_state`** — `boolean`; optional. Default: `true`.
@@ -205,7 +205,7 @@ One move an App offers the Agent.
 One App inside an Environment.
 
 - **`name`** — `string`; required.
-- **`kind`** — `"python" | "mcp" | "openapi" | "data" | "replay"`; optional. Default: `"python"`.
+- **`kind`** — `"python" | "mcp" | "openapi" | "replay"`; optional. Default: `"python"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`python`** — `string | null`; optional. Default: `null`.
 - **`config`** — `object`; optional.

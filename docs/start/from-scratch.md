@@ -20,7 +20,7 @@ every block below can be pasted as it is.
 ```bash
 plural project init wordle
 cd wordle
-plural env init wordle
+plural env init wordle --python
 ```
 
 **What just happened.** `plural project init` made the project folder, and

@@ -22,10 +22,6 @@ def app_class(kind: AppKind) -> type[App[Any]]:
         from plural.apps.openapi import OpenAPIApp
 
         return OpenAPIApp
-    if kind == "data":
-        from plural.apps.data import DataApp
-
-        return DataApp
     if kind == "replay":
         from plural.apps.replay import ReplayApp
 

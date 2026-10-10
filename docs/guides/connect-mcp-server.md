@@ -116,8 +116,9 @@ Or keep them all and drop a few with `exclude: [delete_entities]`. The command
 equivalent is `--tool NAME`, repeated. If `tools` names one the server doesn't offer,
 `validate` lists what it does offer.
 
-The Agent reads each tool's description from the server. With one App, the actions
-keep the tools' names. With several Apps, each is prefixed, such as `memory__search_nodes`.
+The Agent reads each tool's description from the server, and each tool keeps its name.
+Only a name another App also offers is prefixed with the App, such as `memory__search`;
+see [What the Agent sees](../concepts/apps.md#what-the-agent-sees).
 
 ## 4. Supply credentials
 
@@ -340,8 +341,9 @@ environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local
 
 | Setting | Meaning |
 | --- | --- |
+| `server` | A FastMCP server to start inside the Runtime, as `file.py:name`, such as `server.py:mcp`, or `package.module:name`, such as `plural.mcp.files:server`. See [Build an MCP server](build-mcp-server.md). |
 | `command` | Start the server inside the Runtime. A list, or one string split like a shell would. |
-| `url` | Reach a server over Streamable HTTP instead. Give exactly one of `command` and `url`. |
+| `url` | Reach a server over Streamable HTTP instead. Give exactly one of `server`, `command`, and `url`. |
 | `headers` | HTTP headers for a `url` server. Values may contain `${NAME}`, a credential or secret. |
 | `env` | Environment variables for a `command` server. Values may contain `${NAME}`, a credential or secret, and `${PLURAL_APP_DIR}`, the episode's empty folder. |
 | `cwd` | Working folder for a `command` server, relative to the Environment. |

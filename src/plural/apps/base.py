@@ -183,17 +183,6 @@ class App(Generic[StateT]):
         return OpenAPIApp(name=name, **settings)
 
     @staticmethod
-    def data(name: str, **settings: Any) -> App[Any]:
-        """Give data with no tool layer generated query and change actions.
-
-        Returns:
-            A data App.
-        """
-        from plural.apps.data import DataApp
-
-        return DataApp(name=name, **settings)
-
-    @staticmethod
     def replay(name: str, **settings: Any) -> App[Any]:
         """Answer actions from recorded traces.
 

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
 from plural.common import FrozenModel
 
-AppKind = Literal["python", "mcp", "openapi", "data", "replay"]
+AppKind = Literal["python", "mcp", "openapi", "replay"]
 AppControl = Literal["owned", "sandboxed", "live", "replayed"]
 
 APP_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
@@ -57,11 +59,13 @@ class AppAction(FrozenModel):
     """One move an App offers the Agent.
 
     ``name`` is the App's own name for the action (a Python method name or an
-    MCP tool name). The Environment exposes it to the Agent unprefixed when it
-    has one App, and as ``<app>__<name>`` when it has several.
+    MCP tool name), which is how the App is called. The Agent sees it under
+    its exposed name: the same name, with any character a model provider
+    rejects replaced, and prefixed ``<app>__`` only when another App offers
+    the same name.
     """
 
-    name: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
     description: str = ""
     parameters: dict[str, Any] = Field(
         default_factory=lambda: {"type": "object", "additionalProperties": True}
@@ -77,11 +81,8 @@ class AppAction(FrozenModel):
     @field_validator("name")
     @classmethod
     def _tool_name(cls, value: str) -> str:
-        if re.fullmatch(r"[A-Za-z0-9_-]+", value) is None:
-            raise ValueError(
-                f"action name {value!r} may only contain letters, digits, '_' and '-', "
-                "because model providers reject other characters in tool names"
-            )
+        if not value.strip() or any(not character.isprintable() for character in value):
+            raise ValueError(f"action name {value!r} must be printable text")
         return value
 
 
@@ -135,12 +136,6 @@ class AppDefinition(FrozenModel):
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
             raise ValueError(f"App {self.name!r} declares duplicate actions: {duplicates}")
-        reserved = sorted(RESERVED_ACTIONS & set(names))
-        if reserved:
-            raise ValueError(
-                f"App {self.name!r} cannot name an action {reserved[0]!r}; "
-                "reset, step, and finish belong to the episode, not the App"
-            )
         secret_names = [item.name for item in self.secrets]
         if len(secret_names) != len(set(secret_names)):
             raise ValueError(f"App {self.name!r} declares a secret more than once")
@@ -175,7 +170,7 @@ def derive_control(kind: AppKind, *, local: bool, has_reset: bool) -> AppControl
     """Return how much of an App's state Plural controls.
 
     ``local`` means the App's state lives inside the Runtime, so a fresh
-    Runtime is a fresh App: a Python App, a data App, or an MCP server started
+    Runtime is a fresh App: a Python App, or an MCP server named with ``server`` or started
     as a command. A remote App is ``sandboxed`` when it can be reset and
     ``live`` otherwise.
 
@@ -189,9 +184,67 @@ def derive_control(kind: AppKind, *, local: bool, has_reset: bool) -> AppControl
     return "sandboxed" if has_reset else "live"
 
 
-def exposed_name(app: str, action: str, *, prefixed: bool) -> str:
-    """Return the tool name the Agent sees for one App action."""
-    return f"{app}{ACTION_SEPARATOR}{action}" if prefixed else action
+TOOL_NAME_LIMIT = 64
+_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+def _safe(name: str) -> str:
+    return _UNSAFE.sub("_", name).strip("_") or "action"
+
+
+def _fit(name: str, key: str) -> str:
+    if len(name) <= TOOL_NAME_LIMIT:
+        return name
+    digest = hashlib.sha256(key.encode()).hexdigest()[:8]
+    return f"{name[: TOOL_NAME_LIMIT - 9]}_{digest}"
+
+
+def exposed_names(apps: Sequence[tuple[str, Sequence[str]]]) -> dict[tuple[str, str], str]:
+    """The tool name the Agent sees for each App action.
+
+    Each action keeps its own name, with characters model providers reject
+    replaced by ``_``. Only a name another App also offers, or one of the
+    episode's own (``reset``, ``step``, ``finish``), is prefixed with the App's
+    name, so adding an App never renames the tools of the others. Names stay
+    within 64 characters and are unique.
+
+    Returns:
+        ``(app, action)`` to the exposed name.
+    """
+    base = {(app, action): _safe(action) for app, actions in apps for action in actions}
+    owners: dict[str, set[str]] = {}
+    for (app, _), name in base.items():
+        owners.setdefault(name, set()).add(app)
+    exposed: dict[tuple[str, str], str] = {}
+    for (app, action), name in base.items():
+        if len(owners[name]) > 1 or name in RESERVED_ACTIONS:
+            name = f"{app}{ACTION_SEPARATOR}{name}"
+        exposed[(app, action)] = _fit(name, f"{app}/{action}")
+    counts: dict[str, int] = {}
+    for name in exposed.values():
+        counts[name] = counts.get(name, 0) + 1
+    for key, name in exposed.items():
+        if counts[name] > 1:
+            digest = hashlib.sha256(f"{key[0]}/{key[1]}".encode()).hexdigest()[:8]
+            exposed[key] = f"{name[: TOOL_NAME_LIMIT - 9]}_{digest}"
+    return exposed
+
+
+def tool_parameters(schema: Any) -> dict[str, Any]:
+    """An action's parameters as a JSON Schema every model provider accepts.
+
+    Returns:
+        An object schema with ``properties``, without ``$schema`` or ``$id``.
+    """
+    if not isinstance(schema, dict):
+        return {"type": "object", "properties": {}}
+    normalized = {key: value for key, value in schema.items() if key not in {"$schema", "$id"}}
+    kind = normalized.get("type")
+    if kind is None or (isinstance(kind, list) and "object" in kind):
+        normalized["type"] = "object"
+    if normalized.get("type") == "object" and not isinstance(normalized.get("properties"), dict):
+        normalized["properties"] = {}
+    return normalized
 
 
 class ExposedAction(FrozenModel):
@@ -216,6 +269,8 @@ __all__ = [
     "RESERVED_ACTIONS",
     "RewarderDefinition",
     "SecretReference",
+    "TOOL_NAME_LIMIT",
     "derive_control",
-    "exposed_name",
+    "exposed_names",
+    "tool_parameters",
 ]

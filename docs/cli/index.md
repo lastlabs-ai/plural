@@ -42,13 +42,14 @@ Plural API key, stored with `plural auth login --api-key-stdin` or set in
 plural project init NAME [--push]
 plural project show NAME
 plural project push
-plural env|task|verifier|harness|agent|benchmark init NAME
+plural env init NAME [--python]
+plural task|verifier|harness|agent|benchmark init NAME
 plural env|task|verifier|harness|agent|benchmark validate|show|push|pull [NAME]
 plural env|task|verifier|harness|agent|benchmark list
 plural benchmark add|remove TASK [--benchmark NAME]
 plural env from-mcp NAME (--command CMD | --url URL) [--header K=V] [--tool NAME]
 plural env from-openapi NAME --spec FILE_OR_URL [--base-url URL] [--operation ID]
-plural env from-data NAME FILE... [--database FILE] [--read-only] [--sql]
+plural env eject-files NAME [--as FILE]
 plural env from-traces NAME --traces FILE
 plural run (-t TASK | -b BENCHMARK) (-m MODEL [-h HARNESS] | -a AGENT)
            [--hosted [--follow] | --track] [--attempts N] [--concurrency N]

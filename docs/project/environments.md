@@ -168,14 +168,17 @@ plural env init ticket-triage
 ```text
 environments/ticket-triage/
 ├── environment.yaml
-├── environment.py
+├── server.py
 └── README.md
 ```
 
-The App lives in `environment.py`, and the folder is its source package. Add a
-`resources/` folder beside them when the Environment needs data files.
-`environment.yaml` holds everything else: its name, Apps, resources, Runtime, and
-settings. This is the manifest from the [first project](../tutorials/first-project.md):
+The App is the FastMCP server in `server.py`; see
+[Build an MCP server](../guides/build-mcp-server.md). With `--python`, the template
+is a Python App class in `environment.py` instead. Either way the folder is the
+Environment's source package. Add a `resources/` folder beside them when the
+Environment needs data files. `environment.yaml` holds everything else: its name,
+Apps, resources, Runtime, and settings. This is the manifest from the
+[first project](../tutorials/first-project.md), which uses a Python App:
 
 ```yaml
 name: support-queue
@@ -196,8 +199,8 @@ limits:
 ```
 
 To connect an existing system instead of writing one, start from it:
-`plural env from-mcp`, `plural env from-openapi`, `plural env from-data`, or
-`plural env from-traces` drafts the folder for you.
+`plural env from-mcp`, `plural env from-openapi`, or `plural env from-traces` drafts
+the folder for you. For files, add Plural's files server as an App.
 
 What each field means:
 
@@ -206,8 +209,8 @@ What each field means:
   Python App, or an `Environment` subclass whose `on_step` spans the Apps listed in
   `apps`.
 - `apps` lists the Apps. Each entry is a Python App (`python: apps/crm.py:CRM`, with
-  optional `config`), or a named `mcp`, `openapi`, `data`, or `replay` App with that
-  kind's settings. See [Apps](../concepts/apps.md).
+  optional `config`), or a named `mcp`, `openapi`, or `replay` App with that kind's
+  settings. See [Apps](../concepts/apps.md).
 - `readme` points to `README.md`, which explains the Apps, their actions and State,
   rewards, and settings to the people who use the Environment.
 - `resources` lists files to stage, relative to the folder. A path is the
@@ -229,7 +232,8 @@ plural env push ticket-triage
 ```
 
 `validate` loads every App and prints its kind, [control
-level](../concepts/apps.md#control-levels), actions, and secrets. A push saves an
+level](../concepts/apps.md#control-levels), actions, and secrets, then the tools exactly
+as the model will see them. A push saves an
 unchangeable revision that stays private to the project. It refuses files that look
 like credentials and paths that escape the folder. To leave out other files, list them
 in a `.pluralignore` file in the Environment folder. Credentials are never stored in
@@ -492,25 +496,32 @@ Recreate the data each Trial needs in `reset`.
 ## Resources
 
 **Resources** are the files and data the world starts with, like the Wordle word list
-or the support policy. Environment resources are shared by every Task; Task resources
-belong to one case, such as a single customer's invoice. Each Trial gets a fresh copy
-of both:
+or the support policy. Think of them as volumes. The Environment has one, shared by
+every Task. A Task may have its own, for one case, such as a single customer's invoice.
+A Trial references both, read-only; it doesn't own them, and nothing done in a Trial
+changes them. The two sit side by side and never share a path:
 
 ```text
 /workspace/resources/
-  shared/             # Environment inputs
+  environment-resources/   # The Environment's files, for every Task
     policies/refunds.md
-  task/               # Inputs for this Task only
+  task-resources/          # This Task's files, when it has any
     invoice.csv
-  manifest.json       # File locations and SHA-256 hashes
+  manifest.json            # Every file's location and SHA-256 hash
 ```
 
-Use relative file paths. Task files never replace shared files, even when their names
-match. Environment code reads the root folder from `PLURAL_RESOURCES_DIR`, then shows
-the right information through actions or observations.
+Use relative file paths. `PLURAL_RESOURCES_DIR` holds the root folder. A FastMCP server
+reads the two folders with `plural.mcp.environment_resources()` and
+`plural.mcp.task_resources()`; see
+[Build an MCP server](../guides/build-mcp-server.md#4-read-the-environments-and-the-tasks-files).
+For files the Agent should browse and query directly, add Plural's files server as an
+App: `server: plural.mcp.files:server`.
+
+The Agent reaches the files through the Apps' tools. A Harness that can read files,
+such as a coding agent, can also read both folders directly.
 
 > **Good to know:** Files are not added to the model's prompt automatically. The Agent
-> only learns what your code puts in the Observation.
+> only learns what a tool returns.
 
 There are four ways to supply a resource. The short form covers most cases; the rest
 are for power users.

@@ -214,7 +214,7 @@ files. Create it with:
 ```bash
 plural project init support-eval
 cd support-eval
-plural env init ticket-triage
+plural env init ticket-triage --python
 plural verifier init correct-team
 plural task init duplicate-charge --environment ticket-triage --verifier correct-team
 ```
@@ -258,14 +258,8 @@ INV-102,49.00,duplicate
 `environments/ticket-triage/environment.py`:
 
 ```python
-import os
-from pathlib import Path
-
 from plural import App, State, action, initial
-
-
-def resource(scope: str, path: str) -> str:
-    return (Path(os.environ["PLURAL_RESOURCES_DIR"]) / scope / path).read_text()
+from plural.mcp import environment_resources, task_resources
 
 
 class TicketState(State):
@@ -279,13 +273,13 @@ class TicketTriage(App[TicketState]):
 
     def reset(self, initial_state):
         super().reset(initial_state)
-        policy = resource("shared", "resources/policy.md")
+        policy = (environment_resources() / "resources/policy.md").read_text()
         return f"{self.state.issue}\n\nPolicy:\n{policy}"
 
     @action(read_only=True)
     def read_invoice(self) -> str:
         """Read the invoice attached to this support case."""
-        return resource("task", "resources/invoice.csv")
+        return (task_resources() / "resources/invoice.csv").read_text()
 
     @action
     def categorize(self, category: str) -> str:
@@ -361,16 +355,18 @@ initial_state:
 **Resources** are files the world starts with. The support policy applies to every
 ticket, so it belongs to the Environment and is listed under `resources` in
 `environment.yaml`. The invoice belongs to this one case, so it lives in the Task's
-`resources/` folder. Each Trial, one attempt at the Task, receives both, under
+`resources/` folder. Each Trial, one attempt at the Task, reads both, read-only, under
 separate folders:
 
 ```text
 /workspace/resources/
-  shared/resources/policy.md     # from the Environment
-  task/resources/invoice.csv     # from this Task only
+  environment-resources/resources/policy.md   # from the Environment
+  task-resources/resources/invoice.csv        # from this Task only
 ```
 
-Environment code reads the root folder from `PLURAL_RESOURCES_DIR`. In the example,
+`plural.mcp.environment_resources()` and `plural.mcp.task_resources()` return the two
+folders, from a Python App or a [FastMCP server](../guides/build-mcp-server.md). In the
+example,
 `reset` returns the policy as part of the first thing the Agent sees, and the
 `read_invoice` action returns the attachment when the Agent asks for it.
 
@@ -388,8 +384,8 @@ access may read other staged files.
 ### Supply data for a single Task
 
 Files in a Task's `resources/` folder reach that Task's Trials only. Task files are
-UTF-8 text, such as CSV, JSON, or Markdown. They never replace shared files, even when
-their paths match.
+UTF-8 text, such as CSV, JSON, or Markdown. They sit in `task-resources/`, apart from the
+Environment's files, so the two never collide.
 
 A `Task` built in Python takes the same file as an inline resource:
 
@@ -404,15 +400,13 @@ invoice = Resource(
 ```
 
 Pass `resources=[invoice]` to the Task. It becomes
-`/workspace/resources/task/invoice.csv` for this Trial only. Read it in an Environment
-action:
+`/workspace/resources/task-resources/invoice.csv` for this Task's Trials only. Read it
+in an action:
 
 ```python
-import os
-from pathlib import Path
+from plural.mcp import task_resources
 
-resource_root = Path(os.environ["PLURAL_RESOURCES_DIR"])
-invoice_text = (resource_root / "task" / "invoice.csv").read_text()
+invoice_text = (task_resources() / "invoice.csv").read_text()
 ```
 
 Keep case-specific files out of the Environment when other Tasks should not receive

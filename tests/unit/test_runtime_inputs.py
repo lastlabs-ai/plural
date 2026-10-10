@@ -21,16 +21,18 @@ def inline(path="policy.md", content="shared"):
     return Resource(kind="file", name=path, path=path, delivery="inline", content=content)
 
 
-def test_scopes_are_isolated_and_manifest_contains_actual_hashes():
+def test_environment_and_task_resources_are_separate_read_only_volumes():
     uploads = resource_uploads((inline(),), (inline(content="case"),), None, {})
     files = {item.path: item.data for item in uploads}
-    assert files["shared/policy.md"] == b"shared"
-    assert files["task/policy.md"] == b"case"
+    assert files["environment-resources/policy.md"] == b"shared"
+    assert files["task-resources/policy.md"] == b"case"
+    assert {item.mode for item in uploads} == {0o444}
     manifest = json.loads(files["manifest.json"])
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
+    assert [item["scope"] for item in manifest["resources"]] == ["environment", "task"]
     assert manifest["resources"][1]["digest"] == "sha256:" + hashlib.sha256(b"case").hexdigest()
     next_run = resource_uploads((inline(),), (), None, {})
-    assert "task/policy.md" not in {item.path for item in next_run}
+    assert "task-resources/policy.md" not in {item.path for item in next_run}
 
 
 @pytest.mark.parametrize("path", ["../data", "/etc/passwd", "a/../b", "a//b", "a/", "a\\b"])
@@ -176,7 +178,7 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
             SimpleNamespace(task=task, resource_resolvers={}), Provider(), None
         )
     )
-    assert staged["/workspace/resources"]["task/ticket.txt"] == b"case"
+    assert staged["/workspace/resources"]["task-resources/ticket.txt"] == b"case"
     assert "/workspace/environment" not in staged
     files = {item.path: item.data for item in host_files(task)}
     assert json.loads(files[".plural/apps/task.json"]) == {

@@ -599,12 +599,12 @@ async def test_app_host_holds_secrets_and_verifiers_query_it_before_teardown(
     assert b"token-in-host-only" not in (harness.stdin or b"")
     payload = json.loads(harness.stdin or b"{}")["environment"]
     commands = {item["name"]: item["command"] for item in payload["actions"]}
-    assert commands["crm__get_record"] == [
+    assert commands["get_record"] == [
         "python",
         "-m",
         "plural.apps.daemon",
         "step",
-        "crm__get_record",
+        "get_record",
     ]
     assert payload["reset_command"][-1] == "reset"
     assert seen["record"] == {"app": "crm", "action": "get_record", "id": "7"}

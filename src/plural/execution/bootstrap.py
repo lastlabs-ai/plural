@@ -160,27 +160,45 @@ def needs_plural(
     return any(part.startswith("plural.") for command in commands for part in command)
 
 
-def resolve_distribution(requested: str | None) -> PluralDistribution:
+def resolve_distribution(requested: str | None, extras: tuple[str, ...] = ()) -> PluralDistribution:
     """Pick the Plural a sandbox gets from ``PLURAL_RUNTIME_VERSION``.
+
+    ``extras`` are optional dependency groups the Trial needs, such as ``mcp``
+    for an App whose server is written with FastMCP.
 
     Returns:
         This machine's code when unset, otherwise the named release.
     """
     value = (requested or "").strip()
     if value in {"", "current"}:
-        return _host_distribution()
+        return _host_distribution(tuple(sorted(extras)))
     version = _latest_release() if value == "latest" else value.removeprefix("v")
-    return PluralDistribution(version=version, requirements=(f"plural=={version}",))
+    name = f"plural[{','.join(sorted(extras))}]" if extras else "plural"
+    return PluralDistribution(version=version, requirements=(f"{name}=={version}",))
 
 
-@functools.lru_cache(maxsize=1)
-def _host_distribution() -> PluralDistribution:
+def needed_extras(task: Any) -> tuple[str, ...]:
+    """The optional dependency groups a Task's Apps need in the sandbox.
+
+    Returns:
+        ``("mcp",)`` when an App's server is written with FastMCP, else nothing.
+    """
+    for app in task.environment.apps:
+        if app.kind == "mcp" and app.config.get("server"):
+            return ("mcp",)
+    return ()
+
+
+@functools.lru_cache(maxsize=4)
+def _host_distribution(extras: tuple[str, ...] = ()) -> PluralDistribution:
     import plural
 
+    wanted = {f'extra == "{item}"' for item in extras}
     requirements = tuple(
-        item
+        requirement.strip()
         for item in importlib.metadata.requires("plural") or ()
-        if "extra" not in item.partition(";")[2]
+        for requirement, _, marker in [item.partition(";")]
+        if "extra" not in marker or marker.strip() in wanted
     )
     return PluralDistribution(
         version=plural.__version__,

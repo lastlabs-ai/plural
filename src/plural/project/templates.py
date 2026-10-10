@@ -96,7 +96,7 @@ def project_scaffold(name: str) -> Scaffold:
                 f'name = "{name}"\n'
                 'version = "0.1.0"\n'
                 'requires-python = ">=3.11"\n'
-                f'dependencies = ["plural>={MIN_SDK_VERSION}"]\n'
+                f'dependencies = ["plural[mcp]>={MIN_SDK_VERSION}"]\n'
             ),
             "README.md": _PROJECT_README.format(name=name),
             ".gitignore": ".plural/\n__pycache__/\n.venv/\n",
@@ -109,7 +109,7 @@ _PROJECT_README = """# {name}
 A Plural project. Each resource is a directory named after it:
 
 ```
-environments/<name>/   environment.yaml, environment.py, README.md, resources/
+environments/<name>/   environment.yaml, server.py, README.md, resources/
 tasks/<name>/          task.yaml, instruction.md, resources/
 verifiers/<name>/      verifier.yaml, verify.py
 harnesses/<name>/      harness.yaml
@@ -139,13 +139,27 @@ def resource_scaffold(
     verifiers: tuple[str, ...] = (),
     model: str | None = None,
     harness: str | None = None,
+    python: bool = False,
 ) -> Scaffold:
     """Files for ``plural <kind> init <name>``.
+
+    An Environment starts as one App whose server is written with FastMCP;
+    ``python=True`` starts it as a Python ``App`` class instead.
 
     Returns:
         The resource scaffold, relative to the resource directory.
     """
     cls = class_name(name)
+    if kind is ENVIRONMENT and not python:
+        app = name.replace("-", "_")
+        return Scaffold(
+            files={
+                ENVIRONMENT.manifest: _MCP_ENVIRONMENT_YAML.format(name=name, app=app),
+                "server.py": _MCP_SERVER_PY.format(title=title(name), app=app),
+                "README.md": _MCP_ENVIRONMENT_README.format(title=title(name)),
+            },
+            directories=("resources",),
+        )
     if kind is ENVIRONMENT:
         return Scaffold(
             files={
@@ -220,6 +234,149 @@ def resource_scaffold(
     raise ValueError(f"no scaffold for {kind.name}")
 
 
+_MCP_ENVIRONMENT_YAML = """\
+# Environment: the Apps an Agent works with, plus runtime and settings.
+# README.md explains both to the people who use this Environment.
+name: {name}
+description: ""
+overview: ""
+readme: README.md
+
+# Each App is one system the Agent works with. This one is the FastMCP server in
+# server.py: every tool is an action the Agent can take. Plural starts a fresh copy
+# for every Trial. Add more Apps to this list, such as a hosted MCP server:
+#   - name: crm
+#     mcp:
+#       url: https://mcp.example.com/v1
+#       headers: {{Authorization: "Bearer ${{CRM_TOKEN}}"}}
+#       credentials: [CRM_TOKEN]
+# or Plural's ready-made server over this Environment's and the Task's files:
+#   - name: files
+#     mcp:
+#       server: plural.mcp.files:server
+apps:
+  - name: {app}
+    mcp:
+      server: server.py:mcp
+
+# Files every Task can read, relative to this directory. In a Trial they are in
+# environment-resources/, read-only; a Task's own files are beside them in
+# task-resources/. server.py reads them with plural.mcp.environment_resources().
+resources: []
+#  - resources/policy.md
+
+# Where the Environment and Agent run. provider selects a Runtime preset:
+# docker (sandboxed), local (a trusted subprocess, not a sandbox), or daytona.
+runtime:
+  provider: docker
+  image: python:3.12-slim
+
+# Settings: which Agent harnesses may run here, and per-Trial limits.
+harness_policy:
+  mode: allow_all
+limits:
+  max_turns: 8
+  max_seconds: 120
+"""
+
+_MCP_SERVER_PY = '''\
+"""{title}: the MCP server behind this Environment's App.
+
+Every @mcp.tool is an action the Agent can take. Its docstring is what the
+Agent reads, and what it returns is what the Agent sees next. Mark tools that
+change nothing with readOnlyHint, so Benchmarks and Verifiers can rely on them.
+
+Plural starts this server fresh for every Trial. @plural.mcp.reset loads a
+Task's starting state and @plural.mcp.snapshot reports state to Verifiers; the
+Agent sees neither as a tool.
+"""
+
+from fastmcp import FastMCP
+
+import plural.mcp
+
+mcp = FastMCP("{app}")
+
+# PLURAL-TODO: replace this with the state your tools read and change.
+STATE: dict = {{"goal": "", "answer": "", "done": False}}
+
+
+@plural.mcp.reset(mcp)
+def start(initial_state: dict) -> str:
+    """Start an episode from the Task's initial_state. Return what the Agent sees first."""
+    STATE.update(goal=initial_state.get("goal", ""), answer="", done=False)
+    return f"Goal: {{STATE['goal']}}"
+
+
+# PLURAL-TODO: replace these tools with the moves your Agent needs.
+@mcp.tool(annotations={{"readOnlyHint": True}})
+def read_resource(path: str) -> str:
+    """Read a file this Environment provides, such as resources/policy.md."""
+    folder = plural.mcp.environment_resources()
+    target = (folder / path).resolve()
+    if not target.is_relative_to(folder.resolve()) or not target.is_file():
+        raise ValueError(f"No file {{path}}")
+    return target.read_text()
+
+
+@mcp.tool
+def submit(answer: str) -> str:
+    """Submit a final answer."""
+    STATE.update(answer=answer, done=True)
+    return "Submitted."
+
+
+@plural.mcp.snapshot(mcp)
+def state() -> dict:
+    """The state Verifiers read. The Agent never sees it."""
+    return STATE
+'''
+
+_MCP_ENVIRONMENT_README = """\
+# {title}
+
+## Overview
+
+<!-- PLURAL-TODO: describe the world this Environment simulates and what an Agent does in it. -->
+
+## Apps
+
+Each App is one system the Agent works with. `server.py` is a FastMCP server; its tools
+are the Agent's actions. `apps:` in `environment.yaml` can add others, such as a hosted
+MCP server.
+
+## Actions
+
+Functions marked `@mcp.tool`. Their docstrings are what the Agent reads, and what each
+returns is what the Agent sees next.
+
+## State
+
+What `@plural.mcp.snapshot` returns. Each Task's `initial_state` reaches
+`@plural.mcp.reset`. The Agent never sees State; Verifiers do.
+
+## Rewards
+
+None by default. Per-step credit for training comes from an `Environment` subclass's
+`on_step`, or from `@rewarder` methods on an `MCPApp` subclass. Rewards never contribute
+to a score.
+
+## Resources
+
+Files listed under `resources:` in `environment.yaml`. In a Trial they are read-only in
+`environment-resources/`, beside the Task's own files in `task-resources/`.
+
+## Runtime
+
+`runtime:` in `environment.yaml` says where the Environment and Agent run. The server
+needs FastMCP: `pip install 'plural[mcp]'`.
+
+## Settings
+
+`harness_policy` limits which Agent harnesses may run here. `limits` caps each Trial's
+turns, seconds, and cost.
+"""
+
 _ENVIRONMENT_YAML = """\
 # Environment: the Apps an Agent works with, plus runtime and settings.
 # README.md explains both to the people who use this Environment.
@@ -237,12 +394,12 @@ readme: README.md
 #   - python: environment.py:{cls}
 #   - name: files
 #     mcp:
-#       command: [npx, -y, "@modelcontextprotocol/server-filesystem", "."]
+#       server: plural.mcp.files:server
 #   - name: crm
 #     mcp:
 #       url: https://mcp.example.com/v1
 #       headers: {{Authorization: "Bearer ${{CRM_TOKEN}}"}}
-#       secrets: [CRM_TOKEN]
+#       credentials: [CRM_TOKEN]
 
 # Files staged into the runtime, relative to this directory.
 resources: []

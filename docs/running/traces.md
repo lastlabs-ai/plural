@@ -128,6 +128,10 @@ If an agent is already running somewhere, such as in production or another
 framework, you can score its recorded conversations without running it again. No
 model is called, so only a model judge needs a key.
 
+In short: Plural scores each conversation as it happened, turns each one into a Task
+with its tool results recorded, and lets other models work those Tasks against the
+recording. [Start from traces](../start/from-traces.md#how-it-works) walks through it.
+
 A trace file is JSONL, one conversation per line, with its messages in OpenAI chat
 format. A `trace_id` and `model` are optional; Plural Traces and a `TraceDataset`
 work too:

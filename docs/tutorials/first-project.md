@@ -43,7 +43,7 @@ Each building block gets its own template. You will create five:
 - an **Agent** called `careful`: the contestant, a model plus its instructions.
 
 ```bash
-plural env init support-queue
+plural env init support-queue --python
 plural verifier init correct-category
 plural task init ticket-1 --environment support-queue --verifier correct-category
 plural benchmark init support-triage

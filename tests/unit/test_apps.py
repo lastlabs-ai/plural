@@ -21,7 +21,7 @@ from plural import (
     rewarder,
 )
 from plural.apps import daemon
-from plural.apps.definition import AppDefinition, derive_control
+from plural.apps.definition import AppAction, AppDefinition, derive_control
 from plural.apps.host import AppHost
 from plural.apps.mcp import MCPError
 from plural.environments.definition import EnvironmentDefinition
@@ -134,18 +134,15 @@ def test_invalid_arguments_are_feedback() -> None:
     assert "unknown action 'missing'" in info["error"]
 
 
-def test_several_apps_namespace_actions_and_on_step_spans_them() -> None:
+def test_several_apps_keep_their_tool_names_and_on_step_spans_them() -> None:
     environment = Desk(apps=[Wordle(), Notes()], runtime=Runtime.local(), name="desk")
     definition = environment.definition()
-    assert [item.name for item in definition.actions] == [
-        "wordle__guess",
-        "wordle__remaining",
-        "notes__write",
-    ]
+    assert [item.name for item in definition.actions] == ["guess", "remaining", "write"]
+    assert definition.actions[0].description.startswith("[wordle] ")
     assert definition.python == "test_apps.py:Desk"
     observation, _ = environment.reset(initial_state={"wordle": {"secret": "crane"}})
     assert observation == {"text": "Guess the word. You have 6 guesses."}
-    _, reward, _, _, info = environment.step("wordle__guess", word="slate")
+    _, reward, _, _, info = environment.step("guess", word="slate")
     assert reward == 0.5
     assert info["effects"] == [
         {"app": "notes", "action": "write", "arguments": {"text": "guessed slate"}}
@@ -172,8 +169,40 @@ def test_rebuilt_environment_matches_definition() -> None:
     rebuilt = Environment._from_definition(restored)
     assert type(rebuilt).__name__ == "Desk"
     rebuilt.reset()
-    _, reward, _, _, _ = rebuilt.step("wordle__guess", word="crane")
+    _, reward, _, _, _ = rebuilt.step("guess", word="crane")
     assert reward == 2.5
+
+
+def test_tool_names_just_work_for_every_provider() -> None:
+    def server(name: str, *tools: str, schema: dict[str, Any] | None = None) -> AppDefinition:
+        return AppDefinition(
+            name=name,
+            kind="mcp",
+            actions=tuple(
+                AppAction(name=tool, parameters=schema or {"type": "object"}) for tool in tools
+            ),
+        )
+
+    long = "x" * 80
+    environment = EnvironmentDefinition(
+        name="desk",
+        apps=(
+            server("crm", "search", "salesforce.query", "reset", long),
+            server("docs", "search", "read file", schema={"$schema": "x", "properties": {}}),
+        ),
+    )
+    exposed = {(item.app, item.action): item for item in environment.actions}
+    assert exposed[("crm", "search")].name == "crm__search"
+    assert exposed[("docs", "search")].name == "docs__search"
+    assert exposed[("crm", "salesforce.query")].name == "salesforce_query"
+    assert exposed[("crm", "reset")].name == "crm__reset"
+    assert exposed[("docs", "read file")].name == "read_file"
+    assert len(exposed[("crm", long)].name) == 64
+    assert exposed[("docs", "read file")].parameters == {"type": "object", "properties": {}}
+    assert exposed[("crm", "search")].parameters == {"type": "object", "properties": {}}
+    alone = EnvironmentDefinition(name="crm", apps=(server("crm", "search", "salesforce.query"),))
+    assert [item.name for item in alone.actions] == ["search", "salesforce_query"]
+    assert alone.actions[0].description == ""
 
 
 def test_environment_rejects_old_fields() -> None:
@@ -561,10 +590,10 @@ def test_app_host_keeps_state_across_action_commands(workspace: Path) -> None:
     opening = _cli(workspace, "reset")
     assert opening["protocol"] == "plural-step-v1"
     assert opening["kind"] == "reset"
-    step = _cli(workspace, "step", "crm__create_record", stdin='{"name": "Acme"}')
+    step = _cli(workspace, "step", "create_record", stdin='{"name": "Acme"}')
     assert step["app"] == "crm"
     assert step["rendered"] == "created record 1"
-    step = _cli(workspace, "step", "wordle__guess", stdin='{"word": "slate"}')
+    step = _cli(workspace, "step", "guess", stdin='{"word": "slate"}')
     assert step["terminated"] is True
     assert step["reward"] == 2.5
     listed = _cli(workspace, "query", "crm", "list_records")
@@ -589,7 +618,7 @@ def test_app_host_refuses_queries_that_change_state(workspace: Path) -> None:
 
 def test_app_host_reports_bad_arguments(workspace: Path) -> None:
     daemon.call("reset", root=workspace)
-    step = _cli(workspace, "step", "wordle__guess", stdin="not json")
+    step = _cli(workspace, "step", "guess", stdin="not json")
     assert step["info"]["error"] == "action arguments must be a JSON object"
 
 

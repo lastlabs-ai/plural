@@ -41,6 +41,7 @@ from plural.execution.bootstrap import (
     RUNTIME_VERSION_VARIABLE,
     PluralDistribution,
     install_plural,
+    needed_extras,
     needs_plural,
     prepare_requirements,
     resolve_distribution,
@@ -911,7 +912,9 @@ class Trial:
         """The Plural a non-local sandbox needs for this Trial, if it runs any."""
         if provider.name == "local" or not needs_plural(self.task, package):
             return None
-        return resolve_distribution(self.environ.get(RUNTIME_VERSION_VARIABLE))
+        return resolve_distribution(
+            self.environ.get(RUNTIME_VERSION_VARIABLE), needed_extras(self.task)
+        )
 
     async def _stage_environment(self, provider: SandboxProvider, handle: SandboxHandle) -> None:
         source = self.task.environment.source

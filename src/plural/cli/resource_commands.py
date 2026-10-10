@@ -100,6 +100,24 @@ def _app_summary(environment: Any) -> list[dict[str, Any]]:
     ]
 
 
+def _agent_tools(environment: Any) -> list[dict[str, Any]]:
+    """The tools the model is offered, exactly as it sees them.
+
+    Returns:
+        One entry per tool, with the App and action it calls.
+    """
+    return [
+        {
+            "name": item.name,
+            "app": item.app,
+            "action": item.action,
+            "read_only": not item.mutates_state,
+            "description": item.description,
+        }
+        for item in environment.definition().actions
+    ]
+
+
 def _agent_credentials(name: str, agent: Any) -> list[dict[str, Any]]:
     """The credentials an Agent declares, and whether each has a value. Never the value.
 
@@ -174,8 +192,9 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         resource = space.load(ref)
         payload = _local_payload(space, resource)
         apps = _app_summary(resource.value) if kind is ENVIRONMENT else None
+        tools = _agent_tools(resource.value) if kind is ENVIRONMENT else []
         if apps is not None:
-            payload = {**payload, "apps": apps}
+            payload = {**payload, "apps": apps, "tools": tools}
         credentials = _agent_credentials(ref.name, resource.value) if kind is AGENT else []
         if kind is AGENT:
             payload = {**payload, "credentials": credentials}
@@ -196,6 +215,19 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                 for credential in app["credentials"]:
                     typer.echo(
                         f"  credential {credential['name']}: supplied by the Agent that runs"
+                    )
+            if tools:
+                typer.echo(f"\nThe Agent sees {len(tools)} tool{'s' if len(tools) != 1 else ''}:")
+                width = max(len(tool["name"]) for tool in tools)
+                for tool in tools:
+                    summary = tool["description"].splitlines()[0] if tool["description"] else ""
+                    if len(summary) > 72:
+                        summary = summary[:71] + "…"
+                    typer.echo(f"  {tool['name']:<{width}}  {summary}".rstrip())
+                if len(tools) > 40:
+                    typer.echo(
+                        "  That is a lot for one model to choose from; offer fewer with "
+                        "`tools:` or `exclude:` on an App."
                     )
             for credential in credentials:
                 scopes = ", ".join(credential["scopes"]) or "no scopes listed"
@@ -575,6 +607,21 @@ def _init_command(app: typer.Typer, kind: ResourceKind) -> None:
         ) -> None:
             """Create a saved Agent: a model, instructions, and an optional Harness."""
             create(name, model=model, harness=harness)
+
+    elif kind is ENVIRONMENT:
+
+        @app.command("init")
+        @handled
+        def init_environment(
+            name: str = typer.Argument(help="Environment name."),
+            python: bool = typer.Option(
+                False,
+                "--python",
+                help="Start from a Python App class instead of a FastMCP server.",
+            ),
+        ) -> None:
+            """Create an Environment whose App is a FastMCP server you write."""
+            create(name, python=python)
 
     else:
 

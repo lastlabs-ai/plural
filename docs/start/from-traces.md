@@ -17,6 +17,44 @@ side-by-side comparison of your agent and any model in the catalog on the same T
 
 No model is rerun to score a trace, so only the model judge needs a key.
 
+## How it works
+
+Your traces go through three steps. Each one is useful on its own.
+
+```text
+conversations.jsonl
+  │
+  ├─ 1. Score    a judge grades each conversation as it happened
+  │
+  └─ 2. Draft    each conversation becomes a Task; every tool result is recorded
+       │
+       └─ 3. Compare    other models work those Tasks; the recording answers their tool calls
+```
+
+1. **Score.** Plural reads each conversation as a finished attempt: what your agent
+   said, which tools it called, and what came back. Nothing is rerun. A judge model
+   reads it and gives it a score, with the evidence for it.
+2. **Draft.** Each conversation becomes a Task, whose instruction is the customer's
+   first message. Every tool call in every conversation, with the result it returned,
+   is saved to one recording. That recording becomes a stand-in for your real tools,
+   called a replay App.
+3. **Compare.** Another model works the same Tasks with the same tools. When it calls
+   a tool, the replay App looks it up in the recording:
+   - Same tool and same arguments as a recorded call: it gets the recorded result.
+   - Same tool, different arguments: it gets the result of the closest recorded call,
+     and the step is marked `off_recording`.
+
+   The same judge scores every attempt, so your agent's scores and each model's sit
+   side by side.
+
+Nothing real is called after step 1, so comparing is safe and repeatable. The limit is
+the recording: a model that takes a path your agent never took gets the closest
+recorded answer, not the real one. Many `off_recording` steps mean the comparison is
+approximate there; connect the real system to test that behavior, as in
+[Start from a system](from-a-system.md).
+
+The rest of this page does those three steps with two example conversations.
+
 ## 1. Create a project and add your traces
 
 ```bash
@@ -125,12 +163,10 @@ a first message is not always the whole request. Then sharpen the judge's `crite
 plural benchmark validate support
 ```
 
-**What just happened.** A replay App is `replayed`: nothing real is called. When a model
-makes a call no trace recorded, the App answers with the recorded result of the same
-action whose arguments match best, and marks the step `off_recording`. To refuse those
-calls instead, add `fallback: error` under `replay:` in `environment.yaml`. To test new
-behavior against the real system, connect it as an App; see
-[Start from a system](from-a-system.md).
+**What just happened.** `validate` checked that every Task, the judge, and the replay App
+load. A model's call with no exact recording gets the closest one, as described in
+[How it works](#how-it-works). To refuse those calls instead, add `fallback: error`
+under `replay:` in `environment.yaml`; the model is then told no recording matches.
 
 ## 5. Score your agent on the Benchmark
 

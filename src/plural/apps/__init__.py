@@ -2,8 +2,8 @@
 
 An App is a named bundle of actions with optional state hooks. Write one in
 Python by subclassing :class:`App`, or connect an existing system with
-``App.mcp(...)``, ``App.openapi(...)``, ``App.data(...)``, or
-``App.replay(...)``.
+``App.mcp(...)``, ``App.openapi(...)``, or ``App.replay(...)``. Build an
+MCP server of your own with FastMCP; see :mod:`plural.mcp`.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from plural.apps.definition import (
 
 if TYPE_CHECKING:
     from plural.apps.base import App, rewarder
-    from plural.apps.data import DataApp
     from plural.apps.host import AppHost
     from plural.apps.mcp import MCPApp
     from plural.apps.openapi import OpenAPIApp
@@ -34,7 +33,6 @@ _LAZY = {
     "AppHost": "plural.apps.host",
     "MCPApp": "plural.apps.mcp",
     "OpenAPIApp": "plural.apps.openapi",
-    "DataApp": "plural.apps.data",
     "ReplayApp": "plural.apps.replay",
 }
 
@@ -55,7 +53,6 @@ __all__ = [
     "AppDefinition",
     "AppHost",
     "AppKind",
-    "DataApp",
     "ExposedAction",
     "MCPApp",
     "OpenAPIApp",

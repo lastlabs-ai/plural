@@ -26,8 +26,9 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   desk. *Precisely:* one or more Apps, plus the Runtime, resources, Harness policy, and
   limits they share.
 - **Action:** a move an App offers, such as `guess` in Wordle or an MCP server's tool.
-  *Precisely:* an operation an App declares, such as a method marked `@action`. With
-  several Apps, its name is prefixed with the App's, such as `crm__get_record`.
+  *Precisely:* an operation an App declares, such as a FastMCP tool or a method marked
+  `@action`. The Agent sees it under its own name; only a name two Apps share is
+  prefixed with the App's, such as `crm__search`.
 - **Observation:** what the AI is shown after a move, like the colored tiles in
   Wordle. *Precisely:* what an action returns, and the only part of a step the model
   sees.

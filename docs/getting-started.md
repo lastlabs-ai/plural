@@ -162,7 +162,7 @@ project.yaml            name and description
 plural.lock             hosted revisions; commit it
 pyproject.toml          dependencies = ["plural>=0.18.0"]
 .plural/                local state: hosted binding, jobs/, backups/ (gitignored)
-environments/<name>/    environment.yaml, environment.py, README.md, resources/
+environments/<name>/    environment.yaml, server.py or environment.py, README.md, resources/
 tasks/<name>/           task.yaml, instruction.md, resources/
 verifiers/<name>/       verifier.yaml, verify.py
 harnesses/<name>/       harness.yaml, harness.py
@@ -185,7 +185,7 @@ A **resource** is any one of the building blocks from
 Each `init` command writes a template for you to fill in:
 
 ```bash
-plural env init support-desk
+plural env init support-desk --python
 plural verifier init resolved
 plural task init refund --environment support-desk --verifier resolved
 ```

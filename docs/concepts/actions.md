@@ -10,9 +10,9 @@ nav: false
 
 An **action** is a move the Agent can make. In Wordle, `guess` is an action. At a
 support desk, `lookup_order` or `refund` might be. Every action belongs to an
-[App](apps.md): a Python App declares its actions with `@action`, an MCP App offers its
-server's tools, an OpenAPI App offers its operations, and a data App offers generated
-reads and writes.
+[App](apps.md): an MCP App offers its server's tools, whether you wrote the server with
+FastMCP or connected an existing one, an OpenAPI App offers its operations, and a Python
+App declares its actions with `@action`.
 
 ## Why it matters
 
@@ -112,9 +112,10 @@ contribute to a score.
 ## Actions and Harness tools
 
 Every Harness receives the Environment's actions. Plural's native loop offers them to
-the model as tools, plus a `finish` tool. With one App, each tool has the action's
-name, such as `guess`. With several, the name is prefixed with the App, such as
-`orders__lookup_order`.
+the model as tools, plus a `finish` tool. Each tool has the action's name, such as
+`guess`, made safe for every model provider. Only when two Apps offer the same name is
+it prefixed with the App, such as `orders__search`. See
+[What the Agent sees](apps.md#what-the-agent-sees).
 
 A Harness may add tools of its own, such as web search. The Environment can deny
 those but never adds them. A denied Harness tool returns an error to the model and

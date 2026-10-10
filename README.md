@@ -53,7 +53,7 @@ after it, and commands find the project by walking up from wherever you run them
 ```bash
 plural project init my-eval
 cd my-eval
-plural env init support-desk
+plural env init support-desk --python
 plural verifier init resolved
 plural task init refund --environment support-desk --verifier resolved
 ```

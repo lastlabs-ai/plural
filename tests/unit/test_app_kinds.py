@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 from plural import App, Environment, Runtime
-from plural.apps.data import DataApp
 from plural.apps.openapi import OpenAPIApp
 from plural.apps.replay import ReplayApp
 from plural.environments.definition import EnvironmentDefinition
@@ -172,75 +171,6 @@ def test_openapi_headers_must_declare_their_secrets(tmp_path: Path) -> None:
         OpenAPIApp(name="orders", spec="orders.json", headers={"X-Key": "${HIDDEN_KEY}"})
 
 
-def _shop(tmp_path: Path, **settings: Any) -> Environment:
-    (tmp_path / "data").mkdir(exist_ok=True)
-    (tmp_path / "data/customers.csv").write_text("id,name,credit\n1,Ada,12.5\n2,Lin,0\n")
-    (tmp_path / "data/orders.json").write_text(
-        json.dumps([{"id": 10, "customer": 1, "total": 30}, {"id": 11, "customer": 2, "total": 5}])
-    )
-    app = App.data(
-        "shop",
-        tables={"customers": "data/customers.csv", "orders": "data/orders.json"},
-        **settings,
-    )
-    return Environment(apps=[app], runtime=Runtime.local(), source=tmp_path)
-
-
-def test_data_app_generates_actions_and_keeps_the_source_unchanged(tmp_path: Path) -> None:
-    environment = _shop(tmp_path, read_only=["customers"], sql=True)
-    definition = environment.definition()
-    names = {item.name: item for item in definition.actions}
-    assert set(names) == {
-        "list_customers",
-        "get_customers",
-        "list_orders",
-        "get_orders",
-        "create_orders",
-        "update_orders",
-        "delete_orders",
-        "query",
-    }
-    assert names["query"].mutates_state is False
-    assert definition.apps[0].control == "owned"
-
-    environment.reset(initial_state={"orders": [{"id": 1, "customer": 1, "total": 99}]})
-    observation, *_ = environment.step("list_orders")
-    assert observation["rows"] == [{"id": 1, "customer": 1, "total": 99}]
-    observation, *_ = environment.step("create_orders", customer=2, total=7)
-    assert observation == {"id": 2, "customer": 2, "total": 7}
-    environment.step("update_orders", id=2, values={"total": 8})
-    environment.step("delete_orders", id=1)
-    observation, *_ = environment.step("get_customers", id=1)
-    assert observation == {"id": 1, "name": "Ada", "credit": 12.5}
-    _obs, _r, _t, _u, info = environment.step("query", sql="DELETE FROM orders")
-    assert "readonly" in info["error"] or "read-only" in info["error"]
-    observation, *_ = environment.step("query", sql="SELECT count(*) AS n FROM orders")
-    assert observation["rows"] == [{"n": 1}]
-    _obs, _r, _t, _u, info = environment.step("get_orders", id=1)
-    assert "no row" in info["error"]
-    assert environment.apps[0].snapshot()["orders"] == [{"id": 2, "customer": 2, "total": 8}]
-    environment.close()
-    assert "Ada" in (tmp_path / "data/customers.csv").read_text()
-    assert json.loads((tmp_path / "data/orders.json").read_text())[0]["total"] == 30
-
-
-def test_data_app_initial_state_is_validated_per_table(tmp_path: Path) -> None:
-    from plural import DeterministicVerifier, Episode, Task, VerifierOutput
-
-    def check(episode: Episode) -> VerifierOutput:
-        return VerifierOutput(score=1)
-
-    environment = _shop(tmp_path)
-    with pytest.raises(ValueError, match="does not define: 'refunds'"):
-        Task(
-            name="seeded",
-            instructions="Refund.",
-            environment=environment,
-            verifiers=[DeterministicVerifier(name="ok", check=check)],
-            initial_state={"refunds": []},
-        )
-
-
 RECORDED = [
     {"role": "user", "content": "Find order 1."},
     {
@@ -295,11 +225,6 @@ def test_replay_answers_recorded_calls_and_flags_misses(tmp_path: Path) -> None:
         strict.call("refund", {"id": "2"})
 
 
-def test_data_app_needs_a_source() -> None:
-    with pytest.raises(ValueError, match="needs database or tables"):
-        DataApp(name="empty")
-
-
 def test_environment_yaml_lists_apps_of_every_connected_kind(
     tmp_path: Path, api: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -311,8 +236,7 @@ def test_environment_yaml_lists_apps_of_every_connected_kind(
 
     project = write_project(tmp_path / "desk")
     folder = project.root / "environments/backoffice"
-    (folder / "data").mkdir(parents=True)
-    (folder / "data/customers.csv").write_text("id,name\n1,Ada\n")
+    folder.mkdir(parents=True)
     (folder / "orders.json").write_text(json.dumps({**SPEC, "servers": [{"url": api}]}))
     (folder / "trace.json").write_text(json.dumps({"messages": RECORDED}))
     (folder / "README.md").write_text("# Back office\n\n## Overview\n\nOrders and refunds.\n")
@@ -331,9 +255,8 @@ def test_environment_yaml_lists_apps_of_every_connected_kind(
                   spec: orders.json
                   operations: [getOrder, listOrders]
               - name: crm
-                data:
-                  tables:
-                    customers: data/customers.csv
+                mcp:
+                  server: plural.mcp.files:server
                   secrets: [CRM_EXPORT_TOKEN]
               - name: payments
                 replay:
@@ -348,9 +271,8 @@ def test_environment_yaml_lists_apps_of_every_connected_kind(
         "crm": "owned",
         "payments": "replayed",
     }
-    assert "orders__getOrder" in {item.name for item in definition.actions}
-    assert "crm__create_customers" in {item.name for item in definition.actions}
-    assert "payments__refund" in {item.name for item in definition.actions}
+    assert "getOrder" in {item.name for item in definition.actions}
+    assert {"list_files", "query", "refund"} <= {item.name for item in definition.actions}
 
     from typer.testing import CliRunner
 

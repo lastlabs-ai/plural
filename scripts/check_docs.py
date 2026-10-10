@@ -35,6 +35,7 @@ PACKAGE_NAV = [
     ("Start", "/docs/start/from-scratch", "start/from-scratch.md"),
     ("Build", "/docs/concepts/apps", "concepts/apps.md"),
     ("Build", "/docs/project/environments", "project/environments.md"),
+    ("Build", "/docs/guides/build-mcp-server", "guides/build-mcp-server.md"),
     ("Build", "/docs/guides/connect-mcp-server", "guides/connect-mcp-server.md"),
     ("Build", "/docs/project/runtimes", "project/runtimes.md"),
     ("Build", "/docs/project/tasks", "project/tasks.md"),

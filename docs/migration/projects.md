@@ -32,7 +32,7 @@ project.yaml             name and description
 plural.lock              hosted revisions, updated by push and pull; commit it
 pyproject.toml           dependencies = ["plural>=0.18.0"]
 .plural/                 local state: hosted binding, Jobs, backups (gitignored)
-environments/<name>/     environment.yaml, environment.py, README.md
+environments/<name>/     environment.yaml, server.py or environment.py, README.md
 tasks/<name>/            task.yaml, instruction.md
 verifiers/<name>/        verifier.yaml, verify.py
 harnesses/<name>/        harness.yaml, harness.py

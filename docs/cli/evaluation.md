@@ -53,7 +53,7 @@ Projects written for Plural 0.14 or earlier use a different layout; see
 ```bash
 plural project init support-eval
 cd support-eval
-plural env init support-queue
+plural env init support-queue --python
 plural verifier init correct-category
 plural task init ticket-1 -e support-queue -v correct-category
 plural benchmark init support-triage
@@ -907,10 +907,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init          Create a new Environment from the standard template.                               │
+│ init          Create an Environment whose App is a FastMCP server you write.                     │
 │ from-mcp      Draft an Environment whose App is an MCP server; its tools become actions.         │
 │ from-openapi  Draft an Environment whose App is an HTTP API; its operations become actions.      │
-│ from-data     Draft an Environment whose App is tables of data, for a system with no API.        │
+│ eject-files   Copy Plural's ready-made files server into an Environment, to change what it       │
+│               offers.                                                                            │
 │ from-traces   Draft replay Apps from recorded tool calls, a Task per trace, and a Benchmark.     │
 │ validate      Check a resource and everything it depends on, without uploading.                  │
 │ push          Validate and push an immutable, private revision to the bound project.             │
@@ -921,30 +922,21 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural env from-data`
+### `plural env eject-files`
 
 ```text
 
- Usage: plural env from-data [OPTIONS] {name} [files]...
+ Usage: plural env eject-files [OPTIONS] {name}
 
- Draft an Environment whose App is tables of data, for a system with no API.
+ Copy Plural's ready-made files server into an Environment, to change what it offers.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name       <str>  Environment name. [required]                                              │
-│      files      <str>  CSV, JSON, or JSONL files; each is a table named after the file.          │
+│ *    name      <str>  Environment to copy the files server into. [required]                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --database         <str>  A SQLite file instead.                                                 │
-│ --key              <str>  A table's key column, TABLE=COLUMN. Default: id, else rowid.           │
-│ --read-only               Offer no writes.                                                       │
-│ --sql                     Also offer read-only SQL as `query`.                                   │
-│ --app              <str>  The App's name, which prefixes its actions when there are several.     │
-│                           Default: NAME.                                                         │
-│ --runtime          <str>  Where the Environment runs: local (a trusted subprocess), docker, or   │
-│                           daytona.                                                               │
-│                           [default: local]                                                       │
-│ --json                    Print machine-readable JSON.                                           │
-│ --help                    Show this message and exit.                                            │
+│ --as          <str>  File to write, in the Environment folder. [default: files_server.py]        │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -970,8 +962,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │                            credential the Agent supplies.                                        │
 │ --credential        <str>  A credential the running Agent supplies, such as its own API token.   │
 │                            Repeatable. ${NAME} in a header or variable is added for you.         │
-│ --app               <str>  The App's name, which prefixes its actions when there are several.    │
-│                            Default: NAME.                                                        │
+│ --app               <str>  The App's name. It prefixes an action only when another App offers    │
+│                            the same name. Default: NAME.                                         │
 │ --runtime           <str>  Where the Environment runs: local (a trusted subprocess), docker, or  │
 │                            daytona.                                                              │
 │                            [default: local]                                                      │
@@ -1002,8 +994,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │    --credential        <str>  A credential the running Agent supplies, such as its own API       │
 │                               token. Repeatable. ${NAME} in a header or variable is added for    │
 │                               you.                                                               │
-│    --app               <str>  The App's name, which prefixes its actions when there are several. │
-│                               Default: NAME.                                                     │
+│    --app               <str>  The App's name. It prefixes an action only when another App offers │
+│                               the same name. Default: NAME.                                      │
 │    --runtime           <str>  Where the Environment runs: local (a trusted subprocess), docker,  │
 │                               or daytona.                                                        │
 │                               [default: local]                                                   │
@@ -1047,13 +1039,14 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural env init [OPTIONS] {name}
 
- Create a new Environment from the standard template.
+ Create an Environment whose App is a FastMCP server you write.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    name      <str>  Environment name. [required]                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --python          Start from a Python App class instead of a FastMCP server.                     │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

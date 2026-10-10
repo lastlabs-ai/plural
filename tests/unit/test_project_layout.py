@@ -55,7 +55,7 @@ def test_project_init_creates_the_standard_structure_without_credentials(
         assert code == 0, output
     expected = (
         "environments/queue/environment.yaml",
-        "environments/queue/environment.py",
+        "environments/queue/server.py",
         "environments/queue/README.md",
         "tasks/refund/task.yaml",
         "tasks/refund/instruction.md",

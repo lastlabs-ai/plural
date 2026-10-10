@@ -2,8 +2,10 @@
 
 An MCP App turns a server's tools into actions and each tool result into the
 observation for that step. It does not model the server's internals. A server
-started with ``command`` runs inside the Runtime, so every Trial starts it
-fresh and the App is ``owned``. Each episode gives it a new empty folder,
+you write with FastMCP is named with ``server``, such as ``server.py:mcp``; see
+:mod:`plural.mcp`. A server named with ``server`` or started with ``command``
+runs inside the Runtime, so every Trial starts it fresh and the App is
+``owned``. Each episode gives it a new empty folder,
 ``${PLURAL_APP_DIR}``, deleted when the episode ends; point the server's storage
 there so nothing it saves reaches the next Trial. A server reached by ``url``
 lives elsewhere: it is ``sandboxed`` when you give it a ``reset`` hook and
@@ -36,6 +38,7 @@ import select
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -45,6 +48,7 @@ from typing import Any
 from plural.apps.base import App
 from plural.apps.definition import AppAction, SecretReference
 from plural.environments.types import State
+from plural.mcp import HOOK_TOOLS, RESET_TOOL, SNAPSHOT_TOOL
 
 PROTOCOL_VERSION = "2025-06-18"
 CLIENT_INFO = {"name": "plural", "version": "1"}
@@ -459,6 +463,8 @@ def tool_action(tool: Mapping[str, Any], timeout_seconds: float) -> AppAction:
     """
     annotations = tool.get("annotations") or {}
     schema = tool.get("inputSchema")
+    output = tool.get("outputSchema")
+    wrapped = isinstance(output, dict) and output.get("x-fastmcp-wrap-result") is True
     return AppAction(
         name=str(tool["name"]),
         description=str(tool.get("description") or tool.get("title") or tool["name"]).strip(),
@@ -469,6 +475,7 @@ def tool_action(tool: Mapping[str, Any], timeout_seconds: float) -> AppAction:
             isinstance(annotations, dict) and annotations.get("readOnlyHint") is True
         ),
         timeout_seconds=timeout_seconds,
+        binding={"wrapped_result": True} if wrapped else {},
     )
 
 
@@ -482,6 +489,9 @@ class MCPApp(App[State]):
     """An App backed by an MCP server.
 
     Settings:
+        server: A FastMCP server to start inside the Runtime, as ``file.py:name``
+            in the Environment folder, such as ``server.py:mcp``, or
+            ``package.module:name``, such as ``plural.mcp.files:server``.
         command: Start the server inside the Runtime, such as
             ``["npx", "-y", "@modelcontextprotocol/server-memory"]``.
         url: Reach a server over Streamable HTTP instead.
@@ -504,6 +514,9 @@ class MCPApp(App[State]):
         secrets: Setup secrets the project supplies, for hooks and Verifiers.
         credentials: Names the running Agent supplies, such as its own API token.
         timeout_seconds: How long one tool call may run.
+        hooks: The server's Plural hooks, ``plural_reset`` and
+            ``plural_snapshot``. Found when Plural lists the server's tools;
+            set it only alongside ``actions``.
 
     Subclass ``MCPApp`` to write ``reset`` or ``snapshot`` in Python with
     :meth:`call_tool`, or to add ``@rewarder`` methods.
@@ -516,6 +529,7 @@ class MCPApp(App[State]):
         self,
         *,
         name: str | None = None,
+        server: str | None = None,
         command: str | Sequence[str] | None = None,
         url: str | None = None,
         headers: Mapping[str, str] | None = None,
@@ -531,6 +545,7 @@ class MCPApp(App[State]):
         credentials: Iterable[str | SecretReference] | None = None,
         description: str | None = None,
         timeout_seconds: float = 60,
+        hooks: Sequence[str] | None = None,
     ) -> None:
         super().__init__(
             name=name or type(self).name or None,
@@ -538,13 +553,19 @@ class MCPApp(App[State]):
             secrets=secrets,
             credentials=credentials,
         )
+        self.server = server
         self.command = _argv(command)
         self.url = url
-        if bool(self.command) == bool(url):
+        if sum(bool(item) for item in (server, self.command, url)) != 1:
             raise ValueError(
-                f"MCP App {self.name!r} needs exactly one of command (a server started in "
-                "the Runtime) or url (a server reached over HTTP)"
+                f"MCP App {self.name!r} needs exactly one of server (a FastMCP server in the "
+                "Environment, such as server.py:mcp), command (a server started in the "
+                "Runtime), or url (a server reached over HTTP)"
             )
+        unknown_hooks = sorted(set(hooks or ()) - HOOK_TOOLS)
+        if unknown_hooks:
+            raise ValueError(f"MCP App {self.name!r}: unknown hooks {unknown_hooks}")
+        self._hooks: frozenset[str] | None = frozenset(hooks) if hooks is not None else None
         self.headers = dict(headers or {})
         self.env = dict(env or {})
         self.cwd = cwd
@@ -563,6 +584,7 @@ class MCPApp(App[State]):
             else None
         )
         self._client: MCPClient | None = None
+        self._listed: tuple[AppAction, ...] | None = None
         self._app_dir: Path | None = None
         undeclared = sorted(
             referenced_variables([*self.headers.values(), *self.env.values()])
@@ -594,20 +616,25 @@ class MCPApp(App[State]):
             env = {
                 key: expand(value, environ, credentials=owned) for key, value in self.env.items()
             }
-            if self.command:
+            if self._local_command():
                 env = {APP_DIR: environ[APP_DIR], "TMPDIR": environ[APP_DIR], **env}
             self._client = MCPClient(
-                command=self.command or None,
+                command=self._local_command() or None,
                 url=self.url,
                 headers={
                     key: expand(value, credentials=owned) for key, value in self.headers.items()
                 },
                 env=env,
-                cwd=cwd if self.command else None,
-                log=log if self.command else None,
+                cwd=cwd if self._local_command() else None,
+                log=log if self._local_command() else None,
                 timeout_seconds=self.timeout_seconds,
             )
         return self._client
+
+    def _local_command(self) -> list[str]:
+        if self.server:
+            return [sys.executable, "-m", "plural.mcp.serve", self.server]
+        return self.command
 
     def call_tool(self, tool: str, **arguments: Any) -> Any:
         """Call one of the server's tools and return its observation.
@@ -626,6 +653,8 @@ class MCPApp(App[State]):
             raise ValueError(text or f"{tool} failed")
         structured = result.get("structuredContent")
         if isinstance(structured, dict):
+            if set(structured) == {"result"} and tool in self._wrapped_results():
+                return structured["result"]
             return structured
         return text
 
@@ -640,9 +669,17 @@ class MCPApp(App[State]):
         if self._pinned is not None:
             offered = self._pinned
         else:
-            offered = tuple(
-                tool_action(item, self.timeout_seconds) for item in self.connect().list_tools()
-            )
+            if self._listed is None:
+                listed = self.connect().list_tools()
+                self._hooks = frozenset(
+                    str(item.get("name")) for item in listed if item.get("name") in HOOK_TOOLS
+                )
+                self._listed = tuple(
+                    tool_action(item, self.timeout_seconds)
+                    for item in listed
+                    if item.get("name") not in HOOK_TOOLS
+                )
+            offered = self._listed
         by_name = {item.name: item for item in offered}
         if self.tool_filter is not None:
             missing = [item for item in self.tool_filter if item not in by_name]
@@ -679,6 +716,9 @@ class MCPApp(App[State]):
             output = self._run(self.reset_command, stdin=json.dumps(dict(initial_state)))
             opening = output.strip() or None
         self.connect()
+        if RESET_TOOL in self._hook_names():
+            text = self._call_hook(RESET_TOOL, {"initial_state": dict(initial_state)})
+            opening = opening or (text if text.strip() not in ("", "null") else None)
         return opening
 
     def snapshot(self) -> Any:
@@ -688,8 +728,11 @@ class MCPApp(App[State]):
             Its JSON output, or ``None`` without a snapshot command.
         """
         if not self.snapshot_command:
-            return None
-        output = self._run(self.snapshot_command, stdin="")
+            if SNAPSHOT_TOOL not in self._hook_names():
+                return None
+            output = self._call_hook(SNAPSHOT_TOOL, {})
+        else:
+            output = self._run(self.snapshot_command, stdin="")
         try:
             return json.loads(output) if output.strip() else None
         except json.JSONDecodeError as exc:
@@ -701,7 +744,11 @@ class MCPApp(App[State]):
         Returns:
             True when episodes start from a known state.
         """
-        return bool(self.reset_command) or type(self).reset is not MCPApp.reset
+        return (
+            bool(self.reset_command)
+            or type(self).reset is not MCPApp.reset
+            or RESET_TOOL in self._hook_names()
+        )
 
     def has_snapshot(self) -> bool:
         """Whether a snapshot command or Python override reports state.
@@ -709,15 +756,19 @@ class MCPApp(App[State]):
         Returns:
             True when the App can report its state.
         """
-        return bool(self.snapshot_command) or type(self).snapshot is not MCPApp.snapshot
+        return (
+            bool(self.snapshot_command)
+            or type(self).snapshot is not MCPApp.snapshot
+            or SNAPSHOT_TOOL in self._hook_names()
+        )
 
     def is_local(self) -> bool:
         """Whether the server runs inside the Runtime.
 
         Returns:
-            True for a server started as a command.
+            True for a server named with ``server`` or started as a command.
         """
-        return bool(self.command)
+        return bool(self._local_command())
 
     def close(self) -> None:
         """Close the MCP session and delete the episode's folder."""
@@ -735,7 +786,7 @@ class MCPApp(App[State]):
             A copy of the environment for the server and its hooks.
         """
         environ = dict(os.environ)
-        if self.command:
+        if self._local_command():
             if self._app_dir is None:
                 self._app_dir = Path(tempfile.mkdtemp(prefix=f"plural-{self.name}-"))
                 # Listing tools opens a server without an episode, and nothing closes it.
@@ -773,9 +824,39 @@ class MCPApp(App[State]):
             )
         return completed.stdout.decode(errors="replace")
 
+    def _call_hook(self, tool: str, arguments: dict[str, Any]) -> str:
+        result = self.connect().call_tool(tool, arguments, timeout=self.timeout_seconds)
+        text = tool_text(result)
+        if result.get("isError"):
+            raise RuntimeError(f"MCP App {self.name!r} hook {tool} failed: {text}")
+        return text
+
+    def _wrapped_results(self) -> frozenset[str]:
+        """Tools whose server wraps a plain return value as ``{"result": ...}``, as FastMCP does.
+
+        Returns:
+            Their names.
+        """
+        if self._pinned is None and self._hooks is None:
+            return frozenset()
+        return frozenset(
+            item.name for item in self.actions() if item.binding.get("wrapped_result") is True
+        )
+
+    def _hook_names(self) -> frozenset[str]:
+        if self._hooks is None:
+            if self._pinned is not None:
+                self._hooks = frozenset()
+            else:
+                self.actions()
+        return self._hooks or frozenset()
+
     def _config(self) -> dict[str, Any]:
         config = super()._config()
         config.pop("actions", None)
+        hooks = self._hook_names()
+        if hooks:
+            config["hooks"] = sorted(hooks)
         return config
 
     def _state_schema(self) -> dict[str, Any]:

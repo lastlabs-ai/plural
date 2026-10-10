@@ -35,7 +35,7 @@ its kind. That file is the resource's **manifest**. A project looks like this:
 ```text
 project.yaml                  project name and description
 plural.lock                   written by Plural and updated by push; commit it, do not edit it
-environments/<name>/          environment.yaml, environment.py, README.md, optional resources/
+environments/<name>/          environment.yaml, server.py or environment.py, README.md, optional resources/
 tasks/<name>/                 task.yaml, instruction.md, optional resources/
 verifiers/<name>/             verifier.yaml, verify.py
 harnesses/<name>/             harness.yaml, harness.py

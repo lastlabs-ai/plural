@@ -25,10 +25,11 @@ are the same for your own system.
 | --- | --- |
 | An MCP server, started locally or reached at a URL | `plural env from-mcp` |
 | An HTTP API with an OpenAPI document | `plural env from-openapi` |
-| Data in CSV, JSON, JSONL, or SQLite, with no API | `plural env from-data` |
+| Files: documents, CSV, JSON, JSONL, or SQLite, with no API | Plural's files server, `server: plural.mcp.files:server`; see [Build an MCP server](../guides/build-mcp-server.md#start-from-plurals-files-server) |
 
-Each one drafts an ordinary `environment.yaml` with one App, whose actions are what the
-system offers. Create a project to hold it:
+Each command drafts an ordinary `environment.yaml` with one App, whose actions are what
+the system offers. A hosted MCP server can also be added from the Environment's Apps
+tab, with **Add MCP server**. Create a project to hold it:
 
 ```bash
 plural project init notes

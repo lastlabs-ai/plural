@@ -2,7 +2,7 @@
 route: /docs/concepts/apps
 title: Apps
 order: 25
-description: An App is one system an Agent works with, such as a game, a CRM behind an MCP server, an HTTP API, or a table of data. An Environment is a set of Apps.
+description: An App is one system an Agent works with, such as an MCP server you write with FastMCP, a hosted MCP server like a CRM's, an HTTP API, or a game. An Environment is a set of Apps.
 audience: all
 nav: true
 nav_group: Build
@@ -12,7 +12,7 @@ nav_group: Build
 An **App** is one system an Agent works with. Wordle is an App with one action,
 `guess`. A CRM reached through its MCP server is an App whose tools are its actions.
 An [Environment](../project/environments.md) is a set of Apps plus the Runtime they
-run in, so a support desk might combine a CRM, an orders API, and a policy database.
+run in, so a support desk might combine a CRM, an orders API, and the support policy.
 
 Every App does the same three things, whatever kind it is:
 
@@ -26,18 +26,78 @@ Every App does the same three things, whatever kind it is:
 
 ## Kinds of App
 
-Pick the kind that matches what you already have:
+Most Apps are MCP servers. Pick the row that matches what you have:
 
-| You have | Kind | In Python | Start with |
-| --- | --- | --- | --- |
-| Nothing yet; you want to write the system | Python | a subclass of `App` | `plural env init` |
-| An MCP server | `mcp` | `App.mcp(...)` | `plural env from-mcp` |
-| An HTTP API with an OpenAPI document | `openapi` | `App.openapi(...)` | `plural env from-openapi` |
-| Data in files or SQLite, with no API | `data` | `App.data(...)` | `plural env from-data` |
-| Recorded traces of an agent at work | `replay` | `App.replay(...)` | `plural env from-traces` |
+| You have | Kind | Start with |
+| --- | --- | --- |
+| Nothing yet; you want to write the system | `mcp`, a server you write with FastMCP | `plural env init` |
+| A hosted MCP server, such as your CRM's | `mcp`, reached by URL | `plural env from-mcp`, or **Add MCP server** on the Environment's Apps tab |
+| Files: documents, CSV, JSON, or SQLite | `mcp`, Plural's files server | `server: plural.mcp.files:server` |
+| An HTTP API with an OpenAPI document | `openapi` | `plural env from-openapi` |
+| Recorded traces of an agent at work | `replay` | `plural env from-traces` |
+| A simulation you'd rather write as a class, such as a game | Python, a subclass of `App` | `plural env init --python` |
 
-A Python App is a class. Mark each action with `@action`; its docstring is what the
-Agent reads:
+A server you write is an ordinary [FastMCP](https://gofastmcp.com) server. Every tool is
+an action; its docstring is what the Agent reads, and what it returns is what the Agent
+sees next:
+
+```python
+from fastmcp import FastMCP
+
+import plural.mcp
+
+mcp = FastMCP("desk")
+TICKETS: list[dict] = []
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+def list_tickets() -> list[dict]:
+    """List open tickets."""
+    return [ticket for ticket in TICKETS if ticket["status"] == "open"]
+
+
+@mcp.tool
+def close_ticket(id: str) -> str:
+    """Close one ticket."""
+    ...
+
+
+@plural.mcp.reset(mcp)
+def start(initial_state: dict) -> None:
+    TICKETS[:] = initial_state.get("tickets", [])
+
+
+@plural.mcp.snapshot(mcp)
+def state() -> dict:
+    return {"tickets": TICKETS}
+```
+
+Name it in `environment.yaml` with `server: server.py:mcp`, and Plural starts a fresh
+copy for every Trial. `@plural.mcp.reset` receives the Task's starting state and
+`@plural.mcp.snapshot` reports state to Verifiers; the Agent sees neither as a tool.
+[Build an MCP server](../guides/build-mcp-server.md) walks through it, including how a
+server reads the Environment's and the Task's files.
+
+The other kinds connect a system that already exists:
+
+```python
+from plural import App
+
+crm = App.mcp(
+    "crm",
+    url="https://mcp.example.com/v1",
+    headers={"Authorization": "Bearer ${CRM_TOKEN}"},
+    credentials=["CRM_TOKEN"],
+)
+files = App.mcp("files", server="plural.mcp.files:server")
+orders = App.openapi("orders", spec="orders.json", base_url="https://sandbox.example.com")
+```
+
+Paths in an App's settings, such as `server` and `spec`, are relative to the folder
+that holds the Environment. [Connect an MCP server](../guides/connect-mcp-server.md)
+walks through a hosted server step by step.
+
+A Python App is a class instead of a server. Mark each action with `@action`:
 
 ```python
 from plural import App, State, action, initial
@@ -62,24 +122,7 @@ class Wordle(App[Game]):
 ```
 
 `self.state` is the App's private state. Fields marked `initial()` are the ones a Task
-may set. The other kinds connect a system that already exists:
-
-```python
-from plural import App
-
-crm = App.mcp(
-    "crm",
-    url="https://mcp.example.com/v1",
-    headers={"Authorization": "Bearer ${CRM_TOKEN}"},
-    credentials=["CRM_TOKEN"],
-)
-orders = App.openapi("orders", spec="orders.json", base_url="https://sandbox.example.com")
-policies = App.data("policies", tables={"refunds": "data/refunds.csv"}, read_only=True)
-```
-
-Paths in an App's settings, such as `spec` and `tables`, are relative to the file that
-defines the Environment. [Connect an MCP server](../guides/connect-mcp-server.md)
-walks through the MCP kind step by step.
+may set.
 
 ## Compose Apps into an Environment
 
@@ -88,7 +131,7 @@ An Environment lists its Apps:
 ```python
 from plural import Environment, Runtime
 
-environment = Environment(name="support-desk", apps=[crm, orders, policies], runtime=Runtime.local())
+environment = Environment(name="support-desk", apps=[crm, files, orders], runtime=Runtime.local())
 ```
 
 Or, in `environment.yaml`:
@@ -96,23 +139,48 @@ Or, in `environment.yaml`:
 ```yaml
 name: support-desk
 apps:
-  - python: apps/crm.py:CRM
+  - name: desk
+    mcp:
+      server: server.py:mcp
+  - name: crm
+    mcp:
+      url: https://mcp.example.com/v1
+      headers: {Authorization: "Bearer ${CRM_TOKEN}"}
+      credentials: [CRM_TOKEN]
+  - name: files
+    mcp:
+      server: plural.mcp.files:server
   - name: orders
     openapi:
       spec: orders.json
       base_url: https://sandbox.example.com
-  - name: policies
-    data:
-      tables:
-        refunds: data/refunds.csv
-      read_only: true
 runtime:
   provider: local
 ```
 
-With one App, the Agent sees its actions under their own names, such as `guess`. With
-several, each name is prefixed with its App and two underscores, such as
-`crm__get_record` and `orders__getOrder`, so two Apps can both have a `search` action.
+### What the Agent sees
+
+The Agent gets one flat list of tools, built from every App's actions. You don't
+arrange it; it works the same with one App or ten:
+
+- **Each tool keeps its own name,** such as `close_ticket` or `getOrder`. Adding an App
+  never renames the tools of the others.
+- **Only a clash is prefixed.** When two Apps both offer `search`, they become
+  `crm__search` and `docs__search`. So does a tool named like the episode's own
+  `reset`, `step`, or `finish`.
+- **Every name works with every model provider.** Characters providers reject are
+  replaced, so an MCP tool named `salesforce.query` is offered as `salesforce_query`,
+  and long names are shortened to 64 characters. The App is still called with its
+  own name.
+- **Each description says which system it acts on** when there are several Apps, such
+  as `[crm] Close one ticket.`, and every parameter schema is normalized to one that
+  every provider accepts.
+- **Plural's hooks are never tools.** `reset` and `snapshot` hooks, and a FastMCP
+  server's `@plural.mcp.reset` and `@plural.mcp.snapshot`, never reach the Agent.
+
+`plural env validate` prints the list exactly as the model receives it, and so does the
+Environment's Apps tab. Offer fewer tools with `tools:` or `exclude:` on an App; a model
+chooses better from a short list of well-described tools.
 
 Apps never call each other. When one App's action should affect another, such as a
 refund in the orders API closing the ticket in the CRM, subclass `Environment` and
@@ -140,7 +208,7 @@ it.
 
 | Level | Meaning | Examples |
 | --- | --- | --- |
-| `owned` | The state lives inside the Runtime, so every Trial starts fresh. | A Python App, a data App, an MCP server started with `command` that keeps its data in `${PLURAL_APP_DIR}`, an OpenAPI App with `local: true` |
+| `owned` | The state lives inside the Runtime, so every Trial starts fresh. | A FastMCP server named with `server`, Plural's files server, a Python App, an MCP server started with `command` that keeps its data in `${PLURAL_APP_DIR}`, an OpenAPI App with `local: true` |
 | `sandboxed` | The system is remote, but a reset hook returns it to the Task's starting state. | A remote MCP server with a `reset` command that seeds a sandbox tenant |
 | `live` | The system is remote and shared, and Plural can't reset it. | A remote MCP server or API with no reset hook |
 | `replayed` | The App answers from recordings. Nothing real is called. | A replay App |
@@ -154,7 +222,7 @@ The rules that follow from it:
   from the Task's state.
 - An action is treated as one that changes state unless it says otherwise: an MCP
   tool with the `readOnlyHint` annotation, an OpenAPI `GET`, `HEAD`, or `OPTIONS`, or
-  a read in a data App.
+  a Python action marked `read_only`.
 
 To use a remote system in a Benchmark, point it at a sandbox and give it a reset hook,
 which makes it `sandboxed`.
@@ -162,8 +230,8 @@ which makes it `sandboxed`.
 ## State, snapshots, and Verifiers
 
 At the start and end of each episode, Plural takes a **snapshot** of every App: a
-Python App's `state`, a data App's tables, or whatever an MCP App's `snapshot`
-command prints. A Verifier reads them from the episode:
+Python App's `state`, what a FastMCP server's `@plural.mcp.snapshot` returns, or
+whatever an MCP App's `snapshot` command prints. A Verifier reads them from the episode:
 
 ```python
 from plural import Episode, VerifierOutput
@@ -259,7 +327,8 @@ class Wordle(App[Game]):
 
 ## Where to go next
 
-- [Connect an MCP server](../guides/connect-mcp-server.md), step by step.
+- [Build an MCP server](../guides/build-mcp-server.md) with FastMCP.
+- [Connect an MCP server](../guides/connect-mcp-server.md) you already have, step by step.
 - [Environments](../project/environments.md): Runtimes, resources, limits, and how an
   episode ends.
 - [Actions](actions.md): what the Agent sees when it acts.

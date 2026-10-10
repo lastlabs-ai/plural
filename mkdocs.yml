@@ -101,6 +101,7 @@ nav:
   - Build:
       - Apps: concepts/apps.md
       - Environments: project/environments.md
+      - Build an MCP server: guides/build-mcp-server.md
       - Connect an MCP server: guides/connect-mcp-server.md
       - Runtimes: project/runtimes.md
       - Tasks: project/tasks.md

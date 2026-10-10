@@ -52,9 +52,9 @@ class AppManifest(ManifestModel):
     Give exactly one of:
 
     - ``python``: an App class, ``apps/crm.py:CRM``, built with ``config``.
-    - ``mcp``: the settings of :meth:`plural.App.mcp`, such as ``command`` or
-      ``url``, ``headers``, ``tools``, ``reset``, and ``secrets``.
-    - ``openapi``, ``data``, or ``replay``: the settings of the matching
+    - ``mcp``: the settings of :meth:`plural.App.mcp`, such as ``server``,
+      ``command``, or ``url``, ``headers``, ``tools``, ``reset``, and ``credentials``.
+    - ``openapi`` or ``replay``: the settings of the matching
       :class:`plural.App` factory.
     """
 
@@ -63,17 +63,14 @@ class AppManifest(ManifestModel):
     config: dict[str, Any] = Field(default_factory=dict)
     mcp: dict[str, Any] | None = None
     openapi: dict[str, Any] | None = None
-    data: dict[str, Any] | None = None
     replay: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _one_source(self) -> AppManifest:
-        given = [
-            key for key in ("python", "mcp", "openapi", "data", "replay") if getattr(self, key)
-        ]
+        given = [key for key in ("python", "mcp", "openapi", "replay") if getattr(self, key)]
         if len(given) != 1:
             raise ValueError(
-                "an App needs exactly one of python, mcp, openapi, data, or replay"
+                "an App needs exactly one of python, mcp, openapi, or replay"
                 + (f"; got {', '.join(given)}" if given else "")
             )
         if not self.python and not self.name:
@@ -85,9 +82,7 @@ class AppManifest(ManifestModel):
     @property
     def kind(self) -> str:
         """Which source builds this App."""
-        return next(
-            key for key in ("python", "mcp", "openapi", "data", "replay") if getattr(self, key)
-        )
+        return next(key for key in ("python", "mcp", "openapi", "replay") if getattr(self, key))
 
 
 class EnvironmentManifest(ManifestModel):

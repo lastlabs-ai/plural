@@ -1,4 +1,4 @@
-"""`plural env from-mcp|from-openapi|from-data|from-traces`, through the CLI."""
+"""`plural env from-mcp|from-openapi|from-traces|eject-files`, through the CLI."""
 
 from __future__ import annotations
 
@@ -115,21 +115,21 @@ def test_from_openapi_copies_the_document_and_lists_operations(
     assert (project.root / "environments/orders/orders.json").is_file()
 
 
-def test_from_data_turns_files_into_tables(project: Project) -> None:
-    (project.root / "customers.csv").write_text("id,name\n1,Ada\n2,Lin\n")
-    (project.root / "tickets.jsonl").write_text('{"id": 1, "customer": 1, "open": true}\n')
+def test_eject_files_copies_the_ready_made_server_to_edit(project: Project) -> None:
+    code, output, _ = cli("env", "init", "desk")
+    assert code == 0, output
 
-    code, output, drafted = cli(
-        "env", "from-data", "crm", "customers.csv", "tickets.jsonl", "--sql", "--json"
-    )
+    code, output, ejected = cli("env", "eject-files", "desk", "--json")
 
     assert code == 0, output
-    [crm] = drafted["apps"]
-    assert crm["control"] == "owned"
-    names = {item["name"] for item in crm["actions"]}
-    assert {"list_customers", "update_tickets", "query"} <= names
-    environment = Workspace(project).load(ResourceRef("environment", "crm")).value
-    assert environment.definition().apps[0].kind == "data"
+    assert ejected == {
+        "file": "environments/desk/files_server.py",
+        "server": "files_server.py:server",
+    }
+    source = (project.root / "environments/desk/files_server.py").read_text()
+    assert "def list_files" in source and "def query" in source
+    code, output, _ = cli("env", "eject-files", "desk")
+    assert code != 0 and "already exists" in output
 
 
 def test_from_traces_drafts_replay_apps_tasks_and_a_benchmark_the_traces_score_on(
