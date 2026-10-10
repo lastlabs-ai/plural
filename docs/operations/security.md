@@ -55,7 +55,7 @@ implementation.
 
 ## Separate information
 
-After each action the Agent sees only the Observation. Scores, rewards,
+After each action the Agent sees only what the action returned. Scores, rewards,
 termination flags, State, and Verifier data never enter the model's context.
 
 That separation governs what Plural shows the model; it is not process
@@ -75,20 +75,22 @@ private keys.
 
 Supply other secrets when the Job runs:
 
-- **Environment secrets.** An Environment declares `secrets` by name and target
-  (`environment`, `harness`, or `verifier`) and `RuntimeVariable` declarations
-  on its Runtime; the declarations never hold values. At run time Plural reads
-  the values from the Job's environment and injects them: `environment` and
-  `harness` targets into the Runtime the Environment and Harness share, and
-  `verifier` targets into the Verifier's process. A missing required value
-  stops the run before it starts.
+- **App secrets.** Each App declares the names of the secrets it needs, such as
+  the token for its MCP server; the declarations never hold values. At run time
+  Plural reads the values from the Job's environment, or from the hosted
+  project's secrets for a hosted run, and gives them only to the process that
+  runs the Apps and to Verifier queries. They never reach the Agent or its
+  Harness. A missing value stops the run before it starts, naming the App.
+- **Runtime variables.** `RuntimeVariable` declarations on a Runtime carry
+  settings into the Runtime. The Harness shares the Runtime and can read them,
+  so keep credentials on Apps instead.
 - **Harness secrets.** A custom Harness lists the names it reads in `secrets`,
   and an Agent grants a subset with `secret_names`. Granting a name the Harness
   did not declare fails before any value is forwarded.
 - **Model keys.** A Job passes model credentials to the Harness and to Agent
   Verifiers itself; you do not list them in `secret_names`.
 
-Never store values in YAML, Task info, State, Observation, resources, logs, or
+Never store values in YAML, Task info, State, action results, resources, logs, or
 artifacts.
 
 > **Good to know:** Plural replaces the exact values of injected secrets in the

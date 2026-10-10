@@ -22,7 +22,8 @@ In everyday terms first, then the fields each one holds:
 
 | Everyday idea | Object | What it holds |
 | --- | --- | --- |
-| The world | `Environment` | world, actions, state, observation, Runtime, resources, rewarders, limits, and rendering |
+| A system the AI works with | `App` | actions, State, secrets, rewarders, snapshot and reset hooks, and rendering |
+| The world | `Environment` | Apps, Runtime, resources, Harness policy, limits, and the `on_step` hook |
 | One assignment | `Task` | instructions, one Environment, Verifiers, task resources, initial state |
 | The grader | `Verifier` | information, criteria, evidence, runtime, weight, check behavior |
 | The contestant | `Agent` | model, provider, instructions, optional Harness, metadata |
@@ -31,8 +32,8 @@ In everyday terms first, then the fields each one holds:
 | One run you start | `Job` | source, Agents, mode, attempts, concurrency, retry policy |
 | One attempt | `Trial` | one Agent × one Task × one planned attempt; Job output |
 
-Runtime, Resources, and Rewarders are part of the Environment. They are not objects of
-their own.
+Apps, Runtime, and Resources are part of the Environment, and Rewarders are part of an
+App. They are not run or versioned on their own.
 
 A few rules that matter:
 

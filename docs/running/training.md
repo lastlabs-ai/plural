@@ -25,8 +25,8 @@ Two numbers matter here, and they do different jobs:
 
 - A **score** comes from the Verifiers, the graders, at the end of an attempt. It
   says how well the Task went, and it is the only thing a Benchmark ranks on.
-- A **reward** is small, per-step credit from the Environment for one move, such
-  as getting closer to the answer. A training algorithm uses rewards to work out
+- A **reward** is small credit for one move, or one stretch of a trajectory, such as
+  getting closer to the answer. A training algorithm uses rewards to work out
   which moves helped. Rewards never count toward the score, and the Agent never
   sees them.
 
@@ -109,26 +109,91 @@ available, stored with `plural auth login --api-key-stdin` or set as
 
 ## 4. Add rewards where needed
 
-Final Verifiers measure Task success in both eval and train mode. Rewarders
-provide the per-step signal an algorithm needs to assign credit, such as progress
-toward a solution.
+Final Verifiers measure Task success in both eval and train mode. Rewards provide
+the finer signal an algorithm needs to assign credit, such as progress toward a
+solution. Every reward a Trial earns goes in its **reward ledger**, `rewards.jsonl`
+in the Trial's artifacts, whatever produced it. Each line names its source, its
+rewarder and version, its value, and its target: a step, a model call, or a span of
+text or tokens within one. Rewards never reach the Agent and never count toward the
+score.
 
-Every Rewarder runs inside `step`, immediately after the action that changed the
-world, and its value is recorded on the episode in both modes. Train mode also
-writes each step's reward as a `reward` event in the Job's progress events, which
-is where a trainer reads them. Rewards are credit for the trainer, never shown to
-the Agent. `info["rewards"]` breaks each step's total down by name, so you can see
-which action earned the credit. See [Rewards](../project/environments.md#rewards)
-for how to declare them.
+There are two ways to produce them.
+
+**While the episode runs.** A `@rewarder` on an App runs right after each of that
+App's actions, and the Environment's `on_step` can return one for any action. See
+[Rewards](../project/environments.md#rewards) for how to declare them. Train mode also
+writes each step's reward as a `reward` event in the Job's progress events.
+
+**After the episode, in hindsight.** A hindsight rewarder reads a whole finished
+Trial, including its score, every step, and each App's final State, and credits
+whichever moves deserve it. It suits signals you can only judge at the end, such as
+"the guess that solved it, weighted by how few it took", or labels you decide on
+later:
+
+```python
+from plural import HindsightTrial, hindsight_rewarder
+
+
+@hindsight_rewarder(version="1")
+def fewer_guesses(trial: HindsightTrial):
+    """Credit the solving guess more when it took fewer guesses."""
+    guesses = trial.steps("guess")
+    if trial.score:
+        yield trial.credit(guesses[-1]["event_id"], 1.0 - 0.1 * (len(guesses) - 1))
+```
+
+`trial.steps(action)` lists the Environment steps, `trial.model_calls()` the model
+calls, and `trial.apps` each App's initial and final State. Bump `version` when the
+logic changes, so an export can pick which labels to use.
+
+Run it on Trials you already have. This labels a stored Job without running anything
+again, and works the same on [recorded traces](traces.md#score-traces-you-already-have):
+
+```bash
+plural rewards apply rewarders.py:fewer_guesses --job JOB_ID
+plural rewards show TRIAL_ID
+```
+
+```text
+step  e2     +0.000  app:solved
+step  e3     +0.000  app:solved
+step  e4     +0.000  app:solved
+step  e5     +1.000  app:solved
+step  e5     +0.700  hindsight:fewer_guesses@1
+```
+
+Or pass `hindsight=[fewer_guesses]` to the `Job` to label each Trial as it finishes.
 
 The final Task score remains the weighted aggregate of its Verifiers. Rewards
 never contribute to it. Keep that evaluation metric stable as you experiment with
 rewards.
 
-## 5. Train and evaluate again
+## 5. Export training data
+
+`plural rewards export` writes one JSON line per Trial, joining its trajectory with its
+reward ledger:
+
+```bash
+plural rewards export --job JOB_ID --out training.jsonl
+```
+
+Each line has the Trial's `score`, and `turns`: one entry per model call, with the
+reward credited to it, any span rewards mapped onto token positions, and its TITO
+record when the Trial captured one. A step's reward is credited to the model call
+whose turn issued the action. The options choose which labels to use:
+
+- `--rewarder NAME` or `--rewarder NAME@VERSION` keeps only those rewarders. By
+  default every rewarder is used, at its latest version.
+- `--aggregate sum|mean|last` combines several rewards on one target. The default is
+  `sum`.
+- `--include-off-recording` keeps rewards on steps where a replayed App answered a
+  call its recording didn't cover. They are left out by default, because the
+  recording can't vouch for them.
+
+## 6. Train and evaluate again
 
 Select eligible Trials, preserve their Task and Agent versions and scores, and
-convert the records into your trainer's format. Apply your data access,
+convert the export into your trainer's format. Apply your data access,
 redaction, and split rules before export.
 
 After training, make the updated model available through a supported endpoint and

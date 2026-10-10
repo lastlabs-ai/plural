@@ -122,7 +122,7 @@ runtime:
 The settings are copied, not linked. A saved Environment revision never changes, so
 editing a Runtime later does not change Environments that already use it. Run
 `plural runtime use` again, then push, to pick up the change. The Environment's
-[Runtime variables](environments.md#runtime-variables-and-secrets) are kept.
+[Runtime variables](environments.md#runtime-variables) are kept.
 
 On pluralintel.com, open an Environment, go to its **Runtime** tab, and choose a
 project Runtime.

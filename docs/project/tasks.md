@@ -28,13 +28,13 @@ Agent sees exactly what it should, and nothing more.
 | --- | --- | --- |
 | `instructions` and `goals` | What the Agent should accomplish | "Resolve the ticket" |
 | `info` | Public case information, such as an identifier | `ticket_id: ticket-1` |
-| `initial_state` | Hidden starting values, defined by the Environment's State | The expected category |
+| `initial_state` | Hidden starting values for each App's State, keyed by App name | The expected category |
 | `resources` | Files the case uses, which Environment code can read | The customer's invoice |
 | `metadata` | Labels for you, such as an owner or a training or evaluation split | `owner: support-team` |
 | `verifiers` | The graders that score the attempt | `correct-category` |
 
-> **Good to know:** Keep expected answers out of `info`, the instructions, and the
-> Observation. Those are visible to the Agent. The answer belongs in `initial_state`,
+> **Good to know:** Keep expected answers out of `info`, the instructions, and what
+> actions return. Those are visible to the Agent. The answer belongs in `initial_state`,
 > which becomes part of the hidden State that a Verifier can check.
 
 Plural stores a Task's `reset_options` but does not yet pass them to `reset`. Use
@@ -178,16 +178,35 @@ Tasks.
 
 ## Set the initial State
 
-The **State** is the hidden truth of the world, such as the secret word in Wordle or
-the correct category for a ticket. Use `initial_state` when each Task should start the
+The **State** is an App's hidden truth, such as the secret word in Wordle or the
+correct category for a ticket. Use `initial_state` when each Task should start the
 world differently.
 
-The Environment decides which State fields a Task may set by marking them with
+Each App decides which of its State fields a Task may set by marking them with
 `initial()`. Constraints passed there, such as `min_length=5` and
 `pattern=r"^[a-z]{5}$"`, are requirements on the value a Task saves. Plural checks the
-values against the Environment's State schema and loads them before each Trial calls
-`reset`. A Task cannot set unmarked fields, such as whether the episode is already
-solved.
+values against the App's State schema and loads them before each Trial calls `reset`.
+A Task cannot set unmarked fields, such as whether the episode is already solved.
+
+With several Apps, key `initial_state` by App name. With one, give its fields
+directly:
+
+```yaml
+initial_state:
+  crm:
+    tickets: [{id: T-7, status: open}]
+  game:
+    secret: crane
+```
+
+```yaml
+initial_state:
+  secret: crane
+```
+
+For an MCP or OpenAPI App, the App's `reset` hook receives its part of
+`initial_state` and seeds the system; see
+[Connect an MCP server](../guides/connect-mcp-server.md#5-make-a-remote-server-safe-to-benchmark).
 
 The rest of this section builds a small project that uses both initial State and
 files. Create it with:
@@ -242,7 +261,7 @@ INV-102,49.00,duplicate
 import os
 from pathlib import Path
 
-from plural import Environment, Observation, State, action, initial
+from plural import App, State, action, initial
 
 
 def resource(scope: str, path: str) -> str:
@@ -253,53 +272,36 @@ class TicketState(State):
     issue: str = initial("", description="The support request for this Task.")
     expected: str = initial("", description="The category this ticket should receive.")
     category: str = ""
-    done: bool = False
 
 
-class TicketObservation(Observation):
-    issue: str = ""
-    policy: str = ""
-    invoice: str = ""
-    category: str = ""
-    done: bool = False
+class TicketTriage(App[TicketState]):
+    """A support queue with one ticket and its invoice."""
 
+    def reset(self, initial_state):
+        super().reset(initial_state)
+        policy = resource("shared", "resources/policy.md")
+        return f"{self.state.issue}\n\nPolicy:\n{policy}"
 
-class TicketTriage(Environment[TicketObservation, TicketState]):
-    def reset(self, *, seed=None, options=None):
-        super().reset(seed=seed)
-        # Preserve the issue and expected category supplied by the Task.
-        self.state.category = ""
-        self.state.done = False
-        self.observation = TicketObservation(
-            text=self.state.issue,
-            issue=self.state.issue,
-            policy=resource("shared", "resources/policy.md"),
-        )
-        return self.observation, {}
-
-    @action
-    def read_invoice(self) -> TicketObservation:
+    @action(read_only=True)
+    def read_invoice(self) -> str:
         """Read the invoice attached to this support case."""
-        self.observation.invoice = resource("task", "resources/invoice.csv")
-        return self.observation
+        return resource("task", "resources/invoice.csv")
 
     @action
-    def categorize(self, category: str) -> TicketObservation:
+    def categorize(self, category: str) -> str:
         """Assign billing, technical, or account and finish the case."""
         if category not in {"billing", "technical", "account"}:
             raise ValueError("Choose billing, technical, or account")
         self.state.category = category
-        self.state.done = True
-        self.observation.category = category
-        self.observation.done = True
-        return self.observation
+        return f"Assigned to {category}."
 
     def terminated(self) -> bool:
-        return self.state.done
+        return bool(self.state.category)
 ```
 
-`reset` clears progress but keeps the Task's `issue` and `expected` fields. Replacing
-State with an empty `TicketState()` here would throw away those starting conditions.
+The default `reset` loads the Task's `issue` and `expected` fields into State, so the
+override only adds what the Agent sees first: the issue and the policy. `expected`
+stays in State, where the Agent never sees it and the Verifier reads it.
 
 **4. Describe the Environment.** Replace the placeholder comment in
 `environments/ticket-triage/README.md` with a sentence describing the Environment, such
@@ -369,11 +371,11 @@ separate folders:
 ```
 
 Environment code reads the root folder from `PLURAL_RESOURCES_DIR`. In the example,
-`reset` reads the policy into the Observation, and the `read_invoice` action shows the
-attachment when the Agent asks for it.
+`reset` returns the policy as part of the first thing the Agent sees, and the
+`read_invoice` action returns the attachment when the Agent asks for it.
 
 > **Good to know:** Files are not added to the model's prompt automatically. The Agent
-> only sees what your Environment code puts in the Observation.
+> only sees what `reset` and the actions return.
 
 A URI alone does not fetch data. For data that must be fetched when a run starts, use
 `resolver` delivery as described in [Environment resources](environments.md#resources).
@@ -445,8 +447,8 @@ plural trial show TRIAL_ID
 ```
 
 This prints the Trial's score, the Verifier's evidence, and its artifacts folder.
-Open `observation.json` there to check that the issue and invoice reached the
-Observation, and `state.json` to check that the expected category stayed in the hidden
+Open `trajectory.jsonl` there to check that the issue and invoice reached the
+Agent, and `state.json` to check that the expected category stayed in the hidden
 State.
 
 The `local` runtime is a trusted subprocess, not a sandbox; see

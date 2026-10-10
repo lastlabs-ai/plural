@@ -2,7 +2,7 @@
 route: /docs/tutorials/wordle
 title: Wordle
 order: 115
-description: Walk through a Wordle project that keeps the secret word on State, score it with a deterministic Verifier, and run it from the CLI or the Python SDK.
+description: Walk through a Wordle project whose game is one App that keeps the secret word on State, score it with a deterministic Verifier, and run it from the CLI or the Python SDK.
 audience: all
 nav: true
 nav_group: Tutorials
@@ -44,7 +44,7 @@ No account or key is needed until [Run it with a model](#run-it-with-a-model).
 
 In the words from [Core concepts](../getting-started/concepts.md), this tutorial uses:
 
-- **The world** (Environment): `wordle`, the game itself.
+- **The world** (Environment): `wordle`, with one [App](../concepts/apps.md), the game itself.
 - **Three assignments** (Tasks): `crane`, `slate`, and `point`, each with one secret word.
 - **The grader** (Verifier): `solved`, which checks whether the word was found.
 - **The exam** (Benchmark): `wordle`, the three games together.
@@ -72,21 +72,17 @@ The folder also holds a larger exam you can try once you have finished:
 `medium-02`, `hard-01`, and `hard-02`), two more model Agents (`plain` and `tracker`),
 and a `board` Harness. [Extend it](#extend-it) shows how to use them.
 
-### The Environment keeps the secret on State
+### The game is one App
 
-The Environment is the game. `environments/wordle/environment.py` separates what the
-game knows from what the AI sees:
+An [App](../concepts/apps.md) is one system the AI works with. Here it is the game,
+in `environments/wordle/environment.py`, and it separates what the game knows from
+what the AI sees:
 
-- **State** is the full truth: the secret word and the list of guesses so far.
-- The **Observation** is only the board: its text (the last guess and its marks), the
-  guesses remaining, and whether the puzzle is solved.
+- **State** is the game's private truth: the secret word and the guesses so far.
+- What an action **returns** is all the AI sees: the guess, its marks, and how many
+  guesses are left.
 
 ```python
-class Board(Observation):
-    remaining: int = 6
-    solved: bool = False
-
-
 class Game(State):
     secret: str = initial(
         "",
@@ -103,52 +99,63 @@ class Game(State):
 word.
 
 The game has one move, `guess`. It checks the word against the list of accepted words,
-marks each letter, and updates the board. The accepted words live in `words.txt` next
-to the Environment, one per line: the 14,855 guesses Wordle accepts. `words()` reads
-the file once:
+marks each letter, and returns the result. The accepted words live in `words.txt` next
+to the game, one per line: the 14,855 guesses Wordle accepts.
 
 ```python
-WORDS_FILE = Path(__file__).with_name("words.txt")
+class Wordle(App[Game]):
+    """Guess a hidden five-letter word in six tries."""
 
-
-class Wordle(Environment[Board, Game]):
-    @staticmethod
-    @cache
-    def words() -> frozenset[str]:
-        """Every word the game accepts, one per line in words.txt. Read once per process."""
-        lines = WORDS_FILE.read_text(encoding="utf-8").splitlines()
-        return frozenset(line.strip().lower() for line in lines if line.strip())
+    def reset(self, initial_state):
+        """Start an episode. A blank secret is chosen from words.txt using the seed."""
+        super().reset(initial_state)
+        ...
+        return "6 guesses left. Guess any five-letter word."
 
     @action
     def guess(
         self,
         word: Annotated[str, Field(min_length=5, max_length=5, pattern=r"^[a-z]{5}$")],
-    ) -> Board:
+    ) -> str:
         """Guess one word. + is correct, ? is elsewhere in the word, - is absent."""
         word = word.strip().lower()
         if word not in self.words():
             raise ValueError(f"{word!r} is not in the word list")
         ...
+        return f"{word}  {marks_text}\n{status}"
+
+    def terminated(self) -> bool:
+        return self.state.solved or self.state.remaining <= 0
 ```
 
-`word` has to be exactly five lowercase letters. That limit is part of the action
-schema, so the model and the Actions tab both see it.
+`reset` starts each game, and what it returns is the first thing the AI sees. `word`
+has to be exactly five lowercase letters. That limit is part of the action schema, so
+the model and the Actions tab both see it. A word that isn't in the list raises
+`ValueError`, so the AI is told why and can try again.
 
 The marks are Wordle's colors written as symbols: `+` is the right letter in the right
 place (green), `?` is in the word somewhere else (yellow), and `-` is not in the word
-(gray). The docstring on `guess` is the description the AI reads. The game ends when
+(gray). After guessing `point` against the secret `point`, the AI sees:
+
+```text
+point  + + + + +
+solved
+```
+
+The docstring on `guess` is the description the AI reads. The game ends when
 `terminated()` sees the puzzle solved or no guesses left.
 
 Files beside `environment.py` travel with the Environment, so the word list is there in
 a container or a hosted run too.
 
-`environment.yaml` names the class, the runtime, and the limits on each attempt:
+`environment.yaml` names the App class, the runtime, and the limits on each attempt.
+With one Python App, `python:` names it directly:
 
 ```yaml
 name: wordle
-version: 0.1.0
+version: 0.1.1
 description: Guess a hidden five-letter word. Each guess is marked correct, present, or absent.
-overview: Six guesses. The secret stays on State, and the Agent only sees the board.
+overview: Six guesses. The secret stays on State, and the Agent only sees what each guess returns.
 python: environment.py:Wordle
 readme: README.md
 resources: []
@@ -181,7 +188,8 @@ initial_state:
 ```
 
 `slate` and `point` differ only in their name and secret. Because the secret is State,
-the AI never sees it. It sees `instruction.md` and the board, nothing else.
+the AI never sees it. It sees `instruction.md` and what each guess returns, nothing
+else.
 
 ### The Verifier reads the final State
 
@@ -197,7 +205,8 @@ check: verify.py:verify
 weight: 1
 ```
 
-The check reads the final State, which the AI never saw:
+The check reads the game's final State, which the AI never saw. With one App,
+`episode.state` is that App's State:
 
 ```python
 from plural import Episode, VerifierOutput
@@ -263,8 +272,8 @@ You should see the Benchmark confirmed as valid, then one line per game as it
 finishes. Your ids will differ, and the games may finish in a different order:
 
 ```text
-benchmark/wordle is valid: version 1.0.0, sha256:c8e29b50c50ecd2863a61e7ce2b8daa96f083cc00d0fb56f88c58cbba75e5d99
-Running benchmark/wordle@1.0.0 with word-list (openai/gpt-5.6-luna) locally: 3 trial(s), 3 at a time (auto: every Trial at once).
+benchmark/wordle is valid: sha256:f1155eaf88b1869cd4f6a8a8bd3f23cc58d8d370c87baa62f7c1ae5184e0533b
+Running benchmark/wordle local with word-list (openai/gpt-5.6-luna) locally: 3 trial(s), 3 at a time (auto: every Trial at once).
   [1/3] trl_c53f6596c1834b751964f862  crane  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
   [2/3] trl_ccd3f1712d34eddbd923e951  slate  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
   [3/3] trl_3aba06619e94795c19a42df5  point  succeeded  score=1.000  | 3 succeeded, 0 failed, mean 1.000
@@ -336,7 +345,7 @@ plural run --benchmark wordle --agent luna
 ```
 
 `--model` without `--harness` uses `native`, the same loop the `luna` Agent uses. The
-model sees `instruction.md` and the board after each guess. It never sees the secret,
+model sees `instruction.md` and the result of each guess. It never sees the secret,
 the score, or any reward.
 
 ## Read the results
@@ -376,12 +385,17 @@ pinned.
 
 The `Artifacts` directory holds the full record of the game:
 
-- `episode.jsonl`: each guess, with the board the AI saw after it and the
-  Environment's display view.
-- `trajectory.json`: the same guesses as the AI's chat messages, turn by turn.
+- `episode.jsonl`: each guess, with what the AI saw after it and the game's display
+  view.
+- `trajectory.jsonl`: each guess and what came back, as the `word-list` Harness
+  recorded it. A model run writes `trajectory.json` instead: the model's chat
+  messages, turn by turn.
 - `atif-trajectory.json`: the same turns in ATIF, with each call's tokens and cost.
-- `state.json`: the secret and the guess history.
-- `observation.json`: the final board the AI saw.
+- `apps.json`: the game's State at the start and the end, which is what the Verifier
+  read.
+- `state.json`: the final State on its own: the secret and the guess history.
+- `observation.json`: the last thing the AI saw.
+- `rewards.jsonl`: the per-guess rewards, one line per guess.
 - `view.json`: the final display view, the grid of guesses and marks that the run
   viewer draws.
 
@@ -408,10 +422,12 @@ A few more directions:
 - **Judge how the Agent played, not only whether it won,** with an
   [AgentVerifier](../project/verifiers.md#agentverifier) or a
   [HumanVerifier](../project/verifiers.md#humanverifier).
-- **Give per-guess credit for training.** The game already defines a `reward()` that
-  gives 1 point for the guess that solves the word. You can change it or add a
-  `@rewarder`; see [Rewards](../project/environments.md#rewards). Rewards are recorded
-  on the episode and never contribute to the score.
+- **Give per-guess credit for training.** The game already has a `@rewarder` named
+  `solved` that gives 1 point for the guess that solves the word. Change it or add
+  more; see [Rewards](../project/environments.md#rewards). Rewards are recorded in
+  `rewards.jsonl` and never contribute to the score.
+- **Connect a real system next to the game,** such as an MCP server; see
+  [Connect an MCP server](../guides/connect-mcp-server.md).
 
 ## Push it and run hosted
 

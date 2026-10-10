@@ -127,8 +127,8 @@ Environment class lives in a `.py` file and each deterministic Verifier's
 `check` is a function, or a `file.py:function` reference, that accepts an
 `Episode`, such as `verify.py:verify` in the examples.
 
-The function receives the final Observation, State, trajectory, artifacts, and
-usage. If it returns anything other than a `VerifierOutput`, the Trial fails with no
+The function receives each App's State, the last observation, the trajectory,
+artifacts, and usage. If it returns anything other than a `VerifierOutput`, the Trial fails with no
 score and a message that names the Verifier.
 
 ## The Verifier script or result is missing

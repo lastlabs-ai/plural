@@ -90,7 +90,9 @@ nav:
       - Core concepts: getting-started/concepts.md
       - Getting started: getting-started.md
   - Build:
+      - Apps: concepts/apps.md
       - Environments: project/environments.md
+      - Connect an MCP server: guides/connect-mcp-server.md
       - Runtimes: project/runtimes.md
       - Tasks: project/tasks.md
       - Verifiers: project/verifiers.md

@@ -43,8 +43,11 @@ These are the pieces you describe: the world, the assignments, the grader, and t
 contestants.
 
 - The project layout and every manifest: [YAML and serialization](../interfaces/yaml.md).
-- The world (Environment): actions, State, Observation, rewards, resources, secrets,
-  and Runtime: [Environments](../project/environments.md).
+- The systems the AI works with (Apps): Python Apps, MCP servers, HTTP APIs, data,
+  and recordings; control levels and secrets: [Apps](../concepts/apps.md) and
+  [Connect an MCP server](../guides/connect-mcp-server.md).
+- The world (Environment): Apps, rewards, resources, limits, and Runtime:
+  [Environments](../project/environments.md).
 - The assignments (Tasks): instructions, initial State, and Task files:
   [Tasks](../project/tasks.md).
 - The grader (Verifiers): deterministic checks, model judges, and human rubrics:

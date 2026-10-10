@@ -271,6 +271,19 @@ def test_mcp_episode_errors_are_feedback() -> None:
         environment.close()
 
 
+def test_mcp_server_crash_reports_its_output(tmp_path: Path) -> None:
+    crash = tmp_path / "crash.py"
+    crash.write_text(
+        "import sys\nprint('missing CRM_URL', file=sys.stderr)\nsys.exit(3)\n", encoding="utf-8"
+    )
+    app = App.mcp("crm", command=[sys.executable, str(crash)])
+    app.workspace = tmp_path
+    output = r"(?s)exit code 3\. Its output is in .*server\.log.*CRM_URL"
+    with pytest.raises(MCPError, match=output):
+        app.actions()
+    app.close()
+
+
 def test_mcp_secrets_must_be_declared() -> None:
     with pytest.raises(ValueError, match="CRM_TOKEN"):
         App.mcp("crm", url="https://example.com/mcp", headers={"Authorization": "${CRM_TOKEN}"})

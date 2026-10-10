@@ -54,10 +54,10 @@ plural agent init careful --model openai/gpt-5.6-luna
 Each `init` command writes one folder, such as `environments/support-queue/` or
 `tasks/ticket-1/`, and marks every place you must fill in with `PLURAL-TODO`:
 
-- `environments/support-queue/environment.py`: what the world holds (its State), what
-  the AI is shown (its Observation), and the moves it can make (its `@action`
-  methods). Keep the answers on State, never on the Observation. Mark the fields a
-  Task sets with `initial()`.
+- `environments/support-queue/environment.py`: the App. What it holds (its State),
+  the moves it can make (its `@action` methods), and what each move returns, which is
+  all the AI sees. Keep the answers on State, never in what an action returns. Mark
+  the fields a Task sets with `initial()`.
 - `environments/support-queue/README.md`: what the world is and how to use it.
 - `verifiers/correct-category/verify.py`: compare how things ended with what the Task
   asked for, and return a score from 0 to 1 with evidence.

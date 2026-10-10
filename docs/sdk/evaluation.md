@@ -40,7 +40,7 @@ from plural import Agent, Benchmark, Client, Episode, Job, Task, VerifierOutput
 from plural.verifiers import DeterministicVerifier
 
 def resolved(episode: Episode) -> VerifierOutput:
-    return VerifierOutput(score=float(bool(episode.observation.get("done"))))
+    return VerifierOutput(score=float(bool(episode.state.get("done"))))
 
 verifier = DeterministicVerifier(name="resolved", check=resolved)
 task = Task(

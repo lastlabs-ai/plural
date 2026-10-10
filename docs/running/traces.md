@@ -76,8 +76,8 @@ gateway's ID for it; a cost the gateway did not return stays empty rather than
 estimated. Rewards and Verifier scores stay beside the trajectory; neither
 appears in a step.
 
-When available, the final Environment State, Observation, rendering, trajectory,
-and Verifier results are copied into the execution artifacts and listed in the
+When available, each App's State, the last observation, the rendering, the
+trajectory, and Verifier results are copied into the execution artifacts and listed in the
 manifest. Missing runtime data remains absent. Preserve additional files
 explicitly rather than assuming every runtime file survives teardown.
 
@@ -121,6 +121,73 @@ Capture useful evidence, not only final prose. Record tool inputs and outcomes,
 relevant observations, model identity, errors, and the artifacts your scoring rule
 needs. Fields such as usage and latency depend on the integration actually
 recording them; do not infer them from an empty trace.
+
+## Score traces you already have
+
+If an agent is already running somewhere, such as in production or another
+framework, you can score its recorded conversations without running it again. No
+model is called, so only a model judge needs a key.
+
+A trace file is JSONL, one conversation per line, with its messages in OpenAI chat
+format. A `trace_id` and `model` are optional; Plural Traces and a `TraceDataset`
+work too:
+
+```json
+{"trace_id": "t-1", "model": "acme/support-bot", "messages": [{"role": "user", "content": "Where is order 42?"}, {"role": "assistant", "content": null, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"42\"}"}}]}, {"role": "tool", "tool_call_id": "c1", "content": "Order 42 shipped on Monday."}, {"role": "assistant", "content": "Your order shipped on Monday."}]}
+```
+
+Draft a Benchmark from the file:
+
+```bash
+plural env from-traces support --traces conversations.jsonl
+```
+
+This writes an Environment with one replay App, whose actions are the tools the
+traces called; one Task per trace, with the first user message as its instructions;
+a model-judge Verifier, `support-judge`; and a Benchmark, `support`. Review the
+instructions, and replace or add Verifiers as you like. Then score the recorded agent:
+
+```bash
+plural run --benchmark support --traces conversations.jsonl
+```
+
+```text
+Running benchmark/support local with support-bot (acme/support-bot) locally: 2 trial(s), 4 at a time.
+  [1/2] trl_409743e8a46035d1012d7341  support-t-1  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
+  [2/2] trl_bb7968e72da0d0d252bf46b1  support-t-2  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
+```
+
+Each trace is matched to the Task drafted from it, so its Trial lines up with the
+same Task run live. Run a real Agent on the same Benchmark to compare the two:
+
+```bash
+plural run --benchmark support --model openai/gpt-5.6-luna
+```
+
+To score traces against a Task you wrote yourself, pass `--task` instead; every trace
+is then an attempt at that Task. From Python, `Job.from_traces` does the same:
+
+```python
+from plural import Job
+
+job = Job.from_traces("conversations.jsonl", task=task)
+result = job.run()
+```
+
+How a recorded conversation is replayed:
+
+- Each assistant message is recorded as a model call, and each tool result as a step,
+  so the Trial reads like any other.
+- A tool call to an action an App in the Environment declares is sent to that App
+  for real, with the recorded result kept beside it. So when the Environment has
+  real Apps, a Verifier that reads App state sees where the agent left it.
+- A tool call with no recorded result gets the error "the recording has no result
+  for this call".
+- When the recording runs out, the episode ends with the `recording_ended` stop
+  reason, or `agent_response` if it ended on a reply.
+
+The Trials are stored like any other, so rewards and training exports work on them;
+see [Training and RL](training.md).
 
 ## Reuse evidence responsibly
 

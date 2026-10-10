@@ -35,8 +35,8 @@ support tickets in the next.
 
 ## What an Agent sees
 
-An Agent only ever sees two things: the Task's instructions and the Environment's
-Observations (the part of the world it is shown). It never sees the score, the
+An Agent only ever sees two things: the Task's instructions and what its actions
+return. It never sees the score, the
 rewards, the hidden State, or anything the grader knows. That keeps the test fair.
 
 ## Find a model
@@ -142,6 +142,8 @@ The fields, for reference:
 - `harness_kwargs` sets a built-in Harness's options.
 - `auth_mode: none` marks an Agent whose Harness never calls a model, so it runs
   without credentials.
+- `endpoint` and `endpoint_key` point the Agent at its own model server; see
+  [Use your own endpoint](#use-your-own-endpoint).
 
 Model keys and other credentials are never written in `agent.yaml`.
 
@@ -178,6 +180,46 @@ Harness declares the environment variable names it reads, and the Agent's
 the run starts, the error lists it and does not include the value. See
 [Harnesses](harnesses.md).
 
+## Use your own endpoint
+
+To evaluate a model that isn't in the catalog, such as a fine-tuned model you serve
+yourself, give the Agent the address of any OpenAI-compatible server. Its model calls
+then go straight there, not through the Plural gateway:
+
+```python
+from plural import Agent
+
+tuned = Agent(
+    name="support-tuned",
+    model="support-tuned-v3",
+    endpoint="https://models.example.com/v1",
+    endpoint_key="TUNED_API_KEY",
+    instructions="Follow the support policy and finish the ticket using the available tools.",
+)
+```
+
+```yaml
+name: support-tuned
+version: 0.1.0
+model: support-tuned-v3
+endpoint: https://models.example.com/v1
+endpoint_key: TUNED_API_KEY
+instructions: Follow the support policy and finish the ticket using the available tools.
+```
+
+- `model` is whatever name your server expects. It isn't checked against the catalog.
+- `endpoint` is the server's base URL; Plural calls `{endpoint}/chat/completions`.
+- `endpoint_key` is optional. It names the secret holding the server's API key, never
+  the key itself. Export it before `plural run`; it is sent only as the request's
+  bearer token, and a missing value stops the run before it starts.
+- An endpoint Agent uses the native Harness, and can't set `harness`, `provider`,
+  `fallback_models`, or `secret_names`.
+- A Job whose Agents all use their own endpoints, or `auth_mode: none`, needs no
+  Plural API key. The endpoint must be reachable from the Runtime.
+
+This is the usual way to check a trained model against the same Benchmark you used
+for the baseline; see [Training and RL](../running/training.md).
+
 ## Evaluate the Agent
 
 From the command line, run a saved Agent on a Task, or try a model without saving an
@@ -196,7 +238,11 @@ A few things to know:
 - A local run is recorded under `.plural/jobs/`. A run with `--hosted` is recorded in
   the hosted project, where you can also see it in the web app under Jobs.
 - A live local run sends every model call through the Plural gateway, so it needs a
-  Plural API key, such as the one `plural auth login` stores.
+  Plural API key, such as the one `plural auth login` stores. An Agent with its own
+  `endpoint` is the exception.
+- To score conversations an agent already had, without running it again, use
+  `plural run --traces FILE`; see
+  [Score traces you already have](../running/traces.md#score-traces-you-already-have).
 
 In Python, given a Task named `task`, run the Agent with your Client:
 

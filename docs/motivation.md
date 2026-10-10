@@ -48,10 +48,11 @@ flowchart TB
 
 Plural gives each part its own name, so no part can quietly change another.
 
-**The world is the Environment.** It is the place an episode happens. It owns the
-actions the AI can take, the **State** (the full truth, never shown to the Agent), the
-**Observation** (the only part the Agent sees), and the **Runtime** where it runs.
-Nothing on the Agent's side can rewrite it.
+**The world is the Environment.** It is the place an episode happens: a set of
+**Apps**, the systems the AI works with, and the **Runtime** where they run. Each App
+owns the actions the AI can take and its **State** (the full truth, never shown to the
+Agent). What an action returns is the only part the Agent sees. Nothing on the Agent's
+side can rewrite it.
 
 **The assignment is a Task.** It is one piece of work in that world: the instructions,
 the Environment it runs in, and the **Verifiers** that score it.

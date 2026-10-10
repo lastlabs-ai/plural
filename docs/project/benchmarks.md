@@ -276,8 +276,8 @@ local Trial it is `.plural/jobs/JOB_ID/trials/TRIAL_ID/executions/0/artifacts/`:
 
 1. **Trajectory** (`trajectory.json`, or `atif-trajectory.json` in ATIF): what the Agent saw, which actions it took, and
    the feedback it received.
-2. **Final State and Observation** (`state.json`, `observation.json`): what actually
-   changed in the Environment.
+2. **App states** (`apps.json`, `state.json`): each App's State at the start and the
+   end, which is what actually changed.
 3. **Verifier results** (`trial show`, or the Trial's `result.json`): which checks
    passed and the evidence behind the score.
 4. **Receipt** (`receipt.json`, one folder up): which Agent, Task, and Runtime

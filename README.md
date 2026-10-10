@@ -5,8 +5,9 @@ keeping the evidence behind every score.
 
 ## Evaluation in eight objects
 
-1. **Environment**: the world, its actions, private State, the Observation the
-   Agent sees, resources, and Runtime.
+1. **Environment**: the world: its Apps, resources, and Runtime. Each App is one
+   system the Agent works with, such as a game written in Python, an MCP server, or
+   an HTTP API, with its actions, private State, and the secrets it needs.
 2. **Verifier**: deterministic, Agent, or Human scoring of a finished episode.
 3. **Task**: instructions bound to one Environment and its Verifiers.
 4. **Benchmark**: a versioned collection of Tasks and the rules for ranking results.
@@ -18,9 +19,9 @@ keeping the evidence behind every score.
    and score.
 
 A score is what a Verifier produces, and it is the only thing a Benchmark ranks on.
-Per-step rewards from an Environment are recorded for training and never contribute
-to a score. Only the Observation is ever shown to the model; scores, rewards, and
-private Verifier data never reach it.
+Rewards are recorded in each Trial's reward ledger for training and never contribute
+to a score. Only what an action returns is ever shown to the model; scores, rewards,
+State, and private Verifier data never reach it.
 
 ## Install
 

@@ -44,8 +44,8 @@ person only for what code can't decide.
 ## DeterministicVerifier
 
 A `DeterministicVerifier` runs a Python function or command over the completed
-`Episode`, the full record of the attempt. The Episode includes the final Observation,
-the hidden State, the trajectory, artifacts, and usage.
+`Episode`, the full record of the attempt. The Episode includes each App's State at
+the start and the end, the trajectory, the last observation, artifacts, and usage.
 
 Use it for exact checks: the correct category, passing tests, a valid file, a solved
 puzzle, or a required change in the Environment. It scores what happened, rather than
@@ -58,14 +58,13 @@ from plural import DeterministicVerifier, Episode, VerifierOutput
 
 
 def resolved_correctly(episode: Episode) -> VerifierOutput:
-    done = bool(episode.observation.get("done"))
     expected = episode.state.get("expected")
-    category = episode.observation.get("category")
+    category = episode.state.get("category")
     correct = bool(expected) and category == expected
     return VerifierOutput(
-        score=float(done and correct),
+        score=float(correct),
         scores={"correct_category": float(correct)},
-        evidence=[f"Resolved: {done}; category: {category}; correct: {correct}"],
+        evidence=[f"category: {category}; expected: {expected}; correct: {correct}"],
     )
 
 
@@ -75,9 +74,50 @@ completion = DeterministicVerifier(
 )
 ```
 
-This check gives a score of 1 when the ticket is resolved with the expected category,
-and 0 otherwise. `scores` stores extra measurements, and `evidence` explains the
+This check gives a score of 1 when the ticket was assigned the expected category,
+and 0 otherwise. It reads State, not what the Agent said, so a claim of success that
+didn't happen scores 0. `scores` stores extra measurements, and `evidence` explains the
 result in words. Add a separate check if a nonempty response is also required.
+
+### Read App state
+
+`episode.state` is a shortcut. With one App, it is that App's final State, as above.
+With several, it maps each App's name to its final State. For more, use
+`episode.apps`:
+
+```python
+from plural import Episode, VerifierOutput
+
+
+def ticket_closed(episode: Episode) -> VerifierOutput:
+    crm = episode.apps["crm"]
+    opened = crm.initial["tickets"]
+    closed = [item for item in crm.final["tickets"] if item["status"] == "closed"]
+    return VerifierOutput(
+        score=float(any(item["id"] == "T-7" for item in closed)),
+        evidence=[f"{len(closed)} of {len(opened)} tickets closed"],
+    )
+```
+
+- `initial` and `final` are the App's State before the first action and after the
+  last. For an MCP or OpenAPI App, they are what its `snapshot` hook printed.
+- `control` is the App's [control level](../concepts/apps.md#control-levels).
+- `query(action, **arguments)` calls one of the App's read-only actions while the
+  Trial's Runtime is still running, so a check can ask the real system instead of
+  trusting a snapshot:
+
+```python
+from plural import Episode, VerifierOutput
+
+
+def ticket_closed(episode: Episode) -> VerifierOutput:
+    ticket = episode.apps["crm"].query("get_ticket", id="T-7")
+    return VerifierOutput(score=float(ticket["status"] == "closed"))
+```
+
+`query` refuses an action that can change state, so a Verifier can't alter what it
+checks. It is available to function Verifiers during a Trial; when a Verifier runs
+later, such as on a Trial pulled from a hosted project, read `final` instead.
 
 The function must live in a Python file. In a project, each Verifier is a folder under
 `verifiers/`, named after it. This command creates

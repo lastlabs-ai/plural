@@ -188,10 +188,10 @@ plural task init refund --environment support-desk --verifier resolved
 
 The templates mark every place you need to fill in with `PLURAL-TODO`:
 
-- `environments/support-desk/environment.py`: what the world holds (its State), what
-  the AI is shown (its Observation), and the moves it can make (its `@action`
-  methods). Keep the answers on State, never on the Observation, so the AI cannot
-  read them.
+- `environments/support-desk/environment.py`: the App. What it holds (its State),
+  the moves it can make (its `@action` methods), and what each move returns, which is
+  all the AI sees. Keep the answers on State, never in what an action returns, so the
+  AI cannot read them.
 - `environments/support-desk/README.md`: what the world is and how to use it.
 - `verifiers/resolved/verify.py`: compare how things ended with what the Task asked
   for, and return a score.

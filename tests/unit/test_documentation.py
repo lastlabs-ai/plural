@@ -119,7 +119,7 @@ def test_audited_documentation_limits_remain_explicit() -> None:
     api = (ROOT / "docs/reference/api.md").read_text(encoding="utf-8")
     mkdocs = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
 
-    assert "Environment secret references as metadata" in runtime
+    assert "the Job supplies the **values** when it starts" in runtime
     assert "does not expose the full contracted evidence view" in reviews
     assert "native APIs are not directly executed by Job" in integrations
     assert "post-resolution Pydantic constructor models" in fields

@@ -18,17 +18,26 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
 - **Project:** the folder that holds everything you build, with one subfolder for each
   piece. *Precisely:* a directory containing `project.yaml`, with one subdirectory per
   resource, such as `tasks/ticket-1/`.
+- **App:** one system the AI works with, such as the Wordle game, a CRM behind an MCP
+  server, or an HTTP API. *Precisely:* a named bundle of actions and private State,
+  written in Python or connected as an `mcp`, `openapi`, `data`, or `replay` App, with
+  the names of the secrets it needs.
 - **Environment:** the world the AI works in, such as the Wordle game or a support
-  desk. It sets what the AI can do and see. *Precisely:* the world, with actions,
-  state, observations, resources, runtime, and policy.
-- **Observation:** what the AI is shown about the world, like the colored tiles in
-  Wordle. *Precisely:* the information the agent receives from that world, and the only
-  part of a step the model sees.
-- **State:** the full truth about the world, including things the AI must not see,
-  such as the secret word. *Precisely:* the world's internal data, including fields not
-  meant for the agent.
-- **Native action:** a move the world itself offers, such as `guess` in Wordle.
-  *Precisely:* an operation implemented by the Environment and marked `@action`.
+  desk. *Precisely:* one or more Apps, plus the Runtime, resources, Harness policy, and
+  limits they share.
+- **Action:** a move an App offers, such as `guess` in Wordle or an MCP server's tool.
+  *Precisely:* an operation an App declares, such as a method marked `@action`. With
+  several Apps, its name is prefixed with the App's, such as `crm__get_record`.
+- **Observation:** what the AI is shown after a move, like the colored tiles in
+  Wordle. *Precisely:* what an action returns, and the only part of a step the model
+  sees.
+- **State:** an App's full truth, including things the AI must not see, such as the
+  secret word. *Precisely:* an App's internal data, including fields not meant for the
+  agent. A Verifier reads its snapshots.
+- **Control level:** how far Plural can trust an App to start each attempt fresh.
+  *Precisely:* `owned`, `sandboxed`, `live`, or `replayed`, derived from the App's kind
+  and settings. A Benchmark refuses a `live` App that can change state, and training
+  refuses every `live` App.
 - **Runtime:** where the world runs, such as a sealed container or your own computer.
   *Precisely:* the execution machine and its dependencies, connectivity, and limits.
   `local` is a trusted subprocess, not a sandbox.
@@ -45,7 +54,7 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
 - **Verifier:** the grader that marks the finished work. It can be code, an AI judge,
   or a person. *Precisely:* a deterministic, agent, or human scorer attached to a Task.
 - **Evidence contract:** the list of things a grader needs to see to do its job.
-  *Precisely:* the artifacts and Observation or State fields a Verifier asks for.
+  *Precisely:* the artifacts and observation or State fields a Verifier asks for.
 - **Agent:** the contestant: a model plus the instructions you give it. *Precisely:*
   instructions, model configuration, and optionally a Harness. With no Harness, an Agent
   uses `native`, Plural's built-in tool loop.
@@ -92,11 +101,18 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   is the only thing a leaderboard ranks on. *Precisely:* the number a Verifier
   produces, aggregated onto the Trial. It is the only thing a Benchmark ranks on.
 - **Reward:** a small bit of credit for one move, used to train models. It never counts
-  toward the score, and the AI never sees it. *Precisely:* per-step credit for one state
-  transition, recorded on the episode and never part of a score.
-  `Trial.step_reward_total` is the episode's total.
-- **Rewarder:** a rule, attached to the world, that hands out rewards after every move.
-  *Precisely:* an Environment-declared reward signal, run inside every step.
+  toward the score, and the AI never sees it. *Precisely:* credit on one target of a
+  trajectory (a step, a model call, or a span within one), recorded in the Trial's
+  reward ledger and never part of a score. `Trial.step_reward_total` is the episode's
+  total of per-step rewards.
+- **Rewarder:** a rule, attached to an App, that hands out rewards after its moves.
+  *Precisely:* a `@rewarder` method on an App, run after each of its actions.
+- **Hindsight rewarder:** a rule that hands out rewards after an attempt is over,
+  looking at the whole thing. *Precisely:* a function marked `@hindsight_rewarder`,
+  applied to finished Trials with `plural rewards apply` or a Job's `hindsight`.
+- **Reward ledger:** every reward one attempt earned, wherever it came from.
+  *Precisely:* `rewards.jsonl` in a Trial's artifacts, one record per reward, with its
+  source, rewarder, version, target, and value.
 - **Stop reason:** why an attempt ended, such as the game finishing or the AI running
   out of turns. *Precisely:* how one episode ended, one of `plural.STOP_REASONS`, such
   as `environment_terminated`, `agent_finished`, or `max_turns`.

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Apps. An Environment is now a set of Apps, each one system the Agent works with: a Python class (`App`), an MCP server (`App.mcp`), an HTTP API with an OpenAPI document (`App.openapi`), files or SQLite (`App.data`), or recorded traces (`App.replay`). `environment.yaml` lists them under `apps`. With several Apps, action names are prefixed with the App's name, such as `crm__get_record`.
+- `Environment.on_step` for effects that span Apps. It can call any App, and a number it returns is recorded as a reward.
+- Control levels. Each App is `owned`, `sandboxed`, `live`, or `replayed`, derived from its kind and settings. A Benchmark refuses a `live` App that can change state and marks one with only read-only actions not reproducible; a train Job refuses every `live` App.
+- App secrets. An App lists the secrets it needs, references them as `${NAME}` in headers and server environment, and a Job checks them all before it starts. Values go only to the process that runs the Apps and to Verifier queries, never to the Agent or its Harness.
+- `episode.apps` gives Verifiers each App's initial and final snapshot and control level, and `query(...)` calls a read-only action while the Trial's Runtime is still running.
+- The reward ledger, `rewards.jsonl`, records every reward a Trial earns with its source, rewarder, version, and target: a step, a model call, or a span of text or tokens. `@hindsight_rewarder` functions label finished Trials, through `plural rewards apply` or a Job's `hindsight`. `plural rewards show` lists a ledger, and `plural rewards export` writes training data joining each model turn with its rewards and TITO record.
+- Agents with their own model server: `endpoint` and `endpoint_key` send an Agent's model calls to any OpenAI-compatible endpoint instead of the gateway. A Job whose Agents all do so needs no Plural API key.
+- Scoring recorded traces: `plural run --traces FILE` with `--task` or `--benchmark`, and `Job.from_traces`, replay conversations an agent already had as Trials, without calling a model. Recorded calls to actions an App declares are sent to the App, so Verifiers that read App state work. A new stop reason, `recording_ended`.
+- `plural env from-mcp`, `from-openapi`, `from-data`, and `from-traces` draft an Environment from a system you already have. `from-traces` also drafts one Task per trace, a model-judge Verifier, and a Benchmark.
+- `plural env validate` lists each App's kind, control level, actions, and secrets.
+- Documentation: [Apps](docs/concepts/apps.md) and [Connect an MCP server](docs/guides/connect-mcp-server.md).
+
+### Changed
+
+- **Breaking:** `Environment[Observation, State]` subclasses are replaced by Apps. Write `class Game(App[State])` with `@action` methods; what an action returns is what the Agent sees. Pass Apps to `Environment(apps=[...], runtime=...)`, or name the App class in `environment.yaml` with `python:`. `@rewarder` methods live on Apps, and the Environment-level `reward()` and `secrets` are gone.
+- **Breaking:** a Task's `initial_state` is keyed by App name. With one App it may still give that App's fields directly.
+- Native actions are now called actions; the page moved to `concepts/actions`.
+- A crashed MCP server's error includes the end of its output and the path of its log.
+
 ## [0.20.1] - 2026-10-07
 
 ### Fixed

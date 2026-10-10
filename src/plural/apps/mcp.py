@@ -94,9 +94,10 @@ class _Stdio:
     ) -> None:
         stderr: Any = subprocess.DEVNULL
         self._log = None
+        self._log_path = log
         if log is not None:
             log.parent.mkdir(parents=True, exist_ok=True)
-            self._log = log.open("ab")
+            self._log = log.open("wb")
             stderr = self._log
         try:
             self.process = subprocess.Popen(  # noqa: S603 - the App's declared server
@@ -149,7 +150,13 @@ class _Stdio:
 
     def _exit_detail(self) -> str:
         code = self.process.poll()
-        return f"exit code {code}" if code is not None else "closed its output"
+        detail = f"exit code {code}" if code is not None else "closed its output"
+        if self._log is None or self._log_path is None:
+            return detail
+        self._log.flush()
+        lines = self._log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        tail = "\n".join(f"  {line}" for line in lines[-20:])
+        return f"{detail}. Its output is in {self._log_path}" + (f":\n{tail}" if tail else ".")
 
     def close(self) -> None:
         with contextlib.suppress(Exception):

@@ -13,10 +13,10 @@ Two parts of Plural shape what an Agent can do, and it helps to keep them apart:
 - The **Harness** is *how the contestant plays*. It wraps the model and owns the
   loop that decides what to do next, along with any extra instructions, tools, and
   skills. It belongs to the **Agent**.
-- The **Environment** is *the world*, the playing field. Its native actions are the
-  moves the Agent can make there, like `guess` in Wordle. The Environment carries out
-  those moves and returns Observations (what the Agent is shown). It does not wrap
-  the model.
+- The **Environment** is *the world*, the playing field. Its Apps offer the
+  [actions](actions.md), the moves the Agent can make there, like `guess` in Wordle.
+  The Apps carry out those moves and return what the Agent is shown. The Environment
+  does not wrap the model.
 
 Think of an exam. The contestant brings their own way of working. The exam room sets
 the rules and can say "no phones". It can take things away from the contestant, but

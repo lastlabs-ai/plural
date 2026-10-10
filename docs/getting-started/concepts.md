@@ -24,7 +24,8 @@ Plural gives each of those a name.
 
 | Everyday idea | In Plural | Wordle example |
 | --- | --- | --- |
-| The world | **Environment** | The Wordle game |
+| A system the AI works with | **App** | The game itself, or a CRM behind an MCP server |
+| The world | **Environment** | The Wordle game and where it runs |
 | One assignment | **Task** | "The secret word is CRANE" |
 | The grader | **Verifier** | Did the Agent guess the word? |
 | The contestant | **Agent** | A model plus its instructions |
@@ -37,6 +38,7 @@ Here is how they connect:
 
 ```mermaid
 flowchart LR
+  app[App]
   env[Environment]
   ver[Verifier]
   task[Task]
@@ -45,6 +47,7 @@ flowchart LR
   bench[Benchmark]
   job[Job]
   trial[Trial]
+  app --> env
   env --> task
   ver --> task
   task --> bench
@@ -57,34 +60,46 @@ flowchart LR
 
 The rest of this page explains each one.
 
+## App
+
+An **App** is one system the AI can use. In Wordle, the App is the game: it offers
+one move, `guess`, and keeps the secret word to itself. At a help desk, the ticketing
+system is an App, and so is the orders API next to it.
+
+Every App has:
+
+- **Actions**: the moves it offers, like `guess` in Wordle or `refund` at the help
+  desk. What an action returns is what the Agent sees next, like the colored tiles.
+- **State**: its private truth, including things the Agent must not see, such as the
+  secret word. The Agent never sees State; a Verifier reads it to check the work.
+- **Secrets** (optional): the names of credentials it needs, such as an API key. Only
+  the names are stored; the values are supplied when a run starts, and never reach
+  the Agent.
+- **Rewards** (optional): small bits of credit for individual moves, used when you
+  train a model. Rewards are *not* scores. They never count toward a result and the
+  Agent never sees them.
+
+You can write an App in Python, as Wordle does, or connect a system you already have:
+an MCP server, an HTTP API, a table of data, or recordings of an agent at work.
+
+See [Apps](../concepts/apps.md).
+
 ## Environment
 
-An **Environment** is the world the AI is allowed to act in. It decides what the
-Agent can do, what it can see, and what is really going on behind the scenes.
-
-In Wordle, the Environment is the game: you can submit a guess, and after each guess
-you see which letters are green, yellow, or gray. The secret word itself is hidden.
+An **Environment** is the world the AI is allowed to act in: one or more Apps, and
+where they run.
 
 Every Environment has:
 
-- **Actions**: the moves the Agent can make, like `guess` in Wordle or `refund` at the
-  help desk.
-- **State**: the full truth about the world, including things the Agent must not see,
-  such as the secret word. The Agent never sees State.
-- **Observation**: the part of the world the Agent is shown, like the colored tiles.
-  You decide exactly what goes here.
+- **Apps**: the systems in this world. Wordle has one. A help desk might have three.
 - **Runtime**: where the world runs. Usually that is `docker`, a sealed container on
   your machine. There is also `local`, which runs directly on your computer and should
   only be used for code you trust, and hosted options.
 - **Resources**: files that are already in the world, like a word list or a policy
   document, shared by every Task.
-- **Rewards** (optional): small bits of credit for individual moves, used when you
-  train a model. Rewards are *not* scores. They never count toward a result and the
-  Agent never sees them.
+- **Limits**: how many turns and how long one attempt may take.
 
 One Environment can host many Tasks. The Wordle game hosts one Task per secret word.
-An Environment can also say which *secrets* it needs, such as an API key for a tool.
-Only the names are stored; the values are supplied when a run starts.
 
 See [Environments](../project/environments.md).
 
@@ -101,8 +116,8 @@ secret word (`initial_state`), and it can bring its own files, like the specific
 ticket a customer sent. Those files exist only for that attempt and are cleaned up
 afterwards.
 
-A good rule of thumb: how the world *works* belongs on the Environment; the facts of
-*this particular case* belong on the Task.
+A good rule of thumb: how the world *works* belongs on its Apps; the facts of *this
+particular case* belong on the Task.
 
 See [Tasks](../project/tasks.md).
 
@@ -136,8 +151,8 @@ Agents are not tied to one world. The same Agent can play Wordle in one run and 
 support tickets in the next. That makes comparisons fair: you are testing the Agent,
 not a version of it tailored to the test.
 
-An Agent only ever sees two things: the Task's instructions and the Environment's
-Observations. It never sees the score, the rewards, the hidden State, or anything the
+An Agent only ever sees two things: the Task's instructions and what its actions
+return. It never sees the score, the rewards, the hidden State, or anything the
 Verifier knows.
 
 Every model call goes through the Plural gateway, which bills it at the provider's
@@ -146,7 +161,8 @@ one for you: it mints a 30-day key for the account you approve it from. You can 
 create one in the web app under Keys, then store it with
 `plural auth login --api-key-stdin` or put it in the `PLURAL_API_KEY` environment
 variable. An Agent that never calls a model, like a scripted one, can declare
-`auth_mode: none` and needs no key at all.
+`auth_mode: none` and needs no key at all, and neither does an Agent that calls its
+own OpenAI-compatible endpoint.
 
 See [Agents](../project/agents.md).
 
