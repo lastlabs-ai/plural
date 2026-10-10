@@ -18,25 +18,9 @@ for each conversation, and a Benchmark you can run any model on.
 ## What your traces need to look like
 
 Each trace is one conversation, in the OpenAI chat format most agent frameworks
-already log:
+already log. Here a customer asks about an order, and the agent looks it up in the
+orders system before answering:
 
-```json
-{
-  "messages": [
-    {"role": "user", "content": "Where is order 42?"},
-    {"role": "assistant", "content": "It shipped on Monday."}
-  ]
-}
-```
-
-That's the whole requirement. Put your traces in a JSON array, one per line in a
-`.jsonl` file, or pretty-printed one after another; Plural reads all three.
-
-If your agent called tools, keep them in the same list: the assistant's `tool_calls`,
-each answered by a `tool` message with the same `tool_call_id`, exactly as OpenAI's
-API returns them.
-
-:::details A trace with a tool call
 ```json
 {
   "trace_id": "t-1",
@@ -47,20 +31,52 @@ API returns them.
       "content": null,
       "tool_calls": [
         {
-          "id": "c1",
+          "id": "call_1",
           "type": "function",
-          "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"42\"}"}
+          "function": {
+            "name": "orders__lookup_order",
+            "arguments": "{\"order_id\": \"42\"}"
+          }
         }
       ]
     },
-    {"role": "tool", "tool_call_id": "c1", "content": "Order 42 shipped on Monday."},
+    {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "{\"order_id\": \"42\", \"status\": \"shipped\", \"shipped_on\": \"Monday\"}"
+    },
     {"role": "assistant", "content": "Your order shipped on Monday."}
-  ],
+  ]
+}
+```
+
+Reading it top to bottom:
+
+1. The **user** message is the request. It becomes the Task's instructions.
+2. The **assistant** calls a tool. `orders__lookup_order` means the `lookup_order` tool
+   on the `orders` system; the part before the two underscores names the system.
+3. The **tool** message is what the system returned. Its `tool_call_id` matches the
+   call's `id`. This is the answer Plural replays when another model makes the same
+   call.
+4. The last **assistant** message is the agent's reply.
+
+Only `messages` is required, and a conversation with no tool calls works too. Put
+your traces in a JSON array, one per line in a `.jsonl` file, or pretty-printed one
+after another; Plural reads all three.
+
+:::details Include your tool definitions
+Add `tools`, the list your agent sent the model, and other models see your tools
+exactly as your agent did, including tools it never called:
+
+```json
+{
+  "trace_id": "t-1",
+  "messages": ["...as above..."],
   "tools": [
     {
       "type": "function",
       "function": {
-        "name": "lookup_order",
+        "name": "orders__lookup_order",
         "description": "Look up an order by its number.",
         "parameters": {
           "type": "object",
@@ -73,8 +89,12 @@ API returns them.
 }
 ```
 
-`tools` is optional. It is the list your agent sent the model, and it lets other
-models see your tools exactly as your agent did.
+From this trace, Plural drafts an App named `orders` that offers one tool:
+
+```text
+The Agent sees 1 tool:
+  lookup_order  Look up an order by its number.
+```
 :::
 
 :::details Every field Plural reads
@@ -95,10 +115,10 @@ In `messages`:
 :::
 
 :::details Your agent used several systems
-Prefix each tool's name with its system and two underscores, such as `crm__get_record`
-and `billing__issue_refund`. Plural then drafts one replay App per system, `crm` and
-`billing`, each answering only its own tools. Tools without a prefix go to one App
-named `tools`.
+Prefix each tool's name with its system and two underscores, as in
+`orders__lookup_order`, `crm__get_record`, and `billing__issue_refund`. Plural drafts
+one replay App per system, each answering only its own tools. Tools without a prefix
+go to one App named `tools`.
 :::
 
 :::details Your traces are in another format
