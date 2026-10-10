@@ -63,7 +63,9 @@ def socket_path(root: Path) -> str:
         The socket path for ``root``.
     """
     digest = hashlib.sha256(str(root).encode()).hexdigest()[:16]
-    return str(Path(tempfile.gettempdir()) / f"plural-apps-{digest}.sock")
+    # Not TMPDIR: the host and the Harness's action processes can see different values.
+    folder = "/tmp" if os.name == "posix" and os.path.isdir("/tmp") else tempfile.gettempdir()
+    return str(Path(folder) / f"plural-apps-{digest}.sock")
 
 
 # Wire format: one JSON object per line in each direction.

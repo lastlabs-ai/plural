@@ -21,7 +21,7 @@ from plural.common import (
 )
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
 from plural.execution import JobRunner, JobStore
-from plural.execution.engine import _bounded_artifact_evidence
+from plural.execution.engine import ExecutionFailure, _bounded_artifact_evidence
 from plural.jobs import BenchmarkJobSource, JobMode, JobSpec, RetryPolicy, TaskJobSource
 from plural.sandbox import (
     DownloadedFile,
@@ -543,9 +543,9 @@ async def test_missing_app_secrets_fail_before_a_runtime_starts(tmp_path: Path) 
         agents=(AgentBinding(agent=AgentDefinition(name="agent", model="test/model")),),
     )
     provider = FakeProvider("docker")
-    result = await JobRunner(spec, provider=provider, store=JobStore(tmp_path / "jobs")).run()
+    runner = JobRunner(spec, provider=provider, store=JobStore(tmp_path / "jobs"))
+    with pytest.raises(ExecutionFailure, match="App 'crm' needs CRM_TOKEN") as caught:
+        await runner.run()
 
-    assert result.status == "failed"
-    assert result.trials[0].error_code == ErrorCode.AUTHENTICATION
-    assert "App 'crm' needs CRM_TOKEN" in (result.trials[0].error_message or "")
+    assert caught.value.code == ErrorCode.AUTHENTICATION
     assert provider.created == []

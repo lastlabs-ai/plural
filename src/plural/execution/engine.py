@@ -26,9 +26,11 @@ from plural.evidence import first_json_mapping
 from plural.execution.apps import (
     WORKSPACE,
     app_secret_values,
+    describe_missing,
     environment_payload,
     finish_host,
     host_files,
+    missing_app_secrets,
     query_host,
     start_host,
     stop_host,
@@ -1517,7 +1519,18 @@ class JobRunner:
         await asyncio.gather(*(trial.cancel() for trial in tuple(self._trials)))
 
     async def preflight(self) -> None:
-        """Validate every Environment/Harness/Verifier runtime before launching."""
+        """Validate every Environment/Harness/Verifier runtime before launching.
+
+        Raises:
+            ExecutionFailure: When any Environment's Apps are missing secrets.
+        """
+        missing: dict[str, list[str]] = {}
+        for task in self.spec.tasks:
+            for app, names in missing_app_secrets(task.environment, self.environ).items():
+                missing.setdefault(app, [])
+                missing[app].extend(name for name in names if name not in missing[app])
+        if missing:
+            raise ExecutionFailure(ErrorCode.AUTHENTICATION, describe_missing(missing))
         checked: set[tuple[str, str, str]] = set()
         for task in self.spec.tasks:
             for agent in self.spec.agents:
