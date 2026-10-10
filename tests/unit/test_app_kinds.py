@@ -362,6 +362,6 @@ def test_environment_yaml_lists_apps_of_every_connected_kind(
     assert result.exit_code == 0, result.output
     summary = {item["name"]: item for item in json.loads(result.output)["apps"]}
     assert summary["crm"]["secrets"] == [
-        {"name": "CRM_EXPORT_TOKEN", "required": True, "set": False}
+        {"name": "CRM_EXPORT_TOKEN", "required": True, "set": False, "source": None}
     ]
     assert {"name": "getOrder", "mutates_state": False} in summary["orders"]["actions"]

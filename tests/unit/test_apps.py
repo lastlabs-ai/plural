@@ -244,6 +244,15 @@ def test_mcp_app_discovers_tools_and_read_only_hints() -> None:
         environment.close()
 
 
+def test_built_in_kinds_do_not_describe_an_app_with_their_docstring() -> None:
+    assert App.mcp("crm", url="https://example.com/mcp", actions=[]).description == ""
+
+    class Desk(App[Any]):
+        """The support desk."""
+
+    assert Desk().description == "The support desk."
+
+
 def test_mcp_tool_filters() -> None:
     environment = Environment(
         apps=[_stdio_app(tools=["get_record", "create_record"], exclude=["create_record"])],
@@ -269,6 +278,70 @@ def test_mcp_episode_errors_are_feedback() -> None:
         assert observation == {"records": [{"id": "1", "name": "Acme"}]}
     finally:
         environment.close()
+
+
+def test_a_project_secret_fills_a_setting_you_have_not_exported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    from plural.apps.mcp import expand, use_secret_source
+    from plural.cli import secret_commands
+
+    calls: list[list[str]] = []
+
+    class Secrets:
+        def resolve(self, names: list[str]) -> dict[str, Any]:
+            calls.append(names)
+            return {"environ": {"CRM_TOKEN": "stored"}} if names == ["CRM_TOKEN"] else {}
+
+    class Studio:
+        secrets = Secrets()
+
+    monkeypatch.setattr(secret_commands, "_project_studio", lambda: (Studio(), "demo"))
+    monkeypatch.delenv("CRM_TOKEN", raising=False)
+    use_secret_source(secret_commands.project_secret_source())
+    try:
+        assert expand("Bearer ${CRM_TOKEN}") == "Bearer stored"
+        assert expand("${CRM_TOKEN}") == "stored"
+        assert calls == [["CRM_TOKEN"]]
+        assert "CRM_TOKEN" not in os.environ
+        with pytest.raises(MCPError, match="plural secret set OTHER_TOKEN"):
+            expand("${OTHER_TOKEN}")
+        assert expand("${CRM_TOKEN}", {"CRM_TOKEN": "exported"}) == "exported"
+
+        def unreachable() -> Any:
+            raise httpx.ConnectError("refused")
+
+        monkeypatch.setattr(secret_commands, "_project_studio", unreachable)
+        use_secret_source(secret_commands.project_secret_source())
+        with pytest.raises(MCPError, match="CRM_TOKEN is not set"):
+            expand("${CRM_TOKEN}")
+    finally:
+        use_secret_source(None)
+
+
+def test_mcp_command_server_gets_an_empty_folder_each_episode(tmp_path: Path) -> None:
+    def episode() -> tuple[Any, Path]:
+        environment = Environment(
+            apps=[_stdio_app(env={"RECORDS_FILE": "${PLURAL_APP_DIR}/records.json"})],
+            runtime=Runtime.local(),
+        )
+        try:
+            environment.reset()
+            before, *_ = environment.step("list_records")
+            environment.step("create_record", name="Acme")
+            folder = Path(environment.apps[0]._environ()["PLURAL_APP_DIR"])
+            assert (folder / "records.json").exists()
+        finally:
+            environment.close()
+        return before, folder
+
+    first, first_folder = episode()
+    second, second_folder = episode()
+    assert first == second == {"records": []}
+    assert first_folder != second_folder
+    assert not first_folder.exists() and not second_folder.exists()
 
 
 def test_mcp_server_crash_reports_its_output(tmp_path: Path) -> None:
@@ -373,6 +446,11 @@ class Wordle(App[Board]):
     def terminated(self) -> bool:
         return self.state.solved
 
+    def close(self) -> None:
+        import time
+        time.sleep(0.2)
+        (self.workspace / "closed").write_text("yes")
+
 
 class Scored(Environment):
     def on_step(self, call, result, apps):
@@ -431,6 +509,12 @@ def test_app_host_keeps_state_across_action_commands(workspace: Path) -> None:
     assert report["wordle"]["final"]["solved"] is True
     assert report["crm"]["control"] == "owned"
     assert (workspace / ".plural/apps/wordle/state.json").is_file()
+
+
+def test_app_host_closes_apps_before_answering_stop(workspace: Path) -> None:
+    daemon.call("reset", root=workspace)
+    daemon.call("stop", root=workspace)
+    assert (workspace / "closed").read_text() == "yes"
 
 
 def test_app_host_refuses_queries_that_change_state(workspace: Path) -> None:

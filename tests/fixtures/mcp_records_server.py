@@ -2,7 +2,8 @@
 
 Run it over stdio (the default) or Streamable HTTP with ``--http PORT``. With
 ``--require-token NAME`` the HTTP server demands ``Authorization: Bearer
-$NAME``. ``RECORDS_SEED`` (JSON list) preloads records.
+$NAME``. ``RECORDS_SEED`` (JSON list) preloads records. ``RECORDS_FILE`` makes
+the store persist to that file, as many real servers do.
 """
 
 from __future__ import annotations
@@ -17,6 +18,10 @@ from typing import Any
 RECORDS: dict[str, dict[str, Any]] = {}
 for _item in json.loads(os.environ.get("RECORDS_SEED") or "[]"):
     RECORDS[str(_item["id"])] = _item
+STORE = os.environ.get("RECORDS_FILE")
+if STORE and os.path.exists(STORE):
+    with open(STORE, encoding="utf-8") as _file:
+        RECORDS.update(json.load(_file))
 
 TOOLS = [
     {
@@ -52,6 +57,9 @@ def call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "create_record":
         ident = str(len(RECORDS) + 1)
         RECORDS[ident] = {"id": ident, "name": arguments["name"]}
+        if STORE:
+            with open(STORE, "w", encoding="utf-8") as file:
+                json.dump(RECORDS, file)
         return {"content": [{"type": "text", "text": f"created record {ident}"}]}
     if name == "get_record":
         record = RECORDS.get(str(arguments.get("id")))

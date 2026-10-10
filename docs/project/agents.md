@@ -210,7 +210,8 @@ instructions: Follow the support policy and finish the ticket using the availabl
 - `model` is whatever name your server expects. It isn't checked against the catalog.
 - `endpoint` is the server's base URL; Plural calls `{endpoint}/chat/completions`.
 - `endpoint_key` is optional. It names the secret holding the server's API key, never
-  the key itself. Export it before `plural run`; it is sent only as the request's
+  the key itself. Export it, or store it in the hosted project with
+  `plural secret set NAME`, before `plural run`. It is sent only as the request's
   bearer token, and a missing value stops the run before it starts.
 - An endpoint Agent uses the native Harness, and can't set `harness`, `provider`,
   `fallback_models`, or `secret_names`.

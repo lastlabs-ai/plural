@@ -145,7 +145,9 @@ class App(Generic[StateT]):
     ) -> None:
         self.name = name or type(self).name or _snake(type(self).__name__)
         if description is None:
-            own_doc = type(self).__dict__.get("__doc__")
+            # The built-in kinds' docstrings document Plural, not the user's App.
+            builtin = type(self).__module__.startswith("plural.")
+            own_doc = None if builtin else type(self).__dict__.get("__doc__")
             description = type(self).description or (inspect.cleandoc(own_doc) if own_doc else "")
         self.description = description
         declared = type(self).secrets if secrets is None else tuple(secrets)

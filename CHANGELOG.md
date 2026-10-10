@@ -28,6 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** a Task's `initial_state` is keyed by App name. With one App it may still give that App's fields directly.
 - Native actions are now called actions; the page moved to `concepts/actions`.
 - A crashed MCP server's error includes the end of its output and the path of its log.
+- A command MCP server gets a fresh, empty folder for each episode as `PLURAL_APP_DIR` (also its `TMPDIR`). Point the server's data file there, as in `MEMORY_FILE_PATH: ${PLURAL_APP_DIR}/memory.jsonl`, so one Trial's data never reaches the next.
+- `plural env validate`, `plural run`, and the `from-*` commands use a secret stored with `plural secret set` when you have not exported it, including to start an App's server, and say where each secret comes from.
+- `plural benchmark validate` says when a Benchmark is not reproducible and which live Apps make it so.
+- `plural job show` prints why each failed Trial failed.
+- A Verifier that exits with an error reports the end of its error output.
+
+### Fixed
+
+- Model-judge Verifiers (`kind: agent`) failed on every run: the judge read a field Verifiers no longer have, and its structured-output schema was one OpenAI rejects.
+- `Job(..., client=Client())` with `PLURAL_API_URL` set sent Harness model calls to the API root instead of its `/v1` gateway.
+- Applying a hindsight rewarder again no longer duplicates its records, locally or in the hosted ledger; each record's id comes from the Trial, rewarder, version, and target. `plural rewards apply` no longer warns about the hosted project for a Job that was never pushed.
+- `plural run` with an endpoint Agent no longer asks for a Plural API key, and a missing `endpoint_key` value stops the run before it starts.
+- An App's `close()` runs before the App host answers `stop`, so it is no longer cut off when the Runtime is torn down.
+- Built-in App kinds no longer use their own class docstring as an App's description.
 
 ## [0.20.1] - 2026-10-07
 

@@ -3,8 +3,11 @@
 An MCP App turns a server's tools into actions and each tool result into the
 observation for that step. It does not model the server's internals. A server
 started with ``command`` runs inside the Runtime, so every Trial starts it
-fresh and the App is ``owned``. A server reached by ``url`` lives elsewhere: it
-is ``sandboxed`` when you give it a ``reset`` hook and ``live`` otherwise.
+fresh and the App is ``owned``. Each episode gives it a new empty folder,
+``${PLURAL_APP_DIR}``, deleted when the episode ends; point the server's storage
+there so nothing it saves reaches the next Trial. A server reached by ``url``
+lives elsewhere: it is ``sandboxed`` when you give it a ``reset`` hook and
+``live`` otherwise.
 
 Settings that hold secrets reference them as ``${NAME}``; list each name in
 ``secrets`` so the Job supplies it::
@@ -20,15 +23,18 @@ Settings that hold secrets reference them as ``${NAME}``; list each name in
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import json
 import os
 import re
 import select
 import shlex
+import shutil
 import subprocess
+import tempfile
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -39,10 +45,26 @@ from plural.environments.types import State
 PROTOCOL_VERSION = "2025-06-18"
 CLIENT_INFO = {"name": "plural", "version": "1"}
 _VARIABLE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
+APP_DIR = "PLURAL_APP_DIR"
+"""The episode's empty folder for a command server. Not a secret, so never listed."""
 
 
 class MCPError(RuntimeError):
     """The MCP server failed or answered with a protocol error."""
+
+
+_secret_source: Callable[[str], str | None] | None = None
+
+
+def use_secret_source(source: Callable[[str], str | None] | None) -> None:
+    """Look up ``${NAME}`` values the process environment lacks, such as project secrets.
+
+    The CLI installs one so an App can reach its server with a secret stored in
+    the hosted project. A value found this way fills one setting; it is never
+    added to the process environment.
+    """
+    global _secret_source  # noqa: PLW0603 - one source per process
+    _secret_source = source
 
 
 def expand(value: str, environ: Mapping[str, str] | None = None) -> str:
@@ -59,10 +81,12 @@ def expand(value: str, environ: Mapping[str, str] | None = None) -> str:
     def replace(match: re.Match[str]) -> str:
         name = match.group(1)
         found = source.get(name)
+        if found is None and _secret_source is not None and name != APP_DIR:
+            found = _secret_source(name)
         if found is None:
             raise MCPError(
-                f"{name} is not set. Export it to reach the server from here. In a Job, "
-                "list it in the App's secrets and the Job supplies it."
+                f"{name} is not set. Export it, or store it in the hosted project with "
+                f"`plural secret set {name}`."
             )
         return found
 
@@ -78,7 +102,7 @@ def referenced_variables(values: Iterable[str]) -> set[str]:
     found: set[str] = set()
     for value in values:
         found.update(_VARIABLE.findall(value))
-    return found
+    return found - {APP_DIR}
 
 
 class _Stdio:
@@ -412,7 +436,9 @@ class MCPApp(App[State]):
         url: Reach a server over Streamable HTTP instead.
         headers: HTTP headers; values may reference ``${SECRET}``.
         env: Environment variables for a command server; values may
-            reference ``${SECRET}``.
+            reference ``${SECRET}`` and ``${PLURAL_APP_DIR}``, the episode's
+            empty folder, such as ``{"MEMORY_FILE_PATH":
+            "${PLURAL_APP_DIR}/memory.jsonl"}``.
         cwd: Working folder for a command server, relative to the workspace.
         tools: Only offer these tools. Default: every tool.
         exclude: Never offer these tools.
@@ -481,6 +507,7 @@ class MCPApp(App[State]):
             else None
         )
         self._client: MCPClient | None = None
+        self._app_dir: Path | None = None
         undeclared = sorted(
             referenced_variables([*self.headers.values(), *self.env.values()])
             - {SecretReference.model_validate(item).name for item in self.secrets}
@@ -502,11 +529,15 @@ class MCPApp(App[State]):
         if self._client is None:
             log = self.workspace / ".plural" / "apps" / self.name / "server.log"
             cwd = str((self.workspace / self.cwd).resolve()) if self.cwd else str(self.workspace)
+            environ = self._environ()
+            env = {key: expand(value, environ) for key, value in self.env.items()}
+            if self.command:
+                env = {APP_DIR: environ[APP_DIR], "TMPDIR": environ[APP_DIR], **env}
             self._client = MCPClient(
                 command=self.command or None,
                 url=self.url,
                 headers={key: expand(value) for key, value in self.headers.items()},
-                env={key: expand(value) for key, value in self.env.items()},
+                env=env,
                 cwd=cwd if self.command else None,
                 log=log if self.command else None,
                 timeout_seconds=self.timeout_seconds,
@@ -624,16 +655,35 @@ class MCPApp(App[State]):
         return bool(self.command)
 
     def close(self) -> None:
-        """Close the MCP session."""
+        """Close the MCP session and delete the episode's folder."""
         if self._client is not None:
             self._client.close()
             self._client = None
+        if self._app_dir is not None:
+            shutil.rmtree(self._app_dir, ignore_errors=True)
+            self._app_dir = None
+
+    def _environ(self) -> dict[str, str]:
+        """The process environment, plus ``PLURAL_APP_DIR`` for a command server.
+
+        Returns:
+            A copy of the environment for the server and its hooks.
+        """
+        environ = dict(os.environ)
+        if self.command:
+            if self._app_dir is None:
+                self._app_dir = Path(tempfile.mkdtemp(prefix=f"plural-{self.name}-"))
+                # Listing tools opens a server without an episode, and nothing closes it.
+                atexit.register(shutil.rmtree, self._app_dir, ignore_errors=True)
+            environ[APP_DIR] = str(self._app_dir)
+        return environ
 
     def _run(self, command: Sequence[str], *, stdin: str) -> str:
         completed = subprocess.run(  # noqa: S603 - the App's declared hook
             list(command),
             input=stdin.encode(),
             capture_output=True,
+            env=self._environ(),
             cwd=str(self.workspace),
             timeout=self.timeout_seconds,
             check=False,
@@ -655,4 +705,13 @@ class MCPApp(App[State]):
         return {}
 
 
-__all__ = ["MCPApp", "MCPClient", "MCPError", "expand", "tool_action", "tool_text"]
+__all__ = [
+    "APP_DIR",
+    "MCPApp",
+    "MCPClient",
+    "MCPError",
+    "expand",
+    "tool_action",
+    "tool_text",
+    "use_secret_source",
+]

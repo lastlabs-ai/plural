@@ -58,7 +58,9 @@ def test_from_mcp_discovers_the_servers_tools(
     [records] = drafted["apps"]
     assert records["name"] == "records_desk"
     assert [item["name"] for item in records["actions"]] == ["get_record", "list_records"]
-    assert records["secrets"] == [{"name": "RECORDS_TOKEN", "required": True, "set": True}]
+    assert records["secrets"] == [
+        {"name": "RECORDS_TOKEN", "required": True, "set": True, "source": "shell"}
+    ]
     assert "records-secret" not in output
     manifest = yaml.safe_load(
         (project.root / "environments/records-desk/environment.yaml").read_text()

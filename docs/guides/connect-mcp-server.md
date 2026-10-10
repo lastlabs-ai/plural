@@ -55,6 +55,23 @@ limits:
   max_seconds: 600
 ```
 
+This server saves its graph to a file inside its own package, so every Trial would
+see what earlier Trials stored. Point it at the episode's folder instead. Plural gives
+each server started with `command` a new empty folder every episode, available as
+`${PLURAL_APP_DIR}`, and deletes it when the episode ends:
+
+```yaml
+apps:
+  - name: memory
+    mcp:
+      command: [npx, -y, "@modelcontextprotocol/server-memory"]
+      env:
+        MEMORY_FILE_PATH: ${PLURAL_APP_DIR}/memory.jsonl
+```
+
+Check the server's README for where it keeps data: a file path, a database URL, or a
+cache folder. `TMPDIR` already points into the folder.
+
 `[read-only]` marks tools whose `readOnlyHint` annotation says they change nothing.
 Plural treats every other tool as one that changes state, which matters for
 [control levels](#5-make-a-remote-server-safe-to-benchmark).
@@ -144,8 +161,9 @@ the project, shown to the Agent, or given to the Agent's Harness.
 
 ## 5. Make a remote server safe to benchmark
 
-A server started with `command` runs inside the Runtime and starts fresh for every
-Trial, so it is `owned` and can be used anywhere.
+A server started with `command` runs inside the Runtime, and Plural starts a new
+process for every Trial, so it is `owned` and can be used anywhere. It starts fresh
+only if it keeps its data in `${PLURAL_APP_DIR}`, as in [step 1](#1-draft-the-environment).
 
 A remote server is shared. If one Trial creates a record, the next Trial sees it, and
 scores stop being comparable. With no way to reset it, the App is `live`:
@@ -290,7 +308,7 @@ environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local
 | `command` | Start the server inside the Runtime. A list, or one string split like a shell would. |
 | `url` | Reach a server over Streamable HTTP instead. Give exactly one of `command` and `url`. |
 | `headers` | HTTP headers for a `url` server. Values may contain `${SECRET}`. |
-| `env` | Environment variables for a `command` server. Values may contain `${SECRET}`. |
+| `env` | Environment variables for a `command` server. Values may contain `${SECRET}`, and `${PLURAL_APP_DIR}`, the episode's empty folder. |
 | `cwd` | Working folder for a `command` server, relative to the Environment. |
 | `tools` | Offer only these tools. |
 | `exclude` | Never offer these tools. |

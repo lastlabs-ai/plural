@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typer
 
+from plural.apps.mcp import use_secret_source
 from plural.cli.auth_commands import auth_app
 from plural.cli.models_commands import models_app
 from plural.cli.project_commands import project_app
@@ -11,7 +12,7 @@ from plural.cli.resource_commands import resource_app
 from plural.cli.reward_commands import rewards_app
 from plural.cli.run_commands import job_app, review_app, run, trial_app
 from plural.cli.runtime_commands import runtime_app
-from plural.cli.secret_commands import secret_app
+from plural.cli.secret_commands import project_secret_source, secret_app
 from plural.cli.session import session_app
 from plural.project import KINDS
 
@@ -43,6 +44,7 @@ app.add_typer(session_app, name="session")
 
 def main() -> None:
     """Run the CLI."""
+    use_secret_source(project_secret_source())
     app()
 
 

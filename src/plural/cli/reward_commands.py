@@ -26,7 +26,7 @@ from plural.cli.common import (
 from plural.errors import PluralError
 from plural.jobs import TrialResult
 from plural.project import ProjectError, Workspace
-from plural.project.runs import find_local_trial, finished_local_job
+from plural.project.runs import RUN_RECORD, find_local_trial, finished_local_job
 from plural.rewards import (
     LEDGER_FILE,
     RewardRecord,
@@ -88,7 +88,8 @@ def _publish(space: Workspace, trial_dirs: list[Path]) -> tuple[int, str | None]
         pushed = {
             job_id: record.hosted_job_id
             for job_id in by_job
-            if (record := finished_local_job(space, job_id)).hosted_job_id
+            if (space.project.jobs_dir / job_id / RUN_RECORD).is_file()
+            and (record := finished_local_job(space, job_id)).hosted_job_id
         }
         if not pushed:
             return 0, None
@@ -128,8 +129,8 @@ def rewards_apply(
         view = trial_from_artifacts(artifacts, score=_score(trial_dir))
         view.trial_id = trial_dir.name
         records = function.apply(view)
-        append_ledger(artifacts / LEDGER_FILE, records)
-        applied.append({"trial_id": trial_dir.name, "records": len(records)})
+        added = append_ledger(artifacts / LEDGER_FILE, records)
+        applied.append({"trial_id": trial_dir.name, "records": len(records), "new_records": added})
     hosted, problem = _publish(space, _trial_dirs(space, trial, job))
     payload = {
         "rewarder": function.name,
@@ -140,7 +141,11 @@ def rewards_apply(
 
     def text() -> None:
         for item in applied:
-            typer.echo(f"{item['trial_id']}: {item['records']} reward(s) from {function.name}")
+            known = item["records"] - item["new_records"]
+            typer.echo(
+                f"{item['trial_id']}: {item['records']} reward(s) from {function.name}"
+                + (f", {known} already in its ledger" if known else "")
+            )
         if hosted:
             typer.echo(f"Recorded {hosted} new reward(s) in the hosted project.")
         if problem:

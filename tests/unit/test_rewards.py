@@ -115,6 +115,25 @@ def test_the_ledger_is_append_only(tmp_path: Path) -> None:
     assert [item.value for item in read_ledger(path)] == [0.25, 0.25, 9.0]
 
 
+def test_applying_a_hindsight_rewarder_again_adds_nothing(tmp_path: Path) -> None:
+    @hindsight_rewarder(version="1")
+    def solved(trial: HindsightTrial) -> Credit:
+        return trial.credit("e3", 1.0)
+
+    @hindsight_rewarder(version="2")
+    def solved_v2(trial: HindsightTrial) -> Credit:
+        return trial.credit("e3", 0.5)
+
+    path = tmp_path / LEDGER_FILE
+    trial = HindsightTrial(EPISODE, score=1.0, trial_id="trl_a")
+    assert append_ledger(path, solved.apply(trial)) == 1
+    assert append_ledger(path, solved.apply(trial)) == 0
+    assert append_ledger(path, solved_v2.apply(trial)) == 1
+    other = HindsightTrial(EPISODE, score=1.0, trial_id="trl_b")
+    assert solved.apply(other)[0].record_id != solved.apply(trial)[0].record_id
+    assert [(item.version, item.value) for item in read_ledger(path)] == [("1", 1.0), ("2", 0.5)]
+
+
 def _tito(step: int, text: str, offsets: list[tuple[int, int]]) -> dict[str, Any]:
     size = len(offsets)
     return TITORecord(

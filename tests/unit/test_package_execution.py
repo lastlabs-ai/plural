@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +25,11 @@ from plural.common import (
 )
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
 from plural.execution import JobRunner, JobStore
-from plural.execution.engine import ExecutionFailure, _bounded_artifact_evidence
+from plural.execution.engine import (
+    _AGENT_VERIFIER_SCRIPT,
+    ExecutionFailure,
+    _bounded_artifact_evidence,
+)
 from plural.jobs import BenchmarkJobSource, JobMode, JobSpec, RetryPolicy, TaskJobSource
 from plural.sandbox import (
     DownloadedFile,
@@ -192,6 +200,76 @@ async def test_agent_verifier_scores_configured_criteria_with_contracted_evidenc
     execution = store.trial_path(spec.plan().trials[0]) / "executions/0"
     assert "judge-secret" not in (execution / "logs/verifier.stdout.log").read_text()
     assert "***" in (execution / "logs/verifier.stdout.log").read_text()
+
+
+def _strict_schema_errors(schema: dict[str, Any], path: str = "$") -> list[str]:
+    errors: list[str] = []
+    if schema.get("type") == "object":
+        properties = schema.get("properties", {})
+        if not properties or set(schema.get("required", ())) != set(properties):
+            errors.append(f"{path} must list every property as required")
+        if schema.get("additionalProperties") is not False:
+            errors.append(f"{path} must set additionalProperties to false")
+        for name, child in properties.items():
+            errors.extend(_strict_schema_errors(child, f"{path}.{name}"))
+    if schema.get("type") == "array":
+        errors.extend(_strict_schema_errors(schema["items"], f"{path}[]"))
+    return errors
+
+
+def test_agent_verifier_script_sends_a_strict_schema_and_writes_its_output(
+    tmp_path: Path,
+) -> None:
+    requests: list[dict[str, Any]] = []
+
+    class Gateway(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append(body)
+            errors = _strict_schema_errors(body["response_format"]["json_schema"]["schema"])
+            if errors:
+                payload, status = {"error": {"message": "; ".join(errors)}}, 400
+            else:
+                output = {"score": 1, "scores": {"resolved": 1}, "evidence": ["ok"], "feedback": ""}
+                payload = {"choices": [{"message": {"content": json.dumps(output)}}]}
+                status = 200
+            data = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Gateway)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    verifier = AgentVerifier(
+        name="judge",
+        model="openai/gpt-5.6-luna",
+        instructions="Judge the episode.",
+        criteria=(RubricCriterion(name="resolved", description="0 or 1."),),
+    )
+    (tmp_path / ".plural").mkdir()
+    (tmp_path / ".plural/verifier-input.json").write_text(
+        json.dumps({"agent_verifier": verifier.model_dump(mode="json"), "judge_input": {}})
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", _AGENT_VERIFIER_SCRIPT],
+            cwd=tmp_path,
+            env={"PLURAL_GATEWAY_URL": f"http://127.0.0.1:{server.server_port}"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        server.shutdown()
+
+    assert completed.returncode == 0, completed.stderr
+    assert len(requests) == 1
+    written = json.loads((tmp_path / "agent-verifier-result.json").read_text())
+    assert written["scores"] == {"resolved": 1}
 
 
 async def test_cross_environment_scheduler_uses_each_runtime_and_bounds_concurrency(

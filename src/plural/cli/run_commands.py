@@ -27,6 +27,7 @@ from plural.cli.common import (
     signed_in,
     workspace,
 )
+from plural.cli.runtime_commands import _project_studio
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.jobs import JobResult, JobSpec, TrialResult, TrialSpec
@@ -776,8 +777,9 @@ def _project_secrets(
     wanted = [name for name in _needed_secrets(spec) if not environ.get(name)]
     if not wanted:
         return environ
-    studio = _hosted_studio(space, required=False)
-    if studio is None:
+    try:
+        studio, _ = _project_studio()
+    except ProjectError:
         return environ
     try:
         grant = studio.secrets.resolve(wanted)
@@ -978,6 +980,12 @@ def _print_job(payload: dict[str, Any]) -> None:
             ),
             ("trial", "task", "status", "score"),
         )
+    failed = [item for item in trials if item.get("error")]
+    for item in failed:
+        reason = str(item["error"]).strip().splitlines()[0][:200]
+        typer.echo(f"  {item['trial_id']} failed: {reason}")
+    if failed:
+        typer.echo(f"Details: plural trial show {failed[0]['trial_id']}")
 
 
 def _print_trial(payload: dict[str, Any]) -> None:

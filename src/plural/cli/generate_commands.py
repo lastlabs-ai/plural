@@ -14,6 +14,7 @@ from typing import Any
 import typer
 
 from plural.cli.common import JSON_OPTION, emit, handled, relative, workspace
+from plural.cli.secret_commands import secret_status
 from plural.project import ProjectError, ResourceRef, Workspace, check_name
 from plural.project.generators import (
     DEFAULT_JUDGE_MODEL,
@@ -81,7 +82,7 @@ def _write(generated: Generated, *, as_json: bool) -> None:
                 marker = "" if action["mutates_state"] else "  [read-only]"
                 typer.echo(f"  {action['name']}{marker}")
             for secret in app["secrets"]:
-                status = "set" if secret["set"] else "NOT SET: export it before a run"
+                status = secret_status(secret)
                 typer.echo(f"  secret {secret['name']}: {status}")
         if problem:
             typer.echo(

@@ -1261,9 +1261,11 @@ class Trial:
             if execution.timed_out:
                 raise ExecutionFailure(ErrorCode.TIMEOUT, f"Verifier {name!r} timed out")
             if execution.exit_code != 0:
+                detail = verifier_stderr.decode(errors="replace").strip()[-2000:]
                 raise ExecutionFailure(
                     ErrorCode.VERIFIER_FAILED,
-                    f"Verifier {name!r} exited with code {execution.exit_code}",
+                    f"Verifier {name!r} exited with code {execution.exit_code}"
+                    + (f": {detail}" if detail else ""),
                 )
             files = await provider.download_files(handle, (result_path,))
             if len(files) != 1:
@@ -1899,7 +1901,7 @@ class JobRunner:
 
 
 _AGENT_VERIFIER_SCRIPT = r"""
-import json, math, os, urllib.request
+import json, math, os, urllib.error, urllib.request
 data = json.load(open(".plural/verifier-input.json"))
 spec = data["agent_verifier"]
 base = (os.getenv("PLURAL_GATEWAY_URL") or "").rstrip("/")
@@ -1909,7 +1911,6 @@ judge_input = data["judge_input"]
 prompt = json.dumps({
     "instructions": spec["instructions"],
     "criteria": spec["criteria"],
-    "evidence_contract": spec["evidence"],
     "evidence": judge_input,
     "output_contract": {
         "score": "finite number",
@@ -1918,11 +1919,17 @@ prompt = json.dumps({
         "feedback": "string",
     },
 })
+names = [criterion["name"] for criterion in spec["criteria"]]
 schema = {
     "type": "object",
     "properties": {
         "score": {"type": "number"},
-        "scores": {"type": "object", "additionalProperties": {"type": "number"}},
+        "scores": {
+            "type": "object",
+            "properties": {name: {"type": "number"} for name in names},
+            "required": names,
+            "additionalProperties": False,
+        },
         "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1},
         "feedback": {"type": "string"},
     },
@@ -1942,7 +1949,10 @@ key = os.getenv("PLURAL_API_KEY")
 if key: headers["Authorization"] = "Bearer " + key
 if os.getenv("PLURAL_PROJECT_ID"): headers["X-Plural-Project"] = os.getenv("PLURAL_PROJECT_ID")
 req = urllib.request.Request(base + "/chat/completions", data=body, headers=headers)
-response = json.load(urllib.request.urlopen(req))
+try:
+    response = json.load(urllib.request.urlopen(req))
+except urllib.error.HTTPError as exc:
+    raise SystemExit(f"AgentVerifier model call failed ({exc.code}): {exc.read()[:1000]!r}")
 content = response["choices"][0]["message"]["content"]
 result = json.loads(content)
 def finite_number(value):

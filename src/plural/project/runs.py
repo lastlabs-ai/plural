@@ -910,7 +910,16 @@ def _execute(
             missing[app].extend(name for name in names if name not in missing[app])
     if missing:
         raise ProjectError(describe_missing(missing))
-    needs_model = any(binding.auth_mode != "none" for binding in spec.agents)
+    for binding in spec.agents:
+        key = binding.agent.endpoint_key
+        if key and not environ.get(key):
+            raise ProjectError(
+                f"Agent {binding.agent.name!r} needs {key} for its endpoint. Export it, or "
+                f"store it in the hosted project with `plural secret set {key}`."
+            )
+    needs_model = any(
+        binding.auth_mode != "none" and binding.agent.endpoint is None for binding in spec.agents
+    )
     if needs_model and not environ.get("PLURAL_API_KEY"):
         raise ProjectError(
             "This run calls a live model, which goes through the Plural gateway, and no "

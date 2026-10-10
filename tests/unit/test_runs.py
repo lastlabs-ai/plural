@@ -107,6 +107,28 @@ def test_dry_run_reports_the_plan_without_creating_a_job(project: Project) -> No
     assert not project.jobs_dir.exists() or not any(project.jobs_dir.iterdir())
 
 
+def test_an_endpoint_agent_needs_its_own_key_and_no_plural_key(
+    project: Project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent = project.root / "agents/tuned/agent.yaml"
+    agent.parent.mkdir(parents=True)
+    agent.write_text(
+        "name: tuned\nversion: 0.1.0\nmodel: tuned-v1\n"
+        "endpoint: http://127.0.0.1:9/v1\nendpoint_key: TUNED_KEY\n"
+    )
+    monkeypatch.delenv("TUNED_KEY", raising=False)
+    code, output, _ = cli("run", "--task", "refund", "--agent", "tuned")
+    assert code == 1
+    assert "needs TUNED_KEY for its endpoint" in output
+    assert not project.jobs_dir.exists() or not any(project.jobs_dir.iterdir())
+
+    monkeypatch.setenv("TUNED_KEY", "sk-tuned")
+    code, output, _ = cli("run", "--task", "refund", "--agent", "tuned")
+    assert "Plural API key" not in output
+    assert "sk-tuned" not in output
+    assert any(project.jobs_dir.iterdir())
+
+
 def test_local_run_records_a_job_and_trials_can_be_inspected(project: Project) -> None:
     code, output, job = cli("run", "--task", "refund", "--agent", "baseline", "--json")
     assert code == 0, output

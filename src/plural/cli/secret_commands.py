@@ -10,12 +10,17 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable, Mapping
+from typing import Any
 
+import httpx
 import typer
 
 from plural.apps.definition import SecretReference
 from plural.cli.common import JSON_OPTION, emit, fail, handled, muted, rows, success
 from plural.cli.runtime_commands import _project_studio
+from plural.errors import PluralError
+from plural.project import ProjectError
 
 secret_app = typer.Typer(
     help=(
@@ -105,3 +110,55 @@ def secret_delete(
 
 
 __all__ = ["secret_app"]
+
+
+def project_secret_source() -> Callable[[str], str | None]:
+    """Look up a secret you have not exported in the hosted project, once per name.
+
+    ``plural env validate`` and the rest load an App by reaching its server,
+    which can need a secret. Without a hosted project, or when you may not read
+    its secrets, the lookup finds nothing and the App reports what is missing.
+    """
+    found: dict[str, str | None] = {}
+
+    def lookup(name: str) -> str | None:
+        if name not in found:
+            found[name] = None
+            try:
+                studio, _ = _project_studio()
+                grant = studio.secrets.resolve([name])
+            except (PluralError, ProjectError, OSError, httpx.HTTPError):
+                return None
+            value = (grant.get("environ") or {}).get(name)
+            if value:
+                found[name] = str(value)
+                typer.echo(muted(f"Using project secret {name}."), err=True)
+        return found[name]
+
+    return lookup
+
+
+def project_secret_names() -> set[str]:
+    """Names set in the hosted project, or none without one you may read.
+
+    Returns:
+        The stored names; never their values.
+    """
+    try:
+        studio, _ = _project_studio()
+        return {str(item["name"]) for item in studio.secrets.list()}
+    except (PluralError, ProjectError, OSError, httpx.HTTPError):
+        return set()
+
+
+def secret_status(secret: Mapping[str, Any]) -> str:
+    """How a run gets one App secret, for ``validate`` and the ``from-*`` commands.
+
+    Returns:
+        A short phrase naming where the value comes from, or how to supply it.
+    """
+    if secret.get("source") == "shell":
+        return "set in your shell"
+    if secret.get("source") == "project":
+        return "set in the hosted project"
+    return f"NOT SET: export it, or run `plural secret set {secret['name']}`"

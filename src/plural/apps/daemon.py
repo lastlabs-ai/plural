@@ -176,6 +176,7 @@ def serve(root: Path) -> None:
     server.listen(8)
     server.settimeout(1.0)
     last = time.monotonic()
+    closed = False
     try:
         while time.monotonic() - last < IDLE_SECONDS and root.exists():
             try:
@@ -195,12 +196,17 @@ def serve(root: Path) -> None:
                         "kind": type(exc).__name__,
                         "traceback": traceback.format_exc()[-4000:],
                     }
+                if stop:
+                    # The caller destroys the Runtime once it has the reply.
+                    host.close()
+                    closed = True
                 with contextlib.suppress(OSError):
                     _send(connection, response)
                 if stop:
                     break
     finally:
-        host.close()
+        if not closed:
+            host.close()
         server.close()
         with contextlib.suppress(FileNotFoundError):
             os.unlink(path)

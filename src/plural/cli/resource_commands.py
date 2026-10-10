@@ -22,6 +22,7 @@ from plural.cli.common import (
     session,
     workspace,
 )
+from plural.cli.secret_commands import secret_status
 from plural.harness.builtins import BUILTIN_HARNESS_NAMES, builtin_schema, get_builtin
 from plural.project import (
     KINDS,
@@ -64,7 +65,11 @@ def _app_summary(environment: Any) -> list[dict[str, Any]]:
     """
     import os
 
+    from plural.cli.secret_commands import project_secret_names
+
     definition = environment.definition()
+    names = {item.name for app in definition.apps for item in app.secrets}
+    stored = project_secret_names() if names - set(os.environ) else set()
     return [
         {
             "name": app.name,
@@ -77,13 +82,32 @@ def _app_summary(environment: Any) -> list[dict[str, Any]]:
                 {
                     "name": item.name,
                     "required": item.required,
-                    "set": bool(os.environ.get(item.name)),
+                    "set": bool(os.environ.get(item.name)) or item.name in stored,
+                    "source": "shell"
+                    if os.environ.get(item.name)
+                    else "project"
+                    if item.name in stored
+                    else None,
                 }
                 for item in app.secrets
             ],
         }
         for app in definition.apps
     ]
+
+
+def _live_apps(benchmark: Any) -> list[str]:
+    """Live Apps a Benchmark's Tasks read from, each named once.
+
+    Returns:
+        App names, in the order the Tasks first use them.
+    """
+    live: list[str] = []
+    for task in benchmark.tasks:
+        for app in task.environment.definition().apps:
+            if not app.reproducible and app.name not in live:
+                live.append(app.name)
+    return live
 
 
 def resource_app(kind: ResourceKind) -> typer.Typer:
@@ -116,6 +140,9 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         apps = _app_summary(resource.value) if kind is ENVIRONMENT else None
         if apps is not None:
             payload = {**payload, "apps": apps}
+        live = _live_apps(resource.value) if kind is BENCHMARK else []
+        if kind is BENCHMARK:
+            payload = {**payload, "reproducible": not live, "live_apps": live}
 
         def text() -> None:
             typer.echo(f"{ref} is valid: {resource.content_hash}")
@@ -125,8 +152,15 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                     marker = "" if action["mutates_state"] else "  [read-only]"
                     typer.echo(f"  {action['name']}{marker}")
                 for secret in app["secrets"]:
-                    status = "set" if secret["set"] else "NOT SET"
+                    status = secret_status(secret)
                     typer.echo(f"  secret {secret['name']}: {status}")
+            if live:
+                one = len(live) == 1
+                typer.echo(
+                    f"\nNot reproducible: {', '.join(live)} "
+                    f"{'is a live App that only reads' if one else 'are live Apps that only read'}"
+                    ", so results can change as the data behind them changes."
+                )
 
         emit(payload, as_json=as_json, text=text)
 

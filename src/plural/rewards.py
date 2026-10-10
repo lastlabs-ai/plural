@@ -23,6 +23,7 @@ with ``plural rewards apply``.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import math
@@ -181,12 +182,22 @@ def dump_ledger(records: Iterable[RewardRecord]) -> bytes:
     return "".join(item.model_dump_json() + "\n" for item in records).encode()
 
 
-def append_ledger(path: str | Path, records: Iterable[RewardRecord]) -> None:
-    """Append records to a ledger, creating it if needed. Nothing is overwritten."""
+def append_ledger(path: str | Path, records: Iterable[RewardRecord]) -> int:
+    """Append records to a ledger, creating it if needed.
+
+    Nothing is overwritten, and a record whose ``record_id`` is already in the
+    ledger is skipped, so applying the same hindsight rewarder again adds nothing.
+
+    Returns:
+        How many records were added.
+    """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
+    known = {item.record_id for item in read_ledger(target)} if target.is_file() else set()
+    fresh = [item for item in records if item.record_id not in known]
     with target.open("ab") as handle:
-        handle.write(dump_ledger(records))
+        handle.write(dump_ledger(fresh))
+    return len(fresh)
 
 
 def online_records(episode: Sequence[Mapping[str, Any]]) -> list[RewardRecord]:
@@ -344,15 +355,25 @@ class HindsightRewarder:
             produced = [produced]
         known = {str(item["event_id"]) for item in trial.events}
         records: list[RewardRecord] = []
-        for item in produced:
+        for position, item in enumerate(produced):
             credit = item if isinstance(item, Credit) else Credit.model_validate(item)
             if credit.target.event_id not in known:
                 raise ValueError(
                     f"hindsight rewarder {self.name!r} targets event "
                     f"{credit.target.event_id!r}, which this Trial does not have"
                 )
+            identity = [
+                trial.trial_id,
+                self.name,
+                self.version,
+                credit.target.model_dump(mode="json"),
+                position,
+            ]
             records.append(
                 RewardRecord(
+                    record_id=hashlib.sha256(
+                        json.dumps(identity, sort_keys=True).encode()
+                    ).hexdigest()[:32],
                     target=credit.target,
                     value=credit.value,
                     source="hindsight",
