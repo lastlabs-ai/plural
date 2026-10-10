@@ -1,4 +1,4 @@
-"""``plural env from-mcp|from-openapi|from-traces|eject-files``: draft an Environment.
+"""``plural env from-mcp|from-openapi|from-traces|eject-files|serve``: draft and try an Environment.
 
 Each command writes ordinary project files, then loads the Environment the way
 ``plural env validate`` does, which is when an MCP server's tools and an API's
@@ -15,6 +15,7 @@ import typer
 
 from plural.cli.common import JSON_OPTION, emit, handled, relative, workspace
 from plural.cli.secret_commands import secret_status
+from plural.mcp import PORT
 from plural.project import ProjectError, ResourceRef, Workspace, check_name
 from plural.project.generators import (
     DEFAULT_JUDGE_MODEL,
@@ -238,6 +239,66 @@ def add_generators(app: typer.Typer) -> None:
             typer.echo(f"  - name: files\n    mcp:\n      server: {reference}")
 
         emit(payload, as_json=as_json, text=text)
+
+    @app.command("serve")
+    @handled
+    def env_serve(
+        name: str = typer.Argument(help="Environment whose FastMCP server to serve."),
+        app_name: str | None = typer.Option(
+            None, "--app", help="App to serve, when the Environment has several servers."
+        ),
+        port: int = typer.Option(PORT, "--port", help="Port on 127.0.0.1."),
+    ) -> None:
+        """Serve an App's FastMCP server over HTTP, to try its tools in any MCP client.
+
+        Trials don't use this: they talk to the server over stdin and stdout.
+        """
+        import os
+
+        import yaml
+
+        from plural.apps.mcp import expand
+        from plural.mcp.serve import load_server, serve_http
+
+        space = workspace()
+        directory = space.project.resource_dir(ResourceRef(ENVIRONMENT.name, name))
+        manifest = directory / "environment.yaml"
+        if not manifest.is_file():
+            raise ProjectError(f"No Environment {name}. Create it with `plural env init {name}`.")
+        apps = (yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}).get("apps") or []
+        servers = [
+            item
+            for item in apps
+            if isinstance(item, dict)
+            and isinstance(item.get("mcp"), dict)
+            and item["mcp"].get("server")
+            and (app_name is None or item.get("name") == app_name)
+        ]
+        if not servers:
+            raise ProjectError(
+                f"Environment {name} has no FastMCP App"
+                + (f" named {app_name}" if app_name else "")
+                + ". An App with `mcp: {server: server.py:mcp}` can be served."
+            )
+        if len(servers) > 1:
+            names = ", ".join(str(item.get("name")) for item in servers)
+            raise ProjectError(
+                f"Environment {name} has several servers ({names}). Pick one with --app."
+            )
+        settings = servers[0]["mcp"]
+        credentials = [
+            item if isinstance(item, str) else str(item.get("name"))
+            for item in settings.get("credentials") or []
+        ]
+        for key, value in (settings.get("env") or {}).items():
+            os.environ[key] = expand(str(value), credentials=credentials)
+        os.chdir(directory)
+        server = load_server(str(settings["server"]), directory)
+        typer.echo(
+            f"Serving {servers[0].get('name')} at http://127.0.0.1:{port}/mcp. "
+            "Connect any MCP client; stop with Ctrl+C."
+        )
+        serve_http(server, port)
 
     @app.command("from-traces")
     @handled

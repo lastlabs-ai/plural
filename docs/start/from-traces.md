@@ -9,17 +9,94 @@ nav_group: Start
 ---
 # Start from traces
 
-**You start with** recorded conversations from an agent you already run, in production
-or in another framework.
+**You start with** conversations an agent you already run has had.
 
-**You end with** scores for those conversations, a Benchmark drafted from them, and a
-side-by-side comparison of your agent and any model in the catalog on the same Tasks.
+**You end with** a score for each one, a Benchmark made from them, and your agent's
+scores next to any other model's on the same Tasks.
 
-No model is rerun to score a trace, so only the model judge needs a key.
+## What your traces need to look like
+
+One conversation per line, in the OpenAI chat format most agent frameworks already log:
+
+```json
+{"messages": [{"role": "user", "content": "Where is order 42?"}, {"role": "assistant", "content": "It shipped on Monday."}]}
+```
+
+That's the whole requirement. If your agent called tools, keep them in the same list:
+the assistant's `tool_calls`, each answered by a `tool` message with the same
+`tool_call_id`, exactly as OpenAI's API returns them.
+
+:::details Every field Plural reads
+| Field | Required | What it's for |
+| --- | --- | --- |
+| `messages` | Yes | The conversation, oldest first. The first `user` message becomes the Task's instructions. |
+| `trace_id` (or `id`) | No | Names the trace and the Task drafted from it. Default: `trace-1`, `trace-2`, and so on. |
+| `model` | No | Names your agent in the results, such as `acme/support-bot`. Default: `recorded`. |
+| `metadata` | No | Any object; it is kept with the trace. |
+
+In `messages`:
+
+- `content` may be a string or a list of parts; Plural reads the `text` parts.
+- A tool call's `arguments` may be a JSON string, as OpenAI sends it, or an object.
+- A `tool` message's `content` is the tool's result. JSON text is read as JSON.
+- `system` messages are kept in the conversation but never become the instructions.
+
+A `.json` file holding one array of these objects works too.
+:::
+
+:::details Your agent used several systems
+Prefix each tool's name with its system and two underscores, such as `crm__get_record`
+and `billing__issue_refund`. Plural then drafts one replay App per system, `crm` and
+`billing`, each answering only its own tools. Tools without a prefix go to one App
+named `tools`.
+:::
+
+:::details Your traces are in another format
+**Plural Traces.** If you record runs with Plural's tracing SDK, pass those Traces, or
+a `TraceDataset`, wherever this page uses `conversations.jsonl`.
+
+**Anthropic's Messages format.** Convert it first. A `tool_use` block becomes an
+OpenAI tool call, and a `tool_result` block becomes a `tool` message:
+
+```python
+import json
+
+
+def to_openai(messages: list[dict]) -> list[dict]:
+    converted = []
+    for message in messages:
+        content = message["content"]
+        if isinstance(content, str):
+            converted.append({"role": message["role"], "content": content})
+            continue
+        text = "".join(block.get("text", "") for block in content if block["type"] == "text")
+        calls = [
+            {
+                "id": block["id"],
+                "type": "function",
+                "function": {"name": block["name"], "arguments": json.dumps(block["input"])},
+            }
+            for block in content
+            if block["type"] == "tool_use"
+        ]
+        results = [block for block in content if block["type"] == "tool_result"]
+        for block in results:
+            converted.append(
+                {"role": "tool", "tool_call_id": block["tool_use_id"], "content": block["content"]}
+            )
+        if text or calls:
+            entry = {"role": message["role"], "content": text or None}
+            if calls:
+                entry["tool_calls"] = calls
+            converted.append(entry)
+    return converted
+```
+
+**Anything else.** Write each conversation as the `messages` list your agent would
+have sent an OpenAI-compatible model. That list is all Plural needs.
+:::
 
 ## How it works
-
-Your traces go through three steps. Each one is useful on its own.
 
 ```text
 conversations.jsonl
@@ -31,29 +108,25 @@ conversations.jsonl
        └─ 3. Compare    other models work those Tasks; the recording answers their tool calls
 ```
 
-1. **Score.** Plural reads each conversation as a finished attempt: what your agent
-   said, which tools it called, and what came back. Nothing is rerun. A judge model
-   reads it and gives it a score, with the evidence for it.
-2. **Draft.** Each conversation becomes a Task, whose instruction is the customer's
-   first message. Every tool call in every conversation, with the result it returned,
-   is saved to one recording. That recording becomes a stand-in for your real tools,
-   called a replay App.
-3. **Compare.** Another model works the same Tasks with the same tools. When it calls
-   a tool, the replay App looks it up in the recording:
-   - Same tool and same arguments as a recorded call: it gets the recorded result.
-   - Same tool, different arguments: it gets the result of the closest recorded call,
-     and the step is marked `off_recording`.
+1. **Score.** A judge model reads each conversation and scores it. Nothing is rerun.
+2. **Draft.** Each conversation becomes a Task. Every tool call, with the result it
+   got, is saved to a recording that stands in for your real tools.
+3. **Compare.** Other models work the same Tasks. When one calls a tool, it gets the
+   recorded result. The same judge scores everyone.
 
-   The same judge scores every attempt, so your agent's scores and each model's sit
-   side by side.
+:::details What the recording answers when a model does something new
+- Same tool, same arguments as a recorded call: the recorded result.
+- Same tool, different arguments: the result of the closest recorded call. The step
+  is marked `off_recording`.
 
-Nothing real is called after step 1, so comparing is safe and repeatable. The limit is
-the recording: a model that takes a path your agent never took gets the closest
+Nothing real is called after step 1, so comparing is safe and repeatable. The limit
+is the recording: a model that takes a path your agent never took gets the closest
 recorded answer, not the real one. Many `off_recording` steps mean the comparison is
-approximate there; connect the real system to test that behavior, as in
+approximate there. To test that behavior, connect the real system, as in
 [Start from a system](from-a-system.md).
+:::
 
-The rest of this page does those three steps with two example conversations.
+The rest of this page does all three with two example conversations.
 
 ## 1. Create a project and add your traces
 
@@ -62,18 +135,12 @@ plural project init support
 cd support
 ```
 
-Save your traces as `conversations.jsonl`, one conversation per line, with its messages
-in OpenAI chat format. `trace_id` and `model` are optional:
+Save these two conversations as `conversations.jsonl`:
 
 ```json
 {"trace_id": "t-1", "model": "acme/support-bot", "messages": [{"role": "user", "content": "Where is order 42?"}, {"role": "assistant", "content": null, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"42\"}"}}]}, {"role": "tool", "tool_call_id": "c1", "content": "Order 42 shipped on Monday."}, {"role": "assistant", "content": "Your order shipped on Monday."}]}
 {"trace_id": "t-2", "model": "acme/support-bot", "messages": [{"role": "user", "content": "Can I get a refund for order 7? It arrived broken."}, {"role": "assistant", "content": null, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"7\"}"}}]}, {"role": "tool", "tool_call_id": "c1", "content": "Order 7 delivered Friday, $40."}, {"role": "assistant", "content": null, "tool_calls": [{"id": "c2", "type": "function", "function": {"name": "issue_refund", "arguments": "{\"order_id\": \"7\", \"amount\": 40}"}}]}, {"role": "tool", "tool_call_id": "c2", "content": "Refund of $40 issued for order 7."}, {"role": "assistant", "content": "I've refunded the full $40 for order 7. Sorry it arrived broken."}]}
 ```
-
-**What just happened.** Most agent frameworks can log the `messages` list they send to
-an OpenAI-compatible model, and that list is all Plural needs. If you already record
-runs with Plural's tracing SDK, pass those Plural Traces or a `TraceDataset` instead of
-a file anywhere this page uses `conversations.jsonl`.
 
 ## 2. Score them right away
 
@@ -164,9 +231,12 @@ plural benchmark validate support
 ```
 
 **What just happened.** `validate` checked that every Task, the judge, and the replay App
-load. A model's call with no exact recording gets the closest one, as described in
-[How it works](#how-it-works). To refuse those calls instead, add `fallback: error`
-under `replay:` in `environment.yaml`; the model is then told no recording matches.
+load.
+
+:::details Refuse calls the recording doesn't cover
+Add `fallback: error` under `replay:` in `environment.yaml`. A model's call with no
+exact recording is then told no recording matches, instead of getting the closest one.
+:::
 
 ## 5. Score your agent on the Benchmark
 

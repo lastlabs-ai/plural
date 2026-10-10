@@ -46,7 +46,7 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
     extras = {
         "benchmark": {"add", "remove"},
         "agent": {"serve", "credential"},
-        "env": {"from-mcp", "from-openapi", "from-traces", "eject-files"},
+        "env": {"from-mcp", "from-openapi", "from-traces", "eject-files", "serve"},
     }
     for name in RESOURCE_GROUPS:
         group = root.commands[name]

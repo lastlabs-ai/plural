@@ -496,7 +496,7 @@ class MCPApp(App[State]):
             ``["npx", "-y", "@modelcontextprotocol/server-memory"]``.
         url: Reach a server over Streamable HTTP instead.
         headers: HTTP headers; values may reference ``${SECRET}``.
-        env: Environment variables for a command server; values may
+        env: Environment variables for a server started in the Runtime; values may
             reference ``${SECRET}`` and ``${PLURAL_APP_DIR}``, the episode's
             empty folder, such as ``{"MEMORY_FILE_PATH":
             "${PLURAL_APP_DIR}/memory.jsonl"}``.
@@ -517,6 +517,10 @@ class MCPApp(App[State]):
         hooks: The server's Plural hooks, ``plural_reset`` and
             ``plural_snapshot``. Found when Plural lists the server's tools;
             set it only alongside ``actions``.
+        remote: The server runs in the Runtime but acts on a system outside
+            it, such as a data lake, so a fresh server is not a fresh system.
+            Its control level is then ``sandboxed`` with a reset hook and
+            ``live`` without one, as for a server reached by ``url``.
 
     Subclass ``MCPApp`` to write ``reset`` or ``snapshot`` in Python with
     :meth:`call_tool`, or to add ``@rewarder`` methods.
@@ -546,6 +550,7 @@ class MCPApp(App[State]):
         description: str | None = None,
         timeout_seconds: float = 60,
         hooks: Sequence[str] | None = None,
+        remote: bool = False,
     ) -> None:
         super().__init__(
             name=name or type(self).name or None,
@@ -566,6 +571,7 @@ class MCPApp(App[State]):
         if unknown_hooks:
             raise ValueError(f"MCP App {self.name!r}: unknown hooks {unknown_hooks}")
         self._hooks: frozenset[str] | None = frozenset(hooks) if hooks is not None else None
+        self.remote = remote
         self.headers = dict(headers or {})
         self.env = dict(env or {})
         self.cwd = cwd
@@ -763,12 +769,13 @@ class MCPApp(App[State]):
         )
 
     def is_local(self) -> bool:
-        """Whether the server runs inside the Runtime.
+        """Whether the server's state lives inside the Runtime.
 
         Returns:
-            True for a server named with ``server`` or started as a command.
+            True for a server named with ``server`` or started as a command,
+            unless it is marked ``remote``.
         """
-        return bool(self._local_command())
+        return bool(self._local_command()) and not self.remote
 
     def close(self) -> None:
         """Close the MCP session and delete the episode's folder."""

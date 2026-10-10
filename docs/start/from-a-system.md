@@ -26,6 +26,8 @@ are the same for your own system.
 | An MCP server, started locally or reached at a URL | `plural env from-mcp` |
 | An HTTP API with an OpenAPI document | `plural env from-openapi` |
 | Files: documents, CSV, JSON, JSONL, or SQLite, with no API | Plural's files server, `server: plural.mcp.files:server`; see [Build an MCP server](../guides/build-mcp-server.md#start-from-plurals-files-server) |
+| A database, warehouse, or data lake | Your own FastMCP server; see [Build an MCP server](../guides/build-mcp-server.md#work-in-a-data-lake-or-warehouse) |
+| Nothing an Agent can call yet | `plural env init`, then write the tools; see [Build an MCP server](../guides/build-mcp-server.md) |
 
 Each command drafts an ordinary `environment.yaml` with one App, whose actions are what
 the system offers. A hosted MCP server can also be added from the Environment's Apps
@@ -127,9 +129,16 @@ used:
 | `sandboxed` | A shared system with a `reset` hook that restores it each Trial. | Yes | Yes |
 | `live` | A shared system Plural can't reset. | Only if every action is read-only, and then marked not reproducible | No |
 
-A server started with `command` is `owned`. A remote server is `live` until you point
-it at a sandbox and give it `reset` and `snapshot` commands; see
+A server started with `command` or `server` is `owned`. A remote server is `live` until
+you point it at a sandbox and give it `reset` and `snapshot` commands; see
 [Make a remote server safe to benchmark](../guides/connect-mcp-server.md#5-make-a-remote-server-safe-to-benchmark).
+
+:::details A server in the Runtime that works on an outside system
+A server you start in the Runtime is `owned` because a fresh server is a fresh system.
+That stops being true when its tools read or write something outside, such as a data
+lake. Mark the App `remote: true` under `mcp:` and Plural treats it like a remote
+server: `live`, or `sandboxed` once it has a reset hook.
+:::
 
 ## 5. Write a Verifier that queries the App
 
@@ -210,6 +219,45 @@ on the Trial as a step with the App, the tool, its arguments, and its result. Th
 Verifier then asked the server what it held. The evidence is the server's answer, not
 the model's.
 
+## Several systems in one Environment
+
+When the work spans systems, list each as an App in one Environment:
+
+```yaml
+apps:
+  - name: crm
+    mcp:
+      url: https://mcp.example.com/v1
+      headers: {Authorization: "Bearer ${CRM_TOKEN}"}
+      credentials: [CRM_TOKEN]
+  - name: billing
+    openapi:
+      spec: billing.yaml
+      headers: {Authorization: "Bearer ${BILLING_TOKEN}"}
+      credentials: [BILLING_TOKEN]
+  - name: desk
+    mcp:
+      server: server.py:mcp
+```
+
+The Agent gets one list of tools from all three. Run `plural env validate` to see it
+exactly as the model will.
+
+:::details What changes with several Apps
+- **Tool names.** Each tool keeps its name. Only a name two Apps share is prefixed,
+  such as `crm__search` and `desk__search`. Each description starts with its App, such
+  as `[billing] Issue a refund.`
+- **Credentials.** The Agent that runs supplies every credential the Apps list, here
+  `CRM_TOKEN` and `BILLING_TOKEN`. A Job checks it has them all before it starts.
+- **Control.** Each App keeps its own control level. A Benchmark accepts the
+  Environment only if every `live` App is read-only, and training only if none is
+  `live`.
+- **Verifiers.** `episode.apps["crm"]` and `episode.apps["billing"]` each query their
+  own system, so a Verifier can check that the refund and the CRM note both happened.
+- **Effects across systems.** `Environment.on_step` sees every App, for rules such as
+  "a refund also closes the ticket"; see [Apps](../concepts/apps.md).
+:::
+
 ## Where you are now
 
 You have a Benchmark, `memory`, that you can rerun on any model with
@@ -219,7 +267,7 @@ You have a Benchmark, `memory`, that you can rerun on any model with
 Next:
 
 - Add Tasks for the work you care about, each with its own starting state.
-- Compose several systems into one Environment by listing more Apps; see
-  [Apps](../concepts/apps.md).
+- Add Apps for the other systems the work touches, as in
+  [Several systems in one Environment](#several-systems-in-one-environment).
 - The [MCP guide](../guides/connect-mcp-server.md) covers tool filters, Python hooks,
   and troubleshooting.

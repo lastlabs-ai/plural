@@ -513,7 +513,7 @@ changes them. The two sit side by side and never share a path:
 Use relative file paths. `PLURAL_RESOURCES_DIR` holds the root folder. A FastMCP server
 reads the two folders with `plural.mcp.environment_resources()` and
 `plural.mcp.task_resources()`; see
-[Build an MCP server](../guides/build-mcp-server.md#4-read-the-environments-and-the-tasks-files).
+[Build an MCP server](../guides/build-mcp-server.md#read-files).
 For files the Agent should browse and query directly, add Plural's files server as an
 App: `server: plural.mcp.files:server`.
 

@@ -134,7 +134,8 @@ recording. [Start from traces](../start/from-traces.md#how-it-works) walks throu
 
 A trace file is JSONL, one conversation per line, with its messages in OpenAI chat
 format. A `trace_id` and `model` are optional; Plural Traces and a `TraceDataset`
-work too:
+work too. [What your traces need to look like](../start/from-traces.md#what-your-traces-need-to-look-like)
+lists every field and how to convert other formats:
 
 ```json
 {"trace_id": "t-1", "model": "acme/support-bot", "messages": [{"role": "user", "content": "Where is order 42?"}, {"role": "assistant", "content": null, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"42\"}"}}]}, {"role": "tool", "tool_call_id": "c1", "content": "Order 42 shipped on Monday."}, {"role": "assistant", "content": "Your order shipped on Monday."}]}

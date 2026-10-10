@@ -234,6 +234,29 @@ def _check_snippets(source: Path, text: str, failures: list[str]) -> None:
                 failures.append(f"{shown}: unknown CLI command in {stripped!r}")
 
 
+def _check_details(source: Path, text: str, failures: list[str]) -> None:
+    """Both renderers need a details block closed, without headings or tabs inside."""
+    shown = source.relative_to(ROOT)
+    fenced = False
+    opened: int | None = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith(("```", "~~~")):
+            fenced = not fenced
+        if fenced:
+            continue
+        if stripped.startswith(":::details"):
+            if opened is not None:
+                failures.append(f"{shown}:{number}: details block inside another")
+            opened = number
+        elif opened is not None and stripped == ":::":
+            opened = None
+        elif opened is not None and (stripped.startswith("#") or stripped.startswith(":::tab")):
+            failures.append(f"{shown}:{number}: no headings or tabs inside a details block")
+    if opened is not None:
+        failures.append(f"{shown}:{opened}: details block is never closed with :::")
+
+
 def main() -> int:
     """Report invalid metadata and unresolved local Markdown links.
 
@@ -248,6 +271,7 @@ def main() -> int:
         text = source.read_text(encoding="utf-8")
         metadata = _metadata(source, text, failures)
         documents[source] = metadata
+        _check_details(source, text, failures)
         if metadata.get("nav") is True:
             _check_snippets(source, text, failures)
         route = metadata.get("route")

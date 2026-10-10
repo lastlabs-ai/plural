@@ -345,8 +345,9 @@ environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local
 | `command` | Start the server inside the Runtime. A list, or one string split like a shell would. |
 | `url` | Reach a server over Streamable HTTP instead. Give exactly one of `server`, `command`, and `url`. |
 | `headers` | HTTP headers for a `url` server. Values may contain `${NAME}`, a credential or secret. |
-| `env` | Environment variables for a `command` server. Values may contain `${NAME}`, a credential or secret, and `${PLURAL_APP_DIR}`, the episode's empty folder. |
+| `env` | Environment variables for a `server` or `command` server. Values may contain `${NAME}`, a credential or secret, and `${PLURAL_APP_DIR}`, the episode's empty folder. |
 | `cwd` | Working folder for a `command` server, relative to the Environment. |
+| `remote` | Set `true` when a `server` or `command` server works on a system outside the Runtime, such as a data lake. The App is then `live`, or `sandboxed` with a `reset` hook, instead of `owned`. |
 | `tools` | Offer only these tools. |
 | `exclude` | Never offer these tools. |
 | `reset` | Command run at the start of each episode, with the App's starting state as JSON on stdin. |

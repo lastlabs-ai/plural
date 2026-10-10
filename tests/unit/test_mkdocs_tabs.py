@@ -55,3 +55,32 @@ def test_tabs_become_pymdownx_tabs_with_indented_content() -> None:
 def test_markers_inside_code_fences_are_left_alone() -> None:
     source = "```text\n:::tabs\n:::tab A\n:::\n```\n::: plural.Client"
     assert mkdocs_tabs.convert_tabs(source) == source
+
+
+def test_details_blocks_become_collapsed_admonitions() -> None:
+    source = "\n".join(
+        [
+            "Intro.",
+            ":::details More about traces",
+            "Body text.",
+            "```json",
+            ":::",
+            "```",
+            ":::",
+            "After.",
+        ]
+    )
+    assert mkdocs_tabs.convert_details(source) == "\n".join(
+        [
+            "Intro.",
+            "",
+            '??? note "More about traces"',
+            "",
+            "    Body text.",
+            "    ```json",
+            "    :::",
+            "    ```",
+            "",
+            "After.",
+        ]
+    )

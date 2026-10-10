@@ -50,6 +50,7 @@ plural benchmark add|remove TASK [--benchmark NAME]
 plural env from-mcp NAME (--command CMD | --url URL) [--header K=V] [--tool NAME]
 plural env from-openapi NAME --spec FILE_OR_URL [--base-url URL] [--operation ID]
 plural env eject-files NAME [--as FILE]
+plural env serve NAME [--app APP] [--port 3825]
 plural env from-traces NAME --traces FILE
 plural run (-t TASK | -b BENCHMARK) (-m MODEL [-h HARNESS] | -a AGENT)
            [--hosted [--follow] | --track] [--attempts N] [--concurrency N]

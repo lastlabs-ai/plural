@@ -912,6 +912,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ from-openapi  Draft an Environment whose App is an HTTP API; its operations become actions.      │
 │ eject-files   Copy Plural's ready-made files server into an Environment, to change what it       │
 │               offers.                                                                            │
+│ serve         Serve an App's FastMCP server over HTTP, to try its tools in any MCP client.       │
 │ from-traces   Draft replay Apps from recorded tool calls, a Task per trace, and a Benchmark.     │
 │ validate      Check a resource and everything it depends on, without uploading.                  │
 │ push          Validate and push an immutable, private revision to the bound project.             │
@@ -1135,6 +1136,26 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env serve`
+
+```text
+
+ Usage: plural env serve [OPTIONS] {name}
+
+ Serve an App's FastMCP server over HTTP, to try its tools in any MCP client.
+
+ Trials don't use this: they talk to the server over stdin and stdout.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  Environment whose FastMCP server to serve. [required]                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --app         <str>  App to serve, when the Environment has several servers.                     │
+│ --port        <int>  Port on 127.0.0.1. [default: 3825]                                          │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

@@ -35,6 +35,8 @@ SNAPSHOT_TOOL = "plural_snapshot"
 HOOK_TOOLS = frozenset({RESET_TOOL, SNAPSHOT_TOOL})
 ENVIRONMENT_RESOURCES = "environment-resources"
 TASK_RESOURCES = "task-resources"
+# 3825 spells EVAL on a phone keypad.
+PORT = 3825
 
 
 def _sandbox_path(value: str) -> Path:
@@ -159,6 +161,7 @@ def is_hook(tool: Mapping[str, Any]) -> bool:
 
 __all__ = [
     "ENVIRONMENT_RESOURCES",
+    "PORT",
     "HOOK_TOOLS",
     "RESET_TOOL",
     "SNAPSHOT_TOOL",

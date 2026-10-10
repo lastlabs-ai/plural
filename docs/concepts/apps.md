@@ -209,8 +209,8 @@ it.
 | Level | Meaning | Examples |
 | --- | --- | --- |
 | `owned` | The state lives inside the Runtime, so every Trial starts fresh. | A FastMCP server named with `server`, Plural's files server, a Python App, an MCP server started with `command` that keeps its data in `${PLURAL_APP_DIR}`, an OpenAPI App with `local: true` |
-| `sandboxed` | The system is remote, but a reset hook returns it to the Task's starting state. | A remote MCP server with a `reset` command that seeds a sandbox tenant |
-| `live` | The system is remote and shared, and Plural can't reset it. | A remote MCP server or API with no reset hook |
+| `sandboxed` | The system is remote, but a reset hook returns it to the Task's starting state. | A remote MCP server with a `reset` command that seeds a sandbox tenant; a server marked `remote: true` with a reset hook |
+| `live` | The system is remote and shared, and Plural can't reset it. | A remote MCP server or API with no reset hook; a server marked `remote: true` without one |
 | `replayed` | The App answers from recordings. Nothing real is called. | A replay App |
 
 The rules that follow from it:
