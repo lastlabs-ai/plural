@@ -631,8 +631,9 @@ crm = App.mcp(
 ```
 
 A Job checks every App's secrets before it starts anything, and fails at once,
-naming the App and the secret, when one is missing. Locally, the value comes from
-your shell; a hosted run takes it from the hosted project's secrets. The value goes
+naming the App and the secret, when one is missing. A value comes from your shell
+when you exported it, and otherwise from the hosted project, where `plural secret set
+CRM_TOKEN` stores it encrypted. The value goes
 only to the process that runs the Apps and to Verifier queries. It is never shown to
 the Agent or given to its Harness. See [Apps](../concepts/apps.md#secrets).
 

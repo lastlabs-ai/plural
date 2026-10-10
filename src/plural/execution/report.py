@@ -26,7 +26,7 @@ import json
 import queue
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,6 +36,7 @@ from plural import __version__
 from plural.execution.store import JobStore
 from plural.harness.episode import EPISODE_FILE, EPISODE_SCHEMA
 from plural.jobs import JobPlan, JobSpec, ProgressEvent, TrialResult, VerifierResult
+from plural.rewards import LEDGER_FILE, read_ledger
 from plural.studio import Studio
 from plural.usage import TokenUsage, UsageTotals
 
@@ -484,6 +485,61 @@ def publish_job(
     return published
 
 
+def publish_rewards(
+    studio: Studio,
+    store: JobStore,
+    local_job_id: str,
+    hosted_job_id: str,
+    *,
+    trial_ids: Collection[str] | None = None,
+    agents: Mapping[str, AgentPin] | None = None,
+) -> int:
+    """Add each execution's reward ledger to its hosted Trial's ledger.
+
+    Use this after a hindsight rewarder appends to a pushed Job's ledgers.
+    The hosted ledger keeps each record once, so publishing again adds only
+    new records. Executions not yet published are skipped; ``publish_job``
+    sends their whole ledger with them.
+
+    Returns:
+        How many records the hosted ledgers did not have.
+    """
+    pins = dict(agents) if agents is not None else agent_pins(store.load_spec(local_job_id))
+    hosted = _hosted_trials(studio, hosted_job_id)
+    added = 0
+    trials_root = store.job_path(local_job_id) / "trials"
+    for trial_root in sorted(path for path in trials_root.iterdir() if path.is_dir()):
+        if trial_ids is not None and trial_root.name not in trial_ids:
+            continue
+        for execution_root in sorted(
+            (path for path in (trial_root / "executions").iterdir() if path.name.isdigit()),
+            key=lambda path: int(path.name),
+        ):
+            ledger = read_ledger(execution_root / "artifacts" / LEDGER_FILE)
+            if not ledger:
+                continue
+            receipt = TrialResult.model_validate_json(
+                (execution_root / "result.json").read_text(encoding="utf-8")
+            ).receipt
+            name, _ = pins.get(receipt.agent_digest, ("", None))
+            target = hosted.get((receipt.task_pin.name, name, receipt.attempt))
+            if target is None:
+                continue
+            execution = studio.trials.create_execution(
+                target,
+                idempotency_key=execution_key(
+                    receipt.job_id, receipt.trial_id, receipt.execution_id
+                ),
+            )
+            response = studio.trials.add_rewards(
+                target,
+                [item.model_dump(mode="json") for item in ledger],
+                execution_id=str(execution["id"]),
+            )
+            added += int(response.get("added") or 0)
+    return added
+
+
 class HostedTracker:
     """Report a local Job to its hosted client Job while it runs.
 
@@ -660,4 +716,5 @@ __all__ = [
     "execution_key",
     "publish_execution",
     "publish_job",
+    "publish_rewards",
 ]

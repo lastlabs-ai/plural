@@ -97,8 +97,8 @@ def describe_missing(missing: Mapping[str, list[str]]) -> str:
     return (
         "The Environment's Apps are missing secrets:\n"
         + "\n".join(lines)
-        + "\nSet those names before the run, or store them as organization secrets "
-        "for a hosted Job."
+        + "\nExport those names before the run, or set them in the hosted project with "
+        "`plural secret set NAME`."
     )
 
 

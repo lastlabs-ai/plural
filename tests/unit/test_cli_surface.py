@@ -36,6 +36,7 @@ def test_top_level_commands_are_the_documented_set() -> None:
         "rewards",
         "models",
         "runtime",
+        "secret",
         "session",
     }
 
@@ -63,6 +64,7 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
         ("trial", {"show", "rerun", "rescore"}),
         ("rewards", {"apply", "show", "export"}),
         ("models", {"list"}),
+        ("secret", {"list", "set", "delete"}),
         (
             "runtime",
             {

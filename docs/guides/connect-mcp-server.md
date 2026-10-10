@@ -127,8 +127,16 @@ apps:
 Plural refuses an App that references a secret it doesn't list, so a secret can't be
 forgotten. When a Job runs:
 
-- **Locally**, the value comes from your shell. Export it before `plural run`.
-- **Hosted**, the value comes from the hosted project's secrets. Add it there once.
+- **From your shell.** Export it before `plural run`. An exported value always wins.
+- **From the hosted project.** Store it once, and every `plural run` in the project,
+  and every hosted Job, uses it:
+
+  ```bash
+  plural secret set ACME_API_KEY
+  ```
+
+  `plural secret set` prompts for the value without echoing it. `plural secret list`
+  shows which secrets are set, never their values.
 
 Either way, a missing secret stops the Job before it starts, naming the App and the
 secret. The value goes only to the process that runs the Apps. It is never written to
@@ -299,7 +307,7 @@ environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local
 
 | Error | What to do |
 | --- | --- |
-| `CRM_TOKEN is not set` | Export the secret in your shell, or add it to the hosted project. |
+| `App 'crm' needs CRM_TOKEN` | Export the secret in your shell, or store it with `plural secret set CRM_TOKEN`. |
 | `references CRM_TOKEN but does not list it in secrets` | Add the name to the App's `secrets`. |
 | `Cannot start MCP server 'npx'` | The command isn't installed where the Apps run. Install it, or use its full path. |
 | `MCP server exited: exit code 1. Its output is in .../server.log` | The server crashed on startup. The error shows the end of its output; the most common cause is a missing environment variable. |

@@ -759,6 +759,61 @@ class TrialsAPI:
     def watch(self, trial_id: str, *, cursor: int = 0) -> Iterator[JsonObject]:
         return self._studio.watch(f"/trials/{quote(trial_id)}/events", cursor=cursor)
 
+    def rewards(self, trial_id: str) -> JsonObject:
+        """The Trial's reward ledger and each rewarder's total."""
+        return cast(JsonObject, self._studio.request("GET", f"/trials/{quote(trial_id)}/rewards"))
+
+    def add_rewards(
+        self,
+        trial_id: str,
+        records: Sequence[JsonObject],
+        *,
+        execution_id: str | None = None,
+    ) -> JsonObject:
+        """Append records to the Trial's ledger. Records it already has are ignored.
+
+        ``execution_id`` names the execution whose trajectory the targets refer to.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/trials/{quote(trial_id)}/rewards",
+                json={"records": list(records), "execution_id": execution_id},
+            ),
+        )
+
+
+class SecretsAPI:
+    """Values for the secrets the project's Apps and Verifiers declare.
+
+    Values are write-only except through :meth:`resolve`, which the service
+    grants to project contributors starting a run.
+    """
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def list(self) -> JsonList:
+        """Each secret set in the project, by name and hint, never its value."""
+        return cast(JsonList, self._studio.request("GET", "/secrets"))
+
+    def set(self, name: str, value: str) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request("PUT", f"/secrets/{quote(name)}", json={"value": value}),
+        )
+
+    def delete(self, name: str) -> None:
+        self._studio.request("DELETE", f"/secrets/{quote(name)}")
+
+    def resolve(self, names: Sequence[str]) -> JsonObject:
+        """``environ`` with the values set for ``names``, and the ``missing`` ones."""
+        return cast(
+            JsonObject,
+            self._studio.request("POST", "/secrets/resolve", json={"names": list(names)}),
+        )
+
 
 class ReviewsAPI:
     """Human review assignments and submissions."""
@@ -852,6 +907,7 @@ class Studio:
         self.packages = PackagesAPI(self)
         self.models = ModelsAPI(self)
         self.runtimes = RuntimesAPI(self)
+        self.secrets = SecretsAPI(self)
         self.environments = EnvironmentsAPI(self)
         self.tasks = TasksAPI(self)
         self.verifiers = VerifiersAPI(self)
@@ -1036,6 +1092,7 @@ __all__ = [
     "ProjectsAPI",
     "ReviewsAPI",
     "RuntimesAPI",
+    "SecretsAPI",
     "Studio",
     "TasksAPI",
     "TracesAPI",

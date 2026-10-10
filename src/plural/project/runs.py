@@ -752,6 +752,18 @@ def local_job(workspace: Workspace, job_id: str) -> dict[str, Any]:
     }
 
 
+def local_job_spec(workspace: Workspace, job_id: str) -> JobSpec:
+    """The specification a local Job ran with.
+
+    Returns:
+        The Job's specification, with its Python checks re-imported.
+
+    Raises:
+        ProjectError: When there is no such local Job.
+    """
+    return _load_local(workspace, job_id)[0]
+
+
 def find_local_trial(workspace: Workspace, trial_id: str) -> tuple[str, Path]:
     """Locate a Trial among local Jobs.
 
@@ -886,10 +898,18 @@ def _execute(
     progress: Any,
     tracking: Tracking | None = None,
 ) -> tuple[str, JobResult]:
-    from plural.execution.engine import JobRunner
+    from plural.execution.apps import describe_missing, missing_app_secrets
+    from plural.execution.engine import ExecutionFailure, JobRunner
     from plural.execution.report import HostedTracker
     from plural.execution.store import JobStore
 
+    missing: dict[str, list[str]] = {}
+    for task in spec.tasks:
+        for app, names in missing_app_secrets(task.environment, environ).items():
+            missing.setdefault(app, [])
+            missing[app].extend(name for name in names if name not in missing[app])
+    if missing:
+        raise ProjectError(describe_missing(missing))
     needs_model = any(binding.auth_mode != "none" for binding in spec.agents)
     if needs_model and not environ.get("PLURAL_API_KEY"):
         raise ProjectError(
@@ -927,9 +947,11 @@ def _execute(
         options["progress"] = progress
     try:
         result = asyncio.run(JobRunner(spec, **options).run())
-    except BaseException:
+    except BaseException as exc:
         if tracker is not None and tracking is not None:
             tracking.errors = tracker.close(cancelled=True)
+        if isinstance(exc, ExecutionFailure):
+            raise ProjectError(str(exc)) from None
         raise
     if tracker is not None and tracking is not None:
         tracking.errors = tracker.close()

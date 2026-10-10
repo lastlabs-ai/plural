@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-
+- `plural secret list|set|delete` stores the values Apps' secrets need in the hosted project. `plural run` and local reruns fill any secret you have not exported from it, into the Job's environment only.
+- `plural rewards apply` adds new records to the hosted ledgers of a pushed Job. `Studio.secrets` and `Studio.trials.rewards` / `add_rewards` expose both.
 - Apps. An Environment is now a set of Apps, each one system the Agent works with: a Python class (`App`), an MCP server (`App.mcp`), an HTTP API with an OpenAPI document (`App.openapi`), files or SQLite (`App.data`), or recorded traces (`App.replay`). `environment.yaml` lists them under `apps`. With several Apps, action names are prefixed with the App's name, such as `crm__get_record`.
 - `Environment.on_step` for effects that span Apps. It can call any App, and a number it returns is recorded as a reward.
 - Control levels. Each App is `owned`, `sandboxed`, `live`, or `replayed`, derived from its kind and settings. A Benchmark refuses a `live` App that can change state and marks one with only read-only actions not reproducible; a train Job refuses every `live` App.

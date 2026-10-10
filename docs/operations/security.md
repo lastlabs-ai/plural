@@ -78,7 +78,7 @@ Supply other secrets when the Job runs:
 - **App secrets.** Each App declares the names of the secrets it needs, such as
   the token for its MCP server; the declarations never hold values. At run time
   Plural reads the values from the Job's environment, or from the hosted
-  project's secrets for a hosted run, and gives them only to the process that
+  project's secrets (`plural secret set`), and gives them only to the process that
   runs the Apps and to Verifier queries. They never reach the Agent or its
   Harness. A missing value stops the run before it starts, naming the App.
 - **Runtime variables.** `RuntimeVariable` declarations on a Runtime carry

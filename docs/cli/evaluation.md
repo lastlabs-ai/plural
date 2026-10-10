@@ -325,6 +325,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ rewards    Label stored Trials with hindsight rewarders and export training data.                │
 │ models     List the models you may run.                                                          │
 │ runtime    Choose where Environments run.                                                        │
+│ secret     Set the secrets your Apps need in the hosted project.                                 │
 │ session    Export and redeploy portable agent sessions.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -2105,6 +2106,76 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --all           Every Environment in the project.                                                │
 │ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural secret`
+
+```text
+
+ Usage: plural secret [OPTIONS] COMMAND [ARGS]...
+
+ Set the secrets your Apps need in the hosted project.
+
+ `plural env validate` lists the secrets each App needs. Set one with `plural secret set NAME`;
+ `plural run` then supplies it to the App.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ list    List the secrets set in the project, never their values.                                 │
+│ set     Set a secret's value in the hosted project. Prompts without echoing.                     │
+│ delete  Remove a secret's value from the hosted project.                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural secret delete`
+
+```text
+
+ Usage: plural secret delete [OPTIONS] {name}
+
+ Remove a secret's value from the hosted project.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The secret to remove. [required]                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural secret list`
+
+```text
+
+ Usage: plural secret list [OPTIONS]
+
+ List the secrets set in the project, never their values.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural secret set`
+
+```text
+
+ Usage: plural secret set [OPTIONS] {name}
+
+ Set a secret's value in the hosted project. Prompts without echoing.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The secret's name, as the App declares it. [required]                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --from-env          Read the value from the environment variable of that name.                   │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

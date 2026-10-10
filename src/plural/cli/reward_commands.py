@@ -13,10 +13,20 @@ from typing import Any
 
 import typer
 
-from plural.cli.common import JSON_OPTION, emit, handled, workspace
+from plural.cli.common import (
+    JSON_OPTION,
+    emit,
+    handled,
+    note,
+    project_studio,
+    session,
+    signed_in,
+    workspace,
+)
+from plural.errors import PluralError
 from plural.jobs import TrialResult
 from plural.project import ProjectError, Workspace
-from plural.project.runs import find_local_trial
+from plural.project.runs import find_local_trial, finished_local_job
 from plural.rewards import (
     LEDGER_FILE,
     RewardRecord,
@@ -61,6 +71,40 @@ def _trial_dirs(space: Workspace, trials: list[str], job: str | None) -> list[Pa
     return [find_local_trial(space, trial_id)[1] for trial_id in trials]
 
 
+def _publish(space: Workspace, trial_dirs: list[Path]) -> tuple[int, str | None]:
+    """Add new ledger records to the hosted Trials of Jobs that were pushed.
+
+    Returns:
+        How many records were new to the hosted ledgers, and why some could
+        not be recorded, if any.
+    """
+    from plural.execution.report import publish_rewards
+    from plural.execution.store import JobStore
+
+    by_job: dict[str, set[str]] = {}
+    for trial_dir in trial_dirs:
+        by_job.setdefault(trial_dir.parent.parent.name, set()).add(trial_dir.name)
+    try:
+        pushed = {
+            job_id: record.hosted_job_id
+            for job_id in by_job
+            if (record := finished_local_job(space, job_id)).hosted_job_id
+        }
+        if not pushed:
+            return 0, None
+        studio, _ = project_studio(space, signed_in(session()))
+        store = JobStore(space.project.jobs_dir)
+        return (
+            sum(
+                publish_rewards(studio, store, job_id, hosted_id, trial_ids=by_job[job_id])
+                for job_id, hosted_id in pushed.items()
+            ),
+            None,
+        )
+    except (PluralError, ProjectError) as exc:
+        return 0, f"The hosted project was not updated: {exc} Run this again to retry."
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
@@ -86,11 +130,21 @@ def rewards_apply(
         records = function.apply(view)
         append_ledger(artifacts / LEDGER_FILE, records)
         applied.append({"trial_id": trial_dir.name, "records": len(records)})
-    payload = {"rewarder": function.name, "version": function.version, "trials": applied}
+    hosted, problem = _publish(space, _trial_dirs(space, trial, job))
+    payload = {
+        "rewarder": function.name,
+        "version": function.version,
+        "trials": applied,
+        "hosted_records": hosted,
+    }
 
     def text() -> None:
         for item in applied:
             typer.echo(f"{item['trial_id']}: {item['records']} reward(s) from {function.name}")
+        if hosted:
+            typer.echo(f"Recorded {hosted} new reward(s) in the hosted project.")
+        if problem:
+            note(problem)
 
     emit(payload, as_json=as_json, text=text)
 

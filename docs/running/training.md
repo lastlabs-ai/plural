@@ -164,6 +164,10 @@ step  e5     +0.700  hindsight:fewer_guesses@1
 
 Or pass `hindsight=[fewer_guesses]` to the `Job` to label each Trial as it finishes.
 
+If you pushed the Job with `plural job push`, `apply` adds the new records to the
+hosted Trials' ledgers too, where the Trial page shows each reward on the step it
+credits. Each record is stored once, so applying again never duplicates one.
+
 The final Task score remains the weighted aggregate of its Verifiers. Rewards
 never contribute to it. Keep that evaluation metric stable as you experiment with
 rewards.
