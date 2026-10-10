@@ -259,6 +259,36 @@ class ExposedAction(FrozenModel):
     timeout_seconds: float = 30
 
 
+def exposed_actions(apps: Sequence[AppDefinition]) -> tuple[ExposedAction, ...]:
+    """Every App action as the Agent sees it, in App order.
+
+    Each keeps its own name, made safe for every model provider, and is
+    prefixed ``<app>__`` only when another App offers the same name. With
+    several Apps, each description starts with the App's name, so the model
+    knows which system a tool acts on.
+
+    Returns:
+        One ``ExposedAction`` per App action.
+    """
+    names = exposed_names([(app.name, [item.name for item in app.actions]) for app in apps])
+    several = len(apps) > 1
+    return tuple(
+        ExposedAction(
+            name=names[(app.name, item.name)],
+            app=app.name,
+            action=item.name,
+            description=(
+                f"[{app.name}] {item.description}".rstrip() if several else item.description
+            ),
+            parameters=tool_parameters(item.parameters),
+            mutates_state=item.mutates_state,
+            timeout_seconds=item.timeout_seconds,
+        )
+        for app in apps
+        for item in app.actions
+    )
+
+
 __all__ = [
     "ACTION_SEPARATOR",
     "AppAction",
@@ -271,6 +301,7 @@ __all__ = [
     "SecretReference",
     "TOOL_NAME_LIMIT",
     "derive_control",
+    "exposed_actions",
     "exposed_names",
     "tool_parameters",
 ]

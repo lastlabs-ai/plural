@@ -13,8 +13,7 @@ from plural.apps.definition import (
     AppDefinition,
     ExposedAction,
     SecretReference,
-    exposed_names,
-    tool_parameters,
+    exposed_actions,
 )
 from plural.common import (
     SHA256_PATTERN,
@@ -581,25 +580,7 @@ class EnvironmentDefinition(FrozenModel):
         several Apps, each description starts with the App's name, so the
         model knows which system a tool acts on.
         """
-        names = exposed_names(
-            [(app.name, [item.name for item in app.actions]) for app in self.apps]
-        )
-        several = len(self.apps) > 1
-        return tuple(
-            ExposedAction(
-                name=names[(app.name, item.name)],
-                app=app.name,
-                action=item.name,
-                description=(
-                    f"[{app.name}] {item.description}".rstrip() if several else item.description
-                ),
-                parameters=tool_parameters(item.parameters),
-                mutates_state=item.mutates_state,
-                timeout_seconds=item.timeout_seconds,
-            )
-            for app in self.apps
-            for item in app.actions
-        )
+        return exposed_actions(self.apps)
 
     @property
     def secrets(self) -> tuple[SecretReference, ...]:
