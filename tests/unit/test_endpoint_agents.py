@@ -162,3 +162,25 @@ def test_a_job_runs_an_endpoint_agent_without_a_plural_key(
     trial = result.trials[0]
     assert trial.score == 1.0, trial.error_message
     assert _AgentServer.requests[0][1] == "Bearer sk-acme"
+
+
+def test_a_local_runtime_names_the_packages_it_lacks(
+    agent_server: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    monkeypatch.setenv("ACME_KEY", "sk-acme")
+    monkeypatch.chdir(tmp_path)
+    runtime = Runtime.local(packages={"python": ["pydantic>=2", "surely-not-installed-xyz>=1"]})
+    task = Task(
+        name="refund-01",
+        instructions="Say PAID.",
+        environment=Environment(name="support", runtime=runtime),
+        verifiers=[DeterministicVerifier(name="paid", check=answered_paid)],
+    )
+    agent = Agent(model="acme/agent", endpoint=agent_server, endpoint_key="ACME_KEY")
+
+    with pytest.raises(ExecutionFailure) as failure:
+        Job(task, agents=[agent]).run()
+
+    message = str(failure.value)
+    assert "does not have: surely-not-installed-xyz>=1." in message
+    assert "pip install 'surely-not-installed-xyz>=1'" in message

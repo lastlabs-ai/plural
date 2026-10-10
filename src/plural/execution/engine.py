@@ -9,6 +9,8 @@ import functools
 import json
 import math
 import os
+import shlex
+import sys
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -41,6 +43,7 @@ from plural.execution.bootstrap import (
     RUNTIME_VERSION_VARIABLE,
     PluralDistribution,
     install_plural,
+    missing_packages,
     needed_extras,
     needs_plural,
     prepare_requirements,
@@ -898,6 +901,17 @@ class Trial:
             requested_target=self.task.environment.runtime.requested_target,
         )
         await provider.preflight(_requirements(self.task, package))
+        packages = self.task.environment.runtime.packages.python
+        if provider.name == "local" and packages:
+            missing = missing_packages(packages)
+            if missing:
+                quoted = " ".join(shlex.quote(item) for item in missing)
+                raise ExecutionFailure(
+                    ErrorCode.CONFIGURATION,
+                    "The Environment needs Python packages this Python does not have: "
+                    f"{', '.join(missing)}. The local Runtime installs nothing, so install "
+                    f"them into {sys.executable}, such as with `pip install {quoted}`.",
+                )
         source = materialize_package(package)
         if (
             source is not None
@@ -909,11 +923,13 @@ class Trial:
     def _plural_distribution(
         self, provider: SandboxProvider, package: HarnessPackage
     ) -> PluralDistribution | None:
-        """The Plural a non-local sandbox needs for this Trial, if it runs any."""
-        if provider.name == "local" or not needs_plural(self.task, package):
+        """The Plural a non-local sandbox needs for this Trial, and the
+        Environment's packages, if it runs Plural code or installs any."""
+        packages = self.task.environment.runtime.packages.python
+        if provider.name == "local" or not (packages or needs_plural(self.task, package)):
             return None
         return resolve_distribution(
-            self.environ.get(RUNTIME_VERSION_VARIABLE), needed_extras(self.task)
+            self.environ.get(RUNTIME_VERSION_VARIABLE), needed_extras(self.task), packages
         )
 
     async def _stage_environment(self, provider: SandboxProvider, handle: SandboxHandle) -> None:

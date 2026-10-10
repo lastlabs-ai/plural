@@ -75,6 +75,8 @@ def _write(generated: Generated, *, as_json: bool) -> None:
     files = [relative(path, root) for path in written]
     payload = {
         "environment": generated.environment,
+        "updated": generated.updated,
+        "notes": generated.notes,
         "files": files,
         "apps": apps,
         "tasks": generated.tasks,
@@ -83,7 +85,14 @@ def _write(generated: Generated, *, as_json: bool) -> None:
     }
 
     def text() -> None:
-        typer.echo(f"Drafted environment {generated.environment}:")
+        if not generated.updated:
+            typer.echo(f"Drafted environment {generated.environment}:")
+        elif files:
+            typer.echo(f"Updated environment {generated.environment}:")
+        else:
+            typer.echo(f"Nothing changed in environment {generated.environment}:")
+        for note in generated.notes:
+            typer.echo(f"  {note}")
         for path in files:
             typer.echo(f"  {path}")
         for app in apps:
@@ -109,9 +118,8 @@ def _write(generated: Generated, *, as_json: bool) -> None:
             )
         if generated.benchmark:
             typer.echo(
-                f"\nDrafted {len(generated.tasks)} Task(s) and benchmark {generated.benchmark}. "
-                "Review the instructions, then score the recorded agent with "
-                f"`plural run --benchmark {generated.benchmark} --traces <file>`."
+                f"\nReview the drafted Tasks' instructions, then run Agents on them with "
+                f"`plural run --benchmark {generated.benchmark} --model <model>`."
             )
 
     emit(payload, as_json=as_json, text=text)
@@ -307,7 +315,7 @@ def add_generators(app: typer.Typer) -> None:
         traces: str = typer.Option(
             ...,
             "--traces",
-            help='Recorded conversations: JSONL of {"messages": [...]}, or Plural Traces.',
+            help='Recorded conversations: JSON or JSONL of {"messages": [...]}, or Plural Traces.',
         ),
         app_name: str = typer.Option(
             "tools", "--app", help="App for tool calls whose names carry no app__ prefix."
@@ -315,11 +323,20 @@ def add_generators(app: typer.Typer) -> None:
         judge_model: str = typer.Option(
             DEFAULT_JUDGE_MODEL, "--judge-model", help="Model for the drafted judge Verifier."
         ),
-        max_tasks: int = typer.Option(50, "--max-tasks", min=1, help="Draft at most this many."),
+        max_tasks: int = typer.Option(
+            50,
+            "--max-tasks",
+            min=1,
+            help="Draft at most this many Tasks, preferring traces that call different tools.",
+        ),
         runtime: str = typer.Option("local", "--runtime", help=RUNTIME_HELP),
         as_json: bool = JSON_OPTION,
     ) -> None:
-        """Draft replay Apps from recorded tool calls, a Task per trace, and a Benchmark."""
+        """Draft replay Apps, Tasks, and a Benchmark from recorded traces.
+
+        Run it again with newer traces to add them: new calls, new tools, new
+        systems, and Tasks for traces not seen before. Existing Tasks are kept.
+        """
         from plural.recorded import read_traces
 
         root = workspace().project.root
@@ -334,6 +351,7 @@ def add_generators(app: typer.Typer) -> None:
                 judge_model=judge_model,
                 max_tasks=max_tasks,
                 runtime=runtime,
+                root=root,
             )
         except ValueError as exc:
             raise ProjectError(str(exc)) from exc

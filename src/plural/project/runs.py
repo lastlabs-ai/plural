@@ -92,8 +92,6 @@ class RunRequest:
     attempts: int | None = None
     concurrency: int | Literal["auto"] = 1
     hosted: bool = False
-    traces: str | None = None
-    """Recorded conversations to score with the Task instead of running a model."""
 
 
 @dataclass
@@ -204,8 +202,6 @@ def plan_run(
     """
     if bool(request.task) == bool(request.benchmark):
         raise ProjectError("Name exactly one of --task or --benchmark.")
-    if request.traces:
-        return _plan_traces(workspace, request)
     if request.agent and (request.model or request.harness):
         raise ProjectError(
             "--agent already names a model and Harness. Use --agent alone, or --model with an "
@@ -275,50 +271,6 @@ def plan_run(
         job=job,
         pins=pins,
         concurrency_reason=reason,
-    )
-
-
-def _plan_traces(workspace: Workspace, request: RunRequest) -> RunPlan:
-    """Score recorded conversations with a Task's or a Benchmark's Verifiers.
-
-    Returns:
-        The plan, whose Agent replays each trace instead of calling a model.
-    """
-    if request.agent or request.model or request.harness or request.hosted:
-        raise ProjectError(
-            "--traces replays what an agent already did, so it takes no --agent, --model, "
-            "--harness, or --hosted."
-        )
-    path = Path(str(request.traces))
-    if not path.is_absolute():
-        path = workspace.project.root / path
-    if not path.is_file():
-        raise ProjectError(f"No traces file at {path}.")
-    source = (
-        ResourceRef(TASK.name, str(request.task))
-        if request.task
-        else ResourceRef(BENCHMARK.name, str(request.benchmark))
-    )
-    loaded = workspace.load(source)
-    try:
-        job = Job.from_traces(
-            path,
-            task=loaded.value if source.kind == TASK.name else None,
-            benchmark=loaded.value if source.kind == BENCHMARK.name else None,
-            concurrency=request.concurrency if request.concurrency != "auto" else 4,
-            catalog=workspace.catalog,
-        )
-    except ValueError as exc:
-        raise ProjectError(str(exc)) from exc
-    job.spec = job.spec.model_copy(update={"run_id": uuid.uuid4().hex})
-    job.plan = job.spec.plan(workspace.catalog)
-    return RunPlan(
-        source=source,
-        agent=job.agents[0],
-        agent_ref=None,
-        inputs=[source],
-        job=job,
-        pins={str(source): {"revision": "local", "content_hash": loaded.content_hash}},
     )
 
 

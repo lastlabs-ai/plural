@@ -913,7 +913,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ eject-files   Copy Plural's ready-made files server into an Environment, to change what it       │
 │               offers.                                                                            │
 │ serve         Serve an App's FastMCP server over HTTP, to try its tools in any MCP client.       │
-│ from-traces   Draft replay Apps from recorded tool calls, a Task per trace, and a Benchmark.     │
+│ from-traces   Draft replay Apps, Tasks, and a Benchmark from recorded traces.                    │
 │ validate      Check a resource and everything it depends on, without uploading.                  │
 │ push          Validate and push an immutable, private revision to the bound project.             │
 │ release       Label the revision matching your files with a release version, pushing it first.   │
@@ -1011,21 +1011,26 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural env from-traces [OPTIONS] {name}
 
- Draft replay Apps from recorded tool calls, a Task per trace, and a Benchmark.
+ Draft replay Apps, Tasks, and a Benchmark from recorded traces.
+
+ Run it again with newer traces to add them: new calls, new tools, new
+ systems, and Tasks for traces not seen before. Existing Tasks are kept.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    name      <str>  Environment name; also names the drafted Benchmark. [required]             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --traces             <str>               Recorded conversations: JSONL of {"messages":        │
-│                                             [...]}, or Plural Traces.                            │
+│ *  --traces             <str>               Recorded conversations: JSON or JSONL of             │
+│                                             {"messages": [...]}, or Plural Traces.               │
 │                                             [required]                                           │
 │    --app                <str>               App for tool calls whose names carry no app__        │
 │                                             prefix.                                              │
 │                                             [default: tools]                                     │
 │    --judge-model        <str>               Model for the drafted judge Verifier.                │
 │                                             [default: openai/gpt-5.6-luna]                       │
-│    --max-tasks          <int range> [x>=1]  Draft at most this many. [default: 50]               │
+│    --max-tasks          <int range> [x>=1]  Draft at most this many Tasks, preferring traces     │
+│                                             that call different tools.                           │
+│                                             [default: 50]                                        │
 │    --runtime            <str>               Where the Environment runs: local (a trusted         │
 │                                             subprocess), docker, or daytona.                     │
 │                                             [default: local]                                     │
@@ -1731,9 +1736,6 @@ This section is generated from the Typer application. Run `uv run python scripts
  name@version runs that exact pushed version even after your files have
  moved on. It is restored under .plural/versions without touching them.
 
- --traces scores conversations an agent already had: each becomes a Trial
- of --task, replayed without calling a model, and stored like any other.
-
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --task            -t      <str>               Task to run: a name, or name@version for a         │
 │                                               retained version.                                  │
@@ -1743,9 +1745,6 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --harness         -h      <str>               Harness for --model. Default: native (Plural's     │
 │                                               built-in tool loop).                               │
 │ --agent           -a      <str>               Saved Agent to run: a name, or name@version.       │
-│ --traces                  <str>               Score recorded conversations (JSONL of             │
-│                                               {"messages": [...]}, or Plural Traces) with        │
-│                                               --task's Verifiers instead of running a model.     │
 │ --hosted                                      Run on hosted infrastructure. Inputs the hosted    │
 │                                               project lacks are pushed first.                    │
 │ --track                                       Run here, and record the Job in the hosted project │
@@ -1816,7 +1815,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --provider              -p                       <str>  Configure a provider directly instead of │
 │                                                         a template.                              │
 │ --set                                            <str>  A setting as key=value, such as --set    │
-│                                                         cpus=2. Repeat for more. See `plural     │
+│                                                         cpus=2. Repeat for more; repeat a list   │
+│                                                         setting to add items, such as --set      │
+│                                                         python_packages=duckdb --set             │
+│                                                         python_packages=polars. See `plural      │
 │                                                         runtime provider <id>` for every key.    │
 │ --credential                                     <str>  A credential name, such as               │
 │                                                         DAYTONA_API_KEY, to be prompted for      │
@@ -1874,7 +1876,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --set                                          <str>  A setting as key=value, such as --set      │
-│                                                       cpus=2. Repeat for more. See `plural       │
+│                                                       cpus=2. Repeat for more; repeat a list     │
+│                                                       setting to add items, such as --set        │
+│                                                       python_packages=duckdb --set               │
+│                                                       python_packages=polars. See `plural        │
 │                                                       runtime provider <id>` for every key.      │
 │ --unset                                        <str>  Return a setting to its default.           │
 │ --credential                                   <str>  A credential name, such as                 │
@@ -2033,9 +2038,13 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --provider              -p                            <str>  Provider id.                        │
 │ --set                                                 <str>  A setting as key=value, such as     │
-│                                                              --set cpus=2. Repeat for more. See  │
-│                                                              `plural runtime provider <id>` for  │
-│                                                              every key.                          │
+│                                                              --set cpus=2. Repeat for more;      │
+│                                                              repeat a list setting to add items, │
+│                                                              such as --set                       │
+│                                                              python_packages=duckdb --set        │
+│                                                              python_packages=polars. See `plural │
+│                                                              runtime provider <id>` for every    │
+│                                                              key.                                │
 │ --credential                                          <str>  A credential name, such as          │
 │                                                              DAYTONA_API_KEY, to be prompted for │
 │                                                              without echoing; KEY=VALUE also     │
@@ -2112,7 +2121,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --set                                               <str>  A setting as key=value, such as --set │
-│                                                            cpus=2. Repeat for more. See `plural  │
+│                                                            cpus=2. Repeat for more; repeat a     │
+│                                                            list setting to add items, such as    │
+│                                                            --set python_packages=duckdb --set    │
+│                                                            python_packages=polars. See `plural   │
 │                                                            runtime provider <id>` for every key. │
 │ --unset                                             <str>  Return a setting to its default.      │
 │ --credential                                        <str>  A credential name, such as            │

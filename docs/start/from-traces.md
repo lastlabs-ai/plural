@@ -2,36 +2,88 @@
 route: /docs/start/from-traces
 title: Start from traces
 order: 22
-description: "Score conversations your agent already had, draft Tasks and a Benchmark from them, and run other models on the same Tasks to compare."
+description: "Turn conversations your agent already had into an Environment, Tasks, and a Benchmark, then run models on the same Tasks to compare."
 audience: all
 nav: true
 nav_group: Start
 ---
+
 # Start from traces
 
 **You start with** conversations an agent you already run has had.
 
-**You end with** a score for each one, a Benchmark made from them, and your agent's
-scores next to any other model's on the same Tasks.
+**You end with** an Environment whose tools answer the way your real tools did, a Task
+for each conversation, and a Benchmark you can run any model on.
 
 ## What your traces need to look like
 
-One conversation per line, in the OpenAI chat format most agent frameworks already log:
+Each trace is one conversation, in the OpenAI chat format most agent frameworks
+already log:
 
 ```json
-{"messages": [{"role": "user", "content": "Where is order 42?"}, {"role": "assistant", "content": "It shipped on Monday."}]}
+{
+  "messages": [
+    {"role": "user", "content": "Where is order 42?"},
+    {"role": "assistant", "content": "It shipped on Monday."}
+  ]
+}
 ```
 
-That's the whole requirement. If your agent called tools, keep them in the same list:
-the assistant's `tool_calls`, each answered by a `tool` message with the same
-`tool_call_id`, exactly as OpenAI's API returns them.
+That's the whole requirement. Put your traces in a JSON array, one per line in a
+`.jsonl` file, or pretty-printed one after another; Plural reads all three.
+
+If your agent called tools, keep them in the same list: the assistant's `tool_calls`,
+each answered by a `tool` message with the same `tool_call_id`, exactly as OpenAI's
+API returns them.
+
+:::details A trace with a tool call
+```json
+{
+  "trace_id": "t-1",
+  "messages": [
+    {"role": "user", "content": "Where is order 42?"},
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "c1",
+          "type": "function",
+          "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"42\"}"}
+        }
+      ]
+    },
+    {"role": "tool", "tool_call_id": "c1", "content": "Order 42 shipped on Monday."},
+    {"role": "assistant", "content": "Your order shipped on Monday."}
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "lookup_order",
+        "description": "Look up an order by its number.",
+        "parameters": {
+          "type": "object",
+          "properties": {"order_id": {"type": "string"}},
+          "required": ["order_id"]
+        }
+      }
+    }
+  ]
+}
+```
+
+`tools` is optional. It is the list your agent sent the model, and it lets other
+models see your tools exactly as your agent did.
+:::
 
 :::details Every field Plural reads
 | Field | Required | What it's for |
 | --- | --- | --- |
 | `messages` | Yes | The conversation, oldest first. The first `user` message becomes the Task's instructions. |
-| `trace_id` (or `id`) | No | Names the trace and the Task drafted from it. Default: `trace-1`, `trace-2`, and so on. |
-| `model` | No | Names your agent in the results, such as `acme/support-bot`. Default: `recorded`. |
+| `trace_id` (or `id`) | No | Names the trace and the Task drafted from it. Default: a name made from the conversation, so the same conversation always gets the same one. |
+| `tools` | No | The tools your agent was offered, in OpenAI or Anthropic form. Other models get the same names, descriptions, and parameters. |
+| `model` | No | Your agent's model, kept with the trace. |
 | `metadata` | No | Any object; it is kept with the trace. |
 
 In `messages`:
@@ -40,8 +92,6 @@ In `messages`:
 - A tool call's `arguments` may be a JSON string, as OpenAI sends it, or an object.
 - A `tool` message's `content` is the tool's result. JSON text is read as JSON.
 - `system` messages are kept in the conversation but never become the instructions.
-
-A `.json` file holding one array of these objects works too.
 :::
 
 :::details Your agent used several systems
@@ -53,7 +103,7 @@ named `tools`.
 
 :::details Your traces are in another format
 **Plural Traces.** If you record runs with Plural's tracing SDK, pass those Traces, or
-a `TraceDataset`, wherever this page uses `conversations.jsonl`.
+a `TraceDataset`, wherever this page uses `conversations.json`.
 
 **Anthropic's Messages format.** Convert it first. A `tool_use` block becomes an
 OpenAI tool call, and a `tool_result` block becomes a `tool` message:
@@ -92,6 +142,8 @@ def to_openai(messages: list[dict]) -> list[dict]:
     return converted
 ```
 
+Anthropic tool definitions, with `input_schema`, can go in `tools` as they are.
+
 **Anything else.** Write each conversation as the `messages` list your agent would
 have sent an OpenAI-compatible model. That list is all Plural needs.
 :::
@@ -99,34 +151,50 @@ have sent an OpenAI-compatible model. That list is all Plural needs.
 ## How it works
 
 ```text
-conversations.jsonl
+conversations.json
   │
-  ├─ 1. Score    a judge grades each conversation as it happened
-  │
-  └─ 2. Draft    each conversation becomes a Task; every tool result is recorded
+  └─ 1. Draft     tool calls become a recording of your tools; conversations become Tasks
        │
-       └─ 3. Compare    other models work those Tasks; the recording answers their tool calls
+       └─ 2. Run      models work those Tasks; the recording answers their tool calls
 ```
 
-1. **Score.** A judge model reads each conversation and scores it. Nothing is rerun.
-2. **Draft.** Each conversation becomes a Task. Every tool call, with the result it
-   got, is saved to a recording that stands in for your real tools.
-3. **Compare.** Other models work the same Tasks. When one calls a tool, it gets the
-   recorded result. The same judge scores everyone.
+1. **Draft.** Every tool call, with the result it got, is saved to a recording that
+   stands in for your real tools. Conversations become Tasks, and a judge model is
+   drafted to score them.
+2. **Run.** Models work the Tasks. When one calls a tool, it gets the recorded result.
+   The same judge scores every model, so their scores compare.
+
+:::details What Plural learns about your tools
+- A tool in a trace's `tools` list is offered with your name, description, and
+  parameters, even if your agent never called it.
+- A tool your agent called but no `tools` list defines is offered too, with
+  parameters inferred from its calls.
+- A tool your agent never called has no recorded answers. A model that calls it is
+  told so, and the step is marked `off_recording`.
+:::
 
 :::details What the recording answers when a model does something new
 - Same tool, same arguments as a recorded call: the recorded result.
 - Same tool, different arguments: the result of the closest recorded call. The step
   is marked `off_recording`.
 
-Nothing real is called after step 1, so comparing is safe and repeatable. The limit
-is the recording: a model that takes a path your agent never took gets the closest
-recorded answer, not the real one. Many `off_recording` steps mean the comparison is
-approximate there. To test that behavior, connect the real system, as in
+Nothing real is called, so runs are safe and repeatable. The limit is the recording:
+a model that takes a path your agent never took gets the closest recorded answer, not
+the real one. Many `off_recording` steps mean the comparison is approximate there. To
+test that behavior, connect the real system, as in
 [Start from a system](from-a-system.md).
 :::
 
-The rest of this page does all three with two example conversations.
+:::details Hundreds or thousands of traces
+Every tool call from every trace goes into the recording, so more traces give models
+more real answers.
+
+At most 50 traces become Tasks; change that with `--max-tasks`. Plural first picks
+traces that call tools no other picked trace calls, so every tool your agent used is
+exercised by some Task where possible, then fills the rest in file order.
+:::
+
+The rest of this page does both steps with two example conversations.
 
 ## 1. Create a project and add your traces
 
@@ -135,63 +203,78 @@ plural project init support
 cd support
 ```
 
-Save these two conversations as `conversations.jsonl`:
+Save these two conversations as `conversations.json`:
 
 ```json
-{"trace_id": "t-1", "model": "acme/support-bot", "messages": [{"role": "user", "content": "Where is order 42?"}, {"role": "assistant", "content": null, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"42\"}"}}]}, {"role": "tool", "tool_call_id": "c1", "content": "Order 42 shipped on Monday."}, {"role": "assistant", "content": "Your order shipped on Monday."}]}
-{"trace_id": "t-2", "model": "acme/support-bot", "messages": [{"role": "user", "content": "Can I get a refund for order 7? It arrived broken."}, {"role": "assistant", "content": null, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"7\"}"}}]}, {"role": "tool", "tool_call_id": "c1", "content": "Order 7 delivered Friday, $40."}, {"role": "assistant", "content": null, "tool_calls": [{"id": "c2", "type": "function", "function": {"name": "issue_refund", "arguments": "{\"order_id\": \"7\", \"amount\": 40}"}}]}, {"role": "tool", "tool_call_id": "c2", "content": "Refund of $40 issued for order 7."}, {"role": "assistant", "content": "I've refunded the full $40 for order 7. Sorry it arrived broken."}]}
+[
+  {
+    "trace_id": "t-1",
+    "messages": [
+      {"role": "user", "content": "Where is order 42?"},
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "c1",
+            "type": "function",
+            "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"42\"}"}
+          }
+        ]
+      },
+      {"role": "tool", "tool_call_id": "c1", "content": "Order 42 shipped on Monday."},
+      {"role": "assistant", "content": "Your order shipped on Monday."}
+    ]
+  },
+  {
+    "trace_id": "t-2",
+    "messages": [
+      {"role": "user", "content": "Can I get a refund for order 7? It arrived broken."},
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "c1",
+            "type": "function",
+            "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"7\"}"}
+          }
+        ]
+      },
+      {"role": "tool", "tool_call_id": "c1", "content": "Order 7 delivered Friday, $40."},
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "c2",
+            "type": "function",
+            "function": {
+              "name": "issue_refund",
+              "arguments": "{\"order_id\": \"7\", \"amount\": 40}"
+            }
+          }
+        ]
+      },
+      {"role": "tool", "tool_call_id": "c2", "content": "Refund of $40 issued for order 7."},
+      {
+        "role": "assistant",
+        "content": "I've refunded the full $40 for order 7. Sorry it arrived broken."
+      }
+    ]
+  }
+]
 ```
 
-## 2. Score them right away
-
-Before drafting anything, find out how your agent did. Save this as `score_traces.py`:
-
-```python
-from plural import AgentVerifier, Client, Job, RubricCriterion
-
-judge = AgentVerifier(
-    name="resolved",
-    model="openai/gpt-5.6-luna",
-    instructions="Judge whether the agent resolved the customer's request.",
-    criteria=[
-        RubricCriterion(
-            name="resolved",
-            description="0: not resolved. 1: resolved, with the actions it needed.",
-        )
-    ],
-)
-result = Job.from_traces("conversations.jsonl", verifiers=[judge], client=Client()).run()
-for trial in result.trials:
-    print(trial.receipt.task_pin.name, trial.score, trial.verifier_results[0].evidence[0])
-```
+## 2. Draft the Environment, Tasks, and a Benchmark
 
 ```bash
-python score_traces.py
-```
-
-```text
-t-1 1.0 The agent used lookup_order for order 42 and received the status "Order 42 shipped on Monday."
-t-2 1.0 The agent looked up order 7 and confirmed its $40 value.
-```
-
-**What just happened.** Each conversation was replayed as a Trial: every assistant
-message became a model call and every tool result a step, without calling your agent's
-model. A model judge, an `AgentVerifier`, read each one and scored it with evidence.
-The judge's call goes through the Plural gateway, which is why this step needs you
-signed in.
-
-## 3. Draft Tasks and a Benchmark
-
-A score for each trace tells you how your agent did. To compare it with other models,
-turn the traces into Tasks they can attempt too:
-
-```bash
-plural env from-traces support --traces conversations.jsonl
+plural env from-traces support --traces conversations.json
 ```
 
 ```text
 Drafted environment support:
-  environments/support/recordings/tools.jsonl
+  environments/support/apps/tools/recordings.jsonl
   environments/support/environment.yaml
   environments/support/README.md
   verifiers/support-judge/verifier.yaml
@@ -206,7 +289,7 @@ App tools (replay, replayed) offers:
   lookup_order
   issue_refund
 
-Drafted 2 Task(s) and benchmark support. Review the instructions, then score the recorded agent with `plural run --benchmark support --traces <file>`.
+Review the drafted Tasks' instructions, then run Agents on them with `plural run --benchmark support --model <model>`.
 ```
 
 **What just happened.** Plural wrote:
@@ -219,7 +302,7 @@ Drafted 2 Task(s) and benchmark support. Review the instructions, then score the
 
 All of them are ordinary project files.
 
-## 4. Review the drafts
+## 3. Review the drafts
 
 Read each `tasks/*/instruction.md` and make sure it says what the user actually wanted;
 a first message is not always the whole request. Then sharpen the judge's `criteria` in
@@ -230,32 +313,12 @@ a first message is not always the whole request. Then sharpen the judge's `crite
 plural benchmark validate support
 ```
 
-**What just happened.** `validate` checked that every Task, the judge, and the replay App
-load.
-
 :::details Refuse calls the recording doesn't cover
 Add `fallback: error` under `replay:` in `environment.yaml`. A model's call with no
 exact recording is then told no recording matches, instead of getting the closest one.
 :::
 
-## 5. Score your agent on the Benchmark
-
-```bash
-plural run --benchmark support --traces conversations.jsonl
-```
-
-```text
-  [1/2] trl_d9e151759572131586fa1562  support-t-2  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
-  [2/2] trl_6c35608c630b0a1e3cd3fa9b  support-t-1  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
-Job job_1453507c51bdf816d4b92bbd succeeded.
-  support-bot: mean score 1.000 over 2 trial(s), 2 succeeded
-```
-
-**What just happened.** Each trace was matched to the Task drafted from it and scored
-by that Task's Verifier. The Agent is named after the traces' `model`, here
-`support-bot`. This is your baseline.
-
-## 6. Run another model and compare
+## 4. Run models and compare
 
 ```bash
 plural run --benchmark support --model openai/gpt-5.6-luna
@@ -268,10 +331,58 @@ Job job_3a3b71e85e95e020a05801b5 succeeded.
   gpt-5.6-luna: mean score 1.000 over 2 trial(s), 2 succeeded
 ```
 
-**What just happened.** The model worked the same Tasks, calling the same tools, and was
-graded by the same Verifier. Its mean score sits next to your agent's. Run as many
-models as you like; `plural job show <job-id>` lists each Trial's score, and
-`plural trial show <trial-id>` shows the judge's evidence.
+**What just happened.** The model worked both Tasks, calling the recorded tools, and the
+judge scored each attempt. Run as many models as you like; `plural job show <job-id>`
+lists each Trial's score, and `plural trial show <trial-id>` shows the judge's
+evidence.
+
+:::details Put your own agent on the same Benchmark
+If your agent's model is served behind an OpenAI-compatible API, run it as an Agent
+with its own `endpoint`, and it works the same Tasks as every other model; see
+[Use your own endpoint](../project/agents.md#use-your-own-endpoint).
+:::
+
+## 5. Bring newer traces
+
+When your agent changes, such as gaining new tools, run the same command with the new
+traces:
+
+```bash
+plural env from-traces support --traces newer.json
+```
+
+```text
+Updated environment support:
+  App tools: 1 new action(s): reship_order; 1 new recorded call(s).
+  Drafted 1 new Task(s) and added them to benchmark support.
+  environments/support/apps/tools/recordings.jsonl
+  environments/support/apps/tools/tools.json
+  environments/support/environment.yaml
+  tasks/support-t-3/task.yaml
+  tasks/support-t-3/instruction.md
+  benchmarks/support/benchmark.yaml
+
+App tools (replay, replayed) offers:
+  lookup_order
+  issue_refund
+  reship_order
+```
+
+**What just happened.** The Environment picked up what the new traces show: a new
+tool, `reship_order`, and its recorded call. The new trace became a Task in the same
+Benchmark. Your edited Tasks and judge were left as they were.
+
+:::details Exactly what an update changes
+- A trace already imported, by `trace_id`, is skipped.
+- New calls are added to the recording. A tool in the new traces' `tools` lists is
+  added, and a tool defined again replaces the old description and parameters.
+- A system seen for the first time, such as a new `billing__` prefix, becomes a new
+  replay App.
+- An App you replaced with a real connection is left alone; the output says which
+  calls were not added.
+- New Tasks are drafted only from new traces, up to `--max-tasks`, preferring traces
+  that call tools no existing Task covers.
+:::
 
 ## Where you are now
 
@@ -281,9 +392,8 @@ You have a Benchmark, `support`, that you can rerun on any model with
 
 Next:
 
-- Collect more traces and rerun `plural env from-traces` to grow the Benchmark.
 - Replace the judge with a deterministic Verifier where a rule can decide; see
   [Verifiers](../project/verifiers.md).
-- The full reference for trace scoring is
-  [Score traces you already have](../running/traces.md#score-traces-you-already-have).
+- Swap a replay App for the real system when recorded answers aren't enough; see
+  [Start from a system](from-a-system.md).
 - To train on these Trials, see [Training and RL](../running/training.md).

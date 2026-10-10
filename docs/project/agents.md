@@ -292,9 +292,8 @@ A few things to know:
 - A live local run sends every model call through the Plural gateway, so it needs a
   Plural API key, such as the one `plural auth login` stores. An Agent with its own
   `endpoint` is the exception.
-- To score conversations an agent already had, without running it again, use
-  `plural run --traces FILE`; see
-  [Score traces you already have](../running/traces.md#score-traces-you-already-have).
+- To turn conversations an agent already had into Tasks, see
+  [Start from traces](../start/from-traces.md).
 
 In Python, given a Task named `task`, run the Agent with your Client:
 

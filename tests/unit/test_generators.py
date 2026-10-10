@@ -183,10 +183,126 @@ def test_from_traces_drafts_replay_apps_tasks_and_a_benchmark_the_traces_score_o
     assert len(space.load(ResourceRef("benchmark", "support")).value.tasks) == 2
     assert space.load(ResourceRef("verifier", "support-judge")).value.kind == "agent"
 
-    from plural import Job
 
-    job = Job.from_traces(traces, benchmark=space.load(ResourceRef("benchmark", "support")).value)
-    assert [task.name for task in job.source.tasks] == ["support-t-1", "support-t-2"]
+def _call(call_id: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    return {"id": call_id, "function": {"name": name, "arguments": json.dumps(arguments)}}
+
+
+def _tool(name: str, description: str) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {"type": "object", "properties": {"id": {"type": "string"}}},
+        },
+    }
+
+
+def _ticket(ticket: str, calls: list[str], tools: list[dict[str, Any]]) -> dict[str, Any]:
+    messages: list[dict[str, Any]] = [{"role": "user", "content": f"Handle ticket {ticket}."}]
+    for index, name in enumerate(calls):
+        messages.append(
+            {"role": "assistant", "tool_calls": [_call(f"c{index}", name, {"id": ticket})]}
+        )
+        messages.append({"role": "tool", "tool_call_id": f"c{index}", "content": f"{name} ok"})
+    messages.append({"role": "assistant", "content": "Done."})
+    return {"id": ticket, "messages": messages, "tools": tools}
+
+
+def test_from_traces_offers_the_agents_own_tools_with_their_descriptions(
+    project: Project,
+) -> None:
+    tools = [
+        _tool("crm__lookup", "Find a customer by id."),
+        _tool("crm__note", "Add a note to a customer."),
+    ]
+    (project.root / "traces.jsonl").write_text(
+        json.dumps(_ticket("T-1", ["crm__lookup"], tools)) + "\n"
+    )
+
+    code, output, drafted = cli("env", "from-traces", "desk", "--traces", "traces.jsonl", "--json")
+
+    assert code == 0, output
+    [crm] = drafted["apps"]
+    assert [action["name"] for action in crm["actions"]] == ["lookup", "note"]
+    environment = Workspace(project).load(ResourceRef("environment", "desk")).value
+    app = next(item for item in environment.apps if item.name == "crm")
+    described = {action.name: action.description for action in app.actions()}
+    assert described == {"lookup": "Find a customer by id.", "note": "Add a note to a customer."}
+    with pytest.raises(ValueError, match="never called it"):
+        app.call("note", {"id": "T-1"})
+
+
+def test_from_traces_again_adds_new_tools_systems_and_tasks(project: Project) -> None:
+    old_tools = [_tool("crm__lookup", "Find a customer."), _tool("crm__note", "Add a note.")]
+    first = [
+        _ticket("T-1", ["crm__lookup"], old_tools),
+        _ticket("T-2", ["crm__lookup", "crm__note"], old_tools),
+    ]
+    (project.root / "first.jsonl").write_text("".join(json.dumps(t) + "\n" for t in first))
+    code, output, _ = cli("env", "from-traces", "desk", "--traces", "first.jsonl", "--json")
+    assert code == 0, output
+
+    new_tools = [
+        _tool("crm__lookup", "Find a customer by id or email."),
+        _tool("crm__note", "Add a note."),
+        _tool("crm__refund", "Refund an order."),
+        _tool("crm__escalate", "Hand the ticket to a person."),
+        _tool("billing__invoice", "Read an invoice."),
+    ]
+    second = [
+        _ticket("T-2", ["crm__lookup", "crm__note"], new_tools),
+        _ticket("T-3", ["crm__lookup", "crm__refund", "billing__invoice"], new_tools),
+        _ticket("T-4", ["crm__escalate"], new_tools),
+    ]
+    (project.root / "second.jsonl").write_text("".join(json.dumps(t) + "\n" for t in second))
+    code, output, updated = cli("env", "from-traces", "desk", "--traces", "second.jsonl", "--json")
+
+    assert code == 0, output
+    assert updated["updated"] is True
+    assert updated["problem"] is None
+    assert updated["tasks"] == ["desk-t-3", "desk-t-4"]
+    notes = "\n".join(updated["notes"])
+    assert "Skipped 1 trace(s) already imported." in notes
+    assert "App crm: 2 new action(s): escalate, refund" in notes
+    assert "updated description or schema: lookup" in notes
+    assert "New App billing: 1 action(s), 1 recorded call(s)." in notes
+    actions = {app["name"]: [a["name"] for a in app["actions"]] for app in updated["apps"]}
+    assert actions == {
+        "billing": ["invoice"],
+        "crm": ["lookup", "note", "refund", "escalate"],
+    }
+    space = Workspace(project)
+    benchmark = space.load(ResourceRef("benchmark", "desk")).value
+    assert [task.name for task in benchmark.tasks] == [
+        "desk-t-1",
+        "desk-t-2",
+        "desk-t-3",
+        "desk-t-4",
+    ]
+    manifest = (project.root / "environments/desk/environment.yaml").read_text()
+    assert manifest.startswith("# Drafted by `plural env from-traces`")
+    recordings = (project.root / "environments/desk/apps/crm/recordings.jsonl").read_text()
+    assert len(recordings.splitlines()) == 6
+
+    code, output, again = cli("env", "from-traces", "desk", "--traces", "second.jsonl", "--json")
+    assert code == 0, output
+    assert again["tasks"] == []
+    assert "Nothing new to add." in again["notes"]
+
+
+def test_from_traces_drafts_tasks_that_cover_every_tool_first(project: Project) -> None:
+    traces = [_ticket(f"T-{index}", ["lookup"], []) for index in range(1, 6)]
+    traces.append(_ticket("T-6", ["refund"], []))
+    (project.root / "traces.jsonl").write_text("".join(json.dumps(t) + "\n" for t in traces))
+
+    code, output, drafted = cli(
+        "env", "from-traces", "desk", "--traces", "traces.jsonl", "--max-tasks", "2", "--json"
+    )
+
+    assert code == 0, output
+    assert drafted["tasks"] == ["desk-t-1", "desk-t-6"]
 
 
 def test_a_reference_named_with_secret_stays_a_setup_secret() -> None:

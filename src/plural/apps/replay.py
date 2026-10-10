@@ -123,9 +123,12 @@ class ReplayApp(App[State]):
     Settings:
         recordings: A ``.json`` or ``.jsonl`` file of recorded calls in the
             Environment folder.
+        tools: A ``.json`` file of the tools the recorded agent was offered,
+            each ``{"name", "description", "parameters"}``. They are offered with
+            their own descriptions and schemas, even ones the agent never called.
         fallback: ``"nearest"`` or ``"error"`` for a call with no exact recording.
-        actions: Action declarations. Default: one per recorded action, with
-            arguments inferred from the recordings.
+        actions: Action declarations. Default: every tool in ``tools``, then
+            each other recorded action, with arguments inferred from the recordings.
         read_only: Actions that do not change state, so Verifiers may query them.
     """
 
@@ -137,6 +140,7 @@ class ReplayApp(App[State]):
         *,
         name: str | None = None,
         recordings: str | None = None,
+        tools: str | None = None,
         fallback: Literal["nearest", "error"] = "nearest",
         actions: Sequence[Mapping[str, Any] | AppAction] | None = None,
         read_only: Sequence[str] = (),
@@ -155,6 +159,7 @@ class ReplayApp(App[State]):
         if fallback not in {"nearest", "error"}:
             raise ValueError("fallback must be 'nearest' or 'error'")
         self.recordings_file = recordings
+        self.tools_file = tools
         self.fallback = fallback
         self.read_only = tuple(read_only)
         self._declared = (
@@ -166,6 +171,7 @@ class ReplayApp(App[State]):
             else None
         )
         self._recordings: list[dict[str, Any]] | None = None
+        self._tools: list[dict[str, Any]] | None = None
         self._last: dict[str, Any] = {}
         self._calls = 0
         self._off_recording = 0
@@ -180,25 +186,66 @@ class ReplayApp(App[State]):
             ValueError: When the file is missing or has no calls.
         """
         if self._recordings is None:
-            path = Path(self.recordings_file)
-            path = path if path.is_absolute() else self.workspace / path
-            if not path.is_file():
-                raise ValueError(f"Replay App {self.name!r}: {path} does not exist")
+            path = self._path(self.recordings_file)
             self._recordings = read_recordings(path)
-            if not self._recordings:
+            if not self._recordings and not self.tool_definitions():
                 raise ValueError(f"Replay App {self.name!r}: {path} has no recorded calls")
         return self._recordings
 
-    def actions(self) -> tuple[AppAction, ...]:
-        """One action per recorded action name, unless declared explicitly.
+    def tool_definitions(self) -> list[dict[str, Any]]:
+        """The tools the recorded agent was offered, from ``tools``.
 
         Returns:
-            The App's actions.
+            ``{"name", "description", "parameters"}`` entries; none without ``tools``.
+
+        Raises:
+            ValueError: When the file is missing or is not a list of tools.
+        """
+        if self.tools_file is None:
+            return []
+        if self._tools is None:
+            raw = json.loads(self._path(self.tools_file).read_text(encoding="utf-8"))
+            if not isinstance(raw, list) or not all(
+                isinstance(item, Mapping) and item.get("name") for item in raw
+            ):
+                raise ValueError(
+                    f"Replay App {self.name!r}: {self.tools_file} must be a JSON list of "
+                    'tools, each {"name", "description", "parameters"}'
+                )
+            self._tools = [dict(item) for item in raw]
+        return self._tools
+
+    def _path(self, relative: str) -> Path:
+        path = Path(relative)
+        path = path if path.is_absolute() else self.workspace / path
+        if not path.is_file():
+            raise ValueError(f"Replay App {self.name!r}: {path} does not exist")
+        return path
+
+    def actions(self) -> tuple[AppAction, ...]:
+        """Every tool the agent was offered, then each other recorded action.
+
+        Returns:
+            The App's actions, or the declared ones.
         """
         if self._declared is not None:
             return self._declared
-        names = list(dict.fromkeys(item["action"] for item in self.recordings()))
-        return tuple(
+        offered = [
+            AppAction(
+                name=str(tool["name"]),
+                description=str(tool.get("description") or f"Replayed {tool['name']}."),
+                parameters=dict(tool.get("parameters") or {"type": "object", "properties": {}}),
+                mutates_state=tool["name"] not in self.read_only,
+            )
+            for tool in self.tool_definitions()
+        ]
+        known = {action.name for action in offered}
+        names = [
+            name
+            for name in dict.fromkeys(item["action"] for item in self.recordings())
+            if name not in known
+        ]
+        return tuple(offered) + tuple(
             AppAction(
                 name=name,
                 description=f"Replayed {name}.",
@@ -231,7 +278,12 @@ class ReplayApp(App[State]):
                 return item["result"]
         self._off_recording += 1
         self._last = {"replay": self.fallback, "off_recording": True}
-        if self.fallback == "error" or not same:
+        if not same:
+            raise ValueError(
+                f"No recording of {action}: the recorded agent never called it, so there "
+                "is no answer to give."
+            )
+        if self.fallback == "error":
             raise ValueError(f"No recorded {action} call matches these arguments.")
         best = max(same, key=lambda item: _overlap(item["arguments"], arguments))
         return best["result"]

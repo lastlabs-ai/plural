@@ -10,6 +10,10 @@ gets it here, before the Harness starts:
   keyed by the base image and the exact Plural code.
 * Other providers install it into the running sandbox, which needs network.
 
+The Environment's ``runtime.packages.python`` are installed the same way,
+alongside Plural. On the local provider nothing is installed; they must
+already be importable, and :func:`missing_packages` says which are not.
+
 Either way an image that already has the same version is used as it is. By
 default the sandbox gets this machine's own Plural code, so the protocol on
 both sides matches even for an unreleased build. ``PLURAL_RUNTIME_VERSION``
@@ -19,10 +23,12 @@ selects a published release instead: a version such as ``0.16.0``, or
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import importlib.metadata
 import io
 import json
+import re
 import tempfile
 import zipfile
 from collections.abc import Sequence
@@ -51,13 +57,20 @@ _ARCHIVE = ".plural-runtime/plural.zip"
 _PYPI = "https://pypi.org/pypi/plural/json"
 
 _PROBE = """
-import json, sys
+import importlib.metadata, json, sys
 try:
     import plural
     info = {"version": plural.__version__}
 except Exception as exc:
     info = {"error": f"{type(exc).__name__}: {exc}"}
 info["python"] = "%d.%d" % sys.version_info[:2]
+missing = []
+for name in sys.argv[1:]:
+    try:
+        importlib.metadata.version(name)
+    except Exception:
+        missing.append(name)
+info["missing"] = missing
 print(json.dumps(info))
 """
 
@@ -107,12 +120,14 @@ class PluralDistribution:
     version: str
     requirements: tuple[str, ...]
     source: Path | None = None
+    packages: tuple[str, ...] = ()
+    """The Environment's own Python packages, installed alongside Plural."""
 
     @functools.cached_property
     def key(self) -> str:
         """Identity of the exact code, for reusing an image built from it."""
         digest = source_digest(self.source) if self.source is not None else ""
-        return "\n".join((self.version, *self.requirements, digest))
+        return "\n".join((self.version, *self.requirements, *self.packages, digest))
 
     def files(self) -> list[tuple[str, bytes]]:
         """Site-relative files to add on top of ``requirements``.
@@ -160,21 +175,51 @@ def needs_plural(
     return any(part.startswith("plural.") for command in commands for part in command)
 
 
-def resolve_distribution(requested: str | None, extras: tuple[str, ...] = ()) -> PluralDistribution:
+def resolve_distribution(
+    requested: str | None,
+    extras: tuple[str, ...] = (),
+    packages: tuple[str, ...] = (),
+) -> PluralDistribution:
     """Pick the Plural a sandbox gets from ``PLURAL_RUNTIME_VERSION``.
 
     ``extras`` are optional dependency groups the Trial needs, such as ``mcp``
-    for an App whose server is written with FastMCP.
+    for an App whose server is written with FastMCP. ``packages`` are the
+    Environment's own Python packages, installed with it.
 
     Returns:
         This machine's code when unset, otherwise the named release.
     """
     value = (requested or "").strip()
     if value in {"", "current"}:
-        return _host_distribution(tuple(sorted(extras)))
+        return dataclasses.replace(_host_distribution(tuple(sorted(extras))), packages=packages)
     version = _latest_release() if value == "latest" else value.removeprefix("v")
     name = f"plural[{','.join(sorted(extras))}]" if extras else "plural"
-    return PluralDistribution(version=version, requirements=(f"{name}=={version}",))
+    return PluralDistribution(
+        version=version, requirements=(f"{name}=={version}",), packages=packages
+    )
+
+
+def missing_packages(requirements: Sequence[str]) -> list[str]:
+    """The requirements this Python does not satisfy, for the local provider.
+
+    A requirement whose environment marker excludes this Python is satisfied.
+
+    Returns:
+        Each unsatisfied requirement, as written.
+    """
+    missing: list[str] = []
+    for item in requirements:
+        parsed = _requirement(item)
+        if parsed is not None and parsed.marker is not None and not parsed.marker.evaluate():
+            continue
+        try:
+            version = importlib.metadata.version(_name(item))
+        except importlib.metadata.PackageNotFoundError:
+            missing.append(item)
+            continue
+        if parsed is not None and not parsed.specifier.contains(version, prereleases=True):
+            missing.append(item)
+    return missing
 
 
 def needed_extras(task: Any) -> tuple[str, ...]:
@@ -187,6 +232,23 @@ def needed_extras(task: Any) -> tuple[str, ...]:
         if app.kind == "mcp" and app.config.get("server"):
             return ("mcp",)
     return ()
+
+
+def _name(requirement: str) -> str:
+    found = re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*", requirement)
+    return found.group(0) if found else requirement
+
+
+def _requirement(item: str) -> Any:
+    """``item`` parsed by ``packaging`` when it is installed, else ``None``."""
+    try:
+        from packaging.requirements import InvalidRequirement, Requirement
+    except ImportError:
+        return None
+    try:
+        return Requirement(item)
+    except InvalidRequirement:
+        return None
 
 
 @functools.lru_cache(maxsize=4)
@@ -240,7 +302,8 @@ async def prepare_requirements(
         context = Path(directory)
         (context / "Dockerfile").write_text(_DOCKERFILE, encoding="utf-8")
         (context / "requirements.txt").write_text(
-            "".join(f"{item}\n" for item in distribution.requirements), encoding="utf-8"
+            "".join(f"{item}\n" for item in (*distribution.requirements, *distribution.packages)),
+            encoding="utf-8",
         )
         site = context / "site"
         site.mkdir()
@@ -269,23 +332,31 @@ async def install_plural(
         PluralBootstrapError: When the sandbox cannot run or install it.
     """
     env = {"PYTHONPATH": SEARCH_PATH}
-    found = await _probe(provider, handle, env)
-    if found.get("version") == distribution.version:
+    names = {_name(item): item for item in distribution.packages}
+    found = await _probe(provider, handle, env, tuple(names))
+    present = found.get("version") == distribution.version
+    packages = tuple(names[name] for name in found.get("missing", list(names)) if name in names)
+    if present and not packages:
         return env
     if network is NetworkMode.NONE:
+        wanted = " ".join(packages) if present else f"plural=={distribution.version}"
         raise PluralBootstrapError(
-            f"This sandbox has no network, so Plural {distribution.version} cannot be "
-            "installed in it. Use an image with it preinstalled "
-            f"(pip install plural=={distribution.version}), or allow network access."
+            f"This sandbox has no network, so {wanted} cannot be installed in it. Use an "
+            "image with them preinstalled, or allow network access."
         )
     archive = "-"
-    if distribution.source is not None:
-        await provider.upload_files(handle, [FileUpload(path=_ARCHIVE, data=distribution.archive)])
-        archive = f"/workspace/{_ARCHIVE}"
+    requirements = packages
+    if not present:
+        requirements = (*distribution.requirements, *packages)
+        if distribution.source is not None:
+            await provider.upload_files(
+                handle, [FileUpload(path=_ARCHIVE, data=distribution.archive)]
+            )
+            archive = f"/workspace/{_ARCHIVE}"
     result = await provider.exec(
         handle,
         ExecRequest(
-            command=("python", "-c", _INSTALL, RUNTIME_SITE, archive, *distribution.requirements),
+            command=("python", "-c", _INSTALL, RUNTIME_SITE, archive, *requirements),
             cwd="/workspace",
             env={"HOME": "/tmp", "PIP_NO_INPUT": "1"},
             timeout_seconds=600,
@@ -293,26 +364,37 @@ async def install_plural(
     )
     if result.exit_code != 0:
         detail = (result.stderr or result.stdout).decode(errors="replace").strip()
+        listed = ", ".join(packages)
+        wanted = listed if present else f"Plural {distribution.version}"
+        if listed and not present:
+            wanted += f" and {listed}"
         raise PluralBootstrapError(
-            f"Could not install Plural {distribution.version} in the sandbox: "
-            f"{detail[-1500:] or result.exit_code}"
+            f"Could not install {wanted} in the sandbox: {detail[-1500:] or result.exit_code}"
         )
-    found = await _probe(provider, handle, env)
+    found = await _probe(provider, handle, env, tuple(names))
     if found.get("version") != distribution.version:
         raise PluralBootstrapError(
             f"Installed Plural {distribution.version}, but the sandbox imports "
             f"{found.get('version') or found.get('error')!r}."
         )
+    unseen = [names[name] for name in found.get("missing", []) if name in names]
+    if unseen:
+        raise PluralBootstrapError(
+            f"Installed {', '.join(unseen)}, but the sandbox's Python cannot find them."
+        )
     return env
 
 
 async def _probe(
-    provider: SandboxProvider, handle: SandboxHandle, env: dict[str, str]
+    provider: SandboxProvider,
+    handle: SandboxHandle,
+    env: dict[str, str],
+    names: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     result = await provider.exec(
         handle,
         ExecRequest(
-            command=("python", "-c", _PROBE),
+            command=("python", "-c", _PROBE, *names),
             cwd="/workspace",
             env=env,
             timeout_seconds=60,
@@ -336,6 +418,8 @@ __all__ = [
     "PluralBootstrapError",
     "PluralDistribution",
     "install_plural",
+    "missing_packages",
+    "needed_extras",
     "needs_plural",
     "prepare_requirements",
     "resolve_distribution",

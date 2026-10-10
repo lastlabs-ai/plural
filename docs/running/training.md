@@ -147,7 +147,7 @@ calls, and `trial.apps` each App's initial and final State. Bump `version` when 
 logic changes, so an export can pick which labels to use.
 
 Run it on Trials you already have. This labels a stored Job without running anything
-again, and works the same on [recorded traces](traces.md#score-traces-you-already-have):
+again:
 
 ```bash
 plural rewards apply rewarders.py:fewer_guesses --job JOB_ID

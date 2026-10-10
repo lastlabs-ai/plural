@@ -55,7 +55,6 @@ plural env from-traces NAME --traces FILE
 plural run (-t TASK | -b BENCHMARK) (-m MODEL [-h HARNESS] | -a AGENT)
            [--hosted [--follow] | --track] [--attempts N] [--concurrency N]
            [--plural-version VERSION] [--dry-run] [--json]
-plural run (-t TASK | -b BENCHMARK) --traces FILE
 plural job list
 plural job show|rerun|push JOB_ID
 plural trial show|rerun TRIAL_ID

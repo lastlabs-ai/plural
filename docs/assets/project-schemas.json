@@ -441,6 +441,10 @@
           "resources": {
             "$ref": "#/$defs/ResourceRequirements"
           },
+          "packages": {
+            "$ref": "#/$defs/RuntimePackages",
+            "description": "Packages installed in the Runtime before an episode. In environment.yaml, list Python ones under python_packages. On the local Runtime they must already be installed."
+          },
           "read_only_root": {
             "default": false,
             "title": "Read Only Root",
@@ -748,6 +752,22 @@
           "name"
         ],
         "title": "RewarderDefinition",
+        "type": "object"
+      },
+      "RuntimePackages": {
+        "additionalProperties": false,
+        "description": "Packages installed in the Runtime before an episode, by package manager.\n\nEach list holds what you would pass to that manager, one package per entry.",
+        "properties": {
+          "python": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Python",
+            "type": "array"
+          }
+        },
+        "title": "RuntimePackages",
         "type": "object"
       },
       "RuntimeVariable": {

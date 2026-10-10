@@ -1,28 +1,22 @@
-"""Score conversations an agent already had, without running it again.
+"""Read conversations an agent already had, to draft an Environment from them.
 
 A recorded trace is an OpenAI-style message list: the conversation an agent
-had, with its tool calls and their results. :meth:`plural.Job.from_traces`
-turns each one into a Task and replays it through Plural's native Harness, so
-the Task's Verifiers, any hindsight rewarders, ``plural rewards``, and the
-training export all see it exactly as they would a live run. No model is
-called and nothing in the recorded systems is touched.
+had, with its tool calls and their results, and optionally the tools it was
+offered. ``plural env from-traces`` turns the tool calls into replay Apps and
+each conversation into a draft Task.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from plural.agents.models import Agent, AgentDefinition
-from plural.common import FrozenModel, HarnessBinding
-
-RECORDING_KEY = "plural.recording"
-"""The Task metadata key the replay Harness reads its conversation from."""
+from plural.common import FrozenModel
 
 
 class RecordedTrace(FrozenModel):
@@ -32,6 +26,8 @@ class RecordedTrace(FrozenModel):
     messages: tuple[dict[str, Any], ...] = Field(min_length=1)
     model: str = "recorded"
     metadata: dict[str, Any] = Field(default_factory=dict)
+    tools: tuple[dict[str, Any], ...] = ()
+    """The tools the agent was offered, as ``{"name", "description", "parameters"}``."""
 
     @property
     def instructions(self) -> str:
@@ -70,11 +66,75 @@ def recordings_by_app(
     grouped: dict[str, list[dict[str, Any]]] = {}
     for trace in traces:
         for call in trace.tool_calls:
-            app, separator, action = str(call["action"]).partition("__")
-            if not separator or not app or not action:
-                app, action = default_app, str(call["action"])
-            grouped.setdefault(app, []).append({**call, "action": action})
+            app, action = app_action(str(call["action"]), default_app)
+            grouped.setdefault(app, []).append(
+                {**call, "action": action, "trace_id": trace.trace_id}
+            )
     return grouped
+
+
+def tools_by_app(
+    traces: Iterable[RecordedTrace], *, default_app: str = "recorded"
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """The tools the agent was offered, grouped by App like :func:`recordings_by_app`.
+
+    When traces define the same tool differently, the last one wins, so a newer
+    trace's description replaces an older one's.
+
+    Returns:
+        App name to action name to ``{"name", "description", "parameters"}``.
+    """
+    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    for trace in traces:
+        for tool in trace.tools:
+            app, action = app_action(str(tool["name"]), default_app)
+            grouped.setdefault(app, {})[action] = {**tool, "name": action}
+    return grouped
+
+
+def app_action(name: str, default_app: str) -> tuple[str, str]:
+    """Split ``crm__get_record`` into App ``crm`` and action ``get_record``.
+
+    Returns:
+        The App and the action; ``default_app`` for a name with no prefix.
+    """
+    app, separator, action = name.partition("__")
+    if not separator or not app or not action:
+        return default_app, name
+    return app, action
+
+
+def _tools(raw: Any) -> tuple[dict[str, Any], ...]:
+    """Tool definitions in OpenAI, Anthropic, or plain form, as one shape.
+
+    Returns:
+        ``{"name", "description", "parameters"}`` for each named tool.
+    """
+    tools: list[dict[str, Any]] = []
+    for item in raw if isinstance(raw, list) else ():
+        if not isinstance(item, Mapping):
+            continue
+        nested = item.get("function")
+        function: Mapping[str, Any] = nested if isinstance(nested, Mapping) else item
+        name = function.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        parameters = function.get("parameters") or function.get("input_schema")
+        tools.append(
+            {
+                "name": name,
+                "description": str(function.get("description") or ""),
+                "parameters": dict(parameters)
+                if isinstance(parameters, Mapping)
+                else {"type": "object", "properties": {}},
+            }
+        )
+    return tuple(tools)
+
+
+def _fingerprint(messages: Sequence[Any]) -> str:
+    text = json.dumps(list(messages), sort_keys=True, separators=(",", ":"), default=str)
+    return "trace-" + hashlib.sha256(text.encode()).hexdigest()[:12]
 
 
 def _text(content: Any) -> str:
@@ -96,6 +156,7 @@ def _from_plural_trace(payload: Mapping[str, Any]) -> RecordedTrace | None:
         The recorded conversation, or ``None`` when the Trace made no model call.
     """
     best: list[dict[str, Any]] = []
+    tools: tuple[dict[str, Any], ...] = ()
     model = payload.get("model")
     for step in payload.get("steps") or []:
         if not isinstance(step, dict) or step.get("type") != "llm":
@@ -110,6 +171,7 @@ def _from_plural_trace(payload: Mapping[str, Any]) -> RecordedTrace | None:
             messages.append(reply)
         if len(messages) >= len(best):
             best = messages
+            tools = _tools(request.get("tools")) or tools
             model = step.get("model") or model
     if not best:
         return None
@@ -118,6 +180,7 @@ def _from_plural_trace(payload: Mapping[str, Any]) -> RecordedTrace | None:
         messages=tuple(best),
         model=str(model or "recorded"),
         metadata=dict(payload.get("metadata") or {}),
+        tools=tools,
     )
 
 
@@ -127,8 +190,10 @@ def recorded_trace(
     """Read one recorded conversation.
 
     Accepts ``{"messages": [...]}`` (OpenAI chat logs and fine-tuning files,
-    optionally with ``id`` or ``trace_id``, ``model``, and ``metadata``) and a
-    Plural ``Trace`` with model-call steps.
+    optionally with ``id`` or ``trace_id``, ``model``, ``metadata``, and the
+    ``tools`` the agent was offered) and a Plural ``Trace`` with model-call
+    steps. A trace without an id is named after its content, so reading the
+    same conversation twice gives it the same id.
 
     Returns:
         The conversation.
@@ -141,11 +206,13 @@ def recorded_trace(
     if isinstance(payload, BaseModel):
         payload = payload.model_dump(mode="json")
     if isinstance(payload.get("messages"), list):
+        messages = tuple(item for item in payload["messages"] if isinstance(item, dict))
         return RecordedTrace(
-            trace_id=str(payload.get("trace_id") or payload.get("id") or f"trace-{index + 1}"),
-            messages=tuple(item for item in payload["messages"] if isinstance(item, dict)),
+            trace_id=str(payload.get("trace_id") or payload.get("id") or _fingerprint(messages)),
+            messages=messages,
             model=str(payload.get("model") or "recorded"),
             metadata=dict(payload.get("metadata") or {}),
+            tools=_tools(payload.get("tools")),
         )
     if payload.get("trace_id") and isinstance(payload.get("steps"), list):
         found = _from_plural_trace(payload)
@@ -162,6 +229,9 @@ def read_traces(
 ) -> list[RecordedTrace]:
     """Read recorded conversations from a JSONL or JSON file, or from objects.
 
+    A file may hold one trace per line, a JSON array, or traces pretty-printed
+    one after another.
+
     A ``TraceDataset`` works too: its Traces are read in order.
 
     Returns:
@@ -171,13 +241,9 @@ def read_traces(
         ValueError: The source is empty or a trace holds no conversation.
     """
     if isinstance(source, (str, Path)):
-        path = Path(source)
-        text = path.read_text(encoding="utf-8")
-        if path.suffix == ".jsonl":
-            items: list[Any] = [json.loads(line) for line in text.splitlines() if line.strip()]
-        else:
-            parsed = json.loads(text)
-            items = parsed if isinstance(parsed, list) else [parsed]
+        items: list[Any] = _json_values(Path(source).read_text(encoding="utf-8"))
+        if len(items) == 1 and isinstance(items[0], list):
+            items = items[0]
     else:
         items = list(getattr(source, "traces", source))
     traces = [recorded_trace(item, index) for index, item in enumerate(items)]
@@ -186,149 +252,39 @@ def read_traces(
     return traces
 
 
-def _task_names(traces: Sequence[RecordedTrace]) -> list[str]:
-    names: list[str] = []
-    seen: set[str] = set()
-    for trace in traces:
-        base = re.sub(r"[^a-z0-9]+", "-", trace.trace_id.lower()).strip("-") or "trace"
-        name, suffix = base, 2
-        while name in seen:
-            name, suffix = f"{base}-{suffix}", suffix + 1
-        seen.add(name)
-        names.append(name)
-    return names
-
-
-class _RecordedAgent(Agent):
-    """The agent that already ran: its recorded turns, replayed."""
-
-    def _definition(self) -> AgentDefinition:
-        from plural.harness.packages import native_replay_v1
-
-        package = native_replay_v1()
-        return AgentDefinition(
-            name=self.name,
-            revision=self.version,
-            model=self.model,
-            harness=HarnessBinding.from_package(package),
-            harness_package=package,
-            auth_mode="none",
-            metadata={"recorded": True},
-        )
-
-
-def traces_benchmark(
-    traces: Sequence[RecordedTrace],
-    *,
-    name: str,
-    verifiers: Sequence[Any] = (),
-    environment: Any = None,
-    task: Any = None,
-    benchmark: Any = None,
-) -> Any:
-    """One Task per recorded trace, each carrying its conversation.
-
-    With ``benchmark``, each trace is scored as the Task drafted from it, the
-    one whose ``metadata.trace_id`` matches, under that Task's name. With
-    ``task``, every trace is an attempt at it. Otherwise each trace gets a Task
-    of its own, scored by ``verifiers`` in ``environment``.
+def _json_values(text: str) -> list[Any]:
+    """Every JSON value in ``text``, one after another, however each is laid out.
 
     Returns:
-        The Benchmark to run with :func:`recorded_agent`.
+        The values, in order.
 
     Raises:
-        ValueError: A trace has no Task, or nothing scores the traces.
+        ValueError: Something in ``text`` is not JSON.
     """
-    from plural.environments import Environment, Runtime
-    from plural.tasks import Benchmark, Task
-
-    drafted: dict[str, Any] = {}
-    if benchmark is not None:
-        drafted = {
-            str(item.metadata.get("trace_id")): item
-            for item in benchmark.tasks
-            if item.metadata.get("trace_id")
-        }
-    names = _task_names(traces)
-    tasks = []
-    for index, trace in enumerate(traces):
-        template = task
-        task_name = names[index]
-        if benchmark is not None:
-            template = drafted.get(trace.trace_id)
-            if template is None:
-                raise ValueError(
-                    f"No Task in Benchmark {benchmark.name!r} was drafted from trace "
-                    f"{trace.trace_id!r}. A drafted Task names its trace in metadata.trace_id."
-                )
-            task_name = template.name
-        chosen = tuple(verifiers) or (tuple(template.verifiers) if template is not None else ())
-        if not chosen:
-            raise ValueError("Cannot score traces.\nPass a Task, a Benchmark, or Verifiers.")
-        recording = {
-            "trace_id": trace.trace_id,
-            "model": trace.model,
-            "messages": list(trace.messages),
-        }
-        if template is None:
-            tasks.append(
-                Task(
-                    name=task_name,
-                    instructions=trace.instructions,
-                    environment=environment or Environment(name=name, runtime=Runtime.local()),
-                    verifiers=chosen,
-                    metadata={
-                        **trace.metadata,
-                        "trace_id": trace.trace_id,
-                        RECORDING_KEY: recording,
-                    },
-                )
-            )
-            continue
-        tasks.append(
-            Task(
-                name=task_name,
-                version=template.version,
-                instructions=template.instructions,
-                goals=template.goals,
-                info=template.info,
-                environment=environment or template.environment,
-                verifiers=chosen,
-                resources=template.resources,
-                initial_state=template.initial_state,
-                reset_options=template.reset_options,
-                metadata={
-                    **template.metadata,
-                    "trace_id": trace.trace_id,
-                    RECORDING_KEY: recording,
-                },
-            )
-        )
-    return Benchmark(name=name, version="0.1.0", tasks=tuple(tasks))
-
-
-def recorded_agent(traces: Sequence[RecordedTrace]) -> Agent:
-    """The participant that replays recorded traces.
-
-    Returns:
-        An Agent named for the traces' model, which needs no catalog entry or key.
-    """
-    models = {trace.model for trace in traces}
-    model = models.pop() if len(models) == 1 else "recorded"
-    return _RecordedAgent.model_construct(
-        model=model,
-        name=model.rsplit("/", 1)[-1],
-        version="0.1.0",
-        auth_mode="none",
-    )
+    decoder = json.JSONDecoder()
+    values: list[Any] = []
+    position = 0
+    while True:
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position >= len(text):
+            return values
+        try:
+            value, position = decoder.raw_decode(text, position)
+        except json.JSONDecodeError as exc:
+            line = text.count("\n", 0, position) + 1
+            raise ValueError(
+                f"The trace starting on line {line} is not valid JSON: {exc.msg} "
+                f"(line {exc.lineno})."
+            ) from None
+        values.append(value)
 
 
 __all__ = [
-    "RECORDING_KEY",
     "RecordedTrace",
+    "app_action",
     "read_traces",
-    "recorded_agent",
     "recordings_by_app",
     "recorded_trace",
-    "traces_benchmark",
+    "tools_by_app",
 ]

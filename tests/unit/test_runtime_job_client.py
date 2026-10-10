@@ -8,13 +8,11 @@ from pydantic import Field, ValidationError
 
 from plural import (
     Agent,
-    AgentVerifier,
     App,
     DeterministicVerifier,
     Environment,
     Episode,
     Job,
-    RubricCriterion,
     Runtime,
     State,
     Task,
@@ -113,33 +111,6 @@ def test_job_client_injects_plural_env(monkeypatch: pytest.MonkeyPatch) -> None:
     client = type("Client", (), {"api_key": "pk-test", "base_url": "https://gateway.test"})()
     job = Job(_task(), agents=[Agent(model="openai/gpt-5.6-luna")], client=client)
     environ = job._credential_environ()
-    assert environ["PLURAL_API_KEY"] == "pk-test"
-
-
-def test_replayed_traces_need_the_gateway_only_for_a_model_judge(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("PLURAL_API_KEY", raising=False)
-    monkeypatch.delenv("PLURAL_GATEWAY_URL", raising=False)
-    traces = [
-        {"messages": [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello"}]}
-    ]
-    judge = AgentVerifier(
-        name="judge",
-        model="openai/gpt-5.6-luna",
-        instructions="Judge it.",
-        criteria=[RubricCriterion(name="ok", description="0 or 1.")],
-    )
-    plain = DeterministicVerifier(name="solved", check=solved)
-
-    assert (
-        "PLURAL_GATEWAY_URL" not in Job.from_traces(traces, verifiers=[plain])._credential_environ()
-    )
-    with pytest.raises(ValueError, match="model-judge Verifier"):
-        Job.from_traces(traces, verifiers=[judge])._credential_environ()
-    client = type("Client", (), {"api_key": "pk-test", "base_url": "https://gateway.test/v1"})()
-    environ = Job.from_traces(traces, verifiers=[judge], client=client)._credential_environ()
-    assert environ["PLURAL_GATEWAY_URL"] == "https://gateway.test/v1"
     assert environ["PLURAL_API_KEY"] == "pk-test"
 
 

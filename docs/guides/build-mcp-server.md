@@ -299,10 +299,17 @@ host in `network_allowlist` in the Environment's `runtime`; see
 
 :::details Packages your server needs
 A server that imports a package beyond Plural and FastMCP, such as `duckdb` or a
-warehouse client, needs it in the Runtime. On the `local` Runtime it comes from your
-project's Python environment. Elsewhere, install it in the Runtime's image: set
-`dockerfile`, or list it under `declarative_image.pip_packages` in the Environment's
-`runtime`; see [Runtimes](../project/runtimes.md).
+warehouse client, needs it in the Runtime. List it in the Environment's `runtime`:
+
+```yaml
+runtime:
+  python_packages:
+    - duckdb>=1.1
+```
+
+Plural installs it alongside itself. The `local` Runtime uses your project's Python
+instead, and a Job names any package it lacks; see
+[Packages](../project/runtimes.md#packages).
 :::
 
 ## Several Apps

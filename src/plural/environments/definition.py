@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Iterable, Mapping
 from pathlib import PurePosixPath
 from typing import Any, Literal
@@ -160,6 +161,39 @@ class RuntimeVariable(FrozenModel):
         return value
 
 
+_REQUIREMENT = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9._,\s-]*\])?(\s*[@<>=!~;(].*)?$"
+)
+
+
+class RuntimePackages(FrozenModel):
+    """Packages installed in the Runtime before an episode, by package manager.
+
+    Each list holds what you would pass to that manager, one package per entry.
+    """
+
+    python: tuple[str, ...] = ()
+    """Python requirements, such as ``duckdb>=1.1`` or ``snowflake-connector-python``."""
+
+    @field_validator("python")
+    @classmethod
+    def _python_requirements(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        cleaned: list[str] = []
+        for item in value:
+            text = item.strip()
+            if not _REQUIREMENT.match(text) or "\n" in text:
+                raise ValueError(
+                    f"{item!r} is not a Python requirement. Give one package per entry, "
+                    "such as duckdb or duckdb>=1.1, with no pip options."
+                )
+            if text not in cleaned:
+                cleaned.append(text)
+        return tuple(cleaned)
+
+    def __bool__(self) -> bool:
+        return bool(self.python)
+
+
 class EnvironmentRuntime(FrozenModel):
     """Where an Environment runs: Docker, a trusted local process, or a remote sandbox."""
 
@@ -184,6 +218,12 @@ class EnvironmentRuntime(FrozenModel):
         validation_alias=AliasChoices("network_allowlist", "allowed_hosts"),
     )
     resources: ResourceRequirements = Field(default_factory=ResourceRequirements)
+    packages: RuntimePackages = Field(
+        default_factory=RuntimePackages,
+        description="Packages installed in the Runtime before an episode. In "
+        "environment.yaml, list Python ones under python_packages. On the local "
+        "Runtime they must already be installed.",
+    )
     read_only_root: bool = False
     targets: frozenset[ExecutionTarget] = Field(
         default_factory=lambda: frozenset({ExecutionTarget.DOCKER, ExecutionTarget.REMOTE})
@@ -211,6 +251,8 @@ class EnvironmentRuntime(FrozenModel):
                 resources[target] = payload.pop(source)
         if "allowed_hosts" in payload and "network_allowlist" not in payload:
             payload["network_allowlist"] = payload.pop("allowed_hosts")
+        if "python_packages" in payload and "packages" not in payload:
+            payload["packages"] = {"python": payload.pop("python_packages") or ()}
         if resources:
             payload["resources"] = resources
         return payload
@@ -625,6 +667,9 @@ class EnvironmentDefinition(FrozenModel):
         payload = self.model_dump(mode="json", exclude={"source"})
         if payload["runtime"]["ref"] is None:
             del payload["runtime"]["ref"]
+        if not self.runtime.packages:
+            # Runtimes that install nothing keep the identity they had before packages.
+            del payload["runtime"]["packages"]
         for app in payload["apps"]:
             # Apps that need no credentials keep the identity they had before credentials.
             if not app["credentials"]:

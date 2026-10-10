@@ -85,8 +85,6 @@ STOP_REASONS: tuple[str, ...] = (
     "max_turns",
     "max_seconds",
     "max_cost",
-    # A recorded trace, scored offline, ended before the Agent finished.
-    "recording_ended",
     # The episode did not finish.
     "error",
 )
@@ -110,7 +108,6 @@ class EpisodeOutcome(FrozenModel):
         "max_turns",
         "max_seconds",
         "max_cost",
-        "recording_ended",
         "error",
     ] = ""
     terminated: bool = False

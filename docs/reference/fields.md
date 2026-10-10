@@ -48,6 +48,7 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [ResourceRequirements](#resourcerequirements)
 - [Rewarder](#rewarder)
 - [RubricCriterion](#rubriccriterion)
+- [RuntimePackages](#runtimepackages)
 - [RuntimeVariable](#runtimevariable)
 - [Secret](#secret)
 - [VerifierRuntime](#verifierruntime)
@@ -291,6 +292,7 @@ Where an Environment runs: Docker, a trusted local process, or a remote sandbox.
 - **`network`** — `NetworkMode`; optional. Default: `"public"`.
 - **`network_allowlist`** — `array of string`; optional. Default: `[]`.
 - **`resources`** — `ResourceRequirements`; optional.
+- **`packages`** — `RuntimePackages`; optional. Packages installed in the Runtime before an episode. In environment.yaml, list Python ones under python_packages. On the local Runtime they must already be installed.
 - **`read_only_root`** — `boolean`; optional. Default: `false`.
 - **`targets`** — `array of ExecutionTarget`; optional. Constraints: `{"uniqueItems": true}`.
 - **`persistent`** — `boolean`; optional. Default: `false`.
@@ -424,6 +426,12 @@ One Agent or Human rubric criterion.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`min_score`** — `number`; optional. Default: `0`.
 - **`max_score`** — `number`; optional. Default: `1`.
+
+## RuntimePackages
+
+Packages installed in the Runtime before an episode, by package manager.
+
+- **`python`** — `array of string`; optional. Default: `[]`.
 
 ## RuntimeVariable
 

@@ -122,77 +122,25 @@ relevant observations, model identity, errors, and the artifacts your scoring ru
 needs. Fields such as usage and latency depend on the integration actually
 recording them; do not infer them from an empty trace.
 
-## Score traces you already have
+## Build Tasks from traces you already have
 
 If an agent is already running somewhere, such as in production or another
-framework, you can score its recorded conversations without running it again. No
-model is called, so only a model judge needs a key.
-
-In short: Plural scores each conversation as it happened, turns each one into a Task
-with its tool results recorded, and lets other models work those Tasks against the
-recording. [Start from traces](../start/from-traces.md#how-it-works) walks through it.
-
-A trace file is JSONL, one conversation per line, with its messages in OpenAI chat
-format. A `trace_id` and `model` are optional; Plural Traces and a `TraceDataset`
-work too. [What your traces need to look like](../start/from-traces.md#what-your-traces-need-to-look-like)
-lists every field and how to convert other formats:
-
-```json
-{"trace_id": "t-1", "model": "acme/support-bot", "messages": [{"role": "user", "content": "Where is order 42?"}, {"role": "assistant", "content": null, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"42\"}"}}]}, {"role": "tool", "tool_call_id": "c1", "content": "Order 42 shipped on Monday."}, {"role": "assistant", "content": "Your order shipped on Monday."}]}
-```
-
-Draft a Benchmark from the file:
+framework, its recorded conversations can become an Environment and Tasks:
 
 ```bash
-plural env from-traces support --traces conversations.jsonl
+plural env from-traces support --traces conversations.json
 ```
 
-This writes an Environment with one replay App, whose actions are the tools the
-traces called; one Task per trace, with the first user message as its instructions;
-a model-judge Verifier, `support-judge`; and a Benchmark, `support`. Review the
-instructions, and replace or add Verifiers as you like. Then score the recorded agent:
+This writes an Environment with one replay App per system the traces used, whose
+actions are the agent's tools, answered with the results that were recorded; one Task
+per trace, up to `--max-tasks`; a model-judge Verifier; and a Benchmark. Run any model
+on the Benchmark, and rerun the command with newer traces to add new tools and Tasks.
+[Start from traces](../start/from-traces.md) walks through it, including the trace
+format.
 
-```bash
-plural run --benchmark support --traces conversations.jsonl
-```
-
-```text
-Running benchmark/support local with support-bot (acme/support-bot) locally: 2 trial(s), 4 at a time.
-  [1/2] trl_409743e8a46035d1012d7341  support-t-1  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
-  [2/2] trl_bb7968e72da0d0d252bf46b1  support-t-2  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
-```
-
-Each trace is matched to the Task drafted from it, so its Trial lines up with the
-same Task run live. Run a real Agent on the same Benchmark to compare the two:
-
-```bash
-plural run --benchmark support --model openai/gpt-5.6-luna
-```
-
-To score traces against a Task you wrote yourself, pass `--task` instead; every trace
-is then an attempt at that Task. From Python, `Job.from_traces` does the same:
-
-```python
-from plural import Job
-
-job = Job.from_traces("conversations.jsonl", task=task)
-result = job.run()
-```
-
-How a recorded conversation is replayed:
-
-- Each assistant message is recorded as a model call, and each tool result as a step,
-  so the Trial reads like any other.
-- A tool call to an action an App in the Environment declares is sent to that App
-  for real, with the recorded result kept beside it. So when the Environment has
-  real Apps, a Verifier that reads App state sees where the agent left it.
-- A tool call with no recorded result gets the error "the recording has no result
-  for this call".
-- When the recording runs out, the episode ends with the `recording_ended` stop
-  reason, or `agent_response` if it ended on a reply.
-
-The Trials are stored like any other, so rewards and training exports work on them;
-see [Training and RL](training.md).
+Traces are for building Tasks, not for scoring. To compare the agent that produced
+them, run it on the same Benchmark as an Agent with its own `endpoint`; see
+[Use your own endpoint](../project/agents.md#use-your-own-endpoint).
 
 ## Reuse evidence responsibly
 
