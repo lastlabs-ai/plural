@@ -65,6 +65,11 @@ class AppAction(FrozenModel):
     )
     mutates_state: bool = True
     timeout_seconds: float = Field(default=30, gt=0)
+    binding: dict[str, Any] = Field(default_factory=dict)
+    """How the App carries out this action, such as an HTTP method and path.
+
+    Never shown to the Agent.
+    """
 
     @field_validator("name")
     @classmethod

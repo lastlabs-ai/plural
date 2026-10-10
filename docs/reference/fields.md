@@ -187,6 +187,7 @@ One move an App offers the Agent.
 - **`parameters`** — `object`; optional.
 - **`mutates_state`** — `boolean`; optional. Default: `true`.
 - **`timeout_seconds`** — `number`; optional. Default: `30`. Constraints: `{"exclusiveMinimum": 0}`.
+- **`binding`** — `object`; optional.
 
 ## AppDefinition
 

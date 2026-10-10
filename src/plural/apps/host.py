@@ -162,7 +162,7 @@ class AppHost:
                 action=name,
                 observation=None,
                 rendered="",
-                info={"error": str(exc)},
+                info={**app.step_info(), "error": str(exc)},
                 view=self._view(app_name),
             )
         latency_ms = round((time.monotonic() - started) * 1000, 3)
@@ -185,7 +185,7 @@ class AppHost:
             value = float(extra)
             signals.append({"name": "on_step", "app": None, "weight": 1.0, "value": value})
             reward += value
-        info: dict[str, Any] = {"latency_ms": latency_ms}
+        info: dict[str, Any] = {**app.step_info(), "latency_ms": latency_ms}
         if self._effects:
             info["effects"] = list(self._effects)
         return self._envelope(

@@ -229,6 +229,17 @@ class App(Generic[StateT]):
         """Return whether this App cut the episode short."""
         return False
 
+    def step_info(self) -> dict[str, Any]:
+        """Bookkeeping about the last action, recorded on the step.
+
+        It goes in the step's ``info``, which reward ledgers and the run viewer
+        read and the Agent never sees.
+
+        Returns:
+            A JSON-safe mapping, empty by default.
+        """
+        return {}
+
     def view(self) -> dict[str, Any]:
         """Return an optional render document for the run viewer.
 

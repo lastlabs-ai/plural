@@ -4,6 +4,11 @@
       "additionalProperties": false,
       "description": "One move an App offers the Agent.\n\n``name`` is the App's own name for the action (a Python method name or an\nMCP tool name). The Environment exposes it to the Agent unprefixed when it\nhas one App, and as ``<app>__<name>`` when it has several.",
       "properties": {
+        "binding": {
+          "additionalProperties": true,
+          "title": "Binding",
+          "type": "object"
+        },
         "description": {
           "default": "",
           "title": "Description",

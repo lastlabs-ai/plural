@@ -193,6 +193,9 @@ class Environment:
         else:
             root = _caller_root()
         self._root = root if root is not None and root.is_dir() else None
+        if self._root is not None:
+            for app in self.apps:
+                app.workspace = self._root
         self._source = None
         self._source_bound = False
         self._compiled = None
