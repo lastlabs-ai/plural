@@ -862,6 +862,7 @@ class Job:
         traces: str | Path | Iterable[Any],
         *,
         task: Task | None = None,
+        benchmark: Benchmark | None = None,
         verifiers: Sequence[Any] = (),
         environment: Any = None,
         name: str | None = None,
@@ -869,7 +870,7 @@ class Job:
     ) -> Job:
         """Score conversations an agent already had, without running it again.
 
-        Each trace becomes a Task whose Agent replays the recorded turns: every
+        Each trace becomes a Trial whose Agent replays the recorded turns: every
         assistant message is a model call and every tool result a step. A
         recorded call to an action the Environment declares is sent to its App,
         so Verifiers that read App state see where the agent left it. Trials are
@@ -878,12 +879,16 @@ class Job:
 
         Args:
             traces: A JSONL or JSON file, or a list, of ``{"messages": [...]}``
-                conversations in OpenAI chat format, or Plural Traces.
+                conversations in OpenAI chat format, Plural Traces, or a
+                ``TraceDataset``.
             task: Score every trace as an attempt at this Task: its Verifiers,
                 Environment, and starting state.
-            verifiers: Verifiers to score with, instead of or without ``task``.
+            benchmark: Score each trace as the Task drafted from it, matched by
+                ``metadata.trace_id``, so its Trials line up with live runs of
+                the same Benchmark.
+            verifiers: Verifiers to score with, instead of the Task's.
             environment: The Environment the traces ran in, when there is no
-                ``task``. Defaults to an empty local one.
+                Task. Defaults to an empty local one.
             name: The Benchmark the traces are grouped under.
             **options: Any other :class:`Job` option, such as ``hindsight``.
 
@@ -891,23 +896,23 @@ class Job:
             The Job, ready to ``run()``.
 
         Raises:
-            ValueError: Neither ``task`` nor ``verifiers`` was given.
+            ValueError: Both ``task`` and ``benchmark`` were given.
         """
         from plural.recorded import read_traces, recorded_agent, traces_benchmark
 
-        chosen = list(verifiers) or (list(task.verifiers) if task is not None else [])
-        if not chosen:
-            raise ValueError("Cannot score traces.\nPass task=... or verifiers=[...].")
+        if task is not None and benchmark is not None:
+            raise ValueError("Cannot score traces.\nPass task=... or benchmark=..., not both.")
         recorded = read_traces(traces)
-        benchmark = traces_benchmark(
+        named = task.name if task is not None else benchmark.name if benchmark else "recorded"
+        scored = traces_benchmark(
             recorded,
-            verifiers=chosen,
-            environment=environment or (task.environment if task is not None else None),
-            name=name or (f"{task.name}-traces" if task is not None else "recorded-traces"),
-            initial_state=task.initial_state if task is not None else None,
-            reset_options=task.reset_options if task is not None else None,
+            name=name or f"{named}-traces",
+            verifiers=verifiers,
+            environment=environment,
+            task=task,
+            benchmark=benchmark,
         )
-        return cls(benchmark, [recorded_agent(recorded)], **options)
+        return cls(scored, [recorded_agent(recorded)], **options)
 
     def _credential_environ(self) -> dict[str, str]:
         configured = self._runner_options.get("environ")

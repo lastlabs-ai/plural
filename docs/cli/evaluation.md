@@ -829,13 +829,130 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a new Environment from the standard template.                                   │
-│ validate  Check a resource and everything it depends on, without uploading.                      │
-│ push      Validate and push an immutable, private revision to the bound project.                 │
-│ release   Label the revision matching your files with a release version, pushing it first.       │
-│ pull      Restore a hosted revision's editable files into this project.                          │
-│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
-│ list      List resources of this kind, labeled local or hosted.                                  │
+│ init          Create a new Environment from the standard template.                               │
+│ from-mcp      Draft an Environment whose App is an MCP server; its tools become actions.         │
+│ from-openapi  Draft an Environment whose App is an HTTP API; its operations become actions.      │
+│ from-data     Draft an Environment whose App is tables of data, for a system with no API.        │
+│ from-traces   Draft replay Apps from recorded tool calls, a Task per trace, and a Benchmark.     │
+│ validate      Check a resource and everything it depends on, without uploading.                  │
+│ push          Validate and push an immutable, private revision to the bound project.             │
+│ release       Label the revision matching your files with a release version, pushing it first.   │
+│ pull          Restore a hosted revision's editable files into this project.                      │
+│ show          Show a resource: the local copy if there is one, otherwise the hosted one.         │
+│ list          List resources of this kind, labeled local or hosted.                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env from-data`
+
+```text
+
+ Usage: plural env from-data [OPTIONS] {name} [files]...
+
+ Draft an Environment whose App is tables of data, for a system with no API.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name       <str>  Environment name. [required]                                              │
+│      files      <str>  CSV, JSON, or JSONL files; each is a table named after the file.          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --database         <str>  A SQLite file instead.                                                 │
+│ --key              <str>  A table's key column, TABLE=COLUMN. Default: id, else rowid.           │
+│ --read-only               Offer no writes.                                                       │
+│ --sql                     Also offer read-only SQL as `query`.                                   │
+│ --app              <str>  The App's name, which prefixes its actions when there are several.     │
+│                           Default: NAME.                                                         │
+│ --runtime          <str>  Where the Environment runs: local (a trusted subprocess), docker, or   │
+│                           daytona.                                                               │
+│                           [default: local]                                                       │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env from-mcp`
+
+```text
+
+ Usage: plural env from-mcp [OPTIONS] {name}
+
+ Draft an Environment whose App is an MCP server; its tools become actions.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  Environment name. [required]                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --command        <str>  Start a stdio server, such as 'npx -y @scope/server'.                    │
+│ --url            <str>  Reach a Streamable HTTP server.                                          │
+│ --header         <str>  An HTTP header, KEY=VALUE. Repeatable. Use ${SECRET}.                    │
+│ --env            <str>  A server variable, KEY=VALUE. Repeatable. Use ${SECRET}.                 │
+│ --tool           <str>  Only offer this tool. Repeatable. Default: every tool.                   │
+│ --secret         <str>  A secret the App needs. ${NAME} in a header or variable is added for     │
+│                         you.                                                                     │
+│ --app            <str>  The App's name, which prefixes its actions when there are several.       │
+│                         Default: NAME.                                                           │
+│ --runtime        <str>  Where the Environment runs: local (a trusted subprocess), docker, or     │
+│                         daytona.                                                                 │
+│                         [default: local]                                                         │
+│ --json                  Print machine-readable JSON.                                             │
+│ --help                  Show this message and exit.                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env from-openapi`
+
+```text
+
+ Usage: plural env from-openapi [OPTIONS] {name}
+
+ Draft an Environment whose App is an HTTP API; its operations become actions.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  Environment name. [required]                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --spec             <str>  The OpenAPI document: a file or a URL. [required]                   │
+│    --base-url         <str>  Where to send requests. Default: the document's servers.            │
+│    --header           <str>  An HTTP header, KEY=VALUE. Repeatable. Use ${SECRET}.               │
+│    --operation        <str>  Only offer this operationId. Repeatable.                            │
+│    --secret           <str>  A secret the App needs. ${NAME} in a header or variable is added    │
+│                              for you.                                                            │
+│    --app              <str>  The App's name, which prefixes its actions when there are several.  │
+│                              Default: NAME.                                                      │
+│    --runtime          <str>  Where the Environment runs: local (a trusted subprocess), docker,   │
+│                              or daytona.                                                         │
+│                              [default: local]                                                    │
+│    --json                    Print machine-readable JSON.                                        │
+│    --help                    Show this message and exit.                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env from-traces`
+
+```text
+
+ Usage: plural env from-traces [OPTIONS] {name}
+
+ Draft replay Apps from recorded tool calls, a Task per trace, and a Benchmark.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  Environment name; also names the drafted Benchmark. [required]             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --traces             <str>               Recorded conversations: JSONL of {"messages":        │
+│                                             [...]}, or Plural Traces.                            │
+│                                             [required]                                           │
+│    --app                <str>               App for tool calls whose names carry no app__        │
+│                                             prefix.                                              │
+│                                             [default: tools]                                     │
+│    --judge-model        <str>               Model for the drafted judge Verifier.                │
+│                                             [default: openai/gpt-5.6-luna]                       │
+│    --max-tasks          <int range> [x>=1]  Draft at most this many. [default: 50]               │
+│    --runtime            <str>               Where the Environment runs: local (a trusted         │
+│                                             subprocess), docker, or daytona.                     │
+│                                             [default: local]                                     │
+│    --json                                   Print machine-readable JSON.                         │
+│    --help                                   Show this message and exit.                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

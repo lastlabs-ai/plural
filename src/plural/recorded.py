@@ -16,7 +16,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from plural.agents.models import Agent, AgentDefinition
 from plural.common import FrozenModel, HarnessBinding
@@ -121,7 +121,9 @@ def _from_plural_trace(payload: Mapping[str, Any]) -> RecordedTrace | None:
     )
 
 
-def recorded_trace(payload: Mapping[str, Any] | RecordedTrace, index: int = 0) -> RecordedTrace:
+def recorded_trace(
+    payload: Mapping[str, Any] | BaseModel | RecordedTrace, index: int = 0
+) -> RecordedTrace:
     """Read one recorded conversation.
 
     Accepts ``{"messages": [...]}`` (OpenAI chat logs and fine-tuning files,
@@ -136,6 +138,8 @@ def recorded_trace(payload: Mapping[str, Any] | RecordedTrace, index: int = 0) -
     """
     if isinstance(payload, RecordedTrace):
         return payload
+    if isinstance(payload, BaseModel):
+        payload = payload.model_dump(mode="json")
     if isinstance(payload.get("messages"), list):
         return RecordedTrace(
             trace_id=str(payload.get("trace_id") or payload.get("id") or f"trace-{index + 1}"),
@@ -154,9 +158,11 @@ def recorded_trace(payload: Mapping[str, Any] | RecordedTrace, index: int = 0) -
 
 
 def read_traces(
-    source: str | Path | Iterable[Mapping[str, Any] | RecordedTrace],
+    source: str | Path | Iterable[Mapping[str, Any] | BaseModel | RecordedTrace],
 ) -> list[RecordedTrace]:
     """Read recorded conversations from a JSONL or JSON file, or from objects.
+
+    A ``TraceDataset`` works too: its Traces are read in order.
 
     Returns:
         The conversations, in order.
@@ -173,7 +179,7 @@ def read_traces(
             parsed = json.loads(text)
             items = parsed if isinstance(parsed, list) else [parsed]
     else:
-        items = list(source)
+        items = list(getattr(source, "traces", source))
     traces = [recorded_trace(item, index) for index, item in enumerate(items)]
     if not traces:
         raise ValueError("No recorded traces to read.")
@@ -214,40 +220,90 @@ class _RecordedAgent(Agent):
 def traces_benchmark(
     traces: Sequence[RecordedTrace],
     *,
-    verifiers: Sequence[Any],
+    name: str,
+    verifiers: Sequence[Any] = (),
     environment: Any = None,
-    name: str = "recorded-traces",
-    initial_state: dict[str, Any] | None = None,
-    reset_options: dict[str, Any] | None = None,
+    task: Any = None,
+    benchmark: Any = None,
 ) -> Any:
     """One Task per recorded trace, each carrying its conversation.
 
+    With ``benchmark``, each trace is scored as the Task drafted from it, the
+    one whose ``metadata.trace_id`` matches, under that Task's name. With
+    ``task``, every trace is an attempt at it. Otherwise each trace gets a Task
+    of its own, scored by ``verifiers`` in ``environment``.
+
     Returns:
         The Benchmark to run with :func:`recorded_agent`.
+
+    Raises:
+        ValueError: A trace has no Task, or nothing scores the traces.
     """
     from plural.environments import Environment, Runtime
     from plural.tasks import Benchmark, Task
 
-    target = environment or Environment(name=name, runtime=Runtime.local())
-    tasks = [
-        Task(
-            name=task_name,
-            instructions=trace.instructions,
-            environment=target,
-            verifiers=tuple(verifiers),
-            initial_state=dict(initial_state or {}),
-            reset_options=dict(reset_options or {}),
-            metadata={
-                RECORDING_KEY: {
+    drafted: dict[str, Any] = {}
+    if benchmark is not None:
+        drafted = {
+            str(item.metadata.get("trace_id")): item
+            for item in benchmark.tasks
+            if item.metadata.get("trace_id")
+        }
+    names = _task_names(traces)
+    tasks = []
+    for index, trace in enumerate(traces):
+        template = task
+        task_name = names[index]
+        if benchmark is not None:
+            template = drafted.get(trace.trace_id)
+            if template is None:
+                raise ValueError(
+                    f"No Task in Benchmark {benchmark.name!r} was drafted from trace "
+                    f"{trace.trace_id!r}. A drafted Task names its trace in metadata.trace_id."
+                )
+            task_name = template.name
+        chosen = tuple(verifiers) or (tuple(template.verifiers) if template is not None else ())
+        if not chosen:
+            raise ValueError("Cannot score traces.\nPass a Task, a Benchmark, or Verifiers.")
+        recording = {
+            "trace_id": trace.trace_id,
+            "model": trace.model,
+            "messages": list(trace.messages),
+        }
+        if template is None:
+            tasks.append(
+                Task(
+                    name=task_name,
+                    instructions=trace.instructions,
+                    environment=environment or Environment(name=name, runtime=Runtime.local()),
+                    verifiers=chosen,
+                    metadata={
+                        **trace.metadata,
+                        "trace_id": trace.trace_id,
+                        RECORDING_KEY: recording,
+                    },
+                )
+            )
+            continue
+        tasks.append(
+            Task(
+                name=task_name,
+                version=template.version,
+                instructions=template.instructions,
+                goals=template.goals,
+                info=template.info,
+                environment=environment or template.environment,
+                verifiers=chosen,
+                resources=template.resources,
+                initial_state=template.initial_state,
+                reset_options=template.reset_options,
+                metadata={
+                    **template.metadata,
                     "trace_id": trace.trace_id,
-                    "model": trace.model,
-                    "messages": list(trace.messages),
+                    RECORDING_KEY: recording,
                 },
-                **trace.metadata,
-            },
+            )
         )
-        for task_name, trace in zip(_task_names(traces), traces, strict=True)
-    ]
     return Benchmark(name=name, version="0.1.0", tasks=tuple(tasks))
 
 

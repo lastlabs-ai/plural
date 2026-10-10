@@ -274,13 +274,11 @@ def plan_run(
 
 
 def _plan_traces(workspace: Workspace, request: RunRequest) -> RunPlan:
-    """Score recorded conversations with a Task's Verifiers and Environment.
+    """Score recorded conversations with a Task's or a Benchmark's Verifiers.
 
     Returns:
         The plan, whose Agent replays each trace instead of calling a model.
     """
-    if not request.task:
-        raise ProjectError("--traces scores conversations with one Task's Verifiers. Pass --task.")
     if request.agent or request.model or request.harness or request.hosted:
         raise ProjectError(
             "--traces replays what an agent already did, so it takes no --agent, --model, "
@@ -291,12 +289,17 @@ def _plan_traces(workspace: Workspace, request: RunRequest) -> RunPlan:
         path = workspace.project.root / path
     if not path.is_file():
         raise ProjectError(f"No traces file at {path}.")
-    source = ResourceRef(TASK.name, str(request.task))
-    task = workspace.load(source).value
+    source = (
+        ResourceRef(TASK.name, str(request.task))
+        if request.task
+        else ResourceRef(BENCHMARK.name, str(request.benchmark))
+    )
+    loaded = workspace.load(source)
     try:
         job = Job.from_traces(
             path,
-            task=task,
+            task=loaded.value if source.kind == TASK.name else None,
+            benchmark=loaded.value if source.kind == BENCHMARK.name else None,
             concurrency=request.concurrency if request.concurrency != "auto" else 4,
             catalog=workspace.catalog,
         )
@@ -310,7 +313,7 @@ def _plan_traces(workspace: Workspace, request: RunRequest) -> RunPlan:
         agent_ref=None,
         inputs=[source],
         job=job,
-        pins={str(source): {"revision": "local", "content_hash": task.content_hash}},
+        pins={str(source): {"revision": "local", "content_hash": loaded.content_hash}},
     )
 
 

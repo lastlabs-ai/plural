@@ -61,8 +61,8 @@ def expand(value: str, environ: Mapping[str, str] | None = None) -> str:
         found = source.get(name)
         if found is None:
             raise MCPError(
-                f"{name} is not set. Export it, or list it in the App's secrets so a Job "
-                "supplies it."
+                f"{name} is not set. Export it to reach the server from here. In a Job, "
+                "list it in the App's secrets and the Job supplies it."
             )
         return found
 

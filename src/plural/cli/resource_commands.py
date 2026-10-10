@@ -97,6 +97,10 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         no_args_is_help=True,
     )
     _init_command(app, kind)
+    if kind is ENVIRONMENT:
+        from plural.cli.generate_commands import add_generators
+
+        add_generators(app)
 
     @app.command("validate")
     @handled

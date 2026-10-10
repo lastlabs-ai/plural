@@ -42,7 +42,11 @@ def test_top_level_commands_are_the_documented_set() -> None:
 
 def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
     root = _root()
-    extras = {"benchmark": {"add", "remove"}, "agent": {"serve"}}
+    extras = {
+        "benchmark": {"add", "remove"},
+        "agent": {"serve"},
+        "env": {"from-mcp", "from-openapi", "from-data", "from-traces"},
+    }
     for name in RESOURCE_GROUPS:
         group = root.commands[name]
         assert isinstance(group, TyperGroup)
