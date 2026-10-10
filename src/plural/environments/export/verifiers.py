@@ -1,4 +1,4 @@
-"""Export plural traces to a verifiers-style structure.
+"""Export plural traces to a rewarders-style structure.
 
 Examples:
     >>> from plural.tracing.schema import Trace, Outcome
@@ -17,7 +17,7 @@ from plural.types import ChatResponse
 
 
 def to_verifiers_trace(trace: Trace) -> dict[str, Any]:
-    """Convert an plural trace to a simplified verifiers-compatible dict.
+    """Convert an plural trace to a simplified rewarders-compatible dict.
 
     Prefers :class:`~plural.tracing.schema.Turn` steps (observation,
     actions, observations). Falls back to flat ``llm`` / ``action`` steps.

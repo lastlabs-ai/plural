@@ -1,9 +1,9 @@
-"""``plural secret``: values for the secrets Apps and Verifiers declare.
+"""``plural secret``: values for the secrets Apps and Rewarders declare.
 
 An App names the secrets it needs, such as ``SALESFORCE_TOKEN``; it never holds
 their values. Set a value here and the hosted project keeps it encrypted.
 `plural run` fills any secret you have not exported from the project, and
-passes each value only to the App, Verifier, or endpoint that declared it.
+passes each value only to the App, Rewarder, or endpoint that declared it.
 """
 
 from __future__ import annotations

@@ -1,15 +1,16 @@
-"""Draft an Environment from a system you already have.
+"""Add the systems you already have to an Environment, as Apps.
 
-Each generator returns the files to write; nothing here touches the network,
-and only ``from_traces`` reads the project, to add traces to an Environment it
-drafted before. ``plural env from-mcp``, ``from-openapi``, and
-``from-traces`` write them and then load the result, which is when tools and
-operations are discovered.
+Each generator returns the files to write; nothing here touches the network.
+``plural env add`` writes them and then loads the result, which is when tools
+and operations are discovered. Adding to an Environment that exists keeps
+everything already in it.
 """
 
 from __future__ import annotations
 
 import json
+import re
+import shlex
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -109,7 +110,7 @@ def _environment(
     }
     secret_lines = (
         "\n".join(f"- `{item}`" for item in secrets)
-        + "\n\nSetup secrets for reset and snapshot hooks and Verifiers. Export each "
+        + "\n\nSetup secrets for reset and snapshot hooks and Rewarders. Export each "
         "before `plural run`, or set it with `plural secret set NAME`. The values reach "
         "only the App, never the Agent's model or its Harness.\n"
         if secrets
@@ -150,10 +151,67 @@ def _references(
     return secret_names, sorted({*credentials, *found} - set(secret_names))
 
 
-def from_mcp(
-    name: str,
-    *,
+@dataclass
+class AppDraft:
+    """One App drafted from a system, before it joins an Environment."""
+
+    entry: dict[str, Any]
+    """The App's entry under ``apps:`` in environment.yaml."""
+    description: str
+    connection: str
+    """A paragraph for the Environment README's Apps section."""
+    secrets: list[str] = field(default_factory=list)
+    credentials: list[str] = field(default_factory=list)
+    files: dict[str, str | bytes] = field(default_factory=dict)
+    """Files beside the manifest, keyed by path relative to the Environment folder."""
+
+
+_GENERIC_NAMES = {"api", "app", "mcp", "openapi", "server", "spec", "swagger", "www", "index"}
+_LAUNCHERS = {"npx", "uvx", "uv", "run", "node", "bunx", "bun", "pnpm", "dlx", "deno", "docker"}
+
+
+def app_name(source: str, *, fallback: str) -> str:
+    """A default App name for a system: its host, package, or file name.
+
+    ``https://mcp.linear.app/mcp`` is ``linear``, ``npx -y
+    @modelcontextprotocol/server-memory`` is ``memory``, and ``specs/crm.yaml``
+    is ``crm``. A source with no telling name falls back to ``fallback``.
+
+    Returns:
+        A valid App name.
+    """
+    from urllib.parse import urlparse
+
+    candidates: list[str] = []
+    if source.startswith(("http://", "https://")):
+        parsed = urlparse(source)
+        host = [part for part in (parsed.hostname or "").split(".")[:-1] if part]
+        candidates = [part for part in host if part not in _GENERIC_NAMES]
+        path = [part for part in parsed.path.split("/") if part]
+        if path:
+            candidates.append(Path(path[-1]).stem)
+    else:
+        words = [
+            word
+            for word in shlex.split(source)
+            if not word.startswith("-")
+            and Path(word).name not in _LAUNCHERS
+            and not Path(word).name.startswith("python")
+        ]
+        if words:
+            package = words[0].rstrip("/").split("/")[-1].split("@")[0].split(":")[0]
+            stem = re.sub(r"^(mcp[-_])?(server[-_])?", "", Path(package).stem.lower())
+            candidates.append(re.sub(r"([-_]mcp)?([-_]server)?$", "", stem))
+    for candidate in [*candidates, fallback]:
+        name = "_".join(part for part in re.split(r"[^a-z0-9]+", candidate.lower()) if part)
+        if name and name not in _GENERIC_NAMES and name[0].isalpha():
+            return name[:40].rstrip("_")
+    return "app"
+
+
+def mcp_app(
     app: str,
+    *,
     command: Sequence[str] = (),
     url: str | None = None,
     headers: Mapping[str, str] | None = None,
@@ -161,21 +219,20 @@ def from_mcp(
     tools: Sequence[str] = (),
     secrets: Sequence[str] = (),
     credentials: Sequence[str] = (),
-    runtime: str = "local",
-) -> Generated:
-    """An Environment with one App backed by an MCP server.
+) -> AppDraft:
+    """An App backed by an MCP server, reached at ``url`` or started with ``command``.
 
     Every ``${NAME}`` in a header or variable is declared as a credential the
     running Agent supplies, unless ``secrets`` lists it as a setup secret.
 
     Returns:
-        The files to write.
+        The App.
 
     Raises:
         ValueError: Not exactly one of ``command`` and ``url`` was given.
     """
     if bool(command) == bool(url):
-        raise ValueError("Give the server's --command or its --url, not both.")
+        raise ValueError("Give the server's command or its URL, not both.")
     names, needed = _references(secrets, credentials, headers or {}, env or {})
     settings: dict[str, Any] = {"command": list(command)} if command else {"url": url}
     if headers:
@@ -189,31 +246,22 @@ def from_mcp(
     if names:
         settings["secrets"] = names
     reach = f"`{' '.join(command)}`, started in the Runtime" if command else f"{url}"
-    return Generated(
-        files=_environment(
-            name,
-            command="from-mcp",
-            description=f"Work done through the {app} MCP server.",
-            apps=[{"name": app, "mcp": settings}],
-            runtime=runtime,
-            secrets=names,
-            credentials=needed,
-            connection=(
-                f"`{app}` is an MCP server reached at {reach}. Each of its tools is an "
-                "action. To start every episode from a known state, add a `reset` "
-                "command, and a `snapshot` command so Verifiers can read the result."
-            ),
+    return AppDraft(
+        entry={"name": app, "mcp": settings},
+        description=f"Work done through the {app} MCP server.",
+        connection=(
+            f"`{app}` is an MCP server reached at {reach}. Each of its tools is an "
+            "action. To start every episode from a known state, add a `reset` "
+            "command, and a `snapshot` command so Rewarders can read the result."
         ),
-        environment=name,
         secrets=names,
         credentials=needed,
     )
 
 
-def from_openapi(
-    name: str,
-    *,
+def openapi_app(
     app: str,
+    *,
     spec: str,
     spec_file: tuple[str, bytes] | None = None,
     base_url: str | None = None,
@@ -221,16 +269,15 @@ def from_openapi(
     operations: Sequence[str] = (),
     secrets: Sequence[str] = (),
     credentials: Sequence[str] = (),
-    runtime: str = "local",
-) -> Generated:
-    """An Environment with one App backed by an HTTP API's OpenAPI document.
+) -> AppDraft:
+    """An App backed by an HTTP API's OpenAPI document.
 
     ``spec_file`` is a local document to copy beside the manifest, as
     ``(file name, contents)``; otherwise ``spec`` is fetched as a URL. Every
     ``${NAME}`` in a header is a credential unless ``secrets`` lists it.
 
     Returns:
-        The files to write.
+        The App.
     """
     names, needed = _references(secrets, credentials, headers or {})
     settings: dict[str, Any] = {"spec": spec_file[0] if spec_file else spec}
@@ -244,14 +291,9 @@ def from_openapi(
         settings["credentials"] = needed
     if names:
         settings["secrets"] = names
-    files = _environment(
-        name,
-        command="from-openapi",
+    return AppDraft(
+        entry={"name": app, "openapi": settings},
         description=f"Work done through the {app} API.",
-        apps=[{"name": app, "openapi": settings}],
-        runtime=runtime,
-        secrets=names,
-        credentials=needed,
         connection=(
             f"`{app}` is an HTTP API described by `{settings['spec']}`. Each operation is "
             "an action; GET, HEAD, and OPTIONS only read. While the API is a live system, "
@@ -259,10 +301,92 @@ def from_openapi(
             "`base_url` at a sandbox, or set `local: true` for a server the Runtime "
             "starts, to evaluate actions that change state."
         ),
+        secrets=names,
+        credentials=needed,
+        files={spec_file[0]: spec_file[1]} if spec_file else {},
     )
-    if spec_file:
-        files[f"environments/{name}/{spec_file[0]}"] = spec_file[1]
-    return Generated(files=files, environment=name, secrets=names, credentials=needed)
+
+
+def add_app(root: Path, name: str, draft: AppDraft, *, runtime: str | None = None) -> Generated:
+    """Add one App to Environment ``name``, creating the Environment if it is new.
+
+    An existing ``environment.yaml`` keeps its comments, settings, and other
+    Apps; the App is appended to ``apps:`` and described in the README.
+
+    Returns:
+        The files to write or replace.
+
+    Raises:
+        ValueError: The Environment already has an App by that name, or runs elsewhere.
+    """
+    folder = f"environments/{name}"
+    manifest_path = root / folder / "environment.yaml"
+    app = str(draft.entry["name"])
+    extra = {f"{folder}/{path}": content for path, content in draft.files.items()}
+    if not manifest_path.is_file():
+        created = _environment(
+            name,
+            command="add",
+            description=draft.description,
+            apps=[draft.entry],
+            runtime=runtime or "local",
+            secrets=draft.secrets,
+            credentials=draft.credentials,
+            connection=draft.connection,
+        )
+        return Generated(
+            files={**created, **extra},
+            environment=name,
+            secrets=draft.secrets,
+            credentials=draft.credentials,
+        )
+    header, manifest = _read_yaml(manifest_path)
+    apps = [item for item in manifest.get("apps") or [] if isinstance(item, dict)]
+    if any(item.get("name") == app for item in apps):
+        raise ValueError(
+            f"Environment {name} already has an App named {app}. Name this one with --app."
+        )
+    current = (manifest.get("runtime") or {}).get("provider")
+    if runtime and current and runtime != current:
+        raise ValueError(
+            f"Environment {name} runs on {current}. Leave out --runtime, or change "
+            "runtime: in its environment.yaml first."
+        )
+    manifest["apps"] = [*apps, draft.entry]
+    files: dict[str, str | bytes] = {f"{folder}/environment.yaml": _yaml(header, manifest)}
+    replace = {f"{folder}/environment.yaml"}
+    readme = root / folder / "README.md"
+    if readme.is_file():
+        files[f"{folder}/README.md"] = _with_app(readme.read_text(encoding="utf-8"), draft)
+        replace.add(f"{folder}/README.md")
+    notes = [f"Added App {app}."]
+    if draft.secrets or draft.credentials:
+        notes.append("List its secrets and credentials in the README.")
+    return Generated(
+        files={**files, **extra},
+        environment=name,
+        secrets=draft.secrets,
+        credentials=draft.credentials,
+        replace=frozenset(replace),
+        notes=notes,
+        updated=True,
+    )
+
+
+def _with_app(readme: str, draft: AppDraft) -> str:
+    """The README with ``draft``'s paragraph at the end of its Apps section.
+
+    Returns:
+        The new README text.
+    """
+    marker = "\n## Apps\n"
+    start = readme.find(marker)
+    if start < 0:
+        return readme.rstrip() + f"\n\n## Apps\n\n{draft.connection}\n"
+    following = readme.find("\n## ", start + len(marker))
+    end = len(readme) if following < 0 else following
+    section = readme[:end].rstrip()
+    return section + f"\n\n{draft.connection}\n" + readme[end:]
 
 
 def _jsonl(rows: Sequence[Mapping[str, Any]]) -> str:
@@ -270,21 +394,21 @@ def _jsonl(rows: Sequence[Mapping[str, Any]]) -> str:
 
 
 _TRACES_BENCHMARK_HEADER = (
-    "# Drafted by `plural env from-traces`. Run Agents on these Tasks and compare them:\n"
+    "# Drafted by `plural env add --traces`. Run Agents on these Tasks and compare them:\n"
     "#   plural run --benchmark {name} --model <model>\n"
 )
 _JUDGE_HEADER = (
-    "# Drafted by `plural env from-traces`. A model judges each episode against the\n"
+    "# Drafted by `plural env add --traces`. A model judges each episode against the\n"
     "# Task's instructions. Sharpen the criteria, or replace it with a deterministic\n"
-    "# Verifier that checks the Apps' final state.\n"
+    "# Rewarder that checks the Apps' final state.\n"
 )
 _TASK_HEADER = (
     "# Drafted from one recorded trace. Check the instructions say what the user\n"
-    "# wanted, and set initial_state if a Verifier reads the Apps' state.\n"
+    "# wanted, and set initial_state if a Rewarder reads the Apps' state.\n"
 )
 
 
-def from_traces(
+def add_traces(
     name: str,
     traces: Sequence[RecordedTrace],
     *,
@@ -294,7 +418,7 @@ def from_traces(
     runtime: str = "local",
     root: Path | None = None,
 ) -> Generated:
-    """Replay Apps from recorded tool calls, plus draft Tasks and a Benchmark.
+    """Replay Apps from recorded tool calls, plus Tasks and a Benchmark drafted from them.
 
     Each App answers with what the system returned when the agent called it,
     and offers the tools the traces say the agent was offered. Up to
@@ -341,7 +465,7 @@ def from_traces(
     files.update(
         _environment(
             name,
-            command="from-traces",
+            command="add",
             description="The systems the recorded agent used, replayed from its traces.",
             apps=apps,
             runtime=runtime,
@@ -351,15 +475,15 @@ def from_traces(
                 "recorded agent made the closest matching call, so no real system is "
                 "touched and runs are reproducible. A call no recording matches is marked "
                 "`off_recording`; replace an App with its real connection when you need "
-                "live answers. Run `plural env from-traces` again with newer traces to "
+                "live answers. Run `plural env add --traces` again with newer traces to "
                 "add their calls and tools.\n\n" + (listing or "The traces made no tool calls.")
             ),
         )
     )
-    verifier = f"{name}-judge"
-    files[f"verifiers/{verifier}/verifier.yaml"] = _judge(verifier, judge_model)
+    rewarder = f"{name}-judge"
+    files[f"rewarders/{rewarder}/rewarder.yaml"] = _judge(rewarder, judge_model)
     chosen = _choose(traces, max_tasks, covered=set(), default_app=default_app)
-    tasks = _draft_tasks(files, name, verifier, chosen, used=set())
+    tasks = _draft_tasks(files, name, rewarder, chosen, used=set())
     files[f"benchmarks/{name}/benchmark.yaml"] = _yaml(
         _TRACES_BENCHMARK_HEADER.format(name=name), _traces_benchmark(name, tasks)
     )
@@ -494,10 +618,10 @@ def _add_traces(
         if row.get("trace_id") in set(drafted.values())
     }
     chosen = _choose(fresh, max_tasks, covered=covered, default_app=default_app)
-    verifier = f"{name}-judge"
-    if chosen and not (root / "verifiers" / verifier / "verifier.yaml").exists():
-        files[f"verifiers/{verifier}/verifier.yaml"] = _judge(verifier, judge_model)
-    tasks = _draft_tasks(files, name, verifier, chosen, used=_task_dirs(root))
+    rewarder = f"{name}-judge"
+    if chosen and not (root / "rewarders" / rewarder / "rewarder.yaml").exists():
+        files[f"rewarders/{rewarder}/rewarder.yaml"] = _judge(rewarder, judge_model)
+    tasks = _draft_tasks(files, name, rewarder, chosen, used=_task_dirs(root))
     benchmark_path = root / "benchmarks" / name / "benchmark.yaml"
     if tasks:
         if benchmark_path.is_file():
@@ -538,11 +662,11 @@ def _tools_json(tools: Iterable[Mapping[str, Any]]) -> str:
     return json.dumps(list(tools), indent=2, ensure_ascii=False) + "\n"
 
 
-def _judge(verifier: str, judge_model: str) -> str:
+def _judge(rewarder: str, judge_model: str) -> str:
     return _yaml(
         _JUDGE_HEADER,
         {
-            "name": verifier,
+            "name": rewarder,
             "version": "0.1.0",
             "kind": "agent",
             "model": judge_model,
@@ -618,7 +742,7 @@ def _choose(
 def _draft_tasks(
     files: dict[str, str | bytes],
     name: str,
-    verifier: str,
+    rewarder: str,
     traces: Sequence[RecordedTrace],
     *,
     used: set[str],
@@ -640,7 +764,7 @@ def _draft_tasks(
                 "version": "0.1.0",
                 "instructions": "instruction.md",
                 "environment": name,
-                "verifiers": [verifier],
+                "rewarders": [rewarder],
                 "resources": [],
                 "metadata": {"trace_id": trace.trace_id},
             },
@@ -702,8 +826,11 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 __all__ = [
     "DEFAULT_JUDGE_MODEL",
+    "AppDraft",
     "Generated",
-    "from_mcp",
-    "from_openapi",
-    "from_traces",
+    "add_app",
+    "add_traces",
+    "app_name",
+    "mcp_app",
+    "openapi_app",
 ]

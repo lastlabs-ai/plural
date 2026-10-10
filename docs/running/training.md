@@ -12,7 +12,7 @@ outcome: You understand what train mode requires and what a downstream trainer m
 
 Sometimes evaluation shows that even the best model keeps making the same kind of
 mistake. Training is how you fix that. Plural lets you reuse the Tasks,
-Environments, and Verifiers you already built to collect graded training runs,
+Environments, and Rewarders you already built to collect graded training runs,
 then test the improved model on the same kind of work.
 
 Plural prepares the learning data; it does not train the model. Updating model
@@ -23,7 +23,7 @@ training system.
 
 Two numbers matter here, and they do different jobs:
 
-- A **score** comes from the Verifiers, the graders, at the end of an attempt. It
+- A **score** comes from the Rewarders, the graders, at the end of an attempt. It
   says how well the Task went, and it is the only thing a Benchmark ranks on.
 - A **reward** is small credit for one move, or one stretch of a trajectory, such as
   getting closer to the answer. A training algorithm uses rewards to work out
@@ -35,7 +35,7 @@ The steps below use both.
 ## 1. Establish a baseline
 
 Run the Agent in eval mode and inspect its failures. Confirm that the Environment
-gives it the information and actions needed to succeed, and that the Verifiers
+gives it the information and actions needed to succeed, and that the Rewarders
 score correctly. Fix setup problems before treating low scores as model
 weaknesses.
 
@@ -104,12 +104,12 @@ available, stored with `plural auth login --api-key-stdin` or set as
 `PLURAL_API_KEY`.
 
 > **Tip:** Start with one Task and one attempt. Before increasing concurrency,
-> inspect the token artifact, trajectory, final State, and Verifier results.
+> inspect the token artifact, trajectory, final State, and Rewarder results.
 > Complete any pending human reviews before using the run as fully scored data.
 
 ## 4. Add rewards where needed
 
-Final Verifiers measure Task success in both eval and train mode. Rewards provide
+Final Rewarders measure Task success in both eval and train mode. Rewards provide
 the finer signal an algorithm needs to assign credit, such as progress toward a
 solution. Every reward a Trial earns goes in its **reward ledger**, `rewards.jsonl`
 in the Trial's artifacts, whatever produced it. Each line names its source, its
@@ -119,9 +119,10 @@ score.
 
 There are two ways to produce them.
 
-**While the episode runs.** A `@rewarder` on an App runs right after each of that
-App's actions, and the Environment's `on_step` can return one for any action. See
-[Rewards](../project/environments.md#rewards) for how to declare them. Train mode also
+**While the episode runs.** A Task's Rewarder can have a `step` check, which runs right
+after each action, beside the Apps, and can read every App. Because it belongs to the
+Task, the same Environment can be rewarded differently for different Tasks. See
+[Reward each step](../project/rewarders.md#reward-each-step). Train mode also
 writes each step's reward as a `reward` event in the Job's progress events.
 
 **After the episode, in hindsight.** A hindsight rewarder reads a whole finished
@@ -168,7 +169,7 @@ If you pushed the Job with `plural job push`, `apply` adds the new records to th
 hosted Trials' ledgers too, where the Trial page shows each reward on the step it
 credits. Each record is stored once, so applying again never duplicates one.
 
-The final Task score remains the weighted aggregate of its Verifiers. Rewards
+The final Task score remains the weighted aggregate of its Rewarders. Rewards
 never contribute to it. Keep that evaluation metric stable as you experiment with
 rewards.
 

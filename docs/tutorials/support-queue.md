@@ -50,7 +50,7 @@ desk, using the words from [Core concepts](../getting-started/concepts.md):
 
 - **The world** (Environment): `support-queue`, the help desk and its rules.
 - **Three assignments** (Tasks): `ticket-1`, `ticket-2`, and `ticket-3`, one ticket each.
-- **The grader** (Verifier): `correct-category`, which checks the team and the reply.
+- **The grader** (Rewarder): `correct-category`, which checks the team and the reply.
 - **The exam** (Benchmark): `support-triage`, the three tickets together, with a leaderboard.
 - **Three contestants** (Agents): `careful` and `concise` use a real model with different
   instructions; `scripted` follows keyword rules and never calls a model.
@@ -65,7 +65,7 @@ plural.lock                   hosted revisions; commit it
 pyproject.toml                dependencies = ["plural>=0.18.0"]
 environments/support-queue/   environment.yaml, environment.py, README.md, resources/policy.md
 tasks/ticket-1/, ticket-2/, ticket-3/   task.yaml, instruction.md
-verifiers/correct-category/   verifier.yaml, verify.py
+rewarders/correct-category/   rewarder.yaml, reward.py
 harnesses/scripted-triage/    harness.yaml, harness.py
 agents/careful/               agent.yaml (a model on the native harness)
 agents/concise/               agent.yaml (a model on the native harness)
@@ -89,7 +89,7 @@ Project support-queue (local)
   Hosted: not registered (`--push` to register)
 resource     local names
 environment  support-queue
-verifier     correct-category
+rewarder     correct-category
 harness      scripted-triage
 task         ticket-1, ticket-2, ticket-3
 agent        careful, concise, scripted
@@ -170,10 +170,8 @@ class SupportQueue(App[QueueState]):
 moves is a method marked `@action`, and its docstring is the description the AI reads.
 The episode ends when `terminated()` sees the ticket resolved.
 
-The App also has a `@rewarder` named `progress`, which gives 0.25 each time the ticket
-moves forward, from open to triaged to drafted to resolved. A reward is per-step
-credit recorded for training. It never counts toward the score and is never shown to
-the Agent.
+The App only reports what happens. Judging it, at the end and after each move, is
+the Rewarder's job.
 
 ### The Tasks
 
@@ -186,7 +184,7 @@ name: ticket-1
 version: 0.1.0
 instructions: instruction.md
 environment: support-queue
-verifiers:
+rewarders:
   - correct-category
 initial_state:
   ticket_id: ticket-1
@@ -195,33 +193,35 @@ initial_state:
 The model sees `instruction.md` and what its actions return, and nothing else: not the
 State, the score, or the rewards.
 
-### The Verifier
+### The Rewarder
 
-The Verifier is the grader. It marks the finished attempt, not the AI's own claim that
-it did well. `verifiers/correct-category/verifier.yaml` points at a small Python check:
+The Rewarder decides what counts as good work. Its `final` check marks the finished
+attempt, not the AI's own claim that it did well, and its `step` check credits each
+move. `rewarders/correct-category/rewarder.yaml` points at both, in `reward.py`:
 
 ```yaml
 name: correct-category
 version: 0.1.0
 kind: deterministic
-check: verify.py:verify
+final: reward.py:final
+step: reward.py:step
 weight: 1
 ```
 
-`verify.py` reads the final State, including the private `expected` category, and
+`reward.py` reads the final State, including the private `expected` category, and
 returns a score of 1 or 0 with evidence explaining why:
 
 ```python
-from plural import Episode, VerifierOutput
+from plural import Episode, RewarderOutput
 
 
-def verify(episode: Episode) -> VerifierOutput:
+def final(episode: Episode) -> RewarderOutput:
     """Score 1 when the ticket was resolved with the expected category and a reply."""
     state = episode.state
     drafted = bool(str(state.get("draft_reply") or "").strip())
     correct = bool(state.get("done") and state.get("category") == state.get("expected") and drafted)
     score = float(correct)
-    return VerifierOutput(
+    return RewarderOutput(
         score=score,
         scores={"correct_category": score, "response_drafted": float(drafted)},
         evidence=[
@@ -296,7 +296,7 @@ That is the whole project. Time to run it.
 Start with the `scripted` Agent. It needs no account or API key, so it is a quick way
 to check that everything is wired together.
 
-First, validate the Benchmark. This also checks every Task, Verifier, and Environment
+First, validate the Benchmark. This also checks every Task, Rewarder, and Environment
 it depends on:
 
 ```bash
@@ -314,7 +314,7 @@ plural run --benchmark support-triage --agent scripted --dry-run
 Would run benchmark/support-triage with agent/scripted (openai/gpt-5.6-luna, harness scripted-triage) locally: 3 trial(s), 3 at a time (auto: every Trial at once).
 input                      version  content hash
 environment/support-queue  1.0.0    sha256:e8f5b9574267
-verifier/correct-category  0.1.0    sha256:0a3f50cac523
+rewarder/correct-category  0.1.0    sha256:0a3f50cac523
 task/ticket-1              0.1.0    sha256:52486ca1f4f5
 task/ticket-2              0.1.0    sha256:dccd443cb4e6
 task/ticket-3              0.1.0    sha256:0184b5293170
@@ -412,7 +412,7 @@ Trial trl_ea0e25de78e3905c0f791c67 (local) succeeded
   Score:          1.0
   Artifacts:      /path/to/first-project/.plural/jobs/job_9550337c63403bb187d212d1/trials/trl_ea0e25de78e3905c0f791c67/executions/0/artifacts
   Logs:           /path/to/first-project/.plural/jobs/job_9550337c63403bb187d212d1/trials/trl_ea0e25de78e3905c0f791c67/executions/0/logs
-  Verifier correct-category: succeeded score=1.0
+  Rewarder correct-category: succeeded score=1.0
     - status=resolved
     - category=technical
     - correct=True
@@ -441,12 +441,12 @@ The `Artifacts` directory holds the full record of the attempt:
 - `rewards.jsonl`: the reward ledger, one line per reward.
 - `result.json`: the Agent's final response.
 
-Each Verifier's score, sub-scores, evidence, and feedback are in the Trial's
+Each Rewarder's score, sub-scores, evidence, and feedback are in the Trial's
 `result.json`, which `plural trial show` prints.
 
 The `Logs` directory holds the standard output and standard error of the run
-(`stdout.log`, `stderr.log`) and of the Verifiers (`verifier.stdout.log`,
-`verifier.stderr.log`).
+(`stdout.log`, `stderr.log`) and of the Rewarders (`rewarder.stdout.log`,
+`rewarder.stderr.log`).
 
 ## Rerun exactly
 
@@ -475,7 +475,7 @@ same fields as the other three.
 `instruction.md`:
 
 ```bash
-plural task init ticket-4 --environment support-queue --verifier correct-category
+plural task init ticket-4 --environment support-queue --rewarder correct-category
 ```
 
 In the new `tasks/ticket-4/task.yaml`, replace `initial_state: {}` with the ticket the
@@ -506,10 +506,10 @@ project, push again after the fix: each changed resource becomes its next number
 revision, and earlier results keep pointing at the revisions they ran.
 
 To judge how *good* the reply is, not only whether there is one, add an
-[AgentVerifier](../project/verifiers.md#agentverifier) with a rubric, or a
-[HumanVerifier](../project/verifiers.md#humanverifier). A HumanVerifier pauses the
+[AgentRewarder](../project/rewarders.md#agentrewarder) with a rubric, or a
+[HumanRewarder](../project/rewarders.md#humanrewarder). A HumanRewarder pauses the
 Trial until a person scores it: `plural review list` shows waiting Trials, and
-`plural review submit <trial-id> --verifier <name> --score <value>` records the score.
+`plural review submit <trial-id> --rewarder <name> --score <value>` records the score.
 
 ## Push it and run hosted
 
@@ -536,7 +536,7 @@ Here is what each line does:
    and selects the project as your scope. If that name already exists, add
    `--connect` to use it.
 3. `benchmark push --with-deps` pushes the Benchmark and everything it depends on: the
-   Tasks, Verifier, and Environment.
+   Tasks, Rewarder, and Environment.
 4. `agent push --with-deps` pushes the `scripted` Agent and its Harness.
 5. `run --hosted` runs the pushed versions on hosted workers, and `--follow` streams
    progress until the Job finishes.

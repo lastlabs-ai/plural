@@ -22,9 +22,9 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [Environment](#environment)
 - [Harness](#harness)
 - [Task](#task)
-- [DeterministicVerifier](#deterministicverifier)
-- [AgentVerifier](#agentverifier)
-- [HumanVerifier](#humanverifier)
+- [DeterministicRewarder](#deterministicrewarder)
+- [AgentRewarder](#agentrewarder)
+- [HumanRewarder](#humanrewarder)
 - [Agent](#agent)
 - [Benchmark](#benchmark)
 - [AgentCredential](#agentcredential)
@@ -46,12 +46,11 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HarnessPolicy](#harnesspolicy)
 - [NetworkMode](#networkmode)
 - [ResourceRequirements](#resourcerequirements)
-- [Rewarder](#rewarder)
+- [RewarderRuntime](#rewarderruntime)
 - [RubricCriterion](#rubriccriterion)
 - [RuntimePackages](#runtimepackages)
 - [RuntimeVariable](#runtimevariable)
 - [Secret](#secret)
-- [VerifierRuntime](#verifierruntime)
 
 ## Environment
 
@@ -88,14 +87,14 @@ One versioned unit of work in a Python-authored Environment.
 - **`info`** — `JSON value`; optional. Default: `null`.
 - **`metadata`** — `object`; optional.
 - **`environment`** — `JSON value`; required.
-- **`verifiers`** — `array of DeterministicVerifier | AgentVerifier | HumanVerifier`; required. Constraints: `{"minItems": 1}`.
+- **`rewarders`** — `array of DeterministicRewarder | AgentRewarder | HumanRewarder`; required. Constraints: `{"minItems": 1}`.
 - **`resources`** — `array of Resource`; optional. Default: `[]`.
 - **`initial_state`** — `object`; optional.
 - **`reset_options`** — `object`; optional.
 
-## DeterministicVerifier
+## DeterministicRewarder
 
-Function or command that scores a completed Episode.
+Code that rewards an episode: per step, at the end, or both.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
@@ -105,14 +104,15 @@ Function or command that scores a completed Episode.
 - **`metadata`** — `object`; optional.
 - **`secrets`** — `array of Secret`; optional. Default: `[]`.
 - **`kind`** — `"deterministic"`; optional. Default: `"deterministic"`.
-- **`check`** — `JSON value`; required.
-- **`runtime`** — `VerifierRuntime`; optional.
-- **`result_path`** — `string`; optional. Default: `"verifier-result.json"`.
+- **`final`** — `JSON value`; optional. Default: `null`.
+- **`step`** — `JSON value`; optional. Default: `null`.
+- **`runtime`** — `RewarderRuntime`; optional.
+- **`result_path`** — `string`; optional. Default: `"rewarder-result.json"`.
 - **`evidence_required`** — `boolean`; optional. Default: `true`.
 
-## AgentVerifier
+## AgentRewarder
 
-Model-judge verifier with its own runtime and connectivity policy.
+Model-judge rewarder with its own runtime and connectivity policy.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
@@ -126,11 +126,11 @@ Model-judge verifier with its own runtime and connectivity policy.
 - **`instructions`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`provider`** — `string | null`; optional. Default: `null`.
 - **`fallback_models`** — `array of string`; optional. Default: `[]`.
-- **`runtime`** — `VerifierRuntime`; optional.
+- **`runtime`** — `RewarderRuntime`; optional.
 
-## HumanVerifier
+## HumanRewarder
 
-Human review verifier.
+Human review rewarder.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
@@ -213,7 +213,6 @@ One App inside an Environment.
 - **`actions`** — `array of AppAction`; optional. Default: `[]`.
 - **`secrets`** — `array of Secret`; optional. Default: `[]`.
 - **`credentials`** — `array of Secret`; optional. Default: `[]`.
-- **`rewarders`** — `array of Rewarder`; optional. Default: `[]`.
 - **`state_schema`** — `object`; optional.
 - **`has_reset`** — `boolean`; optional. Default: `false`.
 - **`has_snapshot`** — `boolean`; optional. Default: `false`.
@@ -407,15 +406,16 @@ Optional compute limits.
 - **`disk_mb`** — `integer | null`; optional. Default: `null`.
 - **`storage_mb`** — `integer | null`; optional. Default: `null`.
 
-## Rewarder
+## RewarderRuntime
 
-A named reward signal an App computes for each of its own actions.
+Machine for a rewarder that needs its own sandbox.
 
-- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`description`** — `string`; optional. Default: `""`.
-- **`implementation_digest`** — `string`; optional. Default: `""`.
-- **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
-- **`timeout_seconds`** — `number`; optional. Default: `30`. Constraints: `{"exclusiveMinimum": 0}`.
+- **`provider`** — `string`; optional. Default: `"docker"`. Constraints: `{"minLength": 1}`.
+- **`image`** — `string | null`; optional. Default: `null`.
+- **`network`** — `NetworkMode`; optional. Default: `"public"`.
+- **`network_allowlist`** — `array of string`; optional. Default: `[]`.
+- **`resources`** — `ResourceRequirements`; optional.
+- **`timeout_seconds`** — `number`; optional. Default: `60`. Constraints: `{"exclusiveMinimum": 0}`.
 
 ## RubricCriterion
 
@@ -450,14 +450,3 @@ A named value an App needs, which it never stores itself.
 - **`name`** — `string`; required. Constraints: `{"pattern": "^[A-Z_][A-Z0-9_]*$"}`.
 - **`required`** — `boolean`; optional. Default: `true`.
 - **`description`** — `string`; optional. Default: `""`.
-
-## VerifierRuntime
-
-Machine for a verifier that needs its own sandbox.
-
-- **`provider`** — `string`; optional. Default: `"docker"`. Constraints: `{"minLength": 1}`.
-- **`image`** — `string | null`; optional. Default: `null`.
-- **`network`** — `NetworkMode`; optional. Default: `"public"`.
-- **`network_allowlist`** — `array of string`; optional. Default: `[]`.
-- **`resources`** — `ResourceRequirements`; optional.
-- **`timeout_seconds`** — `number`; optional. Default: `60`. Constraints: `{"exclusiveMinimum": 0}`.

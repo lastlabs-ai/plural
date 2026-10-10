@@ -45,13 +45,13 @@ plural trial show TRIAL_ID --follow
 ```
 
 `plural job show` lists each Trial's Task, status, and score. `plural trial show`
-prints one Trial's result, each Verifier's score and feedback, and the paths of
+prints one Trial's result, each Rewarder's score and feedback, and the paths of
 its artifacts and logs. Both look for a local record first and then ask the
 hosted project. `--follow` streams progress until the Trial finishes. For a
 tracked or hosted Job, you can see the same Trials in the web app under Jobs.
 
 A Trial moves through these states: planned, queued, provisioning, running,
-verifying, awaiting_review, and then a terminal state. It waits in
+scoring, awaiting_review, and then a terminal state. It waits in
 `awaiting_review` only when a person needs to grade it; see [Reviews](reviews.md).
 
 Progress events are append-only status updates, written to the Job's
@@ -66,7 +66,7 @@ them separately, in this order:
 1. Confirm the execution succeeded and the expected artifacts exist.
 2. Confirm the receipt's pins and the model endpoint that actually ran.
 3. Read the actions, tool errors, observations, and stop reason.
-4. Read each Verifier's score, criterion scores, evidence, and feedback.
+4. Read each Rewarder's score, criterion scores, evidence, and feedback.
 5. Compare score, cost, and latency only across compatible Benchmark pins.
 
 `plural trial rerun TRIAL_ID` runs one Trial again with its pinned inputs as a
@@ -79,7 +79,7 @@ replay.
 Alongside the score, each Trial records why the attempt stopped. Did the game end,
 did the Agent decide it was done, or did it run out of turns, time, or money? That
 is the `stop_reason`. Read it before concluding an Agent failed the work: a
-truncated Trial still has a trajectory and Verifier results, but it may have
+truncated Trial still has a trajectory and Rewarder results, but it may have
 been cut short.
 
 `stop_reason` takes one of the values in `plural.STOP_REASONS`:
@@ -168,9 +168,9 @@ many calls left each one out.
 
 The receipt's `phases` list the measured phases of an execution:
 `agent_setup`, `environment_setup`, `agent_execution`, `artifact_collection`,
-`verification`, and `cleanup`, each with `started_at` and `completed_at`.
+`scoring`, and `cleanup`, each with `started_at` and `completed_at`.
 Phases can repeat and overlap, so their sum is the work done, not the wall
-clock time. Each Verifier result also carries its own `started_at` and
+clock time. Each Rewarder result also carries its own `started_at` and
 `completed_at`.
 
 ## Publish a local run to a hosted Job
@@ -180,7 +180,7 @@ clock time. Each Verifier result also carries its own `started_at` and
 a hosted Job planned from the same pushed resources. It matches Trials by Task,
 Agent name, and attempt, and replays each execution through the hosted worker
 API: the episode as progress events, logs, artifacts, usage, phases, and
-Verifier results. Failed executions are published too, so the hosted Trial keeps
+Rewarder results. Failed executions are published too, so the hosted Trial keeps
 their retries and cost.
 
 ```python
@@ -196,5 +196,5 @@ publish_job(studio, JobStore(Path(".plural/jobs")), LOCAL_JOB_ID, HOSTED_JOB_ID)
 
 Publishing is idempotent: running it again records nothing new, including for
 executions a `HostedTracker` already reported while the Job ran. It refuses an
-execution whose Environment or Verifier content hash differs from the hosted
+execution whose Environment or Rewarder content hash differs from the hosted
 pins.

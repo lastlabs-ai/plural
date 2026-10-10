@@ -39,7 +39,7 @@ flowchart TB
   world["Your Environment"]
   agentA["Agent A"]
   agentB["Agent B"]
-  score["Verifiers"]
+  score["Rewarders"]
   world --> agentA
   world --> agentB
   agentA --> score
@@ -55,9 +55,9 @@ Agent). What an action returns is the only part the Agent sees. Nothing on the A
 side can rewrite it.
 
 **The assignment is a Task.** It is one piece of work in that world: the instructions,
-the Environment it runs in, and the **Verifiers** that score it.
+the Environment it runs in, and the **Rewarders** that score it.
 
-**The grader is a Verifier.** Verifiers decide whether the episode counted. They are
+**The grader is a Rewarder.** Rewarders decide whether the episode counted. They are
 not the Agent, and they are not the world.
 
 **The contestant is an Agent.** It is a model, its instructions, and an optional

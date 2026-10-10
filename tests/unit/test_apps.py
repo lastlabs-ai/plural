@@ -16,9 +16,9 @@ from plural import (
     Resource,
     Runtime,
     State,
+    Step,
     action,
     initial,
-    rewarder,
 )
 from plural.apps import daemon
 from plural.apps.definition import AppAction, AppDefinition, derive_control
@@ -56,14 +56,20 @@ class Wordle(App[Board]):
         """How many guesses remain."""
         return 6 - len(self.state.guesses)
 
-    @rewarder(weight=2)
-    def solved(self, previous_state, current_state, action, result) -> float:
-        """One when the guess solves the puzzle."""
-        del action, result
-        return float(current_state["solved"] and not previous_state["solved"])
-
     def terminated(self) -> bool:
         return self.state.solved or len(self.state.guesses) >= 6
+
+
+def solved(step: Step) -> float:
+    """Two when the guess solves the puzzle, and a penalty for an invalid one."""
+    if step.error:
+        return -0.5
+    return 2.0 * float(step.current_state["solved"] and not step.previous_state["solved"])
+
+
+def notes_written(step: Step) -> float | None:
+    """Reads another App, which a step hook may do but never writes."""
+    return float(len(step.apps["notes"].snapshot()["entries"])) if step.app == "wordle" else None
 
 
 class Ledger(State):
@@ -79,16 +85,14 @@ class Notes(App[Ledger]):
 
 
 class Desk(Environment):
-    def on_step(self, call, result, apps) -> float | None:
+    def on_step(self, call, result, apps) -> None:
         del result
         if call.app == "wordle":
             apps["notes"].call("write", text=f"guessed {call.arguments['word']}")
-            return 0.5
-        return None
 
 
 class Scored(Environment):
-    def on_step(self, call, result, apps) -> float | None:
+    def on_step(self, call, result, apps) -> float | None:  # type: ignore[override]
         del result, apps
         return 0.5 if call.app == "wordle" else None
 
@@ -102,7 +106,6 @@ def test_single_app_environment_uses_bare_action_names() -> None:
     assert app.python == "test_apps.py:Wordle"
     assert app.control == "owned"
     assert app.description == "Guess a five-letter word."
-    assert app.rewarders[0].weight == 2
     assert app.state_schema["properties"]["secret"]["x-plural-initial"] is True
     assert [item.mutates_state for item in app.actions] == [True, False]
     assert definition.reproducible
@@ -110,11 +113,11 @@ def test_single_app_environment_uses_bare_action_names() -> None:
 
 def test_wordle_episode_in_process() -> None:
     environment = Environment(apps=[Wordle()], runtime=Runtime.local())
-    observation, _ = environment.reset(initial_state={"secret": "slate"})
+    observation, _ = environment.reset(initial_state={"secret": "slate"}, rewarders=[solved])
     assert observation == {"text": "Guess the word. You have 6 guesses."}
     _, reward, terminated, _, info = environment.step("guess", word="toolong")
     assert info["error"] == "a guess must have five letters"
-    assert (reward, terminated) == (0.0, False)
+    assert (reward, terminated) == (-0.5, False)
     observation, reward, terminated, _, info = environment.step("guess", word="slate")
     assert observation == {"text": "solved"}
     assert reward == 2.0
@@ -140,10 +143,13 @@ def test_several_apps_keep_their_tool_names_and_on_step_spans_them() -> None:
     assert [item.name for item in definition.actions] == ["guess", "remaining", "write"]
     assert definition.actions[0].description.startswith("[wordle] ")
     assert definition.python == "test_apps.py:Desk"
-    observation, _ = environment.reset(initial_state={"wordle": {"secret": "crane"}})
+    observation, _ = environment.reset(
+        initial_state={"wordle": {"secret": "crane"}}, rewarders=[solved, notes_written]
+    )
     assert observation == {"text": "Guess the word. You have 6 guesses."}
     _, reward, _, _, info = environment.step("guess", word="slate")
-    assert reward == 0.5
+    assert reward == 1.0
+    assert [item["name"] for item in info["rewards"]] == ["solved", "notes_written"]
     assert info["effects"] == [
         {"app": "notes", "action": "write", "arguments": {"text": "guessed slate"}}
     ]
@@ -168,9 +174,28 @@ def test_rebuilt_environment_matches_definition() -> None:
     assert restored.content_hash == definition.content_hash
     rebuilt = Environment._from_definition(restored)
     assert type(rebuilt).__name__ == "Desk"
-    rebuilt.reset()
+    rebuilt.reset(rewarders=[solved])
     _, reward, _, _, _ = rebuilt.step("guess", word="crane")
-    assert reward == 2.5
+    assert reward == 2.0
+
+
+def test_on_step_gives_no_rewards() -> None:
+    environment = Scored(apps=[Wordle()], runtime=Runtime.local(), name="scored")
+    environment.reset()
+    with pytest.raises(TypeError, match="step hook"):
+        environment.step("guess", word="crane")
+
+
+def test_a_failing_step_hook_never_fails_the_action() -> None:
+    def broken(step: Step) -> float:
+        raise RuntimeError("boom")
+
+    environment = Environment(apps=[Wordle()], runtime=Runtime.local())
+    environment.reset(rewarders=[broken, solved])
+    observation, reward, _, _, info = environment.step("guess", word="crane")
+    assert observation == {"text": "solved"}
+    assert reward == 2.0
+    assert info["rewards"][0]["error"] == "RuntimeError: boom"
 
 
 def test_tool_names_just_work_for_every_provider() -> None:
@@ -212,7 +237,7 @@ def test_environment_rejects_old_fields() -> None:
         )
 
 
-def test_hooks_cannot_be_actions_and_rewarders_check_signature() -> None:
+def test_hooks_cannot_be_actions() -> None:
     class Broken(App[State]):
         @action
         def reset(self, initial_state: dict[str, Any]) -> None:  # type: ignore[override]
@@ -220,11 +245,6 @@ def test_hooks_cannot_be_actions_and_rewarders_check_signature() -> None:
 
     with pytest.raises(TypeError, match="App hook"):
         Broken().actions()
-    with pytest.raises(TypeError, match="previous_state"):
-
-        @rewarder
-        def bad(state) -> float:
-            return 0.0
 
 
 def test_app_settings_must_be_keywords() -> None:
@@ -517,7 +537,7 @@ def test_mcp_reset_hook_makes_a_remote_app_sandboxed(tmp_path: Path) -> None:
 
 
 WORKSPACE_SOURCE = """
-from plural import App, Environment, State, action, initial, rewarder
+from plural import App, Environment, State, action, initial
 
 
 class Board(State):
@@ -532,10 +552,6 @@ class Wordle(App[Board]):
         self.state.solved = word == self.state.secret
         return "solved" if self.state.solved else "no"
 
-    @rewarder(weight=2)
-    def solved(self, previous_state, current_state, action, result) -> float:
-        return float(current_state["solved"])
-
     def terminated(self) -> bool:
         return self.state.solved
 
@@ -545,9 +561,14 @@ class Wordle(App[Board]):
         (self.workspace / "closed").write_text("yes")
 
 
-class Scored(Environment):
-    def on_step(self, call, result, apps):
-        return 0.5 if call.app == "wordle" else None
+class Desk(Environment):
+    pass
+"""
+
+REWARD_SOURCE = """
+def solved(step):
+    crm = step.apps["crm"].query("list_records")
+    return 2.0 * float(step.current_state["solved"]) + 0.5 * len(crm["records"])
 """
 
 
@@ -559,15 +580,30 @@ def workspace(tmp_path: Path) -> Iterator[Path]:
     (root / ".plural" / "apps").mkdir(parents=True)
     (root / "desk.py").write_text(WORKSPACE_SOURCE)
     wordle = load_reference("desk.py:Wordle", root)
-    scored = load_reference("desk.py:Scored", root)
-    environment = scored(
+    desk = load_reference("desk.py:Desk", root)
+    environment = desk(
         apps=[wordle(), _stdio_app()], runtime=Runtime.local(), name="desk", source=root
     )
     definition = environment.definition()
     environment.close()
     (root / ".plural/apps/environment.json").write_text(definition.model_dump_json())
+    (root / ".plural/rewarders/won").mkdir(parents=True)
+    (root / ".plural/rewarders/won/reward.py").write_text(REWARD_SOURCE)
     (root / ".plural/apps/task.json").write_text(
-        json.dumps({"initial_state": {"wordle": {"secret": "slate"}}})
+        json.dumps(
+            {
+                "initial_state": {"wordle": {"secret": "slate"}},
+                "task": {"name": "t", "metadata": {}},
+                "rewarders": [
+                    {
+                        "name": "won",
+                        "version": "1.0.0",
+                        "dir": ".plural/rewarders/won",
+                        "python": "reward.py:solved",
+                    }
+                ],
+            }
+        )
     )
     yield root
     daemon.call("stop", root=root)
@@ -596,6 +632,7 @@ def test_app_host_keeps_state_across_action_commands(workspace: Path) -> None:
     step = _cli(workspace, "step", "guess", stdin='{"word": "slate"}')
     assert step["terminated"] is True
     assert step["reward"] == 2.5
+    assert step["rewards"] == [{"name": "won", "version": "1.0.0", "app": "wordle", "value": 2.5}]
     listed = _cli(workspace, "query", "crm", "list_records")
     assert listed == {"records": [{"id": "1", "name": "Acme"}]}
     report = _cli(workspace, "finish")

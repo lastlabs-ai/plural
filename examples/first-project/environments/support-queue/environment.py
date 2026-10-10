@@ -1,6 +1,6 @@
 """A support queue authored as one Plural App."""
 
-from plural import App, State, action, initial, rewarder
+from plural import App, State, action, initial
 
 TICKETS = {
     "ticket-1": {
@@ -106,11 +106,3 @@ class SupportQueue(App[QueueState]):
     def terminated(self) -> bool:
         """End the episode once the ticket is resolved."""
         return self.state.done
-
-    @rewarder
-    def progress(self, previous_state, current_state, action, result) -> float:
-        """Credit each step that moves the ticket forward. Never part of the score."""
-        order = ("open", "triaged", "drafted", "resolved")
-        before = order.index(previous_state["status"])
-        after = order.index(current_state["status"])
-        return 0.25 * max(after - before, 0)

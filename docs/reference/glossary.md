@@ -34,7 +34,7 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   sees.
 - **State:** an App's full truth, including things the AI must not see, such as the
   secret word. *Precisely:* an App's internal data, including fields not meant for the
-  agent. A Verifier reads its snapshots.
+  agent. A Rewarder reads its snapshots.
 - **Control level:** how far Plural can trust an App to start each attempt fresh.
   *Precisely:* `owned`, `sandboxed`, `live`, or `replayed`, derived from the App's kind
   and settings. A Benchmark refuses a `live` App that can change state, and training
@@ -51,11 +51,11 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   file or data input declared by an Environment or Task; not a run output.
 - **Task:** one assignment in a world, such as "the secret word is CRANE".
   *Precisely:* instructions and public information pinned to one Environment and one or
-  more Verifiers.
-- **Verifier:** the grader that marks the finished work. It can be code, an AI judge,
+  more Rewarders.
+- **Rewarder:** the grader that marks the finished work. It can be code, an AI judge,
   or a person. *Precisely:* a deterministic, agent, or human scorer attached to a Task.
 - **Evidence contract:** the list of things a grader needs to see to do its job.
-  *Precisely:* the artifacts and observation or State fields a Verifier asks for.
+  *Precisely:* the artifacts and observation or State fields a Rewarder asks for.
 - **Agent:** the contestant: a model plus the instructions you give it. *Precisely:*
   instructions, model configuration, and optionally a Harness. With no Harness, an Agent
   uses `native`, Plural's built-in tool loop.
@@ -67,7 +67,7 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   that world's rules are applied. *Precisely:* the capabilities one Harness keeps in one
   Environment after the Environment's policy is applied.
 - **Benchmark:** the exam: a fixed set of assignments with a leaderboard. *Precisely:* a
-  versioned collection of Tasks used for comparison. It ranks on the Verifier score.
+  versioned collection of Tasks used for comparison. It ranks on the Rewarder score.
 
 ## Runs and their records
 
@@ -94,20 +94,21 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   how long. *Precisely:* the Trial's recorded identities, runtime, timing, and
   integrity information.
 - **Review:** a score a person gives when the grader is human. *Precisely:* a person's
-  scoring submission for a pending human Verifier.
+  scoring submission for a pending human Rewarder.
 
 ## Scores, rewards, and training
 
-- **Score:** the grade a Verifier gives the finished work, usually between 0 and 1. It
-  is the only thing a leaderboard ranks on. *Precisely:* the number a Verifier
+- **Score:** the grade a Rewarder gives the finished work, usually between 0 and 1. It
+  is the only thing a leaderboard ranks on. *Precisely:* the number a Rewarder
   produces, aggregated onto the Trial. It is the only thing a Benchmark ranks on.
 - **Reward:** a small bit of credit for one move, used to train models. It never counts
   toward the score, and the AI never sees it. *Precisely:* credit on one target of a
   trajectory (a step, a model call, or a span within one), recorded in the Trial's
   reward ledger and never part of a score. `Trial.step_reward_total` is the episode's
   total of per-step rewards.
-- **Rewarder:** a rule, attached to an App, that hands out rewards after its moves.
-  *Precisely:* a `@rewarder` method on an App, run after each of its actions.
+- **Step reward:** a reward for one action, given while the attempt runs.
+  *Precisely:* what a Rewarder's `step` check returns after each action, recorded
+  with source `step`, the Rewarder's name and version, and the step it credits.
 - **Hindsight rewarder:** a rule that hands out rewards after an attempt is over,
   looking at the whole thing. *Precisely:* a function marked `@hindsight_rewarder`,
   applied to finished Trials with `plural rewards apply` or a Job's `hindsight`.

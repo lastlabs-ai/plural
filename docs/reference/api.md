@@ -95,9 +95,9 @@ revision. To push a project directory with its dependencies, use
 ``plural <kind> push`` or :func:`plural.project.sync.push`.
 
 Args:
-    obj: Environment, Task, Verifier, Agent, Harness, Benchmark, or Trace.
+    obj: Environment, Task, Rewarder, Agent, Harness, Benchmark, or Trace.
     **kwargs: Hosted revision ids for graph edges, such as a Task's
-        ``environment_revision_id`` and ``verifier_revision_ids``.
+        ``environment_revision_id`` and ``rewarder_revision_ids``.
 
 Returns:
     The hosted revision record.
@@ -804,7 +804,7 @@ Attach or update the outcome.
 
 ```text
 Args:
-    scores: Named Verifier outputs.
+    scores: Named Rewarder outputs.
     reward: Scalar reward.
     labels: Discrete labels.
     feedback: Free-form feedback.
@@ -1167,7 +1167,7 @@ Load a resource by kind and name, the way the CLI addresses it.
 describes.
 
 Args:
-    kind: ``environment``/``env``, ``task``, ``verifier``, ``harness``,
+    kind: ``environment``/``env``, ``task``, ``rewarder``, ``harness``,
         ``agent``, or ``benchmark``.
     name: The resource's directory name.
 
@@ -1404,7 +1404,7 @@ Load all complete trial results in lexical order.
 ### plural.JobStore.write_trial_execution
 
 ```python
-write_trial_execution(self, trial: 'TrialSpec', execution_id: 'int', result: 'TrialResult', *, stdout: 'bytes' = b'', stderr: 'bytes' = b'', artifacts: 'Iterable[DownloadedFile]' = (), verifier_stdout: 'bytes' = b'', verifier_stderr: 'bytes' = b'') -> 'Path'
+write_trial_execution(self, trial: 'TrialSpec', execution_id: 'int', result: 'TrialResult', *, stdout: 'bytes' = b'', stderr: 'bytes' = b'', artifacts: 'Iterable[DownloadedFile]' = (), rewarder_stdout: 'bytes' = b'', rewarder_stderr: 'bytes' = b'') -> 'Path'
 ```
 
 Append one immutable execution and update the selected result.
@@ -1420,7 +1420,7 @@ Atomically publish the aggregate result.
 ### plural.JobStore.write_review
 
 ```python
-write_review(self, trial: 'TrialSpec', verifier_name: 'str', submission: 'Mapping[str, Any]', result: 'TrialResult') -> 'Path'
+write_review(self, trial: 'TrialSpec', rewarder_name: 'str', submission: 'Mapping[str, Any]', result: 'TrialResult') -> 'Path'
 ```
 
 Append one immutable human review and publish its resolved Trial result.
@@ -1472,7 +1472,7 @@ plural.Environment(*, apps: 'Iterable[App[Any]]' = (), runtime: 'EnvironmentRunt
 ### plural.Environment.on_step
 
 ```python
-on_step(self, call: 'ActionCall', result: 'Any', apps: 'Mapping[str, Any]') -> 'float | None'
+on_step(self, call: 'ActionCall', result: 'Any', apps: 'Mapping[str, Any]') -> 'None'
 ```
 
 React after any App's action, for effects that span Apps.
@@ -1482,11 +1482,8 @@ React after any App's action, for effects that span Apps.
 ``snapshot()``, and ``state``. An effect here is not an Agent action and
 is not shown to the Agent. Apps never call each other directly.
 
-Return a number to record an Environment reward for this step, or
-``None``. Like every reward, it never reaches the Agent or a score.
-
-Returns:
-    An optional reward.
+Rewards are not given here: they depend on the Task, so they come from
+the ``step`` hook of a Task's Rewarder.
 ```
 
 ### plural.Environment.terminated
@@ -1508,14 +1505,16 @@ Return whether the episode was cut short. Default: any App says so.
 ### plural.Environment.reset
 
 ```python
-reset(self, *, initial_state: 'Mapping[str, Any] | None' = None, info: 'Any' = None, seed: 'int | None' = None) -> 'tuple[Any, dict[str, Any]]'
+reset(self, *, initial_state: 'Mapping[str, Any] | None' = None, info: 'Any' = None, seed: 'int | None' = None, rewarders: 'Sequence[Any]' = ()) -> 'tuple[Any, dict[str, Any]]'
 ```
 
 Start an episode in this process.
 
 ```text
 ``initial_state`` maps each App's name to its starting state; with one
-App it may be that App's state directly.
+App it may be that App's state directly. ``rewarders`` gives each
+:meth:`step` its reward: Rewarders with a ``step`` hook, or functions
+of one :class:`~plural.Step`.
 
 Returns:
     The opening observation and reset information.
@@ -1544,7 +1543,7 @@ Returns:
 snapshot(self) -> 'dict[str, Any]'
 ```
 
-Return each App's state, as a Verifier receives it after the episode.
+Return each App's state, as a Rewarder receives it after the episode.
 
 ### plural.Environment.close
 
@@ -1562,7 +1561,7 @@ Mark an :class:`~plural.apps.App` method as an action the Agent can take.
 Args:
     fn: Method to register (decorator usage).
     name: Optional explicit action name. Defaults to the method name.
-    read_only: The action never changes state. Verifiers may call only
+    read_only: The action never changes state. Rewarders may call only
         read-only actions after the episode.
     timeout_seconds: How long one call may run.
 
@@ -1574,27 +1573,81 @@ Returns:
 plural.action(fn: 'Callable[..., Any] | None' = None, *, name: 'str | None' = None, read_only: 'bool' = False, timeout_seconds: 'float' = 30) -> 'Any'
 ```
 
-## plural.rewarder
+## plural.DeterministicRewarder
 
-Declare a reward signal for each action of the App that defines it.
+Code that rewards an episode: per step, at the end, or both.
 
 ```text
-The method accepts ``previous_state, current_state, action, result``.
-``action`` is ``{"name": ..., **arguments}`` and ``result`` is what the
-action returned, which is what the Agent saw. The two states are the App's
-snapshots before and after the action, or ``None`` when the App does not
-snapshot on each step, so a rewarder on a connected system can still judge
-the system's response.
+``final`` scores the finished episode; that score is what Tasks and
+Benchmarks rank on. It is a function of the :class:`Episode`, a
+``{"python": "reward.py:final"}`` reference, or a command argv.
 
-Rewards are recorded for credit assignment. They never contribute to a
-Verifier score and never reach the Agent.
+``step`` rewards each action while the episode runs. It is a function of
+one :class:`Step`, or a ``{"python": "reward.py:step"}`` reference, and
+runs in the Runtime beside the Apps, so it can read every App. What it
+returns goes to the Trial's reward ledger and never into the score.
+```
 
+### plural.DeterministicRewarder.bind_source
+
+```python
+bind_source(self, digest: 'str', directory: 'Path | None' = None) -> 'None'
+```
+
+Fingerprint callable hooks by the package that ships them.
+
+### plural.DeterministicRewarder.bind_source_digest
+
+```python
+bind_source_digest(self, digest: 'str') -> 'None'
+```
+
+Fingerprint callable hooks by the package that ships them.
+
+### plural.DeterministicRewarder.invoke
+
+```python
+invoke(self, episode: 'Episode') -> 'RewarderOutput'
+```
+
+Run ``final`` in-process on the finished Episode.
+
+```text
 Returns:
-    The decorated method.
+    A validated RewarderOutput.
+```
+
+### plural.DeterministicRewarder.model_post_init
+
+```python
+model_post_init(self: 'BaseModel', context: 'Any', /) -> 'None'
+```
+
+This function is meant to behave like a BaseModel method to initialize private attributes.
+
+```text
+It takes context as an argument since that's what pydantic-core passes when calling it.
+
+Args:
+    self: The BaseModel instance.
+    context: The context.
+```
+
+## plural.Step
+
+One action the Agent took, as a Rewarder's ``step`` hook sees it.
+
+```text
+``observation`` is what the Agent saw back; ``error`` is set instead when
+the action rejected its input. ``previous_state`` and ``current_state``
+are the acting App's snapshots around the action, or ``None`` when it does
+not snapshot on each step. ``apps`` reads any App, by name: ``state`` for
+a Python App, ``snapshot()``, and ``query(action, **arguments)`` for a
+read-only action. Nothing here reaches the Agent.
 ```
 
 ```python
-plural.rewarder(fn: 'Callable[..., float] | None' = None, *, name: 'str | None' = None, weight: 'float' = 1, timeout_seconds: 'float' = 30) -> 'Any'
+plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>) -> None
 ```
 
 ## plural.environments.types.Observation
@@ -1633,7 +1686,7 @@ Persistent internal Environment state for the episode.
 
 ```text
 State is never sent to the Agent. Only :class:`Observation` is visible.
-Verifiers receive the final State on :class:`~plural.verifiers.Episode`.
+Rewarders receive the final State on :class:`~plural.rewarders.Episode`.
 
 Mark a field with :func:`initial` when a Task should supply it. Unmarked
 fields are episode progress and cannot be set as ``initial_state``.
@@ -2340,7 +2393,7 @@ plural.environments.export.hf.to_huggingface_records(dataset: 'TraceDataset') ->
 
 ## plural.environments.export.verifiers.to_verifiers_trace
 
-Convert an plural trace to a simplified verifiers-compatible dict.
+Convert an plural trace to a simplified rewarders-compatible dict.
 
 ```text
 Prefers :class:`~plural.tracing.schema.Turn` steps (observation,

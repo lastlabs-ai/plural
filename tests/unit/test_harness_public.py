@@ -12,7 +12,7 @@ from plural import Agent, Environment, Harness, Job, Runtime, Task
 from plural.cli.main import app
 from plural.project import Project, ResourceRef, Workspace
 from plural.project.resources import load_harness_directory
-from plural.verifiers import DeterministicVerifier
+from plural.rewarders import DeterministicRewarder
 
 ROOT = Path(__file__).resolve().parents[2]
 BANNED = re.compile(
@@ -53,7 +53,7 @@ def _job(harness: Harness) -> Job:
         name="case",
         instructions="Complete the case.",
         environment=Environment(name="world", runtime=Runtime.docker()),
-        verifiers=(DeterministicVerifier(name="done", check="python verify.py"),),
+        rewarders=(DeterministicRewarder(name="done", final="python reward.py"),),
     )
     return Job(
         task,

@@ -1,0 +1,9 @@
+# Rewarder: what counts as a good episode for the Tasks that list it.
+# final scores the finished episode; Tasks and Benchmarks rank on that score.
+# step rewards each action, for training; it never changes the score.
+name: correct-category
+version: 0.1.0
+kind: deterministic
+final: reward.py:final
+step: reward.py:step
+weight: 1

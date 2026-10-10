@@ -1,15 +1,15 @@
 """Plan a model comparison across Tasks and Environments."""
 
 from plural import Agent, Benchmark, Environment, Job, Runtime, Task
-from plural.verifiers import DeterministicVerifier
+from plural.rewarders import DeterministicRewarder
 
-verifier = DeterministicVerifier(name="correct", check=("python", "verify.py"))
+rewarder = DeterministicRewarder(name="correct", final=("python", "reward.py"))
 tasks = tuple(
     Task(
         name=name,
         instructions=prompt,
         environment=Environment(name=f"{name}-environment", runtime=Runtime.docker()),
-        verifiers=(verifier,),
+        rewarders=(rewarder,),
     )
     for name, prompt in (
         ("refund", "Respond to a refund request."),

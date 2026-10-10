@@ -19,7 +19,7 @@ State is the hidden game.
 
 ## State
 
-`secret` is the hidden word. A Task sets it with `initial_state`; a blank secret is chosen from `words.txt` using the seed. `guesses`, `remaining`, and `solved` are episode progress. The Agent never sees State. A Verifier does.
+`secret` is the hidden word. A Task sets it with `initial_state`; a blank secret is chosen from `words.txt` using the seed. `guesses`, `remaining`, and `solved` are episode progress. The Agent never sees State. A Rewarder does.
 
 ## What the Agent sees
 

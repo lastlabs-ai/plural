@@ -6,7 +6,7 @@ import inspect
 import json
 import re
 import sys
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, ClassVar, Generic, cast, get_args, get_origin
 
@@ -17,55 +17,13 @@ from plural.apps.definition import (
     AppControl,
     AppDefinition,
     AppKind,
-    RewarderDefinition,
     SecretReference,
     derive_control,
 )
 from plural.environments.action_registry import action_options, function_schema, iter_env_actions
-from plural.environments.fingerprint import callable_implementation_digest
 from plural.environments.types import Observation, State, StateT
 
-_REWARDER_ATTR = "__plural_rewarder__"
 _LIFECYCLE = frozenset({"reset", "snapshot", "call", "close", "view", "terminated", "truncated"})
-
-
-def rewarder(
-    fn: Callable[..., float] | None = None,
-    *,
-    name: str | None = None,
-    weight: float = 1,
-    timeout_seconds: float = 30,
-) -> Any:
-    """Declare a reward signal for each action of the App that defines it.
-
-    The method accepts ``previous_state, current_state, action, result``.
-    ``action`` is ``{"name": ..., **arguments}`` and ``result`` is what the
-    action returned, which is what the Agent saw. The two states are the App's
-    snapshots before and after the action, or ``None`` when the App does not
-    snapshot on each step, so a rewarder on a connected system can still judge
-    the system's response.
-
-    Rewards are recorded for credit assignment. They never contribute to a
-    Verifier score and never reach the Agent.
-
-    Returns:
-        The decorated method.
-    """
-
-    def decorate(func: Callable[..., float]) -> Callable[..., float]:
-        parameters = tuple(inspect.signature(func).parameters)
-        if parameters and parameters[0] in {"self", "cls"}:
-            parameters = parameters[1:]
-        if parameters != ("previous_state", "current_state", "action", "result"):
-            raise TypeError("rewarder must accept previous_state, current_state, action, result")
-        setattr(
-            func,
-            _REWARDER_ATTR,
-            {"name": name or func.__name__, "weight": weight, "timeout_seconds": timeout_seconds},
-        )
-        return func
-
-    return decorate(fn) if fn is not None else decorate
 
 
 def _snake(name: str) -> str:
@@ -84,7 +42,7 @@ class App(Generic[StateT]):
 
     Subclass ``App`` and mark methods with :func:`~plural.action`. What an
     action returns is what the Agent sees next. Hidden facts belong on
-    ``self.state``, a typed :class:`~plural.State` that Verifiers read and the
+    ``self.state``, a typed :class:`~plural.State` that Rewarders read and the
     Agent never sees::
 
         class Wordle(App[Game]):
@@ -209,7 +167,7 @@ class App(Generic[StateT]):
         return None
 
     def snapshot(self) -> Any:
-        """Return this App's state as JSON for Verifiers and rewarders.
+        """Return this App's state as JSON for Rewarders and rewarders.
 
         Returns:
             The App's state, or ``None`` when it cannot be read.
@@ -342,32 +300,6 @@ class App(Generic[StateT]):
             return type(self).control  # type: ignore[return-value]
         return derive_control(self.kind, local=self.is_local(), has_reset=self.has_reset())
 
-    def _rewarder_methods(self) -> tuple[tuple[dict[str, Any], Callable[..., float]], ...]:
-        bound: list[tuple[dict[str, Any], Callable[..., float]]] = []
-        seen: set[str] = set()
-        for owner in type(self).__mro__:
-            for attribute, value in owner.__dict__.items():
-                config = getattr(value, _REWARDER_ATTR, None)
-                if not callable(value) or not isinstance(config, dict):
-                    continue
-                if config["name"] in seen:
-                    continue
-                seen.add(str(config["name"]))
-                bound.append((config, getattr(self, attribute)))
-        return tuple(bound)
-
-    def _rewarders(self) -> tuple[RewarderDefinition, ...]:
-        return tuple(
-            RewarderDefinition(
-                name=str(config["name"]),
-                description=(inspect.getdoc(method) or "").strip(),
-                implementation_digest=callable_implementation_digest(method),
-                weight=float(config["weight"]),
-                timeout_seconds=float(config["timeout_seconds"]),
-            )
-            for config, method in self._rewarder_methods()
-        )
-
     def _config(self) -> dict[str, Any]:
         config = {key: value for key, value in self._init_config.items() if key != "name"}
         try:
@@ -422,7 +354,6 @@ class App(Generic[StateT]):
             actions=self.actions(),
             secrets=tuple(SecretReference.model_validate(item) for item in self.secrets),
             credentials=tuple(SecretReference.model_validate(item) for item in self.credentials),
-            rewarders=self._rewarders(),
             state_schema=self._state_schema(),
             has_reset=self.has_reset(),
             has_snapshot=self.has_snapshot(),
@@ -468,4 +399,4 @@ def observation_payload(value: Any) -> tuple[Any, str]:
     return payload, json.dumps(payload, sort_keys=True)
 
 
-__all__ = ["App", "observation_payload", "rewarder"]
+__all__ = ["App", "observation_payload"]

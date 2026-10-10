@@ -119,7 +119,7 @@ def test_step_protocol_matches_everywhere_it_is_duplicated() -> None:
 def test_stop_reason_vocabulary_is_declared_once() -> None:
     import typing
 
-    from plural.verifiers import STOP_REASONS, EpisodeOutcome
+    from plural.rewarders import STOP_REASONS, EpisodeOutcome
 
     declared = typing.get_args(EpisodeOutcome.model_fields["stop_reason"].annotation)
     assert set(declared) == {*STOP_REASONS, ""}

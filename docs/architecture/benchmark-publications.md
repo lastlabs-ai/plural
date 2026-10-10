@@ -57,7 +57,7 @@ Aggregation is defined once, in `aggregate_configuration`: attempts are averaged
 within a Task, then Tasks are combined by the release's weights. Attempts are
 classified as scored, Agent failure, infrastructure error, cancelled, or pending.
 Coverage, completion, success, uncertainty, cost, and latency are reported with
-their denominators. Results rank only on the Verifier `score`; per-step rewards
+their denominators. Results rank only on the Rewarder `score`; per-step rewards
 are not an input.
 
 A configuration that falls back to another model, or reports calling more than
@@ -85,17 +85,17 @@ The manifest carries only public routing metadata:
 
 - publication, publisher, release, track, configuration, and result identifiers;
 - Task names, descriptions, categories, applicability, and requirements;
-- score semantics: range, success threshold, weights, and Verifier names and kinds;
+- score semantics: range, success threshold, weights, and Rewarder names and kinds;
 - per-Task and per-category scores, coverage, sample counts, and uncertainty;
 - measured cost and latency with units and denominators;
 - provenance, evaluation dates, lineage, license, and correction status.
 
 It never carries private evaluation material: a Task's initial State and reset
-options, Verifier definitions, rubrics, and expected outputs, resource contents,
-secrets, or trace contents. Task instructions and Verifier findings on example
+options, Rewarder definitions, rubrics, and expected outputs, resource contents,
+secrets, or trace contents. Task instructions and Rewarder findings on example
 attempts are included only when the publisher chooses, after a preview that
 lists what stays private. The manifest states this boundary in its `boundary`
-field. No manifest, Verifier output, or score is ever placed in an evaluated
+field. No manifest, Rewarder output, or score is ever placed in an evaluated
 Agent's context.
 
 ## Categories and comparability

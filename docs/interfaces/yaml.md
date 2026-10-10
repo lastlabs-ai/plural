@@ -2,7 +2,7 @@
 route: /docs/interfaces/yaml
 title: YAML and serialization
 order: 125
-description: Describe Environments, Tasks, Verifiers, Harnesses, Agents, and Benchmarks as short YAML files in a project, with Python files supplying any behavior.
+description: Describe Environments, Tasks, Rewarders, Harnesses, Agents, and Benchmarks as short YAML files in a project, with Python files supplying any behavior.
 audience: all
 nav: true
 nav_group: Interfaces
@@ -37,7 +37,7 @@ project.yaml                  project name and description
 plural.lock                   written by Plural and updated by push; commit it, do not edit it
 environments/<name>/          environment.yaml, server.py or environment.py, README.md, optional resources/
 tasks/<name>/                 task.yaml, instruction.md, optional resources/
-verifiers/<name>/             verifier.yaml, verify.py
+rewarders/<name>/             rewarder.yaml, reward.py
 harnesses/<name>/             harness.yaml, harness.py
 agents/<name>/                agent.yaml
 benchmarks/<name>/            benchmark.yaml, README.md
@@ -95,14 +95,14 @@ Credentials never belong in a manifest. Supply them when the run starts; see
 ## Reference other resources by name
 
 Resources point at each other by name. A **Task** (one assignment) names its one
-Environment and its Verifiers (graders). `tasks/ticket-1/task.yaml`:
+Environment and its Rewarders (graders). `tasks/ticket-1/task.yaml`:
 
 ```yaml
 name: ticket-1
 version: 0.1.0
 instructions: instruction.md
 environment: support-queue
-verifiers:
+rewarders:
   - correct-category
 info:
   ticket_id: ticket-1
@@ -179,13 +179,13 @@ config:
   max_turns: 12
 ```
 
-A deterministic Verifier names its function:
+A deterministic Rewarder names its function:
 
 ```yaml
 name: correct-category
 version: 0.1.0
 kind: deterministic
-check: verify.py:verify
+final: reward.py:final
 ```
 
 Plural imports the referenced object and hashes the whole resource folder, so helper
@@ -235,5 +235,5 @@ plural task show ticket-1 --json
 
 `validate` loads the resource and everything it depends on and prints its version and
 content hash. `show --json` adds its dependencies and whether it has been pushed
-(`"hosted": "not pushed"` until it is). The same verbs exist for `env`, `verifier`,
+(`"hosted": "not pushed"` until it is). The same verbs exist for `env`, `rewarder`,
 `harness`, `agent`, and `benchmark`.

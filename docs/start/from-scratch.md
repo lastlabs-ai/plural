@@ -2,7 +2,7 @@
 route: /docs/start/from-scratch
 title: Start from scratch
 order: 24
-description: "Build a small Wordle game from an empty folder to a scored run: one App with an action, an Environment, two Tasks, a Verifier, and a Benchmark."
+description: "Build a small Wordle game from an empty folder to a scored run: one App with an action, an Environment, two Tasks, a Rewarder, and a Benchmark."
 audience: all
 nav: true
 nav_group: Start
@@ -11,7 +11,7 @@ nav_group: Start
 
 **You start with** an empty folder.
 
-**You end with** a small Wordle game that any model can play, two puzzles, a Verifier
+**You end with** a small Wordle game that any model can play, two puzzles, a Rewarder
 that grades them, and a Benchmark you can rerun. It takes about fifteen minutes, and
 every block below can be pasted as it is.
 
@@ -35,7 +35,7 @@ with:
 ```python
 """A small Wordle: guess a hidden five-letter word in six tries."""
 
-from plural import App, State, action, initial, rewarder
+from plural import App, State, action, initial
 
 
 class Game(State):
@@ -68,11 +68,6 @@ class Wordle(App[Game]):
 
     def terminated(self) -> bool:
         return self.state.solved or self.state.remaining <= 0
-
-    @rewarder
-    def solved(self, previous_state, current_state, action, result) -> float:
-        """1 on the guess that solves the puzzle."""
-        return float(current_state["solved"] and not previous_state["solved"])
 ```
 
 **What just happened.**
@@ -83,7 +78,7 @@ class Wordle(App[Game]):
   what it returns is all the model sees. Raising `ValueError` tells the model what
   went wrong, so it can try again.
 - `terminated` ends the game.
-- The `@rewarder` gives per-step credit for training. It never counts toward a score.
+- The App doesn't grade anything. That is the Rewarder's job, in step 5.
 
 ## 3. Describe the Environment
 
@@ -126,9 +121,9 @@ Each Task is one puzzle, with its own secret:
 
 ```bash
 for word in crane slate; do
-  plural task init $word --environment wordle --verifier solved
+  plural task init $word --environment wordle --rewarder solved
   echo "Guess the hidden five-letter word. Use the marks from each guess to choose the next." > tasks/$word/instruction.md
-  printf 'name: %s\ninstructions: instruction.md\nenvironment: wordle\nverifiers:\n  - solved\ninitial_state:\n  secret: %s\n' $word $word > tasks/$word/task.yaml
+  printf 'name: %s\ninstructions: instruction.md\nenvironment: wordle\nrewarders:\n  - solved\ninitial_state:\n  secret: %s\n' $word $word > tasks/$word/task.yaml
 done
 cat tasks/crane/task.yaml
 ```
@@ -137,7 +132,7 @@ cat tasks/crane/task.yaml
 name: crane
 instructions: instruction.md
 environment: wordle
-verifiers:
+rewarders:
   - solved
 initial_state:
   secret: crane
@@ -146,29 +141,42 @@ initial_state:
 **What just happened.** `initial_state` sets the App's `secret`. Because the secret is
 State, the Agent sees only the instructions and what each guess returns.
 
-## 5. Write a Verifier
+## 5. Write a Rewarder
 
 ```bash
-plural verifier init solved
+plural rewarder init solved
 ```
 
-Replace `verifiers/solved/verify.py` with:
+Replace `rewarders/solved/reward.py` with:
 
 ```python
-"""Score 1 when the secret was guessed."""
+"""Score 1 when the secret was guessed, and credit the guess that solved it."""
 
-from plural import Episode, VerifierOutput
+from plural import Episode, RewarderOutput, Step
 
 
-def verify(episode: Episode) -> VerifierOutput:
+def final(episode: Episode) -> RewarderOutput:
     """Read the final State, which the Agent never saw."""
     solved = bool(episode.state.get("solved"))
     used = 6 - int(episode.state.get("remaining", 6))
-    return VerifierOutput(score=float(solved), evidence=[f"solved={solved} after {used} guesses"])
+    return RewarderOutput(score=float(solved), evidence=[f"solved={solved} after {used} guesses"])
+
+
+def step(step: Step) -> float:
+    """1 on the guess that solves the puzzle."""
+    return float(step.current_state["solved"] and not step.previous_state["solved"])
 ```
 
-**What just happened.** The Verifier grades what actually happened in the game, not the
-model's claim that it won. Its `score` is what a Benchmark ranks on.
+In `rewarders/solved/rewarder.yaml`, turn on the `step` check by uncommenting it:
+
+```yaml
+final: reward.py:final
+step: reward.py:step
+```
+
+**What just happened.** `final` grades what actually happened in the game, not the
+model's claim that it won. Its `score` is what a Benchmark ranks on. `step` runs after
+every guess and gives per-step credit for training. It never counts toward a score.
 
 ## 6. Group the Tasks into a Benchmark
 
@@ -212,13 +220,13 @@ plural rewards show trl_7141ed163cc5f72c17a5c3a4
 ```
 
 ```text
-step  e3     +0.000  app:solved
-step  e5     +0.000  app:solved
-step  e7     +1.000  app:solved
+step  e3     +0.000  step:solved@0.1.0
+step  e5     +0.000  step:solved@0.1.0
+step  e7     +1.000  step:solved@0.1.0
 ```
 
 **What just happened.** The model played both puzzles through the `guess` action, the
-Verifier scored each one, and the `solved` rewarder credited the winning guess. That
+Rewarder's `final` scored each one, and its `step` credited the winning guess. That
 reward sits in the Trial's reward ledger for training. It didn't change the score.
 
 ## Where you are now

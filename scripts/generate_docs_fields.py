@@ -7,16 +7,16 @@ from pathlib import Path
 from plural import Agent, Benchmark, Harness, Task
 from plural.environments.definition import EnvironmentDefinition
 from plural.project import public_schema
-from plural.verifiers import AgentVerifier, DeterministicVerifier, HumanVerifier
+from plural.rewarders import AgentRewarder, DeterministicRewarder, HumanRewarder
 
 root = Path(__file__).resolve().parents[1] / "docs"
 models = [
     ("Environment", EnvironmentDefinition),
     ("Harness", Harness),
     ("Task", Task),
-    ("DeterministicVerifier", DeterministicVerifier),
-    ("AgentVerifier", AgentVerifier),
-    ("HumanVerifier", HumanVerifier),
+    ("DeterministicRewarder", DeterministicRewarder),
+    ("AgentRewarder", AgentRewarder),
+    ("HumanRewarder", HumanRewarder),
     ("Agent", Agent),
     ("Benchmark", Benchmark),
 ]

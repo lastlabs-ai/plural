@@ -18,12 +18,12 @@ from plural.project.templates import project_scaffold, resource_scaffold
 
 ROOT = Path(__file__).resolve().parents[2]
 STALE_PUBLIC_API = re.compile(
-    r"\b(?:Agent|Environment|Task|Benchmark|Job|Verifier)(?:Definition|Binding)\b"
-    r"|\bWeightedVerifier\b|\bnative_(?:actions|chat)_v1\b"
+    r"\b(?:Agent|Environment|Task|Benchmark|Job|Rewarder)(?:Definition|Binding)\b"
+    r"|\bWeightedRewarder\b|\bnative_(?:actions|chat)_v1\b"
 )
 SERIALIZATION_INTERNAL = re.compile(
     r"\b[A-Za-z_]\w*(?:Definition|Binding)\b"
-    r"|\bWeightedVerifier\b|\bnative_(?:actions|chat)_v1\b"
+    r"|\bWeightedRewarder\b|\bnative_(?:actions|chat)_v1\b"
     r"|\bschema_version\b|\bprotocol_adapter\b|\bprotocol\b"
     r"|\bdefinition\b|\bbinding\b|\bpackage\b|_v1\b",
     re.IGNORECASE,
@@ -32,7 +32,7 @@ SERIALIZATION_INTERNAL = re.compile(
 
 FIXTURE_REFS = [
     ResourceRef("environment", "queue"),
-    ResourceRef("verifier", "resolved"),
+    ResourceRef("rewarder", "resolved"),
     ResourceRef("task", "refund"),
     ResourceRef("harness", "scripted"),
     ResourceRef("agent", "baseline"),

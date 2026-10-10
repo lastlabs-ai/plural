@@ -22,13 +22,13 @@ from plural.jobs import (
     TITORecord,
     resolve_trial_harness_grant,
 )
+from plural.rewarders import DeterministicRewarder, WeightedRewarder
 from plural.sandbox import NetworkMode
 from plural.tasks import BenchmarkDefinition, TaskDefinition
-from plural.verifiers import DeterministicVerifier, WeightedVerifier
 
 
-def verifier(name: str = "exact") -> DeterministicVerifier:
-    return DeterministicVerifier(name=name, command=("python", "verify.py"))
+def rewarder(name: str = "exact") -> DeterministicRewarder:
+    return DeterministicRewarder(name=name, final=("python", "reward.py"))
 
 
 def task(name: str, environment: EnvironmentDefinition) -> TaskDefinition:
@@ -36,13 +36,13 @@ def task(name: str, environment: EnvironmentDefinition) -> TaskDefinition:
         task_id=name,
         instructions=f"Solve {name}.",
         environment=environment,
-        verifiers=(WeightedVerifier(verifier=verifier(f"verify-{name}")),),
+        rewarders=(WeightedRewarder(rewarder=rewarder(f"verify-{name}")),),
         info={"value": name},
     )
 
 
 def test_v2_environment_rejects_v1_owned_fields() -> None:
-    for field in ("tasks", "verifier", "mode"):
+    for field in ("tasks", "rewarder", "mode"):
         with pytest.raises(ValidationError, match="cannot own"):
             EnvironmentDefinition.model_validate(
                 {"schema_version": "2", "name": "world", field: []}
@@ -74,7 +74,7 @@ def test_task_state_is_validated_and_kept_off_the_public_payload() -> None:
             task_id="hard-01",
             instructions="Guess.",
             environment=environment,
-            verifiers=(WeightedVerifier(verifier=verifier()),),
+            rewarders=(WeightedRewarder(rewarder=rewarder()),),
             state={"secret": 1},
         )
     with pytest.raises(ValidationError, match="does not define: 'leftover'"):
@@ -82,25 +82,25 @@ def test_task_state_is_validated_and_kept_off_the_public_payload() -> None:
             task_id="hard-01",
             instructions="Guess.",
             environment=environment,
-            verifiers=(WeightedVerifier(verifier=verifier()),),
+            rewarders=(WeightedRewarder(rewarder=rewarder()),),
             state={"leftover": True},
         )
     value = TaskDefinition(
         task_id="hard-01",
         instructions="Guess.",
         environment=environment,
-        verifiers=(WeightedVerifier(verifier=verifier()),),
+        rewarders=(WeightedRewarder(rewarder=rewarder()),),
         state={"secret": "heart"},
     )
     assert value.state == {"secret": "heart"}
     assert "secret" not in value.public_payload
 
 
-def test_task_pins_environment_and_weighted_verifiers() -> None:
+def test_task_pins_environment_and_weighted_rewarders() -> None:
     environment = EnvironmentDefinition(name="world")
     value = task("one", environment)
     assert value.environment.identity == environment.identity
-    assert value.verifiers[0].weight == 1
+    assert value.rewarders[0].weight == 1
     assert "environment" in value.model_dump()
 
 

@@ -1,5 +1,5 @@
 # Benchmark: a named collection of Tasks and the rules for ranking results.
-# Results rank on the Verifier score only; step rewards never contribute.
+# Results rank on the Rewarder score only; step rewards never contribute.
 name: support-triage
 version: 1.0.0
 description: Categorize and resolve support tickets according to policy.

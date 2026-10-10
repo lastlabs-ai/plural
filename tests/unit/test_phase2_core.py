@@ -5,10 +5,10 @@ from pydantic import ValidationError
 
 import plural
 from plural import Agent, Benchmark, Environment, Harness, Job, Runtime, Task
-from plural.verifiers import (
-    AgentVerifier,
-    DeterministicVerifier,
-    HumanVerifier,
+from plural.rewarders import (
+    AgentRewarder,
+    DeterministicRewarder,
+    HumanRewarder,
     RubricCriterion,
 )
 
@@ -20,10 +20,10 @@ class CustomHarness(Harness):
         return {"task": task.id}
 
 
-def solved(*, weight: float = 1) -> DeterministicVerifier:
-    return DeterministicVerifier(
+def solved(*, weight: float = 1) -> DeterministicRewarder:
+    return DeterministicRewarder(
         name="solved",
-        check="python verifier.py",
+        final="python rewarder.py",
         criteria=(RubricCriterion(name="correct", description="The answer is correct."),),
         weight=weight,
     )
@@ -36,7 +36,7 @@ def task(name: str, *, version: str = "0.1.0") -> Task:
         instructions=f"Solve {name}.",
         goals=("Return the correct answer.",),
         environment=Environment(name="world", version="1.0.0", runtime=Runtime.docker()),
-        verifiers=(solved(weight=2),),
+        rewarders=(solved(weight=2),),
         initial_state={},
         reset_options={"seed": 7},
     )
@@ -52,8 +52,8 @@ def test_public_exports_use_plain_domain_names() -> None:
         "EnvironmentDefinition",
         "JobSpec",
         "TaskDefinition",
-        "VerifierDefinition",
-        "WeightedVerifier",
+        "RewarderDefinition",
+        "WeightedRewarder",
         "native_actions_v1",
         "native_chat_v1",
     } & set(plural.__all__)
@@ -92,24 +92,25 @@ def test_agent_catalog_provider_fallback_and_single_harness(tmp_path) -> None:
         )
 
 
-def test_verifier_contract_uses_check_criteria_and_catalog_models() -> None:
+def test_rewarder_contract_uses_final_criteria_and_catalog_models() -> None:
     deterministic = solved(weight=3)
-    assert deterministic.check == ("python", "verifier.py")
-    assert deterministic.command == deterministic.check
+    assert deterministic.final == ("python", "rewarder.py")
+    assert deterministic.command == deterministic.final
+    assert deterministic.scores
     assert deterministic.weight == 3
 
     criterion = RubricCriterion(name="quality", description="Response quality.")
-    judge = AgentVerifier(
+    judge = AgentRewarder(
         name="judge",
         model="openai/gpt-5.6-luna",
         instructions="Judge the response.",
         criteria=(criterion,),
     )
-    human = HumanVerifier(name="human", criteria=(criterion,))
+    human = HumanRewarder(name="human", criteria=(criterion,))
     assert judge.rubric == judge.criteria
     assert human.rubric == human.criteria
     with pytest.raises(ValidationError, match="effective ModelCatalog"):
-        AgentVerifier(
+        AgentRewarder(
             name="judge",
             model="not-registered/model",
             instructions="Judge.",
@@ -117,20 +118,20 @@ def test_verifier_contract_uses_check_criteria_and_catalog_models() -> None:
         )
 
 
-def test_task_compiles_python_environment_and_attaches_verifiers_directly() -> None:
+def test_task_compiles_python_environment_and_attaches_rewarders_directly() -> None:
     environment = Environment(name="world", version="1.2.3", runtime=Runtime.docker())
-    verifier = solved(weight=2)
+    rewarder = solved(weight=2)
     value = Task(
         name="case-1",
         instructions="Solve it.",
         environment=environment,
-        verifiers=(verifier,),
+        rewarders=(rewarder,),
     )
     assert value.environment.version == "1.2.3"
-    assert value.verifiers == (verifier,)
-    assert value.verifiers[0].weight == 2
+    assert value.rewarders == (rewarder,)
+    assert value.rewarders[0].weight == 2
     planned = Job(value, agents=(Agent(model="openai/gpt-5.6-luna"),)).spec.tasks[0]
-    assert planned.verifiers[0].weight == 2
+    assert planned.rewarders[0].weight == 2
 
 
 def test_benchmark_requires_semver_and_exports_structured_diff() -> None:

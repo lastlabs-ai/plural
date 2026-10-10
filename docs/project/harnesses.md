@@ -369,7 +369,7 @@ The trajectory file to exchange with other tools is
 [`atif-trajectory.json` in ATIF](https://docs.harborframework.com/core-concepts/agents/atif),
 Harbor's Agent Trajectory Interchange Format. Current ATIF is `ATIF-v1.7`: an `agent`
 block, ordered `steps`, and optional `final_metrics`. Put Plural-only notes in the
-format's `extra` field. A reward stays on the episode, and a verifier score stays on
+format's `extra` field. A reward stays on the episode, and a rewarder score stays on
 the Trial; neither is an ATIF step.
 
 `normalize_trajectory` reads an ATIF document as well as Plural's own JSON and JSONL

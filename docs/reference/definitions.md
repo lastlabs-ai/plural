@@ -22,10 +22,10 @@ In everyday terms first, then the fields each one holds:
 
 | Everyday idea | Object | What it holds |
 | --- | --- | --- |
-| A system the AI works with | `App` | actions, State, secrets, rewarders, snapshot and reset hooks, and rendering |
+| A system the AI works with | `App` | actions, State, credentials and secrets, snapshot and reset hooks, and rendering |
 | The world | `Environment` | Apps, Runtime, resources, Harness policy, limits, and the `on_step` hook |
-| One assignment | `Task` | instructions, one Environment, Verifiers, task resources, initial state |
-| The grader | `Verifier` | information, criteria, evidence, runtime, weight, check behavior |
+| One assignment | `Task` | instructions, one Environment, Rewarders, task resources, initial state |
+| What counts as good work | `Rewarder` | information, criteria, evidence, runtime, weight, `final` (the score) and `step` (per-step rewards) |
 | The contestant | `Agent` | model, provider, instructions, optional Harness, metadata |
 | How the contestant plays | `Harness` | interaction loop and extra tools for one Agent, bounded by the Environment's policy |
 | The exam | `Benchmark` | name, version, ordered Tasks, scoring rules, and metadata |
@@ -41,7 +41,7 @@ A few rules that matter:
 - **Harness:** `Harness` is the base class you subclass to write one;
   `HarnessDefinition` is the flattened public schema that describes a packaged Harness
   in YAML and the API.
-- **Benchmark:** it ranks only on the Verifier `score` (`primary_metric` defaults to
+- **Benchmark:** it ranks only on the Rewarder `score` (`primary_metric` defaults to
   `"score"`); rewards never contribute.
 
 ## Versions and strict fields
@@ -50,7 +50,7 @@ Every object you write has a version number, and Plural rejects fields it does n
 recognize, so a typo fails loudly instead of being ignored.
 
 Precisely: public models reject unknown fields and use ordinary semantic versions.
-Environment, Agent, Harness, Verifier, and Task default to `0.1.0`. The Python
+Environment, Agent, Harness, Rewarder, and Task default to `0.1.0`. The Python
 `Benchmark` requires an explicit version, and a `benchmark.yaml` defaults to `0.1.0`
 like every other manifest.
 
@@ -60,7 +60,7 @@ In a project, each of the first six objects is a folder with one settings file i
 The folder's name is the object's name.
 
 Precisely: each resource is one directory holding one manifest: `environment.yaml`,
-`task.yaml`, `verifier.yaml`, `harness.yaml`, `agent.yaml`, or `benchmark.yaml`.
+`task.yaml`, `rewarder.yaml`, `harness.yaml`, `agent.yaml`, or `benchmark.yaml`.
 Manifests reference other resources by name, Python behavior as `file.py:Object`, and
 files by paths inside the resource directory. Other field names, defaults, and nesting
 match the public constructors.
@@ -77,7 +77,7 @@ This is for Python users who add their own models. A catalog context makes sure 
 Agent, grader, and run you create from it looks models up in the same list.
 
 Precisely: `CatalogContext` carries one `ModelCatalog`, including any model entries you
-add for your project, to the Agents and Verifiers you create from it, to a `Workspace`
+add for your project, to the Agents and Rewarders you create from it, to a `Workspace`
 loading project resources, and to Job planning, so they all resolve models the same
 way. It never changes global state. See the
 [Python SDK guide](../sdk/evaluation.md#load-project-resources).

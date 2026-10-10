@@ -27,7 +27,7 @@ Plural gives each of those a name.
 | A system the AI works with | **App** | The game itself, or a CRM behind an MCP server |
 | The world | **Environment** | The Wordle game and where it runs |
 | One assignment | **Task** | "The secret word is CRANE" |
-| The grader | **Verifier** | Did the Agent guess the word? |
+| The grader | **Rewarder** | Did the Agent guess the word? |
 | The contestant | **Agent** | A model plus its instructions |
 | How the contestant plays | **Harness** | The loop that picks the next guess |
 | The exam | **Benchmark** | Three Wordle games with a leaderboard |
@@ -40,7 +40,7 @@ Here is how they connect:
 flowchart LR
   app[App]
   env[Environment]
-  ver[Verifier]
+  ver[Rewarder]
   task[Task]
   agent[Agent]
   harness[Harness]
@@ -71,7 +71,7 @@ Every App has:
 - **Actions**: the moves it offers, like `guess` in Wordle or `refund` at the help
   desk. What an action returns is what the Agent sees next, like the colored tiles.
 - **State**: its private truth, including things the Agent must not see, such as the
-  secret word. The Agent never sees State; a Verifier reads it to check the work.
+  secret word. The Agent never sees State; a Rewarder reads it to check the work.
 - **Credentials** (optional): the names of tokens it needs, such as a CRM API key.
   Only the names are stored. The Agent that runs supplies the values, so it acts as its
   own user, and they never reach the model.
@@ -109,7 +109,7 @@ A **Task** is one assignment in an Environment. It has:
 
 - **Instructions**: what the Agent should accomplish, in plain language.
 - **The Environment** it happens in.
-- **One or more Verifiers** that grade it.
+- **One or more Rewarders** that grade it.
 
 A Task can also set up the world before the Agent starts, for example by choosing the
 secret word (`initial_state`), and it can bring its own files, like the specific
@@ -121,13 +121,13 @@ particular case* belong on the Task.
 
 See [Tasks](../project/tasks.md).
 
-## Verifier
+## Rewarder
 
-A **Verifier** is the grader. When an attempt finishes, the Verifier looks at what
+A **Rewarder** is the grader. When an attempt finishes, the Rewarder looks at what
 happened and gives it a **score**, usually between 0 and 1.
 
 It can see everything: every step the Agent took, the hidden State, and any files the
-Agent produced. The Agent, on the other hand, never sees the Verifier or its score.
+Agent produced. The Agent, on the other hand, never sees the Rewarder or its score.
 
 There are three kinds of grader:
 
@@ -140,7 +140,7 @@ There are three kinds of grader:
 
 The score is the only thing Plural ranks on.
 
-See [Verifiers](../project/verifiers.md).
+See [Rewarders](../project/rewarders.md).
 
 ## Agent
 
@@ -153,7 +153,7 @@ not a version of it tailored to the test.
 
 An Agent only ever sees two things: the Task's instructions and what its actions
 return. It never sees the score, the rewards, the hidden State, or anything the
-Verifier knows.
+Rewarder knows.
 
 Every model call goes through the Plural gateway, which bills it at the provider's
 price. That is why a real run needs a **Plural API key**. `plural auth login` stores
@@ -187,11 +187,11 @@ See [Harnesses](../project/harnesses.md).
 A **Benchmark** is the exam: a fixed, ordered set of Tasks and the rules for ranking
 the results. Run several Agents on it and you get a leaderboard for your own work.
 
-Each Agent is ranked by its Verifier scores, alongside how much it cost, how long it
+Each Agent is ranked by its Rewarder scores, alongside how much it cost, how long it
 took, and how consistent it was across repeated attempts. Rewards never affect the
 ranking.
 
-Benchmarks are versioned. When you change a Task, its Environment, or its Verifier,
+Benchmarks are versioned. When you change a Task, its Environment, or its Rewarder,
 you give the Benchmark a new version, so an old result is never quietly compared
 against a different test.
 
@@ -225,7 +225,7 @@ ten Tasks, and two attempts each becomes sixty Trials.
 
 Each Trial keeps a complete record: every step the Agent took (its *trajectory*), the
 files it produced (*artifacts*), logs, cost, timing, and a receipt of the exact inputs
-it used. The Verifiers then write the score. If a Task uses a human grader, the Trial
+it used. The Rewarders then write the score. If a Task uses a human grader, the Trial
 waits in `awaiting_review` until someone submits a score.
 
 If a Trial times out and is retried, the retry is another *execution* of the same

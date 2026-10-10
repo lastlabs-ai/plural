@@ -289,15 +289,15 @@ Save these two conversations as `conversations.json`:
 ## 2. Draft the Environment, Tasks, and a Benchmark
 
 ```bash
-plural env from-traces support --traces conversations.json
+plural env add support --traces conversations.json
 ```
 
 ```text
-Drafted environment support:
+Created environment support:
   environments/support/apps/tools/recordings.jsonl
   environments/support/environment.yaml
   environments/support/README.md
-  verifiers/support-judge/verifier.yaml
+  rewarders/support-judge/rewarder.yaml
   tasks/support-t-1/task.yaml
   tasks/support-t-1/instruction.md
   tasks/support-t-2/task.yaml
@@ -317,7 +317,7 @@ Review the drafted Tasks' instructions, then run Agents on them with `plural run
 - An Environment with one **replay App**, `tools`, whose actions are the tools the
   traces called. It answers each call with the result that was recorded for it.
 - One Task per trace, with the trace's first user message as its instructions.
-- A model-judge Verifier, `support-judge`.
+- A model-judge Rewarder, `support-judge`.
 - A Benchmark, `support`, that holds every Task.
 
 All of them are ordinary project files.
@@ -326,7 +326,7 @@ All of them are ordinary project files.
 
 Read each `tasks/*/instruction.md` and make sure it says what the user actually wanted;
 a first message is not always the whole request. Then sharpen the judge's `criteria` in
-`verifiers/support-judge/verifier.yaml` until they describe your policy, for example
+`rewarders/support-judge/rewarder.yaml` until they describe your policy, for example
 "refunds over $50 need a manager". Check the draft with:
 
 ```bash
@@ -368,7 +368,7 @@ When your agent changes, such as gaining new tools, run the same command with th
 traces:
 
 ```bash
-plural env from-traces support --traces newer.json
+plural env add support --traces newer.json
 ```
 
 ```text
@@ -412,8 +412,8 @@ You have a Benchmark, `support`, that you can rerun on any model with
 
 Next:
 
-- Replace the judge with a deterministic Verifier where a rule can decide; see
-  [Verifiers](../project/verifiers.md).
+- Replace the judge with a deterministic Rewarder where a rule can decide; see
+  [Rewarders](../project/rewarders.md).
 - Swap a replay App for the real system when recorded answers aren't enough; see
   [Start from a system](from-a-system.md).
 - To train on these Trials, see [Training and RL](../running/training.md).

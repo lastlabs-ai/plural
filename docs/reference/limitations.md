@@ -28,7 +28,7 @@ These apply when you push, pull, or run in a hosted project.
   nothing: the revisions a finished Job ran must already be hosted.
 - Revisions saved in the web app, or pushed before 0.15, have no source package.
   Tasks, Agents, and Benchmarks are rebuilt from their stored definition on pull;
-  Environments, Verifiers, and Harnesses cannot be pulled. See
+  Environments, Rewarders, and Harnesses cannot be pulled. See
   [Migrate to 0.15](../migration/projects.md).
 - `.pluralignore` matches exact file paths only; it does not support patterns or
   directory entries.
@@ -59,8 +59,8 @@ These apply to where code runs and what a run can see or measure.
 - A `Resource` descriptor does not fetch, mount, or grant access to its path or
   URI. Use `source`, `inline`, or `resolver` delivery to stage files.
 - Plural stores a Task's `reset_options` but does not yet pass them to `reset`.
-- A Verifier that runs a command receives every captured artifact; isolate
-  untrusted scorers with their own `VerifierRuntime`.
+- A Rewarder that runs a command receives every captured artifact; isolate
+  untrusted scorers with their own `RewarderRuntime`.
 - A Job makes model calls only through OpenAI-compatible `/chat/completions`
   endpoints. The `Client` adapters for Anthropic, Google, Bedrock, and Azure
   native APIs are separate and are not used by Jobs.
@@ -69,7 +69,7 @@ These apply to where code runs and what a run can see or measure.
 
 Plural rejects a run before it starts when the selected provider cannot enforce a
 requested control and it can detect that. Every Trial uses the Runtime of its
-Task's Environment. A Verifier's Runtime and network access are configured
+Task's Environment. A Rewarder's Runtime and network access are configured
 separately and can add their own provider requirements.
 
 ## Training

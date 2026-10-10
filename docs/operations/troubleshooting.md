@@ -19,7 +19,7 @@ fixed by retrying a later one. A run goes through these stages in order:
 2. **Checking your files**: every resource and the links between them are valid.
 3. **Preparing the Runtime**: the place the world runs can do what you asked.
 4. **The Agent works**: the model takes its turns.
-5. **Grading**: the Verifiers (the graders) score the finished work.
+5. **Grading**: the Rewarders (the graders) score the finished work.
 6. **Human review**, if a Task uses a human grader.
 
 Retrying a configuration error rarely helps. Fix the file or setting the error names,
@@ -96,8 +96,8 @@ revision; pass `--force` to replace them, keeping the old copy under
 Manifests (the YAML file in each resource folder) reject unknown fields, and
 validation names the field. Two common mix-ups:
 
-- An Environment cannot list Tasks or Verifiers; a Task names its Environment and
-  Verifiers instead.
+- An Environment cannot list Tasks or Rewarders; a Task names its Environment and
+  Rewarders instead.
 - Eval or train mode belongs on a Python `Job`, not in a manifest.
 
 See the [field catalog](../reference/fields.md) and
@@ -114,27 +114,27 @@ resource until every placeholder is replaced. The error names the file and line.
 Paths in a resource manifest, such as `instructions: instruction.md` in `task.yaml`,
 resolve relative to that resource's folder.
 
-Tasks, Verifiers, and Benchmarks refer to other resources by name, not by path, so
+Tasks, Rewarders, and Benchmarks refer to other resources by name, not by path, so
 check that the named folder exists under the matching directory, for example
 `environments/support-queue/`.
 
 An absolute path on your laptop is not automatically available in a remote sandbox.
 
-## A Verifier fails when the Task is built or when it scores
+## A Rewarder fails when the Task is built or when it scores
 
-Constructing `Task(..., environment=..., verifiers=...)` fails unless the
-Environment class lives in a `.py` file and each deterministic Verifier's
+Constructing `Task(..., environment=..., rewarders=...)` fails unless the
+Environment class lives in a `.py` file and each deterministic Rewarder's
 `check` is a function, or a `file.py:function` reference, that accepts an
-`Episode`, such as `verify.py:verify` in the examples.
+`Episode`, such as `reward.py:final` in the examples.
 
 The function receives each App's State, the last observation, the trajectory,
-artifacts, and usage. If it returns anything other than a `VerifierOutput`, the Trial fails with no
-score and a message that names the Verifier.
+artifacts, and usage. If it returns anything other than a `RewarderOutput`, the Trial fails with no
+score and a message that names the Rewarder.
 
-## The Verifier script or result is missing
+## The Rewarder script or result is missing
 
 Supply the implementation named by `check`. Imported modules and data are not
-automatically available in the Verifier Runtime. The scorer must write its
+automatically available in the Rewarder Runtime. The scorer must write its
 declared result path as valid JSON and include evidence when required.
 
 ## The Runtime cannot enforce a policy
@@ -175,7 +175,7 @@ Keys.
 
 `PLURAL_GATEWAY_URL` selects the gateway; `plural run` sets it from your profile. A
 provider key or `OPENAI_BASE_URL` in the environment is not used for Agent or
-Verifier model calls. Model connectivity is separate from the hosted project API
+Rewarder model calls. Model connectivity is separate from the hosted project API
 endpoint. A local run does not block network requests.
 
 ## The Agent stops at its turn limit
@@ -190,7 +190,7 @@ tutorial requires inspection, categorization, response drafting, and resolution.
 
 ## The run finished but the score is zero
 
-That can be a legitimate evaluation outcome. Inspect the final state and Verifier
+That can be a legitimate evaluation outcome. Inspect the final state and Rewarder
 feedback. A correctly executed Agent can still choose the wrong category. Keep
 zero-scoring completed Trials in your comparison.
 

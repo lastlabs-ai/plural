@@ -35,7 +35,7 @@ FILES = {
           mode: allow_all
     """,
     "environments/queue/environment.py": '''
-        from plural import App, State, action, initial, rewarder
+        from plural import App, State, action, initial
 
 
         class QueueState(State):
@@ -61,10 +61,6 @@ FILES = {
 
             def terminated(self) -> bool:
                 return self.state.done
-
-            @rewarder
-            def resolved(self, previous_state, current_state, action, result) -> float:
-                return 1.0 if current_state["done"] else 0.0
     ''',
     "environments/queue/README.md": """
         # Queue
@@ -74,27 +70,32 @@ FILES = {
         Tickets arrive in a queue and the Agent resolves each one.
     """,
     "environments/queue/resources/policy.md": "Refund orders marked refundable.\n",
-    "verifiers/resolved/verifier.yaml": """
+    "rewarders/resolved/rewarder.yaml": """
         name: resolved
         version: 0.1.0
         kind: deterministic
-        check: verify.py:verify
+        final: reward.py:final
+        step: reward.py:step
     """,
-    "verifiers/resolved/verify.py": """
-        from plural import Episode, VerifierOutput
+    "rewarders/resolved/reward.py": """
+        from plural import Episode, RewarderOutput, Step
 
 
-        def verify(episode: Episode) -> VerifierOutput:
+        def final(episode: Episode) -> RewarderOutput:
             expected = "refunded" if episode.state.get("refundable") else "denied"
             correct = episode.state.get("answer") == expected
-            return VerifierOutput(score=float(correct), evidence=[f"expected={expected}"])
+            return RewarderOutput(score=float(correct), evidence=[f"expected={expected}"])
+
+
+        def step(step: Step) -> float:
+            return 1.0 if step.current_state["done"] else 0.0
     """,
     "tasks/refund/task.yaml": """
         name: refund
         version: 0.1.0
         instructions: instruction.md
         environment: queue
-        verifiers:
+        rewarders:
           - resolved
         initial_state:
           order: A-1
@@ -106,7 +107,7 @@ FILES = {
         version: 0.1.0
         instructions: instruction.md
         environment: queue
-        verifiers:
+        rewarders:
           - resolved
         initial_state:
           order: B-2
@@ -184,7 +185,7 @@ def hasher_for(root: Path):  # noqa: ANN201
     """Content hashes as the real server computes them: from the resource itself."""
     kinds = {
         "environments": "environment",
-        "verifiers": "verifier",
+        "rewarders": "rewarder",
         "harnesses": "harness",
         "tasks": "task",
         "agents": "agent",

@@ -131,7 +131,7 @@ try:
         for kind, name in [
             ("env", "support-queue"),
             ("task", "ticket-1"),
-            ("verifier", "correct-category"),
+            ("rewarder", "correct-category"),
             ("harness", "scripted-triage"),
             ("agent", "careful"),
             ("benchmark", "support-triage"),
@@ -156,9 +156,9 @@ try:
         assert failed_quality["trials"][0]["score"] == 0, failed_quality
         ModelFixture.wrong = False
 
-        _run("verifier", "init", "triage-review")
-        (root / "verifiers/triage-review/verify.py").unlink()
-        (root / "verifiers/triage-review/verifier.yaml").write_text(
+        _run("rewarder", "init", "triage-review")
+        (root / "rewarders/triage-review/reward.py").unlink()
+        (root / "rewarders/triage-review/rewarder.yaml").write_text(
             yaml.safe_dump(
                 {
                     "name": "triage-review",
@@ -181,7 +181,7 @@ try:
         task_file = root / "tasks/review-case/task.yaml"
         task = yaml.safe_load(task_file.read_text())
         task["name"] = "review-case"
-        task["verifiers"].append("triage-review")
+        task["rewarders"].append("triage-review")
         task_file.write_text(yaml.safe_dump(task, sort_keys=False))
         pending = json.loads(_run("run", "-t", "review-case", "-a", "careful", "--json"))
         assert pending["status"] == "awaiting_review", pending
@@ -192,7 +192,7 @@ try:
             "review",
             "submit",
             trial_id,
-            "--verifier",
+            "--rewarder",
             "triage-review",
             "--score",
             "2",

@@ -40,11 +40,11 @@ def test_packaged_schemas_are_valid_json_schemas() -> None:
     paths = sorted((ROOT / "src" / "plural" / "schemas" / "packages").glob("*.json"))
     assert {path.name for path in paths} == {
         "Agent.schema.json",
-        "AgentVerifier.schema.json",
+        "AgentRewarder.schema.json",
         "Benchmark.schema.json",
-        "DeterministicVerifier.schema.json",
+        "DeterministicRewarder.schema.json",
         "Environment.schema.json",
-        "HumanVerifier.schema.json",
+        "HumanRewarder.schema.json",
         "Harness.schema.json",
         "Job.schema.json",
         "Task.schema.json",

@@ -520,7 +520,7 @@ def _merged(items: Iterable[SecretReference]) -> tuple[SecretReference, ...]:
 class EnvironmentDefinition(FrozenModel):
     """Schema-v2 Environment: Apps composed with one Runtime and one set of limits.
 
-    Tasks, Verifiers, and mode are intentionally absent. Every action belongs
+    Tasks, Rewarders, and mode are intentionally absent. Every action belongs
     to exactly one App; ``python`` optionally names an Environment subclass
     whose ``on_step``, ``terminated``, or ``truncated`` span several Apps.
     """
@@ -549,13 +549,18 @@ class EnvironmentDefinition(FrozenModel):
         if isinstance(value, dict):
             if str(value.get("schema_version", "2")) != "2":
                 raise ValueError(
-                    "schema-v1 Environment is unsupported; move tasks and verifiers into "
-                    "first-class Task and Verifier packages"
+                    "schema-v1 Environment is unsupported; move tasks and rewarders into "
+                    "first-class Task and Rewarder packages"
                 )
-            stale = {"tasks", "verifier", "mode", "context"} & set(value)
+            stale = {"tasks", "rewarder", "mode", "context"} & set(value)
             if stale:
                 raise ValueError("schema-v2 Environment cannot own " + ", ".join(sorted(stale)))
-            moved = {"actions", "rewarders", "secrets", "state_schema", "observation_schema"} & {
+            if value.get("rewarders"):
+                raise ValueError(
+                    "An Environment does not own Rewarders. List them on each Task under "
+                    "rewarders:, so what counts as a good episode can differ per Task."
+                )
+            moved = {"actions", "secrets", "state_schema", "observation_schema"} & {
                 key for key, item in value.items() if item
             }
             if moved:
@@ -676,11 +681,6 @@ class EnvironmentDefinition(FrozenModel):
                 del app["credentials"]
         digest = self.source.digest if self.source else None
         payload["source_digest"] = digest
-        if digest is not None:
-            # The source files already cover a Python rewarder's code.
-            for app in payload["apps"]:
-                for rewarder in app["rewarders"]:
-                    rewarder.pop("implementation_digest", None)
         return revision_hash("environment", payload)
 
     @property

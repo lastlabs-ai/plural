@@ -23,7 +23,7 @@ from plural.environments.definition import (
 )
 from plural.environments.env import Environment, normalize_initial_state
 from plural.identity import revision_hash
-from plural.verifiers import DeterministicVerifier, VerifierDefinition, WeightedVerifier
+from plural.rewarders import RewarderDefinition, WeightedRewarder
 
 
 def _json_type_name(value: Any) -> str:
@@ -272,26 +272,11 @@ def _task_bind_errors(task: Task) -> list[str]:
         if isinstance(environment, EnvironmentDefinition)
         else None
     )
-    if not task.verifiers:
+    if not any(rewarder.scores for rewarder in task.rewarders):
         errors.append(
-            f"{header}\nA Task needs at least one Verifier that scores the completed Episode."
+            f"{header}\nA Task needs at least one Rewarder with final, to score the finished "
+            "episode. A Rewarder with only step adds rewards, never a score."
         )
-    for verifier in task.verifiers:
-        if isinstance(verifier, DeterministicVerifier):
-            check = verifier.check
-            if not (
-                callable(check)
-                or (isinstance(check, dict) and check.get("python"))
-                or (isinstance(check, tuple) and check)
-            ):
-                errors.append(
-                    f"{header}\n"
-                    f"Verifier {verifier.name!r} check must be a function that accepts an Episode\n"
-                    "(observation, state, apps, trajectory, artifacts, usage).\n"
-                    f"Got: {type(check).__name__}. Define it like:\n"
-                    "  def solved(episode: Episode) -> VerifierOutput: ...\n"
-                    "  DeterministicVerifier(name='solved', check=solved)"
-                )
     if definition is not None:
         try:
             validate_task_state(
@@ -314,7 +299,7 @@ class Task(FrozenModel):
     info: Any = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     environment: Any
-    verifiers: tuple[VerifierDefinition, ...] = Field(min_length=1)
+    rewarders: tuple[RewarderDefinition, ...] = Field(min_length=1)
     resources: tuple[EnvironmentResource, ...] = ()
     initial_state: dict[str, Any] = Field(default_factory=dict)
     reset_options: dict[str, Any] = Field(default_factory=dict)
@@ -393,7 +378,7 @@ class Task(FrozenModel):
                 "info": self.info,
                 "metadata": self.metadata,
                 "environment": environment.content_hash,
-                "verifiers": [verifier.content_hash for verifier in self.verifiers],
+                "rewarders": [rewarder.content_hash for rewarder in self.rewarders],
                 "resources": self.resources,
                 "initial_state": self.initial_state,
                 "reset_options": self.reset_options,
@@ -424,9 +409,9 @@ class Task(FrozenModel):
             instructions=self.instructions,
             goals=self.goals,
             environment=self._environment_definition(),
-            verifiers=tuple(
-                WeightedVerifier(verifier=verifier, weight=verifier.weight)
-                for verifier in self.verifiers
+            rewarders=tuple(
+                WeightedRewarder(rewarder=rewarder, weight=rewarder.weight)
+                for rewarder in self.rewarders
             ),
             info=self.info,
             metadata=self.metadata,
@@ -445,7 +430,7 @@ class Task(FrozenModel):
 
 
 class TaskDefinition(FrozenModel):
-    """First-class Task revision pinned to one Environment and Verifiers."""
+    """First-class Task revision pinned to one Environment and Rewarders."""
 
     schema_version: Literal["2"] = "2"
     task_id: str = Field(min_length=1)
@@ -454,7 +439,7 @@ class TaskDefinition(FrozenModel):
     instructions: str = Field(min_length=1)
     goals: tuple[str, ...] = ()
     environment: EnvironmentDefinition
-    verifiers: tuple[WeightedVerifier, ...] = Field(min_length=1)
+    rewarders: tuple[WeightedRewarder, ...] = Field(min_length=1)
     info: Any = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     resources: tuple[EnvironmentResource, ...] = ()
@@ -464,6 +449,11 @@ class TaskDefinition(FrozenModel):
     @model_validator(mode="after")
     def _state_fits_environment(self) -> TaskDefinition:
         validate_task_state(task_id=self.task_id, environment=self.environment, state=self.state)
+        if not any(binding.rewarder.scores for binding in self.rewarders):
+            raise ValueError(
+                f"Task {self.task_id!r} needs at least one Rewarder with final, to score "
+                "the finished episode."
+            )
         return self
 
     @property
@@ -505,7 +495,7 @@ class BenchmarkRelease(FrozenModel):
     """What a Benchmark version declares beyond its Tasks.
 
     Every Benchmark version is a release: its Tasks, their Environments and
-    Verifiers, and these rules are fixed once it is saved.
+    Rewarders, and these rules are fixed once it is saved.
 
     Attributes:
         categories: Named groups of Tasks, scored together in results.
@@ -762,7 +752,7 @@ class Benchmark(BenchmarkRelease):
             Benchmark metadata and all pinned Task dependencies.
         """
         environments: dict[str, dict[str, Any]] = {}
-        verifiers: dict[str, dict[str, Any]] = {}
+        rewarders: dict[str, dict[str, Any]] = {}
         task_payloads: list[dict[str, Any]] = []
         for task in self.tasks:
             environment = task._environment_definition()
@@ -770,10 +760,10 @@ class Benchmark(BenchmarkRelease):
                 environment.content_hash,
                 environment.model_dump(mode="json"),
             )
-            for verifier in task.verifiers:
-                verifiers.setdefault(
-                    verifier.content_hash,
-                    verifier.model_dump(mode="json"),
+            for rewarder in task.rewarders:
+                rewarders.setdefault(
+                    rewarder.content_hash,
+                    rewarder.model_dump(mode="json"),
                 )
             task_payloads.append(task._definition().model_dump(mode="json"))
         return {
@@ -789,7 +779,7 @@ class Benchmark(BenchmarkRelease):
             },
             "tasks": task_payloads,
             "environments": [environments[digest] for digest in sorted(environments)],
-            "verifiers": [verifiers[digest] for digest in sorted(verifiers)],
+            "rewarders": [rewarders[digest] for digest in sorted(rewarders)],
         }
 
     def export(self) -> dict[str, Any]:

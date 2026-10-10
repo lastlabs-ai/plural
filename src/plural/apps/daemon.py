@@ -12,8 +12,8 @@ runs is a short client call over a local socket::
 
     python -m plural.apps.daemon reset
     python -m plural.apps.daemon step <action>        # arguments as JSON on stdin
-    python -m plural.apps.daemon query <app> <action> # read-only, for Verifiers
-    python -m plural.apps.daemon finish               # snapshots for Verifiers
+    python -m plural.apps.daemon query <app> <action> # read-only, for Rewarders
+    python -m plural.apps.daemon finish               # snapshots for Rewarders
     python -m plural.apps.daemon stop
 
 A client that finds no host running starts one with its own environment, so
@@ -96,10 +96,11 @@ def _receive(connection: socket.socket) -> dict[str, Any]:
 
 
 def _load_host(root: Path) -> Any:
-    from plural.apps.host import AppHost
+    from plural.apps.host import AppHost, load_step_rewarders
     from plural.apps.mcp import hide_from_hooks
     from plural.environments.definition import EnvironmentDefinition
     from plural.environments.env import Environment
+    from plural.rewarders import StepTask
 
     path = root / ENVIRONMENT_FILE
     if not path.is_file():
@@ -107,7 +108,26 @@ def _load_host(root: Path) -> Any:
     definition = EnvironmentDefinition.model_validate_json(path.read_text(encoding="utf-8"))
     hide_from_hooks(item.name for item in definition.credentials)
     environment = Environment._from_definition(definition, root=root)
-    return AppHost(environment, workspace=root)
+    task = _task_file(root)
+    about: dict[str, Any] = task["task"] if isinstance(task.get("task"), dict) else {}
+    return AppHost(
+        environment,
+        workspace=root,
+        rewarders=load_step_rewarders(root, task.get("rewarders") or []),
+        task=StepTask(
+            name=str(about.get("name") or ""),
+            info=task.get("info"),
+            metadata=dict(about.get("metadata") or {}),
+        ),
+    )
+
+
+def _task_file(root: Path) -> dict[str, Any]:
+    path = root / TASK_FILE
+    task = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    if not isinstance(task, dict):
+        raise ValueError(f"{path} must hold an object")
+    return task
 
 
 def _task_inputs(root: Path) -> dict[str, Any]:
@@ -116,10 +136,7 @@ def _task_inputs(root: Path) -> dict[str, Any]:
     Returns:
         Keyword arguments for :meth:`AppHost.reset`.
     """
-    path = root / TASK_FILE
-    task = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    if not isinstance(task, dict):
-        raise ValueError(f"{path} must hold an object")
+    task = _task_file(root)
     state = task.get("initial_state")
     seed = task.get("seed")
     return {

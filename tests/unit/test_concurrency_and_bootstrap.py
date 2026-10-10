@@ -28,6 +28,7 @@ from plural.execution.bootstrap import (
 from plural.execution.capacity import recommend_concurrency
 from plural.execution.engine import job_progress
 from plural.jobs import BenchmarkJobSource, JobSpec
+from plural.rewarders import DeterministicRewarder, RewarderRuntime, WeightedRewarder
 from plural.sandbox.models import (
     ExecRequest,
     ExecResult,
@@ -37,7 +38,6 @@ from plural.sandbox.models import (
     SandboxRequirements,
 )
 from plural.tasks import BenchmarkDefinition, TaskDefinition
-from plural.verifiers import DeterministicVerifier, VerifierRuntime, WeightedVerifier
 
 
 def _task(
@@ -65,12 +65,12 @@ def _task(
             ),
             apps=apps,
         ),
-        verifiers=(
-            WeightedVerifier(
-                verifier=DeterministicVerifier(
+        rewarders=(
+            WeightedRewarder(
+                rewarder=DeterministicRewarder(
                     name="exact",
-                    command=("python", "verify.py"),
-                    runtime=VerifierRuntime(provider=provider),
+                    final=("python", "reward.py"),
+                    runtime=RewarderRuntime(provider=provider),
                 )
             ),
         ),
@@ -182,7 +182,7 @@ def test_only_sandboxes_that_run_plural_code_need_it() -> None:
 
     assert not needs_plural(plain)
     assert needs_plural(runner)
-    assert needs_plural(plain, None, ("python", "-m", "plural.verifiers.check"))
+    assert needs_plural(plain, None, ("python", "-m", "plural.rewarders.check"))
 
 
 def test_runtime_version_selects_this_code_or_a_release() -> None:

@@ -24,7 +24,7 @@ from plural.tracing.schema import (
     TraceArtifactReference,
     TraceContext,
     TraceKind,
-    TraceVerifierResult,
+    TraceRewarderResult,
     Transition,
     Turn,
 )
@@ -52,7 +52,7 @@ __all__ = [
     "TraceArtifactReference",
     "TraceContext",
     "TraceKind",
-    "TraceVerifierResult",
+    "TraceRewarderResult",
     "TraceWriter",
     "Transition",
     "Turn",

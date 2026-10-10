@@ -90,8 +90,8 @@ Saved revisions are immutable. Each of these changes makes a new one when you pu
 - **Environment**: source, Runtime, actions, resources, or policy.
 - **Harness**: code or declarations need a new Harness version and digest.
 - **Agent**: model, instructions, routing, secret grants, or Harness.
-- **Verifier**: command, criteria, evidence, Runtime, or weight.
-- **Task**: instructions, data, resources, initial State, Environment, or Verifiers.
+- **Rewarder**: command, criteria, evidence, Runtime, or weight.
+- **Task**: instructions, data, resources, initial State, Environment, or Rewarders.
 - **Benchmark**: any changed Task pin, order, primary metric, description, or
   metadata.
 
@@ -177,13 +177,13 @@ Records only ever grow. These are the things that may be added:
 
 - progress events;
 - retry executions;
-- one immutable submission for each pending Human Verifier;
+- one immutable submission for each pending Human Rewarder;
 - the hosted resource and revision ids that a push records in `plural.lock`;
 - derived exports copied to new locations.
 
 A review can resolve `awaiting_review` and update aggregate results. It cannot change
-model actions, earlier verifier outcomes, receipt pins, or artifact bytes. The local
-store rejects a second submission for the same Human Verifier.
+model actions, earlier rewarder outcomes, receipt pins, or artifact bytes. The local
+store rejects a second submission for the same Human Rewarder.
 
 ### Resources versus artifacts
 

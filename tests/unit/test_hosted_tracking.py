@@ -40,9 +40,9 @@ class _Hosted:
         trial = self._trials[trial_id]
         return {
             "pins": {
-                "verifiers": [
+                "rewarders": [
                     {"content_hash": digest, "revision_id": f"vr-{index}"}
-                    for index, digest in enumerate(trial.verifier_digests)
+                    for index, digest in enumerate(trial.rewarder_digests)
                 ]
             }
         }
@@ -139,7 +139,7 @@ async def test_each_execution_is_opened_as_it_starts_and_finished_as_it_ends(
     assert set(hosted.executions) == keys
     for record in hosted.executions.values():
         steps = [status for execution, status in hosted.transitions if execution == record["id"]]
-        assert steps == ["provisioning", "running", "verifying", "succeeded"]
+        assert steps == ["provisioning", "running", "scoring", "succeeded"]
     # Running executions reported liveness while the Job ran.
     assert any(hosted.heartbeats)
 

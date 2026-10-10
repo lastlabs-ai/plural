@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-from plural.apps.definition import AppAction, AppDefinition, RewarderDefinition
+from plural.apps.definition import AppAction, AppDefinition
 from plural.environments.action_registry import action
 from plural.environments.dataset import TraceDataset, TraceFilter
 from plural.environments.definition import (
@@ -27,7 +27,6 @@ from plural.environments.definition import (
 from plural.environments.types import Observation, State, initial
 
 if TYPE_CHECKING:
-    from plural.apps.base import rewarder
     from plural.environments.env import ActionCall, Environment
 
 # Loaded on first use: Environment depends on App, whose module imports the
@@ -35,7 +34,6 @@ if TYPE_CHECKING:
 _LAZY = {
     "ActionCall": "plural.environments.env",
     "Environment": "plural.environments.env",
-    "rewarder": "plural.apps.base",
 }
 
 
@@ -60,7 +58,6 @@ __all__ = [
     "HarnessPolicy",
     "HarnessGrant",
     "Observation",
-    "RewarderDefinition",
     "Resource",
     "Runtime",
     "RuntimePackages",
@@ -72,5 +69,4 @@ __all__ = [
     "TraceFilter",
     "action",
     "initial",
-    "rewarder",
 ]

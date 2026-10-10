@@ -121,14 +121,6 @@
           "default": null,
           "title": "Python"
         },
-        "rewarders": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/RewarderDefinition"
-          },
-          "title": "Rewarders",
-          "type": "array"
-        },
         "secrets": {
           "default": [],
           "items": {
@@ -715,44 +707,6 @@
       "title": "ResourceRequirements",
       "type": "object"
     },
-    "RewarderDefinition": {
-      "additionalProperties": false,
-      "description": "A named reward signal an App computes for each of its own actions.",
-      "properties": {
-        "description": {
-          "default": "",
-          "title": "Description",
-          "type": "string"
-        },
-        "implementation_digest": {
-          "default": "",
-          "title": "Implementation Digest",
-          "type": "string"
-        },
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "timeout_seconds": {
-          "default": 30,
-          "exclusiveMinimum": 0,
-          "title": "Timeout Seconds",
-          "type": "number"
-        },
-        "weight": {
-          "default": 1,
-          "exclusiveMinimum": 0,
-          "title": "Weight",
-          "type": "number"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "title": "RewarderDefinition",
-      "type": "object"
-    },
     "RuntimePackages": {
       "additionalProperties": false,
       "description": "Packages installed in the Runtime before an episode, by package manager.\n\nEach list holds what you would pass to that manager, one package per entry.",
@@ -813,7 +767,7 @@
     },
     "SecretReference": {
       "additionalProperties": false,
-      "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
+      "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Rewarders.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
       "properties": {
         "description": {
           "default": "",
@@ -839,7 +793,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Schema-v2 Environment: Apps composed with one Runtime and one set of limits.\n\nTasks, Verifiers, and mode are intentionally absent. Every action belongs\nto exactly one App; ``python`` optionally names an Environment subclass\nwhose ``on_step``, ``terminated``, or ``truncated`` span several Apps.",
+  "description": "Schema-v2 Environment: Apps composed with one Runtime and one set of limits.\n\nTasks, Rewarders, and mode are intentionally absent. Every action belongs\nto exactly one App; ``python`` optionally names an Environment subclass\nwhose ``on_step``, ``terminated``, or ``truncated`` span several Apps.",
   "properties": {
     "apps": {
       "default": [],

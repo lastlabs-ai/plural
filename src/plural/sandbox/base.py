@@ -1,4 +1,4 @@
-"""Lifecycle contract for agent and verifier sandboxes."""
+"""Lifecycle contract for agent and rewarder sandboxes."""
 
 from __future__ import annotations
 

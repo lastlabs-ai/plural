@@ -9,9 +9,9 @@ from plural.common import RoutingSpec
 from plural.environments.definition import EnvironmentDefinition
 from plural.importers.mercor import import_mercor_trial
 from plural.jobs import BenchmarkJobSource, JobSpec, TrialReceipt
+from plural.rewarders import DeterministicRewarder, RewarderRuntime, WeightedRewarder
 from plural.tasks import BenchmarkDefinition, TaskDefinition
 from plural.trajectory import normalize_trajectory
-from plural.verifiers import DeterministicVerifier, VerifierRuntime, WeightedVerifier
 
 
 def test_trajectory_normalizes_native_formats_and_preserves_original() -> None:
@@ -87,12 +87,12 @@ def test_planning_pins_benchmark_task_and_catalog_endpoint() -> None:
         revision="1.2.3",
         instructions="Solve",
         environment=EnvironmentDefinition(name="env"),
-        verifiers=(
-            WeightedVerifier(
-                verifier=DeterministicVerifier(
+        rewarders=(
+            WeightedRewarder(
+                rewarder=DeterministicRewarder(
                     name="check",
-                    command=("python", "check.py"),
-                    runtime=VerifierRuntime(),
+                    final=("python", "check.py"),
+                    runtime=RewarderRuntime(),
                 )
             ),
         ),

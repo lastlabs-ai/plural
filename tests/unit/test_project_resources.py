@@ -43,7 +43,7 @@ def test_the_sample_project_is_valid(project: Project) -> None:
     workspace = Workspace(project)
     for kind, name in (
         ("environment", "queue"),
-        ("verifier", "resolved"),
+        ("rewarder", "resolved"),
         ("task", "refund"),
         ("harness", "scripted"),
         ("agent", "baseline"),
@@ -58,14 +58,13 @@ def test_rewarders_hash_the_same_on_every_load_and_location(
     project: Project, tmp_path: Path
 ) -> None:
     source = project.root / "environments/queue/environment.py"
-    edit(source, "action, initial", "action, initial, rewarder")
     edit(
         source,
         "    def terminated(self) -> bool:",
-        "    @rewarder\n"
-        "    def finished(self, previous_state, current_state, action, result) -> float:\n"
-        '        """Reward finishing."""\n'
-        '        return float(current_state["done"])\n'
+        "    @action(read_only=True)\n"
+        "    def status(self) -> str:\n"
+        '        """Report the answer so far."""\n'
+        "        return self.state.answer\n"
         "\n"
         "    def terminated(self) -> bool:",
     )
@@ -91,7 +90,7 @@ def test_python_sdk_addresses_resources_like_the_cli(project: Project) -> None:
         workspace.get("task", "missing")
 
 
-def test_a_python_job_with_a_deterministic_verifier_resumes_its_own_store(
+def test_a_python_job_with_a_deterministic_rewarder_resumes_its_own_store(
     project: Project, tmp_path: Path
 ) -> None:
     from plural import Job
@@ -112,13 +111,13 @@ def test_a_python_job_with_a_deterministic_verifier_resumes_its_own_store(
 
     config = store.job_path(first.job_id) / "config.json"
     stored = json.loads(config.read_text())
-    stored["source"]["task"]["verifiers"][0]["verifier"]["check"]["digest"] = "sha256:" + "0" * 64
+    stored["source"]["task"]["rewarders"][0]["rewarder"]["final"]["digest"] = "sha256:" + "0" * 64
     config.write_text(json.dumps(stored))
     with pytest.raises(ValueError, match="lock_incompatible"):
         job().run()
 
 
-def test_task_needs_instructions_one_environment_and_a_verifier(project: Project) -> None:
+def test_task_needs_instructions_one_environment_and_a_rewarder(project: Project) -> None:
     task = project.root / "tasks/refund"
     (task / "instruction.md").write_text("   \n")
     assert "instruction.md is empty" in problems(project, "task", "refund")
@@ -128,13 +127,13 @@ def test_task_needs_instructions_one_environment_and_a_verifier(project: Project
     message = problems(project, "task", "refund")
     assert "environment" in message and "plural env init" in message
 
-    edit(task / "task.yaml", "verifiers:\n  - resolved\n", "verifiers: []\n")
+    edit(task / "task.yaml", "rewarders:\n  - resolved\n", "rewarders: []\n")
     (task / "task.yaml").write_text((task / "task.yaml").read_text() + "environment: queue\n")
-    assert "verifier" in problems(project, "task", "refund").lower()
+    assert "rewarder" in problems(project, "task", "refund").lower()
 
-    edit(task / "task.yaml", "verifiers: []\n", "verifiers:\n  - missing\n")
+    edit(task / "task.yaml", "rewarders: []\n", "rewarders:\n  - missing\n")
     message = problems(project, "task", "refund")
-    assert "verifier/missing" in message or "'missing'" in message
+    assert "rewarder/missing" in message or "'missing'" in message
 
     edit(task / "task.yaml", "environment: queue\n", "environment: [queue, other]\n")
     edit(task / "task.yaml", "  - missing\n", "  - resolved\n")
@@ -193,10 +192,10 @@ def test_benchmark_rules(project: Project) -> None:
     assert "primary_metric" in problems(project, "benchmark", "basics")
 
 
-def test_benchmark_rejects_verifiers_that_score_outside_its_range(project: Project) -> None:
-    verifier = project.root / "verifiers/reviewer"
-    verifier.mkdir()
-    (verifier / "verifier.yaml").write_text(
+def test_benchmark_rejects_rewarders_that_score_outside_its_range(project: Project) -> None:
+    rewarder = project.root / "rewarders/reviewer"
+    rewarder.mkdir()
+    (rewarder / "rewarder.yaml").write_text(
         "name: reviewer\nversion: 0.1.0\nkind: human\n"
         "rubric:\n  - name: tone\n    description: Polite.\n    max_score: 5\n"
     )
@@ -291,7 +290,7 @@ def test_show_and_list_label_local_resources(
     assert shown.exit_code == 0, shown.output
     payload = json.loads(shown.output)
     assert payload["location"] == "local"
-    assert payload["depends_on"] == ["environment/queue", "verifier/resolved"]
+    assert payload["depends_on"] == ["environment/queue", "rewarder/resolved"]
     assert payload["hosted"] == "not pushed"
 
     listed = runner.invoke(app, ["harness", "list", "--json"])

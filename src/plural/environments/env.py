@@ -6,13 +6,13 @@ import importlib.util
 import inspect
 import sys
 import sysconfig
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from plural.apps.base import App, rewarder
+from plural.apps.base import App
 from plural.common import PackageSource
 from plural.environments.action_registry import action
 from plural.environments.definition import (
@@ -136,21 +136,17 @@ class Environment:
 
     # Cross-App hooks.
 
-    def on_step(self, call: ActionCall, result: Any, apps: Mapping[str, Any]) -> float | None:
+    def on_step(self, call: ActionCall, result: Any, apps: Mapping[str, Any]) -> None:
         """React after any App's action, for effects that span Apps.
 
         ``apps`` maps each App's name to a handle with ``call(action, **args)``,
         ``snapshot()``, and ``state``. An effect here is not an Agent action and
         is not shown to the Agent. Apps never call each other directly.
 
-        Return a number to record an Environment reward for this step, or
-        ``None``. Like every reward, it never reaches the Agent or a score.
-
-        Returns:
-            An optional reward.
+        Rewards are not given here: they depend on the Task, so they come from
+        the ``step`` hook of a Task's Rewarder.
         """
         del call, result, apps
-        return None
 
     def terminated(self) -> bool:
         """Return whether the episode is over. Default: any App says it is."""
@@ -306,20 +302,36 @@ class Environment:
         initial_state: Mapping[str, Any] | None = None,
         info: Any = None,
         seed: int | None = None,
+        rewarders: Sequence[Any] = (),
     ) -> tuple[Any, dict[str, Any]]:
         """Start an episode in this process.
 
         ``initial_state`` maps each App's name to its starting state; with one
-        App it may be that App's state directly.
+        App it may be that App's state directly. ``rewarders`` gives each
+        :meth:`step` its reward: Rewarders with a ``step`` hook, or functions
+        of one :class:`~plural.Step`.
 
         Returns:
             The opening observation and reset information.
         """
-        from plural.apps.host import AppHost
+        from plural.apps.host import AppHost, StepRewarder
+        from plural.rewarders import DeterministicRewarder, StepTask
 
+        hooks: list[StepRewarder] = []
+        for item in rewarders:
+            if isinstance(item, DeterministicRewarder):
+                if item.step_fn is not None:
+                    hooks.append(StepRewarder(item.name, item.version, item.step_fn))
+            elif callable(item):
+                hooks.append(StepRewarder(getattr(item, "__name__", "step"), "", item))
+            else:
+                raise TypeError(
+                    "rewarders takes Rewarders with a step hook, or functions of one Step; "
+                    f"got {type(item).__name__}."
+                )
         if self._host is not None:
             self._host.close()
-        self._host = AppHost(self)
+        self._host = AppHost(self, rewarders=hooks, task=StepTask(info=info))
         envelope = self._host.reset(
             initial_state=normalize_initial_state(self.definition(), initial_state or {}),
             info=info,
@@ -365,7 +377,7 @@ class Environment:
         )
 
     def snapshot(self) -> dict[str, Any]:
-        """Return each App's state, as a Verifier receives it after the episode."""
+        """Return each App's state, as a Rewarder receives it after the episode."""
         if self._host is None:
             return {}
         return self._host.snapshot()
@@ -474,5 +486,4 @@ __all__ = [
     "action",
     "load_reference",
     "normalize_initial_state",
-    "rewarder",
 ]

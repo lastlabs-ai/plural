@@ -16,7 +16,7 @@ what it needs from the Trial:
   them; it does not own them, so nothing written during a Trial changes them.
 - :func:`scratch`, a writable folder for this Trial only, deleted when it ends.
 - :func:`reset` and :func:`snapshot`, which register the hooks Plural calls to
-  start an episode from a Task's state and to report state to Verifiers. The
+  start an episode from a Task's state and to report state to Rewarders. The
   Agent never sees either as a tool.
 
 Install FastMCP with ``pip install 'plural[mcp]'``.
@@ -128,7 +128,7 @@ def reset(server: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
 
 
 def snapshot(server: Any) -> Callable[[Callable[[], Any]], Callable[[], Any]]:
-    """Register the function that reports the server's state as JSON, for Verifiers.
+    """Register the function that reports the server's state as JSON, for Rewarders.
 
     ::
 
@@ -144,7 +144,7 @@ def snapshot(server: Any) -> Callable[[Callable[[], Any]], Callable[[], Any]]:
         def hook() -> str:
             return json.dumps(fn(), sort_keys=True, default=str)
 
-        _register(server, SNAPSHOT_TOOL, hook, "Plural: report state for Verifiers. Never offered.")
+        _register(server, SNAPSHOT_TOOL, hook, "Plural: report state for Rewarders. Never offered.")
         return fn
 
     return decorate

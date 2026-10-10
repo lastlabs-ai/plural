@@ -22,7 +22,7 @@ One Python App, `SupportQueue` in `environment.py`.
 ## State
 
 `ticket_id` is set by each Task's `initial_state`. `expected` holds the correct
-category; it is private, so Agents never see it and the Verifier compares against it.
+category; it is private, so Agents never see it and the Rewarder compares against it.
 The rest mirrors the ticket's progress: `category`, `draft_reply`, `status`, `done`.
 
 ## What the Agent sees

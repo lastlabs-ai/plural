@@ -69,7 +69,7 @@ def test_push_with_deps_orders_dependencies_and_repeats_without_duplicates(
     steps = json.loads(output)["steps"]
     assert [step["resource"] for step in steps] == [
         "environment/queue",
-        "verifier/resolved",
+        "rewarder/resolved",
         "task/refund",
     ]
     assert {step["status"] for step in steps} == {"pushed"}
@@ -78,12 +78,12 @@ def test_push_with_deps_orders_dependencies_and_repeats_without_duplicates(
     task_revision = hosted.fake.revisions[
         hosted.fake.parents[(hosted.project_id, "tasks", "refund")]["id"]
     ][0]
-    assert {item["kind"] for item in task_revision["dependencies"]} == {"environment", "verifier"}
+    assert {item["kind"] for item in task_revision["dependencies"]} == {"environment", "rewarder"}
 
     lock = hosted.project.read_lock()
     assert lock.project_id == hosted.project_id
     assert lock.resources["task/refund"].revision_id == task_revision["id"]
-    assert lock.resources["task/refund"].dependencies == ["environment/queue", "verifier/resolved"]
+    assert lock.resources["task/refund"].dependencies == ["environment/queue", "rewarder/resolved"]
 
     writes = len(hosted.fake.writes)
     packages = dict(hosted.fake.packages)
@@ -142,19 +142,19 @@ def test_release_labels_the_revision_matching_the_local_files(hosted: Hosted) ->
 
 
 def test_a_push_on_top_of_unsynced_hosted_changes_is_refused(hosted: Hosted) -> None:
-    assert hosted.cli("verifier", "push", "resolved")[0] == 0
-    parent = hosted.fake.parents[(hosted.project_id, "verifiers", "resolved")]
+    assert hosted.cli("rewarder", "push", "resolved")[0] == 0
+    parent = hosted.fake.parents[(hosted.project_id, "rewarders", "resolved")]
     theirs = {**hosted.fake.revisions[parent["id"]][0], "id": "rev_theirs", "number": 2}
     theirs.update(content_hash="sha256:" + "b" * 64, version=None)
     hosted.fake.revisions[parent["id"]].append(theirs)
     parent["current_revision_id"] = "rev_theirs"
 
-    verifier = next((hosted.project.root / "verifiers/resolved").glob("*.py"))
-    verifier.write_text(verifier.read_text() + "\n# local edit\n")
-    code, output = hosted.cli("verifier", "push", "resolved")
+    rewarder = next((hosted.project.root / "rewarders/resolved").glob("*.py"))
+    rewarder.write_text(rewarder.read_text() + "\n# local edit\n")
+    code, output = hosted.cli("rewarder", "push", "resolved")
     assert code == 1
     assert "hosted #2, synced #1 (0.1.0)" in output
-    code, output = hosted.cli("verifier", "push", "resolved", "--force", "--json")
+    code, output = hosted.cli("rewarder", "push", "resolved", "--force", "--json")
     assert code == 0, output
     assert json.loads(output)["steps"][-1]["number"] == 3
 
@@ -169,7 +169,7 @@ def test_push_refuses_credential_files(hosted: Hosted) -> None:
 
 def test_server_hash_disagreement_is_reported(hosted: Hosted) -> None:
     hosted.fake.hasher = lambda collection, slug, payload: "sha256:" + "f" * 64
-    code, output = hosted.cli("verifier", "push", "resolved")
+    code, output = hosted.cli("rewarder", "push", "resolved")
     assert code == 1
     assert "SDK and server versions disagree" in output
 
@@ -304,14 +304,14 @@ def test_a_web_app_environment_without_files_still_cannot_be_pulled(hosted: Host
 
 
 def test_hosted_show_and_list_are_labeled(hosted: Hosted) -> None:
-    assert hosted.cli("verifier", "push", "resolved")[0] == 0
-    code, output = hosted.cli("verifier", "show", "resolved", "--hosted", "--json")
+    assert hosted.cli("rewarder", "push", "resolved")[0] == 0
+    code, output = hosted.cli("rewarder", "show", "resolved", "--hosted", "--json")
     assert code == 0, output
     payload = json.loads(output)
     assert payload["location"] == "hosted"
     assert payload["revisions"][0]["restorable"] is True
 
-    code, output = hosted.cli("verifier", "list", "--json")
+    code, output = hosted.cli("rewarder", "list", "--json")
     assert code == 0, output
     labels = {(item["name"], item["location"]) for item in json.loads(output)}
     assert labels == {("resolved", "local"), ("resolved", "hosted")}
@@ -334,7 +334,7 @@ def test_push_is_refused_when_the_scope_selects_another_project(hosted: Hosted, 
             ),
         )
     )
-    code, output = hosted.cli("verifier", "push", "resolved")
+    code, output = hosted.cli("rewarder", "push", "resolved")
     assert code == 1
     assert "bound to 'support-desk'" in output
     assert "plural auth scope --project support-desk" in output
@@ -510,7 +510,7 @@ def test_a_failed_push_keeps_the_revisions_pushed_alongside_it(hosted: Hosted) -
     code, _output = hosted.cli("project", "push", "--yes")
     assert code != 0
     pinned = hosted.project.read_lock().resources
-    assert {"environment/queue", "verifier/resolved", "task/refund", "agent/baseline"} <= set(
+    assert {"environment/queue", "rewarder/resolved", "task/refund", "agent/baseline"} <= set(
         pinned
     )
     assert "task/deny" not in pinned

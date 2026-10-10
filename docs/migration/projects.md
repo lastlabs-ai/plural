@@ -9,13 +9,13 @@ nav: false
 # Migrate to 0.15
 
 If you used Plural before 0.15, this page tells you what moved and walks you through
-updating your project. Your Environments, Tasks, Verifiers, and Agents keep working
+updating your project. Your Environments, Tasks, Rewarders, and Agents keep working
 the same way. What changed is where their files live and which commands you type.
 
 Plural 0.15 organizes everything around a project directory and one command shape.
 Each resource lives in its own directory and is addressed by kind and name, as in
 `plural task validate refund`. The SDK objects you author (`Environment`, `Task`, the
-Verifiers, `Harness`, `Agent`, `Benchmark`, and `Job`) are unchanged. What changed is
+Rewarders, `Harness`, `Agent`, `Benchmark`, and `Job`) are unchanged. What changed is
 how files are laid out, how the CLI finds them, and how they reach a hosted project.
 
 > **Tip:** to jump straight to the steps, see [Migrate a project](#migrate-a-project).
@@ -34,7 +34,7 @@ pyproject.toml           dependencies = ["plural>=0.18.0"]
 .plural/                 local state: hosted binding, Jobs, backups (gitignored)
 environments/<name>/     environment.yaml, server.py or environment.py, README.md
 tasks/<name>/            task.yaml, instruction.md
-verifiers/<name>/        verifier.yaml, verify.py
+rewarders/<name>/        rewarder.yaml, reward.py
 harnesses/<name>/        harness.yaml, harness.py
 agents/<name>/           agent.yaml
 benchmarks/<name>/       benchmark.yaml, README.md
@@ -62,7 +62,7 @@ refer to one another by name, for example `environment: support-queue` in a
 | `plural schemas`, `plural harness schema` | `plural.project.manifest_schemas()` in Python, or download [project-schemas.json](../assets/project-schemas.json) |
 | `plural login`, `plural logout`, `plural status` | `plural auth login`, `plural auth logout`, `plural auth status` |
 
-Each resource kind (`env`, `task`, `verifier`, `harness`, `agent`, `benchmark`) has the
+Each resource kind (`env`, `task`, `rewarder`, `harness`, `agent`, `benchmark`) has the
 same verbs: `init`, `validate`, `push`, `pull`, `show`, and `list`. Omitting the name
 uses the resource directory you are in.
 
@@ -162,11 +162,11 @@ Follow these steps in order. Validation in step 5 reports anything you missed.
    generated directory. Until you fill a template in, `validate` reports what is still
    missing. A new Environment's template uses the `docker` runtime; set
    `runtime.provider` to what your old project used. Python behavior, such as an
-   Environment class or a Verifier check, stays Python and is referenced from the
+   Environment class or a Rewarder's `final` and `step` checks, stays Python and is referenced from the
    manifest, for example
-   `python: environment.py:SupportQueue` or `check: verify.py:verify`.
+   `python: environment.py:SupportQueue` or `final: reward.py:final`.
 4. Replace object references with names: a Task lists `environment: <name>` and
-   `verifiers: [<name>]`, and a Benchmark lists `tasks: [<name>, ...]`.
+   `rewarders: [<name>]`, and a Benchmark lists `tasks: [<name>, ...]`.
 5. Check everything with `plural benchmark validate <name>`. It validates the
    Benchmark and everything it depends on, and reports every problem at once.
 6. Run it: `plural run -b <benchmark> -a <agent> --dry-run`, then without `--dry-run`.

@@ -21,7 +21,7 @@ that world.
 
 A support desk works the same way with more Apps. A CRM, reached through its MCP
 server, holds the tickets. A table of refund policies sits beside it. Each Task picks
-one ticket, and a [Verifier](verifiers.md), the grader, checks whether the work was
+one ticket, and a [Rewarder](rewarders.md), the grader, checks whether the work was
 done correctly.
 
 ## How an Environment works
@@ -68,7 +68,7 @@ Before writing code, answer five questions:
 1. **What should the Agent accomplish?** Choose one workflow, such as resolving a support ticket.
 2. **Which systems does it use?** Each one is an App. Connect the ones that already exist, such as an MCP server, and write the rest in Python.
 3. **What can it do?** Offer a few focused actions that match the real workflow.
-4. **How will you know it succeeded?** Keep the expected outcome in State, where a Verifier can read it.
+4. **How will you know it succeeded?** Keep the expected outcome in State, where a Rewarder can read it.
 5. **When should it stop?** Decide what counts as finished, and set a turn and time budget. See [How an episode ends](#how-an-episode-ends).
 
 Start small. Add cases and complexity once you can explain why a known good run
@@ -84,7 +84,7 @@ These three parts describe the interaction:
 - **The observation** is whatever an action returns. It is the only thing the Agent
   sees after acting.
 
-So return what the Agent should see, and never copy State into it. A Verifier reads
+So return what the Agent should see, and never copy State into it. A Rewarder reads
 the final State to check the result.
 
 This split controls what Plural shows the model. It is not a security boundary; when
@@ -198,9 +198,11 @@ limits:
   max_seconds: 120
 ```
 
-To connect an existing system instead of writing one, start from it:
-`plural env from-mcp`, `plural env from-openapi`, or `plural env from-traces` drafts
-the folder for you. For files, add Plural's files server as an App.
+To connect an existing system instead of writing one, add it:
+`plural env add NAME --mcp URL_OR_COMMAND`, `--openapi SPEC`, or `--traces FILE`
+creates the folder, or adds an App to an Environment you already have. Run it once per
+system. For files, add Plural's files server as an App. See
+[Start from a system](../start/from-a-system.md).
 
 What each field means:
 
@@ -212,7 +214,7 @@ What each field means:
   optional `config`), or a named `mcp`, `openapi`, or `replay` App with that kind's
   settings. See [Apps](../concepts/apps.md).
 - `readme` points to `README.md`, which explains the Apps, their actions and State,
-  rewards, and settings to the people who use the Environment.
+  and settings to the people who use the Environment.
 - `resources` lists files to stage, relative to the folder. A path is the
   [short form](#the-short-form); a mapping takes the same fields as `Resource`.
 - `runtime` picks a provider with `provider`, such as `docker`, `local`, or
@@ -267,7 +269,7 @@ Trial, the record of one attempt. The full set of values is `plural.STOP_REASONS
   Agent calls it when the work is done or when it can't make progress, and its
   optional `summary` becomes the Trial's response.
 - **A budget cuts it short.** `max_turns`, `max_seconds`, and `max_cost_usd` truncate
-  the episode instead of failing the Trial, so you still get a trajectory and Verifier
+  the episode instead of failing the Trial, so you still get a trajectory and Rewarder
   results.
 
 `terminated` and `truncated` are recorded separately from `stop_reason`, because
@@ -277,40 +279,27 @@ finished early from a world that declared the Task over.
 ## Rewards
 
 A **reward** is a small bit of credit for one move. It answers "which action deserved
-the credit?", which is what a training system needs. Verifiers answer a different
+the credit?", which is what a training system needs. A score answers a different
 question: did the attempt succeed? Rewards are recorded on the episode in every mode,
 and they never count toward a score.
 
-Declare a `@rewarder` on an App for each signal. Each one runs right after one of
-that App's actions, and `weight` scales its contribution:
-
-```python
-from plural import App, rewarder
-
-
-class TicketTriage(App[Ticket]):
-    @rewarder(weight=2)
-    def correct_category(self, previous_state, current_state, action, result) -> float:
-        return 1.0 if current_state["category"] == current_state["expected"] else 0.0
-
-    @rewarder
-    def progress(self, previous_state, current_state, action, result) -> float:
-        return 1.0 if current_state["category"] and not previous_state["category"] else 0.0
-```
+An Environment gives no rewards itself. What deserves credit depends on the Task, so
+rewards come from the Task's [Rewarders](rewarders.md): a Rewarder's `step` check runs
+right after each action, beside the Apps, and can read every App. See
+[Reward each step](rewarders.md#reward-each-step).
 
 The precise rules:
 
-- Every rewarder takes exactly `previous_state, current_state, action, result`.
-- The two states are detached JSON snapshots of the App, taken before and after the
-  action, so read them like dictionaries rather than as your `State` class. An MCP App
+- The `reward` returned by `step` is the total of every `step` check that gave one.
+  `info["rewards"]` breaks that total down by Rewarder, with its version and the App
+  that acted.
+- `previous_state` and `current_state` are detached JSON snapshots of the acting App,
+  so read them like dictionaries rather than as your `State` class. An MCP App
   provides them only with `snapshot_on_step: true`.
-- `action` is the action name plus its parameters, and `result` is whatever the action
-  returned.
-- The `reward` returned by `step` is the weighted total of every rewarder that ran,
-  plus whatever the Environment's `on_step` returned. `info["rewards"]` breaks that
-  total down by name and App.
-- A rewarder that raises is recorded as `0.0`, with its error in that breakdown,
+- A `step` check that raises is recorded as `0.0`, with its error in that breakdown,
   because a bug in a reward must not fail an action that already changed the world.
+- `on_step` on an `Environment` subclass changes the world after an action. It can't
+  return a reward.
 
 Rewards can also be assigned after the fact, from a whole trajectory, and every
 reward ends up in the Trial's reward ledger. A trainer reads them from there; see
@@ -320,7 +309,7 @@ reward ends up in the Trial's reward ledger. A trainer reads them from there; se
 
 The example above always uses the same ticket. For a useful benchmark, reuse the
 Environment with different case data. Each [Task](tasks.md) supplies instructions,
-picks its case, and attaches one or more [Verifiers](verifiers.md).
+picks its case, and attaches one or more [Rewarders](rewarders.md).
 
 A few rules decide what a Task can pass in:
 
@@ -336,7 +325,7 @@ A few rules decide what a Task can pass in:
   load case data through `initial_state` instead.
 
 The [support queue tutorial](../tutorials/support-queue.md) shows how an App loads the
-Task's ticket and how Verifiers score the finished workflow.
+Task's ticket and how Rewarders score the finished workflow.
 
 ## Display views
 
@@ -469,7 +458,7 @@ Runtime.daytona(
 )
 ```
 
-Use your actual model endpoint hostname. Verifiers have their own `VerifierRuntime`;
+Use your actual model endpoint hostname. Rewarders have their own `RewarderRuntime`;
 model judges also need to reach their endpoint.
 
 ### Compute, timeouts, and persistence
@@ -649,7 +638,7 @@ Agent lists its credentials, with their scopes, in its `agent.yaml`, and
 `plural agent credential set AGENT NAME` stores each value. A secret comes from your
 shell when you exported it, and otherwise from the hosted project, where
 `plural secret set NAME` stores it encrypted. Values go only to the process that runs
-the Apps and to Verifier queries, never to the model or its Harness. See
+the Apps and to Rewarder queries, never to the model or its Harness. See
 [Credentials and secrets](../concepts/apps.md#credentials-and-secrets).
 
 ### Runtime variables
@@ -701,7 +690,7 @@ OpenAI-compatible endpoint needs none; see [Agents](agents.md).
   people see in the run viewer. See [Display views](#display-views).
 - **Harness policy:** limit which custom Harnesses may run here and what they may do.
   See [Harnesses](harnesses.md).
-- **Rewards:** attach per-step credit to state changes. See [Rewards](#rewards).
+- **Rewards:** give per-step credit from a Task's Rewarders. See [Rewards](#rewards).
 
 ## Build a complete example
 

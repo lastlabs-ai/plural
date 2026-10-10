@@ -152,7 +152,13 @@ def test_action_environment_has_only_declared_inputs(monkeypatch, tmp_path):
     assert values["PLURAL_RESOURCES_DIR"] == str(tmp_path / "workspace/resources")
 
 
+def gentle(step):
+    return 0.0
+
+
 def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
+    from plural import DeterministicRewarder
+
     staged = {}
 
     class Provider:
@@ -172,6 +178,8 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
         state={"seed": 42},
         task_id="case",
         info={"hint": "visible"},
+        metadata={"tier": "gold"},
+        rewarders=(SimpleNamespace(rewarder=DeterministicRewarder(name="gentle", step=gentle)),),
     )
     asyncio.run(
         Trial._stage_environment(
@@ -185,7 +193,17 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
         "initial_state": {"game": {"seed": 42}},
         "info": {"hint": "visible"},
         "seed": None,
+        "task": {"name": "case", "metadata": {"tier": "gold"}},
+        "rewarders": [
+            {
+                "name": "gentle",
+                "version": "0.1.0",
+                "dir": ".plural/rewarders/gentle",
+                "python": "test_runtime_inputs.py:gentle",
+            }
+        ],
     }
+    assert b"def gentle(step)" in files[".plural/rewarders/gentle/test_runtime_inputs.py"]
     assert (
         EnvironmentDefinition.model_validate_json(files[".plural/apps/environment.json"]).identity
         == task.environment.identity

@@ -98,7 +98,7 @@ MANIFEST_FILES = frozenset(
         "environment.yaml",
         "harness.yaml",
         "task.yaml",
-        "verifier.yaml",
+        "rewarder.yaml",
     }
 )
 """Resource manifests. Their settings are hashed through the parsed definition."""

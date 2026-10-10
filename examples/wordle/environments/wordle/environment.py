@@ -7,7 +7,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from plural import App, State, action, initial, rewarder
+from plural import App, State, action, initial
 
 WORDS_FILE = Path(__file__).with_name("words.txt")
 
@@ -82,11 +82,6 @@ class Wordle(App[Game]):
 
     def terminated(self) -> bool:
         return self.state.solved or self.state.remaining <= 0
-
-    @rewarder
-    def solved(self, previous_state, current_state, action, result) -> float:
-        """One point for the guess that solves the word. Never part of the score."""
-        return 1.0 if current_state["solved"] and not previous_state["solved"] else 0.0
 
     def view(self):
         """The board as the run viewer draws it: guesses and their marks, not the secret."""

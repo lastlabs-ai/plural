@@ -429,7 +429,7 @@ def trial_show(
     follow: bool = typer.Option(False, "--follow", help="Stream progress until it finishes."),
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted)."""
+    """Show a Trial's result, Rewarder evidence, and artifacts (local first, then hosted)."""
     space = workspace()
     try:
         job_id, _ = find_local_trial(space, trial_id)
@@ -525,8 +525,8 @@ def review_list(
             continue
         for trial in result.trials:
             waiting = [
-                item.verifier_name
-                for item in trial.verifier_results
+                item.rewarder_name
+                for item in trial.rewarder_results
                 if item.status == "awaiting_review"
             ]
             if waiting:
@@ -534,7 +534,7 @@ def review_list(
                     {
                         "job_id": job["job_id"],
                         "trial_id": trial.receipt.trial_id,
-                        "verifiers": waiting,
+                        "rewarders": waiting,
                     }
                 )
 
@@ -543,8 +543,8 @@ def review_list(
             typer.echo("No local Trials are waiting for review.")
             return
         rows(
-            ((item["trial_id"], item["job_id"], ", ".join(item["verifiers"])) for item in pending),
-            ("trial", "job", "verifiers"),
+            ((item["trial_id"], item["job_id"], ", ".join(item["rewarders"])) for item in pending),
+            ("trial", "job", "rewarders"),
         )
 
     emit(pending, as_json=as_json, text=text)
@@ -557,7 +557,7 @@ def review_submit(
     score: list[str] = typer.Option(
         ..., "--score", help="`criterion=value`, or a bare value for a one-criterion rubric."
     ),
-    verifier: str | None = typer.Option(None, "--verifier", help="Human Verifier (local)."),
+    rewarder: str | None = typer.Option(None, "--rewarder", help="Human Rewarder (local)."),
     feedback: str = typer.Option("", "--feedback", help="Notes for the record."),
     hosted: bool = typer.Option(False, "--hosted", help="Submit a hosted assignment."),
 ) -> None:
@@ -581,25 +581,25 @@ def review_submit(
     store = JobStore(space.project.jobs_dir)
     spec = store.load_spec(job_id)
     humans = [
-        item.verifier
+        item.rewarder
         for task in spec.tasks
-        for item in task.verifiers
-        if item.verifier.kind == "human" and (verifier is None or item.verifier.name == verifier)
+        for item in task.rewarders
+        if item.rewarder.kind == "human" and (rewarder is None or item.rewarder.name == rewarder)
     ]
     names = sorted({item.name for item in humans})
     if len(names) != 1:
         raise ProjectError(
-            "Name the human Verifier with --verifier."
+            "Name the human Rewarder with --rewarder."
             if names
-            else f"Trial {target} has no human Verifier"
-            + (f" named {verifier!r}." if verifier else ".")
+            else f"Trial {target} has no human Rewarder"
+            + (f" named {rewarder!r}." if rewarder else ".")
         )
     human = next(item for item in humans if item.name == names[0])
     criteria = [criterion.name for criterion in getattr(human, "rubric", ())]
     JobRunner(spec, store=store).submit_review(
         target, names[0], _scores(score, criteria), feedback=feedback
     )
-    typer.echo(f"Recorded review of trial {target} for verifier {names[0]}.")
+    typer.echo(f"Recorded review of trial {target} for rewarder {names[0]}.")
 
 
 def _scores(values: list[str], criteria: list[str] | None) -> dict[str, float]:
@@ -756,12 +756,12 @@ def _stored_credentials(err: bool) -> CredentialSource:
 
 
 def _needed_secrets(spec: JobSpec) -> list[str]:
-    """Secret names the Job's Apps, Verifiers, and endpoint Agents need."""
+    """Secret names the Job's Apps, Rewarders, and endpoint Agents need."""
     names: set[str] = set()
     for task in spec.tasks:
         names.update(item.name for item in task.environment.secrets)
-        for binding in task.verifiers:
-            names.update(item.name for item in binding.verifier.secrets)
+        for binding in task.rewarders:
+            names.update(item.name for item in binding.rewarder.secrets)
     for agent in spec.agents:
         if agent.agent.endpoint_key:
             names.add(agent.agent.endpoint_key)
@@ -774,7 +774,7 @@ def _project_secrets(
     """Fill secrets the run needs, and you have not exported, from the hosted project.
 
     Values go into the Job's environment, which passes each to the App host,
-    Verifier, or endpoint that declared it, and never into this process's own.
+    Rewarder, or endpoint that declared it, and never into this process's own.
     Variables you already exported always win. Without a hosted project, or
     when you may not read its secrets, the run uses what you exported, and
     its preflight names anything still missing.
@@ -1006,12 +1006,12 @@ def _print_trial(payload: dict[str, Any]) -> None:
     ):
         if payload.get(key) is not None:
             typer.echo(f"  {label + ':':<15} {payload[key]}")
-    for verifier in payload.get("verifiers") or []:
+    for rewarder in payload.get("rewarders") or []:
         typer.echo(
-            f"  Verifier {verifier.get('verifier_name')}: {verifier.get('status')} "
-            f"score={verifier.get('score')}"
+            f"  Rewarder {rewarder.get('rewarder_name')}: {rewarder.get('status')} "
+            f"score={rewarder.get('score')}"
         )
-        for line in verifier.get("evidence") or []:
+        for line in rewarder.get("evidence") or []:
             typer.echo(f"    - {line}")
     for credential in payload.get("credentials") or []:
         scopes = ", ".join(credential.get("scopes") or []) or "no scopes listed"
@@ -1027,8 +1027,8 @@ def _print_hosted_reviews(items: list[dict[str, Any]]) -> None:
         typer.echo("No hosted reviews are waiting.")
         return
     rows(
-        ((item.get("id"), item.get("trial_id"), item.get("verifier_name")) for item in items),
-        ("assignment", "trial", "verifier"),
+        ((item.get("id"), item.get("trial_id"), item.get("rewarder_name")) for item in items),
+        ("assignment", "trial", "rewarder"),
     )
 
 

@@ -2,18 +2,19 @@
 route: /docs/start/from-a-system
 title: Start from a system
 order: 23
-description: "Connect a system your work happens in, such as an MCP server, an HTTP API, or a database, as an App. Then write a Verifier that checks the system itself and run models against it."
+description: "Add the systems your work happens in, such as an MCP server, an HTTP API, or a database, to an Environment as Apps. Then write a Rewarder that checks the systems themselves and run models against it."
 audience: all
 nav: true
 nav_group: Start
 ---
 # Start from a system
 
-**You start with** a system the work happens in: Salesforce behind an MCP server, an
+**You start with** the systems the work happens in: Salesforce behind an MCP server, an
 HTTP API with an OpenAPI document, or data in files or a database.
 
-**You end with** that system as an App, a Verifier that checks the system itself rather
-than the Agent's claims, and a Benchmark you can run any model on.
+**You end with** an Environment with each system as an App, a Rewarder that checks
+the systems themselves rather than the Agent's claims, and a Benchmark you can run
+any model on.
 
 This page uses the open-source memory MCP server, a small knowledge graph, so every
 command runs as written. It needs [Node.js](https://nodejs.org) for `npx`. The steps
@@ -21,35 +22,38 @@ are the same for your own system.
 
 ## 1. Pick the connection type
 
-| Your system offers | Draft it with |
+| Your system offers | Add it with |
 | --- | --- |
-| An MCP server, started locally or reached at a URL | `plural env from-mcp` |
-| An HTTP API with an OpenAPI document | `plural env from-openapi` |
+| An MCP server, started locally or reached at a URL | `plural env add ENV --mcp URL_OR_COMMAND` |
+| An HTTP API with an OpenAPI document | `plural env add ENV --openapi SPEC` |
+| Recorded conversations of an agent using it | `plural env add ENV --traces FILE`; see [Start from traces](from-traces.md) |
 | Files: documents, CSV, JSON, JSONL, or SQLite, with no API | Plural's files server, `server: plural.mcp.files:server`; see [Build an MCP server](../guides/build-mcp-server.md#start-from-plurals-files-server) |
 | A database, warehouse, or data lake | Your own FastMCP server; see [Build an MCP server](../guides/build-mcp-server.md#work-in-a-data-lake-or-warehouse) |
 | Nothing an Agent can call yet | `plural env init`, then write the tools; see [Build an MCP server](../guides/build-mcp-server.md) |
 
-Each command drafts an ordinary `environment.yaml` with one App, whose actions are what
-the system offers. A hosted MCP server can also be added from the Environment's Apps
-tab, with **Add MCP server**. Create a project to hold it:
+`plural env add` adds one system to an Environment as an App, whose actions are what
+the system offers. It creates the Environment the first time, writing an ordinary
+`environment.yaml`, and adds to it after that, so you run it once per system. A hosted
+MCP server can also be added from the Environment's Apps tab, with **Add system**.
+Create a project to hold it:
 
 ```bash
 plural project init notes
 cd notes
 ```
 
-## 2. Draft the Environment
+## 2. Add the system
 
 ```bash
-plural env from-mcp memory \
-  --command "npx -y @modelcontextprotocol/server-memory" \
+plural env add office \
+  --mcp "npx -y @modelcontextprotocol/server-memory" \
   --env 'MEMORY_FILE_PATH=${PLURAL_APP_DIR}/memory.jsonl'
 ```
 
 ```text
-Drafted environment memory:
-  environments/memory/environment.yaml
-  environments/memory/README.md
+Created environment office:
+  environments/office/environment.yaml
+  environments/office/README.md
 
 App memory (mcp, owned) offers:
   create_entities
@@ -63,8 +67,9 @@ App memory (mcp, owned) offers:
   open_nodes  [read-only]
 ```
 
-**What just happened.** Plural started the server, listed its tools, and wrote them down
-as the App's actions. `[read-only]` marks tools that say they change nothing. The
+**What just happened.** Plural created the `office` Environment with one App, named
+`memory` after the server's package. It started the server, listed its tools, and
+wrote them down as the App's actions. Pass `--app NAME` to choose the App's name. `[read-only]` marks tools that say they change nothing. The
 `--env` setting stores the server's graph in `${PLURAL_APP_DIR}`, a new empty folder
 Plural gives the server for every episode, so no Trial sees what another stored.
 
@@ -72,11 +77,12 @@ Plural gives the server for every episode, so no Trial sees what another stored.
 
 The memory server needs none. A system that does, such as a CRM reached over HTTP,
 takes the credential of the Agent that runs, so each Agent acts as its own user with
-its own scopes. The App names the credential; the Agent carries it:
+its own scopes. The App names the credential; the Agent carries it. With your own CRM's
+address in place of the example one:
 
 ```bash
-plural env from-mcp crm \
-  --url https://mcp.example.com/v1 \
+plural env add sales \
+  --mcp https://mcp.example.com/v1 --app crm \
   --header 'Authorization=Bearer ${CRM_TOKEN}'
 plural agent init sales-bot
 ```
@@ -109,11 +115,11 @@ App. See [Supply credentials](../guides/connect-mcp-server.md#4-supply-credentia
 ## 4. Choose a control level
 
 ```bash
-plural env validate memory
+plural env validate office
 ```
 
 ```text
-environment/memory is valid: sha256:ee8a536cf853...
+environment/office is valid: sha256:ee8a536cf853...
 
 App memory (mcp, owned)
   create_entities
@@ -140,40 +146,69 @@ lake. Mark the App `remote: true` under `mcp:` and Plural treats it like a remot
 server: `live`, or `sandboxed` once it has a reset hook.
 :::
 
-## 5. Write a Verifier that queries the App
+## 5. Write a Rewarder that queries the App
+
+A Rewarder decides what counts as good work. Its `final` check scores the finished
+episode, and that score is what Benchmarks rank on. Its optional `step` check rewards
+each action as it happens, for training.
 
 ```bash
-plural verifier init remembered
+plural rewarder init remembered
 ```
 
-Replace `verifiers/remembered/verify.py` with:
+Replace `rewarders/remembered/reward.py` with:
 
 ```python
-"""Score whether the memory server holds Ada Lovelace as a mathematician."""
+"""Reward storing Ada Lovelace as a mathematician in the memory server."""
 
 import json
+from typing import Any
 
-from plural import Episode, VerifierOutput
+from plural import Episode, RewarderOutput, Step
 
 
-def verify(episode: Episode) -> VerifierOutput:
-    """Ask the memory server itself, not the Agent's reply."""
-    found = episode.apps["memory"].query("search_nodes", query="Ada Lovelace")
+def ada(found: Any) -> list[dict[str, Any]]:
     graph = found if isinstance(found, dict) else json.loads(found)
-    ada = [item for item in graph.get("entities", []) if item["name"] == "Ada Lovelace"]
-    notes = " ".join(" ".join(item.get("observations", [])) for item in ada).lower()
-    return VerifierOutput(score=float("mathematician" in notes), evidence=[json.dumps(ada)])
+    return [item for item in graph.get("entities", []) if item["name"] == "Ada Lovelace"]
+
+
+def final(episode: Episode) -> RewarderOutput:
+    """Score the finished episode by asking the memory server, not the Agent's reply."""
+    stored = ada(episode.apps["memory"].query("search_nodes", query="Ada Lovelace"))
+    notes = " ".join(" ".join(item.get("observations", [])) for item in stored).lower()
+    return RewarderOutput(score=float("mathematician" in notes), evidence=[json.dumps(stored)])
+
+
+def step(step: Step) -> float | None:
+    """Reward each write that leaves Ada in the graph, and penalize a rejected call."""
+    if step.error:
+        return -0.1
+    if step.action not in {"create_entities", "add_observations"}:
+        return None
+    stored = ada(step.apps["memory"].query("search_nodes", query="Ada Lovelace"))
+    return 0.5 if stored else 0.0
+```
+
+In `rewarders/remembered/rewarder.yaml`, turn on the `step` check by uncommenting it:
+
+```yaml
+final: reward.py:final
+step: reward.py:step
 ```
 
 **What just happened.** `query` calls one of the App's read-only tools while the
-Trial's Runtime is still running, so the Verifier checks what is actually in the
-system. It refuses a tool that changes state, so a Verifier can't alter what it checks.
-An App with a `snapshot` hook also offers `episode.apps["memory"].final`.
+Trial's Runtime is still running, so the Rewarder checks what is actually in the
+system. It refuses a tool that changes state, so a Rewarder can't alter what it checks.
+`final` runs once, after the episode. `step` runs after every action, beside the
+Apps, and `step.apps` reads any App in the Environment. Its rewards go to the Trial's
+reward ledger, never into the score, and the Agent never sees either. An App with a
+`snapshot` hook also offers `episode.apps["memory"].final`. See
+[Rewarders](../project/rewarders.md).
 
 ## 6. Write a Task and a Benchmark
 
 ```bash
-plural task init remember-ada --environment memory --verifier remembered
+plural task init remember-ada --environment office --rewarder remembered
 plural benchmark init memory
 plural benchmark add remember-ada --benchmark memory
 ```
@@ -210,18 +245,38 @@ plural trial show trl_25307cebd405ee1f5018590a
 ```
 
 ```text
-  Verifier remembered: succeeded score=1.0
+  Rewarder remembered: succeeded score=1.0
     - [{"entityType": "person", "name": "Ada Lovelace", "observations": ["She was a mathematician who wrote the first published algorithm."]}]
 ```
 
 **What just happened.** The model called the server's tools, and each call was recorded
-on the Trial as a step with the App, the tool, its arguments, and its result. The
-Verifier then asked the server what it held. The evidence is the server's answer, not
-the model's.
+on the Trial as a step with the App, the tool, its arguments, and its result. After
+each call, the Rewarder's `step` check rewarded it. At the end, `final` asked the
+server what it held. The evidence is the server's answer, not the model's. To see the
+step rewards:
+
+```bash
+plural rewards show trl_25307cebd405ee1f5018590a
+```
+
+```text
+step  e3     +0.500  step:remembered@0.1.0
+```
 
 ## Several systems in one Environment
 
-When the work spans systems, list each as an App in one Environment:
+When the work spans systems, add each to the same Environment. Every `plural env add`
+appends an App and keeps everything already there:
+
+```bash
+plural env add support --mcp https://mcp.example.com/v1 --app crm \
+  --header 'Authorization=Bearer ${CRM_TOKEN}'
+plural env add support --openapi billing.yaml \
+  --header 'Authorization=Bearer ${BILLING_TOKEN}'
+```
+
+A server you write yourself is added by hand, as one more entry. The resulting
+`apps:` in `environments/support/environment.yaml`:
 
 ```yaml
 apps:
@@ -252,8 +307,10 @@ exactly as the model will.
 - **Control.** Each App keeps its own control level. A Benchmark accepts the
   Environment only if every `live` App is read-only, and training only if none is
   `live`.
-- **Verifiers.** `episode.apps["crm"]` and `episode.apps["billing"]` each query their
-  own system, so a Verifier can check that the refund and the CRM note both happened.
+- **Rewarders.** `episode.apps["crm"]` and `episode.apps["billing"]` each query their
+  own system, so a Rewarder's `final` can check that the refund and the CRM note both
+  happened. Its `step` reads every App through `step.apps` after each action, so it can
+  reward a refund only once the CRM shows the ticket as eligible.
 - **Effects across systems.** `Environment.on_step` sees every App, for rules such as
   "a refund also closes the ticket"; see [Apps](../concepts/apps.md).
 :::
@@ -267,7 +324,7 @@ You have a Benchmark, `memory`, that you can rerun on any model with
 Next:
 
 - Add Tasks for the work you care about, each with its own starting state.
-- Add Apps for the other systems the work touches, as in
+- Add the other systems the work touches with `plural env add`, as in
   [Several systems in one Environment](#several-systems-in-one-environment).
 - The [MCP guide](../guides/connect-mcp-server.md) covers tool filters, Python hooks,
   and troubleshooting.

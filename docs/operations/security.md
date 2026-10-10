@@ -41,7 +41,7 @@ The rest of this page is for when you are running code or data you need to prote
 A **Runtime** is where the world runs. Each option draws the safety line in a
 different place:
 
-- `local` runs the Environment, Harness, and Verifiers as a trusted subprocess
+- `local` runs the Environment, Harness, and Rewarders as a trusted subprocess
   on your machine, under your user account. It is not a sandbox; use it only for
   code you trust.
 - Docker adds container controls but trusts the host and Docker daemon.
@@ -56,15 +56,15 @@ implementation.
 ## Separate information
 
 After each action the Agent sees only what the action returned. Scores, rewards,
-termination flags, State, and Verifier data never enter the model's context.
+termination flags, State, and Rewarder data never enter the model's context.
 
 That separation governs what Plural shows the model; it is not process
 isolation. Code running in the same Runtime can still read a staged file or
 process memory. Use separate processes, minimal staged files, and Runtime
 controls for actual isolation.
 
-Verifiers (the graders) receive the full final Episode, including State. Isolate
-untrusted Verifier code and avoid capturing secrets.
+Rewarders (the graders) receive the full final Episode, including State. Isolate
+untrusted Rewarder code and avoid capturing secrets.
 
 ## Handle secrets
 
@@ -79,7 +79,7 @@ Supply other secrets when the Job runs:
   the token for its MCP server; the declarations never hold values. At run time
   Plural reads the values from the Job's environment, or from the hosted
   project's secrets (`plural secret set`), and gives them only to the process that
-  runs the Apps and to Verifier queries. They never reach the Agent or its
+  runs the Apps and to Rewarder queries. They never reach the Agent or its
   Harness. A missing value stops the run before it starts, naming the App.
 - **Runtime variables.** `RuntimeVariable` declarations on a Runtime carry
   settings into the Runtime. The Harness shares the Runtime and can read them,
@@ -88,13 +88,13 @@ Supply other secrets when the Job runs:
   and an Agent grants a subset with `secret_names`. Granting a name the Harness
   did not declare fails before any value is forwarded.
 - **Model keys.** A Job passes model credentials to the Harness and to Agent
-  Verifiers itself; you do not list them in `secret_names`.
+  Rewarders itself; you do not list them in `secret_names`.
 
 Never store values in YAML, Task info, State, action results, resources, logs, or
 artifacts.
 
 > **Good to know:** Plural replaces the exact values of injected secrets in the
-> Harness and Verifier logs it captures. It cannot catch an encoded or transformed
+> Harness and Rewarder logs it captures. It cannot catch an encoded or transformed
 > secret, and it does not redact artifacts or data your code sends elsewhere.
 
 ## Hosted access

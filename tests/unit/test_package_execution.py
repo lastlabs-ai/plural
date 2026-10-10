@@ -27,11 +27,21 @@ from plural.credentials import CredentialValue, fingerprint
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
 from plural.execution import JobRunner, JobStore
 from plural.execution.engine import (
-    _AGENT_VERIFIER_SCRIPT,
+    _AGENT_REWARDER_SCRIPT,
     ExecutionFailure,
     _bounded_artifact_evidence,
 )
 from plural.jobs import BenchmarkJobSource, JobMode, JobSpec, RetryPolicy, TaskJobSource
+from plural.rewarders import (
+    AgentRewarder,
+    DeterministicRewarder,
+    Episode,
+    HumanRewarder,
+    RewarderOutput,
+    RewarderRuntime,
+    RubricCriterion,
+    WeightedRewarder,
+)
 from plural.sandbox import (
     DownloadedFile,
     ExecRequest,
@@ -40,20 +50,10 @@ from plural.sandbox import (
     SandboxHandle,
 )
 from plural.tasks import BenchmarkDefinition, TaskDefinition
-from plural.verifiers import (
-    AgentVerifier,
-    DeterministicVerifier,
-    Episode,
-    HumanVerifier,
-    RubricCriterion,
-    VerifierOutput,
-    VerifierRuntime,
-    WeightedVerifier,
-)
 
 
 class JudgeProvider(FakeProvider):
-    """No-network provider that emulates an AgentVerifier model response."""
+    """No-network provider that emulates an AgentRewarder model response."""
 
     def __init__(self) -> None:
         super().__init__("docker")
@@ -61,12 +61,12 @@ class JudgeProvider(FakeProvider):
 
     async def exec(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
         files = self.files[handle.sandbox_id]
-        if request.stdin is not None or ".plural/verifier-input.json" not in files:
+        if request.stdin is not None or ".plural/rewarder-input.json" not in files:
             return await super().exec(handle, request)
-        payload = json.loads(files[".plural/verifier-input.json"])
-        verifier = payload["agent_verifier"]
+        payload = json.loads(files[".plural/rewarder-input.json"])
+        rewarder = payload["agent_rewarder"]
         self.judge_input = payload["judge_input"]
-        assert verifier["criteria"] == [
+        assert rewarder["criteria"] == [
             {
                 "name": "quality",
                 "description": "The answer is correct and concise.",
@@ -84,7 +84,7 @@ class JudgeProvider(FakeProvider):
         assert requested[0]["name"] == "result.json"
         assert json.loads(requested[0]["content"]) == {"answer": 42}
         assert self.judge_input["final"]["name"] == "result.json"
-        self.files[handle.sandbox_id]["agent-verifier-result.json"] = json.dumps(
+        self.files[handle.sandbox_id]["agent-rewarder-result.json"] = json.dumps(
             {
                 "score": 0.8,
                 "scores": {"quality": 0.8},
@@ -107,15 +107,15 @@ GAME_APP = AppDefinition(
 )
 
 
-def exact_verifier(provider: str) -> DeterministicVerifier:
-    return DeterministicVerifier(
+def exact_rewarder(provider: str) -> DeterministicRewarder:
+    return DeterministicRewarder(
         name=f"exact-{provider}",
-        command=("python", "verify.py"),
-        runtime=VerifierRuntime(provider=provider),
+        final=("python", "reward.py"),
+        runtime=RewarderRuntime(provider=provider),
     )
 
 
-def test_agent_verifier_artifact_evidence_is_requested_readable_and_bounded() -> None:
+def test_agent_rewarder_artifact_evidence_is_requested_readable_and_bounded() -> None:
     evidence = _bounded_artifact_evidence(
         (
             DownloadedFile(path="requested.txt", data=b"x" * 40_000),
@@ -146,12 +146,12 @@ def make_task(name: str, provider: str) -> TaskDefinition:
         task_id=name,
         instructions=f"Solve {name}",
         environment=environment,
-        verifiers=(WeightedVerifier(verifier=exact_verifier(provider)),),
+        rewarders=(WeightedRewarder(rewarder=exact_rewarder(provider)),),
         info={"question": name},
     )
 
 
-async def test_agent_verifier_scores_configured_criteria_with_contracted_evidence(
+async def test_agent_rewarder_scores_configured_criteria_with_contracted_evidence(
     tmp_path: Path,
 ) -> None:
     provider = JudgeProvider()
@@ -163,7 +163,7 @@ async def test_agent_verifier_scores_configured_criteria_with_contracted_evidenc
             targets=frozenset({ExecutionTarget.DOCKER}),
         ),
     )
-    verifier = AgentVerifier(
+    rewarder = AgentRewarder(
         name="quality-judge",
         model="openai/gpt-5.6-luna",
         instructions="Judge only the supplied evidence.",
@@ -173,13 +173,13 @@ async def test_agent_verifier_scores_configured_criteria_with_contracted_evidenc
                 description="The answer is correct and concise.",
             ),
         ),
-        runtime=VerifierRuntime(provider="docker", network=NetworkMode.PUBLIC),
+        runtime=RewarderRuntime(provider="docker", network=NetworkMode.PUBLIC),
     )
     task = TaskDefinition(
         task_id="judge-me",
         instructions="Return the answer.",
         environment=environment,
-        verifiers=(WeightedVerifier(verifier=verifier),),
+        rewarders=(WeightedRewarder(rewarder=rewarder),),
     )
     spec = JobSpec(
         source=TaskJobSource(task=task),
@@ -194,13 +194,13 @@ async def test_agent_verifier_scores_configured_criteria_with_contracted_evidenc
     ).run()
 
     assert result.status == "succeeded"
-    judged = result.trials[0].verifier_results[0]
+    judged = result.trials[0].rewarder_results[0]
     assert judged.score == 0.8
     assert judged.scores == {"quality": 0.8}
     assert judged.evidence == ("result.json answer=42", "observation.text=done")
     execution = store.trial_path(spec.plan().trials[0]) / "executions/0"
-    assert "judge-secret" not in (execution / "logs/verifier.stdout.log").read_text()
-    assert "***" in (execution / "logs/verifier.stdout.log").read_text()
+    assert "judge-secret" not in (execution / "logs/rewarder.stdout.log").read_text()
+    assert "***" in (execution / "logs/rewarder.stdout.log").read_text()
 
 
 def _strict_schema_errors(schema: dict[str, Any], path: str = "$") -> list[str]:
@@ -218,7 +218,7 @@ def _strict_schema_errors(schema: dict[str, Any], path: str = "$") -> list[str]:
     return errors
 
 
-def test_agent_verifier_script_sends_a_strict_schema_and_writes_its_output(
+def test_agent_rewarder_script_sends_a_strict_schema_and_writes_its_output(
     tmp_path: Path,
 ) -> None:
     requests: list[dict[str, Any]] = []
@@ -245,19 +245,19 @@ def test_agent_verifier_script_sends_a_strict_schema_and_writes_its_output(
 
     server = HTTPServer(("127.0.0.1", 0), Gateway)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    verifier = AgentVerifier(
+    rewarder = AgentRewarder(
         name="judge",
         model="openai/gpt-5.6-luna",
         instructions="Judge the episode.",
         criteria=(RubricCriterion(name="resolved", description="0 or 1."),),
     )
     (tmp_path / ".plural").mkdir()
-    (tmp_path / ".plural/verifier-input.json").write_text(
-        json.dumps({"agent_verifier": verifier.model_dump(mode="json"), "judge_input": {}})
+    (tmp_path / ".plural/rewarder-input.json").write_text(
+        json.dumps({"agent_rewarder": rewarder.model_dump(mode="json"), "judge_input": {}})
     )
     try:
         completed = subprocess.run(
-            [sys.executable, "-c", _AGENT_VERIFIER_SCRIPT],
+            [sys.executable, "-c", _AGENT_REWARDER_SCRIPT],
             cwd=tmp_path,
             env={"PLURAL_GATEWAY_URL": f"http://127.0.0.1:{server.server_port}"},
             capture_output=True,
@@ -269,7 +269,7 @@ def test_agent_verifier_script_sends_a_strict_schema_and_writes_its_output(
 
     assert completed.returncode == 0, completed.stderr
     assert len(requests) == 1
-    written = json.loads((tmp_path / "agent-verifier-result.json").read_text())
+    written = json.loads((tmp_path / "agent-rewarder-result.json").read_text())
     assert written["scores"] == {"resolved": 1}
 
 
@@ -307,15 +307,15 @@ async def test_cross_environment_scheduler_uses_each_runtime_and_bounds_concurre
     assert result.aggregates[0].mean_latency_seconds is not None
 
 
-async def test_human_verifier_yields_awaiting_review(tmp_path: Path) -> None:
+async def test_human_rewarder_yields_awaiting_review(tmp_path: Path) -> None:
     environment = EnvironmentDefinition(name="review")
     task = TaskDefinition(
         task_id="review-me",
         instructions="Write an answer",
         environment=environment,
-        verifiers=(
-            WeightedVerifier(
-                verifier=HumanVerifier(
+        rewarders=(
+            WeightedRewarder(
+                rewarder=HumanRewarder(
                     name="human",
                     rubric=(RubricCriterion(name="quality", description="Answer quality"),),
                 )
@@ -334,7 +334,7 @@ async def test_human_verifier_yields_awaiting_review(tmp_path: Path) -> None:
     result = await job.run()
     assert result.status == "awaiting_review"
     assert result.trials[0].status == "awaiting_review"
-    assert result.trials[0].verifier_results[0].kind == "human"
+    assert result.trials[0].rewarder_results[0].kind == "human"
     trial = spec.plan().trials[0]
     execution = job.store.trial_path(trial) / "executions/0"
     immutable_before = {
@@ -505,7 +505,7 @@ async def test_retries_append_trial_executions_without_new_trial_identity(
     assert entries["observation.json"]["role"] == "observation"
     assert entries["view.json"]["role"] == "rendering"
     assert "trajectory.normalized.json" not in entries
-    assert "verifier-results.json" not in entries
+    assert "rewarder-results.json" not in entries
     messages = json.loads((execution / "artifacts/trajectory.json").read_text())
     assert "user" in [message["role"] for message in messages["messages"]]
     atif = json.loads((execution / "artifacts/atif-trajectory.json").read_text())
@@ -540,7 +540,7 @@ def test_event_store_redacts_hidden_state_and_secrets(tmp_path: Path) -> None:
     assert event.data["hidden_state"] == "[redacted]"
 
 
-def _app_task(verifier: DeterministicVerifier) -> TaskDefinition:
+def _app_task(rewarder: DeterministicRewarder) -> TaskDefinition:
     crm = AppDefinition(
         name="crm",
         kind="mcp",
@@ -562,22 +562,22 @@ def _app_task(verifier: DeterministicVerifier) -> TaskDefinition:
         task_id="desk-task",
         instructions="Do the work.",
         environment=environment,
-        verifiers=(WeightedVerifier(verifier=verifier),),
+        rewarders=(WeightedRewarder(rewarder=rewarder),),
         state={"game": {"step": 0}},
     )
 
 
-async def test_app_host_holds_secrets_and_verifiers_query_it_before_teardown(
+async def test_app_host_holds_secrets_and_rewarders_query_it_before_teardown(
     tmp_path: Path,
 ) -> None:
     seen: dict[str, Any] = {}
 
-    def check(episode: Episode) -> VerifierOutput:
+    def check(episode: Episode) -> RewarderOutput:
         seen["record"] = episode.apps["crm"].query("get_record", id="7")
         seen["state"] = episode.state
-        return VerifierOutput(score=1, evidence=("queried",))
+        return RewarderOutput(score=1, evidence=("queried",))
 
-    task = _app_task(DeterministicVerifier(name="queried", check=check))
+    task = _app_task(DeterministicRewarder(name="queried", final=check))
     spec = JobSpec(
         source=TaskJobSource(task=task),
         agents=(AgentBinding(agent=AgentDefinition(name="agent", model="test/model")),),
@@ -616,7 +616,7 @@ async def test_app_host_holds_secrets_and_verifiers_query_it_before_teardown(
 
 
 async def test_missing_app_secrets_fail_before_a_runtime_starts(tmp_path: Path) -> None:
-    task = _app_task(exact_verifier("docker"))
+    task = _app_task(exact_rewarder("docker"))
     spec = JobSpec(
         source=TaskJobSource(task=task),
         agents=(AgentBinding(agent=AgentDefinition(name="agent", model="test/model")),),
@@ -631,7 +631,7 @@ async def test_missing_app_secrets_fail_before_a_runtime_starts(tmp_path: Path) 
 
 
 def _credential_task() -> TaskDefinition:
-    task = _app_task(exact_verifier("docker"))
+    task = _app_task(exact_rewarder("docker"))
     crm = task.environment.app("crm").model_copy(
         update={"secrets": (), "credentials": (SecretReference(name="CRM_TOKEN"),)}
     )

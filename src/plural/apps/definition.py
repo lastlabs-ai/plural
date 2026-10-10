@@ -23,7 +23,7 @@ class SecretReference(FrozenModel):
     """A named value an App needs, which it never stores itself.
 
     In an App's ``secrets`` it is a setup secret, such as a sandbox's admin
-    token, supplied by the project for reset and snapshot hooks and Verifiers.
+    token, supplied by the project for reset and snapshot hooks and Rewarders.
     In its ``credentials`` it is supplied by the Agent that runs, such as the
     Salesforce token of the user that Agent acts as. Either way the value
     reaches only the App host, never the Harness or the model.
@@ -86,16 +86,6 @@ class AppAction(FrozenModel):
         return value
 
 
-class RewarderDefinition(FrozenModel):
-    """A named reward signal an App computes for each of its own actions."""
-
-    name: str = Field(min_length=1)
-    description: str = ""
-    implementation_digest: str = ""
-    weight: float = Field(default=1, gt=0)
-    timeout_seconds: float = Field(default=30, gt=0)
-
-
 class AppDefinition(FrozenModel):
     """One App inside an Environment.
 
@@ -111,10 +101,9 @@ class AppDefinition(FrozenModel):
     config: dict[str, Any] = Field(default_factory=dict)
     actions: tuple[AppAction, ...] = ()
     secrets: tuple[SecretReference, ...] = ()
-    """Setup secrets, from the project: for reset and snapshot hooks and Verifiers."""
+    """Setup secrets, from the project: for reset and snapshot hooks and Rewarders."""
     credentials: tuple[SecretReference, ...] = ()
     """Credentials the running Agent supplies, so its actions run as that Agent."""
-    rewarders: tuple[RewarderDefinition, ...] = ()
     state_schema: dict[str, Any] = Field(default_factory=dict)
     has_reset: bool = False
     has_snapshot: bool = False
@@ -148,9 +137,6 @@ class AppDefinition(FrozenModel):
                 f"App {self.name!r} lists {both[0]} as both a secret and a credential. "
                 "A credential comes from the Agent; a secret from the project. Pick one."
             )
-        rewarder_names = [item.name for item in self.rewarders]
-        if len(rewarder_names) != len(set(rewarder_names)):
-            raise ValueError(f"App {self.name!r} declares a rewarder name more than once")
         if self.kind == "python" and not self.python:
             raise ValueError(f"Python App {self.name!r} needs a file.py:Class reference")
         return self
@@ -297,7 +283,6 @@ __all__ = [
     "AppKind",
     "ExposedAction",
     "RESERVED_ACTIONS",
-    "RewarderDefinition",
     "SecretReference",
     "TOOL_NAME_LIMIT",
     "derive_control",

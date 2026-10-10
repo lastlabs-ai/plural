@@ -12,8 +12,8 @@ from plural.common import ExecutionTarget
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
 from plural.execution import JobRunner, JobStore
 from plural.jobs import BenchmarkJobSource, JobSpec
+from plural.rewarders import DeterministicRewarder, RewarderRuntime, WeightedRewarder
 from plural.tasks import BenchmarkDefinition, TaskDefinition
-from plural.verifiers import DeterministicVerifier, VerifierRuntime, WeightedVerifier
 
 
 def _task(name: str, provider: str = "docker") -> TaskDefinition:
@@ -25,12 +25,12 @@ def _task(name: str, provider: str = "docker") -> TaskDefinition:
             name=f"env-{name}",
             runtime=EnvironmentRuntime(provider=provider, targets=frozenset({target})),
         ),
-        verifiers=(
-            WeightedVerifier(
-                verifier=DeterministicVerifier(
+        rewarders=(
+            WeightedRewarder(
+                rewarder=DeterministicRewarder(
                     name="exact",
-                    command=("python", "verify.py"),
-                    runtime=VerifierRuntime(provider=provider),
+                    final=("python", "reward.py"),
+                    runtime=RewarderRuntime(provider=provider),
                 )
             ),
         ),

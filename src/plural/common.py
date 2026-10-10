@@ -115,7 +115,7 @@ class ErrorCode(str, Enum):
     HARNESS_FAILED = "harness_failed"
     PROTOCOL_FAILED = "protocol_failed"
     ENVIRONMENT_FAILED = "environment_failed"
-    VERIFIER_FAILED = "verifier_failed"
+    REWARDER_FAILED = "rewarder_failed"
     EVIDENCE_MISSING = "evidence_missing"
     ARTIFACT_FAILED = "artifact_failed"
     LOCK_INCOMPATIBLE = "lock_incompatible"

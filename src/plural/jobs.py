@@ -141,7 +141,7 @@ class TrialStatus(str, Enum):
     QUEUED = "queued"
     PROVISIONING = "provisioning"
     RUNNING = "running"
-    VERIFYING = "verifying"
+    SCORING = "scoring"
     AWAITING_REVIEW = "awaiting_review"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
@@ -154,7 +154,7 @@ class ExecutionStatus(str, Enum):
     QUEUED = "queued"
     PROVISIONING = "provisioning"
     RUNNING = "running"
-    VERIFYING = "verifying"
+    SCORING = "scoring"
     AWAITING_REVIEW = "awaiting_review"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
@@ -180,7 +180,7 @@ class ProgressEvent(FrozenModel):
         "observation",
         "reward",
         "log",
-        "verifying",
+        "scoring",
         "awaiting_review",
         "retrying",
         "succeeded",
@@ -308,11 +308,11 @@ class ModelResolution(FrozenModel):
     catalog_updated_at: str | None = None
 
 
-class VerifierResult(FrozenModel):
-    """One immutable Verifier outcome."""
+class RewarderResult(FrozenModel):
+    """One immutable Rewarder outcome."""
 
-    verifier_name: str
-    verifier_digest: str
+    rewarder_name: str
+    rewarder_digest: str
     kind: Literal["deterministic", "agent", "human"]
     status: Literal["succeeded", "failed", "awaiting_review"]
     score: float | None = None
@@ -323,14 +323,14 @@ class VerifierResult(FrozenModel):
     completed_at: datetime | None = None
 
     @model_validator(mode="after")
-    def _finite(self) -> VerifierResult:
+    def _finite(self) -> RewarderResult:
         values = [*self.scores.values()]
         if self.score is not None:
             values.append(self.score)
         if any(not math.isfinite(item) for item in values):
-            raise ValueError("verifier result contains a non-finite score")
+            raise ValueError("rewarder result contains a non-finite score")
         if self.status == "succeeded" and self.score is None:
-            raise ValueError("successful verifier result requires a score")
+            raise ValueError("successful rewarder result requires a score")
         return self
 
 
@@ -497,7 +497,7 @@ class JobSpec(FrozenModel):
                 attempt=attempt,
                 model=resolutions[agent.agent_id],
                 environment=task.environment.identity,
-                verifier_digests=tuple(item.verifier.content_hash for item in task.verifiers),
+                rewarder_digests=tuple(item.rewarder.content_hash for item in task.rewarders),
                 harness=agent.harness,
                 harness_grant=resolve_trial_harness_grant(task.environment, agent.agent),
                 mode=self.mode,
@@ -521,8 +521,8 @@ class JobSpec(FrozenModel):
             model_resolutions=tuple(resolutions[agent.agent_id] for agent in self.agents),
             task_digests=tuple(task.content_hash for task in self.tasks),
             environment_digests=tuple(task.environment.content_hash for task in self.tasks),
-            verifier_digests=tuple(
-                item.verifier.content_hash for task in self.tasks for item in task.verifiers
+            rewarder_digests=tuple(
+                item.rewarder.content_hash for task in self.tasks for item in task.rewarders
             ),
             agent_digests=tuple(agent.content_hash for agent in self.agents),
             harness_digests=tuple(
@@ -546,7 +546,7 @@ class TrialSpec(FrozenModel):
     attempt: int = Field(ge=1)
     model: ModelResolution
     environment: EnvironmentIdentity
-    verifier_digests: tuple[str, ...]
+    rewarder_digests: tuple[str, ...]
     harness: HarnessBinding | None = None
     harness_grant: HarnessGrant | None = Field(
         default=None, validation_alias=AliasChoices("harness_grant", "harness_stamp")
@@ -593,7 +593,7 @@ class JobLock(FrozenModel):
     model_resolutions: tuple[ModelResolution, ...]
     task_digests: tuple[str, ...]
     environment_digests: tuple[str, ...]
-    verifier_digests: tuple[str, ...]
+    rewarder_digests: tuple[str, ...]
     agent_digests: tuple[str, ...]
     harness_digests: tuple[str, ...]
     mode: JobMode
@@ -622,7 +622,7 @@ PhaseName = Literal[
     "environment_setup",
     "agent_execution",
     "artifact_collection",
-    "verification",
+    "scoring",
     "cleanup",
 ]
 
@@ -661,7 +661,7 @@ class TrialReceipt(FrozenModel):
     benchmark: BenchmarkPin | None = None
     model: ModelResolution
     environment_digest: str
-    verifier_digests: tuple[str, ...]
+    rewarder_digests: tuple[str, ...]
     agent_digest: str
     harness_digest: str = ""
     harness_grant: HarnessGrant | None = Field(
@@ -701,7 +701,7 @@ class TrialResult(FrozenModel):
     receipt: TrialReceipt
     score: float | None = None
     scores: dict[str, float] = Field(default_factory=dict)
-    verifier_results: tuple[VerifierResult, ...] = ()
+    rewarder_results: tuple[RewarderResult, ...] = ()
     trace_id: str | None = None
     error_code: ErrorCode | None = None
     error_message: str | None = None
@@ -880,9 +880,9 @@ class Job:
             return current
         agents = getattr(self.spec, "agents", ())
         judged = any(
-            getattr(binding.verifier, "kind", None) == "agent"
+            getattr(binding.rewarder, "kind", None) == "agent"
             for task in getattr(self.spec, "tasks", ())
-            for binding in task.verifiers
+            for binding in task.rewarders
         )
         if agents and not judged and all(binding.auth_mode == "none" for binding in agents):
             # Credential-free Jobs never call a live model endpoint, so no
@@ -919,7 +919,7 @@ class Job:
             return current
         raise ValueError(
             "Cannot run Job.\n"
-            "A live model call, by an Agent or a model-judge Verifier, goes through the "
+            "A live model call, by an Agent or a model-judge Rewarder, goes through the "
             "Plural gateway and needs a Plural API key.\n"
             "SDK:  Job(task, agents=[agent], client=Client())\n"
             "SDK:  Job(task, agents=[agent], api_key='...')\n"
@@ -986,6 +986,6 @@ __all__ = [
     "TrialResult",
     "TrialSpec",
     "TrialStatus",
-    "VerifierResult",
+    "RewarderResult",
     "resolve_trial_harness_grant",
 ]

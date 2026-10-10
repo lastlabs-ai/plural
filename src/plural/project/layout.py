@@ -8,7 +8,7 @@ manifest::
     project.yaml  plural.lock  pyproject.toml  README.md  .plural/
     environments/<name>/environment.yaml
     tasks/<name>/task.yaml
-    verifiers/<name>/verifier.yaml
+    rewarders/<name>/rewarder.yaml
     harnesses/<name>/harness.yaml
     agents/<name>/agent.yaml
     benchmarks/<name>/benchmark.yaml
@@ -79,13 +79,13 @@ class ResourceKind:
 
 
 ENVIRONMENT = ResourceKind("environment", "env", "environments", "environment.yaml", "Environment")
-VERIFIER = ResourceKind("verifier", "verifier", "verifiers", "verifier.yaml", "Verifier")
+REWARDER = ResourceKind("rewarder", "rewarder", "rewarders", "rewarder.yaml", "Rewarder")
 HARNESS = ResourceKind("harness", "harness", "harnesses", "harness.yaml", "Harness")
 TASK = ResourceKind("task", "task", "tasks", "task.yaml", "Task")
 AGENT = ResourceKind("agent", "agent", "agents", "agent.yaml", "Agent")
 BENCHMARK = ResourceKind("benchmark", "benchmark", "benchmarks", "benchmark.yaml", "Benchmark")
 
-KINDS: tuple[ResourceKind, ...] = (ENVIRONMENT, VERIFIER, HARNESS, TASK, AGENT, BENCHMARK)
+KINDS: tuple[ResourceKind, ...] = (ENVIRONMENT, REWARDER, HARNESS, TASK, AGENT, BENCHMARK)
 _BY_NAME = {kind.name: kind for kind in KINDS} | {kind.cli: kind for kind in KINDS}
 
 
@@ -384,7 +384,7 @@ __all__ = [
     "PROJECT_FILE",
     "STATE_DIR",
     "TASK",
-    "VERIFIER",
+    "REWARDER",
     "Project",
     "ProjectError",
     "ResourceKind",

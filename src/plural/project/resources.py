@@ -1,7 +1,7 @@
 """Load, validate, and order the resources in one project.
 
 A :class:`Workspace` loads a resource by name into the same SDK object a Python
-author would build (an ``Environment``, ``Task``, ``Verifier``, ``Harness``,
+author would build (an ``Environment``, ``Task``, ``Rewarder``, ``Harness``,
 ``Agent``, or ``Benchmark``). Loading is validation: every problem found in a
 resource is collected into one :class:`ProjectError`, so a person sees the full
 list at once rather than fixing one error per run.
@@ -41,8 +41,8 @@ from plural.project.layout import (
     BENCHMARK,
     ENVIRONMENT,
     HARNESS,
+    REWARDER,
     TASK,
-    VERIFIER,
     Project,
     ProjectError,
     ResourceRef,
@@ -57,18 +57,18 @@ from plural.project.manifests import (
     read_yaml_mapping,
     validation_problems,
 )
+from plural.rewarders import (
+    AgentRewarder,
+    DeterministicRewarder,
+    HumanRewarder,
+    Rewarder,
+    RewarderDefinition,
+)
 from plural.sandbox.catalog import RuntimeSettingsError, runtime_from_settings, runtime_provider
 from plural.tasks import RELEASE_FIELDS, Benchmark, Task
-from plural.verifiers import (
-    AgentVerifier,
-    DeterministicVerifier,
-    HumanVerifier,
-    Verifier,
-    VerifierDefinition,
-)
 
 SCAFFOLD_MARKER = "PLURAL-TODO"
-_VERIFIER_ADAPTER: TypeAdapter[VerifierDefinition] = TypeAdapter(VerifierDefinition)
+_REWARDER_ADAPTER: TypeAdapter[RewarderDefinition] = TypeAdapter(RewarderDefinition)
 _IGNORED_PARTS = frozenset({".git", ".plural", "__pycache__", ".venv", "node_modules"})
 _TEXT_SUFFIXES = frozenset({".py", ".md", ".yaml", ".yml", ".txt", ".json", ".toml"})
 
@@ -136,7 +136,7 @@ class Workspace:
         describes.
 
         Args:
-            kind: ``environment``/``env``, ``task``, ``verifier``, ``harness``,
+            kind: ``environment``/``env``, ``task``, ``rewarder``, ``harness``,
                 ``agent``, or ``benchmark``.
             name: The resource's directory name.
 
@@ -228,8 +228,8 @@ def declared_dependencies(kind: str, payload: Mapping[str, Any]) -> tuple[Resour
         if isinstance(payload.get("environment"), str):
             refs.append(ResourceRef(ENVIRONMENT.name, payload["environment"]))
         refs.extend(
-            ResourceRef(VERIFIER.name, name)
-            for name in payload.get("verifiers") or ()
+            ResourceRef(REWARDER.name, name)
+            for name in payload.get("rewarders") or ()
             if isinstance(name, str)
         )
     elif kind == AGENT.name:
@@ -455,39 +455,41 @@ def runtime_from_manifest(spec: Mapping[str, Any] | str) -> EnvironmentRuntime:
     return EnvironmentRuntime.model_validate({"provider": provider, **payload})
 
 
-def _load_verifier(workspace: Workspace, ref: ResourceRef, directory: Path) -> LocalResource:
+def _load_rewarder(workspace: Workspace, ref: ResourceRef, directory: Path) -> LocalResource:
     problems, payload = _begin(workspace, ref, directory)
-    verifier = None
+    rewarder = None
     if payload:
         _check_identity(str(payload.get("name") or ""), ref, problems)
-        verifier = _build_verifier(payload, directory, workspace.catalog, problems)
-    return _finish(workspace, ref, directory, verifier, (), problems)
+        rewarder = _build_rewarder(payload, directory, workspace.catalog, problems)
+    return _finish(workspace, ref, directory, rewarder, (), problems)
 
 
-def _build_verifier(
+def _build_rewarder(
     payload: dict[str, Any], directory: Path, catalog: ModelCatalog, problems: list[str]
-) -> Verifier | None:
+) -> Rewarder | None:
     prepared = dict(payload)
     prepared.setdefault("kind", "deterministic")
-    check = prepared.get("check")
-    bound_check = False
-    if isinstance(check, str) and _looks_like_reference(check):
-        function = _import_reference(directory, check, "check", problems)
+    bound = False
+    for hook in ("final", "step"):
+        reference = prepared.get(hook)
+        if not (isinstance(reference, str) and _looks_like_reference(reference)):
+            continue
+        function = _import_reference(directory, reference, hook, problems)
         if function is None:
             return None
         if not callable(function):
-            problems.append(f"check: {check} is not a function")
+            problems.append(f"{hook}: {reference} is not a function")
             return None
-        prepared["check"] = function
-        bound_check = True
+        prepared[hook] = function
+        bound = True
     try:
-        verifier = _VERIFIER_ADAPTER.validate_python(prepared, context={"catalog": catalog})
+        rewarder = _REWARDER_ADAPTER.validate_python(prepared, context={"catalog": catalog})
     except ValidationError as exc:
         problems.extend(validation_problems(exc))
         return None
-    if bound_check and isinstance(verifier, DeterministicVerifier):
-        verifier.bind_source_digest(source_digest(directory))
-    return verifier
+    if bound and isinstance(rewarder, DeterministicRewarder):
+        rewarder.bind_source(source_digest(directory), directory)
+    return rewarder
 
 
 def _load_harness(workspace: Workspace, ref: ResourceRef, directory: Path) -> LocalResource:
@@ -554,14 +556,14 @@ def _load_task(workspace: Workspace, ref: ResourceRef, directory: Path) -> Local
         instructions = _read_instructions(directory, manifest.instructions, problems)
         resources = _task_resources(directory, manifest.resources, problems)
         environment = _dependency(workspace, ResourceRef(ENVIRONMENT.name, manifest.environment))
-        verifiers = [
-            _dependency(workspace, ResourceRef(VERIFIER.name, name)) for name in manifest.verifiers
+        rewarders = [
+            _dependency(workspace, ResourceRef(REWARDER.name, name)) for name in manifest.rewarders
         ]
-        for item in (environment, *verifiers):
+        for item in (environment, *rewarders):
             if isinstance(item, str):
                 problems.append(item)
-        if len(set(manifest.verifiers)) != len(manifest.verifiers):
-            problems.append("verifiers: each Verifier may be listed once")
+        if len(set(manifest.rewarders)) != len(manifest.rewarders):
+            problems.append("rewarders: each Rewarder may be listed once")
         if instructions and not problems:
             assert isinstance(environment, LocalResource)
             try:
@@ -574,8 +576,8 @@ def _load_task(workspace: Workspace, ref: ResourceRef, directory: Path) -> Local
                         "info": manifest.info,
                         "metadata": manifest.metadata,
                         "environment": environment.value,
-                        "verifiers": tuple(
-                            item.value for item in verifiers if isinstance(item, LocalResource)
+                        "rewarders": tuple(
+                            item.value for item in rewarders if isinstance(item, LocalResource)
                         ),
                         "resources": resources,
                         "initial_state": manifest.initial_state,
@@ -596,8 +598,8 @@ _TASK_HINTS = {
         "environment: is required. Name the one Environment this Task runs in, "
         "for example `environment: support-desk` (create one with `plural env init <name>`)"
     ),
-    "verifiers": (
-        "verifiers: needs at least one Verifier name, for example `verifiers: [resolved]`"
+    "rewarders": (
+        "rewarders: needs at least one Rewarder name, for example `rewarders: [resolved]`"
     ),
 }
 
@@ -731,25 +733,25 @@ def _load_benchmark(workspace: Workspace, ref: ResourceRef, directory: Path) -> 
 
 
 def _score_compatibility(manifest: BenchmarkManifest, tasks: list[LocalResource]) -> list[str]:
-    """Check that every Task's Verifiers can score inside the Benchmark range.
+    """Check that every Task's Rewarders can score inside the Benchmark range.
 
-    A Benchmark ranks on the Verifier score. A rubric whose criteria can score
+    A Benchmark ranks on the Rewarder score. A rubric whose criteria can score
     outside ``scoring.score_range`` would produce scores the ranking cannot
     place, so it is rejected here rather than at result time.
 
     Returns:
-        One problem per incompatible Verifier.
+        One problem per incompatible Rewarder.
     """
     low, high = manifest.scoring.score_range
     problems = []
     for task in tasks:
-        for verifier in task.value.verifiers:
-            if not isinstance(verifier, (AgentVerifier, HumanVerifier)):
+        for rewarder in task.value.rewarders:
+            if not isinstance(rewarder, (AgentRewarder, HumanRewarder)):
                 continue
-            for criterion in verifier.criteria:
+            for criterion in rewarder.criteria:
                 if criterion.min_score < low or criterion.max_score > high:
                     problems.append(
-                        f"task {task.ref.name!r}: Verifier {verifier.name!r} criterion "
+                        f"task {task.ref.name!r}: Rewarder {rewarder.name!r} criterion "
                         f"{criterion.name!r} scores {criterion.min_score}..{criterion.max_score}, "
                         f"outside scoring.score_range {low}..{high}"
                     )
@@ -932,7 +934,7 @@ def _missing_message(project: Project, ref: ResourceRef) -> str:
 
 _LOADERS: dict[str, Callable[[Workspace, ResourceRef, Path], LocalResource]] = {
     ENVIRONMENT.name: _load_environment,
-    VERIFIER.name: _load_verifier,
+    REWARDER.name: _load_rewarder,
     HARNESS.name: _load_harness,
     TASK.name: _load_task,
     AGENT.name: _load_agent,

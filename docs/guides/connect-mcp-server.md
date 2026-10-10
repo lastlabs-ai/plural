@@ -2,7 +2,7 @@
 route: /docs/guides/connect-mcp-server
 title: Connect an MCP server
 order: 32
-description: Turn any MCP server into an App, so Agents can be evaluated and trained against it. Covers local and remote servers, Agent credentials and secrets, choosing tools, resetting a sandbox, and checking state in Verifiers.
+description: Turn any MCP server into an App, so Agents can be evaluated and trained against it. Covers local and remote servers, Agent credentials and secrets, choosing tools, resetting a sandbox, and checking state in Rewarders.
 audience: all
 nav: true
 nav_group: Build
@@ -13,17 +13,16 @@ Any MCP server can be an [App](../concepts/apps.md). Its tools become the Agent'
 actions, and Plural handles the session, the credentials, and the record of every call.
 This guide connects a server, then makes it safe to benchmark.
 
-## 1. Draft the Environment
+## 1. Add the server to an Environment
 
-From inside a project, run `plural env from-mcp` with the command that starts the
-server:
+From inside a project, run `plural env add` with the command that starts the server:
 
 ```bash
-plural env from-mcp memory --command "npx -y @modelcontextprotocol/server-memory"
+plural env add memory --mcp "npx -y @modelcontextprotocol/server-memory"
 ```
 
 ```text
-Drafted environment memory:
+Created environment memory:
   environments/memory/environment.yaml
   environments/memory/README.md
 
@@ -76,13 +75,18 @@ cache folder. `TMPDIR` already points into the folder.
 Plural treats every other tool as one that changes state, which matters for
 [control levels](#5-make-a-remote-server-safe-to-benchmark).
 
-For a server reached over HTTP, pass `--url` instead, with any headers it needs:
+The App is named after the server's package, here `memory`; pass `--app NAME` to
+choose. For a server reached over HTTP, pass its URL instead, with any headers it
+needs:
 
 ```bash
-plural env from-mcp crm \
-  --url https://mcp.example.com/v1 \
+plural env add crm \
+  --mcp https://mcp.example.com/v1 --app crm \
   --header 'Authorization=Bearer ${CRM_TOKEN}'
 ```
+
+Run `plural env add` again with another Environment's name to add the same way to it,
+or with this one's name to add a second system beside the first.
 
 Quote the header in single quotes so your shell leaves `${CRM_TOKEN}` alone; Plural
 fills it in. Every `${NAME}` becomes a credential the running Agent supplies; see
@@ -181,7 +185,7 @@ scopes; the system that issued the token does.
 ### Setup secrets
 
 Some values belong to the project, not to any Agent: the admin token a `reset` command
-uses to wipe a sandbox, or a key a Verifier needs. List those under `secrets`, and store
+uses to wipe a sandbox, or a key a Rewarder needs. List those under `secrets`, and store
 each once in the hosted project, or export it:
 
 ```bash
@@ -194,7 +198,7 @@ plural secret set CRM_ADMIN_TOKEN
 
 A server started with `command` runs inside the Runtime, and Plural starts a new
 process for every Trial, so it is `owned` and can be used anywhere. It starts fresh
-only if it keeps its data in `${PLURAL_APP_DIR}`, as in [step 1](#1-draft-the-environment).
+only if it keeps its data in `${PLURAL_APP_DIR}`, as in [step 1](#1-add-the-server-to-an-environment).
 
 A remote server is shared. If one Trial creates a record, the next Trial sees it, and
 scores stop being comparable. With no way to reset it, the App is `live`:
@@ -272,37 +276,37 @@ apps:
       credentials: [CRM_TOKEN]
 ```
 
-## 6. Check the work in a Verifier
+## 6. Check the work in a Rewarder
 
-A Verifier should check what happened in the system, not what the Agent says
+A Rewarder should check what happened in the system, not what the Agent says
 happened. There are two ways.
 
 **The snapshot.** If the App has a `snapshot` hook, its output is the App's final
 state:
 
 ```python
-from plural import Episode, VerifierOutput
+from plural import Episode, RewarderOutput
 
 
-def ticket_closed(episode: Episode) -> VerifierOutput:
+def ticket_closed(episode: Episode) -> RewarderOutput:
     tickets = episode.apps["crm"].final["tickets"]
     closed = any(item["id"] == "T-7" and item["status"] == "closed" for item in tickets)
-    return VerifierOutput(score=float(closed))
+    return RewarderOutput(score=float(closed))
 ```
 
-**A query.** A Verifier can call one of the App's read-only tools while the Trial's
+**A query.** A Rewarder can call one of the App's read-only tools while the Trial's
 Runtime is still running:
 
 ```python
-from plural import Episode, VerifierOutput
+from plural import Episode, RewarderOutput
 
 
-def ticket_closed(episode: Episode) -> VerifierOutput:
+def ticket_closed(episode: Episode) -> RewarderOutput:
     ticket = episode.apps["crm"].query("get_ticket", id="T-7")
-    return VerifierOutput(score=float(ticket["status"] == "closed"))
+    return RewarderOutput(score=float(ticket["status"] == "closed"))
 ```
 
-`query` refuses a tool that changes state, so a Verifier can't alter what it checks.
+`query` refuses a tool that changes state, so a Rewarder can't alter what it checks.
 It returns the tool's structured content when the server sends some, and its text
 otherwise.
 
@@ -352,11 +356,11 @@ environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local
 | `exclude` | Never offer these tools. |
 | `reset` | Command run at the start of each episode, with the App's starting state as JSON on stdin. |
 | `snapshot` | Command that prints the App's state as JSON. |
-| `snapshot_on_step` | Also snapshot around every action, so `@rewarder` methods receive states. Off by default, since it costs a call per step. |
+| `snapshot_on_step` | Also snapshot around every action, so a Rewarder's `step` check receives `previous_state` and `current_state`. Off by default, since it costs a call per step. |
 | `actions` | Tool declarations to use instead of asking the server, so the Environment loads without reaching it. |
 | `timeout_seconds` | How long one tool call may run. Default 60. |
 | `credentials` | Names the running Agent supplies, such as its own API token. |
-| `secrets` | Names the project supplies, for `reset` and `snapshot` commands and Verifiers. |
+| `secrets` | Names the project supplies, for `reset` and `snapshot` commands and Rewarders. |
 
 ## Troubleshooting
 

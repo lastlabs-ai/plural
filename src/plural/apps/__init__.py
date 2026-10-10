@@ -16,12 +16,11 @@ from plural.apps.definition import (
     AppDefinition,
     AppKind,
     ExposedAction,
-    RewarderDefinition,
     SecretReference,
 )
 
 if TYPE_CHECKING:
-    from plural.apps.base import App, rewarder
+    from plural.apps.base import App
     from plural.apps.host import AppHost
     from plural.apps.mcp import MCPApp
     from plural.apps.openapi import OpenAPIApp
@@ -29,7 +28,6 @@ if TYPE_CHECKING:
 
 _LAZY = {
     "App": "plural.apps.base",
-    "rewarder": "plural.apps.base",
     "AppHost": "plural.apps.host",
     "MCPApp": "plural.apps.mcp",
     "OpenAPIApp": "plural.apps.openapi",
@@ -57,7 +55,5 @@ __all__ = [
     "MCPApp",
     "OpenAPIApp",
     "ReplayApp",
-    "RewarderDefinition",
     "SecretReference",
-    "rewarder",
 ]

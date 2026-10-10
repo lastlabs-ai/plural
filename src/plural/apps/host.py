@@ -2,8 +2,9 @@
 
 The App host owns everything that happens behind the action boundary: it
 resets every App from the Task's initial state, routes each exposed action to
-its App, scores the App's rewarders, runs the Environment's ``on_step`` hook,
-and reports snapshots for Verifiers. It returns one step envelope per call.
+its App, runs the Environment's ``on_step`` hook, calls each of the Task's
+Rewarders' ``step`` hooks, and reports snapshots for their ``final`` hooks. It
+returns one step envelope per call.
 
 The Agent sees only an envelope's ``observation`` (as ``rendered`` text).
 Rewards, snapshots, and views are bookkeeping and never reach the Agent.
@@ -12,13 +13,18 @@ Rewards, snapshots, and views are bookkeeping and never reach the Agent.
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json
+import sys
 import time
-from collections.abc import Mapping
+import uuid
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from plural.apps.base import App, observation_payload
+from plural.rewarders import Step, StepTask
 
 if TYPE_CHECKING:
     from plural.environments.env import Environment
@@ -64,10 +70,99 @@ class AppHandle:
         return result
 
 
+class AppView:
+    """What a Rewarder's ``step`` hook may read of one App: never an action that writes."""
+
+    def __init__(self, host: AppHost, app: App[Any]) -> None:
+        self._host = host
+        self._app = app
+
+    @property
+    def name(self) -> str:
+        """The App's name."""
+        return self._app.name
+
+    @property
+    def state(self) -> Any:
+        """The App's typed state, for a Python App."""
+        return self._app.state
+
+    def snapshot(self) -> Any:
+        """Read the App's current state.
+
+        Returns:
+            The App's snapshot, or ``None`` when it cannot report one.
+        """
+        return self._host._snapshot(self._app)
+
+    def query(self, action: str, /, **arguments: Any) -> Any:
+        """Call one of the App's read-only actions.
+
+        Returns:
+            The action's observation.
+        """
+        return self._host.query(self._app.name, action, arguments)
+
+
+@dataclass(frozen=True)
+class StepRewarder:
+    """A Task Rewarder's ``step`` hook, loaded where the Apps run."""
+
+    name: str
+    version: str
+    fn: Callable[[Step], Any]
+
+
+def load_step_rewarders(root: Path, entries: Sequence[Mapping[str, Any]]) -> list[StepRewarder]:
+    """Import each Rewarder's ``step`` hook from the files the Job staged under ``root``.
+
+    Each entry names a Rewarder, its version, its hook as ``file.py:function``,
+    and the folder holding its source, relative to ``root``.
+
+    Returns:
+        The hooks, in the Task's order.
+
+    Raises:
+        ValueError: When a hook's file or function is missing.
+    """
+    loaded: list[StepRewarder] = []
+    for entry in entries:
+        name = str(entry["name"])
+        folder = (root / str(entry["dir"])).resolve()
+        file_name, _, function_name = str(entry["python"]).rpartition(":")
+        path = folder / file_name
+        if not path.is_file():
+            raise ValueError(f"Rewarder {name!r}: its step hook file {file_name} is missing")
+        module_name = f"_plural_rewarder_{uuid.uuid4().hex}"
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            raise ValueError(f"Rewarder {name!r}: cannot import {file_name}")
+        module = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(folder))
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.path.remove(str(folder))
+        function: Any = module
+        for part in function_name.split("."):
+            function = getattr(function, part, None)
+            if function is None:
+                raise ValueError(f"Rewarder {name!r}: {file_name} has no {function_name}")
+        loaded.append(StepRewarder(name=name, version=str(entry.get("version") or ""), fn=function))
+    return loaded
+
+
 class AppHost:
     """Episode state for one Environment's Apps in one process."""
 
-    def __init__(self, environment: Environment, workspace: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        environment: Environment,
+        workspace: str | Path | None = None,
+        *,
+        rewarders: Sequence[StepRewarder] = (),
+        task: StepTask | None = None,
+    ) -> None:
         self.environment = environment
         self.definition = environment.definition()
         self.apps: dict[str, App[Any]] = {item.name: item for item in environment.apps}
@@ -76,6 +171,8 @@ class AppHost:
         if self.workspace is not None:
             for app in self.apps.values():
                 app.workspace = self.workspace
+        self.rewarders = tuple(rewarders)
+        self.task = task or StepTask()
         self.initial: dict[str, Any] = {}
         self.turns = 0
         self.started = False
@@ -149,42 +246,45 @@ class AppHost:
         app_name, action_name = route
         app = self.apps[app_name]
         arguments = dict(arguments)
-        previous = self._snapshot(app) if app.snapshot_on_step else None
+        watched = bool(self.rewarders) and app.snapshot_on_step
+        previous = self._snapshot(app) if watched else None
         self._effects = []
         started = time.monotonic()
         try:
             result = app.call(action_name, arguments)
         except ValueError as exc:
             self.turns += 1
+            reward, signals = self._reward(
+                app_name, action_name, arguments, None, str(exc), previous, previous
+            )
             return self._envelope(
                 "step",
                 app=app_name,
                 action=name,
                 observation=None,
                 rendered="",
+                reward=reward,
+                rewards=signals,
                 info={**app.step_info(), "error": str(exc)},
                 view=self._view(app_name),
             )
         latency_ms = round((time.monotonic() - started) * 1000, 3)
         self.turns += 1
-        current = self._snapshot(app) if app.snapshot_on_step else None
         payload, rendered = observation_payload(result)
-        reward, signals = _score(
-            app,
-            previous,
-            current,
-            {"name": action_name, **arguments},
-            payload,
-        )
-        extra = self.environment.on_step(
+        effect: Any = cast(Any, self.environment.on_step)(
             ActionCall(app=app_name, action=action_name, arguments=arguments, name=name),
             result,
             {key: AppHandle(self, value) for key, value in self.apps.items()},
         )
-        if extra is not None:
-            value = float(extra)
-            signals.append({"name": "on_step", "app": None, "weight": 1.0, "value": value})
-            reward += value
+        if effect is not None:
+            raise TypeError(
+                "Environment.on_step returned a value, but it only applies effects across "
+                "Apps now. Move the reward to a Rewarder's step hook on the Task."
+            )
+        current = self._snapshot(app) if watched else None
+        reward, signals = self._reward(
+            app_name, action_name, arguments, payload, None, previous, current
+        )
         info: dict[str, Any] = {**app.step_info(), "latency_ms": latency_ms}
         if self._effects:
             info["effects"] = list(self._effects)
@@ -217,7 +317,7 @@ class AppHost:
         return report
 
     def query(self, app_name: str, action: str, arguments: Mapping[str, Any]) -> Any:
-        """Run a read-only action for a Verifier.
+        """Run a read-only action for a Rewarder.
 
         Returns:
             The action's JSON observation.
@@ -235,7 +335,7 @@ class AppHost:
             raise KeyError(f"App {app_name!r} has no action {action!r}")
         if declaration.mutates_state:
             raise PermissionError(
-                f"Verifiers may only call read-only actions; {app_name}.{action} can change "
+                f"Rewarders may only call read-only actions; {app_name}.{action} can change "
                 "state. Mark it @action(read_only=True), or for MCP set readOnlyHint."
             )
         payload, _ = observation_payload(self.apps[app_name].call(action, dict(arguments)))
@@ -248,6 +348,55 @@ class AppHost:
                 app.close()
 
     # Helpers.
+
+    def _reward(
+        self,
+        app: str,
+        action: str,
+        arguments: Mapping[str, Any],
+        observation: Any,
+        error: str | None,
+        previous: Any,
+        current: Any,
+    ) -> tuple[float, list[dict[str, Any]]]:
+        """Call every ``step`` hook on one action; a failing hook never fails the action.
+
+        Returns:
+            The step's total reward and one signal per Rewarder that answered.
+        """
+        if not self.rewarders:
+            return 0.0, []
+        step = Step(
+            task=self.task,
+            turn=self.turns,
+            app=app,
+            action=action,
+            arguments=dict(arguments),
+            observation=observation,
+            error=error,
+            previous_state=previous,
+            current_state=current,
+            apps={name: AppView(self, item) for name, item in self.apps.items()},
+        )
+        total = 0.0
+        signals: list[dict[str, Any]] = []
+        for rewarder in self.rewarders:
+            entry: dict[str, Any] = {
+                "name": rewarder.name,
+                "version": rewarder.version,
+                "app": app,
+            }
+            try:
+                value = rewarder.fn(step)
+                if value is None:
+                    continue
+                entry["value"] = float(value)
+            except Exception as exc:  # noqa: BLE001 - a reward never fails the action
+                entry.update({"value": 0.0, "error": f"{type(exc).__name__}: {exc}"})
+            else:
+                total += entry["value"]
+            signals.append(entry)
+        return total, signals
 
     def _snapshot(self, app: App[Any]) -> Any:
         if not app.has_snapshot():
@@ -337,28 +486,11 @@ def _accepts_seed(app: App[Any]) -> bool:
     return "seed" in app._state_type().model_fields
 
 
-def _score(
-    app: App[Any],
-    previous: Any,
-    current: Any,
-    action: dict[str, Any],
-    result: Any,
-) -> tuple[float, list[dict[str, Any]]]:
-    signals: list[dict[str, Any]] = []
-    total = 0.0
-    for config, method in app._rewarder_methods():
-        weight = float(config["weight"])
-        entry: dict[str, Any] = {"name": str(config["name"]), "app": app.name, "weight": weight}
-        try:
-            value = float(method(previous, current, action, result))
-        except Exception as exc:  # noqa: BLE001
-            # A reward signal must never fail the action that already ran.
-            entry.update({"value": 0.0, "error": str(exc)})
-        else:
-            entry["value"] = value
-            total += weight * value
-        signals.append(entry)
-    return total, signals
-
-
-__all__ = ["STEP_PROTOCOL", "AppHandle", "AppHost"]
+__all__ = [
+    "STEP_PROTOCOL",
+    "AppHandle",
+    "AppHost",
+    "AppView",
+    "StepRewarder",
+    "load_step_rewarders",
+]

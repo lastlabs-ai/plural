@@ -13,9 +13,9 @@ A record targets one of three things, through a :class:`RewardTarget`:
 - a span inside an event: character offsets into its text, or a token range on
   the TITO record of that model call.
 
-Rewards come from two places. Online rewards are scored while the episode runs,
-by ``@rewarder`` methods on Apps and by the Environment's ``on_step`` hook.
-Hindsight rewards are scored after it ends, by :func:`hindsight_rewarder`
+Rewards come from two places. Step rewards are given while the episode runs,
+by the ``step`` hook of each of the Task's Rewarders, beside the Apps.
+Hindsight rewards are given after it ends, by :func:`hindsight_rewarder`
 functions that read the whole trajectory, the Apps' snapshots, and the score.
 Run them in a Job with ``Job(..., hindsight=[...])``, or later on stored Trials
 with ``plural rewards apply``.
@@ -38,7 +38,7 @@ from pydantic import Field, model_validator
 from plural.common import FrozenModel
 
 LEDGER_FILE = "rewards.jsonl"
-RewardSource = Literal["app", "environment", "hindsight", "judge", "human"]
+RewardSource = Literal["step", "environment", "hindsight", "judge", "human"]
 TextField = Literal["text", "reasoning"]
 
 
@@ -201,18 +201,19 @@ def append_ledger(path: str | Path, records: Iterable[RewardRecord]) -> int:
 
 
 def online_records(episode: Sequence[Mapping[str, Any]]) -> list[RewardRecord]:
-    """The online rewards recorded on each step of an ``episode.jsonl``.
+    """The step rewards recorded on each step of an ``episode.jsonl``.
 
-    Each App rewarder signal on a step becomes one record targeting that step.
-    A step that reports a total reward with no signals becomes one
-    ``environment`` record named ``reward``.
+    Each Rewarder's ``step`` signal becomes one record targeting that step,
+    including on a step whose action rejected its input. A step that reports
+    a total reward with no signals, as a third-party Environment may, becomes
+    one ``environment`` record named ``reward``.
 
     Returns:
         The records, in step order.
     """
     records: list[RewardRecord] = []
     for record in episode:
-        if record.get("kind") != "environment.step" or record.get("error"):
+        if record.get("kind") != "environment.step":
             continue
         identifier = record.get("event_id") or event_id(int(record.get("sequence") or 0))
         target = RewardTarget.step(str(identifier))
@@ -228,14 +229,15 @@ def online_records(episode: Sequence[Mapping[str, Any]]) -> list[RewardRecord]:
                     target=target,
                     value=float(signal.get("value") or 0),
                     weight=float(signal.get("weight", 1.0)),
-                    source="app" if app else "environment",
+                    source="step",
                     rewarder=str(signal.get("name") or "reward"),
+                    version=str(signal.get("version") or ""),
                     app=str(app) if app else None,
                     off_recording=off_recording,
                 )
             )
         reward = record.get("reward")
-        if not signals and isinstance(reward, (int, float)) and reward:
+        if not signals and not record.get("error") and isinstance(reward, (int, float)) and reward:
             records.append(
                 RewardRecord(
                     target=target,
@@ -632,7 +634,7 @@ def trial_from_artifacts(folder: Path, *, score: float | None = None) -> Hindsig
     )
     apps_file = folder / "apps.json"
     apps = json.loads(apps_file.read_text()) if apps_file.is_file() else {}
-    from plural.verifiers import Episode
+    from plural.rewarders import Episode
 
     return HindsightTrial(
         events,

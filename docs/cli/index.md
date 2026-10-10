@@ -43,15 +43,14 @@ plural project init NAME [--push]
 plural project show NAME
 plural project push
 plural env init NAME [--python]
-plural task|verifier|harness|agent|benchmark init NAME
-plural env|task|verifier|harness|agent|benchmark validate|show|push|pull [NAME]
-plural env|task|verifier|harness|agent|benchmark list
+plural task|rewarder|harness|agent|benchmark init NAME
+plural env|task|rewarder|harness|agent|benchmark validate|show|push|pull [NAME]
+plural env|task|rewarder|harness|agent|benchmark list
 plural benchmark add|remove TASK [--benchmark NAME]
-plural env from-mcp NAME (--command CMD | --url URL) [--header K=V] [--tool NAME]
-plural env from-openapi NAME --spec FILE_OR_URL [--base-url URL] [--operation ID]
+plural env add NAME (--mcp URL_OR_COMMAND | --openapi SPEC | --traces FILE) [--app APP]
+           [--header K=V] [--env K=V] [--tool NAME] [--operation ID] [--credential NAME]
 plural env eject-files NAME [--as FILE]
 plural env serve NAME [--app APP] [--port 3825]
-plural env from-traces NAME --traces FILE
 plural run (-t TASK | -b BENCHMARK) (-m MODEL [-h HARNESS] | -a AGENT)
            [--hosted [--follow] | --track] [--attempts N] [--concurrency N]
            [--plural-version VERSION] [--dry-run] [--json]
@@ -59,7 +58,7 @@ plural job list
 plural job show|rerun|push JOB_ID
 plural trial show|rerun TRIAL_ID
 plural review list
-plural review submit TRIAL_ID --verifier NAME --score SCORE
+plural review submit TRIAL_ID --rewarder NAME --score SCORE
 plural rewards apply PATH.py:NAME (--trial TRIAL_ID... | --job JOB_ID)
 plural rewards show TRIAL_ID
 plural rewards export (--trial TRIAL_ID... | --job JOB_ID) [--rewarder NAME[@VERSION]]

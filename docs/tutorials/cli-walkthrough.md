@@ -31,7 +31,7 @@ plural run --benchmark support-triage --agent scripted --dry-run
 plural run --benchmark support-triage --agent scripted
 ```
 
-- `validate` checks the Benchmark and every Task, Verifier, Environment, and Harness it
+- `validate` checks the Benchmark and every Task, Rewarder, Environment, and Harness it
   depends on.
 - `--dry-run` prints the plan and each input's version and content hash (a fingerprint
   of its exact files) without running anything.
@@ -63,7 +63,7 @@ plural trial show <trial-id>
 ```
 
 - `job show` lists each Trial with its Task, status, and score.
-- `trial show` prints the score, each Verifier's evidence, and where the Trial's
+- `trial show` prints the score, each Rewarder's evidence, and where the Trial's
   artifacts and logs are stored.
 
 To run the exact same experiment again:

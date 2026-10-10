@@ -33,7 +33,7 @@ from plural.benchmarks.publication import (
 )
 from plural.benchmarks.results import MeasuredMean
 from plural.identity import revision_hash
-from plural.verifiers import DeterministicVerifier, RubricCriterion
+from plural.rewarders import DeterministicRewarder, RubricCriterion
 
 
 def task(name: str, *, max_turns: int = 8) -> Task:
@@ -46,10 +46,10 @@ def task(name: str, *, max_turns: int = 8) -> Task:
             runtime=Runtime.docker(),
             limits=ExecutionLimits(max_turns=max_turns),
         ),
-        verifiers=(
-            DeterministicVerifier(
+        rewarders=(
+            DeterministicRewarder(
                 name="solved",
-                check="python verifier.py",
+                final="python rewarder.py",
                 criteria=(RubricCriterion(name="correct", description="Correct."),),
             ),
         ),

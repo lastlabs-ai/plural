@@ -1,6 +1,6 @@
 """What a Benchmark release declares about scoring and comparison.
 
-A release pins its Tasks and, with them, each Task's Environment and Verifier
+A release pins its Tasks and, with them, each Task's Environment and Rewarder
 revisions. This module holds the rest of what makes two results comparable:
 task categories, how scores are combined, and the evaluation tracks that fix
 the conditions an Agent is run under.
@@ -70,11 +70,11 @@ class BenchmarkScoring(FrozenModel):
 
     Repeated attempts of a Task are averaged first. Task scores are then
     combined with ``task_weights``; a Task without a weight counts once. Step
-    rewards never contribute: only the Verifier score on each Trial does.
+    rewards never contribute: only the Rewarder score on each Trial does.
 
     Attributes:
         metric: Human-readable name of the success metric, such as
-            ``"Resolution rate"``. It labels the Verifier score; it never
+            ``"Resolution rate"``. It labels the Rewarder score; it never
             selects a different value to rank on.
         description: What a score means, in words a reader can act on.
         aggregation: How Task scores combine. ``"weighted_mean"`` averages
@@ -85,7 +85,7 @@ class BenchmarkScoring(FrozenModel):
         task_weights: Weight per Task name. Unlisted Tasks weigh 1.
         coverage_required: Weighted share of Tasks that must have a score
             before a result can be ranked officially.
-        agent_failure: How an attempt that ended without a Verifier score
+        agent_failure: How an attempt that ended without a Rewarder score
             because of the Agent (for example, a budget ran out) is scored.
             ``"zero"`` scores it at the bottom of the range.
         infrastructure_error: Attempts lost to the runtime or provider are

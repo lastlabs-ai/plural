@@ -4,7 +4,7 @@ A revision's content hash names what it contains and nothing else. Labels a
 person chooses (``name``, ``title``, ``version``) are left out, so renaming a
 resource, labeling a release, or forking it into another project keeps the
 hash. Dependencies enter by their own content hashes, so a Benchmark's hash
-covers every Task, Environment, and Verifier beneath it.
+covers every Task, Environment, and Rewarder beneath it.
 
 The rules are language-neutral and specified in
 ``docs/architecture/revision-identity.md``; ``spec/identity/vectors.json``
@@ -45,7 +45,7 @@ UNORDERED_FIELDS = frozenset(
 )
 """Fields, at any depth, whose arrays are sets: sorted by their canonical JSON before hashing."""
 
-SEALED_KINDS = frozenset({"environment", "verifier", "task", "harness", "benchmark"})
+SEALED_KINDS = frozenset({"environment", "rewarder", "task", "harness", "benchmark"})
 """Kinds whose hash fixes their behavior. An Agent names a hosted model, so it is referenced."""
 
 
@@ -72,7 +72,7 @@ def revision_hash(kind: str, content: Mapping[str, Any]) -> str:
     """The content hash of one revision of ``kind``.
 
     Args:
-        kind: ``environment``, ``verifier``, ``task``, ``harness``, ``agent``,
+        kind: ``environment``, ``rewarder``, ``task``, ``harness``, ``agent``,
             or ``benchmark``.
         content: The revision's canonical definition. Top-level label fields
             are dropped here; dependencies must already be content hashes.

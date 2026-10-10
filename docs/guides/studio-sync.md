@@ -158,7 +158,7 @@ and instructions from the stored definition. The directory is the hosted slug,
 such as `tasks/ui-task/`, and `title:` keeps the display name, such as `UI Task`,
 so the pulled files match the hosted revision exactly. To rename it later, change
 `title:` and push; the hosted resource is renamed and its revision is unchanged. An
-Environment, Verifier, or Harness carries code and still cannot be pulled without
+Environment, Rewarder, or Harness carries code and still cannot be pulled without
 a package; push it again from its source directory. See
 [Migrate to 0.15](../migration/projects.md).
 

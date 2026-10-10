@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 PROTOCOL_VERSION = "plural-harness-v1"
-FORBIDDEN_HARNESS_KEYS = frozenset({"score", "scores", "reward", "verifier", "expected", "actions"})
+FORBIDDEN_HARNESS_KEYS = frozenset({"score", "scores", "reward", "rewarder", "expected", "actions"})
 
 
 class ProtocolModel(BaseModel):

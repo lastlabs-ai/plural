@@ -37,11 +37,11 @@
         "version": "1.2.0",
         "instructions": "Decide the refund.",
         "environment": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "verifiers": [
+        "rewarders": [
           "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         ]
       },
-      "expected": "sha256:616860dac738643aeb14d447472c3768518c0b164222bd4b50bdbca075d76257"
+      "expected": "sha256:5f8fae3b378c58978dd76bcdf000650c649ce959b57709da46c7520b51cd0e4c"
     },
     {
       "name": "the same content under other labels",
@@ -51,23 +51,23 @@
         "version": "0.1.0",
         "instructions": "Decide the refund.",
         "environment": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "verifiers": [
+        "rewarders": [
           "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         ]
       },
-      "expected": "sha256:616860dac738643aeb14d447472c3768518c0b164222bd4b50bdbca075d76257"
+      "expected": "sha256:5f8fae3b378c58978dd76bcdf000650c649ce959b57709da46c7520b51cd0e4c"
     },
     {
       "name": "the kind is part of the identity",
-      "kind": "verifier",
+      "kind": "rewarder",
       "content": {
         "instructions": "Decide the refund.",
         "environment": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "verifiers": [
+        "rewarders": [
           "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         ]
       },
-      "expected": "sha256:13369d1d8670dab67177f6261c1e6207e963f097989c32664c1945fae2ac8192"
+      "expected": "sha256:b710afec25e82000b469ea4100f9c99696957d933f7b072e6adf830220d30bfb"
     },
     {
       "name": "set-valued fields are sorted",

@@ -10,9 +10,9 @@ from plural import Agent, Client, Environment, Runtime, Task
 from plural.agents import AgentBinding, AgentDefinition
 from plural.environments.definition import EnvironmentDefinition
 from plural.jobs import BenchmarkJobSource, JobSpec
+from plural.rewarders import DeterministicRewarder, WeightedRewarder
 from plural.studio import studio_base_url
 from plural.tasks import BenchmarkDefinition, TaskDefinition
-from plural.verifiers import DeterministicVerifier, WeightedVerifier
 
 BASE = "https://api.example.com/api/v1"
 
@@ -105,7 +105,7 @@ def test_push_task_and_agent_revision_references(tmp_path: Path) -> None:
         name="case-1",
         instructions="Solve it.",
         environment=Environment(name="World", runtime=Runtime.docker()),
-        verifiers=[DeterministicVerifier(name="correct", check="python verify.py")],
+        rewarders=[DeterministicRewarder(name="correct", final="python reward.py")],
     )
     for collection, slug, parent_id in (
         ("tasks", "case-1", "task_1"),
@@ -123,14 +123,14 @@ def test_push_task_and_agent_revision_references(tmp_path: Path) -> None:
     client.tasks.push(
         task,
         environment_revision_id="env_rev_1",
-        verifier_revision_ids=["verifier_rev_1"],
+        rewarder_revision_ids=["rewarder_rev_1"],
     )
     client.agents.push(Agent(name="candidate", model="openai/gpt-5.6-luna"))
     task_payload = json.loads(task_route.calls.last.request.content)
     assert task_payload["environment_revision_id"] == "env_rev_1"
-    assert task_payload["verifier_revision_ids"] == ["verifier_rev_1"]
+    assert task_payload["rewarder_revision_ids"] == ["rewarder_rev_1"]
     assert task_payload["instructions"] == "Solve it."
-    assert "environment" not in task_payload and "verifiers" not in task_payload
+    assert "environment" not in task_payload and "rewarders" not in task_payload
     agent_payload = json.loads(agent_route.calls.last.request.content)
     assert agent_payload["model"] == "openai/gpt-5.6-luna"
     assert "environment" not in agent_payload
@@ -148,9 +148,9 @@ def test_submit_job_and_transition_cancel(tmp_path: Path) -> None:
         task_id="case-1",
         instructions="Solve it.",
         environment=EnvironmentDefinition(name="World"),
-        verifiers=(
-            WeightedVerifier(
-                verifier=DeterministicVerifier(name="correct", command=("python", "verify.py"))
+        rewarders=(
+            WeightedRewarder(
+                rewarder=DeterministicRewarder(name="correct", final=("python", "reward.py"))
             ),
         ),
     )

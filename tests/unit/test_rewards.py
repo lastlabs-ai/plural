@@ -41,8 +41,9 @@ EPISODE: list[dict[str, Any]] = [
         "action": "game__guess",
         "reward": 0.5,
         "rewards": [
-            {"name": "progress", "app": "game", "weight": 1.0, "value": 0.25},
-            {"name": "on_step", "app": None, "weight": 1.0, "value": 0.25},
+            {"name": "progress", "version": "1.0.0", "app": "game", "value": 0.25},
+            {"name": "careful", "version": "2", "app": "game", "value": 0.25},
+            {"name": "broken", "version": "1", "app": "game", "value": 0, "error": "boom"},
         ],
         "info": {},
     },
@@ -71,16 +72,36 @@ def test_targets_name_one_thing_and_spans_need_exactly_one_range() -> None:
     with pytest.raises(ValidationError, match="end after it starts"):
         RewardTarget.span("e2", 5, 5)
     with pytest.raises(ValidationError, match="finite"):
-        RewardRecord(target=RewardTarget.step("e3"), value=float("nan"), source="app", rewarder="x")
+        RewardRecord(
+            target=RewardTarget.step("e3"), value=float("nan"), source="step", rewarder="x"
+        )
 
 
 def test_online_records_come_from_each_step_signal() -> None:
     records = online_records(EPISODE)
     assert [(item.source, item.rewarder, item.app, item.value) for item in records] == [
-        ("app", "progress", "game", 0.25),
-        ("environment", "on_step", None, 0.25),
+        ("step", "progress", "game", 0.25),
+        ("step", "careful", "game", 0.25),
     ]
+    assert [item.version for item in records] == ["1.0.0", "2"]
     assert {item.target.event_id for item in records} == {"e3"}
+
+
+def test_a_rejected_action_still_gets_its_step_rewards() -> None:
+    rejected = {
+        "sequence": 1,
+        "event_id": "e1",
+        "kind": "environment.step",
+        "error": "a guess must have five letters",
+        "reward": -0.1,
+        "rewards": [{"name": "solved", "version": "1", "app": "game", "value": -0.1}],
+    }
+    legacy = {"sequence": 2, "event_id": "e2", "kind": "environment.step", "reward": 0.5}
+    records = online_records([rejected, legacy])
+    assert [(item.source, item.rewarder, item.value) for item in records] == [
+        ("step", "solved", -0.1),
+        ("environment", "reward", 0.5),
+    ]
 
 
 def test_hindsight_rewarders_credit_any_event_and_reject_unknown_ones() -> None:
@@ -248,8 +269,8 @@ async def test_a_job_writes_online_and_hindsight_rewards_to_the_trial_ledger(
     trial = spec.plan().trials[0]
     ledger = read_ledger(store.trial_path(trial) / "executions/0/artifacts" / LEDGER_FILE)
     assert [(item.source, item.rewarder) for item in ledger] == [
-        ("app", "progress"),
-        ("environment", "on_step"),
+        ("step", "progress"),
+        ("step", "careful"),
         ("hindsight", "finished"),
     ]
     events = (store.job_path(spec.job_id) / "events.jsonl").read_text()

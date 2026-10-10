@@ -129,7 +129,7 @@ class ReplayApp(App[State]):
         fallback: ``"nearest"`` or ``"error"`` for a call with no exact recording.
         actions: Action declarations. Default: every tool in ``tools``, then
             each other recorded action, with arguments inferred from the recordings.
-        read_only: Actions that do not change state, so Verifiers may query them.
+        read_only: Actions that do not change state, so Rewarders may query them.
     """
 
     kind = "replay"

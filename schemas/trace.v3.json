@@ -931,7 +931,7 @@
       "type": "object"
     },
     "Outcome": {
-      "description": "Labeled outcome attached to a trace.\n\nAttributes:\n    scores: Named Verifier outputs.\n    reward: Scalar reward used for RL / ranking.\n    labels: Discrete labels (e.g. intent, success/fail).\n    feedback: Free-form human or automated feedback.",
+      "description": "Labeled outcome attached to a trace.\n\nAttributes:\n    scores: Named Rewarder outputs.\n    reward: Scalar reward used for RL / ranking.\n    labels: Discrete labels (e.g. intent, success/fail).\n    feedback: Free-form human or automated feedback.",
       "properties": {
         "feedback": {
           "anyOf": [
@@ -1337,8 +1337,8 @@
       "title": "TraceArtifactReference",
       "type": "object"
     },
-    "TraceVerifierResult": {
-      "description": "Final Verifier or pending human-review state.",
+    "TraceRewarderResult": {
+      "description": "Final Rewarder or pending human-review state.",
       "properties": {
         "digest": {
           "title": "Digest",
@@ -1397,7 +1397,7 @@
         "kind",
         "status"
       ],
-      "title": "TraceVerifierResult",
+      "title": "TraceRewarderResult",
       "type": "object"
     },
     "Turn": {
@@ -1834,6 +1834,21 @@
       "default": null,
       "title": "Parent Trace Id"
     },
+    "rewarder_results": {
+      "items": {
+        "$ref": "#/$defs/TraceRewarderResult"
+      },
+      "title": "Rewarder Results",
+      "type": "array"
+    },
+    "rewarder_revision_digests": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Rewarder Revision Digests",
+      "type": "array"
+    },
     "schema_version": {
       "const": "3.0.0",
       "default": "3.0.0",
@@ -1972,21 +1987,6 @@
       ],
       "default": null,
       "title": "Truncated"
-    },
-    "verifier_results": {
-      "items": {
-        "$ref": "#/$defs/TraceVerifierResult"
-      },
-      "title": "Verifier Results",
-      "type": "array"
-    },
-    "verifier_revision_digests": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "title": "Verifier Revision Digests",
-      "type": "array"
     }
   },
   "title": "Plural Trace",
