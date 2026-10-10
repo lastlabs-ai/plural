@@ -184,7 +184,8 @@ class OpenAPIApp(App[State]):
         local: Set when the API runs inside the Runtime, so a fresh Runtime is
             a fresh API.
         actions: Operation declarations to use instead of reading ``spec``.
-        secrets: Names the Job must supply.
+        secrets: Setup secrets the project supplies, for hooks and Verifiers.
+        credentials: Names the running Agent supplies, such as its own API token.
         timeout_seconds: How long one request may take.
     """
 
@@ -205,11 +206,15 @@ class OpenAPIApp(App[State]):
         local: bool = False,
         actions: Sequence[Mapping[str, Any] | AppAction] | None = None,
         secrets: Iterable[str | SecretReference] | None = None,
+        credentials: Iterable[str | SecretReference] | None = None,
         description: str | None = None,
         timeout_seconds: float = 30,
     ) -> None:
         super().__init__(
-            name=name or type(self).name or None, description=description, secrets=secrets
+            name=name or type(self).name or None,
+            description=description,
+            secrets=secrets,
+            credentials=credentials,
         )
         if spec is None and actions is None:
             raise ValueError(f"OpenAPI App {self.name!r} needs spec: a file or URL")
@@ -234,12 +239,16 @@ class OpenAPIApp(App[State]):
         self._client: httpx.Client | None = None
         undeclared = sorted(
             referenced_variables(self.headers.values())
-            - {SecretReference.model_validate(item).name for item in self.secrets}
+            - {
+                SecretReference.model_validate(item).name
+                for item in (*self.secrets, *self.credentials)
+            }
         )
         if undeclared:
             raise ValueError(
                 f"OpenAPI App {self.name!r} headers reference {', '.join(undeclared)}; "
-                "list them in secrets so the Job knows to supply them"
+                "list them in credentials when the running Agent supplies them, or in "
+                "secrets when the project does"
             )
 
     def document(self) -> dict[str, Any]:

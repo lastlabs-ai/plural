@@ -45,7 +45,7 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
     root = _root()
     extras = {
         "benchmark": {"add", "remove"},
-        "agent": {"serve"},
+        "agent": {"serve", "credential"},
         "env": {"from-mcp", "from-openapi", "from-data", "from-traces"},
     }
     for name in RESOURCE_GROUPS:

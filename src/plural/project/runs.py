@@ -23,7 +23,7 @@ import json
 import shutil
 import sys
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +32,7 @@ from typing import Any, Literal
 from plural.agents import Agent
 from plural.agents.models import AgentDefinition
 from plural.common import HarnessPackage, PackageSource
+from plural.credentials import CredentialValue
 from plural.environments.definition import EnvironmentDefinition
 from plural.execution.capacity import recommend_concurrency
 from plural.harness.retrieval import source_digest
@@ -117,6 +118,10 @@ class RunPlan:
     def harness(self) -> str:
         """The Harness the Agent runs with; ``native`` when none is named."""
         return _harness_name(self.agent)
+
+
+CredentialSource = Callable[[JobSpec, str | None], Mapping[str, Mapping[str, CredentialValue]]]
+"""Looks up a run's stored Agent credentials: the Job and the saved Agent's folder name."""
 
 
 @dataclass(frozen=True)
@@ -324,6 +329,7 @@ def run_local(
     environ: Mapping[str, str],
     progress: Any = None,
     tracking: Tracking | None = None,
+    credential_source: CredentialSource | None = None,
 ) -> tuple[str, JobResult]:
     """Execute a plan on this machine and record it under ``.plural/jobs``.
 
@@ -342,7 +348,15 @@ def run_local(
         harness=plan.harness,
         inputs=plan.pins,
     )
-    return _execute(workspace, spec, record, environ=environ, progress=progress, tracking=tracking)
+    return _execute(
+        workspace,
+        spec,
+        record,
+        environ=environ,
+        progress=progress,
+        tracking=tracking,
+        credential_source=credential_source,
+    )
 
 
 def rerun_local_job(
@@ -352,6 +366,7 @@ def rerun_local_job(
     environ: Mapping[str, str],
     progress: Any = None,
     tracking: Tracking | None = None,
+    credential_source: CredentialSource | None = None,
 ) -> tuple[str, JobResult]:
     """Run a recorded local Job again with its original pinned inputs.
 
@@ -372,7 +387,13 @@ def rerun_local_job(
         }
     )
     return _execute(
-        workspace, fresh, new_record, environ=environ, progress=progress, tracking=tracking
+        workspace,
+        fresh,
+        new_record,
+        environ=environ,
+        progress=progress,
+        tracking=tracking,
+        credential_source=credential_source,
     )
 
 
@@ -383,6 +404,7 @@ def rerun_local_trial(
     environ: Mapping[str, str],
     progress: Any = None,
     tracking: Tracking | None = None,
+    credential_source: CredentialSource | None = None,
 ) -> tuple[str, JobResult]:
     """Run one recorded local Trial again as a new one-Trial Job.
 
@@ -415,7 +437,13 @@ def rerun_local_trial(
         }
     )
     return _execute(
-        workspace, fresh, new_record, environ=environ, progress=progress, tracking=tracking
+        workspace,
+        fresh,
+        new_record,
+        environ=environ,
+        progress=progress,
+        tracking=tracking,
+        credential_source=credential_source,
     )
 
 
@@ -812,6 +840,9 @@ def local_trial(workspace: Workspace, trial_id: str) -> dict[str, Any]:
         "verifiers": (
             [item.model_dump(mode="json") for item in result.verifier_results] if result else []
         ),
+        "credentials": (
+            [item.model_dump(mode="json") for item in result.credentials] if result else []
+        ),
         "artifacts": str(latest / "artifacts") if latest else None,
         "logs": str(latest / "logs") if latest else None,
     }
@@ -897,7 +928,10 @@ def _execute(
     environ: Mapping[str, str],
     progress: Any,
     tracking: Tracking | None = None,
+    credential_source: CredentialSource | None = None,
 ) -> tuple[str, JobResult]:
+    from plural.credentials import CredentialError
+    from plural.credentials import resolve as resolve_credentials
     from plural.execution.apps import describe_missing, missing_app_secrets
     from plural.execution.engine import ExecutionFailure, JobRunner
     from plural.execution.report import HostedTracker
@@ -910,6 +944,26 @@ def _execute(
             missing[app].extend(name for name in names if name not in missing[app])
     if missing:
         raise ProjectError(describe_missing(missing))
+    hosted_agent = (
+        record.agent.removeprefix(f"{AGENT.name}/")
+        if record.agent.startswith(f"{AGENT.name}/")
+        else None
+    )
+    credentials = dict(credential_source(spec, hosted_agent)) if credential_source else {}
+    for task in spec.tasks:
+        for binding in spec.agents:
+            try:
+                resolve_credentials(
+                    task.environment,
+                    binding.agent,
+                    credentials.get(binding.name, {}),
+                    environ,
+                )
+            except CredentialError as exc:
+                hint = (
+                    "" if hosted_agent else "\nThis run used --model, which carries no credentials."
+                )
+                raise ProjectError(str(exc) + hint) from None
     for binding in spec.agents:
         key = binding.agent.endpoint_key
         if key and not environ.get(key):
@@ -951,7 +1005,12 @@ def _execute(
     job_dir = store.job_path(spec.job_id)
     job_dir.mkdir(parents=True, exist_ok=True)
     _write_record(job_dir, record)
-    options: dict[str, Any] = {"store": store, "catalog": workspace.catalog, "environ": environ}
+    options: dict[str, Any] = {
+        "store": store,
+        "catalog": workspace.catalog,
+        "environ": environ,
+        "credentials": credentials,
+    }
     if progress is not None:
         options["progress"] = progress
     try:

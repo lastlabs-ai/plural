@@ -400,6 +400,7 @@ def publish_execution(
         usage["agent"] = {"cost_usd": receipt.cost_usd}
     report: dict[str, Any] = {
         **_outcome(artifacts_root, records),
+        "credentials": [item.model_dump(mode="json") for item in result.credentials],
         "usage": usage,
         "phases": [phase.model_dump(mode="json") for phase in receipt.phases],
         "runtime": {

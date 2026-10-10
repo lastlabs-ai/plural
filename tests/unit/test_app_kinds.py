@@ -168,7 +168,7 @@ def test_openapi_definition_rebuilds_from_pinned_actions(
 
 def test_openapi_headers_must_declare_their_secrets(tmp_path: Path) -> None:
     (tmp_path / "orders.json").write_text(json.dumps(SPEC))
-    with pytest.raises(ValueError, match="list them in secrets"):
+    with pytest.raises(ValueError, match="list them in credentials"):
         OpenAPIApp(name="orders", spec="orders.json", headers={"X-Key": "${HIDDEN_KEY}"})
 
 

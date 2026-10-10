@@ -27,6 +27,7 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HumanVerifier](#humanverifier)
 - [Agent](#agent)
 - [Benchmark](#benchmark)
+- [AgentCredential](#agentcredential)
 - [AppAction](#appaction)
 - [AppDefinition](#appdefinition)
 - [BenchmarkCategory](#benchmarkcategory)
@@ -158,6 +159,7 @@ A catalog-backed model and its optional execution harness.
 - **`secret_names`** — `array of string`; optional. Default: `[]`.
 - **`endpoint`** — `string | null`; optional. Default: `null`.
 - **`endpoint_key`** — `string | null`; optional. Default: `null`.
+- **`credentials`** — `object`; optional.
 - **`metadata`** — `object`; optional.
 
 ## Benchmark
@@ -179,6 +181,13 @@ A semantic version that pins an ordered set of Tasks.
 - **`primary_metric`** — `string`; optional. Default: `"score"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`metadata`** — `object`; optional.
+
+## AgentCredential
+
+A credential this Agent supplies to the Apps it works with.
+
+- **`scopes`** — `array of string`; optional. Default: `[]`.
+- **`description`** — `string`; optional. Default: `""`.
 
 ## AppAction
 
@@ -202,6 +211,7 @@ One App inside an Environment.
 - **`config`** — `object`; optional.
 - **`actions`** — `array of AppAction`; optional. Default: `[]`.
 - **`secrets`** — `array of Secret`; optional. Default: `[]`.
+- **`credentials`** — `array of Secret`; optional. Default: `[]`.
 - **`rewarders`** — `array of Rewarder`; optional. Default: `[]`.
 - **`state_schema`** — `object`; optional.
 - **`has_reset`** — `boolean`; optional. Default: `false`.
@@ -427,7 +437,7 @@ A launch-time variable declaration. Values are supplied to Job, never saved here
 
 ## Secret
 
-A named credential an App needs, supplied by the Job when it runs.
+A named value an App needs, which it never stores itself.
 
 - **`name`** — `string`; required. Constraints: `{"pattern": "^[A-Z_][A-Z0-9_]*$"}`.
 - **`required`** — `boolean`; optional. Default: `true`.

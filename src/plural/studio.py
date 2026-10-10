@@ -337,6 +337,38 @@ class AgentsAPI(RevisionResourceAPI[Agent]):
         payload["harness_revision_id"] = harness_revision_id
         return payload
 
+    def credentials(self, agent: str) -> JsonList:
+        """The credentials stored for an Agent, by name and hint, never their values."""
+        return cast(JsonList, self._studio.request("GET", f"/agents/{quote(agent)}/credentials"))
+
+    def set_credential(self, agent: str, name: str, value: str) -> JsonObject:
+        """Store an Agent's credential value, replacing any it had."""
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "PUT",
+                f"/agents/{quote(agent)}/credentials/{quote(name)}",
+                json={"value": value},
+            ),
+        )
+
+    def delete_credential(self, agent: str, name: str) -> None:
+        self._studio.request("DELETE", f"/agents/{quote(agent)}/credentials/{quote(name)}")
+
+    def resolve_credentials(self, agent: str, names: Sequence[str]) -> JsonObject:
+        """``credentials`` (name to ``{value, updated_at}``) and the ``missing`` names.
+
+        The service grants it to project contributors starting a run.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/agents/{quote(agent)}/credentials/resolve",
+                json={"names": list(names)},
+            ),
+        )
+
 
 class HarnessesAPI(RevisionResourceAPI[HarnessDefinition]):
     collection = "harnesses"

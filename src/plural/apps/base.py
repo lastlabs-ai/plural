@@ -105,6 +105,7 @@ class App(Generic[StateT]):
     kind: ClassVar[AppKind] = "python"
     state_type: ClassVar[type[State]] = State
     secrets: Sequence[str | SecretReference] = ()
+    credentials: Sequence[str | SecretReference] = ()
     control: ClassVar[AppControl | None] = None
     snapshot_on_step: ClassVar[bool] = True
 
@@ -142,6 +143,7 @@ class App(Generic[StateT]):
         name: str | None = None,
         description: str | None = None,
         secrets: Iterable[str | SecretReference] | None = None,
+        credentials: Iterable[str | SecretReference] | None = None,
     ) -> None:
         self.name = name or type(self).name or _snake(type(self).__name__)
         if description is None:
@@ -152,6 +154,8 @@ class App(Generic[StateT]):
         self.description = description
         declared = type(self).secrets if secrets is None else tuple(secrets)
         self.secrets = tuple(SecretReference.model_validate(item) for item in declared)
+        needed = type(self).credentials if credentials is None else tuple(credentials)
+        self.credentials = tuple(SecretReference.model_validate(item) for item in needed)
         self.state = cast(StateT, self._state_type()())
 
     # Factories for Apps that connect existing systems.
@@ -428,6 +432,7 @@ class App(Generic[StateT]):
             config=self._config(),
             actions=self.actions(),
             secrets=tuple(SecretReference.model_validate(item) for item in self.secrets),
+            credentials=tuple(SecretReference.model_validate(item) for item in self.credentials),
             rewarders=self._rewarders(),
             state_schema=self._state_schema(),
             has_reset=self.has_reset(),

@@ -1249,6 +1249,9 @@ def _files_from_definition(
             "harness_kwargs",
             "auth_mode",
             "secret_names",
+            "endpoint",
+            "endpoint_key",
+            "credentials",
             "metadata",
         ):
             if key in definition and not _is_default(Agent, key, definition[key]):

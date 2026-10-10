@@ -12,7 +12,7 @@ import pytest
 from fakes import FakeProvider
 
 from plural.agents import AgentBinding, AgentDefinition
-from plural.apps.definition import AppAction, AppDefinition
+from plural.apps.definition import AppAction, AppDefinition, SecretReference
 from plural.atif import validate_atif
 from plural.common import (
     ErrorCode,
@@ -23,6 +23,7 @@ from plural.common import (
     HarnessProtocol,
     PackageSource,
 )
+from plural.credentials import CredentialValue, fingerprint
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
 from plural.execution import JobRunner, JobStore
 from plural.execution.engine import (
@@ -627,3 +628,95 @@ async def test_missing_app_secrets_fail_before_a_runtime_starts(tmp_path: Path) 
 
     assert caught.value.code == ErrorCode.AUTHENTICATION
     assert provider.created == []
+
+
+def _credential_task() -> TaskDefinition:
+    task = _app_task(exact_verifier("docker"))
+    crm = task.environment.app("crm").model_copy(
+        update={"secrets": (), "credentials": (SecretReference(name="CRM_TOKEN"),)}
+    )
+    environment = task.environment.model_copy(update={"apps": (GAME_APP, crm)})
+    return task.model_copy(update={"environment": environment})
+
+
+async def test_each_agent_supplies_its_own_credential_and_the_trial_records_it(
+    tmp_path: Path,
+) -> None:
+    sales = AgentDefinition(
+        name="sales-bot",
+        model="test/model",
+        credentials={"CRM_TOKEN": {"scopes": ["read:accounts"]}},
+    )
+    admin = AgentDefinition(name="admin-bot", model="test/model", credentials=["CRM_TOKEN"])
+    spec = JobSpec(
+        source=TaskJobSource(task=_credential_task()),
+        agents=(AgentBinding(agent=sales), AgentBinding(agent=admin)),
+    )
+    provider = FakeProvider("docker")
+    result = await JobRunner(
+        spec,
+        provider=provider,
+        store=JobStore(tmp_path / "jobs"),
+        environ={"CRM_TOKEN": "admin-token-from-shell"},
+        credentials={"sales-bot": {"CRM_TOKEN": CredentialValue("sales-token", source="hosted")}},
+    ).run()
+
+    assert result.status == "succeeded", [item.error_message for item in result.trials]
+    started = [
+        json.loads(item.stdin or b"{}")
+        for item in provider.host_calls
+        if item.command[3] == "start"
+    ]
+    assert sorted(item["CRM_TOKEN"] for item in started) == [
+        "admin-token-from-shell",
+        "sales-token",
+    ]
+    for request in provider.harness_requests:
+        assert "CRM_TOKEN" not in request.env
+        assert b"sales-token" not in (request.stdin or b"")
+        assert b"admin-token-from-shell" not in (request.stdin or b"")
+    audits = {item.credentials[0].agent: item.credentials[0] for item in result.trials}
+    assert audits["sales-bot"].app == "crm"
+    assert audits["sales-bot"].scopes == ("read:accounts",)
+    assert audits["sales-bot"].source == "hosted"
+    assert audits["sales-bot"].fingerprint == fingerprint("sales-token")
+    assert audits["admin-bot"].source == "environment"
+    assert audits["admin-bot"].scopes == ()
+    stored = (tmp_path / "jobs").rglob("result.json")
+    for path in stored:
+        text = path.read_text()
+        assert "sales-token" not in text
+        assert "admin-token-from-shell" not in text
+
+
+async def test_an_agent_without_the_credential_cannot_run_before_a_runtime_starts(
+    tmp_path: Path,
+) -> None:
+    spec = JobSpec(
+        source=TaskJobSource(task=_credential_task()),
+        agents=(AgentBinding(agent=AgentDefinition(name="gpt", model="test/model")),),
+    )
+    provider = FakeProvider("docker")
+    runner = JobRunner(
+        spec,
+        provider=provider,
+        store=JobStore(tmp_path / "jobs"),
+        environ={"CRM_TOKEN": "exported-but-not-carried"},
+    )
+    with pytest.raises(ExecutionFailure, match="Agent 'gpt' does not carry") as caught:
+        await runner.run()
+
+    assert caught.value.code == ErrorCode.AUTHENTICATION
+    assert "CRM_TOKEN, for App crm" in str(caught.value)
+    assert provider.created == []
+
+
+async def test_an_agent_that_declares_a_credential_needs_its_value(tmp_path: Path) -> None:
+    agent = AgentDefinition(name="sales-bot", model="test/model", credentials=["CRM_TOKEN"])
+    spec = JobSpec(
+        source=TaskJobSource(task=_credential_task()),
+        agents=(AgentBinding(agent=agent),),
+    )
+    runner = JobRunner(spec, provider=FakeProvider("docker"), store=JobStore(tmp_path / "jobs"))
+    with pytest.raises(ExecutionFailure, match="plural agent credential set sales-bot"):
+        await runner.run()

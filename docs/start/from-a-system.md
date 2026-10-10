@@ -65,25 +65,43 @@ as the App's actions. `[read-only]` marks tools that say they change nothing. Th
 `--env` setting stores the server's graph in `${PLURAL_APP_DIR}`, a new empty folder
 Plural gives the server for every episode, so no Trial sees what another stored.
 
-## 3. Attach secrets
+## 3. Give the Agent its credentials
 
 The memory server needs none. A system that does, such as a CRM reached over HTTP,
-names its secrets on the App, and you store each value once in the hosted project:
+takes the credential of the Agent that runs, so each Agent acts as its own user with
+its own scopes. The App names the credential; the Agent carries it:
 
 ```bash
 plural env from-mcp crm \
   --url https://mcp.example.com/v1 \
-  --header 'Authorization=Bearer ${CRM_TOKEN}' \
-  --secret CRM_TOKEN
-plural secret set CRM_TOKEN
+  --header 'Authorization=Bearer ${CRM_TOKEN}'
+plural agent init sales-bot
 ```
 
-**What just happened.** `${CRM_TOKEN}` stays a reference in `environment.yaml`; the
-value never enters your project. `plural secret set` prompts for it without echoing it.
-Every `plural run` in the project, and every hosted Job, fills it in. An exported
-variable of the same name wins. The value goes only to the process that runs the Apps,
-never to the Agent or its Harness. `plural env validate` says where each secret will
-come from. See [Supply secrets](../guides/connect-mcp-server.md#4-supply-secrets).
+In `agents/sales-bot/agent.yaml`, list the credential and the scopes its token grants:
+
+```yaml
+credentials:
+  CRM_TOKEN:
+    scopes: [read:accounts, write:opportunities]
+```
+
+Then store the value with the Agent, and check it:
+
+```bash
+plural agent credential set sales-bot CRM_TOKEN
+plural agent validate sales-bot
+```
+
+Runs that use the CRM App then take `--agent sales-bot`.
+
+**What just happened.** `${CRM_TOKEN}` stays a reference in `environment.yaml`, listed
+under the App's `credentials`; the value never enters your project. `plural agent
+credential set` prompts for it without echoing it and stores it encrypted with the
+hosted Agent. The value goes only to the process that runs the Apps, never to the model
+or its Harness, and each Trial records which Agent's token acted, its scopes, and a
+fingerprint of the value. A `--model` run carries no credentials, so it can't use this
+App. See [Supply credentials](../guides/connect-mcp-server.md#4-supply-credentials).
 
 ## 4. Choose a control level
 

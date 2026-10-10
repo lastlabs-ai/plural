@@ -28,7 +28,14 @@ from plural.project.layout import ENVIRONMENT
 
 APP_HELP = "The App's name, which prefixes its actions when there are several. Default: NAME."
 RUNTIME_HELP = "Where the Environment runs: local (a trusted subprocess), docker, or daytona."
-SECRET_HELP = "A secret the App needs. ${NAME} in a header or variable is added for you."
+SECRET_HELP = (
+    "A setup secret the project supplies, for reset and snapshot hooks. Repeatable. "
+    "Without it, ${NAME} in a header or variable is a credential the Agent supplies."
+)
+CREDENTIAL_HELP = (
+    "A credential the running Agent supplies, such as its own API token. Repeatable. "
+    "${NAME} in a header or variable is added for you."
+)
 
 
 def _pairs(values: list[str], option: str) -> dict[str, str]:
@@ -84,6 +91,14 @@ def _write(generated: Generated, *, as_json: bool) -> None:
             for secret in app["secrets"]:
                 status = secret_status(secret)
                 typer.echo(f"  secret {secret['name']}: {status}")
+            for credential in app["credentials"]:
+                typer.echo(f"  credential {credential['name']}: supplied by the Agent that runs")
+        if generated.credentials:
+            typer.echo(
+                "\nAn Agent supplies each credential. List them under credentials: in its "
+                "agent.yaml, store each with `plural agent credential set AGENT NAME`, and "
+                "run with --agent."
+            )
         if problem:
             typer.echo(
                 f"\nThe files are written, but loading the Environment failed:\n  {problem}\n"
@@ -131,6 +146,7 @@ def add_generators(app: typer.Typer) -> None:
             [], "--tool", help="Only offer this tool. Repeatable. Default: every tool."
         ),
         secret: list[str] = typer.Option([], "--secret", help=SECRET_HELP),
+        credential: list[str] = typer.Option([], "--credential", help=CREDENTIAL_HELP),
         app_name: str | None = typer.Option(None, "--app", help=APP_HELP),
         runtime: str = typer.Option("local", "--runtime", help=RUNTIME_HELP),
         as_json: bool = JSON_OPTION,
@@ -146,6 +162,7 @@ def add_generators(app: typer.Typer) -> None:
                 env=_pairs(env, "--env"),
                 tools=tool,
                 secrets=secret,
+                credentials=credential,
                 runtime=runtime,
             )
         except ValueError as exc:
@@ -167,6 +184,7 @@ def add_generators(app: typer.Typer) -> None:
             [], "--operation", help="Only offer this operationId. Repeatable."
         ),
         secret: list[str] = typer.Option([], "--secret", help=SECRET_HELP),
+        credential: list[str] = typer.Option([], "--credential", help=CREDENTIAL_HELP),
         app_name: str | None = typer.Option(None, "--app", help=APP_HELP),
         runtime: str = typer.Option("local", "--runtime", help=RUNTIME_HELP),
         as_json: bool = JSON_OPTION,
@@ -182,6 +200,7 @@ def add_generators(app: typer.Typer) -> None:
             headers=_pairs(header, "--header"),
             operations=operation,
             secrets=secret,
+            credentials=credential,
             runtime=runtime,
         )
         _write(generated, as_json=as_json)

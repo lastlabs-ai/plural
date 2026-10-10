@@ -32,6 +32,7 @@ class Generated:
     tasks: list[str] = field(default_factory=list)
     benchmark: str | None = None
     secrets: list[str] = field(default_factory=list)
+    credentials: list[str] = field(default_factory=list)
 
     def conflicts(self, root: Path) -> list[str]:
         """Paths that already exist.
@@ -84,6 +85,7 @@ def _environment(
     apps: list[dict[str, Any]],
     runtime: str,
     secrets: Sequence[str],
+    credentials: Sequence[str] = (),
     connection: str,
 ) -> dict[str, str | bytes]:
     folder = f"environments/{name}"
@@ -99,9 +101,18 @@ def _environment(
     }
     secret_lines = (
         "\n".join(f"- `{item}`" for item in secrets)
-        + "\n\nExport each before `plural run`, or add it to the hosted project's secrets. "
-        "The values reach only the App, never the Agent or its Harness.\n"
+        + "\n\nSetup secrets for reset and snapshot hooks and Verifiers. Export each "
+        "before `plural run`, or set it with `plural secret set NAME`. The values reach "
+        "only the App, never the Agent's model or its Harness.\n"
         if secrets
+        else "None.\n"
+    )
+    credential_lines = (
+        "\n".join(f"- `{item}`" for item in credentials)
+        + "\n\nThe Agent that runs supplies these, so it acts as its own user with its own "
+        "scopes. List each under `credentials:` in the Agent's `agent.yaml`, store its "
+        "value with `plural agent credential set AGENT NAME`, and run with `--agent`.\n"
+        if credentials
         else "None.\n"
     )
     readme = (
@@ -109,6 +120,7 @@ def _environment(
         "Run `plural env validate "
         f"{name}` to list every action the Agent is offered, which ones only read, "
         "and whether each secret is set.\n\n"
+        f"## Credentials\n\n{credential_lines}\n"
         f"## Secrets\n\n{secret_lines}"
     )
     return {
@@ -117,9 +129,17 @@ def _environment(
     }
 
 
-def _secrets(declared: Sequence[str], *values: Mapping[str, str]) -> list[str]:
+def _references(
+    secrets: Sequence[str], credentials: Sequence[str], *values: Mapping[str, str]
+) -> tuple[list[str], list[str]]:
+    """Setup secrets, and credentials: every other ``${NAME}`` the settings reference.
+
+    Returns:
+        The secret names and the credential names.
+    """
     found = referenced_variables([value for group in values for value in group.values()])
-    return sorted({*declared, *found})
+    secret_names = sorted(set(secrets))
+    return secret_names, sorted({*credentials, *found} - set(secret_names))
 
 
 def from_mcp(
@@ -132,11 +152,13 @@ def from_mcp(
     env: Mapping[str, str] | None = None,
     tools: Sequence[str] = (),
     secrets: Sequence[str] = (),
+    credentials: Sequence[str] = (),
     runtime: str = "local",
 ) -> Generated:
     """An Environment with one App backed by an MCP server.
 
-    Every ``${NAME}`` in a header or variable is declared as a secret.
+    Every ``${NAME}`` in a header or variable is declared as a credential the
+    running Agent supplies, unless ``secrets`` lists it as a setup secret.
 
     Returns:
         The files to write.
@@ -146,7 +168,7 @@ def from_mcp(
     """
     if bool(command) == bool(url):
         raise ValueError("Give the server's --command or its --url, not both.")
-    names = _secrets(secrets, headers or {}, env or {})
+    names, needed = _references(secrets, credentials, headers or {}, env or {})
     settings: dict[str, Any] = {"command": list(command)} if command else {"url": url}
     if headers:
         settings["headers"] = dict(headers)
@@ -154,6 +176,8 @@ def from_mcp(
         settings["env"] = dict(env)
     if tools:
         settings["tools"] = list(tools)
+    if needed:
+        settings["credentials"] = needed
     if names:
         settings["secrets"] = names
     reach = f"`{' '.join(command)}`, started in the Runtime" if command else f"{url}"
@@ -165,6 +189,7 @@ def from_mcp(
             apps=[{"name": app, "mcp": settings}],
             runtime=runtime,
             secrets=names,
+            credentials=needed,
             connection=(
                 f"`{app}` is an MCP server reached at {reach}. Each of its tools is an "
                 "action. To start every episode from a known state, add a `reset` "
@@ -173,6 +198,7 @@ def from_mcp(
         ),
         environment=name,
         secrets=names,
+        credentials=needed,
     )
 
 
@@ -186,17 +212,19 @@ def from_openapi(
     headers: Mapping[str, str] | None = None,
     operations: Sequence[str] = (),
     secrets: Sequence[str] = (),
+    credentials: Sequence[str] = (),
     runtime: str = "local",
 ) -> Generated:
     """An Environment with one App backed by an HTTP API's OpenAPI document.
 
     ``spec_file`` is a local document to copy beside the manifest, as
-    ``(file name, contents)``; otherwise ``spec`` is fetched as a URL.
+    ``(file name, contents)``; otherwise ``spec`` is fetched as a URL. Every
+    ``${NAME}`` in a header is a credential unless ``secrets`` lists it.
 
     Returns:
         The files to write.
     """
-    names = _secrets(secrets, headers or {})
+    names, needed = _references(secrets, credentials, headers or {})
     settings: dict[str, Any] = {"spec": spec_file[0] if spec_file else spec}
     if base_url:
         settings["base_url"] = base_url
@@ -204,6 +232,8 @@ def from_openapi(
         settings["headers"] = dict(headers)
     if operations:
         settings["operations"] = list(operations)
+    if needed:
+        settings["credentials"] = needed
     if names:
         settings["secrets"] = names
     files = _environment(
@@ -213,6 +243,7 @@ def from_openapi(
         apps=[{"name": app, "openapi": settings}],
         runtime=runtime,
         secrets=names,
+        credentials=needed,
         connection=(
             f"`{app}` is an HTTP API described by `{settings['spec']}`. Each operation is "
             "an action; GET, HEAD, and OPTIONS only read. While the API is a live system, "
@@ -223,7 +254,7 @@ def from_openapi(
     )
     if spec_file:
         files[f"environments/{name}/{spec_file[0]}"] = spec_file[1]
-    return Generated(files=files, environment=name, secrets=names)
+    return Generated(files=files, environment=name, secrets=names, credentials=needed)
 
 
 def from_data(

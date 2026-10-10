@@ -20,8 +20,9 @@ Every App does the same three things, whatever kind it is:
   parameters. What an action returns is what the Agent sees next.
 - **Keeps state the Agent never sees.** A Verifier reads it at the end to check the
   work. The Agent only sees what actions return.
-- **Declares the secrets it needs,** such as `CRM_TOKEN`. A Job supplies the values,
-  and they reach only the App, never the Agent or its Harness.
+- **Declares the credentials it needs,** such as `CRM_TOKEN`. The Agent that runs
+  supplies the values, so it acts as its own user with its own scopes. They reach only
+  the App, never the model or its Harness.
 
 ## Kinds of App
 
@@ -70,7 +71,7 @@ crm = App.mcp(
     "crm",
     url="https://mcp.example.com/v1",
     headers={"Authorization": "Bearer ${CRM_TOKEN}"},
-    secrets=["CRM_TOKEN"],
+    credentials=["CRM_TOKEN"],
 )
 orders = App.openapi("orders", spec="orders.json", base_url="https://sandbox.example.com")
 policies = App.data("policies", tables={"refunds": "data/refunds.csv"}, read_only=True)
@@ -183,29 +184,62 @@ def refunded(episode: Episode) -> VerifierOutput:
   running, so a Verifier can check the real system instead of trusting what the
   Agent said. Plural refuses an action that changes state.
 
-## Secrets
+## Credentials and secrets
 
-An App declares the names of the secrets it needs. In headers and server variables,
-`${NAME}` stands for the value:
+An App never holds a credential's value. It declares the names it needs, and
+`${NAME}` stands for the value in headers and server variables. There are two kinds:
+
+- **Credentials** come from the Agent that runs. Use them for anything the Agent acts
+  with, such as the Salesforce token of the user it works as. Each Agent carries its
+  own token, so its scopes decide what it can do, and every Trial records which Agent's
+  credential was used.
+- **Secrets** come from the project. Use them only for setup: a `reset` or `snapshot`
+  command's admin token, or a key a Verifier needs. Those commands never see an
+  Agent's credentials.
 
 ```python
 crm = App.mcp(
     "crm",
     url="https://mcp.example.com/v1",
     headers={"Authorization": "Bearer ${CRM_TOKEN}"},
-    secrets=["CRM_TOKEN"],
+    credentials=["CRM_TOKEN"],
+    reset="python scripts/seed.py",
+    secrets=["CRM_ADMIN_TOKEN"],
 )
 ```
 
-The Environment knows every App's secrets, so a Job can check them before it starts
-anything. A missing secret fails the Job at once, naming the App and the secret. The
-values travel only to the process that runs the Apps and to Verifier queries. They are
-never written to the project, shown to the Agent, or given to its Harness. Run
-`plural env validate` to see which secrets each App needs and whether each is set in
-your shell.
+The Agent lists the credentials it carries in its `agent.yaml`, with the scopes each
+one grants:
 
-Locally, export the value before `plural run`. A hosted run takes it from the hosted
-project's secrets.
+```yaml
+name: sales-bot
+model: openai/gpt-5.6
+credentials:
+  CRM_TOKEN:
+    scopes: [read:accounts, write:opportunities]
+```
+
+Store each value with the Agent, then run it:
+
+```bash
+plural agent credential set sales-bot CRM_TOKEN
+plural run --task close-deal --agent sales-bot
+```
+
+Before anything starts, the Job checks that the Agent carries every credential the
+Apps need and has a value for each. A run with `--model` carries none, so it can't use
+an App that needs one. For a local run you can export the value instead of storing it.
+
+Values travel only to the process that runs the Apps and to Verifier queries made
+through it. They are never written to the project or the Trial, shown to the model,
+or given to its Harness. Each Trial records, for every credential: the App, the Agent
+and its revision, the declared scopes, where the value came from, and a short
+fingerprint of the value, so you can tell which token acted without storing it.
+`plural trial show` prints this record, and so does the Trial page.
+
+Plural doesn't enforce scopes. The system that issued the token does; Plural records
+what you declared. Run `plural env validate` to see what each App needs, and
+`plural agent validate` to see which credentials an Agent has values for.
 
 ## Rewards on Apps
 

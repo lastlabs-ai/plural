@@ -129,6 +129,56 @@ def test_an_endpoint_agent_needs_its_own_key_and_no_plural_key(
     assert any(project.jobs_dir.iterdir())
 
 
+def test_an_app_credential_comes_from_the_agent_that_runs(
+    project: Project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = project.root / "environments/queue/environment.py"
+    app.write_text(
+        app.read_text().replace(
+            '''    """A refund queue."""\n''',
+            '''    """A refund queue."""\n\n    credentials = ["QUEUE_TOKEN"]\n''',
+        )
+    )
+    monkeypatch.setenv("QUEUE_TOKEN", "queue-token-value")
+
+    code, output, _ = cli("run", "--task", "refund", "--model", "openai/gpt-5.6-luna")
+    assert code == 1
+    assert "does not carry" in output
+    assert "QUEUE_TOKEN, for App queue" in output
+    assert "This run used --model" in output
+
+    code, output, _ = cli("run", "--task", "refund", "--agent", "baseline")
+    assert code == 1
+    assert "Agent 'baseline' does not carry" in output
+    assert not project.jobs_dir.exists() or not any(project.jobs_dir.iterdir())
+
+    agent = project.root / "agents/baseline/agent.yaml"
+    agent.write_text(agent.read_text() + "credentials:\n  QUEUE_TOKEN:\n    scopes: [read:queue]\n")
+    monkeypatch.delenv("QUEUE_TOKEN")
+    code, output, _ = cli("run", "--task", "refund", "--agent", "baseline")
+    assert code == 1
+    assert "plural agent credential set baseline NAME" in output
+
+    monkeypatch.setenv("QUEUE_TOKEN", "queue-token-value")
+    code, output, job = cli("run", "--task", "refund", "--agent", "baseline", "--json")
+    assert code == 0, output
+    assert "queue-token-value" not in output
+    [trial] = job["trials"]
+    code, output, shown = cli("trial", "show", trial["trial_id"], "--json")
+    assert code == 0, output
+    [used] = shown["credentials"]
+    assert used["app"] == "queue"
+    assert used["agent"] == "baseline"
+    assert used["scopes"] == ["read:queue"]
+    assert used["source"] == "environment"
+    assert used["fingerprint"].startswith("sha256:")
+    code, output, _ = cli("trial", "show", trial["trial_id"])
+    assert "Credential QUEUE_TOKEN for App queue: Agent baseline" in output
+    for path in project.jobs_dir.rglob("*"):
+        if path.is_file():
+            assert b"queue-token-value" not in path.read_bytes(), path
+
+
 def test_local_run_records_a_job_and_trials_can_be_inspected(project: Project) -> None:
     code, output, job = cli("run", "--task", "refund", "--agent", "baseline", "--json")
     assert code == 0, output

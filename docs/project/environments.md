@@ -57,9 +57,9 @@ flowchart LR
 > actions return. It never sees an App's State, a score, or a reward.
 
 Two optional extras build on this. **Rewards** give small bits of credit for
-individual moves when you train a model; they are never part of a score. **Secrets**,
-such as an API key for a CRM, are declared by name on the App that needs them and
-supplied only when a run starts.
+individual moves when you train a model; they are never part of a score. **Credentials**,
+such as the CRM token the Agent acts with, are declared by name on the App that needs
+them and supplied by the Agent that runs.
 
 ## Start with the work you want to measure
 
@@ -615,9 +615,11 @@ itself.
 
 ## Secrets
 
-Credentials belong to the App that uses them. An App lists the **names** of its
-secrets, and the Job supplies the **values** when it starts, so no credential is ever
-saved with the Environment:
+An App never holds a credential's value; it lists the names it needs, and they are
+supplied when a run starts, so nothing secret is saved with the Environment. A
+**credential** is supplied by the Agent that runs, so each Agent acts with its own token
+and scopes. A **secret** is supplied by the project, for setup only, such as a reset
+hook's admin token:
 
 ```python
 from plural import App
@@ -626,16 +628,18 @@ crm = App.mcp(
     "crm",
     url="https://mcp.example.com/v1",
     headers={"Authorization": "Bearer ${CRM_TOKEN}"},
-    secrets=["CRM_TOKEN"],
+    credentials=["CRM_TOKEN"],
 )
 ```
 
-A Job checks every App's secrets before it starts anything, and fails at once,
-naming the App and the secret, when one is missing. A value comes from your shell
-when you exported it, and otherwise from the hosted project, where `plural secret set
-CRM_TOKEN` stores it encrypted. The value goes
-only to the process that runs the Apps and to Verifier queries. It is never shown to
-the Agent or given to its Harness. See [Apps](../concepts/apps.md#secrets).
+A Job checks before it starts anything that the Agent carries every credential and
+that every secret has a value, and fails at once, naming the App and the name. The
+Agent lists its credentials, with their scopes, in its `agent.yaml`, and
+`plural agent credential set AGENT NAME` stores each value. A secret comes from your
+shell when you exported it, and otherwise from the hosted project, where
+`plural secret set NAME` stores it encrypted. Values go only to the process that runs
+the Apps and to Verifier queries, never to the model or its Harness. See
+[Credentials and secrets](../concepts/apps.md#credentials-and-secrets).
 
 ### Runtime variables
 

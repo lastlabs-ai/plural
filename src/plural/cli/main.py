@@ -6,6 +6,7 @@ import typer
 
 from plural.apps.mcp import use_secret_source
 from plural.cli.auth_commands import auth_app
+from plural.cli.credential_commands import credential_app
 from plural.cli.models_commands import models_app
 from plural.cli.project_commands import project_app
 from plural.cli.resource_commands import resource_app
@@ -30,7 +31,10 @@ app = typer.Typer(
 app.add_typer(auth_app, name="auth")
 app.add_typer(project_app, name="project")
 for _kind in KINDS:
-    app.add_typer(resource_app(_kind), name=_kind.cli)
+    _group = resource_app(_kind)
+    if _kind.name == "agent":
+        _group.add_typer(credential_app, name="credential")
+    app.add_typer(_group, name=_kind.cli)
 app.command("run")(run)
 app.add_typer(job_app, name="job")
 app.add_typer(trial_app, name="trial")

@@ -72,9 +72,9 @@ Every App has:
   desk. What an action returns is what the Agent sees next, like the colored tiles.
 - **State**: its private truth, including things the Agent must not see, such as the
   secret word. The Agent never sees State; a Verifier reads it to check the work.
-- **Secrets** (optional): the names of credentials it needs, such as an API key. Only
-  the names are stored; the values are supplied when a run starts, and never reach
-  the Agent.
+- **Credentials** (optional): the names of tokens it needs, such as a CRM API key.
+  Only the names are stored. The Agent that runs supplies the values, so it acts as its
+  own user, and they never reach the model.
 - **Rewards** (optional): small bits of credit for individual moves, used when you
   train a model. Rewards are *not* scores. They never count toward a result and the
   Agent never sees them.

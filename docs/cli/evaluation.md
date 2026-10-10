@@ -342,14 +342,91 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a saved Agent: a model, instructions, and an optional Harness.                  │
-│ validate  Check a resource and everything it depends on, without uploading.                      │
-│ push      Validate and push an immutable, private revision to the bound project.                 │
-│ release   Label the revision matching your files with a release version, pushing it first.       │
-│ pull      Restore a hosted revision's editable files into this project.                          │
-│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
-│ list      List resources of this kind, labeled local or hosted.                                  │
-│ serve     Reserved: serve an Agent as an endpoint (not available yet).                           │
+│ init        Create a saved Agent: a model, instructions, and an optional Harness.                │
+│ validate    Check a resource and everything it depends on, without uploading.                    │
+│ push        Validate and push an immutable, private revision to the bound project.               │
+│ release     Label the revision matching your files with a release version, pushing it first.     │
+│ pull        Restore a hosted revision's editable files into this project.                        │
+│ show        Show a resource: the local copy if there is one, otherwise the hosted one.           │
+│ list        List resources of this kind, labeled local or hosted.                                │
+│ serve       Reserved: serve an Agent as an endpoint (not available yet).                         │
+│ credential  Store the credentials an Agent carries, such as the token of the user it acts as.    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent credential`
+
+```text
+
+ Usage: plural agent credential [OPTIONS] COMMAND [ARGS]...
+
+ Store the credentials an Agent carries, such as the token of the user it acts as.
+
+ List each one under credentials: in the Agent's agent.yaml, with its scopes. Set its value with
+ `plural agent credential set AGENT NAME`; `plural run --agent AGENT` then supplies it to the Apps
+ that need it.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ list   List an Agent's stored credentials, never their values.                                   │
+│ set    Store an Agent's credential. Prompts without echoing.                                     │
+│ unset  Remove an Agent's stored credential.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent credential list`
+
+```text
+
+ Usage: plural agent credential list [OPTIONS] {agent}
+
+ List an Agent's stored credentials, never their values.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    agent      <str>  The Agent, by its folder name under agents/. [required]                   │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent credential set`
+
+```text
+
+ Usage: plural agent credential set [OPTIONS] {agent} {name}
+
+ Store an Agent's credential. Prompts without echoing.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    agent      <str>  The Agent, by its folder name under agents/. [required]                   │
+│ *    name       <str>  The credential's name, as the App declares it. [required]                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --from-env          Read the value from the environment variable of that name.                   │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent credential unset`
+
+```text
+
+ Usage: plural agent credential unset [OPTIONS] {agent} {name}
+
+ Remove an Agent's stored credential.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    agent      <str>  The Agent, by its folder name under agents/. [required]                   │
+│ *    name       <str>  The credential to remove. [required]                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -883,20 +960,23 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ *    name      <str>  Environment name. [required]                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --command        <str>  Start a stdio server, such as 'npx -y @scope/server'.                    │
-│ --url            <str>  Reach a Streamable HTTP server.                                          │
-│ --header         <str>  An HTTP header, KEY=VALUE. Repeatable. Use ${SECRET}.                    │
-│ --env            <str>  A server variable, KEY=VALUE. Repeatable. Use ${SECRET}.                 │
-│ --tool           <str>  Only offer this tool. Repeatable. Default: every tool.                   │
-│ --secret         <str>  A secret the App needs. ${NAME} in a header or variable is added for     │
-│                         you.                                                                     │
-│ --app            <str>  The App's name, which prefixes its actions when there are several.       │
-│                         Default: NAME.                                                           │
-│ --runtime        <str>  Where the Environment runs: local (a trusted subprocess), docker, or     │
-│                         daytona.                                                                 │
-│                         [default: local]                                                         │
-│ --json                  Print machine-readable JSON.                                             │
-│ --help                  Show this message and exit.                                              │
+│ --command           <str>  Start a stdio server, such as 'npx -y @scope/server'.                 │
+│ --url               <str>  Reach a Streamable HTTP server.                                       │
+│ --header            <str>  An HTTP header, KEY=VALUE. Repeatable. Use ${SECRET}.                 │
+│ --env               <str>  A server variable, KEY=VALUE. Repeatable. Use ${SECRET}.              │
+│ --tool              <str>  Only offer this tool. Repeatable. Default: every tool.                │
+│ --secret            <str>  A setup secret the project supplies, for reset and snapshot hooks.    │
+│                            Repeatable. Without it, ${NAME} in a header or variable is a          │
+│                            credential the Agent supplies.                                        │
+│ --credential        <str>  A credential the running Agent supplies, such as its own API token.   │
+│                            Repeatable. ${NAME} in a header or variable is added for you.         │
+│ --app               <str>  The App's name, which prefixes its actions when there are several.    │
+│                            Default: NAME.                                                        │
+│ --runtime           <str>  Where the Environment runs: local (a trusted subprocess), docker, or  │
+│                            daytona.                                                              │
+│                            [default: local]                                                      │
+│ --json                     Print machine-readable JSON.                                          │
+│ --help                     Show this message and exit.                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -912,19 +992,23 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ *    name      <str>  Environment name. [required]                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --spec             <str>  The OpenAPI document: a file or a URL. [required]                   │
-│    --base-url         <str>  Where to send requests. Default: the document's servers.            │
-│    --header           <str>  An HTTP header, KEY=VALUE. Repeatable. Use ${SECRET}.               │
-│    --operation        <str>  Only offer this operationId. Repeatable.                            │
-│    --secret           <str>  A secret the App needs. ${NAME} in a header or variable is added    │
-│                              for you.                                                            │
-│    --app              <str>  The App's name, which prefixes its actions when there are several.  │
-│                              Default: NAME.                                                      │
-│    --runtime          <str>  Where the Environment runs: local (a trusted subprocess), docker,   │
-│                              or daytona.                                                         │
-│                              [default: local]                                                    │
-│    --json                    Print machine-readable JSON.                                        │
-│    --help                    Show this message and exit.                                         │
+│ *  --spec              <str>  The OpenAPI document: a file or a URL. [required]                  │
+│    --base-url          <str>  Where to send requests. Default: the document's servers.           │
+│    --header            <str>  An HTTP header, KEY=VALUE. Repeatable. Use ${SECRET}.              │
+│    --operation         <str>  Only offer this operationId. Repeatable.                           │
+│    --secret            <str>  A setup secret the project supplies, for reset and snapshot hooks. │
+│                               Repeatable. Without it, ${NAME} in a header or variable is a       │
+│                               credential the Agent supplies.                                     │
+│    --credential        <str>  A credential the running Agent supplies, such as its own API       │
+│                               token. Repeatable. ${NAME} in a header or variable is added for    │
+│                               you.                                                               │
+│    --app               <str>  The App's name, which prefixes its actions when there are several. │
+│                               Default: NAME.                                                     │
+│    --runtime           <str>  Where the Environment runs: local (a trusted subprocess), docker,  │
+│                               or daytona.                                                        │
+│                               [default: local]                                                   │
+│    --json                     Print machine-readable JSON.                                       │
+│    --help                     Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

@@ -25,6 +25,7 @@ from plural.common import (
     stable_id,
 )
 from plural.config import resolve_gateway_url
+from plural.credentials import CredentialUse, CredentialValue
 from plural.environments.definition import EnvironmentDefinition, EnvironmentIdentity, HarnessGrant
 from plural.sandbox.models import NetworkMode
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
@@ -705,6 +706,8 @@ class TrialResult(FrozenModel):
     trace_id: str | None = None
     error_code: ErrorCode | None = None
     error_message: str | None = None
+    credentials: tuple[CredentialUse, ...] = ()
+    """Which Agent credentials the Apps used, for audit. Never their values."""
 
     @model_validator(mode="after")
     def _shape(self) -> TrialResult:
@@ -747,7 +750,13 @@ class JobResult(FrozenModel):
 
 
 class Job:
-    """Simple public runner for a Task or Benchmark and catalog-backed Agents."""
+    """Simple public runner for a Task or Benchmark and catalog-backed Agents.
+
+    ``credentials`` gives each Agent's credential values by Agent name, such as
+    ``{"sales-bot": {"SALESFORCE_TOKEN": token}}``. A credential an Agent
+    declares and is not given here is read from the exported variable of the
+    same name.
+    """
 
     def __init__(
         self,
@@ -772,6 +781,7 @@ class Job:
         client: Any = None,
         api_key: str | None = None,
         hindsight: Sequence[Any] = (),
+        credentials: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         if not isinstance(source, (Task, Benchmark)):
             raise TypeError(
@@ -846,6 +856,11 @@ class Job:
             "environ": environ,
             "resource_resolvers": resource_resolvers,
             "hindsight": tuple(hindsight) or None,
+            "credentials": {
+                agent: {name: CredentialValue(value) for name, value in values.items()}
+                for agent, values in (credentials or {}).items()
+            }
+            or None,
             "progress": progress,
             "project_policy": project_policy,
             "catalog": self.catalog,

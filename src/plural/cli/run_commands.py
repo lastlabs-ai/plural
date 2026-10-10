@@ -27,6 +27,7 @@ from plural.cli.common import (
     signed_in,
     workspace,
 )
+from plural.cli.credential_commands import stored_credentials
 from plural.cli.runtime_commands import _project_studio
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
@@ -43,6 +44,7 @@ from plural.project.layout import (
 )
 from plural.project.runs import (
     DEFAULT_HARNESS,
+    CredentialSource,
     RunPlan,
     RunRequest,
     Tracking,
@@ -239,7 +241,12 @@ def run(
     _runtime_credentials(space, plan, err=as_json)
     _project_secrets(space, plan.spec, environ, err=as_json)
     job_id, result = run_local(
-        space, plan, environ=environ, progress=_progress(as_json, total), tracking=tracking
+        space,
+        plan,
+        environ=environ,
+        progress=_progress(as_json, total),
+        tracking=tracking,
+        credential_source=_stored_credentials(as_json),
     )
     _finish_local(space, job_id, result, tracking, as_json=as_json)
 
@@ -410,6 +417,7 @@ def job_rerun(
             environ=environ,
             progress=_progress(as_json),
             tracking=tracking,
+            credential_source=_stored_credentials(as_json),
         )
         _finish_local(space, new_id, result, tracking, as_json=as_json)
         return
@@ -478,6 +486,7 @@ def trial_rerun(
             environ=environ,
             progress=_progress(as_json),
             tracking=tracking,
+            credential_source=_stored_credentials(as_json),
         )
         _finish_local(space, new_id, result, tracking, as_json=as_json)
         return
@@ -750,6 +759,11 @@ def _runtime_credentials(space: Workspace, plan: RunPlan, *, err: bool) -> None:
         )
 
 
+def _stored_credentials(err: bool) -> CredentialSource:
+    """Look up the running Agent's stored credentials when the run starts."""
+    return lambda spec, agent: stored_credentials(spec, agent, err=err)
+
+
 def _needed_secrets(spec: JobSpec) -> list[str]:
     """Secret names the Job's Apps, Verifiers, and endpoint Agents need."""
     names: set[str] = set()
@@ -1008,6 +1022,13 @@ def _print_trial(payload: dict[str, Any]) -> None:
         )
         for line in verifier.get("evidence") or []:
             typer.echo(f"    - {line}")
+    for credential in payload.get("credentials") or []:
+        scopes = ", ".join(credential.get("scopes") or []) or "no scopes listed"
+        typer.echo(
+            f"  Credential {credential.get('name')} for App {credential.get('app')}: "
+            f"Agent {credential.get('agent')} {credential.get('agent_revision')} ({scopes}), "
+            f"from {credential.get('source')}, {credential.get('fingerprint')}"
+        )
 
 
 def _print_hosted_reviews(items: list[dict[str, Any]]) -> None:

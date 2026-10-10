@@ -219,6 +219,53 @@ def test_app_names_and_secret_names_are_checked() -> None:
         App.mcp("crm", url="https://example.com/mcp", secrets=["PATH"], actions=[])
 
 
+def test_a_name_is_either_a_setup_secret_or_an_agent_credential() -> None:
+    with pytest.raises(ValueError, match="both a secret and a credential"):
+        AppDefinition(name="crm", kind="mcp", secrets=["CRM_TOKEN"], credentials=["CRM_TOKEN"])
+    crm = AppDefinition(name="crm", kind="mcp", credentials=["CRM_TOKEN"])
+    admin = AppDefinition(name="admin", kind="mcp", secrets=["CRM_TOKEN"])
+    with pytest.raises(ValueError, match="secret of one App and a credential of another"):
+        EnvironmentDefinition(name="desk", apps=(crm, admin))
+
+
+def test_an_app_without_credentials_keeps_its_environment_hash() -> None:
+    plain = EnvironmentDefinition(name="desk", apps=(AppDefinition(name="crm", kind="mcp"),))
+    payload = plain.model_dump(mode="json")
+    assert payload["apps"][0]["credentials"] == []
+    needs = plain.model_copy(
+        update={"apps": (AppDefinition(name="crm", kind="mcp", credentials=["CRM_TOKEN"]),)}
+    )
+    assert needs.content_hash != plain.content_hash
+    assert needs.credentials[0].name == "CRM_TOKEN"
+    assert plain.credentials == ()
+
+
+def test_reset_and_snapshot_hooks_never_see_an_agents_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from plural.apps import mcp
+
+    monkeypatch.setenv("CRM_TOKEN", "agent-token")
+    monkeypatch.setenv("OTHER_TOKEN", "other-agent-token")
+    monkeypatch.setenv("CRM_ADMIN", "admin-token")
+    monkeypatch.setattr(mcp, "_hidden_from_hooks", frozenset())
+    app = App.mcp(
+        "crm",
+        url="https://crm.example/mcp",
+        headers={"Authorization": "${CRM_TOKEN}"},
+        credentials=["CRM_TOKEN"],
+        secrets=["CRM_ADMIN"],
+        reset="python scripts/seed.py",
+        actions=[],
+    )
+    mcp.hide_from_hooks(["OTHER_TOKEN"])
+    hook = app._hook_environ()  # type: ignore[attr-defined]
+
+    assert hook["CRM_ADMIN"] == "admin-token"
+    assert "CRM_TOKEN" not in hook
+    assert "OTHER_TOKEN" not in hook
+
+
 # MCP Apps.
 
 

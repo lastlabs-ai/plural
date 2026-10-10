@@ -1,5 +1,26 @@
 {
   "$defs": {
+    "AgentCredential": {
+      "additionalProperties": false,
+      "description": "A credential this Agent supplies to the Apps it works with.\n\nThe value, such as the Salesforce token of the user this Agent acts as, is\nnever part of the Agent: it is stored with ``plural agent credential set``\nor exported, and reaches only the App host. ``scopes`` records what the\ntoken may do, as you describe it; the system that issued the token enforces\nthem, and every Trial records them for audit.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "scopes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes",
+          "type": "array"
+        }
+      },
+      "title": "AgentCredential",
+      "type": "object"
+    },
     "FileDeclaration": {
       "additionalProperties": false,
       "description": "A file emitted or consumed by a package.",
@@ -236,6 +257,13 @@
       ],
       "title": "Auth Mode",
       "type": "string"
+    },
+    "credentials": {
+      "additionalProperties": {
+        "$ref": "#/$defs/AgentCredential"
+      },
+      "title": "Credentials",
+      "type": "object"
     },
     "endpoint": {
       "anyOf": [

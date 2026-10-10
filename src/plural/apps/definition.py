@@ -18,10 +18,13 @@ RESERVED_ACTIONS = frozenset({"reset", "step", "finish"})
 
 
 class SecretReference(FrozenModel):
-    """A named credential an App needs, supplied by the Job when it runs.
+    """A named value an App needs, which it never stores itself.
 
-    The value reaches only the App host that runs the App and the Verifier
-    queries made against it. It never reaches the Harness or the model.
+    In an App's ``secrets`` it is a setup secret, such as a sandbox's admin
+    token, supplied by the project for reset and snapshot hooks and Verifiers.
+    In its ``credentials`` it is supplied by the Agent that runs, such as the
+    Salesforce token of the user that Agent acts as. Either way the value
+    reaches only the App host, never the Harness or the model.
     """
 
     name: str = Field(pattern=r"^[A-Z_][A-Z0-9_]*$")
@@ -107,6 +110,9 @@ class AppDefinition(FrozenModel):
     config: dict[str, Any] = Field(default_factory=dict)
     actions: tuple[AppAction, ...] = ()
     secrets: tuple[SecretReference, ...] = ()
+    """Setup secrets, from the project: for reset and snapshot hooks and Verifiers."""
+    credentials: tuple[SecretReference, ...] = ()
+    """Credentials the running Agent supplies, so its actions run as that Agent."""
     rewarders: tuple[RewarderDefinition, ...] = ()
     state_schema: dict[str, Any] = Field(default_factory=dict)
     has_reset: bool = False
@@ -138,6 +144,15 @@ class AppDefinition(FrozenModel):
         secret_names = [item.name for item in self.secrets]
         if len(secret_names) != len(set(secret_names)):
             raise ValueError(f"App {self.name!r} declares a secret more than once")
+        credential_names = [item.name for item in self.credentials]
+        if len(credential_names) != len(set(credential_names)):
+            raise ValueError(f"App {self.name!r} declares a credential more than once")
+        both = sorted(set(secret_names) & set(credential_names))
+        if both:
+            raise ValueError(
+                f"App {self.name!r} lists {both[0]} as both a secret and a credential. "
+                "A credential comes from the Agent; a secret from the project. Pick one."
+            )
         rewarder_names = [item.name for item in self.rewarders]
         if len(rewarder_names) != len(set(rewarder_names)):
             raise ValueError(f"App {self.name!r} declares a rewarder name more than once")

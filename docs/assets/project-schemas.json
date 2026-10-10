@@ -102,6 +102,14 @@
             "title": "Secrets",
             "type": "array"
           },
+          "credentials": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SecretReference"
+            },
+            "title": "Credentials",
+            "type": "array"
+          },
           "rewarders": {
             "default": [],
             "items": {
@@ -787,7 +795,7 @@
       },
       "SecretReference": {
         "additionalProperties": false,
-        "description": "A named credential an App needs, supplied by the Job when it runs.\n\nThe value reaches only the App host that runs the App and the Verifier\nqueries made against it. It never reaches the Harness or the model.",
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
         "properties": {
           "name": {
             "pattern": "^[A-Z_][A-Z0-9_]*$",
@@ -1384,7 +1392,7 @@
       },
       "SecretReference": {
         "additionalProperties": false,
-        "description": "A named credential an App needs, supplied by the Job when it runs.\n\nThe value reaches only the App host that runs the App and the Verifier\nqueries made against it. It never reaches the Harness or the model.",
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
         "properties": {
           "name": {
             "pattern": "^[A-Z_][A-Z0-9_]*$",
@@ -1676,7 +1684,7 @@
       },
       "SecretReference": {
         "additionalProperties": false,
-        "description": "A named credential an App needs, supplied by the Job when it runs.\n\nThe value reaches only the App host that runs the App and the Verifier\nqueries made against it. It never reaches the Harness or the model.",
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
         "properties": {
           "name": {
             "pattern": "^[A-Z_][A-Z0-9_]*$",
@@ -1950,7 +1958,7 @@
       },
       "SecretReference": {
         "additionalProperties": false,
-        "description": "A named credential an App needs, supplied by the Job when it runs.\n\nThe value reaches only the App host that runs the App and the Verifier\nqueries made against it. It never reaches the Harness or the model.",
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
         "properties": {
           "name": {
             "pattern": "^[A-Z_][A-Z0-9_]*$",
@@ -2157,7 +2165,7 @@
       },
       "SecretReference": {
         "additionalProperties": false,
-        "description": "A named credential an App needs, supplied by the Job when it runs.\n\nThe value reaches only the App host that runs the App and the Verifier\nqueries made against it. It never reaches the Harness or the model.",
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
         "properties": {
           "name": {
             "pattern": "^[A-Z_][A-Z0-9_]*$",
@@ -2247,6 +2255,27 @@
   },
   "Agent": {
     "$defs": {
+      "AgentCredential": {
+        "additionalProperties": false,
+        "description": "A credential this Agent supplies to the Apps it works with.\n\nThe value, such as the Salesforce token of the user this Agent acts as, is\nnever part of the Agent: it is stored with ``plural agent credential set``\nor exported, and reaches only the App host. ``scopes`` records what the\ntoken may do, as you describe it; the system that issued the token enforces\nthem, and every Trial records them for audit.",
+        "properties": {
+          "scopes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "title": "AgentCredential",
+        "type": "object"
+      },
       "FileDeclaration": {
         "additionalProperties": false,
         "description": "A file emitted or consumed by a package.",
@@ -2603,6 +2632,13 @@
         ],
         "default": null,
         "title": "Endpoint Key"
+      },
+      "credentials": {
+        "additionalProperties": {
+          "$ref": "#/$defs/AgentCredential"
+        },
+        "title": "Credentials",
+        "type": "object"
       },
       "metadata": {
         "additionalProperties": true,
@@ -3366,7 +3402,7 @@
       },
       "SecretReference": {
         "additionalProperties": false,
-        "description": "A named credential an App needs, supplied by the Job when it runs.\n\nThe value reaches only the App host that runs the App and the Verifier\nqueries made against it. It never reaches the Harness or the model.",
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
         "properties": {
           "name": {
             "pattern": "^[A-Z_][A-Z0-9_]*$",

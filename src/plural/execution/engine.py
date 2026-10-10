@@ -22,6 +22,8 @@ from plural.benchmarks.results import AttemptEvidence, aggregate_configuration
 from plural.benchmarks.rules import BenchmarkScoring
 from plural.catalog import ModelCatalog
 from plural.common import ErrorCode, HarnessPackage, content_hash
+from plural.credentials import CredentialError, CredentialUse, CredentialValue
+from plural.credentials import resolve as resolve_credentials
 from plural.evidence import first_json_mapping
 from plural.execution.apps import (
     WORKSPACE,
@@ -470,10 +472,12 @@ class Trial:
         project_policy: ProjectPolicy,
         resource_resolvers: Mapping[str, ResourceResolver] | None = None,
         hindsight: Sequence[HindsightRewarder] = (),
+        credentials: Mapping[str, CredentialValue | str] | None = None,
     ) -> None:
         self.spec = spec
         self.job_spec = job_spec
         self.hindsight = tuple(hindsight)
+        self.credentials = dict(credentials or {})
         self.provider_for = provider_for
         self.store = store
         self.environ = environ
@@ -522,6 +526,7 @@ class Trial:
         app_report: dict[str, Any] = {}
         trace_id: str | None = None
         verifier_results: tuple[VerifierResult, ...] = ()
+        credential_uses: tuple[CredentialUse, ...] = ()
         tito: ArtifactReference | None = None
         cost_usd: float | None = None
         phases: list[PhaseTiming] = []
@@ -552,8 +557,12 @@ class Trial:
             host_env, runtime_secrets = runtime_values(task.environment, self.environ)
             try:
                 app_secrets = app_secret_values(task.environment, self.environ)
+                credential_values, credential_uses = resolve_credentials(
+                    task.environment, agent.agent, self.credentials, self.environ
+                )
             except ValueError as exc:
                 raise ExecutionFailure(ErrorCode.AUTHENTICATION, str(exc)) from None
+            app_secrets = {**app_secrets, **credential_values}
             self._verifier_secret_values()
             secrets.update(runtime_secrets)
             secrets.update(app_secrets)
@@ -774,6 +783,7 @@ class Trial:
                 scores={} if awaiting else scores,
                 verifier_results=verifier_results,
                 trace_id=trace_id,
+                credentials=credential_uses,
             )
         except BaseException as exc:
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
@@ -798,6 +808,7 @@ class Trial:
                 receipt=receipt,
                 verifier_results=verifier_results,
                 trace_id=trace_id,
+                credentials=credential_uses,
                 error_code=None if code is ErrorCode.CANCELLED else code,
                 error_message=_redact_bytes(str(exc).encode(), secrets).decode(errors="replace")[
                     :1000
@@ -1541,9 +1552,11 @@ class JobRunner:
         project_policy: ProjectPolicy | None = None,
         catalog: ModelCatalog | None = None,
         hindsight: Sequence[HindsightRewarder] = (),
+        credentials: Mapping[str, Mapping[str, CredentialValue | str]] | None = None,
     ) -> None:
         self.spec = spec
         self.hindsight = tuple(hindsight)
+        self.credentials = dict(credentials or {})
         self.catalog = catalog or ModelCatalog()
         self.plan = spec.plan(self.catalog)
         self._provider_override = provider
@@ -1558,6 +1571,10 @@ class JobRunner:
             allow_unsafe_local=allow_local
         )
         self._trials: set[Trial] = set()
+
+    def _agent_credentials(self, trial: TrialSpec) -> Mapping[str, CredentialValue | str]:
+        agent = next(item for item in self.spec.agents if item.agent_id == trial.agent_id)
+        return self.credentials.get(agent.name, {})
 
     def _provider_for(self, name: str) -> SandboxProvider:
         if self._provider_override is not None:
@@ -1584,6 +1601,17 @@ class JobRunner:
                 missing[app].extend(name for name in names if name not in missing[app])
         if missing:
             raise ExecutionFailure(ErrorCode.AUTHENTICATION, describe_missing(missing))
+        for task in self.spec.tasks:
+            for agent in self.spec.agents:
+                try:
+                    resolve_credentials(
+                        task.environment,
+                        agent.agent,
+                        self.credentials.get(agent.name, {}),
+                        self.environ,
+                    )
+                except CredentialError as exc:
+                    raise ExecutionFailure(ErrorCode.AUTHENTICATION, str(exc)) from None
         checked: set[tuple[str, str, str]] = set()
         for task in self.spec.tasks:
             for agent in self.spec.agents:
@@ -1674,6 +1702,7 @@ class JobRunner:
                         resource_resolvers=self.resource_resolvers,
                         project_policy=self.project_policy,
                         hindsight=self.hindsight,
+                        credentials=self._agent_credentials(trial_spec),
                     )
                     self._trials.add(trial)
                     try:

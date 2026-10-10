@@ -170,6 +170,9 @@ def test_an_unset_ref_leaves_environment_hashes_unchanged(tmp_path: Path) -> Non
     del payload["runtime"]["ref"]
     from plural.identity import revision_hash
 
+    for item in payload["apps"]:
+        if not item["credentials"]:
+            del item["credentials"]
     payload["source_digest"] = definition.source.digest if definition.source else None
     if payload["source_digest"] is not None:
         for app in payload["apps"]:

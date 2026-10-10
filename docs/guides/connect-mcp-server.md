@@ -2,7 +2,7 @@
 route: /docs/guides/connect-mcp-server
 title: Connect an MCP server
 order: 32
-description: Turn any MCP server into an App, so Agents can be evaluated and trained against it. Covers local and remote servers, secrets, choosing tools, resetting a sandbox, and checking state in Verifiers.
+description: Turn any MCP server into an App, so Agents can be evaluated and trained against it. Covers local and remote servers, Agent credentials and secrets, choosing tools, resetting a sandbox, and checking state in Verifiers.
 audience: all
 nav: true
 nav_group: Build
@@ -10,7 +10,7 @@ nav_group: Build
 # Connect an MCP server
 
 Any MCP server can be an [App](../concepts/apps.md). Its tools become the Agent's
-actions, and Plural handles the session, the secrets, and the record of every call.
+actions, and Plural handles the session, the credentials, and the record of every call.
 This guide connects a server, then makes it safe to benchmark.
 
 ## 1. Draft the Environment
@@ -81,14 +81,13 @@ For a server reached over HTTP, pass `--url` instead, with any headers it needs:
 ```bash
 plural env from-mcp crm \
   --url https://mcp.example.com/v1 \
-  --header 'Authorization=Bearer ${CRM_TOKEN}' \
-  --secret CRM_TOKEN
+  --header 'Authorization=Bearer ${CRM_TOKEN}'
 ```
 
 Quote the header in single quotes so your shell leaves `${CRM_TOKEN}` alone; Plural
-fills it in. Export the token first (`export CRM_TOKEN=...`) so Plural can reach the
-server to list its tools. Without it, the files are still written and the command
-says which secret to set.
+fills it in. Every `${NAME}` becomes a credential the running Agent supplies; see
+[step 4](#4-supply-credentials). Export the token first (`export CRM_TOKEN=...`) so
+Plural can reach the server to list its tools. Without it, the files are still written.
 
 ## 2. Check it
 
@@ -97,8 +96,8 @@ plural env validate memory
 ```
 
 `validate` connects to the server and prints each App's kind, control level, actions,
-and secrets, with where each secret comes from: your shell, the hosted project, or
-nowhere yet. It never prints a value.
+credentials, and secrets, with where each secret comes from: your shell, the hosted
+project, or nowhere yet. It never prints a value.
 Run it after every change.
 
 ## 3. Choose the tools
@@ -120,11 +119,13 @@ equivalent is `--tool NAME`, repeated. If `tools` names one the server doesn't o
 The Agent reads each tool's description from the server. With one App, the actions
 keep the tools' names. With several Apps, each is prefixed, such as `memory__search_nodes`.
 
-## 4. Supply secrets
+## 4. Supply credentials
 
-Secrets belong to the App that uses them. Reference them as `${NAME}` in `headers`
-(remote servers) or `env` (servers started with `command`), and list their names
-under `secrets`:
+A server's token belongs to the Agent that uses it, not to the App. Each Agent carries
+its own, such as the token of the Salesforce user it acts as, so its scopes decide
+what it can do and every Trial records which Agent's token acted. Reference the token as
+`${NAME}` in `headers` (remote servers) or `env` (servers started with `command`), and
+list its name under `credentials`:
 
 ```yaml
 apps:
@@ -133,32 +134,60 @@ apps:
       url: https://mcp.example.com/v1
       headers:
         Authorization: Bearer ${CRM_TOKEN}
-      secrets: [CRM_TOKEN]
+      credentials: [CRM_TOKEN]
   - name: search
     mcp:
       command: [uvx, acme-search-mcp]
       env:
         ACME_API_KEY: ${ACME_API_KEY}
-      secrets: [ACME_API_KEY]
+      credentials: [ACME_API_KEY]
 ```
 
-Plural refuses an App that references a secret it doesn't list, so a secret can't be
-forgotten. When a Job runs:
+Plural refuses an App that references a name it doesn't list, so nothing can be
+forgotten. Then give the Agent its credentials. List each in its `agent.yaml`, with
+the scopes the token grants, and store each value with the Agent:
 
-- **From your shell.** Export it before `plural run`. An exported value always wins.
-- **From the hosted project.** Store it once, and every `plural run` in the project,
-  and every hosted Job, uses it:
+```yaml
+# agents/sales-bot/agent.yaml
+name: sales-bot
+model: openai/gpt-5.6
+credentials:
+  CRM_TOKEN:
+    scopes: [read:accounts, write:opportunities]
+  ACME_API_KEY: {}
+```
 
-  ```bash
-  plural secret set ACME_API_KEY
-  ```
+```bash
+plural agent credential set sales-bot CRM_TOKEN
+plural agent credential set sales-bot ACME_API_KEY
+plural run --task close-deal --agent sales-bot
+```
 
-  `plural secret set` prompts for the value without echoing it. `plural secret list`
-  shows which secrets are set, never their values.
+`plural agent credential set` prompts for the value without echoing it, and
+`plural agent credential list sales-bot` shows which are stored, never their values.
+For a quick local run you can export the value instead.
 
-Either way, a missing secret stops the Job before it starts, naming the App and the
-secret. The value goes only to the process that runs the Apps. It is never written to
-the project, shown to the Agent, or given to the Agent's Harness.
+A run stops before it starts when the Agent doesn't carry a credential an App needs, or
+has no value for one, naming the App and the credential. A run with `--model` carries
+no credentials, so it can't use an App that needs one; save an Agent instead.
+
+The value goes only to the process that runs the Apps. It is never written to the
+project or the Trial, shown to the model, or given to its Harness. Each Trial records
+the Agent, its revision, the declared scopes, where the value came from, and a short
+fingerprint of it; `plural trial show` prints that record. Plural doesn't enforce the
+scopes; the system that issued the token does.
+
+### Setup secrets
+
+Some values belong to the project, not to any Agent: the admin token a `reset` command
+uses to wipe a sandbox, or a key a Verifier needs. List those under `secrets`, and store
+each once in the hosted project, or export it:
+
+```bash
+plural secret set CRM_ADMIN_TOKEN
+```
+
+`reset` and `snapshot` commands get the App's secrets and never an Agent's credentials.
 
 ## 5. Make a remote server safe to benchmark
 
@@ -187,13 +216,15 @@ apps:
         Authorization: Bearer ${CRM_TOKEN}
       reset: python scripts/seed_crm.py
       snapshot: python scripts/dump_crm.py
-      secrets: [CRM_TOKEN]
+      credentials: [CRM_TOKEN]
+      secrets: [CRM_ADMIN_TOKEN]
 ```
 
 The `reset` script wipes the sandbox tenant and loads the records the Task describes.
 Anything it prints becomes the episode's opening observation, so print nothing unless
-the Agent should see it. The App's secrets are in the script's environment. Give a
-Task's starting state under `initial_state`:
+the Agent should see it. The App's secrets, such as `CRM_ADMIN_TOKEN`, are in the
+script's environment; the Agent's credentials are not. Give a Task's starting state
+under `initial_state`:
 
 ```yaml
 initial_state:
@@ -207,7 +238,9 @@ initial_state:
 With one App, the App's name can be left out of `initial_state`.
 
 If the hooks are easier to write in Python, subclass `MCPApp` and use `call_tool`,
-which calls one of the server's tools:
+which calls one of the server's tools. Those calls go through the App's own connection,
+so they act with the running Agent's credential; use a `reset` command with a setup
+secret when the reset needs rights the Agent doesn't have:
 
 ```python
 from plural.apps import MCPApp
@@ -235,7 +268,7 @@ apps:
       url: https://sandbox.mcp.example.com/v1
       headers:
         Authorization: Bearer ${CRM_TOKEN}
-      secrets: [CRM_TOKEN]
+      credentials: [CRM_TOKEN]
 ```
 
 ## 6. Check the work in a Verifier
@@ -296,7 +329,8 @@ crm = App.mcp(
     headers={"Authorization": "Bearer ${CRM_TOKEN}"},
     reset="python scripts/seed_crm.py",
     snapshot="python scripts/dump_crm.py",
-    secrets=["CRM_TOKEN"],
+    credentials=["CRM_TOKEN"],
+    secrets=["CRM_ADMIN_TOKEN"],
 )
 
 environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local())
@@ -308,8 +342,8 @@ environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local
 | --- | --- |
 | `command` | Start the server inside the Runtime. A list, or one string split like a shell would. |
 | `url` | Reach a server over Streamable HTTP instead. Give exactly one of `command` and `url`. |
-| `headers` | HTTP headers for a `url` server. Values may contain `${SECRET}`. |
-| `env` | Environment variables for a `command` server. Values may contain `${SECRET}`, and `${PLURAL_APP_DIR}`, the episode's empty folder. |
+| `headers` | HTTP headers for a `url` server. Values may contain `${NAME}`, a credential or secret. |
+| `env` | Environment variables for a `command` server. Values may contain `${NAME}`, a credential or secret, and `${PLURAL_APP_DIR}`, the episode's empty folder. |
 | `cwd` | Working folder for a `command` server, relative to the Environment. |
 | `tools` | Offer only these tools. |
 | `exclude` | Never offer these tools. |
@@ -318,7 +352,8 @@ environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local
 | `snapshot_on_step` | Also snapshot around every action, so `@rewarder` methods receive states. Off by default, since it costs a call per step. |
 | `actions` | Tool declarations to use instead of asking the server, so the Environment loads without reaching it. |
 | `timeout_seconds` | How long one tool call may run. Default 60. |
-| `secrets` | Names of the secrets the App needs. A Job supplies the values. |
+| `credentials` | Names the running Agent supplies, such as its own API token. |
+| `secrets` | Names the project supplies, for `reset` and `snapshot` commands and Verifiers. |
 
 ## Troubleshooting
 
@@ -326,8 +361,10 @@ environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local
 
 | Error | What to do |
 | --- | --- |
-| `App 'crm' needs CRM_TOKEN` | Export the secret in your shell, or store it with `plural secret set CRM_TOKEN`. |
-| `references CRM_TOKEN but does not list it in secrets` | Add the name to the App's `secrets`. |
+| `Agent 'gpt-5.6' does not carry: CRM_TOKEN, for App crm` | List `CRM_TOKEN` under `credentials:` in the Agent's `agent.yaml` and run with `--agent`. A `--model` run carries no credentials. |
+| `Agent 'sales-bot' declares CRM_TOKEN but has no value for it` | Store it with `plural agent credential set sales-bot CRM_TOKEN`, or export it for a local run. |
+| `App 'crm' needs CRM_ADMIN_TOKEN` | A setup secret is missing. Export it, or store it with `plural secret set CRM_ADMIN_TOKEN`. |
+| `references CRM_TOKEN but does not list it` | Add the name to the App's `credentials`, or to its `secrets` if the project supplies it. |
 | `Cannot start MCP server 'npx'` | The command isn't installed where the Apps run. Install it, or use its full path. |
 | `MCP server exited: exit code 1. Its output is in .../server.log` | The server crashed on startup. The error shows the end of its output; the most common cause is a missing environment variable. |
 | `Cannot reach MCP server https://...` | Check the URL, and that the server speaks Streamable HTTP. |

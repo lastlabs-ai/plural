@@ -58,7 +58,7 @@ VERSIONED_NAME_HELP = (
 
 
 def _app_summary(environment: Any) -> list[dict[str, Any]]:
-    """Each App's kind, control level, actions, and secrets, never their values.
+    """Each App's kind, control level, actions, secrets, and credentials, never values.
 
     Returns:
         One entry per App.
@@ -91,8 +91,44 @@ def _app_summary(environment: Any) -> list[dict[str, Any]]:
                 }
                 for item in app.secrets
             ],
+            "credentials": [
+                {"name": item.name, "required": item.required, "description": item.description}
+                for item in app.credentials
+            ],
         }
         for app in definition.apps
+    ]
+
+
+def _agent_credentials(name: str, agent: Any) -> list[dict[str, Any]]:
+    """The credentials an Agent declares, and whether each has a value. Never the value.
+
+    Returns:
+        One entry per credential.
+    """
+    import os
+
+    import httpx
+
+    from plural.cli.runtime_commands import _project_studio
+    from plural.errors import PluralError
+    from plural.studio import slugify
+
+    declared = agent._definition().credentials
+    stored: set[str] = set()
+    if set(declared) - set(os.environ):
+        try:
+            studio, _ = _project_studio()
+            stored = {str(item["name"]) for item in studio.agents.credentials(slugify(name))}
+        except (PluralError, ProjectError, OSError, httpx.HTTPError):
+            stored = set()
+    return [
+        {
+            "name": key,
+            "scopes": list(item.scopes),
+            "source": "agent" if key in stored else "shell" if os.environ.get(key) else None,
+        }
+        for key, item in declared.items()
     ]
 
 
@@ -140,6 +176,9 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         apps = _app_summary(resource.value) if kind is ENVIRONMENT else None
         if apps is not None:
             payload = {**payload, "apps": apps}
+        credentials = _agent_credentials(ref.name, resource.value) if kind is AGENT else []
+        if kind is AGENT:
+            payload = {**payload, "credentials": credentials}
         live = _live_apps(resource.value) if kind is BENCHMARK else []
         if kind is BENCHMARK:
             payload = {**payload, "reproducible": not live, "live_apps": live}
@@ -154,6 +193,21 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                 for secret in app["secrets"]:
                     status = secret_status(secret)
                     typer.echo(f"  secret {secret['name']}: {status}")
+                for credential in app["credentials"]:
+                    typer.echo(
+                        f"  credential {credential['name']}: supplied by the Agent that runs"
+                    )
+            for credential in credentials:
+                scopes = ", ".join(credential["scopes"]) or "no scopes listed"
+                status = (
+                    "stored with the Agent"
+                    if credential["source"] == "agent"
+                    else "set in your shell"
+                    if credential["source"] == "shell"
+                    else f"NOT SET: run `plural agent credential set {ref.name} "
+                    f"{credential['name']}`"
+                )
+                typer.echo(f"  credential {credential['name']} ({scopes}): {status}")
             if live:
                 one = len(live) == 1
                 typer.echo(

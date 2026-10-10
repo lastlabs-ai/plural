@@ -15,6 +15,7 @@ from typer.testing import CliRunner
 
 from plural.cli.main import app
 from plural.project import Project, ResourceRef, Workspace
+from plural.project.generators import from_mcp
 
 SERVER = Path(__file__).resolve().parents[1] / "fixtures" / "mcp_records_server.py"
 
@@ -58,15 +59,19 @@ def test_from_mcp_discovers_the_servers_tools(
     [records] = drafted["apps"]
     assert records["name"] == "records_desk"
     assert [item["name"] for item in records["actions"]] == ["get_record", "list_records"]
-    assert records["secrets"] == [
-        {"name": "RECORDS_TOKEN", "required": True, "set": True, "source": "shell"}
+    assert records["secrets"] == []
+    assert records["credentials"] == [
+        {"name": "RECORDS_TOKEN", "required": True, "description": ""}
     ]
     assert "records-secret" not in output
     manifest = yaml.safe_load(
         (project.root / "environments/records-desk/environment.yaml").read_text()
     )
-    assert manifest["apps"][0]["mcp"]["secrets"] == ["RECORDS_TOKEN"]
-    assert "RECORDS_TOKEN" in (project.root / "environments/records-desk/README.md").read_text()
+    assert manifest["apps"][0]["mcp"]["credentials"] == ["RECORDS_TOKEN"]
+    assert "secrets" not in manifest["apps"][0]["mcp"]
+    readme = (project.root / "environments/records-desk/README.md").read_text()
+    assert "RECORDS_TOKEN" in readme
+    assert "plural agent credential set" in readme
 
     code, output, _ = cli("env", "from-mcp", "records-desk", "--url", "https://x.dev/mcp")
     assert code != 0
@@ -182,3 +187,19 @@ def test_from_traces_drafts_replay_apps_tasks_and_a_benchmark_the_traces_score_o
 
     job = Job.from_traces(traces, benchmark=space.load(ResourceRef("benchmark", "support")).value)
     assert [task.name for task in job.source.tasks] == ["support-t-1", "support-t-2"]
+
+
+def test_a_reference_named_with_secret_stays_a_setup_secret() -> None:
+    generated = from_mcp(
+        "crm",
+        app="crm",
+        url="https://crm.example/mcp",
+        headers={"Authorization": "Bearer ${CRM_TOKEN}", "X-Admin": "${CRM_ADMIN}"},
+        secrets=["CRM_ADMIN"],
+    )
+
+    assert generated.credentials == ["CRM_TOKEN"]
+    assert generated.secrets == ["CRM_ADMIN"]
+    manifest = yaml.safe_load(generated.files["environments/crm/environment.yaml"])
+    assert manifest["apps"][0]["mcp"]["credentials"] == ["CRM_TOKEN"]
+    assert manifest["apps"][0]["mcp"]["secrets"] == ["CRM_ADMIN"]

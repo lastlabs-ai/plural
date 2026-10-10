@@ -122,10 +122,14 @@ class DataApp(App[State]):
         sql: bool = False,
         page_size: int = 50,
         secrets: Iterable[str | SecretReference] | None = None,
+        credentials: Iterable[str | SecretReference] | None = None,
         description: str | None = None,
     ) -> None:
         super().__init__(
-            name=name or type(self).name or None, description=description, secrets=secrets
+            name=name or type(self).name or None,
+            description=description,
+            secrets=secrets,
+            credentials=credentials,
         )
         if database is None and not tables:
             raise ValueError(f"Data App {self.name!r} needs database or tables")

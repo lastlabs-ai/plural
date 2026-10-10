@@ -163,7 +163,7 @@ apps:
       url: https://sandbox.mcp.example.com/v1
       headers:
         Authorization: Bearer ${CRM_TOKEN}
-      secrets: [CRM_TOKEN]
+      credentials: [CRM_TOKEN]
 runtime:
   provider: local
 ```

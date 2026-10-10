@@ -221,6 +221,57 @@ instructions: Follow the support policy and finish the ticket using the availabl
 This is the usual way to check a trained model against the same Benchmark you used
 for the baseline; see [Training and RL](../running/training.md).
 
+## Give the Agent credentials
+
+When an App acts as a user of a real system, such as a CRM, the token it needs belongs
+to the Agent, not the App. Each Agent carries its own credentials, so two Agents can
+work in the same Environment as different users with different permissions, and every
+Trial records which Agent's token acted.
+
+List each credential in `agent.yaml`, by the name the App declares, with the scopes the
+token grants:
+
+```yaml
+name: sales-bot
+version: 0.1.0
+model: openai/gpt-5.6
+credentials:
+  CRM_TOKEN:
+    scopes: [read:accounts, write:opportunities]
+    description: The sales team's integration user.
+```
+
+Then store each value with the Agent in the hosted project:
+
+```bash
+plural agent credential set sales-bot CRM_TOKEN
+plural agent credential list sales-bot
+plural agent validate sales-bot
+```
+
+`set` prompts for the value without echoing it, or reads it with `--from-env`. `list`
+and `validate` show which credentials have a value, never the values. For a local run
+you can export the value instead; the stored one wins when both exist.
+
+- The value goes only to the process that runs the Apps. The model and its Harness
+  never receive it, and it is never written to the project or the Trial.
+- `scopes` is what you declare the token may do. Plural records it on each Trial; the
+  system that issued the token enforces it.
+- A run stops before it starts when the Agent lacks a credential an App needs, or has
+  no value for one. A `--model` run has no Agent to carry credentials, so it can only
+  use Apps that need none.
+- Each Trial records, per credential: the App, the Agent and its revision, the scopes,
+  where the value came from (`hosted`, `environment`, or `provided` from Python), and a
+  short fingerprint of the value. `plural trial show` prints it.
+
+In Python, declare them on the Agent and pass the values to the Job by Agent name:
+
+```python
+agent = Agent(model="openai/gpt-5.6", name="sales-bot",
+              credentials={"CRM_TOKEN": {"scopes": ["read:accounts"]}})
+Job(task, [agent], credentials={"sales-bot": {"CRM_TOKEN": token}}).run()
+```
+
 ## Evaluate the Agent
 
 From the command line, run a saved Agent on a Task, or try a model without saving an

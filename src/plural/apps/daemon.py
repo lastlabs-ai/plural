@@ -97,6 +97,7 @@ def _receive(connection: socket.socket) -> dict[str, Any]:
 
 def _load_host(root: Path) -> Any:
     from plural.apps.host import AppHost
+    from plural.apps.mcp import hide_from_hooks
     from plural.environments.definition import EnvironmentDefinition
     from plural.environments.env import Environment
 
@@ -104,6 +105,7 @@ def _load_host(root: Path) -> Any:
     if not path.is_file():
         raise FileNotFoundError(f"{path} is missing; the Job writes it before starting the host")
     definition = EnvironmentDefinition.model_validate_json(path.read_text(encoding="utf-8"))
+    hide_from_hooks(item.name for item in definition.credentials)
     environment = Environment._from_definition(definition, root=root)
     return AppHost(environment, workspace=root)
 

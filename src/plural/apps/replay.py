@@ -141,10 +141,14 @@ class ReplayApp(App[State]):
         actions: Sequence[Mapping[str, Any] | AppAction] | None = None,
         read_only: Sequence[str] = (),
         secrets: Iterable[str | SecretReference] | None = None,
+        credentials: Iterable[str | SecretReference] | None = None,
         description: str | None = None,
     ) -> None:
         super().__init__(
-            name=name or type(self).name or None, description=description, secrets=secrets
+            name=name or type(self).name or None,
+            description=description,
+            secrets=secrets,
+            credentials=credentials,
         )
         if recordings is None:
             raise ValueError(f"Replay App {self.name!r} needs recordings: a .json or .jsonl file")

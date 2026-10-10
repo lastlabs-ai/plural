@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
@@ -461,6 +461,20 @@ class ExecutionLimits(FrozenModel):
     max_cost_usd: float | None = Field(default=None, gt=0)
 
 
+def _merged(items: Iterable[SecretReference]) -> tuple[SecretReference, ...]:
+    """Each name once; required wins when two Apps disagree.
+
+    Returns:
+        The references in first-seen order.
+    """
+    seen: dict[str, SecretReference] = {}
+    for item in items:
+        current = seen.get(item.name)
+        if current is None or (item.required and not current.required):
+            seen[item.name] = item
+    return tuple(seen.values())
+
+
 class EnvironmentDefinition(FrozenModel):
     """Schema-v2 Environment: Apps composed with one Runtime and one set of limits.
 
@@ -537,10 +551,19 @@ class EnvironmentDefinition(FrozenModel):
         if len(resource_names) != len(set(resource_names)):
             raise ValueError("resource names must be unique")
         variables = {item.name for item in self.runtime.variables}
-        overlap = sorted(variables & {item.name for item in self.secrets})
+        secret_names = {item.name for item in self.secrets}
+        credential_names = {item.name for item in self.credentials}
+        overlap = sorted(variables & (secret_names | credential_names))
         if overlap:
             raise ValueError(
                 f"{overlap[0]} is both a Runtime variable and an App secret; declare it once"
+            )
+        mixed = sorted(secret_names & credential_names)
+        if mixed:
+            raise ValueError(
+                f"{mixed[0]} is a secret of one App and a credential of another. A "
+                "credential comes from the Agent and a secret from the project, so one name "
+                "cannot be both; rename one of them."
             )
         exposed = [item.name for item in self.actions]
         clashes = sorted({name for name in exposed if exposed.count(name) > 1})
@@ -572,14 +595,13 @@ class EnvironmentDefinition(FrozenModel):
 
     @property
     def secrets(self) -> tuple[SecretReference, ...]:
-        """Every secret the Environment's Apps need, each listed once."""
-        seen: dict[str, SecretReference] = {}
-        for app in self.apps:
-            for item in app.secrets:
-                current = seen.get(item.name)
-                if current is None or (item.required and not current.required):
-                    seen[item.name] = item
-        return tuple(seen.values())
+        """Every setup secret the Environment's Apps need, each listed once."""
+        return _merged(item for app in self.apps for item in app.secrets)
+
+    @property
+    def credentials(self) -> tuple[SecretReference, ...]:
+        """Every credential the running Agent must supply, each listed once."""
+        return _merged(item for app in self.apps for item in app.credentials)
 
     def app(self, name: str) -> AppDefinition:
         """Return one App by name.
@@ -614,6 +636,10 @@ class EnvironmentDefinition(FrozenModel):
         payload = self.model_dump(mode="json", exclude={"source"})
         if payload["runtime"]["ref"] is None:
             del payload["runtime"]["ref"]
+        for app in payload["apps"]:
+            # Apps that need no credentials keep the identity they had before credentials.
+            if not app["credentials"]:
+                del app["credentials"]
         digest = self.source.digest if self.source else None
         payload["source_digest"] = digest
         if digest is not None:

@@ -9,16 +9,20 @@ there so nothing it saves reaches the next Trial. A server reached by ``url``
 lives elsewhere: it is ``sandboxed`` when you give it a ``reset`` hook and
 ``live`` otherwise.
 
-Settings that hold secrets reference them as ``${NAME}``; list each name in
-``secrets`` so the Job supplies it::
+Settings that hold credentials reference them as ``${NAME}``. List a name in
+``credentials`` when the running Agent supplies it, so each Agent acts with its
+own token and scopes, or in ``secrets`` when the project does, as for a reset
+hook's admin token::
 
     App.mcp(
         "crm",
         url="https://mcp.example.com/v1",
         headers={"Authorization": "Bearer ${CRM_TOKEN}"},
-        secrets=["CRM_TOKEN"],
+        credentials=["CRM_TOKEN"],
         tools=["create_record", "get_record"],
     )
+
+Reset and snapshot hooks never see an Agent's credentials.
 """
 
 from __future__ import annotations
@@ -54,6 +58,7 @@ class MCPError(RuntimeError):
 
 
 _secret_source: Callable[[str], str | None] | None = None
+_hidden_from_hooks: frozenset[str] = frozenset()
 
 
 def use_secret_source(source: Callable[[str], str | None] | None) -> None:
@@ -65,6 +70,16 @@ def use_secret_source(source: Callable[[str], str | None] | None) -> None:
     """
     global _secret_source  # noqa: PLW0603 - one source per process
     _secret_source = source
+
+
+def hide_from_hooks(names: Iterable[str]) -> None:
+    """Keep these values, the running Agent's credentials, out of reset and snapshot hooks.
+
+    Hooks set up and inspect the system with the project's setup secrets; they
+    never act as the Agent.
+    """
+    global _hidden_from_hooks  # noqa: PLW0603 - one Environment per App host
+    _hidden_from_hooks = frozenset(names)
 
 
 def expand(value: str, environ: Mapping[str, str] | None = None) -> str:
@@ -85,8 +100,9 @@ def expand(value: str, environ: Mapping[str, str] | None = None) -> str:
             found = _secret_source(name)
         if found is None:
             raise MCPError(
-                f"{name} is not set. Export it, or store it in the hosted project with "
-                f"`plural secret set {name}`."
+                f"{name} is not set. Export it, store it in the hosted project with "
+                f"`plural secret set {name}`, or, for an Agent's credential, with "
+                f"`plural agent credential set <agent> {name}`."
             )
         return found
 
@@ -450,7 +466,8 @@ class MCPApp(App[State]):
             rewarders receive states. Off by default because it costs a call.
         actions: Tool declarations to use instead of asking the server, so a
             definition can be built without reaching it.
-        secrets: Names the Job must supply.
+        secrets: Setup secrets the project supplies, for hooks and Verifiers.
+        credentials: Names the running Agent supplies, such as its own API token.
         timeout_seconds: How long one tool call may run.
 
     Subclass ``MCPApp`` to write ``reset`` or ``snapshot`` in Python with
@@ -476,11 +493,15 @@ class MCPApp(App[State]):
         snapshot_on_step: bool = False,
         actions: Sequence[Mapping[str, Any] | AppAction] | None = None,
         secrets: Iterable[str | SecretReference] | None = None,
+        credentials: Iterable[str | SecretReference] | None = None,
         description: str | None = None,
         timeout_seconds: float = 60,
     ) -> None:
         super().__init__(
-            name=name or type(self).name or None, description=description, secrets=secrets
+            name=name or type(self).name or None,
+            description=description,
+            secrets=secrets,
+            credentials=credentials,
         )
         self.command = _argv(command)
         self.url = url
@@ -510,12 +531,16 @@ class MCPApp(App[State]):
         self._app_dir: Path | None = None
         undeclared = sorted(
             referenced_variables([*self.headers.values(), *self.env.values()])
-            - {SecretReference.model_validate(item).name for item in self.secrets}
+            - {
+                SecretReference.model_validate(item).name
+                for item in (*self.secrets, *self.credentials)
+            }
         )
         if undeclared:
             raise ValueError(
                 f"MCP App {self.name!r} references {', '.join(undeclared)} but does not list "
-                f"it in secrets. Add secrets={undeclared!r} so a Job supplies the value."
+                f"it. Add credentials={undeclared!r} when the running Agent supplies the "
+                f"value, or secrets={undeclared!r} when the project does."
             )
 
     # Connection.
@@ -678,12 +703,23 @@ class MCPApp(App[State]):
             environ[APP_DIR] = str(self._app_dir)
         return environ
 
+    def _hook_environ(self) -> dict[str, str]:
+        """The hook's environment: the App's, without any Agent's credentials.
+
+        Returns:
+            A copy of the environment for a reset or snapshot hook.
+        """
+        hidden = _hidden_from_hooks | {
+            SecretReference.model_validate(item).name for item in self.credentials
+        }
+        return {key: value for key, value in self._environ().items() if key not in hidden}
+
     def _run(self, command: Sequence[str], *, stdin: str) -> str:
         completed = subprocess.run(  # noqa: S603 - the App's declared hook
             list(command),
             input=stdin.encode(),
             capture_output=True,
-            env=self._environ(),
+            env=self._hook_environ(),
             cwd=str(self.workspace),
             timeout=self.timeout_seconds,
             check=False,
@@ -711,6 +747,7 @@ __all__ = [
     "MCPClient",
     "MCPError",
     "expand",
+    "hide_from_hooks",
     "tool_action",
     "tool_text",
     "use_secret_source",
