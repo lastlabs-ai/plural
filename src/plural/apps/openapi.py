@@ -331,7 +331,8 @@ class OpenAPIApp(App[State]):
         query = {
             item: values.pop(item) for item in binding.get("query_params") or () if item in values
         }
-        headers = {k: expand(v) for k, v in self.headers.items()}
+        owned = {SecretReference.model_validate(item).name for item in self.credentials}
+        headers = {k: expand(v, credentials=owned) for k, v in self.headers.items()}
         for item in binding.get("header_params") or ():
             if item in values:
                 headers[item] = str(values.pop(item))

@@ -58,6 +58,7 @@ class MCPError(RuntimeError):
 
 
 _secret_source: Callable[[str], str | None] | None = None
+_credential_source: Callable[[str], str | None] | None = None
 _hidden_from_hooks: frozenset[str] = frozenset()
 
 
@@ -72,6 +73,18 @@ def use_secret_source(source: Callable[[str], str | None] | None) -> None:
     _secret_source = source
 
 
+def use_credential_source(source: Callable[[str], str | None] | None) -> None:
+    """Look up an Agent credential's value the process environment lacks.
+
+    ``plural run --agent`` installs one for that Agent, so planning the run can
+    reach a server that needs the Agent's own token to list its tools. A value
+    found this way fills one setting; it is never added to the process
+    environment.
+    """
+    global _credential_source  # noqa: PLW0603 - one running Agent per process
+    _credential_source = source
+
+
 def hide_from_hooks(names: Iterable[str]) -> None:
     """Keep these values, the running Agent's credentials, out of reset and snapshot hooks.
 
@@ -82,8 +95,16 @@ def hide_from_hooks(names: Iterable[str]) -> None:
     _hidden_from_hooks = frozenset(names)
 
 
-def expand(value: str, environ: Mapping[str, str] | None = None) -> str:
+def expand(
+    value: str,
+    environ: Mapping[str, str] | None = None,
+    *,
+    credentials: Iterable[str] = (),
+) -> str:
     """Replace ``${NAME}`` with the value of that environment variable.
+
+    A name in ``credentials`` belongs to the running Agent, so it is never
+    looked up among the project's secrets.
 
     Returns:
         ``value`` with every reference replaced.
@@ -92,12 +113,26 @@ def expand(value: str, environ: Mapping[str, str] | None = None) -> str:
         MCPError: When a referenced variable is not set.
     """
     source = os.environ if environ is None else environ
+    agent_owned = frozenset(credentials)
 
     def replace(match: re.Match[str]) -> str:
         name = match.group(1)
         found = source.get(name)
-        if found is None and _secret_source is not None and name != APP_DIR:
+        if (
+            found is None
+            and _secret_source is not None
+            and name != APP_DIR
+            and name not in agent_owned
+        ):
             found = _secret_source(name)
+        if found is None and name in agent_owned and _credential_source is not None:
+            found = _credential_source(name)
+        if found is None and name in agent_owned:
+            raise MCPError(
+                f"{name} is a credential the running Agent supplies, and it is not set "
+                "here. Export it to reach the server now; a run takes it from the Agent, "
+                f"set with `plural agent credential set <agent> {name}`."
+            )
         if found is None:
             raise MCPError(
                 f"{name} is not set. Export it, store it in the hosted project with "
@@ -555,13 +590,18 @@ class MCPApp(App[State]):
             log = self.workspace / ".plural" / "apps" / self.name / "server.log"
             cwd = str((self.workspace / self.cwd).resolve()) if self.cwd else str(self.workspace)
             environ = self._environ()
-            env = {key: expand(value, environ) for key, value in self.env.items()}
+            owned = self._credential_names()
+            env = {
+                key: expand(value, environ, credentials=owned) for key, value in self.env.items()
+            }
             if self.command:
                 env = {APP_DIR: environ[APP_DIR], "TMPDIR": environ[APP_DIR], **env}
             self._client = MCPClient(
                 command=self.command or None,
                 url=self.url,
-                headers={key: expand(value) for key, value in self.headers.items()},
+                headers={
+                    key: expand(value, credentials=owned) for key, value in self.headers.items()
+                },
                 env=env,
                 cwd=cwd if self.command else None,
                 log=log if self.command else None,
@@ -703,15 +743,16 @@ class MCPApp(App[State]):
             environ[APP_DIR] = str(self._app_dir)
         return environ
 
+    def _credential_names(self) -> frozenset[str]:
+        return frozenset(SecretReference.model_validate(item).name for item in self.credentials)
+
     def _hook_environ(self) -> dict[str, str]:
         """The hook's environment: the App's, without any Agent's credentials.
 
         Returns:
             A copy of the environment for a reset or snapshot hook.
         """
-        hidden = _hidden_from_hooks | {
-            SecretReference.model_validate(item).name for item in self.credentials
-        }
+        hidden = _hidden_from_hooks | self._credential_names()
         return {key: value for key, value in self._environ().items() if key not in hidden}
 
     def _run(self, command: Sequence[str], *, stdin: str) -> str:
@@ -750,5 +791,6 @@ __all__ = [
     "hide_from_hooks",
     "tool_action",
     "tool_text",
+    "use_credential_source",
     "use_secret_source",
 ]

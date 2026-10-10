@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 from datetime import datetime
 
 import httpx
@@ -167,6 +168,31 @@ def stored_credentials(
     return out
 
 
+def agent_credential_source(agent: str) -> Callable[[str], str | None]:
+    """Look up one of this Agent's stored credentials, once per name.
+
+    Planning a run loads its Apps, and a server that needs the Agent's own
+    token to list its tools gets it here. Without a hosted project, or when
+    you may not read the Agent's credentials, the lookup finds nothing and the
+    App names what is missing.
+    """
+    found: dict[str, str | None] = {}
+
+    def lookup(name: str) -> str | None:
+        if name not in found:
+            found[name] = None
+            try:
+                studio, _ = _project_studio()
+                grant = _resolve(studio, slugify(agent), [name])
+            except (PluralError, ProjectError, OSError, httpx.HTTPError):
+                return None
+            if name in grant:
+                found[name] = grant[name].value
+        return found[name]
+
+    return lookup
+
+
 def _resolve(studio: Studio, agent: str, names: list[str]) -> dict[str, CredentialValue]:
     found = studio.agents.resolve_credentials(agent, names).get("credentials") or {}
     out: dict[str, CredentialValue] = {}
@@ -182,4 +208,4 @@ def _resolve(studio: Studio, agent: str, names: list[str]) -> dict[str, Credenti
     return out
 
 
-__all__ = ["credential_app", "stored_credentials"]
+__all__ = ["agent_credential_source", "credential_app", "stored_credentials"]

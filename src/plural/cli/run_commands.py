@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 import typer
 
+from plural.apps.mcp import use_credential_source
 from plural.auth import Session
 from plural.cli.common import (
     JSON_OPTION,
@@ -27,7 +28,7 @@ from plural.cli.common import (
     signed_in,
     workspace,
 )
-from plural.cli.credential_commands import stored_credentials
+from plural.cli.credential_commands import agent_credential_source, stored_credentials
 from plural.cli.runtime_commands import _project_studio
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
@@ -202,6 +203,8 @@ def run(
         if pulled:
             _print_pulled(pulled, err=as_json)
             space = Workspace(Project.at(root))
+    if agent:
+        use_credential_source(agent_credential_source(agent))
     plan = plan_run(space, request, environ=environ)
     if dry_run:
         payload = _plan_payload(plan, hosted=hosted)

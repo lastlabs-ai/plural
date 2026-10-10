@@ -332,7 +332,7 @@ def test_a_project_secret_fills_a_setting_you_have_not_exported(
 ) -> None:
     import httpx
 
-    from plural.apps.mcp import expand, use_secret_source
+    from plural.apps.mcp import expand, use_credential_source, use_secret_source
     from plural.cli import secret_commands
 
     calls: list[list[str]] = []
@@ -356,6 +356,23 @@ def test_a_project_secret_fills_a_setting_you_have_not_exported(
         with pytest.raises(MCPError, match="plural secret set OTHER_TOKEN"):
             expand("${OTHER_TOKEN}")
         assert expand("${CRM_TOKEN}", {"CRM_TOKEN": "exported"}) == "exported"
+
+        # An Agent's credential never falls back to a project secret of the same name.
+        calls.clear()
+        with pytest.raises(MCPError, match="plural agent credential set"):
+            expand("Bearer ${CRM_TOKEN}", credentials={"CRM_TOKEN"})
+        assert calls == []
+
+        # `plural run --agent` lets the planner reach the server with that Agent's own value.
+        asked: list[str] = []
+        use_credential_source(lambda name: asked.append(name) or "agent-token")
+        try:
+            assert expand("Bearer ${CRM_TOKEN}", credentials={"CRM_TOKEN"}) == "Bearer agent-token"
+            with pytest.raises(MCPError, match="plural secret set OTHER_TOKEN"):
+                expand("${OTHER_TOKEN}", credentials={"CRM_TOKEN"})
+            assert asked == ["CRM_TOKEN"]
+        finally:
+            use_credential_source(None)
 
         def unreachable() -> Any:
             raise httpx.ConnectError("refused")
