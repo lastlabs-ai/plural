@@ -92,6 +92,13 @@ from plural.jobs import (
     VerifierResult,
 )
 from plural.project import Project, ProjectError, ResourceRef, Workspace
+from plural.rewards import (
+    Credit,
+    HindsightTrial,
+    RewardRecord,
+    RewardTarget,
+    hindsight_rewarder,
+)
 from plural.sandbox import (
     Capability,
     DaytonaProvider,
@@ -168,8 +175,13 @@ __all__ = [
     "Verifier",
     "VerifierOutput",
     "action",
+    "hindsight_rewarder",
     "initial",
     "rewarder",
+    "Credit",
+    "HindsightTrial",
+    "RewardRecord",
+    "RewardTarget",
     # Projects.
     "Project",
     "ProjectError",

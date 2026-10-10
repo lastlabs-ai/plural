@@ -241,3 +241,47 @@ def test_verifier_data_never_reaches_the_harness(project: Project, tmp_path: Pat
     assert "Review order A-1" in visible
     for private in ("SECRET", "verify.py", "resolved", '"score"', "refundable"):
         assert private not in visible, private
+
+
+def test_rewards_apply_labels_a_stored_trial_and_export_joins_the_ledger(
+    project: Project,
+) -> None:
+    code, output, job = cli("run", "--task", "refund", "--agent", "baseline", "--json")
+    assert code == 0, output
+    [trial] = job["trials"]
+    (project.root / "labels.py").write_text(
+        "from plural import HindsightTrial, RewardTarget, hindsight_rewarder\n\n\n"
+        "@hindsight_rewarder(version='3')\n"
+        "def scored(trial: HindsightTrial):\n"
+        "    for step in trial.steps('submit'):\n"
+        "        yield trial.credit(RewardTarget.step(step['event_id']), trial.score or 0)\n"
+    )
+
+    code, output, applied = cli(
+        "rewards", "apply", "labels.py:scored", "--trial", trial["trial_id"], "--json"
+    )
+    assert code == 0, output
+    assert applied["version"] == "3"
+    assert applied["trials"][0]["trial_id"] == trial["trial_id"]
+    labeled = applied["trials"][0]["records"]
+    assert labeled >= 1
+
+    code, output, ledger = cli("rewards", "show", trial["trial_id"], "--json")
+    assert code == 0, output
+    assert [(item["source"], item["rewarder"], item["app"]) for item in ledger] == [
+        ("app", "resolved", "queue"),
+        ("hindsight", "scored", None),
+    ]
+    assert ledger[0]["target"] == ledger[1]["target"]
+    assert ledger[1]["value"] == 1.0
+
+    out = project.root / "train.jsonl"
+    code, output, _ = cli(
+        "rewards", "export", "--job", job["job_id"], "--rewarder", "scored@3", "--out", str(out)
+    )
+    assert code == 0, output
+    [line] = out.read_text().splitlines()
+    exported = json.loads(line)
+    assert exported["trial_id"] == trial["trial_id"]
+    assert exported["score"] == 1.0
+    assert [item["rewarder"] for item in exported["rewards"]] == ["scored"]

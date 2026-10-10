@@ -177,6 +177,7 @@ class _Episode:
             {
                 "schema": EPISODE_SCHEMA,
                 "sequence": len(self.records) + 1,
+                "event_id": f"e{len(self.records) + 1}",
                 "kind": kind,
                 "turn": turn,
                 "started_at": started[0],
@@ -459,6 +460,7 @@ def _record_outcome(
         observation=step.get("observation"),
         content=visible,
         reward=step.get("reward"),
+        rewards=step.get("rewards") or [],
         terminated=step.get("terminated"),
         truncated=step.get("truncated"),
         info=info,
@@ -607,10 +609,16 @@ def _parse_envelope(text: str) -> dict[str, Any] | None:
     observation = parsed.get("observation")
     info = parsed.get("info")
     rendered = parsed.get("rendered")
+    signals = parsed.get("rewards")
+    if not isinstance(signals, list) and isinstance(info, dict):
+        signals = info.get("rewards")
     return {
         "observation": observation if isinstance(observation, dict) else {},
         "rendered": rendered if isinstance(rendered, str) else None,
         "reward": float(parsed.get("reward") or 0),
+        "rewards": [item for item in signals if isinstance(item, dict)]
+        if isinstance(signals, list)
+        else [],
         "terminated": bool(parsed.get("terminated")),
         "truncated": bool(parsed.get("truncated")),
         "info": info if isinstance(info, dict) else {},
@@ -721,7 +729,7 @@ def _run_action(
     error = envelope["info"].get("error")
     if error:
         visible = "\n\n".join(part for part in (f"Error: {error}", visible) if part)
-    signals = envelope["info"].get("rewards")
+    signals = envelope["rewards"]
     reward = None
     if envelope["reward"] or signals:
         reward = {
@@ -729,7 +737,7 @@ def _run_action(
             "turn": turn,
             "action": name,
             "value": envelope["reward"],
-            "signals": signals if isinstance(signals, list) else [],
+            "signals": signals,
         }
     return _ToolOutcome(
         message=_tool_observation(call, name, visible),
@@ -740,6 +748,7 @@ def _run_action(
             "arguments": arguments,
             "observation": envelope["observation"],
             "reward": envelope["reward"],
+            "rewards": signals,
             "terminated": envelope["terminated"],
             "truncated": envelope["truncated"],
             "info": envelope["info"],

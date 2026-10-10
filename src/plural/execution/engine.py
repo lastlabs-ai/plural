@@ -72,6 +72,14 @@ from plural.jobs import (
     TrialSpec,
     VerifierResult,
 )
+from plural.rewards import (
+    LEDGER_FILE,
+    HindsightRewarder,
+    HindsightTrial,
+    RewardRecord,
+    dump_ledger,
+    online_records,
+)
 from plural.sandbox import (
     CapabilityError,
     DownloadedFile,
@@ -368,29 +376,6 @@ def _transcript(artifacts: Sequence[DownloadedFile]) -> dict[str, Any] | None:
     return episode_to_messages(records)
 
 
-def _step_rewards(artifacts: Sequence[DownloadedFile]) -> tuple[dict[str, Any], ...]:
-    """Return the per-step reward records for this episode.
-
-    The steps Plural recorded in ``episode.jsonl`` take precedence. Without
-    them, rewards come from a Harness-written trajectory.
-    """
-    records = _episode_records(artifacts)
-    source = _trajectory_source(artifacts)
-    if records or source is None:
-        return tuple(
-            {"reward": record["reward"], "step": record.get("sequence"), "action": record["action"]}
-            for record in records
-            if record.get("kind") == "environment.step"
-            and isinstance(record.get("reward"), (int, float))
-            and record.get("error") is None
-        )
-    try:
-        trajectory = normalize_trajectory(source.data)
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-        return ()
-    return tuple(event.payload for event in trajectory.events if event.kind == "reward")
-
-
 def _episode_outcome(artifacts: Sequence[DownloadedFile]) -> EpisodeOutcome:
     """Read how the episode ended from the Harness result."""
     result = first_json_mapping(artifacts, ("result.json", "final-result.json", "output.json"))
@@ -467,9 +452,11 @@ class Trial:
         environ: Mapping[str, str],
         project_policy: ProjectPolicy,
         resource_resolvers: Mapping[str, ResourceResolver] | None = None,
+        hindsight: Sequence[HindsightRewarder] = (),
     ) -> None:
         self.spec = spec
         self.job_spec = job_spec
+        self.hindsight = tuple(hindsight)
         self.provider_for = provider_for
         self.store = store
         self.environ = environ
@@ -710,7 +697,6 @@ class Trial:
 
                 if self.job_spec.mode is JobMode.TRAIN:
                     tito = _validate_tito(package, artifacts)
-                self._emit_step_rewards(_step_rewards(artifacts))
 
                 self.store.emit(
                     self.spec.job_id,
@@ -742,6 +728,14 @@ class Trial:
                     await provider.destroy(handle)
             awaiting = any(item.status == "awaiting_review" for item in verifier_results)
             score, scores = _aggregate(task, verifier_results)
+            ledger = self._reward_ledger(
+                artifacts, apps=app_report, score=None if awaiting else score
+            )
+            if ledger:
+                artifacts = _with_artifact(
+                    artifacts, DownloadedFile(path=LEDGER_FILE, data=dump_ledger(ledger))
+                )
+            self._emit_rewards(ledger)
             status: Literal["succeeded", "awaiting_review"] = (
                 "awaiting_review" if awaiting else "succeeded"
             )
@@ -976,26 +970,65 @@ class Trial:
             )
         return values
 
-    def _emit_step_rewards(self, rewards: Sequence[Mapping[str, Any]]) -> None:
-        """Publish recorded per-step rewards as training signal.
+    def _reward_ledger(
+        self,
+        artifacts: Sequence[DownloadedFile],
+        *,
+        apps: Mapping[str, Any] | None,
+        score: float | None,
+    ) -> list[RewardRecord]:
+        """Online rewards from the episode, then any hindsight rewarders' records.
 
-        Rewards are recorded on every episode. Only train-mode Jobs stream them
-        as reward events, because only training consumes them.
+        A hindsight rewarder that fails is reported and skipped; rewards never
+        fail a Trial or change its score.
+
+        Returns:
+            The Trial's reward ledger.
+        """
+        events = _episode_records(artifacts)
+        ledger = online_records(events)
+        if not self.hindsight or not events:
+            return ledger
+        trial = HindsightTrial(
+            events,
+            apps=Episode.from_apps(apps).apps if apps else {},
+            score=score,
+            rewards=ledger,
+            task_id=self.task.task_id,
+            trial_id=self.spec.trial_id,
+        )
+        for rewarder in self.hindsight:
+            try:
+                ledger.extend(rewarder.apply(trial))
+            except Exception as exc:  # noqa: BLE001 - a reward label never fails a Trial
+                self.store.emit(
+                    self.spec.job_id,
+                    "log",
+                    "running",
+                    trial_id=self.spec.trial_id,
+                    data={
+                        "message": f"hindsight rewarder {rewarder.name!r} failed",
+                        "rewarder": rewarder.name,
+                        "error": str(exc)[:1000],
+                    },
+                )
+        return ledger
+
+    def _emit_rewards(self, ledger: Sequence[RewardRecord]) -> None:
+        """Publish reward records as training signal.
+
+        Rewards are recorded on every Trial. Only train-mode Jobs stream them
+        as events, because only training consumes them.
         """
         if self.job_spec.mode is not JobMode.TRAIN:
             return
-        for item in rewards:
+        for record in ledger:
             self.store.emit(
                 self.spec.job_id,
                 "reward",
                 "running",
                 trial_id=self.spec.trial_id,
-                data={
-                    "action": item.get("action"),
-                    "turn": item.get("turn"),
-                    "reward": item.get("value"),
-                    "signals": item.get("signals") or [],
-                },
+                data=record.model_dump(mode="json"),
             )
 
     async def _run_verifiers(
@@ -1117,7 +1150,6 @@ class Trial:
                 cost_usd=getattr(self, "_last_cost", None),
             ),
             outcome=outcome,
-            rewards=list(_step_rewards(artifacts)),
         )
         if not episode.apps and not episode.state:
             fallback = first_json_mapping(artifacts, ("final-state.json", "state.json"))
@@ -1489,8 +1521,10 @@ class JobRunner:
         progress: Callable[[TrialSpec, TrialResult], None] | None = None,
         project_policy: ProjectPolicy | None = None,
         catalog: ModelCatalog | None = None,
+        hindsight: Sequence[HindsightRewarder] = (),
     ) -> None:
         self.spec = spec
+        self.hindsight = tuple(hindsight)
         self.catalog = catalog or ModelCatalog()
         self.plan = spec.plan(self.catalog)
         self._provider_override = provider
@@ -1620,6 +1654,7 @@ class JobRunner:
                         environ=self.environ,
                         resource_resolvers=self.resource_resolvers,
                         project_policy=self.project_policy,
+                        hindsight=self.hindsight,
                     )
                     self._trials.add(trial)
                     try:

@@ -199,6 +199,8 @@ class TITORecord(FrozenModel):
 
     schema_version: Literal["1"] = "1"
     step: int = Field(ge=0)
+    event_id: str | None = None
+    """The ``event_id`` of the model call this record captured."""
     tokenizer: str = Field(min_length=1)
     model: str = Field(min_length=1)
     input_token_ids: tuple[int, ...]
@@ -211,10 +213,17 @@ class TITORecord(FrozenModel):
     input_len: int = Field(ge=0)
     output_len: int = Field(ge=0)
     observation_len: int = Field(ge=0)
+    output_token_offsets: tuple[tuple[int, int], ...] | None = None
+    """Each output token's character range in ``output_text``, when the Harness knows it.
+
+    A training export uses it to turn a character span reward into a token range.
+    """
 
     @model_validator(mode="after")
     def _validated_lengths(self) -> TITORecord:
         size = len(self.output_token_ids)
+        if self.output_token_offsets is not None and len(self.output_token_offsets) != size:
+            raise ValueError("output_token_offsets must have one range per output token")
         if len(self.output_logprobs) != size or len(self.output_top_logprobs) != size:
             raise ValueError(
                 "output_token_ids, output_logprobs, and output_top_logprobs lengths must match"
@@ -761,6 +770,7 @@ class Job:
         catalog: ModelCatalog | None = None,
         client: Any = None,
         api_key: str | None = None,
+        hindsight: Sequence[Any] = (),
     ) -> None:
         if not isinstance(source, (Task, Benchmark)):
             raise TypeError(
@@ -776,6 +786,12 @@ class Job:
         if any(not isinstance(agent, Agent) for agent in agents):
             raise TypeError(
                 "Cannot create Job.\nagents must be Agent instances created from a catalog model."
+            )
+        from plural.rewards import HindsightRewarder
+
+        if any(not isinstance(item, HindsightRewarder) for item in hindsight):
+            raise TypeError(
+                "Cannot create Job.\nhindsight must list functions marked with @hindsight_rewarder."
             )
         if client is not None and api_key:
             raise ValueError(
@@ -828,6 +844,7 @@ class Job:
             "store": store,
             "environ": environ,
             "resource_resolvers": resource_resolvers,
+            "hindsight": tuple(hindsight) or None,
             "progress": progress,
             "project_policy": project_policy,
             "catalog": self.catalog,

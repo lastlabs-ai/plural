@@ -221,7 +221,7 @@ class HarnessEnvironment:
             return self._observation
         started = self._recorder.start() if self._recorder else None
         try:
-            step, view = self._exec(tuple(str(item) for item in raw_command))
+            step, view, _ = self._exec(tuple(str(item) for item in raw_command))
         except Exception as exc:
             if self._recorder and started:
                 self._recorder.reset(started, error=str(exc))
@@ -253,7 +253,7 @@ class HarnessEnvironment:
             raise ValueError(f"Environment action {action!r} has no executable command")
         started = self._recorder.start() if self._recorder else None
         try:
-            step, view = self._exec(
+            step, view, signals = self._exec(
                 tuple(str(item) for item in raw_command),
                 stdin=json.dumps(arguments).encode(),
             )
@@ -272,6 +272,7 @@ class HarnessEnvironment:
                 arguments=arguments,
                 observation=step.observation,
                 reward=step.reward,
+                rewards=signals,
                 terminated=step.terminated,
                 truncated=step.truncated,
                 info=step.info,
@@ -281,7 +282,7 @@ class HarnessEnvironment:
 
     def _exec(
         self, command: tuple[str, ...], stdin: bytes | None = None
-    ) -> tuple[HarnessStep, dict[str, Any] | None]:
+    ) -> tuple[HarnessStep, dict[str, Any] | None, list[dict[str, Any]]]:
         from plural.harness.native_runner import (
             STEP_PROTOCOL,
             _action_environment,
@@ -304,14 +305,15 @@ class HarnessEnvironment:
             )
         text = completed.stdout.decode("utf-8", errors="replace").strip()
         if not text:
-            return HarnessStep(observation={}), None
+            return HarnessStep(observation={}), None, []
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
-            return HarnessStep(observation={"output": text}), None
+            return HarnessStep(observation={"output": text}), None, []
         if isinstance(parsed, dict) and parsed.get("protocol") == STEP_PROTOCOL:
             info = parsed.get("info")
             view = parsed.get("view")
+            signals = parsed.get("rewards")
             return (
                 HarnessStep(
                     observation=parsed.get("observation"),
@@ -321,8 +323,11 @@ class HarnessEnvironment:
                     info=info if isinstance(info, dict) else {},
                 ),
                 view if isinstance(view, dict) and view else None,
+                [item for item in signals if isinstance(item, dict)]
+                if isinstance(signals, list)
+                else [],
             )
-        return HarnessStep(observation=parsed), None
+        return HarnessStep(observation=parsed), None, []
 
 
 class HarnessResult(FrozenModel):

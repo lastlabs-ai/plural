@@ -322,6 +322,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ job        List, inspect, and rerun Jobs.                                                        │
 │ trial      Inspect and rerun Trials.                                                             │
 │ review     List and submit human reviews.                                                        │
+│ rewards    Label stored Trials with hindsight rewarders and export training data.                │
 │ models     List the models you may run.                                                          │
 │ runtime    Choose where Environments run.                                                        │
 │ session    Export and redeploy portable agent sessions.                                          │
@@ -1415,6 +1416,87 @@ This section is generated from the Typer application. Run `uv run python scripts
 │    --feedback        <str>  Notes for the record.                                                │
 │    --hosted                 Submit a hosted assignment.                                          │
 │    --help                   Show this message and exit.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural rewards`
+
+```text
+
+ Usage: plural rewards [OPTIONS] COMMAND [ARGS]...
+
+ Label stored Trials with hindsight rewarders and export training data.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ apply   Run a hindsight rewarder on stored Trials and append its rewards to their ledgers.       │
+│ show    List a Trial's reward ledger.                                                            │
+│ export  Write one training record per Trial: model turns with TITO tokens and their rewards.     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural rewards apply`
+
+```text
+
+ Usage: plural rewards apply [OPTIONS] {rewarder}
+
+ Run a hindsight rewarder on stored Trials and append its rewards to their ledgers.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    rewarder      <str>  The hindsight rewarder, as path.py:name. [required]                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --trial        <str>  A local Trial id. Repeatable.                                              │
+│ --job          <str>  Every Trial of this local Job.                                             │
+│ --json                Print machine-readable JSON.                                               │
+│ --help                Show this message and exit.                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural rewards export`
+
+```text
+
+ Usage: plural rewards export [OPTIONS]
+
+ Write one training record per Trial: model turns with TITO tokens and their rewards.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --trial                                                  <str>   A local Trial id. Repeatable.   │
+│ --job                                                    <str>   Every Trial of this local Job.  │
+│ --rewarder                                               <str>   Use only this rewarder, as name │
+│                                                                  or name@version. Repeatable.    │
+│ --aggregate                                              <str>   Combine rewards on one target:  │
+│                                                                  sum, mean, last.                │
+│                                                                  [default: sum]                  │
+│ --include-off-recording    --no-include-off-recording            Keep rewards on steps a         │
+│                                                                  replayed App answered off its   │
+│                                                                  recording.                      │
+│                                                                  [default:                       │
+│                                                                  no-include-off-recording]       │
+│ --out                                                    <path>  Where to write JSONL.           │
+│                                                                  [default: training.jsonl]       │
+│ --help                                                           Show this message and exit.     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural rewards show`
+
+```text
+
+ Usage: plural rewards show [OPTIONS] {trial_id}
+
+ List a Trial's reward ledger.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    trial_id      <str>  A local Trial id. [required]                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

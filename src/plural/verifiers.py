@@ -163,8 +163,8 @@ class Episode(FrozenModel):
     Verifiers, read-only ``query`` access. ``state`` is a shortcut: the one
     App's final snapshot when the Environment has one App, otherwise a mapping
     of App name to final snapshot. Neither is ever shown to the Agent.
-    ``observation`` is what the Agent last saw. ``rewards`` holds the per-step
-    reward records; they support credit assignment and are never a score.
+    ``observation`` is what the Agent last saw. Rewards are not here: they
+    live in the Trial's reward ledger and never feed a score.
     """
 
     observation: dict[str, Any] = Field(default_factory=dict)
@@ -174,7 +174,6 @@ class Episode(FrozenModel):
     artifacts: dict[str, Any] = Field(default_factory=dict)
     usage: EpisodeUsage = Field(default_factory=EpisodeUsage)
     outcome: EpisodeOutcome = Field(default_factory=EpisodeOutcome)
-    rewards: list[dict[str, Any]] = Field(default_factory=list)
 
     @classmethod
     def from_apps(cls, report: Mapping[str, Any], **fields: Any) -> Episode:
