@@ -155,10 +155,10 @@ plural rewards show TRIAL_ID
 ```
 
 ```text
-step  e2     +0.000  app:solved
-step  e3     +0.000  app:solved
-step  e4     +0.000  app:solved
-step  e5     +1.000  app:solved
+step  e2     +0.000  step:solved
+step  e3     +0.000  step:solved
+step  e4     +0.000  step:solved
+step  e5     +1.000  step:solved
 step  e5     +0.700  hindsight:fewer_guesses@1
 ```
 
