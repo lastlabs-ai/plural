@@ -17,7 +17,7 @@ from plural import (
     Task,
 )
 from plural.project.resources import load_harness_directory
-from plural.rewarders import DeterministicRewarder, RewarderRuntime
+from plural.verifiers import DeterministicVerifier, VerifierRuntime
 
 ROOT = Path(__file__).parent
 HARNESS = ROOT / "minimal_harness"
@@ -25,7 +25,7 @@ VERIFY = (
     "import json,pathlib; "
     "rows=[json.loads(l) for l in pathlib.Path('artifacts/trajectory.jsonl').read_text().splitlines() if l.strip()]; "
     "assert rows, 'missing harness trajectory'; "
-    "pathlib.Path('rewarder-result.json').write_text("
+    "pathlib.Path('verifier-result.json').write_text("
     "json.dumps({'score':1.0,'scores':{'present':1.0},"
     "'evidence':[f'{len(rows)} trajectory rows']})+'\\n')"
 )
@@ -57,10 +57,10 @@ def build_job(
             else Runtime.daytona(network=NetworkMode.NO_NETWORK)
         ),
     )
-    rewarder = DeterministicRewarder(
+    verifier = DeterministicVerifier(
         name="evidence-present",
-        final=("python", "-c", VERIFY),
-        runtime=RewarderRuntime(
+        check=("python", "-c", VERIFY),
+        runtime=VerifierRuntime(
             provider=provider,
             image="python:3.12-slim" if provider in {"docker", "daytona"} else None,
             network=NetworkMode.NO_NETWORK if isolated else NetworkMode.PUBLIC,
@@ -72,7 +72,7 @@ def build_job(
             instructions=f"Return a deterministic response for {value}.",
             info={"value": value},
             environment=environment,
-            rewarders=(rewarder,),
+            verifiers=(verifier,),
         )
         for task_id, value in (("one", "hello"), ("two", "world"))
     )

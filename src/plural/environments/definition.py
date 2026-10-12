@@ -520,7 +520,7 @@ def _merged(items: Iterable[SecretReference]) -> tuple[SecretReference, ...]:
 class EnvironmentDefinition(FrozenModel):
     """Schema-v2 Environment: Apps composed with one Runtime and one set of limits.
 
-    Tasks, Rewarders, and mode are intentionally absent. Every action belongs
+    Tasks, Verifiers, and mode are intentionally absent. Every action belongs
     to exactly one App; ``python`` optionally names an Environment subclass
     whose ``on_step``, ``terminated``, or ``truncated`` span several Apps.
     """
@@ -549,16 +549,16 @@ class EnvironmentDefinition(FrozenModel):
         if isinstance(value, dict):
             if str(value.get("schema_version", "2")) != "2":
                 raise ValueError(
-                    "schema-v1 Environment is unsupported; move tasks and rewarders into "
-                    "first-class Task and Rewarder packages"
+                    "schema-v1 Environment is unsupported; move tasks and verifiers into "
+                    "first-class Task and Verifier packages"
                 )
-            stale = {"tasks", "rewarder", "mode", "context"} & set(value)
+            stale = {"tasks", "verifier", "mode", "context"} & set(value)
             if stale:
                 raise ValueError("schema-v2 Environment cannot own " + ", ".join(sorted(stale)))
-            if value.get("rewarders"):
+            if value.get("verifiers"):
                 raise ValueError(
-                    "An Environment does not own Rewarders. List them on each Task under "
-                    "rewarders:, so what counts as a good episode can differ per Task."
+                    "An Environment does not own Verifiers. List them on each Task under "
+                    "verifiers:, so what counts as a good episode can differ per Task."
                 )
             moved = {"actions", "secrets", "state_schema", "observation_schema"} & {
                 key for key, item in value.items() if item
@@ -576,7 +576,7 @@ class EnvironmentDefinition(FrozenModel):
                 not in {
                     "schema_version",
                     "actions",
-                    "rewarders",
+                    "verifiers",
                     "secrets",
                     "state_schema",
                     "observation_schema",

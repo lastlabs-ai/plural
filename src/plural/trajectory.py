@@ -127,7 +127,7 @@ def _decode(source: Any) -> Any:
 def _atif_events(value: Mapping[str, Any]) -> list[TrajectoryEvent] | None:
     """Read Harbor's ATIF document when ``schema_version`` says so.
 
-    ATIF steps are the interchange record. Plural still keeps reward and rewarder
+    ATIF steps are the interchange record. Plural still keeps reward and verifier
     scores beside the trajectory; they are not ATIF fields.
 
     Returns:

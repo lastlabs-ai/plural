@@ -37,15 +37,15 @@ when you push.
 Each building block gets its own template. You will create five:
 
 - an **Environment** called `support-queue`: the world, a help desk with tickets,
-- a **Rewarder** called `correct-category`: the grader, which checks the category,
+- a **Verifier** called `correct-category`: the grader, which checks the category,
 - a **Task** called `ticket-1`: one assignment, a single ticket to sort,
 - a **Benchmark** called `support-triage`: the exam, which groups the Tasks, and
 - an **Agent** called `careful`: the contestant, a model plus its instructions.
 
 ```bash
 plural env init support-queue --python
-plural rewarder init correct-category
-plural task init ticket-1 --environment support-queue --rewarder correct-category
+plural verifier init correct-category
+plural task init ticket-1 --environment support-queue --verifier correct-category
 plural benchmark init support-triage
 plural benchmark add ticket-1 --benchmark support-triage
 plural agent init careful --model openai/gpt-5.6-luna
@@ -59,7 +59,7 @@ Each `init` command writes one folder, such as `environments/support-queue/` or
   all the AI sees. Keep the answers on State, never in what an action returns. Mark
   the fields a Task sets with `initial()`.
 - `environments/support-queue/README.md`: what the world is and how to use it.
-- `rewarders/correct-category/reward.py`: compare how things ended with what the Task
+- `verifiers/correct-category/verify.py`: compare how things ended with what the Task
   asked for, and return a score from 0 to 1 with evidence.
 - `tasks/ticket-1/instruction.md`: what the AI must accomplish, in plain language. Set
   the Task's starting State under `initial_state` in `task.yaml`.

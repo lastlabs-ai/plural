@@ -1,12 +1,12 @@
 # support-queue
 
 A complete Plural project in the standard layout: one Environment, three Tasks, one
-Rewarder, a Benchmark, two model Agents, and a scripted Agent that needs no model.
+Verifier, a Benchmark, two model Agents, and a scripted Agent that needs no model.
 
 ```
 environments/support-queue/   environment.yaml, environment.py, README.md, resources/policy.md
 tasks/ticket-{1,2,3}/         task.yaml, instruction.md
-rewarders/correct-category/   rewarder.yaml, reward.py
+verifiers/correct-category/   verifier.yaml, verify.py
 harnesses/scripted-triage/    harness.yaml, harness.py
 agents/careful/               agent.yaml   (model, native harness)
 agents/concise/               agent.yaml   (model, native harness)

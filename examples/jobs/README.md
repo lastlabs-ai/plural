@@ -23,5 +23,5 @@ first-project example, dependencies first.
 `minimal_harness/` is a complete custom Harness: `harness.yaml` and a Harness class. Its `run` method receives
 the standard Task, Agent, and Environment interfaces and returns a
 `HarnessResult`; Plural writes the execution artifacts. `_foundation.py` builds
-first-class Task and Rewarder versions, an Environment-independent Agent, a
+first-class Task and Verifier versions, an Environment-independent Agent, a
 Benchmark source, and an Environment-routed Job.

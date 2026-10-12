@@ -8,9 +8,9 @@ keeping the evidence behind every score.
 1. **Environment**: the world: its Apps, resources, and Runtime. Each App is one
    system the Agent works with, such as a game written in Python, an MCP server, or
    an HTTP API, with its actions, private State, and the secrets it needs.
-2. **Rewarder**: what counts as good work on a Task. Deterministic, Agent, or Human
+2. **Verifier**: what counts as good work on a Task. Deterministic, Agent, or Human
    scoring of a finished episode, and optionally a reward for each step.
-3. **Task**: instructions bound to one Environment and its Rewarders.
+3. **Task**: instructions bound to one Environment and its Verifiers.
 4. **Benchmark**: a versioned collection of Tasks and the rules for ranking results.
 5. **Agent**: a catalog model, instructions, and an optional Harness.
 6. **Harness**: the loop that connects an Agent to an Environment. An Agent with
@@ -19,11 +19,11 @@ keeping the evidence behind every score.
 8. **Trial**: one Agent on one Task for one attempt, with its trajectory, artifacts,
    and score.
 
-A score is what a Rewarder's `final` check produces, and it is the only thing a
-Benchmark ranks on. Rewards, from a Rewarder's `step` check or a hindsight rewarder,
-are recorded in each Trial's reward ledger for training and never contribute
-to a score. Only what an action returns is ever shown to the model; scores, rewards,
-State, and private Rewarder data never reach it.
+A score is what a Verifier's `check` produces, and it is the only thing a
+Benchmark ranks on. Rewards, from a Verifier's `reward` function or a hindsight verifier,
+are recorded in each Trial's reward ledger for training. They count toward a
+score only when a Verifier's `check` is `total_reward`. Only what an action returns is ever shown to the model; scores, rewards,
+State, and private Verifier data never reach it.
 
 ## Install
 
@@ -56,8 +56,8 @@ after it, and commands find the project by walking up from wherever you run them
 plural project init my-eval
 cd my-eval
 plural env init support-desk --python
-plural rewarder init resolved
-plural task init refund --environment support-desk --rewarder resolved
+plural verifier init resolved
+plural task init refund --environment support-desk --verifier resolved
 ```
 
 Each `init` writes a template. Fill in the places marked `PLURAL-TODO`, then validate.

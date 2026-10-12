@@ -53,8 +53,8 @@ from plural.execution.inputs import ResourceResolver, resource_uploads, runtime_
 from plural.execution.policy import (
     ProjectPolicy,
     resolve_effective_policy,
-    rewarder_score_sandbox,
     sandbox_requirements_for,
+    verifier_score_sandbox,
 )
 from plural.execution.scheduler import drain
 from plural.execution.store import JobStore
@@ -72,28 +72,16 @@ from plural.jobs import (
     JobSpec,
     PhaseName,
     PhaseTiming,
-    RewarderResult,
     TITORecord,
     TrialReceipt,
     TrialResult,
     TrialSpec,
-)
-from plural.rewarders import (
-    STOP_REASONS,
-    AgentRewarder,
-    DeterministicRewarder,
-    Episode,
-    EpisodeOutcome,
-    EpisodeUsage,
-    HumanRewarder,
-    RewarderDefinition,
-    RewarderOutput,
-    RewarderRuntime,
+    VerifierResult,
 )
 from plural.rewards import (
     LEDGER_FILE,
-    HindsightRewarder,
     HindsightTrial,
+    HindsightVerifier,
     RewardRecord,
     dump_ledger,
     online_records,
@@ -113,6 +101,18 @@ from plural.sandbox import (
 from plural.tasks import TaskDefinition, validate_task_state
 from plural.trajectory import normalize_trajectory
 from plural.transcript import TRAJECTORY_FILE, episode_to_messages
+from plural.verifiers import (
+    STOP_REASONS,
+    AgentVerifier,
+    DeterministicVerifier,
+    Episode,
+    EpisodeOutcome,
+    EpisodeUsage,
+    HumanVerifier,
+    VerifierDefinition,
+    VerifierOutput,
+    VerifierRuntime,
+)
 
 
 class ExecutionFailure(RuntimeError):
@@ -331,7 +331,7 @@ def _bounded_artifact_evidence(
 
 
 def _final_evidence(artifacts: Sequence[DownloadedFile]) -> dict[str, Any] | None:
-    """Return one bounded final Harness output for a judging Rewarder."""
+    """Return one bounded final Harness output for a judging Verifier."""
     final = next(
         (
             item
@@ -475,7 +475,7 @@ class Trial:
         environ: Mapping[str, str],
         project_policy: ProjectPolicy,
         resource_resolvers: Mapping[str, ResourceResolver] | None = None,
-        hindsight: Sequence[HindsightRewarder] = (),
+        hindsight: Sequence[HindsightVerifier] = (),
         credentials: Mapping[str, CredentialValue | str] | None = None,
     ) -> None:
         self.spec = spec
@@ -522,14 +522,14 @@ class Trial:
         secrets: dict[str, str] = {}
         stdout = b""
         stderr = b""
-        rewarder_stdout = b""
-        rewarder_stderr = b""
+        verifier_stdout = b""
+        verifier_stderr = b""
         artifacts: tuple[DownloadedFile, ...] = ()
         environment_observation: dict[str, Any] = {}
         environment_view_doc: dict[str, Any] = {}
         app_report: dict[str, Any] = {}
         trace_id: str | None = None
-        rewarder_results: tuple[RewarderResult, ...] = ()
+        verifier_results: tuple[VerifierResult, ...] = ()
         credential_uses: tuple[CredentialUse, ...] = ()
         tito: ArtifactReference | None = None
         cost_usd: float | None = None
@@ -567,7 +567,7 @@ class Trial:
             except ValueError as exc:
                 raise ExecutionFailure(ErrorCode.AUTHENTICATION, str(exc)) from None
             app_secrets = {**app_secrets, **credential_values}
-            self._rewarder_secret_values()
+            self._verifier_secret_values()
             secrets.update(runtime_secrets)
             secrets.update(app_secrets)
             harness_env["PLURAL_RESOURCES_DIR"] = "/workspace/resources"
@@ -734,18 +734,18 @@ class Trial:
 
                 self.store.emit(
                     self.spec.job_id,
-                    "scoring",
-                    "scoring",
+                    "verifying",
+                    "verifying",
                     trial_id=self.spec.trial_id,
                     execution_id=execution_id,
                 )
-                # Rewarders run while the Runtime is up, so they can query the Apps.
-                async with phase("scoring"):
+                # Verifiers run while the Runtime is up, so they can query the Apps.
+                async with phase("verification"):
                     (
-                        rewarder_results,
-                        rewarder_stdout,
-                        rewarder_stderr,
-                    ) = await self._run_rewarders(
+                        verifier_results,
+                        verifier_stdout,
+                        verifier_stderr,
+                    ) = await self._run_verifiers(
                         artifacts,
                         trace_id,
                         observation=environment_observation,
@@ -760,8 +760,8 @@ class Trial:
                     if task.environment.apps:
                         await stop_host(provider, handle, env=host_env)
                     await provider.destroy(handle)
-            awaiting = any(item.status == "awaiting_review" for item in rewarder_results)
-            score, scores = _aggregate(task, rewarder_results)
+            awaiting = any(item.status == "awaiting_review" for item in verifier_results)
+            score, scores = _aggregate(task, verifier_results)
             ledger = self._reward_ledger(
                 artifacts, apps=app_report, score=None if awaiting else score
             )
@@ -789,7 +789,7 @@ class Trial:
                 receipt=receipt,
                 score=None if awaiting else score,
                 scores={} if awaiting else scores,
-                rewarder_results=rewarder_results,
+                verifier_results=verifier_results,
                 trace_id=trace_id,
                 credentials=credential_uses,
             )
@@ -814,7 +814,7 @@ class Trial:
             result = TrialResult(
                 status="cancelled" if code is ErrorCode.CANCELLED else "failed",
                 receipt=receipt,
-                rewarder_results=rewarder_results,
+                verifier_results=verifier_results,
                 trace_id=trace_id,
                 credentials=credential_uses,
                 error_code=None if code is ErrorCode.CANCELLED else code,
@@ -829,8 +829,8 @@ class Trial:
             stdout=stdout,
             stderr=stderr,
             artifacts=artifacts,
-            rewarder_stdout=rewarder_stdout,
-            rewarder_stderr=rewarder_stderr,
+            verifier_stdout=verifier_stdout,
+            verifier_stderr=verifier_stderr,
         )
         for stream, payload in (("stdout", stdout), ("stderr", stderr)):
             if payload:
@@ -973,7 +973,7 @@ class Trial:
         handle: SandboxHandle,
         env: Mapping[str, str],
     ) -> Callable[[str, str, dict[str, Any]], Any]:
-        """A blocking App query for function Rewarders, which run in a worker thread."""
+        """A blocking App query for function Verifiers, which run in a worker thread."""
         loop = asyncio.get_running_loop()
         timeouts = {
             (item.app, item.action): item.timeout_seconds for item in self.task.environment.actions
@@ -996,8 +996,8 @@ class Trial:
 
         return query
 
-    def _rewarder_secret_values(self) -> dict[str, str]:
-        """Secret values the Task's Rewarders declared.
+    def _verifier_secret_values(self) -> dict[str, str]:
+        """Secret values the Task's Verifiers declared.
 
         Returns:
             Name to value.
@@ -1007,17 +1007,17 @@ class Trial:
         """
         values: dict[str, str] = {}
         missing: list[str] = []
-        for binding in self.task.rewarders:
-            for item in binding.rewarder.secrets:
+        for binding in self.task.verifiers:
+            for item in binding.verifier.secrets:
                 value = self.environ.get(item.name)
                 if value:
                     values[item.name] = value
                 elif item.required:
-                    missing.append(f"Rewarder {binding.rewarder.name!r} needs {item.name}")
+                    missing.append(f"Verifier {binding.verifier.name!r} needs {item.name}")
         if missing:
             raise ExecutionFailure(
                 ErrorCode.AUTHENTICATION,
-                "Missing Rewarder secrets:\n  " + "\n  ".join(missing),
+                "Missing Verifier secrets:\n  " + "\n  ".join(missing),
             )
         return values
 
@@ -1028,9 +1028,9 @@ class Trial:
         apps: Mapping[str, Any] | None,
         score: float | None,
     ) -> list[RewardRecord]:
-        """Online rewards from the episode, then any hindsight rewarders' records.
+        """Online rewards from the episode, then any hindsight verifiers' records.
 
-        A hindsight rewarder that fails is reported and skipped; rewards never
+        A hindsight verifier that fails is reported and skipped; rewards never
         fail a Trial or change its score.
 
         Returns:
@@ -1048,9 +1048,9 @@ class Trial:
             task_id=self.task.task_id,
             trial_id=self.spec.trial_id,
         )
-        for rewarder in self.hindsight:
+        for verifier in self.hindsight:
             try:
-                ledger.extend(rewarder.apply(trial))
+                ledger.extend(verifier.apply(trial))
             except Exception as exc:  # noqa: BLE001 - a reward label never fails a Trial
                 self.store.emit(
                     self.spec.job_id,
@@ -1058,8 +1058,8 @@ class Trial:
                     "running",
                     trial_id=self.spec.trial_id,
                     data={
-                        "message": f"hindsight rewarder {rewarder.name!r} failed",
-                        "rewarder": rewarder.name,
+                        "message": f"hindsight verifier {verifier.name!r} failed",
+                        "verifier": verifier.name,
                         "error": str(exc)[:1000],
                     },
                 )
@@ -1082,7 +1082,7 @@ class Trial:
                 data=record.model_dump(mode="json"),
             )
 
-    async def _run_rewarders(
+    async def _run_verifiers(
         self,
         artifacts: Sequence[DownloadedFile],
         trace_id: str | None,
@@ -1090,36 +1090,42 @@ class Trial:
         observation: Mapping[str, Any] | None = None,
         apps: Mapping[str, Any] | None = None,
         query: Callable[[str, str, dict[str, Any]], Any] | None = None,
-    ) -> tuple[tuple[RewarderResult, ...], bytes, bytes]:
-        results: list[RewarderResult] = []
+    ) -> tuple[tuple[VerifierResult, ...], bytes, bytes]:
+        results: list[VerifierResult] = []
         stdout = bytearray()
         stderr = bytearray()
-        for binding in self.task.rewarders:
-            rewarder = binding.rewarder
+        for binding in self.task.verifiers:
+            verifier = binding.verifier
             began = datetime.now(timezone.utc)
-            if isinstance(rewarder, HumanRewarder):
+            if isinstance(verifier, HumanVerifier):
                 results.append(
-                    RewarderResult(
-                        rewarder_name=rewarder.name,
-                        rewarder_digest=rewarder.content_hash,
+                    VerifierResult(
+                        verifier_name=verifier.name,
+                        verifier_digest=verifier.content_hash,
                         kind="human",
                         status="awaiting_review",
                     )
                 )
                 continue
-            if not rewarder.scores:
+            if not verifier.scores:
                 continue
-            if isinstance(rewarder, DeterministicRewarder) and rewarder.final_fn is not None:
-                episode = self._episode(artifacts, observation=observation, apps=apps, query=query)
+            if isinstance(verifier, DeterministicVerifier) and verifier.check_fn is not None:
+                episode = self._episode(
+                    artifacts,
+                    observation=observation,
+                    apps=apps,
+                    query=query,
+                    verifier=verifier.name,
+                )
                 try:
-                    scored = await asyncio.to_thread(rewarder.invoke, episode)
+                    scored = await asyncio.to_thread(verifier.invoke, episode)
                     parsed = scored.validated_finite()
                 except ValueError as exc:
-                    raise ExecutionFailure(ErrorCode.REWARDER_FAILED, str(exc)) from exc
+                    raise ExecutionFailure(ErrorCode.VERIFIER_FAILED, str(exc)) from exc
                 results.append(
-                    RewarderResult(
-                        rewarder_name=rewarder.name,
-                        rewarder_digest=rewarder.content_hash,
+                    VerifierResult(
+                        verifier_name=verifier.name,
+                        verifier_digest=verifier.content_hash,
                         kind="deterministic",
                         status="succeeded",
                         score=parsed.score,
@@ -1131,29 +1137,29 @@ class Trial:
                     )
                 )
                 continue
-            if isinstance(rewarder, AgentRewarder):
+            if isinstance(verifier, AgentVerifier):
                 command: tuple[str, ...] = (
                     "python",
                     "-c",
-                    _AGENT_REWARDER_SCRIPT,
+                    _AGENT_VERIFIER_SCRIPT,
                 )
-                result_path = "agent-rewarder-result.json"
+                result_path = "agent-verifier-result.json"
                 evidence_required = True
             else:
-                command = rewarder.command
-                result_path = rewarder.result_path
-                evidence_required = rewarder.evidence_required
+                command = verifier.command
+                result_path = verifier.result_path
+                evidence_required = verifier.evidence_required
             result, out, err = await self._run_score_command(
-                name=rewarder.name,
-                digest=rewarder.content_hash,
-                kind=rewarder.kind,
+                name=verifier.name,
+                digest=verifier.content_hash,
+                kind=verifier.kind,
                 command=command,
-                runtime=rewarder.runtime,
+                runtime=verifier.runtime,
                 result_path=result_path,
                 artifacts=artifacts,
                 trace_id=trace_id,
                 evidence_required=evidence_required,
-                rewarder=rewarder,
+                verifier=verifier,
                 observation=observation,
                 apps=apps,
             )
@@ -1173,6 +1179,7 @@ class Trial:
         observation: Mapping[str, Any] | None = None,
         apps: Mapping[str, Any] | None = None,
         query: Callable[[str, str, dict[str, Any]], Any] | None = None,
+        verifier: str | None = None,
     ) -> Episode:
         view_observation = dict(observation or {}) or first_json_mapping(
             artifacts, ("final-observation.json", "observation.json")
@@ -1193,6 +1200,15 @@ class Trial:
                     continue
                 break
         outcome = _episode_outcome(artifacts)
+        rewards = (
+            tuple(
+                record.value
+                for record in online_records(_episode_records(artifacts))
+                if record.verifier == verifier
+            )
+            if verifier
+            else ()
+        )
         episode = Episode.from_apps(
             apps or {},
             observation=view_observation,
@@ -1203,6 +1219,7 @@ class Trial:
                 cost_usd=getattr(self, "_last_cost", None),
             ),
             outcome=outcome,
+            rewards=rewards,
         )
         if not episode.apps and not episode.state:
             fallback = first_json_mapping(artifacts, ("final-state.json", "state.json"))
@@ -1220,16 +1237,16 @@ class Trial:
         digest: str,
         kind: str,
         command: tuple[str, ...],
-        runtime: RewarderRuntime,
+        runtime: VerifierRuntime,
         result_path: str,
         artifacts: Sequence[DownloadedFile],
         trace_id: str | None,
         evidence_required: bool,
-        rewarder: RewarderDefinition | None = None,
+        verifier: VerifierDefinition | None = None,
         observation: Mapping[str, Any] | None = None,
         apps: Mapping[str, Any] | None = None,
-    ) -> tuple[RewarderResult, bytes, bytes]:
-        provider_name, requirements = rewarder_score_sandbox(self.task.environment, runtime)
+    ) -> tuple[VerifierResult, bytes, bytes]:
+        provider_name, requirements = verifier_score_sandbox(self.task.environment, runtime)
         provider = self.provider_for(provider_name)
         await provider.preflight(requirements)
         distribution = (
@@ -1247,7 +1264,12 @@ class Trial:
                 if distribution is not None
                 else {}
             )
-            episode = self._episode(artifacts, observation=observation, apps=apps)
+            episode = self._episode(
+                artifacts,
+                observation=observation,
+                apps=apps,
+                verifier=verifier.name if verifier is not None else None,
+            )
             payload: dict[str, Any] = {
                 "task": self.task.public_payload,
                 "trace_id": trace_id,
@@ -1258,8 +1280,8 @@ class Trial:
                     "state": episode.state,
                 },
             }
-            if isinstance(rewarder, AgentRewarder):
-                payload["agent_rewarder"] = rewarder.model_dump(mode="json")
+            if isinstance(verifier, AgentVerifier):
+                payload["agent_verifier"] = verifier.model_dump(mode="json")
                 payload["judge_input"] = {
                     "task": self.task.public_payload,
                     "trace_id": trace_id,
@@ -1272,51 +1294,51 @@ class Trial:
                     ),
                 }
             uploads = [
-                FileUpload(path=".plural/rewarder-input.json", data=json.dumps(payload).encode()),
+                FileUpload(path=".plural/verifier-input.json", data=json.dumps(payload).encode()),
                 *(FileUpload(path=f"artifacts/{item.path}", data=item.data) for item in artifacts),
             ]
             await provider.upload_files(handle, uploads)
-            rewarder_env = {**self._rewarder_env(rewarder), **plural_env}
+            verifier_env = {**self._verifier_env(verifier), **plural_env}
             execution = await provider.exec(
                 handle,
                 ExecRequest(
                     command=command,
                     cwd="/workspace",
-                    env=rewarder_env,
+                    env=verifier_env,
                     timeout_seconds=runtime.timeout_seconds,
                 ),
             )
-            declared = {item.name for item in rewarder.secrets} if rewarder is not None else set()
-            rewarder_secrets = {
+            declared = {item.name for item in verifier.secrets} if verifier is not None else set()
+            verifier_secrets = {
                 name: value
-                for name, value in rewarder_env.items()
+                for name, value in verifier_env.items()
                 if name.endswith("_API_KEY") or name in declared
             }
-            rewarder_stdout = _redact_bytes(execution.stdout, rewarder_secrets)
-            rewarder_stderr = _redact_bytes(execution.stderr, rewarder_secrets)
+            verifier_stdout = _redact_bytes(execution.stdout, verifier_secrets)
+            verifier_stderr = _redact_bytes(execution.stderr, verifier_secrets)
             if execution.timed_out:
-                raise ExecutionFailure(ErrorCode.TIMEOUT, f"Rewarder {name!r} timed out")
+                raise ExecutionFailure(ErrorCode.TIMEOUT, f"Verifier {name!r} timed out")
             if execution.exit_code != 0:
-                detail = rewarder_stderr.decode(errors="replace").strip()[-2000:]
+                detail = verifier_stderr.decode(errors="replace").strip()[-2000:]
                 raise ExecutionFailure(
-                    ErrorCode.REWARDER_FAILED,
-                    f"Rewarder {name!r} exited with code {execution.exit_code}"
+                    ErrorCode.VERIFIER_FAILED,
+                    f"Verifier {name!r} exited with code {execution.exit_code}"
                     + (f": {detail}" if detail else ""),
                 )
             files = await provider.download_files(handle, (result_path,))
             if len(files) != 1:
                 raise ExecutionFailure(
-                    ErrorCode.EVIDENCE_MISSING, f"Rewarder {name!r} result is missing"
+                    ErrorCode.EVIDENCE_MISSING, f"Verifier {name!r} result is missing"
                 )
-            output = RewarderOutput.model_validate_json(files[0].data).validated_finite()
+            output = VerifierOutput.model_validate_json(files[0].data).validated_finite()
             if evidence_required and not output.evidence:
                 raise ExecutionFailure(
-                    ErrorCode.EVIDENCE_MISSING, f"Rewarder {name!r} evidence is required"
+                    ErrorCode.EVIDENCE_MISSING, f"Verifier {name!r} evidence is required"
                 )
             return (
-                RewarderResult(
-                    rewarder_name=name,
-                    rewarder_digest=digest,
+                VerifierResult(
+                    verifier_name=name,
+                    verifier_digest=digest,
                     kind=kind,  # type: ignore[arg-type]
                     status="succeeded",
                     score=output.score,
@@ -1324,17 +1346,17 @@ class Trial:
                     evidence=output.evidence,
                     feedback=output.feedback,
                 ),
-                rewarder_stdout,
-                rewarder_stderr,
+                verifier_stdout,
+                verifier_stderr,
             )
         finally:
             self._active.pop((provider.name, handle.sandbox_id), None)
             await provider.destroy(handle)
 
-    def _rewarder_env(self, rewarder: RewarderDefinition | None) -> dict[str, str]:
-        declared = {item.name for item in rewarder.secrets} if rewarder is not None else set()
+    def _verifier_env(self, verifier: VerifierDefinition | None) -> dict[str, str]:
+        declared = {item.name for item in verifier.secrets} if verifier is not None else set()
         values = {name: self.environ[name] for name in declared if self.environ.get(name)}
-        if isinstance(rewarder, AgentRewarder):
+        if isinstance(verifier, AgentVerifier):
             names = ("PLURAL_GATEWAY_URL", "PLURAL_API_KEY", "PLURAL_PROJECT_ID")
             values.update({name: self.environ[name] for name in names if self.environ.get(name)})
         return values
@@ -1397,7 +1419,7 @@ class Trial:
             benchmark=self.spec.benchmark,
             model=self.spec.model,
             environment_digest=self.task.environment.content_hash,
-            rewarder_digests=self.spec.rewarder_digests,
+            verifier_digests=self.spec.verifier_digests,
             agent_digest=agent.content_hash,
             harness_digest=self.spec.harness.digest if self.spec.harness else "",
             harness_grant=self.spec.harness_grant,
@@ -1427,19 +1449,19 @@ def _bound_query(
 
 def _aggregate(
     task: TaskDefinition,
-    results: Sequence[RewarderResult],
+    results: Sequence[VerifierResult],
 ) -> tuple[float | None, dict[str, float]]:
-    """Aggregate final Rewarders and train Rewarders deterministically."""
+    """Aggregate final Verifiers and train Verifiers deterministically."""
     final = [
         item
         for item in results
-        if item.rewarder_digest in {binding.rewarder.content_hash for binding in task.rewarders}
+        if item.verifier_digest in {binding.verifier.content_hash for binding in task.verifiers}
     ]
     if any(item.status == "awaiting_review" for item in final):
         return None, {}
-    weights = {binding.rewarder.content_hash: binding.weight for binding in task.rewarders}
+    weights = {binding.verifier.content_hash: binding.weight for binding in task.verifiers}
     weighted = [
-        (item.score, weights[item.rewarder_digest])
+        (item.score, weights[item.verifier_digest])
         for item in final
         if item.status == "succeeded" and item.score is not None
     ]
@@ -1448,9 +1470,9 @@ def _aggregate(
     scores: dict[str, float] = {}
     for item in final:
         if item.score is not None:
-            scores[f"rewarder.{item.rewarder_name}"] = item.score
+            scores[f"verifier.{item.verifier_name}"] = item.score
         for key, value in item.scores.items():
-            scores[f"{item.rewarder_name}.{key}"] = value
+            scores[f"{item.verifier_name}.{key}"] = value
     return score, scores
 
 
@@ -1576,7 +1598,7 @@ class JobRunner:
         progress: Callable[[TrialSpec, TrialResult], None] | None = None,
         project_policy: ProjectPolicy | None = None,
         catalog: ModelCatalog | None = None,
-        hindsight: Sequence[HindsightRewarder] = (),
+        hindsight: Sequence[HindsightVerifier] = (),
         credentials: Mapping[str, Mapping[str, CredentialValue | str]] | None = None,
     ) -> None:
         self.spec = spec
@@ -1614,7 +1636,7 @@ class JobRunner:
         await asyncio.gather(*(trial.cancel() for trial in tuple(self._trials)))
 
     async def preflight(self) -> None:
-        """Validate every Environment/Harness/Rewarder runtime before launching.
+        """Validate every Environment/Harness/Verifier runtime before launching.
 
         Raises:
             ExecutionFailure: When any Environment's Apps are missing secrets.
@@ -1667,12 +1689,12 @@ class JobRunner:
                     self._provider_for(task.environment.runtime.provider),
                     package,
                 )
-            for binding in task.rewarders:
-                rewarder = binding.rewarder
-                if isinstance(rewarder, HumanRewarder):
+            for binding in task.verifiers:
+                verifier = binding.verifier
+                if isinstance(verifier, HumanVerifier):
                     continue
-                provider_name, requirements = rewarder_score_sandbox(
-                    task.environment, rewarder.runtime
+                provider_name, requirements = verifier_score_sandbox(
+                    task.environment, verifier.runtime
                 )
                 provider = self._provider_for(provider_name)
                 await provider.preflight(requirements)
@@ -1773,12 +1795,12 @@ class JobRunner:
     def submit_review(
         self,
         trial_id: str,
-        rewarder_name: str,
+        verifier_name: str,
         scores: Mapping[str, float],
         *,
         feedback: str = "",
     ) -> JobResult:
-        """Resolve one pending Human Rewarder and recompute deterministic aggregates.
+        """Resolve one pending Human Verifier and recompute deterministic aggregates.
 
         Returns:
             Updated durable Job result.
@@ -1796,14 +1818,14 @@ class JobRunner:
         binding = next(
             (
                 item
-                for item in task.rewarders
-                if item.rewarder.name == rewarder_name and isinstance(item.rewarder, HumanRewarder)
+                for item in task.verifiers
+                if item.verifier.name == verifier_name and isinstance(item.verifier, HumanVerifier)
             ),
             None,
         )
-        if binding is None or not isinstance(binding.rewarder, HumanRewarder):
-            raise ValueError(f"pending Human Rewarder {rewarder_name!r} was not found")
-        expected = {item.name: item for item in binding.rewarder.rubric}
+        if binding is None or not isinstance(binding.verifier, HumanVerifier):
+            raise ValueError(f"pending Human Verifier {verifier_name!r} was not found")
+        expected = {item.name: item for item in binding.verifier.rubric}
         if set(scores) != set(expected):
             raise ValueError(f"review scores must match rubric criteria: {sorted(expected)!r}")
         weighted = 0.0
@@ -1821,18 +1843,18 @@ class JobRunner:
         review_score = weighted / total_weight
         source = next(item for item in aggregate.trials if item.receipt.trial_id == trial_id)
         replacements = tuple(
-            RewarderResult(
-                rewarder_name=item.rewarder_name,
-                rewarder_digest=item.rewarder_digest,
+            VerifierResult(
+                verifier_name=item.verifier_name,
+                verifier_digest=item.verifier_digest,
                 kind="human",
                 status="succeeded",
                 score=review_score,
                 scores={str(key): float(value) for key, value in scores.items()},
                 feedback=feedback,
             )
-            if item.rewarder_name == rewarder_name and item.status == "awaiting_review"
+            if item.verifier_name == verifier_name and item.status == "awaiting_review"
             else item
-            for item in source.rewarder_results
+            for item in source.verifier_results
         )
         score, aggregate_scores = _aggregate(task, replacements)
         still_pending = any(item.status == "awaiting_review" for item in replacements)
@@ -1841,7 +1863,7 @@ class JobRunner:
                 "status": "awaiting_review" if still_pending else "succeeded",
                 "score": None if still_pending else score,
                 "scores": {} if still_pending else aggregate_scores,
-                "rewarder_results": replacements,
+                "verifier_results": replacements,
             }
         )
         updated_trials = tuple(
@@ -1866,7 +1888,7 @@ class JobRunner:
         )
         self.store.write_review(
             trial_spec,
-            rewarder_name,
+            verifier_name,
             {
                 "scores": dict(scores),
                 "feedback": feedback,
@@ -1880,7 +1902,7 @@ class JobRunner:
             "succeeded" if not still_pending else "awaiting_review",
             updated_trial.status,
             trial_id=trial_id,
-            data={"rewarder": rewarder_name, "score": review_score},
+            data={"verifier": verifier_name, "score": review_score},
         )
         return updated
 
@@ -1928,7 +1950,7 @@ class JobRunner:
                 benchmark=trial.benchmark,
                 model=trial.model,
                 environment_digest=task.environment.content_hash,
-                rewarder_digests=trial.rewarder_digests,
+                verifier_digests=trial.verifier_digests,
                 agent_digest=agent.content_hash,
                 harness_digest=trial.harness.digest if trial.harness else "",
                 harness_grant=trial.harness_grant,
@@ -1954,13 +1976,13 @@ class JobRunner:
         return result
 
 
-_AGENT_REWARDER_SCRIPT = r"""
+_AGENT_VERIFIER_SCRIPT = r"""
 import json, math, os, urllib.error, urllib.request
-data = json.load(open(".plural/rewarder-input.json"))
-spec = data["agent_rewarder"]
+data = json.load(open(".plural/verifier-input.json"))
+spec = data["agent_verifier"]
 base = (os.getenv("PLURAL_GATEWAY_URL") or "").rstrip("/")
 if not base:
-    raise SystemExit("AgentRewarder requires PLURAL_GATEWAY_URL for its model call")
+    raise SystemExit("AgentVerifier requires PLURAL_GATEWAY_URL for its model call")
 judge_input = data["judge_input"]
 prompt = json.dumps({
     "instructions": spec["instructions"],
@@ -1995,7 +2017,7 @@ body = json.dumps({
     "messages": [{"role": "user", "content": prompt}],
     "response_format": {
         "type": "json_schema",
-        "json_schema": {"name": "rewarder_output", "strict": True, "schema": schema},
+        "json_schema": {"name": "verifier_output", "strict": True, "schema": schema},
     },
 }).encode()
 headers = {"Content-Type": "application/json"}
@@ -2006,27 +2028,27 @@ req = urllib.request.Request(base + "/chat/completions", data=body, headers=head
 try:
     response = json.load(urllib.request.urlopen(req))
 except urllib.error.HTTPError as exc:
-    raise SystemExit(f"AgentRewarder model call failed ({exc.code}): {exc.read()[:1000]!r}")
+    raise SystemExit(f"AgentVerifier model call failed ({exc.code}): {exc.read()[:1000]!r}")
 content = response["choices"][0]["message"]["content"]
 result = json.loads(content)
 def finite_number(value):
     return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
 if set(result) != {"score", "scores", "evidence", "feedback"}:
-    raise ValueError("AgentRewarder output must match RewarderOutput fields exactly")
+    raise ValueError("AgentVerifier output must match VerifierOutput fields exactly")
 if not finite_number(result["score"]):
-    raise ValueError("AgentRewarder score must be finite")
+    raise ValueError("AgentVerifier score must be finite")
 if not isinstance(result["scores"], dict) or any(
     not isinstance(name, str) or not finite_number(value)
     for name, value in result["scores"].items()
 ):
-    raise ValueError("AgentRewarder scores must map names to finite numbers")
+    raise ValueError("AgentVerifier scores must map names to finite numbers")
 if not isinstance(result["evidence"], list) or not result["evidence"] or any(
     not isinstance(item, str) for item in result["evidence"]
 ):
-    raise ValueError("AgentRewarder evidence must be a non-empty list of strings")
+    raise ValueError("AgentVerifier evidence must be a non-empty list of strings")
 if not isinstance(result["feedback"], str):
-    raise ValueError("AgentRewarder feedback must be a string")
-json.dump(result, open("agent-rewarder-result.json", "w"))
+    raise ValueError("AgentVerifier feedback must be a string")
+json.dump(result, open("agent-verifier-result.json", "w"))
 """
 
 
@@ -2035,6 +2057,6 @@ __all__ = [
     "JobProgress",
     "JobRunner",
     "Trial",
-    "RewarderOutput",
+    "VerifierOutput",
     "job_progress",
 ]

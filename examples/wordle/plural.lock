@@ -97,7 +97,7 @@ resources:
     package_digest: sha256:88106d7851157c54ca6f094e3f041f56be5cb78ee8c4c8e200505a11f4db4fff
     dependencies:
     - environment/wordle
-    - rewarder/solved
+    - verifier/solved
     resource_id: 0bd1ced1-44b6-401f-ae30-58d58f618623
     revision_id: 08236522-67e0-4781-93a7-9d7af7e22a7e
   task/case-02:
@@ -106,7 +106,7 @@ resources:
     package_digest: sha256:f34004c2702ab3c6add5e8c2e94ff74ff7f3da26ce8086829d1779961bf9efe9
     dependencies:
     - environment/wordle
-    - rewarder/solved
+    - verifier/solved
     resource_id: ff42b68b-eb2d-4280-a91e-db35c8eb207c
     revision_id: 15f49ae6-74f0-4ac1-a320-88ed9e91909a
   task/case-03:
@@ -115,7 +115,7 @@ resources:
     package_digest: sha256:952333653acdb1ec5014839ffce393b9f553aa3bfab75013a9d4ef83663cb564
     dependencies:
     - environment/wordle
-    - rewarder/solved
+    - verifier/solved
     resource_id: 989be164-13be-4abf-9ce9-634441f35e64
     revision_id: 1d49c691-7343-4e08-8f17-c1636943d409
   task/crane:
@@ -124,7 +124,7 @@ resources:
     package_digest: sha256:38bc917582ce6202fe6d3c6a8fe79ebe250a2c625042f4bd265477823b7c45e0
     dependencies:
     - environment/wordle
-    - rewarder/solved
+    - verifier/solved
     resource_id: dec1fddd-493d-40eb-9c23-bfaebb7819f1
     revision_id: 9fe4dfef-fefb-4205-8fd2-7a3a6b912238
   task/hard-01:
@@ -133,7 +133,7 @@ resources:
     package_digest: sha256:9dd81de58cef4685f4be57d267d117f8908a63a3f10b4e7727dc764359ae1f52
     dependencies:
     - environment/wordle
-    - rewarder/solved
+    - verifier/solved
     resource_id: 658dd627-cdd4-4c29-ab9d-e03ebabc69da
     revision_id: 56ddaec7-f1f0-4195-b26d-280e8d508fea
   task/hard-02:
@@ -142,7 +142,7 @@ resources:
     package_digest: sha256:f6b753fdcbb1e858f43aed68824903f6a1268ea907e3b4d57578c8e16fa47a1e
     dependencies:
     - environment/wordle
-    - rewarder/solved
+    - verifier/solved
     resource_id: 036bf44e-669d-42f3-aa35-b32508e91801
     revision_id: 740a6e02-0789-4902-80d0-7e39c74e082e
   task/medium-01:
@@ -151,7 +151,7 @@ resources:
     package_digest: sha256:de11fc88bb9a393a41a6b6a86c89305ac46f6c571904891bce00aef59b0c0edc
     dependencies:
     - environment/wordle
-    - rewarder/solved
+    - verifier/solved
     resource_id: 56d4cdc9-676d-49d4-9fcd-96ac06d9a3e9
     revision_id: 605a552e-b267-4778-9711-393a601cf9a9
   task/medium-02:
@@ -160,7 +160,7 @@ resources:
     package_digest: sha256:3a9f8b7834e2335a3a42b3f7d94d22d5dedaac956efca3f824db117f2b50387a
     dependencies:
     - environment/wordle
-    - rewarder/solved
+    - verifier/solved
     resource_id: 3621b2b4-1056-428d-b29b-f719c34590ec
     revision_id: e0566ae7-8da7-4de5-a82c-b73860ebd690
   task/point:
@@ -169,7 +169,7 @@ resources:
     package_digest: sha256:2a9438e25582f7c22bac0050763352cd5dcde0913f9fcc4c9cbf5e27ba15728b
     dependencies:
     - environment/wordle
-    - rewarder/solved
+    - verifier/solved
     resource_id: ba5f3a97-02dc-437c-9664-b57132518a3b
     revision_id: 0194d95a-bb5f-4b3d-ab78-a0339dacc4ab
   task/slate:
@@ -178,7 +178,7 @@ resources:
     package_digest: sha256:0a44111f9bdfba6971b008e4e9e390223848d7238fe6236be270095d98bbe071
     dependencies:
     - environment/wordle
-    - rewarder/solved
+    - verifier/solved
     resource_id: 2e7a092f-eb27-440e-b5cf-8be860419a0b
     revision_id: fd9cbc36-645d-4348-9bc9-23a12a131a89
   task/ui-task:
@@ -187,10 +187,10 @@ resources:
     package_digest: sha256:b04247b5b867880b6c61339640a4fd44c7f681668e04b4840f282ec8d2c92278
     dependencies:
     - environment/wordle
-    - rewarder/solved
+    - verifier/solved
     resource_id: d7eeeaac-1be9-4433-8cc6-22e0ae24b42d
     revision_id: bb1fc6e5-752d-42b3-b1e2-ef841e97cf58
-  rewarder/solved:
+  verifier/solved:
     version: 0.1.0
     content_hash: sha256:814c32ec197bce14966b3141516c3b7a514b6efc5eb45893ad59a9c3dc5d12f7
     package_digest: sha256:f8c241f0bd10d1fee205cc5cd680474feda6ba98af92dbfc4a76a5d0f3afb255

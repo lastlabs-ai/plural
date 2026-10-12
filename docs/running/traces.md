@@ -44,7 +44,7 @@ Trial's artifacts and logs. The main files are:
     executions/0/
       receipt.json                    identities and artifact hashes
       result.json                     this execution's result
-      logs/                           captured execution and rewarder logs
+      logs/                           captured execution and verifier logs
       artifacts/
         manifest.json                 paths, hashes, media types, sizes, and roles
 ```
@@ -73,11 +73,11 @@ to share with other tools. Plural derives it from the episode record, so it has
 every model call and step in order. Each step's `metrics.cost_usd` is the exact
 amount the gateway billed for that call, and `metrics.extra.request_id` is the
 gateway's ID for it; a cost the gateway did not return stays empty rather than
-estimated. Rewards and Rewarder scores stay beside the trajectory; neither
+estimated. Rewards and Verifier scores stay beside the trajectory; neither
 appears in a step.
 
 When available, each App's State, the last observation, the rendering, the
-trajectory, and Rewarder results are copied into the execution artifacts and listed in the
+trajectory, and Verifier results are copied into the execution artifacts and listed in the
 manifest. Missing runtime data remains absent. Preserve additional files
 explicitly rather than assuming every runtime file survives teardown.
 
@@ -90,9 +90,9 @@ through these checks in order:
 2. Check the Task and revision identities. Confirm this is the world and scoring rule you intended to test.
 3. Read the first observation and the actions that followed. Look for missing information, repeated tool errors, or a misunderstood response.
 4. Check why the episode stopped. The Trial's `stop_reason` says whether the Environment ended it, the Agent finished, or a turn, time, or cost budget cut it short; see [Trials](trials.md#how-the-episode-ended).
-5. Compare the final State and artifacts with the Rewarder's feedback. A plausible answer may still leave the world in the wrong state.
+5. Compare the final State and artifacts with the Verifier's feedback. A plausible answer may still leave the world in the wrong state.
 
-A Rewarder failure may mean evidence was missing rather than that the Agent
+A Verifier failure may mean evidence was missing rather than that the Agent
 performed poorly. Keep execution completeness visible when summarizing a
 Benchmark.
 
@@ -104,7 +104,7 @@ being uploaded or ingested; a local file path cannot be opened by another user's
 browser.
 
 Use the Trial receipt to identify the Environment, Task, Agent, Harness, and
-Rewarder revisions. A receipt's `trust` field says how the result was produced,
+Verifier revisions. A receipt's `trust` field says how the result was produced,
 and a local run reports `self_reported`. Artifact hashes identify content, but do
 not independently prove the truth of every event recorded by a custom Harness.
 
@@ -133,7 +133,7 @@ plural env add support --traces conversations.json
 
 This writes an Environment with one replay App per system the traces used, whose
 actions are the agent's tools, answered with the results that were recorded; one Task
-per trace, up to `--max-tasks`; a model-judge Rewarder; and a Benchmark. Run any model
+per trace, up to `--max-tasks`; a model-judge Verifier; and a Benchmark. Run any model
 on the Benchmark, and rerun the command with newer traces to add new tools and Tasks.
 [Start from traces](../start/from-traces.md) walks through it, including the trace
 format.
@@ -155,7 +155,7 @@ cannot substitute for the exact token records required by train mode. See
 
 Treat captured files according to their contents. State fields hidden from the
 Agent are not automatically removed from custom artifacts, logs, or anything your
-code writes. The [rewarders guide](../project/rewarders.md) explains Episode
+code writes. The [verifiers guide](../project/verifiers.md) explains Episode
 scoring boundaries.
 
 If the episode needs a human score, continue to [Reviews](reviews.md).

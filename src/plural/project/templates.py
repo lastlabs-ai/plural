@@ -17,8 +17,8 @@ from plural.project.layout import (
     HARNESS,
     LOCK_FILE,
     PROJECT_FILE,
-    REWARDER,
     TASK,
+    VERIFIER,
     ResourceKind,
 )
 from plural.project.manifests import PROJECT_SCHEMA_VERSION
@@ -111,7 +111,7 @@ A Plural project. Each resource is a directory named after it:
 ```
 environments/<name>/   environment.yaml, server.py, README.md, resources/
 tasks/<name>/          task.yaml, instruction.md, resources/
-rewarders/<name>/      rewarder.yaml, reward.py
+verifiers/<name>/      verifier.yaml, verify.py
 harnesses/<name>/      harness.yaml
 agents/<name>/         agent.yaml
 benchmarks/<name>/     benchmark.yaml, README.md
@@ -121,8 +121,8 @@ Common commands, run from anywhere inside this directory:
 
 ```bash
 plural env init <name>
-plural rewarder init <name>
-plural task init <name> --environment <env> --rewarder <rewarder>
+plural verifier init <name>
+plural task init <name> --environment <env> --verifier <verifier>
 plural task validate <name>
 plural run --task <name> --model <model>
 plural project init {name} --push   # register this project with Plural
@@ -136,7 +136,7 @@ def resource_scaffold(
     name: str,
     *,
     environment: str | None = None,
-    rewarders: tuple[str, ...] = (),
+    verifiers: tuple[str, ...] = (),
     model: str | None = None,
     harness: str | None = None,
     python: bool = False,
@@ -176,26 +176,26 @@ def resource_scaffold(
             else "# PLURAL-TODO: name the one Environment this Task runs in.\n"
             "# environment: <environment-name>\n"
         )
-        rewarder_lines = (
-            "rewarders:\n" + "".join(f"  - {item}\n" for item in rewarders)
-            if rewarders
-            else "# PLURAL-TODO: name at least one Rewarder that scores this Task.\n"
-            "# rewarders:\n#   - <rewarder-name>\n"
+        verifier_lines = (
+            "verifiers:\n" + "".join(f"  - {item}\n" for item in verifiers)
+            if verifiers
+            else "# PLURAL-TODO: name at least one Verifier that scores this Task.\n"
+            "# verifiers:\n#   - <verifier-name>\n"
         )
         return Scaffold(
             files={
                 TASK.manifest: _TASK_YAML.format(
-                    name=name, environment=environment_line, rewarders=rewarder_lines
+                    name=name, environment=environment_line, verifiers=verifier_lines
                 ),
                 "instruction.md": _TASK_INSTRUCTION.format(title=title(name)),
             },
             directories=("resources",),
         )
-    if kind is REWARDER:
+    if kind is VERIFIER:
         return Scaffold(
             files={
-                REWARDER.manifest: _REWARDER_YAML.format(name=name),
-                "reward.py": _REWARDER_PY,
+                VERIFIER.manifest: _VERIFIER_YAML.format(name=name),
+                "verify.py": _VERIFIER_PY,
             }
         )
     if kind is HARNESS:
@@ -284,10 +284,10 @@ _MCP_SERVER_PY = '''\
 
 Every @mcp.tool is an action the Agent can take. Its docstring is what the
 Agent reads, and what it returns is what the Agent sees next. Mark tools that
-change nothing with readOnlyHint, so Benchmarks and Rewarders can rely on them.
+change nothing with readOnlyHint, so Benchmarks and Verifiers can rely on them.
 
 Plural starts this server fresh for every Trial. @plural.mcp.reset loads a
-Task's starting state and @plural.mcp.snapshot reports state to Rewarders; the
+Task's starting state and @plural.mcp.snapshot reports state to Verifiers; the
 Agent sees neither as a tool.
 """
 
@@ -328,7 +328,7 @@ def submit(answer: str) -> str:
 
 @plural.mcp.snapshot(mcp)
 def state() -> dict:
-    """The state Rewarders read. The Agent never sees it."""
+    """The state Verifiers read. The Agent never sees it."""
     return STATE
 '''
 
@@ -353,12 +353,12 @@ returns is what the Agent sees next.
 ## State
 
 What `@plural.mcp.snapshot` returns. Each Task's `initial_state` reaches
-`@plural.mcp.reset`. The Agent never sees State; Rewarders do.
+`@plural.mcp.reset`. The Agent never sees State; Verifiers do.
 
 ## Rewards
 
-An Environment gives no rewards. Each Task's Rewarders do: `final` scores the finished
-episode, and `step` rewards each action. See `rewarders/`.
+An Environment gives no rewards. Each Task's Verifiers do: `check` scores the finished
+episode, and `reward` rewards each action. See `verifiers/`.
 
 ## Resources
 
@@ -422,7 +422,7 @@ _ENVIRONMENT_PY = '''\
 """{title}.
 
 An App is the moves an Agent can make. What an action returns is what the
-Agent sees next. State is private: Rewarders read it and the Agent never does.
+Agent sees next. State is private: Verifiers read it and the Agent never does.
 """
 
 from plural import App, State, action, initial
@@ -477,12 +477,12 @@ each returns is what the Agent sees next.
 ## State
 
 Private fields in the `State` class. Fields marked `initial()` are set by each Task's
-`initial_state`. The Agent never sees State; Rewarders do.
+`initial_state`. The Agent never sees State; Verifiers do.
 
 ## Rewards
 
-An Environment gives no rewards. Each Task's Rewarders do: `final` scores the finished
-episode, and `step` rewards each action. See `rewarders/`.
+An Environment gives no rewards. Each Task's Verifiers do: `check` scores the finished
+episode, and `reward` rewards each action. See `verifiers/`.
 
 ## Resources
 
@@ -500,10 +500,10 @@ turns, seconds, and cost.
 
 _TASK_YAML = """\
 # Task: instructions for the Agent, the one Environment it runs in, and the
-# Rewarders that score it. Files under resources/ are given to the Agent.
+# Verifiers that score it. Files under resources/ are given to the Agent.
 name: {name}
 instructions: instruction.md
-{environment}{rewarders}# Values for the App State fields marked initial(). With several Apps,
+{environment}{verifiers}# Values for the App State fields marked initial(). With several Apps,
 # key them by App name: {{crm: {{...}}, wordle: {{...}}}}.
 initial_state: {{}}
 """
@@ -514,32 +514,33 @@ _TASK_INSTRUCTION = """\
 <!-- PLURAL-TODO: write what the Agent must accomplish. Only this text and the Environment's observations reach the Agent. -->
 """
 
-_REWARDER_YAML = """\
-# Rewarder: what counts as a good episode for the Tasks that list it.
-# final scores the finished episode; Tasks and Benchmarks rank on that score.
-# step rewards each action, for training; it never changes the score.
+_VERIFIER_YAML = """\
+# Verifier: what counts as a good episode for the Tasks that list it.
+# check scores the finished episode; Tasks and Benchmarks rank on that score.
+# reward rewards each action, for training. It changes the score only when
+# check is total_reward.
 name: {name}
 kind: deterministic
-final: reward.py:final
-# step: reward.py:step
+check: verify.py:check
+# reward: verify.py:reward
 weight: 1
 """
 
-_REWARDER_PY = '''\
-"""Reward an episode: each action with step, and the finished episode with final."""
+_VERIFIER_PY = '''\
+"""Verify an episode: score the finished episode with check, and reward each action with reward."""
 
-from plural import Episode, RewarderOutput, Step
+from plural import Episode, VerifierOutput, Step
 
 
-def final(episode: Episode) -> RewarderOutput:
+def check(episode: Episode) -> VerifierOutput:
     """Return a score from 0 to 1 with evidence a reviewer can check."""
     # PLURAL-TODO: compare episode.state with what the Task asked for.
     done = bool(episode.state.get("done"))
-    return RewarderOutput(score=float(done), evidence=[f"done={done}"])
+    return VerifierOutput(score=float(done), evidence=[f"done={done}"])
 
 
-def step(step: Step) -> float | None:
-    """Reward one action, or return None to give none. Turn it on in rewarder.yaml."""
+def reward(step: Step) -> float | None:
+    """Reward one action, or return None to give none. Turn it on in verifier.yaml."""
     # PLURAL-TODO: read step.observation, step.current_state, or step.apps["name"].
     return -0.1 if step.error else None
 '''
@@ -574,7 +575,7 @@ name: {name}
 
 _BENCHMARK_YAML = """\
 # Benchmark: a named collection of Tasks and the rules for ranking results.
-# Results rank on the Rewarder score only; step rewards never contribute.
+# Results rank on the Verifier score only; rewards count only through a check of total_reward.
 name: {name}
 description: ""
 # PLURAL-TODO: state the motivation: what this Benchmark measures and why it matters.

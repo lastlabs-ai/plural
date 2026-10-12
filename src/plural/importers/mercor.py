@@ -133,7 +133,7 @@ class MercorTrialImport(FrozenModel):
             benchmark=benchmark,
             model=model,
             environment_digest=content_hash(self.config.get("environment") or {"source": "mercor"}),
-            rewarder_digests=(),
+            verifier_digests=(),
             agent_digest=content_hash(
                 self.config.get("agent") or {"model": model.catalog_model_id}
             ),
@@ -388,7 +388,7 @@ def _entry(path: str, data: bytes) -> ArtifactManifestEntry:
     role = (
         "trajectory"
         if "trajectory" in path
-        else "rewarder_evidence"
+        else "verifier_evidence"
         if "verifier" in path
         else "training"
         if "tito" in path

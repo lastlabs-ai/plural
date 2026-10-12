@@ -8,7 +8,17 @@ import pytest
 from fakes import FakeProvider
 from pydantic import ValidationError
 
-from plural import Credit, HindsightTrial, Job, RewardTarget, hindsight_rewarder
+from plural import (
+    Credit,
+    DeterministicVerifier,
+    Episode,
+    HindsightTrial,
+    Job,
+    RewardTarget,
+    Step,
+    hindsight_verifier,
+    total_reward,
+)
 from plural.agents import AgentBinding, AgentDefinition
 from plural.execution import JobRunner, JobStore
 from plural.jobs import JobSpec, TaskJobSource, TITORecord
@@ -22,6 +32,7 @@ from plural.rewards import (
     training_export,
 )
 from plural.sandbox import ExecRequest, ExecResult, SandboxHandle
+from plural.verifiers import WeightedVerifier
 
 EPISODE: list[dict[str, Any]] = [
     {"sequence": 1, "event_id": "e1", "kind": "environment.reset", "turn": None},
@@ -73,13 +84,13 @@ def test_targets_name_one_thing_and_spans_need_exactly_one_range() -> None:
         RewardTarget.span("e2", 5, 5)
     with pytest.raises(ValidationError, match="finite"):
         RewardRecord(
-            target=RewardTarget.step("e3"), value=float("nan"), source="step", rewarder="x"
+            target=RewardTarget.step("e3"), value=float("nan"), source="step", verifier="x"
         )
 
 
 def test_online_records_come_from_each_step_signal() -> None:
     records = online_records(EPISODE)
-    assert [(item.source, item.rewarder, item.app, item.value) for item in records] == [
+    assert [(item.source, item.verifier, item.app, item.value) for item in records] == [
         ("step", "progress", "game", 0.25),
         ("step", "careful", "game", 0.25),
     ]
@@ -98,14 +109,14 @@ def test_a_rejected_action_still_gets_its_step_rewards() -> None:
     }
     legacy = {"sequence": 2, "event_id": "e2", "kind": "environment.step", "reward": 0.5}
     records = online_records([rejected, legacy])
-    assert [(item.source, item.rewarder, item.value) for item in records] == [
+    assert [(item.source, item.verifier, item.value) for item in records] == [
         ("step", "solved", -0.1),
         ("environment", "reward", 0.5),
     ]
 
 
-def test_hindsight_rewarders_credit_any_event_and_reject_unknown_ones() -> None:
-    @hindsight_rewarder(version="2")
+def test_hindsight_verifiers_credit_any_event_and_reject_unknown_ones() -> None:
+    @hindsight_verifier(version="2")
     def no_deletes(trial: HindsightTrial):
         for step in trial.steps("crm__delete_record"):
             yield trial.credit(step["event_id"], -1.0, reason="deleted a record")
@@ -120,7 +131,7 @@ def test_hindsight_rewarders_credit_any_event_and_reject_unknown_ones() -> None:
     assert all(item.source == "hindsight" for item in records)
     assert records[0].metadata == {"reason": "deleted a record"}
 
-    @hindsight_rewarder
+    @hindsight_verifier
     def stray(trial: HindsightTrial) -> Credit:
         return trial.credit("e99", 1.0)
 
@@ -136,12 +147,12 @@ def test_the_ledger_is_append_only(tmp_path: Path) -> None:
     assert [item.value for item in read_ledger(path)] == [0.25, 0.25, 9.0]
 
 
-def test_applying_a_hindsight_rewarder_again_adds_nothing(tmp_path: Path) -> None:
-    @hindsight_rewarder(version="1")
+def test_applying_a_hindsight_verifier_again_adds_nothing(tmp_path: Path) -> None:
+    @hindsight_verifier(version="1")
     def solved(trial: HindsightTrial) -> Credit:
         return trial.credit("e3", 1.0)
 
-    @hindsight_rewarder(version="2")
+    @hindsight_verifier(version="2")
     def solved_v2(trial: HindsightTrial) -> Credit:
         return trial.credit("e3", 0.5)
 
@@ -187,21 +198,21 @@ def test_training_export_lines_up_steps_spans_and_tokens() -> None:
             target=RewardTarget.span("e2", 7, 18),
             value=1.0,
             source="hindsight",
-            rewarder="good_guess",
+            verifier="good_guess",
             version="1",
         ),
         RewardRecord(
             target=RewardTarget.span("e2", 7, 18),
             value=3.0,
             source="hindsight",
-            rewarder="good_guess",
+            verifier="good_guess",
             version="2",
         ),
         RewardRecord(
             target=RewardTarget.step("e5"),
             value=-1.0,
             source="hindsight",
-            rewarder="no_deletes",
+            verifier="no_deletes",
             off_recording=True,
         ),
     ]
@@ -218,16 +229,16 @@ def test_training_export_lines_up_steps_spans_and_tokens() -> None:
             "token_start": 2,
             "token_end": 4,
             "value": 3.0,
-            "rewarder": "good_guess",
+            "verifier": "good_guess",
         }
     ]
     assert second["reward"] == 0.0
 
-    older = training_export(EPISODE, ledger, tito=tito, rewarders={"good_guess": "1"})
+    older = training_export(EPISODE, ledger, tito=tito, verifiers={"good_guess": "1"})
     assert older["turns"][0]["reward"] == 0.0
     assert older["turns"][0]["span_rewards"][0]["value"] == 1.0
 
-    kept = training_export(EPISODE, ledger, rewarders=["no_deletes"], include_off_recording=True)
+    kept = training_export(EPISODE, ledger, verifiers=["no_deletes"], include_off_recording=True)
     assert kept["turns"][1]["reward"] == -1.0
 
 
@@ -247,12 +258,12 @@ async def test_a_job_writes_online_and_hindsight_rewards_to_the_trial_ledger(
 ) -> None:
     from test_package_execution import make_task
 
-    @hindsight_rewarder
+    @hindsight_verifier
     def finished(trial: HindsightTrial):
         assert trial.score == 1.0
         yield trial.credit(RewardTarget.event("e4"), 1.0)
 
-    @hindsight_rewarder
+    @hindsight_verifier
     def broken(trial: HindsightTrial):
         raise RuntimeError("bad label")
 
@@ -268,7 +279,7 @@ async def test_a_job_writes_online_and_hindsight_rewards_to_the_trial_ledger(
     assert result.status == "succeeded"
     trial = spec.plan().trials[0]
     ledger = read_ledger(store.trial_path(trial) / "executions/0/artifacts" / LEDGER_FILE)
-    assert [(item.source, item.rewarder) for item in ledger] == [
+    assert [(item.source, item.verifier) for item in ledger] == [
         ("step", "progress"),
         ("step", "careful"),
         ("hindsight", "finished"),
@@ -278,10 +289,54 @@ async def test_a_job_writes_online_and_hindsight_rewards_to_the_trial_ledger(
     assert result.trials[0].score == 1.0
 
 
-def test_job_rejects_plain_functions_as_hindsight_rewarders() -> None:
+def test_job_rejects_plain_functions_as_hindsight_verifiers() -> None:
     from test_runtime_job_client import _task
 
     from plural import Agent
 
-    with pytest.raises(TypeError, match="@hindsight_rewarder"):
+    with pytest.raises(TypeError, match="@hindsight_verifier"):
         Job(_task(), agents=[Agent(model="openai/gpt-5.6-luna")], hindsight=[lambda trial: []])
+
+
+def _progress(step: Step) -> float:
+    return 0.25
+
+
+async def test_total_reward_scores_a_trial_by_its_own_verifiers_rewards(tmp_path: Path) -> None:
+    from test_package_execution import make_task
+
+    verifier = DeterministicVerifier(name="progress", check=total_reward, reward=_progress)
+    task = make_task("one", "docker").model_copy(
+        update={"verifiers": (WeightedVerifier(verifier=verifier),)}
+    )
+    spec = JobSpec(
+        source=TaskJobSource(task=task),
+        agents=(AgentBinding(agent=AgentDefinition(name="agent", model="test/model")),),
+    )
+    result = await JobRunner(
+        spec, provider=_StepProvider("docker"), store=JobStore(tmp_path / "jobs")
+    ).run()
+
+    assert result.status == "succeeded"
+    # The episode also holds 0.25 from another Verifier, "careful", which is not counted.
+    assert result.trials[0].score == 0.25
+
+
+def test_total_reward_is_a_builtin_check_that_needs_a_reward() -> None:
+    verifier = DeterministicVerifier(name="return", check="total_reward", reward=_progress)
+    assert verifier.check is total_reward
+    assert verifier.model_dump(mode="json")["check"] == {"builtin": "total_reward"}
+    restored = DeterministicVerifier.model_validate(
+        {**verifier.model_dump(mode="json"), "reward": _progress}
+    )
+    assert restored.check is total_reward
+    assert total_reward(Episode(rewards=(0.25, -0.1, 1.0))).score == pytest.approx(1.15)
+    with pytest.raises(ValueError, match="needs a reward function too"):
+        DeterministicVerifier(name="return", check=total_reward)
+
+
+def test_a_verifier_needs_a_check_a_reward_or_both() -> None:
+    rewards_only = DeterministicVerifier(name="progress", reward=_progress)
+    assert not rewards_only.scores
+    with pytest.raises(ValueError, match="Give it check"):
+        DeterministicVerifier(name="empty")

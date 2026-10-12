@@ -68,7 +68,7 @@ def solved(step: Step) -> float:
 
 
 def notes_written(step: Step) -> float | None:
-    """Reads another App, which a step hook may do but never writes."""
+    """Reads another App, which a reward hook may do but never writes."""
     return float(len(step.apps["notes"].snapshot()["entries"])) if step.app == "wordle" else None
 
 
@@ -113,7 +113,7 @@ def test_single_app_environment_uses_bare_action_names() -> None:
 
 def test_wordle_episode_in_process() -> None:
     environment = Environment(apps=[Wordle()], runtime=Runtime.local())
-    observation, _ = environment.reset(initial_state={"secret": "slate"}, rewarders=[solved])
+    observation, _ = environment.reset(initial_state={"secret": "slate"}, verifiers=[solved])
     assert observation == {"text": "Guess the word. You have 6 guesses."}
     _, reward, terminated, _, info = environment.step("guess", word="toolong")
     assert info["error"] == "a guess must have five letters"
@@ -144,7 +144,7 @@ def test_several_apps_keep_their_tool_names_and_on_step_spans_them() -> None:
     assert definition.actions[0].description.startswith("[wordle] ")
     assert definition.python == "test_apps.py:Desk"
     observation, _ = environment.reset(
-        initial_state={"wordle": {"secret": "crane"}}, rewarders=[solved, notes_written]
+        initial_state={"wordle": {"secret": "crane"}}, verifiers=[solved, notes_written]
     )
     assert observation == {"text": "Guess the word. You have 6 guesses."}
     _, reward, _, _, info = environment.step("guess", word="slate")
@@ -174,7 +174,7 @@ def test_rebuilt_environment_matches_definition() -> None:
     assert restored.content_hash == definition.content_hash
     rebuilt = Environment._from_definition(restored)
     assert type(rebuilt).__name__ == "Desk"
-    rebuilt.reset(rewarders=[solved])
+    rebuilt.reset(verifiers=[solved])
     _, reward, _, _, _ = rebuilt.step("guess", word="crane")
     assert reward == 2.0
 
@@ -182,7 +182,7 @@ def test_rebuilt_environment_matches_definition() -> None:
 def test_on_step_gives_no_rewards() -> None:
     environment = Scored(apps=[Wordle()], runtime=Runtime.local(), name="scored")
     environment.reset()
-    with pytest.raises(TypeError, match="step hook"):
+    with pytest.raises(TypeError, match="reward hook"):
         environment.step("guess", word="crane")
 
 
@@ -191,7 +191,7 @@ def test_a_failing_step_hook_never_fails_the_action() -> None:
         raise RuntimeError("boom")
 
     environment = Environment(apps=[Wordle()], runtime=Runtime.local())
-    environment.reset(rewarders=[broken, solved])
+    environment.reset(verifiers=[broken, solved])
     observation, reward, _, _, info = environment.step("guess", word="crane")
     assert observation == {"text": "solved"}
     assert reward == 2.0
@@ -587,19 +587,19 @@ def workspace(tmp_path: Path) -> Iterator[Path]:
     definition = environment.definition()
     environment.close()
     (root / ".plural/apps/environment.json").write_text(definition.model_dump_json())
-    (root / ".plural/rewarders/won").mkdir(parents=True)
-    (root / ".plural/rewarders/won/reward.py").write_text(REWARD_SOURCE)
+    (root / ".plural/verifiers/won").mkdir(parents=True)
+    (root / ".plural/verifiers/won/verify.py").write_text(REWARD_SOURCE)
     (root / ".plural/apps/task.json").write_text(
         json.dumps(
             {
                 "initial_state": {"wordle": {"secret": "slate"}},
                 "task": {"name": "t", "metadata": {}},
-                "rewarders": [
+                "verifiers": [
                     {
                         "name": "won",
                         "version": "1.0.0",
-                        "dir": ".plural/rewarders/won",
-                        "python": "reward.py:solved",
+                        "dir": ".plural/verifiers/won",
+                        "python": "verify.py:solved",
                     }
                 ],
             }

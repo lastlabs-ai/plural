@@ -16,7 +16,7 @@ If you want, you will also have run the same thing on Plural's servers.
 Plan on about half an hour. The setup steps take a few minutes each; most of the time
 goes into describing your first Task.
 
-If words like Environment, Task, and Rewarder are new, read
+If words like Environment, Task, and Verifier are new, read
 [Core concepts](getting-started/concepts.md) first. It takes about five minutes. If
 you would rather watch a finished project run before building your own, try the
 [support queue tutorial](tutorials/support-queue.md). It runs offline, with no account
@@ -164,7 +164,7 @@ pyproject.toml          dependencies = ["plural>=0.18.0"]
 .plural/                local state: hosted binding, jobs/, backups/ (gitignored)
 environments/<name>/    environment.yaml, server.py or environment.py, README.md, resources/
 tasks/<name>/           task.yaml, instruction.md, resources/
-rewarders/<name>/       rewarder.yaml, reward.py
+verifiers/<name>/       verifier.yaml, verify.py
 harnesses/<name>/       harness.yaml, harness.py
 agents/<name>/          agent.yaml
 benchmarks/<name>/      benchmark.yaml, README.md
@@ -179,15 +179,15 @@ A **resource** is any one of the building blocks from
 [Core concepts](getting-started/concepts.md). For a first run you need three:
 
 - an **Environment**, the world the AI works in (here, a support desk),
-- a **Rewarder**, the grader that scores the finished work, and
+- a **Verifier**, the grader that scores the finished work, and
 - a **Task**, one assignment in that world (here, a refund request).
 
 Each `init` command writes a template for you to fill in:
 
 ```bash
 plural env init support-desk --python
-plural rewarder init resolved
-plural task init refund --environment support-desk --rewarder resolved
+plural verifier init resolved
+plural task init refund --environment support-desk --verifier resolved
 ```
 
 The templates mark every place you need to fill in with `PLURAL-TODO`:
@@ -197,7 +197,7 @@ The templates mark every place you need to fill in with `PLURAL-TODO`:
   all the AI sees. Keep the answers on State, never in what an action returns, so the
   AI cannot read them.
 - `environments/support-desk/README.md`: what the world is and how to use it.
-- `rewarders/resolved/reward.py`: compare how things ended with what the Task asked
+- `verifiers/resolved/verify.py`: compare how things ended with what the Task asked
   for, and return a score.
 - `tasks/refund/instruction.md`: what the AI must accomplish, in plain language. Set
   the Task's starting State under `initial_state` in `task.yaml`.
@@ -221,7 +221,7 @@ A few details worth knowing:
 - Inside a resource's folder you can leave off the name: `plural task validate` in
   `tasks/refund/` validates `refund`.
 - Every resource kind has the same verbs: `init`, `validate`, `show`, `list`, `push`,
-  and `pull`. They work for `env`, `task`, `rewarder`, `harness`, `agent`, and
+  and `pull`. They work for `env`, `task`, `verifier`, `harness`, `agent`, and
   `benchmark`.
 - A new Environment uses the `docker` runtime (`runtime.provider: docker` in
   `environment.yaml`), so Docker must be running when you run it. The `local` runtime
@@ -241,7 +241,7 @@ plural run --task refund --model openai/gpt-5.6-luna --dry-run
 Would run task/refund with gpt-5.6-luna (openai/gpt-5.6-luna, harness native) locally: 1 trial(s), 1 at a time (auto: every Trial at once).
 input                     version  content hash
 environment/support-desk  0.1.0    sha256:d7b203421527
-rewarder/resolved         0.1.0    sha256:9f13af9d2534
+verifier/resolved         0.1.0    sha256:9f13af9d2534
 task/refund               0.1.0    sha256:4c7c807a30fe
 ```
 
@@ -272,7 +272,7 @@ plural job rerun <job-id>
 ```
 
 - `job show` lists each Trial with its Task, status, and score.
-- `trial show` prints the score, each Rewarder's evidence, and where the Trial's
+- `trial show` prints the score, each Verifier's evidence, and where the Trial's
   artifacts and logs are.
 - `job rerun` runs the Job again with the exact inputs it used the first time, even if
   you have edited your files since, and creates a new Job linked to the original.

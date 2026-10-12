@@ -52,7 +52,7 @@ def _hashes(project: Project) -> dict[str, str]:
         f"{kind}/{name}": workspace.load(ResourceRef(kind, name)).content_hash
         for kind, name in (
             ("environment", "queue"),
-            ("rewarder", "resolved"),
+            ("verifier", "resolved"),
             ("task", "refund"),
             ("agent", "baseline"),
             ("benchmark", "basics"),
@@ -71,7 +71,7 @@ def test_versions_and_titles_label_a_revision_without_changing_its_hash(tmp_path
     before = _hashes(project)
     for manifest in (
         "environments/queue/environment.yaml",
-        "rewarders/resolved/rewarder.yaml",
+        "verifiers/resolved/verifier.yaml",
         "tasks/refund/task.yaml",
         "benchmarks/basics/benchmark.yaml",
     ):

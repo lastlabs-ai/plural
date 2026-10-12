@@ -72,7 +72,7 @@ class JobStore:
         config_path = destination / "config.json"
         if config_path.exists():
             existing_spec = JobSpec.model_validate_json(config_path.read_text(encoding="utf-8"))
-            # In memory a Rewarder check is a callable; on disk it is its source digest.
+            # In memory a Verifier check is a callable; on disk it is its source digest.
             if existing_spec.model_dump(mode="json") != spec.model_dump(mode="json"):
                 raise ValueError(ErrorCode.LOCK_INCOMPATIBLE.value)
         else:
@@ -268,8 +268,8 @@ class JobStore:
         stdout: bytes = b"",
         stderr: bytes = b"",
         artifacts: Iterable[DownloadedFile] = (),
-        rewarder_stdout: bytes = b"",
-        rewarder_stderr: bytes = b"",
+        verifier_stdout: bytes = b"",
+        verifier_stderr: bytes = b"",
     ) -> Path:
         """Append one immutable execution and update the selected result."""
         self._validate_result_ownership(trial, result)
@@ -291,8 +291,8 @@ class JobStore:
             logs.mkdir()
             self._write_bytes(logs / "stdout.log", stdout)
             self._write_bytes(logs / "stderr.log", stderr)
-            self._write_bytes(logs / "rewarder.stdout.log", rewarder_stdout)
-            self._write_bytes(logs / "rewarder.stderr.log", rewarder_stderr)
+            self._write_bytes(logs / "verifier.stdout.log", verifier_stdout)
+            self._write_bytes(logs / "verifier.stderr.log", verifier_stderr)
             artifact_root = temporary / "artifacts"
             artifact_root.mkdir()
             for artifact_name, artifact in sorted(unique.items()):
@@ -345,15 +345,15 @@ class JobStore:
     def write_review(
         self,
         trial: TrialSpec,
-        rewarder_name: str,
+        verifier_name: str,
         submission: Mapping[str, Any],
         result: TrialResult,
     ) -> Path:
         """Append one immutable human review and publish its resolved Trial result."""
-        if not rewarder_name or any(item in rewarder_name for item in ("/", "\\", "..", "\x00")):
-            raise ValueError("invalid rewarder name")
+        if not verifier_name or any(item in verifier_name for item in ("/", "\\", "..", "\x00")):
+            raise ValueError("invalid verifier name")
         self._validate_result_ownership(trial, result)
-        destination = self.trial_path(trial) / "reviews" / rewarder_name
+        destination = self.trial_path(trial) / "reviews" / verifier_name
         if destination.exists():
             raise ValueError("review was already submitted")
         destination.mkdir(parents=True, exist_ok=False)
@@ -428,7 +428,7 @@ class JobStore:
             or receipt.task_pin != trial.task_pin
             or receipt.benchmark != trial.benchmark
             or receipt.model != trial.model
-            or receipt.rewarder_digests != trial.rewarder_digests
+            or receipt.verifier_digests != trial.verifier_digests
             or receipt.harness_grant != trial.harness_grant
             or receipt.mode != trial.mode
             or receipt.runtime_provider != trial.runtime_provider
@@ -482,8 +482,8 @@ def _artifact_role(path: Path) -> str | None:
         return "episode"
     if "trajectory" in name:
         return "trajectory"
-    if name.startswith("rewarder/"):
-        return "rewarder_evidence"
+    if name.startswith("verifier/"):
+        return "verifier_evidence"
     if "tito" in name:
         return "training"
     return None
@@ -517,7 +517,7 @@ _PRIVATE_EVENT_KEYS = frozenset(
         "secret",
         "secrets",
         "state",
-        "rewarder_input",
+        "verifier_input",
     }
 )
 

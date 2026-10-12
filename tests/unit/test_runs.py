@@ -87,7 +87,7 @@ def test_every_plan_is_a_new_job_with_pinned_inputs(project: Project) -> None:
     pinned = first.pins
     assert set(pinned) == {
         "environment/queue",
-        "rewarder/resolved",
+        "verifier/resolved",
         "task/refund",
         "task/deny",
         "harness/scripted",
@@ -200,7 +200,7 @@ def test_local_run_records_a_job_and_trials_can_be_inspected(project: Project) -
     code, output, shown = cli("trial", "show", trial["trial_id"], "--json")
     assert code == 0, output
     assert shown["job_id"] == job["job_id"]
-    assert shown["rewarders"][0]["score"] == 1.0
+    assert shown["verifiers"][0]["score"] == 1.0
 
     code, output, again = cli("run", "--task", "refund", "--agent", "baseline", "--json")
     assert code == 0, output
@@ -216,8 +216,8 @@ def test_reruns_use_the_pinned_inputs_and_link_to_the_original(project: Project)
     # Local edits after the run must not change what a rerun executes.
     harness = project.root / "harnesses/scripted/harness.yaml"
     harness.write_text(harness.read_text().replace("answer: refunded", "answer: denied"))
-    rewarder = project.root / "rewarders/resolved/reward.py"
-    rewarder.write_text(rewarder.read_text().replace("float(correct)", "0.5"))
+    verifier = project.root / "verifiers/resolved/verify.py"
+    verifier.write_text(verifier.read_text().replace("float(correct)", "0.5"))
 
     code, output, rerun = cli("job", "rerun", job["job_id"], "--json")
     assert code == 0, output
@@ -288,7 +288,7 @@ def test_a_provider_key_is_never_sent_to_the_plural_gateway(
     assert keyed["PLURAL_GATEWAY_URL"] == "https://plural.example/v1"
 
 
-def test_rewarder_data_never_reaches_the_harness(project: Project, tmp_path: Path) -> None:
+def test_verifier_data_never_reaches_the_harness(project: Project, tmp_path: Path) -> None:
     seen = tmp_path / "seen.json"
     harness = project.root / "harnesses/scripted/harness.py"
     harness.write_text(
@@ -303,15 +303,15 @@ def test_rewarder_data_never_reaches_the_harness(project: Project, tmp_path: Pat
     )
     manifest = project.root / "harnesses/scripted/harness.yaml"
     manifest.write_text(manifest.read_text() + f"  seen: {seen}\n")
-    rewarder = project.root / "rewarders/resolved/reward.py"
-    rewarder.write_text(rewarder.read_text().replace("expected={expected}", "SECRET-{expected}"))
+    verifier = project.root / "verifiers/resolved/verify.py"
+    verifier.write_text(verifier.read_text().replace("expected={expected}", "SECRET-{expected}"))
 
     code, output, job = cli("run", "--task", "refund", "--agent", "baseline", "--json")
     assert code == 0, output
     assert job["trials"][0]["score"] == 1.0
     visible = seen.read_text()
     assert "Review order A-1" in visible
-    for private in ("SECRET", "reward.py", "resolved", '"score"', "refundable"):
+    for private in ("SECRET", "verify.py", "resolved", '"score"', "refundable"):
         assert private not in visible, private
 
 
@@ -322,8 +322,8 @@ def test_rewards_apply_labels_a_stored_trial_and_export_joins_the_ledger(
     assert code == 0, output
     [trial] = job["trials"]
     (project.root / "labels.py").write_text(
-        "from plural import HindsightTrial, RewardTarget, hindsight_rewarder\n\n\n"
-        "@hindsight_rewarder(version='3')\n"
+        "from plural import HindsightTrial, RewardTarget, hindsight_verifier\n\n\n"
+        "@hindsight_verifier(version='3')\n"
         "def scored(trial: HindsightTrial):\n"
         "    for step in trial.steps('submit'):\n"
         "        yield trial.credit(RewardTarget.step(step['event_id']), trial.score or 0)\n"
@@ -340,7 +340,7 @@ def test_rewards_apply_labels_a_stored_trial_and_export_joins_the_ledger(
 
     code, output, ledger = cli("rewards", "show", trial["trial_id"], "--json")
     assert code == 0, output
-    assert [(item["source"], item["rewarder"], item["app"]) for item in ledger] == [
+    assert [(item["source"], item["verifier"], item["app"]) for item in ledger] == [
         ("step", "resolved", "queue"),
         ("hindsight", "scored", None),
     ]
@@ -349,14 +349,14 @@ def test_rewards_apply_labels_a_stored_trial_and_export_joins_the_ledger(
 
     out = project.root / "train.jsonl"
     code, output, _ = cli(
-        "rewards", "export", "--job", job["job_id"], "--rewarder", "scored@3", "--out", str(out)
+        "rewards", "export", "--job", job["job_id"], "--verifier", "scored@3", "--out", str(out)
     )
     assert code == 0, output
     [line] = out.read_text().splitlines()
     exported = json.loads(line)
     assert exported["trial_id"] == trial["trial_id"]
     assert exported["score"] == 1.0
-    assert [item["rewarder"] for item in exported["rewards"]] == ["scored"]
+    assert [item["verifier"] for item in exported["rewards"]] == ["scored"]
 
 
 def test_run_has_no_traces_option(project: Project) -> None:

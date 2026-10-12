@@ -1,6 +1,6 @@
 """Durable local Job and Trial runtime APIs."""
 
-from plural.execution.engine import ExecutionFailure, JobRunner, RewarderOutput, Trial
+from plural.execution.engine import ExecutionFailure, JobRunner, Trial, VerifierOutput
 from plural.execution.policy import (
     EffectivePolicy,
     PolicyDenial,
@@ -17,7 +17,7 @@ __all__ = [
     "PolicyDenial",
     "ProjectPolicy",
     "Trial",
-    "RewarderOutput",
+    "VerifierOutput",
     "redact_mapping",
     "resolve_effective_policy",
 ]

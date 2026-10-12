@@ -41,7 +41,7 @@ Think of it like setting an exam for AI.
 flowchart LR
   world["The world<br/>(Environment)"]
   work["The assignment<br/>(Task)"]
-  grader["The grader<br/>(Rewarder)"]
+  grader["The grader<br/>(Verifier)"]
   contestant["The contestant<br/>(Agent)"]
   result["A score you can trust"]
   world --> work
@@ -54,7 +54,7 @@ flowchart LR
   ticket queue. That is an **Environment**.
 - You write **the assignment**, such as "guess the word CRANE" or "refund this
   customer". That is a **Task**.
-- You decide **how the work is graded**. That is a **Rewarder**.
+- You decide **how the work is graded**. That is a **Verifier**.
 - You pick **the contestants**: a model plus its instructions. Each one is an
   **Agent**.
 
@@ -83,7 +83,7 @@ attempt.
 ## Where your work lives
 
 Everything you build lives in a **project**. On your computer, a project is a folder
-with one subfolder per Environment, Task, Rewarder, Agent, and so on. In the web app
+with one subfolder per Environment, Task, Verifier, Agent, and so on. In the web app
 at [pluralintel.com](https://pluralintel.com), the same project shows up in the
 project switcher at the top of the sidebar.
 

@@ -12,8 +12,8 @@ runs is a short client call over a local socket::
 
     python -m plural.apps.daemon reset
     python -m plural.apps.daemon step <action>        # arguments as JSON on stdin
-    python -m plural.apps.daemon query <app> <action> # read-only, for Rewarders
-    python -m plural.apps.daemon finish               # snapshots for Rewarders
+    python -m plural.apps.daemon query <app> <action> # read-only, for Verifiers
+    python -m plural.apps.daemon finish               # snapshots for Verifiers
     python -m plural.apps.daemon stop
 
 A client that finds no host running starts one with its own environment, so
@@ -96,11 +96,11 @@ def _receive(connection: socket.socket) -> dict[str, Any]:
 
 
 def _load_host(root: Path) -> Any:
-    from plural.apps.host import AppHost, load_step_rewarders
+    from plural.apps.host import AppHost, load_reward_hooks
     from plural.apps.mcp import hide_from_hooks
     from plural.environments.definition import EnvironmentDefinition
     from plural.environments.env import Environment
-    from plural.rewarders import StepTask
+    from plural.verifiers import StepTask
 
     path = root / ENVIRONMENT_FILE
     if not path.is_file():
@@ -113,7 +113,7 @@ def _load_host(root: Path) -> Any:
     return AppHost(
         environment,
         workspace=root,
-        rewarders=load_step_rewarders(root, task.get("rewarders") or []),
+        verifiers=load_reward_hooks(root, task.get("verifiers") or []),
         task=StepTask(
             name=str(about.get("name") or ""),
             info=task.get("info"),

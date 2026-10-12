@@ -1,4 +1,4 @@
-"""First-class Rewarder definitions."""
+"""First-class Verifier definitions."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from plural.identity import revision_hash
 from plural.sandbox.models import NetworkMode, ResourceRequirements
 
 
-class RewarderRuntime(FrozenModel):
-    """Machine for a rewarder that needs its own sandbox.
+class VerifierRuntime(FrozenModel):
+    """Machine for a verifier that needs its own sandbox.
 
     The default runs in the Task Environment. Set a provider, image, network,
     resource limit, or timeout to use a different machine.
@@ -36,17 +36,17 @@ class RewarderRuntime(FrozenModel):
     timeout_seconds: float = Field(default=60, gt=0)
 
     @model_validator(mode="after")
-    def _network(self) -> RewarderRuntime:
+    def _network(self) -> VerifierRuntime:
         if self.network_allowlist and self.network is not NetworkMode.ALLOWLIST:
             raise ValueError(
-                "Cannot create RewarderRuntime.\n"
+                "Cannot create VerifierRuntime.\n"
                 f"allowed_hosts is set but network={self.network.value!r}.\n"
                 "Set network='allowlist' or remove allowed_hosts."
             )
         return self
 
 
-def runtime_is_custom(runtime: RewarderRuntime) -> bool:
+def runtime_is_custom(runtime: VerifierRuntime) -> bool:
     """Return whether this runtime names its own machine.
 
     Docker, public network, and a 60 second timeout, with no image or resource
@@ -123,9 +123,9 @@ class EpisodeOutcome(FrozenModel):
 
 
 class AppSnapshot(FrozenModel):
-    """One App at the start and end of an episode, as a Rewarder sees it.
+    """One App at the start and end of an episode, as a Verifier sees it.
 
-    ``initial`` and ``final`` are the App's snapshots, or ``None`` when it has
+    ``initial`` and ``check`` are the App's snapshots, or ``None`` when it has
     no ``snapshot()``. ``control`` says how far they can be trusted: an
     ``owned`` or ``sandboxed`` App started from the Task's state; a ``live``
     App is shared and may have changed for other reasons.
@@ -140,7 +140,7 @@ class AppSnapshot(FrozenModel):
     def query(self, action: str, /, **arguments: Any) -> Any:
         """Call one of this App's read-only actions, such as ``get_record``.
 
-        Available to function Rewarders while the Trial's Runtime is still
+        Available to function Verifiers while the Trial's Runtime is still
         running. An action that can change state is refused.
 
         Returns:
@@ -151,21 +151,21 @@ class AppSnapshot(FrozenModel):
         """
         if self._query is None:
             raise RuntimeError(
-                "App queries are only available to function Rewarders during a Trial. "
+                "App queries are only available to function Verifiers during a Trial. "
                 "Read the App's final snapshot instead."
             )
         return self._query(action, arguments)
 
 
 class Episode(FrozenModel):
-    """Completed Agent episode handed to a Rewarder.
+    """Completed Agent episode handed to a Verifier.
 
     ``apps`` holds each App's initial and final snapshots and, for function
-    Rewarders, read-only ``query`` access. ``state`` is a shortcut: the one
+    Verifiers, read-only ``query`` access. ``state`` is a shortcut: the one
     App's final snapshot when the Environment has one App, otherwise a mapping
     of App name to final snapshot. Neither is ever shown to the Agent.
-    ``observation`` is what the Agent last saw. Rewards are not here: they
-    live in the Trial's reward ledger and never feed a score.
+    ``observation`` is what the Agent last saw. ``rewards`` are the values this
+    Verifier's ``reward`` gave each step, in order; :func:`total_reward` sums them.
     """
 
     observation: dict[str, Any] = Field(default_factory=dict)
@@ -175,6 +175,7 @@ class Episode(FrozenModel):
     artifacts: dict[str, Any] = Field(default_factory=dict)
     usage: EpisodeUsage = Field(default_factory=EpisodeUsage)
     outcome: EpisodeOutcome = Field(default_factory=EpisodeOutcome)
+    rewards: tuple[float, ...] = ()
 
     @classmethod
     def from_apps(cls, report: Mapping[str, Any], **fields: Any) -> Episode:
@@ -198,7 +199,7 @@ class Episode(FrozenModel):
 
 @dataclass(frozen=True)
 class StepTask:
-    """The Task an episode is working on, as a ``step`` hook sees it."""
+    """The Task an episode is working on, as a ``reward`` hook sees it."""
 
     name: str = ""
     info: Any = None
@@ -207,7 +208,7 @@ class StepTask:
 
 @dataclass(frozen=True)
 class Step:
-    """One action the Agent took, as a Rewarder's ``step`` hook sees it.
+    """One action the Agent took, as a Verifier's ``reward`` hook sees it.
 
     ``observation`` is what the Agent saw back; ``error`` is set instead when
     the action rejected its input. ``previous_state`` and ``current_state``
@@ -229,12 +230,13 @@ class Step:
     apps: Mapping[str, Any] = field(default_factory=dict)
 
 
-class RewarderOutput(FrozenModel):
-    """What a Rewarder's ``final`` hook returns for the finished episode.
+class VerifierOutput(FrozenModel):
+    """What a Verifier's ``check`` hook returns for the finished episode.
 
     ``score`` is the headline number for the Task; ``scores`` holds any named
-    sub-metrics behind it. Step rewards are separate: a ``step`` hook returns a
-    number per action, which goes to the reward ledger and never into a score.
+    sub-metrics behind it. Step rewards are separate: a ``reward`` hook returns a
+    number per action, which goes to the reward ledger. It reaches a score only
+    when ``check`` is :func:`total_reward`.
     """
 
     score: float
@@ -242,14 +244,14 @@ class RewarderOutput(FrozenModel):
     evidence: tuple[str, ...] = ()
     feedback: str = ""
 
-    def validated_finite(self) -> RewarderOutput:
+    def validated_finite(self) -> VerifierOutput:
         """Reject non-finite scores.
 
         Returns:
             This output when all scores are finite.
         """
         if any(not math.isfinite(item) for item in (self.score, *self.scores.values())):
-            raise ValueError("Rewarder emitted non-finite scores")
+            raise ValueError("Verifier emitted non-finite scores")
         return self
 
 
@@ -274,27 +276,27 @@ def _bundled_catalog() -> ModelCatalog:
     return ModelCatalog()
 
 
-def coerce_rewarder_output(value: Any, *, rewarder_name: str) -> RewarderOutput:
-    """Accept a RewarderOutput, mapping, or object with the same fields.
+def coerce_verifier_output(value: Any, *, verifier_name: str) -> VerifierOutput:
+    """Accept a VerifierOutput, mapping, or object with the same fields.
 
     Returns:
-        A validated RewarderOutput.
+        A validated VerifierOutput.
     """
-    if isinstance(value, RewarderOutput):
+    if isinstance(value, VerifierOutput):
         return value
     if isinstance(value, Mapping):
         try:
-            return RewarderOutput.model_validate(value)
+            return VerifierOutput.model_validate(value)
         except Exception as exc:
             raise ValueError(
-                f"Rewarder {rewarder_name!r} returned an invalid result.\n"
-                "Return RewarderOutput or a mapping with a finite 'score' and optional "
+                f"Verifier {verifier_name!r} returned an invalid result.\n"
+                "Return VerifierOutput or a mapping with a finite 'score' and optional "
                 "'scores', 'evidence', and 'feedback'.\n"
                 f"Got: {value!r}\n"
                 f"Cause: {exc}"
             ) from exc
     raise ValueError(
-        f"Rewarder {rewarder_name!r} must return RewarderOutput or a mapping.\n"
+        f"Verifier {verifier_name!r} must return VerifierOutput or a mapping.\n"
         f"Got {type(value).__name__}."
     )
 
@@ -326,8 +328,8 @@ def _accepts_episode(fn: Callable[..., Any]) -> bool:
     }
 
 
-class Rewarder(FrozenModel):
-    """Fields shared by every completed-Trial rewarder."""
+class Verifier(FrozenModel):
+    """Fields shared by every completed-Trial verifier."""
 
     name: str = Field(min_length=1)
     version: str = "0.1.0"
@@ -336,7 +338,7 @@ class Rewarder(FrozenModel):
     weight: float = Field(default=1, gt=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
     secrets: tuple[SecretReference, ...] = ()
-    """Names the Job supplies to this Rewarder, such as a key for a system it checks."""
+    """Names the Job supplies to this Verifier, such as a key for a system it checks."""
 
     @model_validator(mode="before")
     @classmethod
@@ -346,7 +348,7 @@ class Rewarder(FrozenModel):
         payload = dict(value)
         schema_version = payload.pop("schema_version", "2")
         if str(schema_version) != "2":
-            raise ValueError("only rewarder schema version 2 is supported")
+            raise ValueError("only verifier schema version 2 is supported")
         if "version" not in payload and "revision" in payload:
             payload["version"] = payload.pop("revision")
         if "criteria" not in payload and "rubric" in payload:
@@ -355,7 +357,7 @@ class Rewarder(FrozenModel):
         return payload
 
     @model_validator(mode="after")
-    def _semantic_version(self) -> Rewarder:
+    def _semantic_version(self) -> Verifier:
         from plural.common import semantic_version
 
         semantic_version(self.version)
@@ -363,7 +365,7 @@ class Rewarder(FrozenModel):
 
     @property
     def scores(self) -> bool:
-        """Whether this Rewarder produces a score at the end of the episode."""
+        """Whether this Verifier produces a score at the end of the episode."""
         return True
 
     @property
@@ -381,28 +383,29 @@ class Rewarder(FrozenModel):
 
     @property
     def content_hash(self) -> str:
-        """Stable Rewarder version digest."""
-        return revision_hash("rewarder", self._hash_payload())
+        """Stable Verifier version digest."""
+        return revision_hash("verifier", self._hash_payload())
 
 
-class DeterministicRewarder(Rewarder):
-    """Code that rewards an episode: per step, at the end, or both.
+class DeterministicVerifier(Verifier):
+    """Code that verifies an episode: it scores the end, rewards each step, or both.
 
-    ``final`` scores the finished episode; that score is what Tasks and
+    ``check`` scores the finished episode; that score is what Tasks and
     Benchmarks rank on. It is a function of the :class:`Episode`, a
-    ``{"python": "reward.py:final"}`` reference, or a command argv.
+    ``{"python": "verify.py:check"}`` reference, or a command argv.
 
-    ``step`` rewards each action while the episode runs. It is a function of
-    one :class:`Step`, or a ``{"python": "reward.py:step"}`` reference, and
+    ``reward`` rewards each action while the episode runs. It is a function of
+    one :class:`Step`, or a ``{"python": "verify.py:reward"}`` reference, and
     runs in the Runtime beside the Apps, so it can read every App. What it
-    returns goes to the Trial's reward ledger and never into the score.
+    returns goes to the Trial's reward ledger. Rewards reach the score only
+    when ``check`` is :func:`total_reward`.
     """
 
     kind: Literal["deterministic"] = "deterministic"
-    final: Any = None
-    step: Any = None
-    runtime: RewarderRuntime = Field(default_factory=RewarderRuntime)
-    result_path: str = "rewarder-result.json"
+    check: Any = None
+    reward: Any = None
+    runtime: VerifierRuntime = Field(default_factory=VerifierRuntime)
+    result_path: str = "verifier-result.json"
     evidence_required: bool = True
 
     _source_digest: str | None = PrivateAttr(default=None)
@@ -414,74 +417,89 @@ class DeterministicRewarder(Rewarder):
         if not isinstance(value, dict):
             return value
         payload = dict(value)
-        if "check" in payload or "command" in payload:
-            raise ValueError(
-                "A Rewarder's check is now `final`: rename check: (or command:) to final:."
+        if "check" not in payload and "command" in payload:
+            payload["check"] = payload.pop("command")
+        check = payload.get("check")
+        if check == TOTAL_REWARD or check == {"builtin": TOTAL_REWARD}:
+            payload["check"] = total_reward
+        elif isinstance(check, str):
+            payload["check"] = (
+                {"python": check} if _looks_like_reference(check) else tuple(shlex.split(check))
             )
-        final = payload.get("final")
-        if isinstance(final, str):
-            payload["final"] = (
-                {"python": final} if _looks_like_reference(final) else tuple(shlex.split(final))
-            )
-        elif isinstance(final, list):
-            payload["final"] = tuple(str(item) for item in final)
-        step = payload.get("step")
-        if isinstance(step, str):
-            payload["step"] = {"python": step}
+        elif isinstance(check, list):
+            payload["check"] = tuple(str(item) for item in check)
+        reward = payload.get("reward")
+        if isinstance(reward, str):
+            payload["reward"] = {"python": reward}
         payload.pop("required_artifacts", None)
         payload.pop("evidence", None)
         return payload
 
     @model_validator(mode="after")
-    def _valid_hooks(self) -> DeterministicRewarder:
-        if self.final is None and self.step is None:
+    def _valid_hooks(self) -> DeterministicVerifier:
+        if self.check is None and self.reward is None:
             raise ValueError(
-                f"Cannot create DeterministicRewarder {self.name!r}.\n"
-                "Give it final, to score the finished episode, step, to reward each "
+                f"Cannot create DeterministicVerifier {self.name!r}.\n"
+                "Give it check, to score the finished episode, reward, to reward each "
                 "action, or both:\n"
-                "  DeterministicRewarder(name='solved', final=solved, step=progress)"
+                "  DeterministicVerifier(name='solved', check=solved, reward=progress)"
             )
-        final = self.final
-        if final is not None and not (
-            (callable(final) and _accepts_episode(final))
-            or (isinstance(final, dict) and final.get("python"))
-            or (isinstance(final, tuple) and final and all(isinstance(i, str) for i in final))
+        check = self.check
+        if check is not None and not (
+            (callable(check) and _accepts_episode(check))
+            or (isinstance(check, dict) and check.get("python"))
+            or (isinstance(check, tuple) and check and all(isinstance(i, str) for i in check))
         ):
             raise ValueError(
-                f"Cannot create DeterministicRewarder {self.name!r}.\n"
-                "final must be a function that accepts the finished Episode, a "
-                "'reward.py:final' reference, or a command.\n"
+                f"Cannot create DeterministicVerifier {self.name!r}.\n"
+                "check must be a function that accepts the finished Episode, a "
+                "'verify.py:check' reference, a command, or total_reward.\n"
                 "Define it like:\n"
-                "  def final(episode: Episode) -> RewarderOutput: ...\n"
-                f"Got {type(final).__name__}: {final!r}."
+                "  def check(episode: Episode) -> VerifierOutput: ...\n"
+                f"Got {type(check).__name__}: {check!r}."
             )
-        step = self.step
-        if step is not None and not (
-            (callable(step) and _accepts_episode(step))
-            or (isinstance(step, dict) and step.get("python"))
+        if check is total_reward and self.reward is None:
+            raise ValueError(
+                f"Cannot create DeterministicVerifier {self.name!r}.\n"
+                "check=total_reward scores the episode by this Verifier's own rewards, "
+                "so it needs a reward function too."
+            )
+        reward = self.reward
+        if reward is not None and not (
+            (callable(reward) and _accepts_episode(reward))
+            or (isinstance(reward, dict) and reward.get("python"))
         ):
             raise ValueError(
-                f"Cannot create DeterministicRewarder {self.name!r}.\n"
-                "step must be a function that accepts one Step, or a 'reward.py:step' "
-                "reference. Define it like:\n"
-                "  def step(step: Step) -> float | None: ...\n"
-                f"Got {type(step).__name__}: {step!r}."
+                f"Cannot create DeterministicVerifier {self.name!r}.\n"
+                "reward must be a function that accepts one Step, or a "
+                "'verify.py:reward' reference. Define it like:\n"
+                "  def reward(step: Step) -> float | None: ...\n"
+                f"Got {type(reward).__name__}: {reward!r}."
             )
         return self
 
-    @field_serializer("final", "step")
+    @field_serializer("check", "reward")
     def _serialize_hook(self, hook: Any) -> Any:
+        if hook is total_reward:
+            return {"builtin": TOTAL_REWARD}
         if callable(hook):
             return self._callable_reference(hook)
         if isinstance(hook, tuple):
             return list(hook)
         return hook
 
+    def _hash_payload(self) -> dict[str, Any]:
+        payload = self.model_dump(mode="json")
+        # A Verifier with no reward hashes as it did before reward existed.
+        if payload.get("reward") is None:
+            payload.pop("reward", None)
+        return payload
+
     def _callable_reference(self, hook: Callable[..., Any]) -> dict[str, str]:
         """Name a callable hook and fingerprint the code behind it.
 
-        The digest makes an edit to the hook's source a new Rewarder version
-        rather than a silent change under an old one. A project Rewarder binds
+        The digest makes an edit to the hook's source a new Verifier version
+        rather than a silent change under an old one. A project Verifier binds
         the digest of its whole directory; otherwise it is the source file's.
 
         Returns:
@@ -497,40 +515,40 @@ class DeterministicRewarder(Rewarder):
 
     @property
     def scores(self) -> bool:
-        """Whether this Rewarder produces a score: it has ``final``."""
-        return self.final is not None
+        """Whether this Verifier produces a score: it has ``check``."""
+        return self.check is not None
 
     @property
     def command(self) -> tuple[str, ...]:
-        """``final`` as a command argv, if it is one."""
-        final = self.final
-        if isinstance(final, tuple) and final and all(isinstance(item, str) for item in final):
-            return final
+        """``check`` as a command argv, if it is one."""
+        check = self.check
+        if isinstance(check, tuple) and check and all(isinstance(item, str) for item in check):
+            return check
         return ()
 
     @property
     def python_ref(self) -> str | None:
-        """``final`` as a ``file.py:function`` reference, if it is one."""
-        return _reference(self.final)
+        """``check`` as a ``file.py:function`` reference, if it is one."""
+        return _reference(self.check)
 
     @property
-    def step_ref(self) -> str | None:
-        """``step`` as a ``file.py:function`` reference, if it is one."""
-        return _reference(self.step)
+    def reward_ref(self) -> str | None:
+        """``reward`` as a ``file.py:function`` reference, if it is one."""
+        return _reference(self.reward)
 
     @property
-    def final_fn(self) -> Callable[[Episode], Any] | None:
-        """``final`` as an in-process function, if it is one."""
-        return self.final if callable(self.final) else None
+    def check_fn(self) -> Callable[[Episode], Any] | None:
+        """``check`` as an in-process function, if it is one."""
+        return self.check if callable(self.check) else None
 
     @property
-    def step_fn(self) -> Callable[..., Any] | None:
-        """``step`` as an in-process function, if it is one."""
-        return self.step if callable(self.step) else None
+    def reward_fn(self) -> Callable[..., Any] | None:
+        """``reward`` as an in-process function, if it is one."""
+        return self.reward if callable(self.reward) else None
 
     @property
     def source_dir(self) -> Path | None:
-        """The folder the hooks were imported from, for a project Rewarder."""
+        """The folder the hooks were imported from, for a project Verifier."""
         return self._source_dir
 
     def bind_source(self, digest: str, directory: Path | None = None) -> None:
@@ -542,26 +560,45 @@ class DeterministicRewarder(Rewarder):
         """Fingerprint callable hooks by the package that ships them."""
         self._source_digest = digest
 
-    def invoke(self, episode: Episode) -> RewarderOutput:
-        """Run ``final`` in-process on the finished Episode.
+    def invoke(self, episode: Episode) -> VerifierOutput:
+        """Run ``check`` in-process on the finished Episode.
 
         Returns:
-            A validated RewarderOutput.
+            A validated VerifierOutput.
         """
-        fn = self.final_fn
+        fn = self.check_fn
         if fn is None:
             raise ValueError(
-                f"Rewarder {self.name!r} cannot be invoked in-process.\n"
-                "Its final is a command or Python reference that has not been resolved."
+                f"Verifier {self.name!r} cannot be invoked in-process.\n"
+                "Its check is a command or Python reference that has not been resolved."
             )
         try:
-            return coerce_rewarder_output(fn(episode), rewarder_name=self.name)
+            return coerce_verifier_output(fn(episode), verifier_name=self.name)
         except TypeError as exc:
             raise ValueError(
-                f"Rewarder {self.name!r} final failed to accept the Episode.\n"
+                f"Verifier {self.name!r} check failed to accept the Episode.\n"
                 "The function must accept one argument: the finished Episode.\n"
                 f"Cause: {exc}"
             ) from exc
+
+
+TOTAL_REWARD = "total_reward"
+
+
+def total_reward(episode: Episode) -> VerifierOutput:
+    """Score an episode by the sum of its Verifier's own rewards.
+
+    Use it as a Verifier's ``check`` to make the reward the score:
+    ``DeterministicVerifier(name="return", check=total_reward, reward=progress)``,
+    or ``check: total_reward`` in ``verifier.yaml``.
+
+    Returns:
+        The total of ``episode.rewards`` as the score.
+    """
+    total = float(sum(episode.rewards))
+    return VerifierOutput(
+        score=total, evidence=(f"{len(episode.rewards)} step rewards totalling {total:g}",)
+    )
 
 
 def _looks_like_reference(value: str) -> bool:
@@ -576,8 +613,8 @@ def _reference(hook: Any) -> str | None:
     return None
 
 
-class AgentRewarder(Rewarder):
-    """Model-judge rewarder with its own runtime and connectivity policy."""
+class AgentVerifier(Verifier):
+    """Model-judge verifier with its own runtime and connectivity policy."""
 
     kind: Literal["agent"] = "agent"
     model: str = Field(min_length=1)
@@ -585,10 +622,10 @@ class AgentRewarder(Rewarder):
     provider: str | None = None
     fallback_models: tuple[str, ...] = ()
     criteria: tuple[RubricCriterion, ...] = Field(min_length=1)
-    runtime: RewarderRuntime = Field(default_factory=RewarderRuntime)
+    runtime: VerifierRuntime = Field(default_factory=VerifierRuntime)
 
     @model_validator(mode="after")
-    def _catalog_model(self, info: ValidationInfo) -> AgentRewarder:
+    def _catalog_model(self, info: ValidationInfo) -> AgentVerifier:
         context = info.context if isinstance(info.context, dict) else {}
         catalog = context.get("catalog") or _bundled_catalog()
         if not isinstance(catalog, ModelCatalog):
@@ -602,29 +639,29 @@ class AgentRewarder(Rewarder):
                 else " Call ModelCatalog().ids() or plural models list to see registered IDs."
             )
             raise ValueError(
-                f"Cannot create AgentRewarder {self.name!r}.\n"
+                f"Cannot create AgentVerifier {self.name!r}.\n"
                 f"model {self.model!r} is not registered in the effective ModelCatalog.{hint}"
             )
         if self.provider is not None and self.provider not in selected.host_providers():
             raise ValueError(
-                f"Cannot create AgentRewarder {self.name!r}.\n"
+                f"Cannot create AgentVerifier {self.name!r}.\n"
                 f"provider {self.provider!r} is not a catalog endpoint for model {self.model!r}."
             )
         unknown = [model for model in self.fallback_models if catalog.get(model) is None]
         if unknown:
             raise ValueError(
-                f"Cannot create AgentRewarder {self.name!r}.\n"
+                f"Cannot create AgentVerifier {self.name!r}.\n"
                 "fallback models are not registered in the effective ModelCatalog: "
                 + ", ".join(repr(model) for model in unknown)
             )
         return self
 
     @classmethod
-    def from_catalog(cls, catalog: ModelCatalog, **fields: Any) -> AgentRewarder:
+    def from_catalog(cls, catalog: ModelCatalog, **fields: Any) -> AgentVerifier:
         """Create a model judge against an explicit effective catalog.
 
         Returns:
-            A validated AgentRewarder without global registration.
+            A validated AgentVerifier without global registration.
         """
         return cls.model_validate(fields, context={"catalog": catalog})
 
@@ -634,41 +671,41 @@ class AgentRewarder(Rewarder):
         return RoutingSpec(provider=self.provider, fallback_models=self.fallback_models)
 
 
-class HumanRewarder(Rewarder):
-    """Human review rewarder."""
+class HumanVerifier(Verifier):
+    """Human review verifier."""
 
     kind: Literal["human"] = "human"
     criteria: tuple[RubricCriterion, ...] = Field(min_length=1)
     instructions: str = ""
 
 
-RewarderDefinition = Annotated[
-    DeterministicRewarder | AgentRewarder | HumanRewarder,
+VerifierDefinition = Annotated[
+    DeterministicVerifier | AgentVerifier | HumanVerifier,
     Field(discriminator="kind"),
 ]
 
 
-class WeightedRewarder(FrozenModel):
-    """One pinned Rewarder revision and aggregate weight."""
+class WeightedVerifier(FrozenModel):
+    """One pinned Verifier revision and aggregate weight."""
 
-    rewarder: RewarderDefinition
+    verifier: VerifierDefinition
     weight: float = Field(default=1, gt=0)
 
 
 __all__ = [
-    "AgentRewarder",
+    "AgentVerifier",
     "AppSnapshot",
-    "DeterministicRewarder",
+    "DeterministicVerifier",
     "Episode",
     "EpisodeUsage",
-    "HumanRewarder",
+    "HumanVerifier",
     "RubricCriterion",
     "Step",
     "StepTask",
-    "Rewarder",
-    "RewarderDefinition",
-    "RewarderOutput",
-    "RewarderRuntime",
-    "WeightedRewarder",
-    "coerce_rewarder_output",
+    "Verifier",
+    "VerifierDefinition",
+    "VerifierOutput",
+    "VerifierRuntime",
+    "WeightedVerifier",
+    "coerce_verifier_output",
 ]

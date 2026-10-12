@@ -2,7 +2,7 @@
 route: /docs/tutorials/wordle
 title: Wordle
 order: 115
-description: Walk through a Wordle project whose game is one App that keeps the secret word on State, score it with a deterministic Rewarder, and run it from the CLI or the Python SDK.
+description: Walk through a Wordle project whose game is one App that keeps the secret word on State, score it with a deterministic Verifier, and run it from the CLI or the Python SDK.
 audience: all
 nav: true
 nav_group: Tutorials
@@ -46,7 +46,7 @@ In the words from [Core concepts](../getting-started/concepts.md), this tutorial
 
 - **The world** (Environment): `wordle`, with one [App](../concepts/apps.md), the game itself.
 - **Three assignments** (Tasks): `crane`, `slate`, and `point`, each with one secret word.
-- **The grader** (Rewarder): `solved`, which checks whether the word was found.
+- **The grader** (Verifier): `solved`, which checks whether the word was found.
 - **The exam** (Benchmark): `wordle`, the three games together.
 - **Two contestants** (Agents): `word-list`, which guesses from a fixed list and calls no
   model, and `luna`, a real model.
@@ -56,7 +56,7 @@ On disk:
 ```text
 environments/wordle/            environment.yaml, environment.py, README.md, words.txt
 tasks/crane/, slate/, point/    task.yaml, instruction.md (one secret word each)
-rewarders/solved/               rewarder.yaml, reward.py
+verifiers/solved/               verifier.yaml, verify.py
 harnesses/word-list/            harness.yaml, harness.py (guesses a fixed list, no model)
 agents/word-list/               agent.yaml (runs the word-list Harness)
 agents/luna/                    agent.yaml (a model on the native harness)
@@ -181,7 +181,7 @@ name: crane
 version: 0.1.0
 instructions: instruction.md
 environment: wordle
-rewarders:
+verifiers:
   - solved
 initial_state:
   secret: crane
@@ -191,35 +191,35 @@ initial_state:
 the AI never sees it. It sees `instruction.md` and what each guess returns, nothing
 else.
 
-### The Rewarder reads the final State
+### The Verifier reads the final State
 
-The Rewarder is the grader. `rewarders/solved/rewarder.yaml` declares a deterministic
-Rewarder (a `DeterministicRewarder` in Python), meaning a small piece of code that
-checks the answer exactly. Its `final` check scores the finished game, and its `step`
-check rewards each guess. Both are functions in `reward.py`:
+The Verifier is the grader. `verifiers/solved/verifier.yaml` declares a deterministic
+Verifier (a `DeterministicVerifier` in Python), meaning a small piece of code that
+checks the answer exactly. Its `check` scores the finished game, and its `reward`
+check rewards each guess. Both are functions in `verify.py`:
 
 ```yaml
 name: solved
 version: 0.1.0
 kind: deterministic
-final: reward.py:final
-step: reward.py:step
+check: verify.py:check
+reward: verify.py:reward
 weight: 1
 ```
 
-The `final` check reads the game's final State, which the AI never saw. With one App,
+The `check` reads the game's final State, which the AI never saw. With one App,
 `episode.state` is that App's State:
 
 ```python
-from plural import Episode, RewarderOutput
+from plural import Episode, VerifierOutput
 
 
-def final(episode: Episode) -> RewarderOutput:
+def check(episode: Episode) -> VerifierOutput:
     """Score 1 when the secret was guessed and 0 otherwise. Report guesses used."""
     guesses = episode.state.get("guesses") or []
     solved = bool(episode.state.get("solved"))
     detail = f"solved in {len(guesses)}" if solved else f"unsolved after {len(guesses)}"
-    return RewarderOutput(
+    return VerifierOutput(
         score=float(solved),
         scores={"guesses": float(len(guesses))},
         evidence=[detail],
@@ -230,10 +230,10 @@ The grader looks at what actually happened in the game, not at the AI's claim th
 won. `score` is what the Benchmark ranks on. The `guesses` sub-score shows how
 efficiently each puzzle was solved, but it does not affect ranking.
 
-The `step` check runs after every guess and gives per-guess credit for training:
+The `reward` function runs after every guess and gives per-guess credit for training:
 
 ```python
-def step(step: Step) -> float:
+def reward(step: Step) -> float:
     """One point for the guess that solves the word, minus a little for an invalid one."""
     if step.error:
         return -0.1
@@ -241,8 +241,8 @@ def step(step: Step) -> float:
     return 1.0 if solved else 0.0
 ```
 
-Its rewards go to the Trial's reward ledger, `rewards.jsonl`. They never change the
-score, and the AI never sees them.
+Its rewards go to the Trial's reward ledger, `rewards.jsonl`. They don't change the
+score, since `check` decides it, and the AI never sees them.
 
 ### Two Agents
 
@@ -277,7 +277,7 @@ That is everything. Time to play.
 
 Start with the `word-list` Agent. It needs no account or key, so it is the quickest
 way to check the project is wired correctly. Validate the Benchmark, which also checks
-every Task, Rewarder, and Environment it uses, then run it:
+every Task, Verifier, and Environment it uses, then run it:
 
 ```bash
 plural benchmark validate wordle
@@ -384,7 +384,7 @@ Trial trl_3aba06619e94795c19a42df5 (local) succeeded
   Score:          1.0
   Artifacts:      /path/to/wordle/.plural/jobs/job_68c5dde6a6c6f1aa9303254f/trials/trl_3aba06619e94795c19a42df5/executions/0/artifacts
   Logs:           /path/to/wordle/.plural/jobs/job_68c5dde6a6c6f1aa9303254f/trials/trl_3aba06619e94795c19a42df5/executions/0/logs
-  Rewarder solved: succeeded score=1.0
+  Verifier solved: succeeded score=1.0
     - solved in 4
 ```
 
@@ -407,7 +407,7 @@ The `Artifacts` directory holds the full record of the game:
   recorded it. A model run writes `trajectory.json` instead: the model's chat
   messages, turn by turn.
 - `atif-trajectory.json`: the same turns in ATIF, with each call's tokens and cost.
-- `apps.json`: the game's State at the start and the end, which is what the Rewarder
+- `apps.json`: the game's State at the start and the end, which is what the Verifier
   read.
 - `state.json`: the final State on its own: the secret and the guess history.
 - `observation.json`: the last thing the AI saw.
@@ -436,13 +436,14 @@ plural run --benchmark wordlebench --agent tracker
 A few more directions:
 
 - **Judge how the Agent played, not only whether it won,** with an
-  [AgentRewarder](../project/rewarders.md#agentrewarder) or a
-  [HumanRewarder](../project/rewarders.md#humanrewarder).
-- **Shape the per-guess credit for training.** The `solved` Rewarder's `step` check
+  [AgentVerifier](../project/verifiers.md#agentverifier) or a
+  [HumanVerifier](../project/verifiers.md#humanverifier).
+- **Shape the per-guess credit for training.** The `solved` Verifier's `reward` function
   gives 1 point for the guess that solves the word. Credit green letters too, or add a
-  second Rewarder with its own `step`; see
-  [Reward each step](../project/rewarders.md#reward-each-step). Rewards are recorded
-  in `rewards.jsonl` and never contribute to the score.
+  second Verifier with its own `reward`; see
+  [Reward each step](../project/verifiers.md#reward-each-step). Rewards are recorded
+  in `rewards.jsonl`. To score by them instead, see
+  [Make the reward the score](../project/verifiers.md#make-the-reward-the-score).
 - **Connect a real system next to the game,** such as an MCP server; see
   [Connect an MCP server](../guides/connect-mcp-server.md).
 
@@ -461,7 +462,7 @@ plural run --benchmark wordle --agent luna --hosted --follow
 
 `project init --push` registers the project, named `wordle` in `project.yaml`, with a
 new private hosted project and selects it as your scope. If `wordle` already exists in
-the account, add `--connect` to use it. `--with-deps` also pushes the Tasks, Rewarder,
+the account, add `--connect` to use it. `--with-deps` also pushes the Tasks, Verifier,
 and Environment the Benchmark uses. `--hosted` runs the pushed revisions, first pushing
 any input the hosted project does not hold yet, and `--follow` streams progress until
 the Job finishes.

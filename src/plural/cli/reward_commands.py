@@ -1,4 +1,4 @@
-"""``plural rewards``: label stored Trials with hindsight rewarders and export training data.
+"""``plural rewards``: label stored Trials with hindsight verifiers and export training data.
 
 Rewards live in each Trial's ``rewards.jsonl`` ledger, beside the trajectory.
 ``apply`` appends to it without rerunning anything; ``export`` joins it with
@@ -31,14 +31,14 @@ from plural.rewards import (
     LEDGER_FILE,
     RewardRecord,
     append_ledger,
-    load_rewarder,
+    load_verifier,
     read_ledger,
     training_export,
     trial_from_artifacts,
 )
 
 rewards_app = typer.Typer(
-    help="Label stored Trials with hindsight rewarders and export training data.",
+    help="Label stored Trials with hindsight verifiers and export training data.",
     no_args_is_help=True,
 )
 
@@ -115,14 +115,14 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 @rewards_app.command("apply")
 @handled
 def rewards_apply(
-    rewarder: str = typer.Argument(help="The hindsight rewarder, as path.py:name."),
+    verifier: str = typer.Argument(help="The hindsight verifier, as path.py:name."),
     trial: list[str] = typer.Option([], "--trial", help="A local Trial id. Repeatable."),
     job: str | None = typer.Option(None, "--job", help="Every Trial of this local Job."),
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Run a hindsight rewarder on stored Trials and append its rewards to their ledgers."""
+    """Run a hindsight verifier on stored Trials and append its rewards to their ledgers."""
     space = workspace()
-    function = load_rewarder(rewarder, space.project.root)
+    function = load_verifier(verifier, space.project.root)
     applied: list[dict[str, Any]] = []
     for trial_dir in _trial_dirs(space, trial, job):
         artifacts = _latest_artifacts(trial_dir)
@@ -133,7 +133,7 @@ def rewards_apply(
         applied.append({"trial_id": trial_dir.name, "records": len(records), "new_records": added})
     hosted, problem = _publish(space, _trial_dirs(space, trial, job))
     payload = {
-        "rewarder": function.name,
+        "verifier": function.name,
         "version": function.version,
         "trials": applied,
         "hosted_records": hosted,
@@ -172,13 +172,13 @@ def rewards_show(
             version = f"@{item.version}" if item.version else ""
             typer.echo(
                 f"{item.target.kind:<5} {item.target.event_id:<6} {item.value:+.3f}  "
-                f"{item.source}:{item.rewarder}{version}"
+                f"{item.source}:{item.verifier}{version}"
             )
 
     emit(payload, as_json=as_json, text=text)
 
 
-def _rewarder_choice(values: list[str]) -> dict[str, str | None] | None:
+def _verifier_choice(values: list[str]) -> dict[str, str | None] | None:
     if not values:
         return None
     chosen: dict[str, str | None] = {}
@@ -193,8 +193,8 @@ def _rewarder_choice(values: list[str]) -> dict[str, str | None] | None:
 def rewards_export(
     trial: list[str] = typer.Option([], "--trial", help="A local Trial id. Repeatable."),
     job: str | None = typer.Option(None, "--job", help="Every Trial of this local Job."),
-    rewarder: list[str] = typer.Option(
-        [], "--rewarder", help="Use only this rewarder, as name or name@version. Repeatable."
+    verifier: list[str] = typer.Option(
+        [], "--verifier", help="Use only this verifier, as name or name@version. Repeatable."
     ),
     aggregate: str = typer.Option("sum", help="Combine rewards on one target: sum, mean, last."),
     include_off_recording: bool = typer.Option(
@@ -214,7 +214,7 @@ def rewards_export(
             _read_jsonl(artifacts / "episode.jsonl"),
             ledger,
             tito=_read_jsonl(artifacts / "tito.jsonl"),
-            rewarders=_rewarder_choice(rewarder),
+            verifiers=_verifier_choice(verifier),
             aggregate=aggregate,  # type: ignore[arg-type]
             include_off_recording=include_off_recording,
         )

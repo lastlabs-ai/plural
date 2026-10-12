@@ -4,7 +4,7 @@ title: UI Task
 version: 0.1.1
 instructions: instruction.md
 environment: wordle
-rewarders:
+verifiers:
 - solved
 info:
   authors: []

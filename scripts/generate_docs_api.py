@@ -22,7 +22,7 @@ TARGETS = [
     "plural.JobStore",
     "plural.Environment",
     "plural.action",
-    "plural.DeterministicRewarder",
+    "plural.DeterministicVerifier",
     "plural.Step",
     "plural.environments.types",
     "plural.Harness",

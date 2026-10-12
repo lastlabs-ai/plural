@@ -70,24 +70,24 @@ FILES = {
         Tickets arrive in a queue and the Agent resolves each one.
     """,
     "environments/queue/resources/policy.md": "Refund orders marked refundable.\n",
-    "rewarders/resolved/rewarder.yaml": """
+    "verifiers/resolved/verifier.yaml": """
         name: resolved
         version: 0.1.0
         kind: deterministic
-        final: reward.py:final
-        step: reward.py:step
+        check: verify.py:check
+        reward: verify.py:reward
     """,
-    "rewarders/resolved/reward.py": """
-        from plural import Episode, RewarderOutput, Step
+    "verifiers/resolved/verify.py": """
+        from plural import Episode, VerifierOutput, Step
 
 
-        def final(episode: Episode) -> RewarderOutput:
+        def check(episode: Episode) -> VerifierOutput:
             expected = "refunded" if episode.state.get("refundable") else "denied"
             correct = episode.state.get("answer") == expected
-            return RewarderOutput(score=float(correct), evidence=[f"expected={expected}"])
+            return VerifierOutput(score=float(correct), evidence=[f"expected={expected}"])
 
 
-        def step(step: Step) -> float:
+        def reward(step: Step) -> float:
             return 1.0 if step.current_state["done"] else 0.0
     """,
     "tasks/refund/task.yaml": """
@@ -95,7 +95,7 @@ FILES = {
         version: 0.1.0
         instructions: instruction.md
         environment: queue
-        rewarders:
+        verifiers:
           - resolved
         initial_state:
           order: A-1
@@ -107,7 +107,7 @@ FILES = {
         version: 0.1.0
         instructions: instruction.md
         environment: queue
-        rewarders:
+        verifiers:
           - resolved
         initial_state:
           order: B-2
@@ -185,7 +185,7 @@ def hasher_for(root: Path):  # noqa: ANN201
     """Content hashes as the real server computes them: from the resource itself."""
     kinds = {
         "environments": "environment",
-        "rewarders": "rewarder",
+        "verifiers": "verifier",
         "harnesses": "harness",
         "tasks": "task",
         "agents": "agent",

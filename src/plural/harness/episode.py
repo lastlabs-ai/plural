@@ -132,7 +132,7 @@ class EpisodeRecorder:
         view: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> None:
-        """Record one Environment step, with each rewarder's signal in ``rewards``."""
+        """Record one Environment step, with each verifier's signal in ``rewards``."""
         if not self._model_turn_open:
             self._turn += 1
         self._record(

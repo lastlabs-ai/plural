@@ -5,7 +5,7 @@ The engine writes each execution to the local store as ``receipt.json``,
 Harness ran through ``HarnessEnvironment``). ``publish_execution`` replays that
 record through the hosted worker contracts: it opens a hosted execution,
 streams episode and log events, uploads artifacts, and reports the terminal
-transition with usage, phase timings, and Rewarder results.
+transition with usage, phase timings, and Verifier results.
 
 Every write is idempotent. A hosted execution is keyed by the local Job,
 Trial, and execution number, event keys are ``{hosted execution id}:{n}``, and
@@ -35,7 +35,7 @@ from urllib.parse import quote
 from plural import __version__
 from plural.execution.store import JobStore
 from plural.harness.episode import EPISODE_FILE, EPISODE_SCHEMA
-from plural.jobs import JobPlan, JobSpec, ProgressEvent, RewarderResult, TrialResult
+from plural.jobs import JobPlan, JobSpec, ProgressEvent, TrialResult, VerifierResult
 from plural.rewards import LEDGER_FILE, read_ledger
 from plural.studio import Studio
 from plural.usage import TokenUsage, UsageTotals
@@ -50,7 +50,7 @@ _EPISODE_KINDS = {
 _ROLES = {
     "rendering": "rendering",
     "trajectory": "trajectory",
-    "rewarder_evidence": "rewarder",
+    "verifier_evidence": "verifier",
     "state": "log",
     "observation": "log",
     "result": "log",
@@ -61,8 +61,8 @@ Harness returned is the Agent's ``output``."""
 _LOGS = (
     ("stdout.log", "stdout", "harness"),
     ("stderr.log", "stderr", "harness"),
-    ("rewarder.stdout.log", "stdout", "rewarder"),
-    ("rewarder.stderr.log", "stderr", "rewarder"),
+    ("verifier.stdout.log", "stdout", "verifier"),
+    ("verifier.stderr.log", "stderr", "verifier"),
 )
 
 
@@ -171,7 +171,7 @@ def log_events(
                     "ingest_key": f"{execution_id}:log:{name}:{start}",
                     "timestamp": timestamp,
                     "kind": "log",
-                    "phase": "scoring" if component == "rewarder" else "agent_execution",
+                    "phase": "verification" if component == "verifier" else "agent_execution",
                     "message": "",
                     "payload": {"stream": stream, "chunk": chunk},
                     "execution_id": execution_id,
@@ -226,24 +226,24 @@ def agent_usage(records: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 
 def _hosted_results(
-    results: tuple[RewarderResult, ...], pins: list[Mapping[str, Any]]
+    results: tuple[VerifierResult, ...], pins: list[Mapping[str, Any]]
 ) -> list[dict[str, Any]]:
     by_digest = {str(pin.get("content_hash")): pin for pin in pins}
     out = []
     for result in results:
-        pin = by_digest.get(result.rewarder_digest)
+        pin = by_digest.get(result.verifier_digest)
         if pin is None:
             raise PublishError(
-                f"Rewarder {result.rewarder_name} ran at {result.rewarder_digest}, which "
-                "the hosted Trial does not pin. Push the same Rewarder revision first."
+                f"Verifier {result.verifier_name} ran at {result.verifier_digest}, which "
+                "the hosted Trial does not pin. Push the same Verifier revision first."
             )
         if result.status == "awaiting_review":
             continue
         out.append(
             {
-                "rewarder_revision_id": pin["revision_id"],
-                "rewarder_name": result.rewarder_name,
-                "rewarder_digest": result.rewarder_digest,
+                "verifier_revision_id": pin["revision_id"],
+                "verifier_name": result.verifier_name,
+                "verifier_digest": result.verifier_digest,
                 "kind": result.kind,
                 "status": result.status,
                 "score": result.score,
@@ -340,7 +340,7 @@ def publish_execution(
     ):
         if hosted and local != hosted:
             raise PublishError(f"{label} {local} does not match the hosted pin {hosted}")
-    rewarder_results = _hosted_results(result.rewarder_results, list(pins.get("rewarders") or []))
+    verifier_results = _hosted_results(result.verifier_results, list(pins.get("verifiers") or []))
 
     execution = studio.trials.create_execution(
         trial_id,
@@ -411,11 +411,11 @@ def publish_execution(
     }
     final = result.status
     if final in {"succeeded", "awaiting_review"}:
-        studio.request("POST", f"{path}/transition", json={"status": "scoring"})
+        studio.request("POST", f"{path}/transition", json={"status": "verifying"})
         body: dict[str, Any] = {
             "status": "succeeded",
             "result": report,
-            "rewarder_results": rewarder_results,
+            "verifier_results": verifier_results,
         }
     else:
         body = {
@@ -497,7 +497,7 @@ def publish_rewards(
 ) -> int:
     """Add each execution's reward ledger to its hosted Trial's ledger.
 
-    Use this after a hindsight rewarder appends to a pushed Job's ledgers.
+    Use this after a hindsight verifier appends to a pushed Job's ledgers.
     The hosted ledger keeps each record once, so publishing again adds only
     new records. Executions not yet published are skipped; ``publish_job``
     sends their whole ledger with them.

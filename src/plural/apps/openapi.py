@@ -3,7 +3,7 @@
 Each operation becomes an action named by its ``operationId``. Its path,
 query, and header parameters and its JSON body's fields become the action's
 arguments. ``GET``, ``HEAD``, and ``OPTIONS`` operations are read-only, so
-Rewarders may query them; every other method changes state.
+Verifiers may query them; every other method changes state.
 
 An error response (status 400 or above) is feedback: the Agent sees the
 status and body, and the episode continues.
@@ -180,11 +180,11 @@ class OpenAPIApp(App[State]):
         exclude: Never offer these operationIds.
         reset: Command run at the start of each episode, from the workspace,
             with the App's initial state as JSON on stdin.
-        snapshot: Command that prints the App's state as JSON, for Rewarders.
+        snapshot: Command that prints the App's state as JSON, for Verifiers.
         local: Set when the API runs inside the Runtime, so a fresh Runtime is
             a fresh API.
         actions: Operation declarations to use instead of reading ``spec``.
-        secrets: Setup secrets the project supplies, for hooks and Rewarders.
+        secrets: Setup secrets the project supplies, for hooks and Verifiers.
         credentials: Names the running Agent supplies, such as its own API token.
         timeout_seconds: How long one request may take.
     """

@@ -273,7 +273,7 @@ class Client:
         self.studio = Studio.for_client(self)
         self.environments = self.studio.environments
         self.tasks = self.studio.tasks
-        self.rewarders = self.studio.rewarders
+        self.verifiers = self.studio.verifiers
         self.harnesses = self.studio.harnesses
         self.agents = self.studio.agents
         self.benchmarks = self.studio.benchmarks
@@ -320,9 +320,9 @@ class Client:
         ``plural <kind> push`` or :func:`plural.project.sync.push`.
 
         Args:
-            obj: Environment, Task, Rewarder, Agent, Harness, Benchmark, or Trace.
+            obj: Environment, Task, Verifier, Agent, Harness, Benchmark, or Trace.
             **kwargs: Hosted revision ids for graph edges, such as a Task's
-                ``environment_revision_id`` and ``rewarder_revision_ids``.
+                ``environment_revision_id`` and ``verifier_revision_ids``.
 
         Returns:
             The hosted revision record.

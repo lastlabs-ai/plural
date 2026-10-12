@@ -86,9 +86,73 @@
       "title": "ResourceRequirements",
       "type": "object"
     },
-    "RewarderRuntime": {
+    "RubricCriterion": {
       "additionalProperties": false,
-      "description": "Machine for a rewarder that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
+      "description": "One Agent or Human rubric criterion.",
+      "properties": {
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "max_score": {
+          "default": 1,
+          "title": "Max Score",
+          "type": "number"
+        },
+        "min_score": {
+          "default": 0,
+          "title": "Min Score",
+          "type": "number"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "weight": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Weight",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "RubricCriterion",
+      "type": "object"
+    },
+    "SecretReference": {
+      "additionalProperties": false,
+      "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Z_][A-Z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SecretReference",
+      "type": "object"
+    },
+    "VerifierRuntime": {
+      "additionalProperties": false,
+      "description": "Machine for a verifier that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
       "properties": {
         "image": {
           "anyOf": [
@@ -130,105 +194,37 @@
           "type": "number"
         }
       },
-      "title": "RewarderRuntime",
-      "type": "object"
-    },
-    "RubricCriterion": {
-      "additionalProperties": false,
-      "description": "One Agent or Human rubric criterion.",
-      "properties": {
-        "description": {
-          "minLength": 1,
-          "title": "Description",
-          "type": "string"
-        },
-        "max_score": {
-          "default": 1,
-          "title": "Max Score",
-          "type": "number"
-        },
-        "min_score": {
-          "default": 0,
-          "title": "Min Score",
-          "type": "number"
-        },
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "weight": {
-          "default": 1,
-          "exclusiveMinimum": 0,
-          "title": "Weight",
-          "type": "number"
-        }
-      },
-      "required": [
-        "name",
-        "description"
-      ],
-      "title": "RubricCriterion",
-      "type": "object"
-    },
-    "SecretReference": {
-      "additionalProperties": false,
-      "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Rewarders.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
-      "properties": {
-        "description": {
-          "default": "",
-          "title": "Description",
-          "type": "string"
-        },
-        "name": {
-          "pattern": "^[A-Z_][A-Z0-9_]*$",
-          "title": "Name",
-          "type": "string"
-        },
-        "required": {
-          "default": true,
-          "title": "Required",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "title": "SecretReference",
+      "title": "VerifierRuntime",
       "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "Model-judge rewarder with its own runtime and connectivity policy.",
+  "description": "Code that verifies an episode: it scores the end, rewards each step, or both.\n\n``check`` scores the finished episode; that score is what Tasks and\nBenchmarks rank on. It is a function of the :class:`Episode`, a\n``{\"python\": \"verify.py:check\"}`` reference, or a command argv.\n\n``reward`` rewards each action while the episode runs. It is a function of\none :class:`Step`, or a ``{\"python\": \"verify.py:reward\"}`` reference, and\nruns in the Runtime beside the Apps, so it can read every App. What it\nreturns goes to the Trial's reward ledger. Rewards reach the score only\nwhen ``check`` is :func:`total_reward`.",
   "properties": {
+    "check": {
+      "default": null,
+      "title": "Check"
+    },
     "criteria": {
+      "default": [],
       "items": {
         "$ref": "#/$defs/RubricCriterion"
       },
-      "minItems": 1,
       "title": "Criteria",
       "type": "array"
     },
-    "fallback_models": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "title": "Fallback Models",
-      "type": "array"
+    "evidence_required": {
+      "default": true,
+      "title": "Evidence Required",
+      "type": "boolean"
     },
     "info": {
       "default": null,
       "title": "Info"
     },
-    "instructions": {
-      "minLength": 1,
-      "title": "Instructions",
-      "type": "string"
-    },
     "kind": {
-      "const": "agent",
-      "default": "agent",
+      "const": "deterministic",
+      "default": "deterministic",
       "title": "Kind",
       "type": "string"
     },
@@ -237,30 +233,22 @@
       "title": "Metadata",
       "type": "object"
     },
-    "model": {
-      "minLength": 1,
-      "title": "Model",
-      "type": "string"
-    },
     "name": {
       "minLength": 1,
       "title": "Name",
       "type": "string"
     },
-    "provider": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
+    "result_path": {
+      "default": "verifier-result.json",
+      "title": "Result Path",
+      "type": "string"
+    },
+    "reward": {
       "default": null,
-      "title": "Provider"
+      "title": "Reward"
     },
     "runtime": {
-      "$ref": "#/$defs/RewarderRuntime"
+      "$ref": "#/$defs/VerifierRuntime"
     },
     "secrets": {
       "default": [],
@@ -283,11 +271,8 @@
     }
   },
   "required": [
-    "name",
-    "criteria",
-    "model",
-    "instructions"
+    "name"
   ],
-  "title": "AgentRewarder",
+  "title": "DeterministicVerifier",
   "type": "object"
 }

@@ -240,7 +240,7 @@ def test_add_traces_drafts_replay_apps_tasks_and_a_benchmark_the_traces_score_on
     )
     space = Workspace(project)
     assert len(space.load(ResourceRef("benchmark", "support")).value.tasks) == 2
-    assert space.load(ResourceRef("rewarder", "support-judge")).value.kind == "agent"
+    assert space.load(ResourceRef("verifier", "support-judge")).value.kind == "agent"
 
 
 def _call(call_id: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:

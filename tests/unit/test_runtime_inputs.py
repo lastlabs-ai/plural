@@ -157,7 +157,7 @@ def gentle(step):
 
 
 def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
-    from plural import DeterministicRewarder
+    from plural import DeterministicVerifier
 
     staged = {}
 
@@ -179,7 +179,7 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
         task_id="case",
         info={"hint": "visible"},
         metadata={"tier": "gold"},
-        rewarders=(SimpleNamespace(rewarder=DeterministicRewarder(name="gentle", step=gentle)),),
+        verifiers=(SimpleNamespace(verifier=DeterministicVerifier(name="gentle", reward=gentle)),),
     )
     asyncio.run(
         Trial._stage_environment(
@@ -194,16 +194,16 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
         "info": {"hint": "visible"},
         "seed": None,
         "task": {"name": "case", "metadata": {"tier": "gold"}},
-        "rewarders": [
+        "verifiers": [
             {
                 "name": "gentle",
                 "version": "0.1.0",
-                "dir": ".plural/rewarders/gentle",
+                "dir": ".plural/verifiers/gentle",
                 "python": "test_runtime_inputs.py:gentle",
             }
         ],
     }
-    assert b"def gentle(step)" in files[".plural/rewarders/gentle/test_runtime_inputs.py"]
+    assert b"def gentle(step)" in files[".plural/verifiers/gentle/test_runtime_inputs.py"]
     assert (
         EnvironmentDefinition.model_validate_json(files[".plural/apps/environment.json"]).identity
         == task.environment.identity

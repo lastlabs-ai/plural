@@ -15,7 +15,7 @@ Tools:
 
 ``plural.mcp.files:writable`` also offers ``write_file(path, content)`` into a
 third folder, ``scratch/``, which belongs to the Trial and is deleted when it
-ends; its snapshot is every file written there, for Rewarders. The resource
+ends; its snapshot is every file written there, for Verifiers. The resource
 folders are never changed.
 
 To change what it offers, copy it into your Environment with

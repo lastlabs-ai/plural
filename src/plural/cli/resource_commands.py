@@ -1,7 +1,7 @@
 """Resource commands: the same verbs for every kind of project resource.
 
 ``plural <kind> init|validate|push|release|pull|show|list`` for ``env``,
-``task``, ``rewarder``, ``harness``, ``agent``, and ``benchmark``. Resources
+``task``, ``verifier``, ``harness``, ``agent``, and ``benchmark``. Resources
 are named by their directory; revisions by number, release version, or hash.
 """
 
@@ -589,12 +589,12 @@ def _init_command(app: typer.Typer, kind: ResourceKind) -> None:
             environment: str | None = typer.Option(
                 None, "--environment", "-e", help="Environment the Task runs in."
             ),
-            rewarder: list[str] = typer.Option(
-                [], "--rewarder", "-v", help="Rewarder that scores it. Repeat for more."
+            verifier: list[str] = typer.Option(
+                [], "--verifier", "-v", help="Verifier that scores it. Repeat for more."
             ),
         ) -> None:
-            """Create a Task with instructions, one Environment, and its Rewarders."""
-            create(name, environment=environment, rewarders=tuple(rewarder))
+            """Create a Task with instructions, one Environment, and its Verifiers."""
+            create(name, environment=environment, verifiers=tuple(verifier))
 
     elif kind is AGENT:
 

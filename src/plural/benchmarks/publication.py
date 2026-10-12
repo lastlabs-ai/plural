@@ -6,7 +6,7 @@ provenance. It is immutable once published and addressed by its digest, so a
 consumer can name exactly which evidence it used.
 
 The manifest is public routing metadata. It never carries private evaluation
-material: a Task's initial State and reset options, Rewarder definitions and
+material: a Task's initial State and reset options, Verifier definitions and
 expected answers, resource contents, secrets, or trace contents unless the
 publisher disclosed them. It is never placed in an evaluated Agent's context.
 """
@@ -26,7 +26,7 @@ MANIFEST_SCHEMA: Literal["plural.benchmark-publication/1"] = "plural.benchmark-p
 PUBLIC_ROUTING_FIELDS: tuple[str, ...] = (
     "publication, publisher, release, track, configuration, and result identifiers",
     "Task names, descriptions, categories, applicability, and requirements",
-    "score semantics: range, success threshold, weights, and Rewarder names and kinds",
+    "score semantics: range, success threshold, weights, and Verifier names and kinds",
     "per-Task and per-category scores, coverage, sample counts, and uncertainty",
     "measured cost and latency with their units and denominators",
     "provenance, evaluation dates, lineage, license, and correction status",
@@ -34,8 +34,8 @@ PUBLIC_ROUTING_FIELDS: tuple[str, ...] = (
 
 PRIVATE_EVALUATION_MATERIAL: tuple[str, ...] = (
     "Task initial State and reset options, which can hold the answer",
-    "Rewarder definitions, rubrics, and expected outputs",
-    "Rewarder findings, unless the publisher disclosed them",
+    "Verifier definitions, rubrics, and expected outputs",
+    "Verifier findings, unless the publisher disclosed them",
     "Task instructions, unless the publisher disclosed them",
     "trace contents, unless the publisher disclosed them",
     "resource contents, secrets, and API keys",
@@ -59,12 +59,12 @@ class Disclosure(FrozenModel):
 
     Attributes:
         task_instructions: Publish each Task's instructions.
-        rewarder_findings: Publish Rewarder evidence on representative attempts.
+        verifier_findings: Publish Verifier evidence on representative attempts.
         traces: Publish trace links for representative attempts.
     """
 
     task_instructions: bool = False
-    rewarder_findings: bool = False
+    verifier_findings: bool = False
     traces: bool = False
 
 
@@ -151,8 +151,8 @@ class ManifestRequirements(FrozenModel):
     max_cost_usd: float | None = None
 
 
-class ManifestRewarder(FrozenModel):
-    """A Rewarder's public identity, never its definition."""
+class ManifestVerifier(FrozenModel):
+    """A Verifier's public identity, never its definition."""
 
     name: str
     kind: str
@@ -172,7 +172,7 @@ class ManifestTask(FrozenModel):
         applicability: Author-declared conditions under which results apply,
             such as ``{"language": "en"}``.
         requirements: What running it needs.
-        rewarders: Which Rewarders score it.
+        verifiers: Which Verifiers score it.
         instructions: The Task instructions, only when disclosed.
     """
 
@@ -184,7 +184,7 @@ class ManifestTask(FrozenModel):
     weight: float = 1.0
     applicability: dict[str, Any] = Field(default_factory=dict)
     requirements: ManifestRequirements
-    rewarders: tuple[ManifestRewarder, ...] = ()
+    verifiers: tuple[ManifestVerifier, ...] = ()
     instructions: str | None = None
 
 
@@ -257,9 +257,9 @@ class ManifestExample(FrozenModel):
         task_id: Task id.
         attempt: Attempt index.
         outcome: How the attempt ended.
-        score: Rewarder-derived score, when one was produced.
+        score: Verifier-derived score, when one was produced.
         stop_reason: How the episode ended.
-        findings: Rewarder evidence, only when the publisher disclosed it.
+        findings: Verifier evidence, only when the publisher disclosed it.
     """
 
     task_id: str
@@ -390,11 +390,11 @@ class PublicationManifest(FrozenModel):
                 raise ValueError(f"Result {result.id!r} reports an unknown category.")
             if {item.task_id for item in result.examples} - task_ids:
                 raise ValueError(f"Result {result.id!r} shows an example of an unknown Task.")
-            if not self.disclosure.rewarder_findings and any(
+            if not self.disclosure.verifier_findings and any(
                 item.findings for item in result.examples
             ):
                 raise ValueError(
-                    f"Result {result.id!r} includes Rewarder findings the publisher "
+                    f"Result {result.id!r} includes Verifier findings the publisher "
                     "did not disclose."
                 )
             if result.reproducibility.release_content_hash != self.release.content_hash:
@@ -431,7 +431,7 @@ __all__ = [
     "ManifestResult",
     "ManifestTask",
     "ManifestTaskResult",
-    "ManifestRewarder",
+    "ManifestVerifier",
     "PublicationManifest",
     "Provenance",
     "release_reference",

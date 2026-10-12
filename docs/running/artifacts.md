@@ -22,7 +22,7 @@ When you want to understand one attempt, read these in order:
 
 1. **The trajectory**, for the sequence of actions the Agent took.
 2. **The final State**, for what actually changed in the world.
-3. **The Rewarder results**, for the score and the grader's feedback.
+3. **The Verifier results**, for the score and the grader's feedback.
 
 Two more files back those up. The **receipt** identifies the exact versions that
 were used. The **manifest** lists every captured file and its fingerprint (hash),
@@ -79,14 +79,14 @@ hold:
 - `result.json` in `artifacts/` is the Harness's final response.
 - `state.json` is the final State: one App's, or a mapping from App name to State.
 - `apps.json` has each App's State at the start and the end, with its control level.
-  It is what a Rewarder reads as `episode.apps`.
+  It is what a Verifier reads as `episode.apps`.
 - `observation.json` is the last thing an action returned, and `view.json` is the
   final display view.
 - `rewards.jsonl` is the reward ledger: one line per reward, each tied to the step,
   turn, or span it credits. See [Training and RL](training.md).
 
 A Harness that returns its own trajectory events also gets `trajectory.jsonl`, and
-anything else the Agent writes is captured beside them. Rewarder scores and
+anything else the Agent writes is captured beside them. Verifier scores and
 evidence are in the Trial's `result.json`, not in an artifact.
 
 ## Evidence never changes
@@ -98,20 +98,20 @@ summaries, and leaves the captured evidence unchanged.
 
 The manifest records each artifact's path, SHA-256, media type, byte size, and
 optional role. Receipts bind those hashes to the exact Task, Benchmark, model
-endpoint, Environment, Rewarders, Agent, Harness, mode, Runtime, timing, and cost.
+endpoint, Environment, Verifiers, Agent, Harness, mode, Runtime, timing, and cost.
 
 ## Episode scoring
 
-The grader sees more than the Agent does. A Rewarder function receives the
+The grader sees more than the Agent does. A Verifier function receives the
 completed Episode: each App's State, the last observation, the trajectory,
-artifacts, and usage. None of this reaches the Agent. A Rewarder that runs a command receives
+artifacts, and usage. None of this reaches the Agent. A Verifier that runs a command receives
 every captured artifact in its scoring workspace. Isolate untrusted scoring code
-with its own `RewarderRuntime`.
+with its own `VerifierRuntime`.
 
 ## Logs, secrets, and trust
 
 Plural replaces the exact values of the credentials it injects, such as the
-secrets an Agent grants its Harness and the model API key a Rewarder uses, in
+secrets an Agent grants its Harness and the model API key a Verifier uses, in
 the stdout and stderr logs it captures. It matches exact values only, so it
 cannot catch a secret that code has encoded or transformed, and it does not
 redact custom artifacts, external systems, or anything else your code writes.

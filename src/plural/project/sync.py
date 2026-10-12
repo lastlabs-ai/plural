@@ -57,8 +57,8 @@ from plural.project.layout import (
     ENVIRONMENT,
     HARNESS,
     KINDS,
-    REWARDER,
     TASK,
+    VERIFIER,
     Project,
     ProjectError,
     ResourceKind,
@@ -1008,7 +1008,7 @@ def _push_one(
             value._package(), source=f"{PLURAL_PACKAGE_PREFIX}{digest}"
         )
     elif resource.ref.kind == TASK.name:
-        references = {"environment_revision_id": ids[0], "rewarder_revision_ids": ids[1:]}
+        references = {"environment_revision_id": ids[0], "verifier_revision_ids": ids[1:]}
     elif resource.ref.kind == AGENT.name:
         references = {"harness_revision_id": ids[0] if ids else None}
     elif resource.ref.kind == BENCHMARK.name:
@@ -1211,16 +1211,16 @@ def _files_from_definition(
                 f"{ref} {revision.label} lists resource files, and their contents were "
                 "never uploaded. Recreate the Task locally and push it."
             )
-        environments, rewarders = named(ENVIRONMENT.name), named(REWARDER.name)
-        if not environments or not rewarders:
+        environments, verifiers = named(ENVIRONMENT.name), named(VERIFIER.name)
+        if not environments or not verifiers:
             raise ProjectError(
-                f"{ref} {revision.label} does not name a hosted Environment and Rewarder, "
+                f"{ref} {revision.label} does not name a hosted Environment and Verifier, "
                 "so it cannot be written as a task.yaml."
             )
         manifest |= {
             "instructions": "instruction.md",
             "environment": environments[0],
-            "rewarders": rewarders,
+            "verifiers": verifiers,
         }
         for key in ("goals", "info", "metadata", "initial_state", "reset_options"):
             if key in definition and not _is_default(TaskManifest, key, definition[key]):

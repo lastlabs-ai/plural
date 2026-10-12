@@ -25,7 +25,7 @@ from plural.common import (
     stable_id,
 )
 
-# Authoring: worlds (Environment owns Runtime, Resources, Rewarders).
+# Authoring: worlds (Environment owns Runtime, Resources, Verifiers).
 from plural.environments import (  # noqa: I001 - Environments load before Apps
     ActionCall,
     Environment,
@@ -83,35 +83,21 @@ from plural.jobs import (
     JobResult,
     ProgressEvent,
     RetryPolicy,
-    RewarderResult,
     TITORecord,
     TrialExecution,
     TrialReceipt,
     TrialResult,
     TrialSpec,
     TrialStatus,
+    VerifierResult,
 )
 from plural.project import Project, ProjectError, ResourceRef, Workspace
-from plural.rewarders import (
-    STOP_REASONS,
-    AgentRewarder,
-    DeterministicRewarder,
-    Episode,
-    EpisodeOutcome,
-    EpisodeUsage,
-    HumanRewarder,
-    Rewarder,
-    RewarderOutput,
-    RewarderRuntime,
-    RubricCriterion,
-    Step,
-)
 from plural.rewards import (
     Credit,
     HindsightTrial,
     RewardRecord,
     RewardTarget,
-    hindsight_rewarder,
+    hindsight_verifier,
 )
 from plural.sandbox import (
     Capability,
@@ -140,6 +126,21 @@ from plural.tracing import (
 )
 from plural.trajectory import Trajectory, TrajectoryEvent, normalize_trajectory
 from plural.types import ChatRequest, ChatResponse, Message, Tool, Usage
+from plural.verifiers import (
+    STOP_REASONS,
+    AgentVerifier,
+    DeterministicVerifier,
+    Episode,
+    EpisodeOutcome,
+    EpisodeUsage,
+    HumanVerifier,
+    RubricCriterion,
+    Step,
+    Verifier,
+    VerifierOutput,
+    VerifierRuntime,
+    total_reward,
+)
 
 try:
     __version__ = version("plural")
@@ -152,19 +153,19 @@ __all__ = [
     "Agent",
     "App",
     "AppDefinition",
-    "AgentRewarder",
+    "AgentVerifier",
     "Benchmark",
     "BenchmarkCategory",
     "BenchmarkScoring",
     "CatalogContext",
-    "DeterministicRewarder",
+    "DeterministicVerifier",
     "Environment",
     "EvaluationTrack",
     "Episode",
     "ExecutionLimits",
     "Harness",
     "HarnessPolicy",
-    "HumanRewarder",
+    "HumanVerifier",
     "Observation",
     "Resource",
     "RubricCriterion",
@@ -175,10 +176,11 @@ __all__ = [
     "Secret",
     "State",
     "Task",
-    "Rewarder",
-    "RewarderOutput",
+    "Verifier",
+    "VerifierOutput",
     "action",
-    "hindsight_rewarder",
+    "hindsight_verifier",
+    "total_reward",
     "initial",
     "Credit",
     "HindsightTrial",
@@ -272,8 +274,8 @@ __all__ = [
     "TrialSpec",
     "TrialStatus",
     "Usage",
-    "RewarderResult",
-    "RewarderRuntime",
+    "VerifierResult",
+    "VerifierRuntime",
     "__version__",
     "content_hash",
     "is_retryable",

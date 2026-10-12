@@ -45,8 +45,8 @@ def test_project_init_creates_the_standard_structure_without_credentials(
     monkeypatch.chdir(root)
     for command in (
         ("env", "init", "queue"),
-        ("rewarder", "init", "resolved"),
-        ("task", "init", "refund", "--environment", "queue", "--rewarder", "resolved"),
+        ("verifier", "init", "resolved"),
+        ("task", "init", "refund", "--environment", "queue", "--verifier", "resolved"),
         ("harness", "init", "loop"),
         ("agent", "init", "careful", "--model", "openai/gpt-5.6-luna"),
         ("benchmark", "init", "basics"),
@@ -59,8 +59,8 @@ def test_project_init_creates_the_standard_structure_without_credentials(
         "environments/queue/README.md",
         "tasks/refund/task.yaml",
         "tasks/refund/instruction.md",
-        "rewarders/resolved/rewarder.yaml",
-        "rewarders/resolved/reward.py",
+        "verifiers/resolved/verifier.yaml",
+        "verifiers/resolved/verify.py",
         "harnesses/loop/harness.yaml",
         "agents/careful/agent.yaml",
         "benchmarks/basics/benchmark.yaml",
@@ -81,7 +81,7 @@ def test_every_scaffold_fails_validation_with_a_useful_message(
     invoke("project", "init", "desk")
     monkeypatch.chdir(tmp_path / "desk")
     invoke("env", "init", "queue")
-    invoke("rewarder", "init", "resolved")
+    invoke("verifier", "init", "resolved")
     invoke("task", "init", "refund")
     invoke("benchmark", "init", "basics")
 
@@ -170,4 +170,4 @@ def test_sdk_and_cli_load_the_same_objects(tmp_path: Path, home: Path) -> None:
     task = workspace.load(ResourceRef("task", "refund"))
     again = Workspace(Project.find(project.root / "tasks")).load(ResourceRef("task", "refund"))
     assert task.content_hash == again.content_hash
-    assert [str(item) for item in task.dependencies] == ["environment/queue", "rewarder/resolved"]
+    assert [str(item) for item in task.dependencies] == ["environment/queue", "verifier/resolved"]

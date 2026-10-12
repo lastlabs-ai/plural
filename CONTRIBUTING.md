@@ -36,7 +36,7 @@ A change that adds a public symbol is incomplete until:
 6. Pydantic manifests and checked-in package schemas regenerated together
 
 Package/execution changes must also document provider enforcement, secret and
-rewarder boundaries, receipt trust, migration impact, and unsupported backend
+verifier boundaries, receipt trust, migration impact, and unsupported backend
 or external-service behavior. Do not describe a placeholder as live.
 
 ## Tests

@@ -7,7 +7,7 @@ results the Agent saw, and that call's tokens and cost. See the
 `ATIF RFC <https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md>`_.
 
 Only what reached the Agent is written as step content. Reward, termination,
-and Rewarder scores are episode bookkeeping and stay in ``episode.jsonl`` and
+and Verifier scores are episode bookkeeping and stay in ``episode.jsonl`` and
 the Trial result, so a trajectory loaded back as context cannot leak them.
 """
 

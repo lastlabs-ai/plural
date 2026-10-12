@@ -98,7 +98,7 @@ class FakeProvider(SandboxProvider):
             version = json.dumps({"version": plural.__version__}).encode()
             return ExecResult(exit_code=0, stdout=version + b"\n", duration_seconds=0.001)
         if request.stdin is None:
-            self.files[handle.sandbox_id]["rewarder-result.json"] = json.dumps(
+            self.files[handle.sandbox_id]["verifier-result.json"] = json.dumps(
                 {
                     "score": 1,
                     "scores": {"correct": 1},

@@ -23,7 +23,7 @@ class SecretReference(FrozenModel):
     """A named value an App needs, which it never stores itself.
 
     In an App's ``secrets`` it is a setup secret, such as a sandbox's admin
-    token, supplied by the project for reset and snapshot hooks and Rewarders.
+    token, supplied by the project for reset and snapshot hooks and Verifiers.
     In its ``credentials`` it is supplied by the Agent that runs, such as the
     Salesforce token of the user that Agent acts as. Either way the value
     reaches only the App host, never the Harness or the model.
@@ -101,7 +101,7 @@ class AppDefinition(FrozenModel):
     config: dict[str, Any] = Field(default_factory=dict)
     actions: tuple[AppAction, ...] = ()
     secrets: tuple[SecretReference, ...] = ()
-    """Setup secrets, from the project: for reset and snapshot hooks and Rewarders."""
+    """Setup secrets, from the project: for reset and snapshot hooks and Verifiers."""
     credentials: tuple[SecretReference, ...] = ()
     """Credentials the running Agent supplies, so its actions run as that Agent."""
     state_schema: dict[str, Any] = Field(default_factory=dict)

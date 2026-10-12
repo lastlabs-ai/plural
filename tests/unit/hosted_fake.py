@@ -24,10 +24,10 @@ import pytest
 from plural.sandbox.catalog import RUNTIME_PROVIDERS, runtime_from_settings, runtime_provider
 
 Hasher = Callable[[str, str, dict[str, Any]], str]
-COLLECTIONS = ("environments", "rewarders", "harnesses", "tasks", "agents", "benchmarks")
+COLLECTIONS = ("environments", "verifiers", "harnesses", "tasks", "agents", "benchmarks")
 KIND = {
     "environments": "environment",
-    "rewarders": "rewarder",
+    "verifiers": "verifier",
     "harnesses": "harness",
     "tasks": "task",
     "agents": "agent",
@@ -422,7 +422,7 @@ class FakeHosted:
         for field_name in ("environment_revision_id", "harness_revision_id"):
             if body.get(field_name):
                 ids.append(body[field_name])
-        for field_name in ("rewarder_revision_ids", "task_revision_ids"):
+        for field_name in ("verifier_revision_ids", "task_revision_ids"):
             ids.extend(body.get(field_name) or [])
         output = []
         for revision_id in ids:

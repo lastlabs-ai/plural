@@ -11,13 +11,13 @@ from pydantic import ValidationError
 
 from plural import (
     Agent,
-    DeterministicRewarder,
+    DeterministicVerifier,
     Environment,
     Episode,
     Job,
-    RewarderOutput,
     Runtime,
     Task,
+    VerifierOutput,
 )
 from plural.common import ErrorCode
 from plural.execution.engine import ExecutionFailure, _harness_environment
@@ -60,8 +60,8 @@ def agent_server() -> Iterator[str]:
         server.shutdown()
 
 
-def answered_paid(episode: Episode) -> RewarderOutput:
-    return RewarderOutput(score=1.0 if "PAID" in json.dumps(episode.trajectory) else 0.0)
+def answered_paid(episode: Episode) -> VerifierOutput:
+    return VerifierOutput(score=1.0 if "PAID" in json.dumps(episode.trajectory) else 0.0)
 
 
 def test_an_endpoint_agent_needs_no_catalog_model() -> None:
@@ -153,7 +153,7 @@ def test_a_job_runs_an_endpoint_agent_without_a_plural_key(
         name="refund-01",
         instructions="Say PAID.",
         environment=Environment(name="support", runtime=Runtime.local()),
-        rewarders=[DeterministicRewarder(name="paid", final=answered_paid)],
+        verifiers=[DeterministicVerifier(name="paid", check=answered_paid)],
     )
     agent = Agent(model="acme/agent", endpoint=agent_server, endpoint_key="ACME_KEY")
 
@@ -174,7 +174,7 @@ def test_a_local_runtime_names_the_packages_it_lacks(
         name="refund-01",
         instructions="Say PAID.",
         environment=Environment(name="support", runtime=runtime),
-        rewarders=[DeterministicRewarder(name="paid", final=answered_paid)],
+        verifiers=[DeterministicVerifier(name="paid", check=answered_paid)],
     )
     agent = Agent(model="acme/agent", endpoint=agent_server, endpoint_key="ACME_KEY")
 

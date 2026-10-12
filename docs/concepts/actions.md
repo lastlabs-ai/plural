@@ -30,7 +30,7 @@ Each time the Agent takes an action:
    shown next.
 3. If the Environment has an `on_step` hook, it runs, and may call other Apps. The
    Agent doesn't see that.
-4. Each of the Task's Rewarders with a `step` check rewards the action. The Agent
+4. Each of the Task's Verifiers with a `reward` function rewards the action. The Agent
    doesn't see that either.
 
 ## In Python
@@ -67,7 +67,7 @@ What an action may return:
 
 `@action` takes two options:
 
-- `read_only=True` says the action never changes state. Rewarders may only `query`
+- `read_only=True` says the action never changes state. Verifiers may only `query`
   read-only actions, and a `live` App with only read-only actions can still be used
   in a Benchmark.
 - `timeout_seconds` limits how long one call may run. The default is 30.

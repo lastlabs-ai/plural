@@ -23,7 +23,7 @@ from plural.harness.vendor_harnesses import (
 )
 from plural.project import Project, ProjectError, ResourceRef, Workspace
 from plural.project.resources import load_harness_directory
-from plural.rewarders import DeterministicRewarder
+from plural.verifiers import DeterministicVerifier
 
 
 def _task() -> Task:
@@ -31,7 +31,7 @@ def _task() -> Task:
         name="case",
         instructions="Finish the case.",
         environment=Environment(name="world", runtime=Runtime.docker()),
-        rewarders=(DeterministicRewarder(name="done", final="python reward.py"),),
+        verifiers=(DeterministicVerifier(name="done", check="python verify.py"),),
     )
 
 

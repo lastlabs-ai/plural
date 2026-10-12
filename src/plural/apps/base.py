@@ -42,7 +42,7 @@ class App(Generic[StateT]):
 
     Subclass ``App`` and mark methods with :func:`~plural.action`. What an
     action returns is what the Agent sees next. Hidden facts belong on
-    ``self.state``, a typed :class:`~plural.State` that Rewarders read and the
+    ``self.state``, a typed :class:`~plural.State` that Verifiers read and the
     Agent never sees::
 
         class Wordle(App[Game]):
@@ -167,7 +167,7 @@ class App(Generic[StateT]):
         return None
 
     def snapshot(self) -> Any:
-        """Return this App's state as JSON for Rewarders and rewarders.
+        """Return this App's state as JSON for Verifiers and verifiers.
 
         Returns:
             The App's state, or ``None`` when it cannot be read.

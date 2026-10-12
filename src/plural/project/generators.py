@@ -110,7 +110,7 @@ def _environment(
     }
     secret_lines = (
         "\n".join(f"- `{item}`" for item in secrets)
-        + "\n\nSetup secrets for reset and snapshot hooks and Rewarders. Export each "
+        + "\n\nSetup secrets for reset and snapshot hooks and Verifiers. Export each "
         "before `plural run`, or set it with `plural secret set NAME`. The values reach "
         "only the App, never the Agent's model or its Harness.\n"
         if secrets
@@ -252,7 +252,7 @@ def mcp_app(
         connection=(
             f"`{app}` is an MCP server reached at {reach}. Each of its tools is an "
             "action. To start every episode from a known state, add a `reset` "
-            "command, and a `snapshot` command so Rewarders can read the result."
+            "command, and a `snapshot` command so Verifiers can read the result."
         ),
         secrets=names,
         credentials=needed,
@@ -400,11 +400,11 @@ _TRACES_BENCHMARK_HEADER = (
 _JUDGE_HEADER = (
     "# Drafted by `plural env add --traces`. A model judges each episode against the\n"
     "# Task's instructions. Sharpen the criteria, or replace it with a deterministic\n"
-    "# Rewarder that checks the Apps' final state.\n"
+    "# Verifier that checks the Apps' final state.\n"
 )
 _TASK_HEADER = (
     "# Drafted from one recorded trace. Check the instructions say what the user\n"
-    "# wanted, and set initial_state if a Rewarder reads the Apps' state.\n"
+    "# wanted, and set initial_state if a Verifier reads the Apps' state.\n"
 )
 
 
@@ -480,10 +480,10 @@ def add_traces(
             ),
         )
     )
-    rewarder = f"{name}-judge"
-    files[f"rewarders/{rewarder}/rewarder.yaml"] = _judge(rewarder, judge_model)
+    verifier = f"{name}-judge"
+    files[f"verifiers/{verifier}/verifier.yaml"] = _judge(verifier, judge_model)
     chosen = _choose(traces, max_tasks, covered=set(), default_app=default_app)
-    tasks = _draft_tasks(files, name, rewarder, chosen, used=set())
+    tasks = _draft_tasks(files, name, verifier, chosen, used=set())
     files[f"benchmarks/{name}/benchmark.yaml"] = _yaml(
         _TRACES_BENCHMARK_HEADER.format(name=name), _traces_benchmark(name, tasks)
     )
@@ -618,10 +618,10 @@ def _add_traces(
         if row.get("trace_id") in set(drafted.values())
     }
     chosen = _choose(fresh, max_tasks, covered=covered, default_app=default_app)
-    rewarder = f"{name}-judge"
-    if chosen and not (root / "rewarders" / rewarder / "rewarder.yaml").exists():
-        files[f"rewarders/{rewarder}/rewarder.yaml"] = _judge(rewarder, judge_model)
-    tasks = _draft_tasks(files, name, rewarder, chosen, used=_task_dirs(root))
+    verifier = f"{name}-judge"
+    if chosen and not (root / "verifiers" / verifier / "verifier.yaml").exists():
+        files[f"verifiers/{verifier}/verifier.yaml"] = _judge(verifier, judge_model)
+    tasks = _draft_tasks(files, name, verifier, chosen, used=_task_dirs(root))
     benchmark_path = root / "benchmarks" / name / "benchmark.yaml"
     if tasks:
         if benchmark_path.is_file():
@@ -662,11 +662,11 @@ def _tools_json(tools: Iterable[Mapping[str, Any]]) -> str:
     return json.dumps(list(tools), indent=2, ensure_ascii=False) + "\n"
 
 
-def _judge(rewarder: str, judge_model: str) -> str:
+def _judge(verifier: str, judge_model: str) -> str:
     return _yaml(
         _JUDGE_HEADER,
         {
-            "name": rewarder,
+            "name": verifier,
             "version": "0.1.0",
             "kind": "agent",
             "model": judge_model,
@@ -742,7 +742,7 @@ def _choose(
 def _draft_tasks(
     files: dict[str, str | bytes],
     name: str,
-    rewarder: str,
+    verifier: str,
     traces: Sequence[RecordedTrace],
     *,
     used: set[str],
@@ -764,7 +764,7 @@ def _draft_tasks(
                 "version": "0.1.0",
                 "instructions": "instruction.md",
                 "environment": name,
-                "rewarders": [rewarder],
+                "verifiers": [verifier],
                 "resources": [],
                 "metadata": {"trace_id": trace.trace_id},
             },

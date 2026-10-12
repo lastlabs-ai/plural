@@ -21,7 +21,7 @@ is a [Trial](trials.md), and a Job is the set of Trials it planned.
 ## Why it matters
 
 A Job is repeatable. Before it starts, it pins the exact version of every Task,
-Agent, Environment, and Rewarder it uses. You can rerun it months later with
+Agent, Environment, and Verifier it uses. You can rerun it months later with
 `plural job rerun` and get the same experiment, even if you have edited your files
 since.
 
@@ -137,7 +137,7 @@ the web app under Jobs:
 `job push` and `--track` create the same hosted Job, marked as run by a client,
 so pushing a tracked Job again records nothing twice. A tracked run opens each
 hosted execution as it starts, reports liveness while it runs, and publishes the
-trajectory, usage, and Rewarder results when it ends. If the hosted service
+trajectory, usage, and Verifier results when it ends. If the hosted service
 cannot be reached mid-run, the local Job still finishes and `plural job push`
 fills in what was missed.
 
@@ -153,17 +153,17 @@ hosted.
 
 ## Evaluate before routing or training
 
-Eval mode, the default, runs the Rewarders at the end of each episode and
+Eval mode, the default, runs the Verifiers at the end of each episode and
 records the score, cost, latency, trajectory, and whether each Trial completed.
 Compare results only across the same Agent and Benchmark versions. Use those
 records to [choose a routing policy](../reference/integrations.md#route-after-evaluation)
 for application traffic.
 
-Train mode (`mode=JobMode.TRAIN`) also runs the Rewarders, and additionally
+Train mode (`mode=JobMode.TRAIN`) also runs the Verifiers, and additionally
 requires the Harness to record the exact tokens in and tokens out of every model
 call. A Trial whose Harness does not support that capture fails with a
 `tito_unsupported` error. Train mode also streams each step's reward as a progress
-event. Rewards are for training and never count toward the score; see
+event. Rewards are for training; see
 [Training and RL](training.md).
 
 ## Going deeper
@@ -173,7 +173,7 @@ resuming works.
 
 **What the plan pins.** `job.plan` fixes everything the Job will use before it
 starts: the Task and Benchmark versions, the model endpoint each model resolves
-to, the content hashes of every Environment, Rewarder, Agent, and Harness, the
+to, the content hashes of every Environment, Verifier, Agent, and Harness, the
 Runtime provider, the mode, and the list of Trials (one per Agent, Task, and
 attempt).
 

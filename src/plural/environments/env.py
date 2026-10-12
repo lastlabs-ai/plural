@@ -144,7 +144,7 @@ class Environment:
         is not shown to the Agent. Apps never call each other directly.
 
         Rewards are not given here: they depend on the Task, so they come from
-        the ``step`` hook of a Task's Rewarder.
+        the ``reward`` hook of a Task's Verifier.
         """
         del call, result, apps
 
@@ -302,36 +302,36 @@ class Environment:
         initial_state: Mapping[str, Any] | None = None,
         info: Any = None,
         seed: int | None = None,
-        rewarders: Sequence[Any] = (),
+        verifiers: Sequence[Any] = (),
     ) -> tuple[Any, dict[str, Any]]:
         """Start an episode in this process.
 
         ``initial_state`` maps each App's name to its starting state; with one
-        App it may be that App's state directly. ``rewarders`` gives each
-        :meth:`step` its reward: Rewarders with a ``step`` hook, or functions
+        App it may be that App's state directly. ``verifiers`` gives each
+        :meth:`step` its reward: Verifiers with a ``reward`` hook, or functions
         of one :class:`~plural.Step`.
 
         Returns:
             The opening observation and reset information.
         """
-        from plural.apps.host import AppHost, StepRewarder
-        from plural.rewarders import DeterministicRewarder, StepTask
+        from plural.apps.host import AppHost, RewardHook
+        from plural.verifiers import DeterministicVerifier, StepTask
 
-        hooks: list[StepRewarder] = []
-        for item in rewarders:
-            if isinstance(item, DeterministicRewarder):
-                if item.step_fn is not None:
-                    hooks.append(StepRewarder(item.name, item.version, item.step_fn))
+        hooks: list[RewardHook] = []
+        for item in verifiers:
+            if isinstance(item, DeterministicVerifier):
+                if item.reward_fn is not None:
+                    hooks.append(RewardHook(item.name, item.version, item.reward_fn))
             elif callable(item):
-                hooks.append(StepRewarder(getattr(item, "__name__", "step"), "", item))
+                hooks.append(RewardHook(getattr(item, "__name__", "step"), "", item))
             else:
                 raise TypeError(
-                    "rewarders takes Rewarders with a step hook, or functions of one Step; "
+                    "verifiers takes Verifiers with a reward hook, or functions of one Step; "
                     f"got {type(item).__name__}."
                 )
         if self._host is not None:
             self._host.close()
-        self._host = AppHost(self, rewarders=hooks, task=StepTask(info=info))
+        self._host = AppHost(self, verifiers=hooks, task=StepTask(info=info))
         envelope = self._host.reset(
             initial_state=normalize_initial_state(self.definition(), initial_state or {}),
             info=info,
@@ -377,7 +377,7 @@ class Environment:
         )
 
     def snapshot(self) -> dict[str, Any]:
-        """Return each App's state, as a Rewarder receives it after the episode."""
+        """Return each App's state, as a Verifier receives it after the episode."""
         if self._host is None:
             return {}
         return self._host.snapshot()

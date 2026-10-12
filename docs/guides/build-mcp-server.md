@@ -69,7 +69,7 @@ def close_ticket(id: str, resolution: str) -> str:
 - Mark a tool that changes nothing with `readOnlyHint`.
 
 :::details Why `readOnlyHint` matters
-Rewarders may call only read-only tools, so they can't change what they check. A
+Verifiers may call only read-only tools, so they can't change what they check. A
 Benchmark treats every other tool as one that changes state, which decides whether a
 system Plural can't reset is allowed in it.
 :::
@@ -121,7 +121,7 @@ hooks, `plural_reset` and `plural_snapshot`; an Agent never sees those.
 
 ## Give it a starting state
 
-A Task says where the episode starts, and a Rewarder checks where it ended. Two
+A Task says where the episode starts, and a Verifier checks where it ended. Two
 decorators connect your server to both:
 
 ```python
@@ -146,7 +146,7 @@ initial_state:
 :::details More about reset and snapshot
 `reset` receives the Task's `initial_state` for this App at the start of every episode.
 Return text from it only if the Agent should see it first. `snapshot` returns the state
-a Rewarder reads as `episode.apps["support_desk"].final`. Neither is offered to the
+a Verifier reads as `episode.apps["support_desk"].final`. Neither is offered to the
 Agent as a tool.
 :::
 
@@ -181,7 +181,7 @@ in its `resources/` folder. A Trial references both; it never owns or changes th
 | `plural.mcp.scratch()` | A writable folder for this Trial only, empty at the start and deleted at the end. |
 
 Write anything the server must keep to `scratch()`, and report it from `snapshot` if a
-Rewarder should check it. A Harness that can read files, such as a coding agent, can
+Verifier should check it. A Harness that can read files, such as a coding agent, can
 also read both folders directly; `PLURAL_RESOURCES_DIR` points at them.
 :::
 
@@ -206,7 +206,7 @@ apps:
 
 :::details Writing, table names, and making it your own
 - **Writing.** `plural.mcp.files:writable` adds `write_file`, which writes only to a
-  `scratch/` folder. Its snapshot is every file written there, for Rewarders.
+  `scratch/` folder. Its snapshot is every file written there, for Verifiers.
 - **Table names.** A CSV, JSON, or JSONL file is a table named after the file. A SQLite
   file's tables are `<file>.<table>`. When the Environment and the Task both have a file
   with the same name, the tables are `environment_resources_<name>` and
@@ -322,5 +322,5 @@ server. The Agent gets one list of tools; see
 ## Where to go next
 
 - [Connect an MCP server](connect-mcp-server.md) that already exists, such as your CRM's.
-- [Rewarders](../project/rewarders.md): score an episode from the snapshot.
+- [Verifiers](../project/verifiers.md): score an episode from the snapshot.
 - [Tasks](../project/tasks.md): starting states and per-Task files.

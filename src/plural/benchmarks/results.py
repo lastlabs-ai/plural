@@ -1,10 +1,10 @@
 """Combine the attempts of one configuration into a release result.
 
-The order is fixed. Each attempt is first classified: scored by a Rewarder, an
+The order is fixed. Each attempt is first classified: scored by a Verifier, an
 Agent failure, an infrastructure error, cancelled, or still pending. Repeated
 attempts of a Task are averaged. Tasks are then combined with the release's
 declared weights. Nothing here picks a best attempt, and step rewards never
-enter: only the Rewarder score recorded on each attempt is read.
+enter: only the Verifier score recorded on each attempt is read.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from plural.common import FrozenModel
 
 AttemptOutcome = Literal["scored", "agent_failure", "infrastructure_error", "cancelled", "pending"]
 
-_PENDING = {"queued", "provisioning", "running", "scoring", "awaiting_review"}
+_PENDING = {"queued", "provisioning", "running", "verifying", "awaiting_review"}
 _BUDGET_STOPS = {"max_turns", "max_seconds", "max_cost"}
 # The evaluated system produced no valid answer. On an agents track the harness
 # is part of that system, so its failures count against it.
@@ -39,7 +39,7 @@ class AttemptEvidence(FrozenModel):
         task: Task name within the release.
         attempt: Attempt index, starting at 0.
         status: Trial status.
-        score: Rewarder-derived Trial score, when one was produced.
+        score: Verifier-derived Trial score, when one was produced.
         error_code: Failure category, when the attempt failed.
         stop_reason: How the episode ended.
         cost_usd: Measured cost of the attempt in US dollars.
@@ -123,8 +123,8 @@ class TaskResult(FrozenModel):
         weight: Declared weight.
         categories: Category ids.
         attempts: Attempts recorded, in every outcome.
-        scored: Attempts with a Rewarder score.
-        agent_failures: Attempts the Agent ended without a Rewarder score.
+        scored: Attempts with a Verifier score.
+        agent_failures: Attempts the Agent ended without a Verifier score.
         infrastructure_errors: Attempts lost to the runtime or provider.
         cancelled: Attempts cancelled before they finished.
         pending: Attempts still running or awaiting review.
@@ -196,7 +196,7 @@ class ConfigurationResult(FrozenModel):
         tasks_total: Tasks in the release.
         tasks_covered: Tasks with at least one valid attempt.
         success_rate: Share of valid attempts that succeeded.
-        completion_rate: Share of attempts that ran to a Rewarder score,
+        completion_rate: Share of attempts that ran to a Verifier score,
             separate from whether they succeeded.
         uncertainty: Interval around ``score``, or why there is none.
         cost: Mean measured cost per attempt.
@@ -228,10 +228,10 @@ class ConfigurationResult(FrozenModel):
 def classify_attempt(attempt: AttemptEvidence) -> AttemptOutcome:
     """Decide which outcome one attempt had.
 
-    A Rewarder score always means ``"scored"``. A failure with no score is an
+    A Verifier score always means ``"scored"``. A failure with no score is an
     Agent failure when the Agent's own system caused it (a budget ran out, or
     the harness produced no valid answer) and an infrastructure error when the
-    runtime, provider, or Rewarder did.
+    runtime, provider, or Verifier did.
 
     Returns:
         The attempt's outcome.

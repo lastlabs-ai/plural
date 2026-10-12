@@ -65,7 +65,7 @@ def manifest_schemas() -> dict[str, dict[str, Any]]:
         ProjectManifest,
         TaskManifest,
     )
-    from plural.rewarders import RewarderDefinition
+    from plural.verifiers import VerifierDefinition
 
     agent = public_schema(Agent)
     agent.setdefault("properties", {})["title"] = {
@@ -77,7 +77,7 @@ def manifest_schemas() -> dict[str, dict[str, Any]]:
         "project.yaml": public_schema(ProjectManifest),
         "environment.yaml": public_schema(EnvironmentManifest),
         "task.yaml": public_schema(TaskManifest),
-        "rewarder.yaml": TypeAdapter(RewarderDefinition).json_schema(),
+        "verifier.yaml": TypeAdapter(VerifierDefinition).json_schema(),
         "harness.yaml": public_schema(HarnessManifest),
         "agent.yaml": agent,
         "benchmark.yaml": public_schema(BenchmarkManifest),

@@ -8,7 +8,7 @@ from plural import (
     Agent,
     Benchmark,
     Client,
-    DeterministicRewarder,
+    DeterministicVerifier,
     Environment,
     ErrorCode,
     Harness,
@@ -52,12 +52,12 @@ def main() -> None:
     assert env.name == "x"
     assert len(ds) == 1
     harness = CustomHarness()
-    rewarder = DeterministicRewarder(name="v", final=("python", "-c", "pass"))
+    verifier = DeterministicVerifier(name="v", check=("python", "-c", "pass"))
     task = Task(
         name="1",
         instructions="Say hi.",
         environment=env,
-        rewarders=(rewarder,),
+        verifiers=(verifier,),
     )
     benchmark = Benchmark(
         name="b",
@@ -76,7 +76,7 @@ def main() -> None:
     assert plan.trial_count == 1
     runtime_provider: str = plan.trials[0].runtime_provider
     retry: RetryPolicy = RetryPolicy()
-    rewarder_definition: DeterministicRewarder = rewarder
+    verifier_definition: DeterministicVerifier = verifier
     _ = (
         Job,
         JobResult,
@@ -89,7 +89,7 @@ def main() -> None:
         ErrorCode,
         runtime_provider,
         retry,
-        rewarder_definition,
+        verifier_definition,
     )
     _ = Client
 

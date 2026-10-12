@@ -2,7 +2,7 @@
 route: /docs/project/tasks
 title: Tasks
 order: 40
-description: "One assignment in an Environment: the instructions, the starting situation, any files that case needs, and the Rewarders that grade it."
+description: "One assignment in an Environment: the instructions, the starting situation, any files that case needs, and the Verifiers that grade it."
 audience: all
 nav: true
 nav_group: Build
@@ -16,7 +16,7 @@ desk, a Task is one support ticket.
 
 The Environment says how the world *works*. The Task says what is true about *this
 particular case*: what the Agent should do, how the world starts, which files it
-needs, and which [Rewarders](rewarders.md), the graders, decide whether it succeeded.
+needs, and which [Verifiers](verifiers.md), the graders, decide whether it succeeded.
 Keeping the two apart lets you write the world once and add as many cases as you like.
 
 ## What goes in a Task
@@ -31,18 +31,18 @@ Agent sees exactly what it should, and nothing more.
 | `initial_state` | Hidden starting values for each App's State, keyed by App name | The expected category |
 | `resources` | Files the case uses, which Environment code can read | The customer's invoice |
 | `metadata` | Labels for you, such as an owner or a training or evaluation split | `owner: support-team` |
-| `rewarders` | The graders that score the attempt | `correct-category` |
+| `verifiers` | The graders that score the attempt | `correct-category` |
 
 > **Good to know:** Keep expected answers out of `info`, the instructions, and what
 > actions return. Those are visible to the Agent. The answer belongs in `initial_state`,
-> which becomes part of the hidden State that a Rewarder can check.
+> which becomes part of the hidden State that a Verifier can check.
 
 Plural stores a Task's `reset_options` but does not yet pass them to `reset`. Use
 `initial_state`, or load the case in Environment code, instead.
 
 ## Create a Task
 
-This Task uses the `environment` and `rewarder` from the
+This Task uses the `environment` and `verifier` from the
 [support queue tutorial](../tutorials/support-queue.md):
 
 ```python
@@ -54,7 +54,7 @@ task = Task(
     goals=("Follow the support policy.", "Leave the ticket resolved."),
     info={"ticket_id": "ticket-1"},
     environment=environment,
-    rewarders=[rewarder],
+    verifiers=[verifier],
 )
 ```
 
@@ -67,7 +67,7 @@ In a [project](../getting-started.md#create-a-project), each Task is a folder un
 `tasks/`, named after the Task. Create one from inside the project:
 
 ```bash
-plural task init ticket-1 --environment support-queue --rewarder correct-category
+plural task init ticket-1 --environment support-queue --verifier correct-category
 ```
 
 This creates:
@@ -79,7 +79,7 @@ tasks/ticket-1/
 ```
 
 Add a `resources/` folder when the Task needs its own files. `task.yaml` names the
-Task, its one Environment, and its Rewarders. This is `tasks/ticket-1/task.yaml` from
+Task, its one Environment, and its Verifiers. This is `tasks/ticket-1/task.yaml` from
 the [first project](../tutorials/first-project.md):
 
 ```yaml
@@ -87,7 +87,7 @@ name: ticket-1
 version: 0.1.0
 instructions: instruction.md
 environment: support-queue
-rewarders:
+verifiers:
   - correct-category
 initial_state:
   ticket_id: ticket-1
@@ -99,7 +99,7 @@ Check the Task and everything it depends on:
 plural task validate ticket-1
 ```
 
-Validation also loads the Environment and each Rewarder, and reports every problem it
+Validation also loads the Environment and each Verifier, and reports every problem it
 finds, including placeholders the template left for you to fill in. Leave out the name
 to validate the Task whose folder you are in.
 
@@ -114,8 +114,8 @@ Here is what each field in `task.yaml` means, for when you need the exact rules:
   renames the hosted Task while its slug stays the same.
 - `instructions` is the path of a UTF-8 file in the Task folder, `instruction.md` by
   default. Its contents are the Task's instructions.
-- `environment` is the name of one Environment in `environments/`, and `rewarders`
-  lists at least one Rewarder in `rewarders/`, each once. Resources always refer to
+- `environment` is the name of one Environment in `environments/`, and `verifiers`
+  lists at least one Verifier in `verifiers/`, each once. Resources always refer to
   each other by name within the project.
 - `initial_state`, `info`, `goals`, `metadata`, and `reset_options` mean the same as
   the `Task` fields described on this page.
@@ -133,7 +133,7 @@ checkout is bound to:
 plural task push ticket-1 --with-deps
 ```
 
-`--with-deps` also pushes the Environment and Rewarders when they are not hosted yet.
+`--with-deps` also pushes the Environment and Verifiers when they are not hosted yet.
 Without it, each dependency must already be pushed with identical content, and the
 push stops before uploading anything if one is not.
 
@@ -153,7 +153,7 @@ plural task pull ticket-1
 ```
 
 This restores a hosted revision into `tasks/ticket-1/`, plus its Environment and
-Rewarders if this project lacks them. A Task created in the web app is written from its
+Verifiers if this project lacks them. A Task created in the web app is written from its
 stored content. Pull refuses to overwrite local files that differ unless you pass
 `--force`, which keeps the old copy under `.plural/backups`.
 
@@ -215,8 +215,8 @@ files. Create it with:
 plural project init support-eval
 cd support-eval
 plural env init ticket-triage --python
-plural rewarder init correct-team
-plural task init duplicate-charge --environment ticket-triage --rewarder correct-team
+plural verifier init correct-team
+plural task init duplicate-charge --environment ticket-triage --verifier correct-team
 ```
 
 When you have filled in the files below, the project looks like this:
@@ -229,9 +229,9 @@ support-eval/
 │   ├── environment.py
 │   ├── README.md
 │   └── resources/policy.md
-├── rewarders/correct-team/
-│   ├── rewarder.yaml
-│   └── reward.py
+├── verifiers/correct-team/
+│   ├── verifier.yaml
+│   └── verify.py
 └── tasks/duplicate-charge/
     ├── task.yaml
     ├── instruction.md
@@ -295,7 +295,7 @@ class TicketTriage(App[TicketState]):
 
 The default `reset` loads the Task's `issue` and `expected` fields into State, so the
 override only adds what the Agent sees first: the issue and the policy. `expected`
-stays in State, where the Agent never sees it and the Rewarder reads it.
+stays in State, where the Agent never sees it and the Verifier reads it.
 
 **4. Describe the Environment.** Replace the placeholder comment in
 `environments/ticket-triage/README.md` with a sentence describing the Environment, such
@@ -319,15 +319,15 @@ limits:
 ```
 
 **5. Add the grader.** Save the `resolved_correctly` function from the
-[DeterministicRewarder example](rewarders.md#deterministicrewarder) in
-`rewarders/correct-team/reward.py`, and point `rewarders/correct-team/rewarder.yaml` at
+[DeterministicVerifier example](verifiers.md#deterministicverifier) in
+`verifiers/correct-team/verify.py`, and point `verifiers/correct-team/verifier.yaml` at
 it:
 
 ```yaml
 name: correct-team
 version: 0.1.0
 kind: deterministic
-final: reward.py:resolved_correctly
+check: verify.py:resolved_correctly
 ```
 
 **6. Write the case.** `tasks/duplicate-charge/instruction.md` holds the instructions:
@@ -343,7 +343,7 @@ name: duplicate-charge
 version: 0.1.0
 instructions: instruction.md
 environment: ticket-triage
-rewarders:
+verifiers:
   - correct-team
 initial_state:
   issue: I was charged twice for the same subscription.
@@ -440,7 +440,7 @@ The run is a Job, recorded under `.plural/jobs/`. To see how it went:
 plural trial show TRIAL_ID
 ```
 
-This prints the Trial's score, the Rewarder's evidence, and its artifacts folder.
+This prints the Trial's score, the Verifier's evidence, and its artifacts folder.
 Open `trajectory.jsonl` there to check that the issue and invoice reached the
 Agent, and `state.json` to check that the expected category stayed in the hidden
 State.
@@ -459,6 +459,6 @@ A quick recap of [What goes in a Task](#what-goes-in-a-task):
 - **`metadata`:** organizational labels, such as an owner or a training or evaluation split.
 
 Keep one clear outcome per Task. Include common cases and important failures, test
-your Rewarders on known outcomes, and hold some Tasks back if you plan to train.
+your Verifiers on known outcomes, and hold some Tasks back if you plan to train.
 Collect Tasks into a [Benchmark](benchmarks.md), the exam, to compare Agents across
 the work you care about.

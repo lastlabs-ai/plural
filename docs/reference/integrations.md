@@ -16,7 +16,7 @@ without touching the other.
 - A **model provider** answers model requests. You reach every model through the
   Plural gateway with one Plural API key.
 - A **Runtime provider** (in code, a `SandboxProvider`) creates the Runtime, the place
-  where the Environment, Harness, and Rewarder code runs. It might be your own
+  where the Environment, Harness, and Verifier code runs. It might be your own
   machine, a Docker container, or a remote service.
 
 Once your results are in, this page also covers the step after evaluation: using
@@ -24,7 +24,7 @@ those scores to decide which model handles which work in your own application.
 
 ## Model endpoints
 
-Agents and Agent Rewarders name models by stable IDs from a `ModelCatalog`, the list
+Agents and Agent Verifiers name models by stable IDs from a `ModelCatalog`, the list
 of models Plural knows about. You can browse it in the web app's model Catalog. A
 catalog entry says which upstream model an ID resolves to; it does not by itself give
 you access to that model.

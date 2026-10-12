@@ -52,8 +52,8 @@ contestants.
   [Environments](../project/environments.md).
 - The assignments (Tasks): instructions, initial State, and Task files:
   [Tasks](../project/tasks.md).
-- The grader (Rewarders): deterministic checks, model judges, and human rubrics:
-  [Rewarders](../project/rewarders.md).
+- The grader (Verifiers): deterministic checks, model judges, and human rubrics:
+  [Verifiers](../project/verifiers.md).
 - How the contestant plays (Harnesses): the native loop, the built-in Hermes, Claude
   Code, and Codex Harnesses, custom Harness classes, and secret grants:
   [Harnesses](../project/harnesses.md).
@@ -109,7 +109,7 @@ The [CLI guide](../cli/evaluation.md#command-reference) lists every command and
 option, generated from the command tree. Each resource kind uses the same verbs:
 
 ```bash
-plural <env|task|rewarder|harness|agent|benchmark> init|validate|push|pull|show|list
+plural <env|task|verifier|harness|agent|benchmark> init|validate|push|pull|show|list
 ```
 
 `plural benchmark add` and `remove` edit a Benchmark's Task list. The other

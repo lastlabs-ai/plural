@@ -54,7 +54,7 @@ Projects written for Plural 0.14 or earlier use a different layout; see
 plural project init support-eval
 cd support-eval
 plural env init support-queue --python
-plural rewarder init correct-category
+plural verifier init correct-category
 plural task init ticket-1 -e support-queue -v correct-category
 plural benchmark init support-triage
 plural benchmark add ticket-1 -b support-triage
@@ -62,11 +62,11 @@ plural agent init careful -m openai/gpt-5.6-luna
 ```
 
 This builds the support queue example: a world (the Environment), a grader (the
-Rewarder), one ticket to work (the Task), an exam that holds it (the Benchmark), and a
+Verifier), one ticket to work (the Task), an exam that holds it (the Benchmark), and a
 contestant (the Agent).
 
 `plural project init` works offline. Each resource `init` command writes a template
-with places marked `PLURAL-TODO` for you to fill in. A new Environment and Rewarder
+with places marked `PLURAL-TODO` for you to fill in. A new Environment and Verifier
 need real behavior before a run means anything; the
 [support queue tutorial](../tutorials/support-queue.md) provides both. Without `-m`,
 `agent init` leaves the model for you to choose from `plural models list`.
@@ -148,19 +148,19 @@ plural job rerun JOB_ID
 plural trial show TRIAL_ID
 plural trial rerun TRIAL_ID
 plural review list
-plural review submit TRIAL_ID --rewarder policy-review --score 2 \
+plural review submit TRIAL_ID --verifier policy-review --score 2 \
   --feedback "Meets policy."
 ```
 
 - `job list` shows local and hosted Jobs, newest first, labeled by where they ran.
 - `job show` and `trial show` look for a local record first and then ask the hosted
-  project. `trial show` includes the Rewarder's evidence and the Trial's artifacts.
+  project. `trial show` includes the Verifier's evidence and the Trial's artifacts.
   Add `--follow` to either to stream progress until it finishes.
 - `job rerun` runs a Job again with the exact pinned inputs it used and creates a new
   Job linked to the original. `trial rerun` runs one Trial again as a new one-Trial
   Job. Add `--track` to either to record a local rerun in the hosted project as it
   runs.
-- `review list` shows Trials waiting for a HumanRewarder score, and `review submit`
+- `review list` shows Trials waiting for a HumanVerifier score, and `review submit`
   records one. Use one `--score criterion=value` per rubric criterion, or a bare value
   for a one-criterion rubric. Add `--hosted` to either for hosted review assignments.
   Submissions are append-only.
@@ -300,7 +300,7 @@ This section is generated from the Typer application. Run `uv run python scripts
  Build, push, and run Plural projects.
 
  Start with `plural project init <name>`, add resources with `plural
- <env|task|rewarder|harness|agent|benchmark> init <name>`, and run them with `plural run --task
+ <env|task|verifier|harness|agent|benchmark> init <name>`, and run them with `plural run --task
  <name> --model <model>`.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -314,7 +314,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ auth       Sign in, sign out, and choose the hosted account or project commands use.             │
 │ project    Create, register, and inspect projects.                                               │
 │ env        Create, validate, push, pull, and inspect Environments.                               │
-│ rewarder   Create, validate, push, pull, and inspect Rewarders.                                  │
+│ verifier   Create, validate, push, pull, and inspect Verifiers.                                  │
 │ harness    Create, validate, push, pull, and inspect Harnesses.                                  │
 │ task       Create, validate, push, pull, and inspect Tasks.                                      │
 │ agent      Create, validate, push, pull, and inspect Agents.                                     │
@@ -322,7 +322,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ job        List, inspect, and rerun Jobs.                                                        │
 │ trial      Inspect and rerun Trials.                                                             │
 │ review     List and submit human reviews.                                                        │
-│ rewards    Label stored Trials with hindsight rewarders and export training data.                │
+│ rewards    Label stored Trials with hindsight verifiers and export training data.                │
 │ models     List the models you may run.                                                          │
 │ runtime    Choose where Environments run.                                                        │
 │ secret     Set the secrets your Apps need in the hosted project.                                 │
@@ -1589,178 +1589,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ *  --score           <str>  `criterion=value`, or a bare value for a one-criterion rubric.       │
 │                             [required]                                                           │
-│    --rewarder        <str>  Human Rewarder (local).                                              │
+│    --verifier        <str>  Human Verifier (local).                                              │
 │    --feedback        <str>  Notes for the record.                                                │
 │    --hosted                 Submit a hosted assignment.                                          │
 │    --help                   Show this message and exit.                                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural rewarder`
-
-```text
-
- Usage: plural rewarder [OPTIONS] COMMAND [ARGS]...
-
- Create, validate, push, pull, and inspect Rewarders.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a new Rewarder from the standard template.                                      │
-│ validate  Check a resource and everything it depends on, without uploading.                      │
-│ push      Validate and push an immutable, private revision to the bound project.                 │
-│ release   Label the revision matching your files with a release version, pushing it first.       │
-│ pull      Restore a hosted revision's editable files into this project.                          │
-│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
-│ list      List resources of this kind, labeled local or hosted.                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural rewarder init`
-
-```text
-
- Usage: plural rewarder init [OPTIONS] {name}
-
- Create a new Rewarder from the standard template.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name      <str>  Rewarder name. [required]                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural rewarder list`
-
-```text
-
- Usage: plural rewarder list [OPTIONS]
-
- List resources of this kind, labeled local or hosted.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --local           Only list local resources.                                                     │
-│ --hosted          Only list hosted resources.                                                    │
-│ --json            Print machine-readable JSON.                                                   │
-│ --help            Show this message and exit.                                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural rewarder pull`
-
-```text
-
- Usage: plural rewarder pull [OPTIONS] [name]
-
- Restore a hosted revision's editable files into this project.
-
- Name a retained revision as name@REVISION or with --revision.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
-│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
-│                             it pins. Missing dependencies are always restored.                   │
-│ --force                     Replace local files that differ. The old copy is kept under          │
-│                             .plural/backups.                                                     │
-│ --json                      Print machine-readable JSON.                                         │
-│ --help                      Show this message and exit.                                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural rewarder push`
-
-```text
-
- Usage: plural rewarder push [OPTIONS] [name]
-
- Validate and push an immutable, private revision to the bound project.
-
- The hosted project numbers revisions. Pushing content it already holds
- reuses that revision. Without --with-deps, every dependency must
- already be pushed with identical content. Nothing is uploaded unless
- the whole push can succeed.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --with-deps          Also push local dependencies that are not hosted yet.                       │
-│ --force              Add a revision even though the hosted resource moved since you last synced. │
-│ --json               Print machine-readable JSON.                                                │
-│ --help               Show this message and exit.                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural rewarder release`
-
-```text
-
- Usage: plural rewarder release [OPTIONS] {name} {version}
-
- Label the revision matching your files with a release version, pushing it first.
-
- A version names one revision forever, so collaborators and Jobs can
- refer to it as name@VERSION.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
-│                          [required]                                                              │
-│ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --json          Print machine-readable JSON.                                                     │
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural rewarder show`
-
-```text
-
- Usage: plural rewarder show [OPTIONS] [name]
-
- Show a resource: the local copy if there is one, otherwise the hosted one.
-
- An invalid local copy is an error, not a reason to show the hosted one.
- name@REVISION shows that revision: the working copy when it holds
- exactly that content, otherwise the retained hosted revision.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --local           Only read local files.                                                         │
-│ --hosted          Only read the hosted project.                                                  │
-│ --json            Print machine-readable JSON.                                                   │
-│ --help            Show this message and exit.                                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural rewarder validate`
-
-```text
-
- Usage: plural rewarder validate [OPTIONS] [name]
-
- Check a resource and everything it depends on, without uploading.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --json          Print machine-readable JSON.                                                     │
-│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1770,13 +1602,13 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural rewards [OPTIONS] COMMAND [ARGS]...
 
- Label stored Trials with hindsight rewarders and export training data.
+ Label stored Trials with hindsight verifiers and export training data.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ apply   Run a hindsight rewarder on stored Trials and append its rewards to their ledgers.       │
+│ apply   Run a hindsight verifier on stored Trials and append its rewards to their ledgers.       │
 │ show    List a Trial's reward ledger.                                                            │
 │ export  Write one training record per Trial: model turns with TITO tokens and their rewards.     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -1786,12 +1618,12 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural rewards apply [OPTIONS] {rewarder}
+ Usage: plural rewards apply [OPTIONS] {verifier}
 
- Run a hindsight rewarder on stored Trials and append its rewards to their ledgers.
+ Run a hindsight verifier on stored Trials and append its rewards to their ledgers.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    rewarder      <str>  The hindsight rewarder, as path.py:name. [required]                    │
+│ *    verifier      <str>  The hindsight verifier, as path.py:name. [required]                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --trial        <str>  A local Trial id. Repeatable.                                              │
@@ -1812,7 +1644,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --trial                                                  <str>   A local Trial id. Repeatable.   │
 │ --job                                                    <str>   Every Trial of this local Job.  │
-│ --rewarder                                               <str>   Use only this rewarder, as name │
+│ --verifier                                               <str>   Use only this verifier, as name │
 │                                                                  or name@version. Repeatable.    │
 │ --aggregate                                              <str>   Combine rewards on one target:  │
 │                                                                  sum, mean, last.                │
@@ -2480,7 +2312,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a Task with instructions, one Environment, and its Rewarders.                   │
+│ init      Create a Task with instructions, one Environment, and its Verifiers.                   │
 │ validate  Check a resource and everything it depends on, without uploading.                      │
 │ push      Validate and push an immutable, private revision to the bound project.                 │
 │ release   Label the revision matching your files with a release version, pushing it first.       │
@@ -2496,14 +2328,14 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural task init [OPTIONS] {name}
 
- Create a Task with instructions, one Environment, and its Rewarders.
+ Create a Task with instructions, one Environment, and its Verifiers.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    name      <str>  Task name. [required]                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --environment  -e      <str>  Environment the Task runs in.                                      │
-│ --rewarder     -v      <str>  Rewarder that scores it. Repeat for more.                          │
+│ --verifier     -v      <str>  Verifier that scores it. Repeat for more.                          │
 │ --help                        Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -2650,7 +2482,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ show     Show a Trial's result, Rewarder evidence, and artifacts (local first, then hosted).     │
+│ show     Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted).     │
 │ rerun    Run one Trial again with its pinned inputs, as a new one-Trial Job.                     │
 │ rescore  Reserved: score a finished Trial again (not available yet).                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -2696,7 +2528,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural trial show [OPTIONS] {trial_id}
 
- Show a Trial's result, Rewarder evidence, and artifacts (local first, then hosted).
+ Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted).
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    trial_id      <str>  Trial id. [required]                                                   │
@@ -2705,6 +2537,174 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --follow          Stream progress until it finishes.                                             │
 │ --json            Print machine-readable JSON.                                                   │
 │ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier`
+
+```text
+
+ Usage: plural verifier [OPTIONS] COMMAND [ARGS]...
+
+ Create, validate, push, pull, and inspect Verifiers.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init      Create a new Verifier from the standard template.                                      │
+│ validate  Check a resource and everything it depends on, without uploading.                      │
+│ push      Validate and push an immutable, private revision to the bound project.                 │
+│ release   Label the revision matching your files with a release version, pushing it first.       │
+│ pull      Restore a hosted revision's editable files into this project.                          │
+│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
+│ list      List resources of this kind, labeled local or hosted.                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier init`
+
+```text
+
+ Usage: plural verifier init [OPTIONS] {name}
+
+ Create a new Verifier from the standard template.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  Verifier name. [required]                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier list`
+
+```text
+
+ Usage: plural verifier list [OPTIONS]
+
+ List resources of this kind, labeled local or hosted.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --local           Only list local resources.                                                     │
+│ --hosted          Only list hosted resources.                                                    │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier pull`
+
+```text
+
+ Usage: plural verifier pull [OPTIONS] [name]
+
+ Restore a hosted revision's editable files into this project.
+
+ Name a retained revision as name@REVISION or with --revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
+│                    resource directory you are in.                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
+│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
+│                             it pins. Missing dependencies are always restored.                   │
+│ --force                     Replace local files that differ. The old copy is kept under          │
+│                             .plural/backups.                                                     │
+│ --json                      Print machine-readable JSON.                                         │
+│ --help                      Show this message and exit.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier push`
+
+```text
+
+ Usage: plural verifier push [OPTIONS] [name]
+
+ Validate and push an immutable, private revision to the bound project.
+
+ The hosted project numbers revisions. Pushing content it already holds
+ reuses that revision. Without --with-deps, every dependency must
+ already be pushed with identical content. Nothing is uploaded unless
+ the whole push can succeed.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --with-deps          Also push local dependencies that are not hosted yet.                       │
+│ --force              Add a revision even though the hosted resource moved since you last synced. │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier release`
+
+```text
+
+ Usage: plural verifier release [OPTIONS] {name} {version}
+
+ Label the revision matching your files with a release version, pushing it first.
+
+ A version names one revision forever, so collaborators and Jobs can
+ refer to it as name@VERSION.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
+│                          [required]                                                              │
+│ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier show`
+
+```text
+
+ Usage: plural verifier show [OPTIONS] [name]
+
+ Show a resource: the local copy if there is one, otherwise the hosted one.
+
+ An invalid local copy is an error, not a reason to show the hosted one.
+ name@REVISION shows that revision: the working copy when it holds
+ exactly that content, otherwise the retained hosted revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
+│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
+│                    resource directory you are in.                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --local           Only read local files.                                                         │
+│ --hosted          Only read the hosted project.                                                  │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier validate`
+
+```text
+
+ Usage: plural verifier validate [OPTIONS] [name]
+
+ Check a resource and everything it depends on, without uploading.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 <!-- /generated-cli-reference -->

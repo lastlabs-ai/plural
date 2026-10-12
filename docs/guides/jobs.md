@@ -15,7 +15,7 @@ sandbox), how many run at once, and how to record, rerun, and review Jobs.
 If you haven't run anything yet, start with the
 [complete CLI walkthrough](../tutorials/cli-walkthrough.md). It creates the files
 used here, configures model credentials, and grants the Harness its secret. Add a
-[Rewarder](../project/rewarders.md) before treating a Job as a scored evaluation.
+[Verifier](../project/verifiers.md) before treating a Job as a scored evaluation.
 
 ## Validate and preview
 
@@ -23,7 +23,7 @@ Check everything before spending anything:
 
 ```bash
 plural env validate support-queue
-plural rewarder validate correct-category
+plural verifier validate correct-category
 plural task validate ticket-1
 plural benchmark validate support-triage
 plural agent show careful
@@ -49,7 +49,7 @@ so later edits to your working files do not change what a recorded Job used.
 
 Where a Trial runs is decided by its Environment, not by the command. An
 Environment picks a Runtime with `provider:` under `runtime:` in its
-`environment.yaml`. Rewarders declare their Runtime independently.
+`environment.yaml`. Verifiers declare their Runtime independently.
 
 > **Good to know:** The `local` Runtime provider is a trusted subprocess, not a
 > sandbox. It runs resource code as child processes under your user account and
@@ -205,7 +205,7 @@ plural run -b support-triage -a careful --track
 ```
 
 Both record the same hosted Job, marked as run by a client, with every
-execution's trajectory, usage, phases, and Rewarder results. `--track` opens
+execution's trajectory, usage, phases, and Verifier results. `--track` opens
 each execution as it starts, so the hosted project shows the Job running. A
 reporting failure never fails the local run; the command prints what could not
 be recorded, and `plural job push JOB_ID` fills it in. `plural job rerun` and
@@ -238,7 +238,7 @@ plural trial show TRIAL_ID
 plural job rerun JOB_ID
 plural trial rerun TRIAL_ID
 plural review list
-plural review submit TRIAL_ID --rewarder human-review --score 1
+plural review submit TRIAL_ID --verifier human-review --score 1
 ```
 
 `job rerun` runs a Job again with the exact inputs it pinned and creates a new

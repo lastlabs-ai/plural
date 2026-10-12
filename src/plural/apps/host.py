@@ -3,7 +3,7 @@
 The App host owns everything that happens behind the action boundary: it
 resets every App from the Task's initial state, routes each exposed action to
 its App, runs the Environment's ``on_step`` hook, calls each of the Task's
-Rewarders' ``step`` hooks, and reports snapshots for their ``final`` hooks. It
+Verifiers' ``reward`` hooks, and reports snapshots for their ``check`` hooks. It
 returns one step envelope per call.
 
 The Agent sees only an envelope's ``observation`` (as ``rendered`` text).
@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from plural.apps.base import App, observation_payload
-from plural.rewarders import Step, StepTask
+from plural.verifiers import Step, StepTask
 
 if TYPE_CHECKING:
     from plural.environments.env import Environment
@@ -71,7 +71,7 @@ class AppHandle:
 
 
 class AppView:
-    """What a Rewarder's ``step`` hook may read of one App: never an action that writes."""
+    """What a Verifier's ``reward`` hook may read of one App: never an action that writes."""
 
     def __init__(self, host: AppHost, app: App[Any]) -> None:
         self._host = host
@@ -105,18 +105,18 @@ class AppView:
 
 
 @dataclass(frozen=True)
-class StepRewarder:
-    """A Task Rewarder's ``step`` hook, loaded where the Apps run."""
+class RewardHook:
+    """A Task Verifier's ``reward`` hook, loaded where the Apps run."""
 
     name: str
     version: str
     fn: Callable[[Step], Any]
 
 
-def load_step_rewarders(root: Path, entries: Sequence[Mapping[str, Any]]) -> list[StepRewarder]:
-    """Import each Rewarder's ``step`` hook from the files the Job staged under ``root``.
+def load_reward_hooks(root: Path, entries: Sequence[Mapping[str, Any]]) -> list[RewardHook]:
+    """Import each Verifier's ``reward`` hook from the files the Job staged under ``root``.
 
-    Each entry names a Rewarder, its version, its hook as ``file.py:function``,
+    Each entry names a Verifier, its version, its hook as ``file.py:function``,
     and the folder holding its source, relative to ``root``.
 
     Returns:
@@ -125,18 +125,18 @@ def load_step_rewarders(root: Path, entries: Sequence[Mapping[str, Any]]) -> lis
     Raises:
         ValueError: When a hook's file or function is missing.
     """
-    loaded: list[StepRewarder] = []
+    loaded: list[RewardHook] = []
     for entry in entries:
         name = str(entry["name"])
         folder = (root / str(entry["dir"])).resolve()
         file_name, _, function_name = str(entry["python"]).rpartition(":")
         path = folder / file_name
         if not path.is_file():
-            raise ValueError(f"Rewarder {name!r}: its step hook file {file_name} is missing")
-        module_name = f"_plural_rewarder_{uuid.uuid4().hex}"
+            raise ValueError(f"Verifier {name!r}: its reward hook file {file_name} is missing")
+        module_name = f"_plural_verifier_{uuid.uuid4().hex}"
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:
-            raise ValueError(f"Rewarder {name!r}: cannot import {file_name}")
+            raise ValueError(f"Verifier {name!r}: cannot import {file_name}")
         module = importlib.util.module_from_spec(spec)
         sys.path.insert(0, str(folder))
         try:
@@ -147,8 +147,8 @@ def load_step_rewarders(root: Path, entries: Sequence[Mapping[str, Any]]) -> lis
         for part in function_name.split("."):
             function = getattr(function, part, None)
             if function is None:
-                raise ValueError(f"Rewarder {name!r}: {file_name} has no {function_name}")
-        loaded.append(StepRewarder(name=name, version=str(entry.get("version") or ""), fn=function))
+                raise ValueError(f"Verifier {name!r}: {file_name} has no {function_name}")
+        loaded.append(RewardHook(name=name, version=str(entry.get("version") or ""), fn=function))
     return loaded
 
 
@@ -160,7 +160,7 @@ class AppHost:
         environment: Environment,
         workspace: str | Path | None = None,
         *,
-        rewarders: Sequence[StepRewarder] = (),
+        verifiers: Sequence[RewardHook] = (),
         task: StepTask | None = None,
     ) -> None:
         self.environment = environment
@@ -171,7 +171,7 @@ class AppHost:
         if self.workspace is not None:
             for app in self.apps.values():
                 app.workspace = self.workspace
-        self.rewarders = tuple(rewarders)
+        self.verifiers = tuple(verifiers)
         self.task = task or StepTask()
         self.initial: dict[str, Any] = {}
         self.turns = 0
@@ -246,7 +246,7 @@ class AppHost:
         app_name, action_name = route
         app = self.apps[app_name]
         arguments = dict(arguments)
-        watched = bool(self.rewarders) and app.snapshot_on_step
+        watched = bool(self.verifiers) and app.snapshot_on_step
         previous = self._snapshot(app) if watched else None
         self._effects = []
         started = time.monotonic()
@@ -279,7 +279,7 @@ class AppHost:
         if effect is not None:
             raise TypeError(
                 "Environment.on_step returned a value, but it only applies effects across "
-                "Apps now. Move the reward to a Rewarder's step hook on the Task."
+                "Apps now. Move the reward to a Verifier's reward hook on the Task."
             )
         current = self._snapshot(app) if watched else None
         reward, signals = self._reward(
@@ -317,7 +317,7 @@ class AppHost:
         return report
 
     def query(self, app_name: str, action: str, arguments: Mapping[str, Any]) -> Any:
-        """Run a read-only action for a Rewarder.
+        """Run a read-only action for a Verifier.
 
         Returns:
             The action's JSON observation.
@@ -335,7 +335,7 @@ class AppHost:
             raise KeyError(f"App {app_name!r} has no action {action!r}")
         if declaration.mutates_state:
             raise PermissionError(
-                f"Rewarders may only call read-only actions; {app_name}.{action} can change "
+                f"Verifiers may only call read-only actions; {app_name}.{action} can change "
                 "state. Mark it @action(read_only=True), or for MCP set readOnlyHint."
             )
         payload, _ = observation_payload(self.apps[app_name].call(action, dict(arguments)))
@@ -359,12 +359,12 @@ class AppHost:
         previous: Any,
         current: Any,
     ) -> tuple[float, list[dict[str, Any]]]:
-        """Call every ``step`` hook on one action; a failing hook never fails the action.
+        """Call every ``reward`` hook on one action; a failing hook never fails the action.
 
         Returns:
-            The step's total reward and one signal per Rewarder that answered.
+            The step's total reward and one signal per Verifier that answered.
         """
-        if not self.rewarders:
+        if not self.verifiers:
             return 0.0, []
         step = Step(
             task=self.task,
@@ -380,14 +380,14 @@ class AppHost:
         )
         total = 0.0
         signals: list[dict[str, Any]] = []
-        for rewarder in self.rewarders:
+        for verifier in self.verifiers:
             entry: dict[str, Any] = {
-                "name": rewarder.name,
-                "version": rewarder.version,
+                "name": verifier.name,
+                "version": verifier.version,
                 "app": app,
             }
             try:
-                value = rewarder.fn(step)
+                value = verifier.fn(step)
                 if value is None:
                     continue
                 entry["value"] = float(value)
@@ -491,6 +491,6 @@ __all__ = [
     "AppHandle",
     "AppHost",
     "AppView",
-    "StepRewarder",
-    "load_step_rewarders",
+    "RewardHook",
+    "load_reward_hooks",
 ]

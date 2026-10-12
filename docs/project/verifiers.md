@@ -1,38 +1,39 @@
 ---
-route: /docs/project/rewarders
-title: Rewarders
+route: /docs/project/verifiers
+title: Verifiers
 order: 55
 description: "What counts as good work on a Task: a score for the finished episode and, for training, a reward for each step. Written as code, an AI judge with a rubric, or a person."
 audience: all
 nav: true
 nav_group: Build
-outcome: You can choose and configure each Rewarder type, reward each step, and attach Rewarders to a Task.
+outcome: You can choose and configure each Verifier type, reward each step, and attach Verifiers to a Task.
 ---
-# Rewarders
+# Verifiers
 
-A **Rewarder** decides what counts as good work on a [Task](tasks.md), one
-assignment. When an attempt finishes, its `final` check looks at what happened and gives
-the work a **score**, usually between 0 and 1. A Rewarder written in code can also have a
-`step` check, which gives a **reward** for each action while the attempt runs, for
-training. You attach one or more Rewarders to a Task.
+A **Verifier** decides what counts as good work on a [Task](tasks.md), one
+assignment. When an attempt finishes, its `check` looks at what happened and gives
+the work a **score**, usually between 0 and 1. A Verifier written in code can also have a
+`reward` function, which gives a **reward** for each action while the attempt runs, for
+training. You attach one or more Verifiers to a Task.
 
-In Wordle, the Rewarder asks "did the Agent guess the word?" At the support desk, it
+In Wordle, the Verifier asks "did the Agent guess the word?" At the support desk, it
 might ask "was the ticket sent to the right team?" and "was the reply polite and
 accurate?"
 
 ## Why it matters
 
 The score is the only thing Plural ranks on. A Benchmark's leaderboard is built from
-Rewarder scores, so the Rewarder decides what "good" means for your work. Step rewards
-are recorded separately, in the Trial's reward ledger, and never count toward a score.
+Verifier scores, so the Verifier decides what "good" means for your work. Step rewards
+are recorded separately, in the Trial's reward ledger, and count toward a score only if
+you [make the reward the score](#make-the-reward-the-score).
 
-Rewarders belong to Tasks, not to Environments or Apps. The same Environment can
-serve Tasks that want different things, and one Rewarder can read every App in the
+Verifiers belong to Tasks, not to Environments or Apps. The same Environment can
+serve Tasks that want different things, and one Verifier can read every App in the
 Environment at once.
 
-A Rewarder sees everything about the attempt: every step the Agent took, the hidden
+A Verifier sees everything about the attempt: every step the Agent took, the hidden
 State of the world, and any files the Agent produced. The Agent, on the other hand,
-never sees the Rewarder or its score. That means a Rewarder grades what actually
+never sees the Verifier or its score. That means a Verifier grades what actually
 happened, not what the Agent claims happened.
 
 ## Choose a kind of grader
@@ -41,16 +42,16 @@ There are three kinds, and you can combine them on one Task:
 
 | Kind | Who grades | Use it for | Support desk example |
 | --- | --- | --- | --- |
-| [DeterministicRewarder](#deterministicrewarder) | A small piece of code | Facts you can check exactly | Is the category `billing`? |
-| [AgentRewarder](#agentrewarder) | An AI model, as a judge | Qualities that need interpretation | Is the reply clear and grounded in policy? |
-| [HumanRewarder](#humanrewarder) | A person, with a rubric | High-stakes or subjective calls | Is this reply ready to send to a customer? |
+| [DeterministicVerifier](#deterministicverifier) | A small piece of code | Facts you can check exactly | Is the category `billing`? |
+| [AgentVerifier](#agentverifier) | An AI model, as a judge | Qualities that need interpretation | Is the reply clear and grounded in policy? |
+| [HumanVerifier](#humanverifier) | A person, with a rubric | High-stakes or subjective calls | Is this reply ready to send to a customer? |
 
 Start with an exact check whenever the right answer is clear-cut. Add a judge or a
 person only for what code can't decide.
 
-## DeterministicRewarder
+## DeterministicVerifier
 
-A `DeterministicRewarder` runs `final`, a Python function or command, over the
+A `DeterministicVerifier` runs `check`, a Python function or command, over the
 completed `Episode`, the full record of the attempt. The Episode includes each App's State at
 the start and the end, the trajectory, the last observation, artifacts, and usage.
 
@@ -58,26 +59,26 @@ Use it for exact checks: the correct category, passing tests, a valid file, a so
 puzzle, or a required change in the Environment. It scores what happened, rather than
 trusting the Agent's claim that it finished.
 
-Save this support check in `reward.py`:
+Save this support check in `verify.py`:
 
 ```python
-from plural import DeterministicRewarder, Episode, RewarderOutput
+from plural import DeterministicVerifier, Episode, VerifierOutput
 
 
-def resolved_correctly(episode: Episode) -> RewarderOutput:
+def resolved_correctly(episode: Episode) -> VerifierOutput:
     expected = episode.state.get("expected")
     category = episode.state.get("category")
     correct = bool(expected) and category == expected
-    return RewarderOutput(
+    return VerifierOutput(
         score=float(correct),
         scores={"correct_category": float(correct)},
         evidence=[f"category: {category}; expected: {expected}; correct: {correct}"],
     )
 
 
-completion = DeterministicRewarder(
+completion = DeterministicVerifier(
     name="correct-resolution",
-    final=resolved_correctly,
+    check=resolved_correctly,
 )
 ```
 
@@ -93,20 +94,20 @@ With several, it maps each App's name to its final State. For more, use
 `episode.apps`:
 
 ```python
-from plural import Episode, RewarderOutput
+from plural import Episode, VerifierOutput
 
 
-def ticket_closed(episode: Episode) -> RewarderOutput:
+def ticket_closed(episode: Episode) -> VerifierOutput:
     crm = episode.apps["crm"]
     opened = crm.initial["tickets"]
     closed = [item for item in crm.final["tickets"] if item["status"] == "closed"]
-    return RewarderOutput(
+    return VerifierOutput(
         score=float(any(item["id"] == "T-7" for item in closed)),
         evidence=[f"{len(closed)} of {len(opened)} tickets closed"],
     )
 ```
 
-- `initial` and `final` are the App's State before the first action and after the
+- `initial` and `check` are the App's State before the first action and after the
   last. For an MCP or OpenAPI App, they are what its `snapshot` hook printed.
 - `control` is the App's [control level](../concepts/apps.md#control-levels).
 - `query(action, **arguments)` calls one of the App's read-only actions while the
@@ -114,42 +115,42 @@ def ticket_closed(episode: Episode) -> RewarderOutput:
   trusting a snapshot:
 
 ```python
-from plural import Episode, RewarderOutput
+from plural import Episode, VerifierOutput
 
 
-def ticket_closed(episode: Episode) -> RewarderOutput:
+def ticket_closed(episode: Episode) -> VerifierOutput:
     ticket = episode.apps["crm"].query("get_ticket", id="T-7")
-    return RewarderOutput(score=float(ticket["status"] == "closed"))
+    return VerifierOutput(score=float(ticket["status"] == "closed"))
 ```
 
-`query` refuses an action that can change state, so a Rewarder can't alter what it
-checks. It is available to function Rewarders during a Trial; when a Rewarder runs
-later, such as on a Trial pulled from a hosted project, read `final` instead.
+`query` refuses an action that can change state, so a Verifier can't alter what it
+checks. It is available to function Verifiers during a Trial; when a Verifier runs
+later, such as on a Trial pulled from a hosted project, read `check` instead.
 
-The function must live in a Python file. In a project, each Rewarder is a folder under
-`rewarders/`, named after it. This command creates
-`rewarders/correct-resolution/rewarder.yaml` and `reward.py`:
+The function must live in a Python file. In a project, each Verifier is a folder under
+`verifiers/`, named after it. This command creates
+`verifiers/correct-resolution/verifier.yaml` and `verify.py`:
 
 ```bash
-plural rewarder init correct-resolution
+plural verifier init correct-resolution
 ```
 
-The manifest takes the Rewarder's fields, with `final` written as `file.py:function`:
+The manifest takes the Verifier's fields, with `check` written as `file.py:function`:
 
 ```yaml
 name: correct-resolution
 version: 0.1.0
 kind: deterministic
-final: reward.py:resolved_correctly
+check: verify.py:resolved_correctly
 weight: 1
 ```
 
-`name` must match the folder name. `weight` sets this Rewarder's share of the Trial's
-score when a Task has several Rewarders, and defaults to 1. To import the function and
+`name` must match the folder name. `weight` sets this Verifier's share of the Trial's
+score when a Task has several Verifiers, and defaults to 1. To import the function and
 check the manifest, run:
 
 ```bash
-plural rewarder validate correct-resolution
+plural verifier validate correct-resolution
 ```
 
 > **Tip:** Test the function on known correct, incorrect, and incomplete outcomes
@@ -158,7 +159,7 @@ plural rewarder validate correct-resolution
 ### Reward each step
 
 A score at the end is one number for a whole attempt. For training, it helps to credit
-actions as they happen. Give the Rewarder a `step` function in the same `reward.py`:
+actions as they happen. Give the Verifier a `reward` function in the same `verify.py`:
 
 ```python
 from plural import Step
@@ -174,20 +175,20 @@ def progress(step: Step) -> float | None:
     return 0.25 * max(after - before, 0)
 ```
 
-and name it beside `final`:
+and name it beside `check`:
 
 ```yaml
-final: reward.py:resolved_correctly
-step: reward.py:progress
+check: verify.py:resolved_correctly
+reward: verify.py:progress
 ```
 
-In Python, pass both: `DeterministicRewarder(name="correct-resolution",
-final=resolved_correctly, step=progress)`.
+In Python, pass both: `DeterministicVerifier(name="correct-resolution",
+check=resolved_correctly, reward=progress)`.
 
-`step` runs right after each action, beside the Apps in the Trial's Runtime. The `Step`
+`reward` runs right after each action, beside the Apps in the Trial's Runtime. The `Step`
 it receives holds:
 
-- `task`: the Task being run, with its `name`, `info`, and `metadata`, so one Rewarder
+- `task`: the Task being run, with its `name`, `info`, and `metadata`, so one Verifier
   can reward differently per Task.
 - `app`, `action`, `arguments`, and `turn`: the action the Agent just took.
 - `observation`: what the Agent saw back. When the action rejected its input, `error`
@@ -205,31 +206,52 @@ def reply_matches_crm(step: Step) -> float | None:
     return 1.0 if customer["name"] in step.arguments["text"] else 0.0
 ```
 
-Return a number, or `None` when this step gives no signal. A `step` function that
+Return a number, or `None` when this step gives no signal. A `reward` function that
 raises is recorded with its error and a value of 0; it never fails the Agent's action.
 
 Each reward is written to the Trial's reward ledger, `rewards.jsonl`, with the
-Rewarder's name and version and the step it credits. The Agent never sees it: only an
+Verifier's name and version and the step it credits. The Agent never sees it: only an
 action's observation reaches the model. For credit you can only judge once the
 attempt is over, such as a model call that was wasted, use a
-[hindsight Rewarder](../running/training.md).
+[hindsight Verifier](../running/training.md).
 
-A Rewarder needs `final`, `step`, or both. One with only `step` gives rewards and no
-score, so every Task also needs at least one Rewarder with `final`.
+A Verifier needs `check`, `reward`, or both. One with only `reward` gives rewards and no
+score, so every Task also needs at least one Verifier with `check`.
 
-To try step rewards on an Environment in Python, pass Rewarders, or plain functions of
+To try step rewards on an Environment in Python, pass Verifiers, or plain functions of
 a `Step`, when you reset it:
 
 ```python
-environment.reset(rewarders=[completion])
+environment.reset(verifiers=[completion])
 observation, reward, terminated, truncated, info = environment.step("categorize", category="billing")
 ```
 
-`reward` is the step's total, and `info["rewards"]` lists each Rewarder's part.
+`reward` is the step's total, and `info["rewards"]` lists each Verifier's part.
 
-## AgentRewarder
+### Make the reward the score
 
-An `AgentRewarder` uses an **AI model as a judge**. It reads the completed Episode and
+Sometimes the reward is the score you want: a game's points, or the total progress
+over an attempt. Set `check` to the built-in `total_reward`, and the Verifier scores
+each attempt by the sum of its own `reward` values:
+
+```yaml
+check: total_reward
+reward: verify.py:progress
+```
+
+```python
+from plural import DeterministicVerifier, total_reward
+
+DeterministicVerifier(name="progress", check=total_reward, reward=progress)
+```
+
+Only this Verifier's rewards count, not those of other Verifiers on the Task or of
+hindsight Verifiers. `total_reward` needs a `reward` function. Without it, the
+score would always be 0.
+
+## AgentVerifier
+
+An `AgentVerifier` uses an **AI model as a judge**. It reads the completed Episode and
 scores it against your rubric, a list of criteria with a score range for each. Use it
 for qualities such as whether a reply is clear, grounded in policy, relevant, or
 appropriately empathetic.
@@ -237,9 +259,9 @@ appropriately empathetic.
 This example judges a support reply on two criteria:
 
 ```python
-from plural import AgentRewarder, RubricCriterion
+from plural import AgentVerifier, RubricCriterion
 
-reply_quality = AgentRewarder(
+reply_quality = AgentVerifier(
     name="reply-quality",
     model="openai/gpt-5.6-luna",
     instructions=(
@@ -275,10 +297,10 @@ reply_quality = AgentRewarder(
 
 Choose the judge model from `plural models list`, the same way you would when creating an
 Agent. You can also browse models and prices in the web app's model Catalog. An
-AgentRewarder brings its own judging instructions and rubric, so you don't need to
+AgentVerifier brings its own judging instructions and rubric, so you don't need to
 create a separate Agent for it.
 
-In a project, the same judge is a `rewarder.yaml` with `kind: agent` and the fields
+In a project, the same judge is a `verifier.yaml` with `kind: agent` and the fields
 above:
 
 ```yaml
@@ -298,7 +320,7 @@ criteria:
     max_score: 2
 ```
 
-A HumanRewarder is written the same way, with `kind: human`, `instructions`, and
+A HumanVerifier is written the same way, with `kind: human`, `instructions`, and
 `criteria`, and no `model`.
 
 ### Set up a reliable judge
@@ -314,19 +336,19 @@ An AI judge is only as good as its rubric. These habits keep its scores meaningf
 - **Keep the judge and rubric fixed during comparisons.** Changing either changes what the scores mean.
 
 The judge makes model calls, so allow for its cost and latency. It uses its own
-`RewarderRuntime`, with public network access by default, and needs credentials and a
+`VerifierRuntime`, with public network access by default, and needs credentials and a
 connection to its model endpoint.
 
-## HumanRewarder
+## HumanVerifier
 
-A `HumanRewarder` asks a person to score the finished work against a rubric. Use it
+A `HumanVerifier` asks a person to score the finished work against a rubric. Use it
 for high-impact decisions, subjective judgments, or checking that an AI judge agrees
 with people.
 
 ```python
-from plural import HumanRewarder, RubricCriterion
+from plural import HumanVerifier, RubricCriterion
 
-human_review = HumanRewarder(
+human_review = HumanVerifier(
     name="customer-review",
     instructions="Read the ticket, policy, draft reply, and action history before scoring.",
     criteria=[
@@ -344,18 +366,18 @@ human_review = HumanRewarder(
 )
 ```
 
-Once the attempt has run and the automatic Rewarders have scored it, the Trial waits
+Once the attempt has run and the automatic Verifiers have scored it, the Trial waits
 in `awaiting_review`. A reviewer reads the evidence and submits a score:
 
 ```bash
 plural review list
 plural review submit TRIAL_ID \
-  --rewarder customer-review \
+  --verifier customer-review \
   --score 2 \
   --feedback "Accurate next steps and no unsupported promises."
 ```
 
-Replace `TRIAL_ID` with a Trial from `plural review list`. When every human Rewarder on
+Replace `TRIAL_ID` with a Trial from `plural review list`. When every human Verifier on
 the Trial has a review, the Trial finishes with its combined score.
 
 The precise rules:
@@ -369,7 +391,7 @@ The precise rules:
 You can also find hosted reviews in the web app under Reviews. Evidence access and
 hosted review workflows are described in [Reviews](../running/reviews.md).
 
-## Attach your Rewarders to a Task
+## Attach your Verifiers to a Task
 
 Using an Environment named `environment` and the three graders above:
 
@@ -381,14 +403,14 @@ task = Task(
     instructions="Inspect, categorize, answer, and resolve the ticket.",
     info={"ticket_id": "ticket-1"},
     environment=environment,
-    rewarders=[completion, reply_quality, human_review],
+    verifiers=[completion, reply_quality, human_review],
 )
 ```
 
-In a project, list the Rewarders by name in the Task's `task.yaml`:
+In a project, list the Verifiers by name in the Task's `task.yaml`:
 
 ```yaml
-rewarders:
+verifiers:
   - correct-resolution
   - reply-quality
   - customer-review
@@ -404,8 +426,8 @@ For power users who need the exact arithmetic:
 
 - Each rubric criterion's range is normalized to 0 to 1, and criterion weights are
   applied.
-- Each Rewarder's `weight` then sets its share of the Trial's weighted score.
-- Only `final` counts. Step rewards never contribute to a score.
+- Each Verifier's `weight` then sets its share of the Trial's weighted score.
+- Only `check` counts. Step rewards reach a score only through `check: total_reward`.
 
 Look at the individual scores as well as the total. A high subjective score should not
 hide a failed exact check.

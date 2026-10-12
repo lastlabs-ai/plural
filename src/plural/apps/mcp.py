@@ -506,12 +506,12 @@ class MCPApp(App[State]):
         reset: Command run at the start of each episode, from the workspace,
             with the App's initial state as JSON on stdin. Use it to seed a
             sandbox tenant. Its output, if any, is the App's first observation.
-        snapshot: Command that prints the App's state as JSON, for Rewarders.
+        snapshot: Command that prints the App's state as JSON, for Verifiers.
         snapshot_on_step: Also snapshot before and after each action, so
-            rewarders receive states. Off by default because it costs a call.
+            verifiers receive states. Off by default because it costs a call.
         actions: Tool declarations to use instead of asking the server, so a
             definition can be built without reaching it.
-        secrets: Setup secrets the project supplies, for hooks and Rewarders.
+        secrets: Setup secrets the project supplies, for hooks and Verifiers.
         credentials: Names the running Agent supplies, such as its own API token.
         timeout_seconds: How long one tool call may run.
         hooks: The server's Plural hooks, ``plural_reset`` and

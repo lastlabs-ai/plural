@@ -1,0 +1,10 @@
+# Verifier: what counts as a good episode for the Tasks that list it.
+# check scores the finished episode; Tasks and Benchmarks rank on that score.
+# reward rewards each action, for training. It changes the score only when
+# check is total_reward.
+name: solved
+version: 0.1.0
+kind: deterministic
+check: verify.py:check
+reward: verify.py:reward
+weight: 1

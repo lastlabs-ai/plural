@@ -114,7 +114,7 @@ class State(BaseModel):
     """Persistent internal Environment state for the episode.
 
     State is never sent to the Agent. Only :class:`Observation` is visible.
-    Rewarders receive the final State on :class:`~plural.rewarders.Episode`.
+    Verifiers receive the final State on :class:`~plural.verifiers.Episode`.
 
     Mark a field with :func:`initial` when a Task should supply it. Unmarked
     fields are episode progress and cannot be set as ``initial_state``.

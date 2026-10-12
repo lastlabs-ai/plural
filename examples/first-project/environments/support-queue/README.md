@@ -22,7 +22,7 @@ One Python App, `SupportQueue` in `environment.py`.
 ## State
 
 `ticket_id` is set by each Task's `initial_state`. `expected` holds the correct
-category; it is private, so Agents never see it and the Rewarder compares against it.
+category; it is private, so Agents never see it and the Verifier compares against it.
 The rest mirrors the ticket's progress: `category`, `draft_reply`, `status`, `done`.
 
 ## What the Agent sees
@@ -32,7 +32,7 @@ Every action returns `ticket_id`, `customer_tier`, `issue`, `policy`, `category`
 
 ## Rewards
 
-The `progress` rewarder gives 0.25 for each step that advances the ticket (open, triaged, drafted, resolved). Rewards
+The `progress` verifier gives 0.25 for each step that advances the ticket (open, triaged, drafted, resolved). Rewards
 are recorded for training only and never contribute to a score.
 
 ## Resources

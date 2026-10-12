@@ -28,9 +28,9 @@ from plural.errors import (
 )
 from plural.harness.models import Harness, HarnessDefinition
 from plural.jobs import JobSpec
-from plural.rewarders import DeterministicRewarder, HumanRewarder
 from plural.tasks import Benchmark, Task
 from plural.tracing.schema import Trace
+from plural.verifiers import DeterministicVerifier, HumanVerifier
 
 if TYPE_CHECKING:
     from plural.client import Client
@@ -287,35 +287,35 @@ class TasksAPI(RevisionResourceAPI[Task]):
 
     def _revision_payload(self, value: Task, **references: Any) -> JsonObject:
         environment_revision_id = references.get("environment_revision_id")
-        rewarder_revision_ids = references.get("rewarder_revision_ids")
+        verifier_revision_ids = references.get("verifier_revision_ids")
         if not isinstance(environment_revision_id, str) or not environment_revision_id:
             raise InvalidRequestError("Task push requires environment_revision_id")
-        if not isinstance(rewarder_revision_ids, Sequence) or isinstance(
-            rewarder_revision_ids, (str, bytes)
+        if not isinstance(verifier_revision_ids, Sequence) or isinstance(
+            verifier_revision_ids, (str, bytes)
         ):
-            raise InvalidRequestError("Task push requires rewarder_revision_ids")
-        ids = [str(item) for item in rewarder_revision_ids]
-        if len(ids) != len(value.rewarders):
-            raise InvalidRequestError("rewarder_revision_ids must align with Task rewarders")
+            raise InvalidRequestError("Task push requires verifier_revision_ids")
+        ids = [str(item) for item in verifier_revision_ids]
+        if len(ids) != len(value.verifiers):
+            raise InvalidRequestError("verifier_revision_ids must align with Task verifiers")
         payload = _dump(
             value,
-            exclude={"name", "environment", "rewarders"},
+            exclude={"name", "environment", "verifiers"},
         )
         payload["name"] = value.name
         payload["environment_revision_id"] = environment_revision_id
-        payload["rewarder_revision_ids"] = ids
+        payload["verifier_revision_ids"] = ids
         return payload
 
 
-class RewardersAPI(RevisionResourceAPI[Any]):
-    collection = "rewarders"
+class VerifiersAPI(RevisionResourceAPI[Any]):
+    collection = "verifiers"
     model_type = BaseModel
 
     def push(
         self, value: Any, *, package_digest: str | None = None, **references: Any
     ) -> JsonObject:
         if getattr(value, "kind", None) not in {"deterministic", "agent", "human"}:
-            raise InvalidRequestError("Rewarder push requires a Rewarder")
+            raise InvalidRequestError("Verifier push requires a Verifier")
         return super().push(value, package_digest=package_digest, **references)
 
     def _revision_payload(self, value: Any, **references: Any) -> JsonObject:
@@ -792,7 +792,7 @@ class TrialsAPI:
         return self._studio.watch(f"/trials/{quote(trial_id)}/events", cursor=cursor)
 
     def rewards(self, trial_id: str) -> JsonObject:
-        """The Trial's reward ledger and each rewarder's total."""
+        """The Trial's reward ledger and each verifier's total."""
         return cast(JsonObject, self._studio.request("GET", f"/trials/{quote(trial_id)}/rewards"))
 
     def add_rewards(
@@ -817,7 +817,7 @@ class TrialsAPI:
 
 
 class SecretsAPI:
-    """Values for the secrets the project's Apps and Rewarders declare.
+    """Values for the secrets the project's Apps and Verifiers declare.
 
     Values are write-only except through :meth:`resolve`, which the service
     grants to project contributors starting a run.
@@ -942,7 +942,7 @@ class Studio:
         self.secrets = SecretsAPI(self)
         self.environments = EnvironmentsAPI(self)
         self.tasks = TasksAPI(self)
-        self.rewarders = RewardersAPI(self)
+        self.verifiers = VerifiersAPI(self)
         self.agents = AgentsAPI(self)
         self.harnesses = HarnessesAPI(self)
         self.benchmarks = BenchmarksAPI(self)
@@ -1084,7 +1084,7 @@ def push_object(studio: Studio, obj: Any, **references: Any) -> JsonObject:
     """Push one revision of a public SDK object, or ingest one Trace.
 
     Graph edges are explicit hosted revision ids: a Task needs
-    ``environment_revision_id`` and ``rewarder_revision_ids``, an Agent with a
+    ``environment_revision_id`` and ``verifier_revision_ids``, an Agent with a
     custom Harness needs ``harness_revision_id``, and a Benchmark needs
     ``task_revision_ids``.
     """
@@ -1097,10 +1097,10 @@ def push_object(studio: Studio, obj: Any, **references: Any) -> JsonObject:
     if isinstance(obj, Task):
         return studio.tasks.push(obj, **references)
     if (
-        isinstance(obj, (DeterministicRewarder, HumanRewarder))
+        isinstance(obj, (DeterministicVerifier, HumanVerifier))
         or getattr(obj, "kind", None) == "agent"
     ):
-        return studio.rewarders.push(obj, **references)
+        return studio.verifiers.push(obj, **references)
     if isinstance(obj, Agent):
         return studio.agents.push(obj, **references)
     if isinstance(obj, HarnessDefinition):
@@ -1129,7 +1129,7 @@ __all__ = [
     "TasksAPI",
     "TracesAPI",
     "TrialsAPI",
-    "RewardersAPI",
+    "VerifiersAPI",
     "push_object",
     "slugify",
     "studio_base_url",

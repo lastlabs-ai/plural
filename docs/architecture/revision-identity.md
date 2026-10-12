@@ -8,7 +8,7 @@ nav: false
 ---
 # Revision identity
 
-Every saved revision of an Environment, Rewarder, Task, Harness, Agent, or Benchmark
+Every saved revision of an Environment, Verifier, Task, Harness, Agent, or Benchmark
 is identified by a **content hash**: a fingerprint of what the revision contains and
 nothing else. The service also gives each revision a **number** in the order it was
 pushed, and optionally a **release version** that people choose. This page specifies
@@ -41,7 +41,7 @@ revision_hash(kind, content) =
 
 - **`identity`** is the version of these rules. It is hashed in, so a future change to
   the rules can never produce a hash that collides with one made under these.
-- **`kind`** is one of `environment`, `rewarder`, `task`, `harness`, `agent`, or
+- **`kind`** is one of `environment`, `verifier`, `task`, `harness`, `agent`, or
   `benchmark`. The same content under two kinds has two hashes.
 - **`body`** is the revision's canonical definition with the top-level label fields
   `name`, `title`, `version`, and `revision` removed. Only top-level keys are removed;
@@ -64,16 +64,16 @@ because order carries meaning, as in a Benchmark's Task list.
 A revision refers to what it depends on by that dependency's content hash, never by
 name, id, or version:
 
-- A **Task** holds its Environment's hash and one hash per Rewarder.
+- A **Task** holds its Environment's hash and one hash per Verifier.
 - An **Agent** holds its Harness's hash.
 - A **Benchmark** holds one hash per Task.
 
-A Benchmark's hash therefore covers every Task, Environment, and Rewarder beneath it,
+A Benchmark's hash therefore covers every Task, Environment, and Verifier beneath it,
 and changing an Environment changes the hash of every Task and Benchmark above it.
 
 ### Source files
 
-An Environment, Rewarder, or Harness carries code. Its definition includes a
+An Environment, Verifier, or Harness carries code. Its definition includes a
 **source digest** of its directory:
 
 ```text
@@ -86,7 +86,7 @@ source_digest = "sha256:" + hex(SHA-256(
 - Files are ordered by comparing paths **component by component**, each component as
   a string: `a/one.py` sorts before `a-b.txt`, because the component `a` sorts before
   `a-b.txt`.
-- The manifest at the root (`environment.yaml`, `rewarder.yaml`, `harness.yaml`,
+- The manifest at the root (`environment.yaml`, `verifier.yaml`, `harness.yaml`,
   `task.yaml`, `agent.yaml`, `benchmark.yaml`) is left out. Its settings already reach
   the hash through the parsed definition, and its `name`, `title`, and `version` lines
   are labels.
@@ -155,7 +155,7 @@ never changes a hash.
 
 ## Sealed and referenced kinds
 
-Environments, Rewarders, Tasks, Harnesses, and Benchmarks are **sealed**: their hash
+Environments, Verifiers, Tasks, Harnesses, and Benchmarks are **sealed**: their hash
 covers everything that decides how they behave, so a revision behaves the same every
 time it runs. An Agent is **referenced**: it names a hosted model, which its provider
 can change without the Agent's hash changing. The API marks each resource with

@@ -19,7 +19,7 @@ State is the hidden game.
 
 ## State
 
-`secret` is the hidden word. A Task sets it with `initial_state`; a blank secret is chosen from `words.txt` using the seed. `guesses`, `remaining`, and `solved` are episode progress. The Agent never sees State. A Rewarder does.
+`secret` is the hidden word. A Task sets it with `initial_state`; a blank secret is chosen from `words.txt` using the seed. `guesses`, `remaining`, and `solved` are episode progress. The Agent never sees State. A Verifier does.
 
 ## What the Agent sees
 
@@ -28,7 +28,7 @@ word is solved. The secret never appears in it.
 
 ## Rewards
 
-The `solved` rewarder gives per-step credit for training. Rewards never contribute to a score.
+The `solved` verifier gives per-step credit for training. Rewards never contribute to a score.
 
 ## Resources
 

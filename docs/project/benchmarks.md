@@ -29,7 +29,7 @@ flowchart LR
 ## How it works, in plain words
 
 **The leaderboard.** You don't score a Benchmark by hand. You run a Job (one run you
-start) with the Agents you want to compare. Each Task's grader, its Rewarder, scores
+start) with the Agents you want to compare. Each Task's grader, its Verifier, scores
 every attempt. Plural then ranks the Agents on those scores and shows, beside each
 one, how consistent it was, how long it took, and what it cost.
 
@@ -42,7 +42,7 @@ different exam.
 Tasks count more than others, what counts as a pass, and what happens when an attempt
 crashes. It can also declare *tracks*, the rules that make two results fair to
 compare, such as "same loop, no extra instructions, two attempts each". Only the
-Rewarder score counts. Rewards (small per-step credit used for training) never do.
+Verifier score counts. Rewards (small per-step credit used for training) never do.
 
 **Publishing.** Everything you build and run stays private to your project. If you
 want others to see a release and its leaderboard, you publish it to the Hub in the
@@ -55,7 +55,7 @@ Agents that are accurate enough, then prefer the cheaper ones.
 ## Create a Benchmark
 
 Start from Tasks you already have. Each Task is one case: instructions, an
-Environment, and the Rewarders that define success. See [Tasks](tasks.md) if you
+Environment, and the Verifiers that define success. See [Tasks](tasks.md) if you
 still need to write those.
 
 ```python
@@ -146,7 +146,7 @@ plural benchmark validate support-triage
 plural benchmark push support-triage --with-deps
 ```
 
-`validate` checks the Benchmark and every Task, Environment, and Rewarder it depends
+`validate` checks the Benchmark and every Task, Environment, and Verifier it depends
 on. `push` saves an immutable, private revision; `--with-deps` also pushes
 dependencies that are not hosted yet. Pushing unchanged content reuses the existing
 revision, and a changed file under an unchanged `version` is refused. To use the saved
@@ -154,7 +154,7 @@ Benchmark from Python, load it with `Workspace(Project.find()).get("benchmark",
 "support-triage")` from `plural.project`.
 
 `primary_metric` defaults to `score`, the correctness score written by each Task's
-Rewarders. Leave it as `score` unless you have a named Rewarder score you want to rank
+Verifiers. Leave it as `score` unless you have a named Verifier score you want to rank
 on.
 
 ## Run the Benchmark
@@ -207,7 +207,7 @@ took, and what it cost. Read them together. An overall average hides the tradeof
 
 ### Correctness
 
-Correctness is the Rewarder score. For a support ticket, that is usually 1 when the
+Correctness is the Verifier score. For a support ticket, that is usually 1 when the
 Agent assigned the right category, drafted a reply, and resolved the ticket, and 0
 otherwise. The Benchmark ranks Agents on `primary_metric`, which defaults to this
 score.
@@ -267,7 +267,7 @@ plural trial show TRIAL_ID
 ```
 
 `job show` prints the Job and its Trials, with the per-case scores behind the
-averages. `trial show` prints one Trial's result, Rewarder evidence, and the location
+averages. `trial show` prints one Trial's result, Verifier evidence, and the location
 of its artifacts and logs. Add `--json` to either for the full record. Hosted Jobs
 also appear in the web app under Jobs.
 
@@ -278,7 +278,7 @@ local Trial it is `.plural/jobs/JOB_ID/trials/TRIAL_ID/executions/0/artifacts/`:
    the feedback it received.
 2. **App states** (`apps.json`, `state.json`): each App's State at the start and the
    end, which is what actually changed.
-3. **Rewarder results** (`trial show`, or the Trial's `result.json`): which checks
+3. **Verifier results** (`trial show`, or the Trial's `result.json`): which checks
    passed and the evidence behind the score.
 4. **Receipt** (`receipt.json`, one folder up): which Agent, Task, and Runtime
    produced the result.
@@ -295,7 +295,7 @@ leaderboard.
 ## Use the findings
 
 Keep the Tasks and scoring stable while you compare Agents. When you add cases, change
-a Rewarder, or edit the Environment, push the Benchmark again with `--with-deps`. It
+a Verifier, or edit the Environment, push the Benchmark again with `--with-deps`. It
 becomes a new numbered revision, so earlier results keep their meaning. When the
 revision is ready to cite or publish, give it a version with
 `plural benchmark release NAME 1.1.0`.
@@ -318,9 +318,9 @@ to the Hub is a separate, explicit step on Plural Intel:
 
 1. Pick which results to publish. Each is frozen from exactly the Jobs it ran in, on
    one track; untracked runs are never published.
-2. Choose whether Task instructions and Rewarder findings on example attempts are
+2. Choose whether Task instructions and Verifier findings on example attempts are
    public. Both are private by default because they can reveal answers. Traces,
-   Rewarder setups, hidden state, resources, and secrets are never published.
+   Verifier setups, hidden state, resources, and secrets are never published.
 3. Read the preview of exactly what becomes public, then publish.
 
 A published release never changes. It is addressed by a reference such as
@@ -405,7 +405,7 @@ Each attempt is classified before it is scored:
 
 | Outcome | Examples | Effect |
 | --- | --- | --- |
-| Scored | The Rewarders returned a score | Counts |
+| Scored | The Verifiers returned a score | Counts |
 | Agent failure | The Agent crashed, gave up, or hit its turn, time, or cost limit | Zero by default, or excluded if the release says so |
 | Infrastructure error | Provider outage, lost machine, sandbox failure | Excluded and shown |
 | Cancelled or still running | | Not counted; blocks official ranking while running |

@@ -6,9 +6,9 @@ defined once. The only manifest-specific fields are references: other resources
 by name, Python behavior as ``file.py:Object``, and files by a path relative to
 the manifest.
 
-Rewarders and Agents have no manifest model of their own: their manifests are
-the public :mod:`plural.rewarders` and :class:`plural.Agent` fields, with a
-Rewarder ``check`` written as ``reward.py:function`` and an Agent ``harness``
+Verifiers and Agents have no manifest model of their own: their manifests are
+the public :mod:`plural.verifiers` and :class:`plural.Agent` fields, with a
+Verifier ``check`` written as ``verify.py:function`` and an Agent ``harness``
 written as a Harness name.
 """
 
@@ -136,7 +136,7 @@ class EnvironmentManifest(ManifestModel):
 
 
 class TaskManifest(ManifestModel):
-    """``task.yaml``: instructions, one Environment, and its Rewarders."""
+    """``task.yaml``: instructions, one Environment, and its Verifiers."""
 
     name: str = Field(min_length=1)
     title: str | None = Field(
@@ -147,7 +147,7 @@ class TaskManifest(ManifestModel):
     version: str = "0.1.0"
     instructions: str = "instruction.md"
     environment: str = Field(min_length=1)
-    rewarders: list[str] = Field(min_length=1)
+    verifiers: list[str] = Field(min_length=1)
     resources: list[str] = Field(default_factory=lambda: ["resources"])
     goals: list[str] = Field(default_factory=list)
     info: Any = None
@@ -173,7 +173,7 @@ class HarnessManifest(ManifestModel):
 class BenchmarkManifest(BenchmarkRelease):
     """``benchmark.yaml``: Task references plus release and scoring rules.
 
-    ``purpose`` is the Benchmark's motivation. It ranks on the Rewarder-derived
+    ``purpose`` is the Benchmark's motivation. It ranks on the Verifier-derived
     ``score`` only; step rewards never contribute.
     """
 

@@ -1,10 +1,10 @@
 # Task: instructions for the Agent, the one Environment it runs in, and the
-# Rewarders that score it. Files under resources/ are given to the Agent.
+# Verifiers that score it. Files under resources/ are given to the Agent.
 name: hard-01
 version: 0.1.1
 instructions: instruction.md
 environment: wordle
-rewarders:
+verifiers:
   - solved
 # The hidden word. It is State, so the Agent never sees it.
 initial_state:

@@ -2,7 +2,7 @@
 route: /docs/guides/connect-mcp-server
 title: Connect an MCP server
 order: 32
-description: Turn any MCP server into an App, so Agents can be evaluated and trained against it. Covers local and remote servers, Agent credentials and secrets, choosing tools, resetting a sandbox, and checking state in Rewarders.
+description: Turn any MCP server into an App, so Agents can be evaluated and trained against it. Covers local and remote servers, Agent credentials and secrets, choosing tools, resetting a sandbox, and checking state in Verifiers.
 audience: all
 nav: true
 nav_group: Build
@@ -185,7 +185,7 @@ scopes; the system that issued the token does.
 ### Setup secrets
 
 Some values belong to the project, not to any Agent: the admin token a `reset` command
-uses to wipe a sandbox, or a key a Rewarder needs. List those under `secrets`, and store
+uses to wipe a sandbox, or a key a Verifier needs. List those under `secrets`, and store
 each once in the hosted project, or export it:
 
 ```bash
@@ -276,37 +276,37 @@ apps:
       credentials: [CRM_TOKEN]
 ```
 
-## 6. Check the work in a Rewarder
+## 6. Check the work in a Verifier
 
-A Rewarder should check what happened in the system, not what the Agent says
+A Verifier should check what happened in the system, not what the Agent says
 happened. There are two ways.
 
 **The snapshot.** If the App has a `snapshot` hook, its output is the App's final
 state:
 
 ```python
-from plural import Episode, RewarderOutput
+from plural import Episode, VerifierOutput
 
 
-def ticket_closed(episode: Episode) -> RewarderOutput:
+def ticket_closed(episode: Episode) -> VerifierOutput:
     tickets = episode.apps["crm"].final["tickets"]
     closed = any(item["id"] == "T-7" and item["status"] == "closed" for item in tickets)
-    return RewarderOutput(score=float(closed))
+    return VerifierOutput(score=float(closed))
 ```
 
-**A query.** A Rewarder can call one of the App's read-only tools while the Trial's
+**A query.** A Verifier can call one of the App's read-only tools while the Trial's
 Runtime is still running:
 
 ```python
-from plural import Episode, RewarderOutput
+from plural import Episode, VerifierOutput
 
 
-def ticket_closed(episode: Episode) -> RewarderOutput:
+def ticket_closed(episode: Episode) -> VerifierOutput:
     ticket = episode.apps["crm"].query("get_ticket", id="T-7")
-    return RewarderOutput(score=float(ticket["status"] == "closed"))
+    return VerifierOutput(score=float(ticket["status"] == "closed"))
 ```
 
-`query` refuses a tool that changes state, so a Rewarder can't alter what it checks.
+`query` refuses a tool that changes state, so a Verifier can't alter what it checks.
 It returns the tool's structured content when the server sends some, and its text
 otherwise.
 
@@ -356,11 +356,11 @@ environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local
 | `exclude` | Never offer these tools. |
 | `reset` | Command run at the start of each episode, with the App's starting state as JSON on stdin. |
 | `snapshot` | Command that prints the App's state as JSON. |
-| `snapshot_on_step` | Also snapshot around every action, so a Rewarder's `step` check receives `previous_state` and `current_state`. Off by default, since it costs a call per step. |
+| `snapshot_on_step` | Also snapshot around every action, so a Verifier's `reward` function receives `previous_state` and `current_state`. Off by default, since it costs a call per step. |
 | `actions` | Tool declarations to use instead of asking the server, so the Environment loads without reaching it. |
 | `timeout_seconds` | How long one tool call may run. Default 60. |
 | `credentials` | Names the running Agent supplies, such as its own API token. |
-| `secrets` | Names the project supplies, for `reset` and `snapshot` commands and Rewarders. |
+| `secrets` | Names the project supplies, for `reset` and `snapshot` commands and Verifiers. |
 
 ## Troubleshooting
 

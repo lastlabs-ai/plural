@@ -205,7 +205,7 @@ class Outcome(BaseModel):
     """Labeled outcome attached to a trace.
 
     Attributes:
-        scores: Named Rewarder outputs.
+        scores: Named Verifier outputs.
         reward: Scalar reward used for RL / ranking.
         labels: Discrete labels (e.g. intent, success/fail).
         feedback: Free-form human or automated feedback.
@@ -226,8 +226,8 @@ class TraceArtifactReference(BaseModel):
     size_bytes: int = Field(ge=0)
 
 
-class TraceRewarderResult(BaseModel):
-    """Final Rewarder or pending human-review state."""
+class TraceVerifierResult(BaseModel):
+    """Final Verifier or pending human-review state."""
 
     name: str
     digest: str
@@ -286,7 +286,7 @@ class Trace(BaseModel):
     capability_denials: tuple[CapabilityDenial, ...] = ()
     task_revision_digest: str | None = None
     environment_revision_digest: str | None = None
-    rewarder_revision_digests: tuple[str, ...] = ()
+    verifier_revision_digests: tuple[str, ...] = ()
     agent_revision_digest: str | None = None
     harness_revision_digest: str | None = None
     job_id: str | None = None
@@ -296,7 +296,7 @@ class Trace(BaseModel):
     steps: list[Step] = Field(default_factory=list)
     final_state: dict[str, Any] | None = None
     outcome: Outcome | None = None
-    rewarder_results: list[TraceRewarderResult] = Field(default_factory=list)
+    verifier_results: list[TraceVerifierResult] = Field(default_factory=list)
     artifacts: list[TraceArtifactReference] = Field(default_factory=list)
     tito_artifact: TraceArtifactReference | None = None
     metrics: dict[str, Any] = Field(default_factory=dict)
@@ -617,7 +617,7 @@ class Trace(BaseModel):
         """Attach or update the outcome.
 
         Args:
-            scores: Named Rewarder outputs.
+            scores: Named Verifier outputs.
             reward: Scalar reward.
             labels: Discrete labels.
             feedback: Free-form feedback.

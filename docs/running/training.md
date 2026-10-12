@@ -12,7 +12,7 @@ outcome: You understand what train mode requires and what a downstream trainer m
 
 Sometimes evaluation shows that even the best model keeps making the same kind of
 mistake. Training is how you fix that. Plural lets you reuse the Tasks,
-Environments, and Rewarders you already built to collect graded training runs,
+Environments, and Verifiers you already built to collect graded training runs,
 then test the improved model on the same kind of work.
 
 Plural prepares the learning data; it does not train the model. Updating model
@@ -23,19 +23,19 @@ training system.
 
 Two numbers matter here, and they do different jobs:
 
-- A **score** comes from the Rewarders, the graders, at the end of an attempt. It
+- A **score** comes from the Verifiers, the graders, at the end of an attempt. It
   says how well the Task went, and it is the only thing a Benchmark ranks on.
 - A **reward** is small credit for one move, or one stretch of a trajectory, such as
   getting closer to the answer. A training algorithm uses rewards to work out
-  which moves helped. Rewards never count toward the score, and the Agent never
-  sees them.
+  which moves helped. Rewards count toward the score only when a Verifier's `check`
+  is `total_reward`, and the Agent never sees them.
 
 The steps below use both.
 
 ## 1. Establish a baseline
 
 Run the Agent in eval mode and inspect its failures. Confirm that the Environment
-gives it the information and actions needed to succeed, and that the Rewarders
+gives it the information and actions needed to succeed, and that the Verifiers
 score correctly. Fix setup problems before treating low scores as model
 weaknesses.
 
@@ -104,38 +104,37 @@ available, stored with `plural auth login --api-key-stdin` or set as
 `PLURAL_API_KEY`.
 
 > **Tip:** Start with one Task and one attempt. Before increasing concurrency,
-> inspect the token artifact, trajectory, final State, and Rewarder results.
+> inspect the token artifact, trajectory, final State, and Verifier results.
 > Complete any pending human reviews before using the run as fully scored data.
 
 ## 4. Add rewards where needed
 
-Final Rewarders measure Task success in both eval and train mode. Rewards provide
+Final Verifiers measure Task success in both eval and train mode. Rewards provide
 the finer signal an algorithm needs to assign credit, such as progress toward a
 solution. Every reward a Trial earns goes in its **reward ledger**, `rewards.jsonl`
 in the Trial's artifacts, whatever produced it. Each line names its source, its
-rewarder and version, its value, and its target: a step, a model call, or a span of
-text or tokens within one. Rewards never reach the Agent and never count toward the
-score.
+verifier and version, its value, and its target: a step, a model call, or a span of
+text or tokens within one. Rewards never reach the Agent.
 
 There are two ways to produce them.
 
-**While the episode runs.** A Task's Rewarder can have a `step` check, which runs right
+**While the episode runs.** A Task's Verifier can have a `reward` function, which runs right
 after each action, beside the Apps, and can read every App. Because it belongs to the
 Task, the same Environment can be rewarded differently for different Tasks. See
-[Reward each step](../project/rewarders.md#reward-each-step). Train mode also
+[Reward each step](../project/verifiers.md#reward-each-step). Train mode also
 writes each step's reward as a `reward` event in the Job's progress events.
 
-**After the episode, in hindsight.** A hindsight rewarder reads a whole finished
+**After the episode, in hindsight.** A hindsight verifier reads a whole finished
 Trial, including its score, every step, and each App's final State, and credits
 whichever moves deserve it. It suits signals you can only judge at the end, such as
 "the guess that solved it, weighted by how few it took", or labels you decide on
 later:
 
 ```python
-from plural import HindsightTrial, hindsight_rewarder
+from plural import HindsightTrial, hindsight_verifier
 
 
-@hindsight_rewarder(version="1")
+@hindsight_verifier(version="1")
 def fewer_guesses(trial: HindsightTrial):
     """Credit the solving guess more when it took fewer guesses."""
     guesses = trial.steps("guess")
@@ -151,7 +150,7 @@ Run it on Trials you already have. This labels a stored Job without running anyt
 again:
 
 ```bash
-plural rewards apply rewarders.py:fewer_guesses --job JOB_ID
+plural rewards apply verifiers.py:fewer_guesses --job JOB_ID
 plural rewards show TRIAL_ID
 ```
 
@@ -169,9 +168,9 @@ If you pushed the Job with `plural job push`, `apply` adds the new records to th
 hosted Trials' ledgers too, where the Trial page shows each reward on the step it
 credits. Each record is stored once, so applying again never duplicates one.
 
-The final Task score remains the weighted aggregate of its Rewarders. Rewards
-never contribute to it. Keep that evaluation metric stable as you experiment with
-rewards.
+The final Task score remains the weighted aggregate of its Verifiers. Rewards
+contribute to it only through a Verifier whose `check` is `total_reward`. Keep that
+evaluation metric stable as you experiment with rewards.
 
 ## 5. Export training data
 
@@ -187,8 +186,8 @@ reward credited to it, any span rewards mapped onto token positions, and its TIT
 record when the Trial captured one. A step's reward is credited to the model call
 whose turn issued the action. The options choose which labels to use:
 
-- `--rewarder NAME` or `--rewarder NAME@VERSION` keeps only those rewarders. By
-  default every rewarder is used, at its latest version.
+- `--verifier NAME` or `--verifier NAME@VERSION` keeps only those verifiers. By
+  default every verifier is used, at its latest version.
 - `--aggregate sum|mean|last` combines several rewards on one target. The default is
   `sum`.
 - `--include-off-recording` keeps rewards on steps where a replayed App answered a

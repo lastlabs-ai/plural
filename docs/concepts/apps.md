@@ -18,7 +18,7 @@ Every App does the same three things, whatever kind it is:
 
 - **Offers actions.** Each action has a name, a description the Agent reads, and typed
   parameters. What an action returns is what the Agent sees next.
-- **Keeps state the Agent never sees.** A Rewarder reads it at the end to check the
+- **Keeps state the Agent never sees.** A Verifier reads it at the end to check the
   work. The Agent only sees what actions return.
 - **Declares the credentials it needs,** such as `CRM_TOKEN`. The Agent that runs
   supplies the values, so it acts as its own user with its own scopes. They reach only
@@ -74,7 +74,7 @@ def state() -> dict:
 
 Name it in `environment.yaml` with `server: server.py:mcp`, and Plural starts a fresh
 copy for every Trial. `@plural.mcp.reset` receives the Task's starting state and
-`@plural.mcp.snapshot` reports state to Rewarders; the Agent sees neither as a tool.
+`@plural.mcp.snapshot` reports state to Verifiers; the Agent sees neither as a tool.
 [Build an MCP server](../guides/build-mcp-server.md) walks through it, including how a
 server reads the Environment's and the Task's files.
 
@@ -199,7 +199,7 @@ class SupportDesk(Environment):
 
 What `on_step` does is not an Agent action and is never shown to the Agent. It
 changes the world and gives no reward: rewards come from the Task's
-[Rewarders](../project/rewarders.md#reward-each-step).
+[Verifiers](../project/verifiers.md#reward-each-step).
 
 ## Control levels
 
@@ -228,21 +228,21 @@ The rules that follow from it:
 To use a remote system in a Benchmark, point it at a sandbox and give it a reset hook,
 which makes it `sandboxed`.
 
-## State, snapshots, and Rewarders
+## State, snapshots, and Verifiers
 
 At the start and end of each episode, Plural takes a **snapshot** of every App: a
 Python App's `state`, what a FastMCP server's `@plural.mcp.snapshot` returns, or
-whatever an MCP App's `snapshot` command prints. A Rewarder reads them from the episode:
+whatever an MCP App's `snapshot` command prints. A Verifier reads them from the episode:
 
 ```python
-from plural import Episode, RewarderOutput
+from plural import Episode, VerifierOutput
 
 
-def refunded(episode: Episode) -> RewarderOutput:
+def refunded(episode: Episode) -> VerifierOutput:
     crm = episode.apps["crm"]
     ticket = crm.query("get_ticket", id="T-7")
     done = ticket["status"] == "closed" and crm.final is not None
-    return RewarderOutput(score=float(done))
+    return VerifierOutput(score=float(done))
 ```
 
 - `episode.apps[name].initial` and `.final` are the two snapshots, and `.control` is
@@ -250,12 +250,12 @@ def refunded(episode: Episode) -> RewarderOutput:
 - `episode.state` is a shortcut: with one App, its final snapshot; with several, a
   mapping from App name to final snapshot.
 - `query` calls one of the App's read-only actions while the Trial's Runtime is still
-  running, so a Rewarder can check the real system instead of trusting what the
+  running, so a Verifier can check the real system instead of trusting what the
   Agent said. Plural refuses an action that changes state.
 
-A Rewarder's `step` check reads the same Apps after every action, through
+A Verifier's `reward` function reads the same Apps after every action, through
 `step.apps`, to reward each step. See
-[Reward each step](../project/rewarders.md#reward-each-step).
+[Reward each step](../project/verifiers.md#reward-each-step).
 
 ## Credentials and secrets
 
@@ -267,7 +267,7 @@ An App never holds a credential's value. It declares the names it needs, and
   own token, so its scopes decide what it can do, and every Trial records which Agent's
   credential was used.
 - **Secrets** come from the project. Use them only for setup: a `reset` or `snapshot`
-  command's admin token, or a key a Rewarder needs. Those commands never see an
+  command's admin token, or a key a Verifier needs. Those commands never see an
   Agent's credentials.
 
 ```python
@@ -303,7 +303,7 @@ Before anything starts, the Job checks that the Agent carries every credential t
 Apps need and has a value for each. A run with `--model` carries none, so it can't use
 an App that needs one. For a local run you can export the value instead of storing it.
 
-Values travel only to the process that runs the Apps and to Rewarder queries made
+Values travel only to the process that runs the Apps and to Verifier queries made
 through it. They are never written to the project or the Trial, shown to the model,
 or given to its Harness. Each Trial records, for every credential: the App, the Agent
 and its revision, the declared scopes, where the value came from, and a short
@@ -318,7 +318,7 @@ what you declared. Run `plural env validate` to see what each App needs, and
 
 An App reports what happened: its State, its snapshots, and what its actions return.
 It doesn't judge any of it. Whether an action deserved credit depends on the Task, and
-often on more than one App, so per-step rewards come from the Task's Rewarders, which
+often on more than one App, so per-step rewards come from the Task's Verifiers, which
 can read every App:
 
 ```python
@@ -329,8 +329,8 @@ def solved(step: Step) -> float:
     return 1.0 if step.current_state["solved"] and not step.previous_state["solved"] else 0.0
 ```
 
-Name it as the `step` of a Rewarder the Task lists. See
-[Reward each step](../project/rewarders.md#reward-each-step).
+Name it as the `reward` of a Verifier the Task lists. See
+[Reward each step](../project/verifiers.md#reward-each-step).
 
 ## Where to go next
 
@@ -339,5 +339,5 @@ Name it as the `step` of a Rewarder the Task lists. See
 - [Environments](../project/environments.md): Runtimes, resources, limits, and how an
   episode ends.
 - [Actions](actions.md): what the Agent sees when it acts.
-- [Rewarders](../project/rewarders.md): score an episode and reward each step from App
+- [Verifiers](../project/verifiers.md): score an episode and reward each step from App
   state.

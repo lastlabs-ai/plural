@@ -22,7 +22,7 @@ app = typer.Typer(
     help=(
         "Build, push, and run Plural projects.\n\n"
         "Start with `plural project init <name>`, add resources with "
-        "`plural <env|task|rewarder|harness|agent|benchmark> init <name>`, and run them "
+        "`plural <env|task|verifier|harness|agent|benchmark> init <name>`, and run them "
         "with `plural run --task <name> --model <model>`."
     ),
     no_args_is_help=True,

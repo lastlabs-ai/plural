@@ -1,7 +1,8 @@
 """Rewards: credit attached to trajectory targets, kept in a ledger beside the trajectory.
 
-A reward is credit for part of what happened in an episode. It never contributes
-to a score and never reaches the Agent. Each one is a :class:`RewardRecord` in
+A reward is credit for part of what happened in an episode. It never reaches the
+Agent, and counts toward a score only through a Verifier whose ``check`` is
+:func:`~plural.total_reward`. Each one is a :class:`RewardRecord` in
 an append-only ledger, ``rewards.jsonl``, stored next to the trajectory rather
 than inside it. The trajectory stays immutable, so a Trial can be relabeled any
 number of times without rerunning it, and older labels are kept.
@@ -14,8 +15,8 @@ A record targets one of three things, through a :class:`RewardTarget`:
   the TITO record of that model call.
 
 Rewards come from two places. Step rewards are given while the episode runs,
-by the ``step`` hook of each of the Task's Rewarders, beside the Apps.
-Hindsight rewards are given after it ends, by :func:`hindsight_rewarder`
+by the ``reward`` hook of each of the Task's Verifiers, beside the Apps.
+Hindsight rewards are given after it ends, by :func:`hindsight_verifier`
 functions that read the whole trajectory, the Apps' snapshots, and the score.
 Run them in a Job with ``Job(..., hindsight=[...])``, or later on stored Trials
 with ``plural rewards apply``.
@@ -54,7 +55,7 @@ def event_id(sequence: int) -> str:
 class RewardTarget(FrozenModel):
     """What a reward is credit for.
 
-    Build one with :meth:`step`, :meth:`event`, :meth:`span`, or :meth:`tokens`.
+    Build one with :meth:`reward`, :meth:`event`, :meth:`span`, or :meth:`tokens`.
     """
 
     kind: Literal["step", "event", "span"]
@@ -136,7 +137,7 @@ class RewardRecord(FrozenModel):
     value: float
     weight: float = 1.0
     source: RewardSource
-    rewarder: str = Field(min_length=1)
+    verifier: str = Field(min_length=1)
     version: str = ""
     app: str | None = None
     off_recording: bool = False
@@ -186,7 +187,7 @@ def append_ledger(path: str | Path, records: Iterable[RewardRecord]) -> int:
     """Append records to a ledger, creating it if needed.
 
     Nothing is overwritten, and a record whose ``record_id`` is already in the
-    ledger is skipped, so applying the same hindsight rewarder again adds nothing.
+    ledger is skipped, so applying the same hindsight verifier again adds nothing.
 
     Returns:
         How many records were added.
@@ -203,7 +204,7 @@ def append_ledger(path: str | Path, records: Iterable[RewardRecord]) -> int:
 def online_records(episode: Sequence[Mapping[str, Any]]) -> list[RewardRecord]:
     """The step rewards recorded on each step of an ``episode.jsonl``.
 
-    Each Rewarder's ``step`` signal becomes one record targeting that step,
+    Each Verifier's ``reward`` signal becomes one record targeting that step,
     including on a step whose action rejected its input. A step that reports
     a total reward with no signals, as a third-party Environment may, becomes
     one ``environment`` record named ``reward``.
@@ -230,7 +231,7 @@ def online_records(episode: Sequence[Mapping[str, Any]]) -> list[RewardRecord]:
                     value=float(signal.get("value") or 0),
                     weight=float(signal.get("weight", 1.0)),
                     source="step",
-                    rewarder=str(signal.get("name") or "reward"),
+                    verifier=str(signal.get("name") or "reward"),
                     version=str(signal.get("version") or ""),
                     app=str(app) if app else None,
                     off_recording=off_recording,
@@ -243,18 +244,18 @@ def online_records(episode: Sequence[Mapping[str, Any]]) -> list[RewardRecord]:
                     target=target,
                     value=float(reward),
                     source="environment",
-                    rewarder="reward",
+                    verifier="reward",
                     off_recording=off_recording,
                 )
             )
     return records
 
 
-# Hindsight rewarders.
+# Hindsight verifiers.
 
 
 class Credit(FrozenModel):
-    """What a hindsight rewarder returns: a value for one target."""
+    """What a hindsight verifier returns: a value for one target."""
 
     target: RewardTarget
     value: float
@@ -262,13 +263,13 @@ class Credit(FrozenModel):
 
 
 class HindsightTrial:
-    """Everything a hindsight rewarder can read about one finished Trial.
+    """Everything a hindsight verifier can read about one finished Trial.
 
     ``events`` is the episode record list, each with an ``event_id``. ``apps``
-    maps each App name to its snapshots (``initial``, ``final``, ``control``).
+    maps each App name to its snapshots (``initial``, ``check``, ``control``).
     ``score`` is the Trial's score, or ``None`` when it was not scored.
     ``rewards`` is the ledger so far. Nothing here reaches the Agent, and
-    nothing a rewarder returns changes the score.
+    nothing a verifier returns changes the score.
     """
 
     def __init__(
@@ -315,14 +316,14 @@ class HindsightTrial:
         """Credit ``value`` to a target, or to a step given by its event id.
 
         Returns:
-            The credit to return from the rewarder.
+            The credit to return from the verifier.
         """
         resolved = RewardTarget.step(target) if isinstance(target, str) else target
         return Credit(target=resolved, value=value, metadata=metadata)
 
 
-class HindsightRewarder:
-    """A function that scores rewards after an episode. Make one with :func:`hindsight_rewarder`."""
+class HindsightVerifier:
+    """A function that scores rewards after an episode. Make one with :func:`hindsight_verifier`."""
 
     def __init__(self, fn: Callable[[HindsightTrial], Any], *, name: str, version: str) -> None:
         self.fn = fn
@@ -348,7 +349,7 @@ class HindsightRewarder:
             New records with source ``hindsight``.
 
         Raises:
-            ValueError: When the rewarder targets an event the Trial does not have.
+            ValueError: When the verifier targets an event the Trial does not have.
         """
         produced = self.fn(trial)
         if produced is None:
@@ -361,7 +362,7 @@ class HindsightRewarder:
             credit = item if isinstance(item, Credit) else Credit.model_validate(item)
             if credit.target.event_id not in known:
                 raise ValueError(
-                    f"hindsight rewarder {self.name!r} targets event "
+                    f"hindsight verifier {self.name!r} targets event "
                     f"{credit.target.event_id!r}, which this Trial does not have"
                 )
             identity = [
@@ -379,7 +380,7 @@ class HindsightRewarder:
                     target=credit.target,
                     value=credit.value,
                     source="hindsight",
-                    rewarder=self.name,
+                    verifier=self.name,
                     version=self.version,
                     metadata=credit.metadata,
                 )
@@ -387,7 +388,7 @@ class HindsightRewarder:
         return records
 
 
-def hindsight_rewarder(
+def hindsight_verifier(
     fn: Callable[[HindsightTrial], Any] | None = None,
     *,
     name: str | None = None,
@@ -398,7 +399,7 @@ def hindsight_rewarder(
     The function receives a :class:`HindsightTrial` and returns
     :class:`Credit` values, usually built with ``trial.credit(...)``::
 
-        @hindsight_rewarder(version="2")
+        @hindsight_verifier(version="2")
         def no_deletes(trial: HindsightTrial):
             for step in trial.steps("crm__delete_record"):
                 yield trial.credit(step["event_id"], -1.0)
@@ -407,13 +408,13 @@ def hindsight_rewarder(
     which labels to use.
 
     Returns:
-        A :class:`HindsightRewarder`, or a decorator that makes one.
+        A :class:`HindsightVerifier`, or a decorator that makes one.
     """
 
-    def wrap(function: Callable[[HindsightTrial], Any]) -> HindsightRewarder:
+    def wrap(function: Callable[[HindsightTrial], Any]) -> HindsightVerifier:
         if not callable(function) or not inspect.signature(function).parameters:
-            raise TypeError("a hindsight rewarder is a function that takes a HindsightTrial")
-        return HindsightRewarder(
+            raise TypeError("a hindsight verifier is a function that takes a HindsightTrial")
+        return HindsightVerifier(
             function, name=name or str(getattr(function, "__name__", "hindsight")), version=version
         )
 
@@ -431,7 +432,7 @@ def align_tito(
     """Give each TITO record the ``event_id`` of the model call it captured.
 
     A record that already names its event keeps it. Otherwise the record for
-    model turn ``step`` lines up with the ``step``-th model call.
+    model turn ``reward`` lines up with the ``reward``-th model call.
 
     Returns:
         The TITO records with ``event_id`` set where it can be.
@@ -496,15 +497,15 @@ def training_export(
     ledger: Sequence[RewardRecord],
     *,
     tito: Sequence[Mapping[str, Any]] = (),
-    rewarders: Mapping[str, str | None] | Sequence[str] | None = None,
+    verifiers: Mapping[str, str | None] | Sequence[str] | None = None,
     aggregate: Aggregate = "sum",
     include_off_recording: bool = False,
 ) -> dict[str, Any]:
     """Join a trajectory with its reward ledger for training.
 
-    ``rewarders`` picks which labels to use: a list of names, or a mapping of
+    ``verifiers`` picks which labels to use: a list of names, or a mapping of
     name to the version to use (``None`` for the latest). By default every
-    rewarder is used, at its latest version. A step reward is credited to the
+    verifier is used, at its latest version. A step reward is credited to the
     model call whose turn issued the action. Rewards on the same target are
     combined with ``aggregate``, after applying each record's weight.
 
@@ -513,7 +514,7 @@ def training_export(
         rewards, and its TITO record when there is one; and ``rewards``: the
         records used.
     """
-    selected = _select(ledger, rewarders, include_off_recording)
+    selected = _select(ledger, verifiers, include_off_recording)
     by_id = {
         str(item.get("event_id") or event_id(int(item.get("sequence") or 0))): item
         for item in episode
@@ -551,7 +552,7 @@ def training_export(
                 "token_start": tokens[0] if tokens else None,
                 "token_end": tokens[1] if tokens else None,
                 "value": value,
-                "rewarder": record.rewarder,
+                "verifier": record.verifier,
             }
         )
     turns = [
@@ -574,50 +575,50 @@ def training_export(
 
 def _select(
     ledger: Sequence[RewardRecord],
-    rewarders: Mapping[str, str | None] | Sequence[str] | None,
+    verifiers: Mapping[str, str | None] | Sequence[str] | None,
     include_off_recording: bool,
 ) -> list[RewardRecord]:
     usable = [item for item in ledger if include_off_recording or not item.off_recording]
     wanted: Mapping[str, str | None] | None
-    if rewarders is None:
+    if verifiers is None:
         wanted = None
-    elif isinstance(rewarders, Mapping):
-        wanted = rewarders
+    elif isinstance(verifiers, Mapping):
+        wanted = verifiers
     else:
-        wanted = dict.fromkeys(rewarders)
+        wanted = dict.fromkeys(verifiers)
     # The ledger is append-only, so the last version written is the latest.
     latest: dict[str, str] = {}
     for item in usable:
-        latest[item.rewarder] = item.version
+        latest[item.verifier] = item.version
     chosen: list[RewardRecord] = []
     for item in usable:
-        if wanted is not None and item.rewarder not in wanted:
+        if wanted is not None and item.verifier not in wanted:
             continue
-        version = wanted.get(item.rewarder) if wanted is not None else None
+        version = wanted.get(item.verifier) if wanted is not None else None
         if version is None:
-            version = latest.get(item.rewarder, "")
+            version = latest.get(item.verifier, "")
         if item.version == version:
             chosen.append(item)
     return chosen
 
 
-def load_rewarder(reference: str, root: Path | None = None) -> HindsightRewarder:
-    """Load ``path.py:name`` as a hindsight rewarder.
+def load_verifier(reference: str, root: Path | None = None) -> HindsightVerifier:
+    """Load ``path.py:name`` as a hindsight verifier.
 
     Returns:
-        The rewarder.
+        The verifier.
 
     Raises:
-        TypeError: When the reference does not name a hindsight rewarder.
+        TypeError: When the reference does not name a hindsight verifier.
     """
     from plural.environments.env import load_reference
 
     value = load_reference(reference, root or Path.cwd())
-    if isinstance(value, HindsightRewarder):
+    if isinstance(value, HindsightVerifier):
         return value
     if callable(value):
-        return HindsightRewarder(value, name=getattr(value, "__name__", reference), version="1")
-    raise TypeError(f"{reference} is not a hindsight rewarder")
+        return HindsightVerifier(value, name=getattr(value, "__name__", reference), version="1")
+    raise TypeError(f"{reference} is not a hindsight verifier")
 
 
 def trial_from_artifacts(folder: Path, *, score: float | None = None) -> HindsightTrial:
@@ -634,7 +635,7 @@ def trial_from_artifacts(folder: Path, *, score: float | None = None) -> Hindsig
     )
     apps_file = folder / "apps.json"
     apps = json.loads(apps_file.read_text()) if apps_file.is_file() else {}
-    from plural.rewarders import Episode
+    from plural.verifiers import Episode
 
     return HindsightTrial(
         events,
@@ -647,7 +648,7 @@ def trial_from_artifacts(folder: Path, *, score: float | None = None) -> Hindsig
 __all__ = [
     "LEDGER_FILE",
     "Credit",
-    "HindsightRewarder",
+    "HindsightVerifier",
     "HindsightTrial",
     "RewardRecord",
     "RewardSource",
@@ -656,8 +657,8 @@ __all__ = [
     "append_ledger",
     "dump_ledger",
     "event_id",
-    "hindsight_rewarder",
-    "load_rewarder",
+    "hindsight_verifier",
+    "load_verifier",
     "online_records",
     "parse_ledger",
     "read_ledger",

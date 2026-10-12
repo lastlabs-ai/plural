@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 
 from plural.cli.main import app
 
-RESOURCE_GROUPS = ("env", "task", "rewarder", "harness", "agent", "benchmark")
+RESOURCE_GROUPS = ("env", "task", "verifier", "harness", "agent", "benchmark")
 RESOURCE_VERBS = {"init", "validate", "push", "release", "pull", "show", "list"}
 
 
@@ -108,9 +108,9 @@ def test_old_environment_manifests_fail_with_the_unknown_fields(
 ) -> None:
     project = write_project(tmp_path / "support-desk")
     manifest = project.root / "environments/queue/environment.yaml"
-    manifest.write_text(manifest.read_text() + "tasks: []\nrewarder: null\n")
+    manifest.write_text(manifest.read_text() + "tasks: []\nverifier: null\n")
     monkeypatch.chdir(project.root)
     result = CliRunner().invoke(app, ["env", "validate", "queue"])
     assert result.exit_code == 1
     assert "tasks" in result.output
-    assert "rewarder" in result.output
+    assert "verifier" in result.output

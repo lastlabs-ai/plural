@@ -24,7 +24,7 @@ read [Core concepts](../getting-started/concepts.md) first.
 Here is a complete evaluation in Python: a grader, one assignment, an exam holding
 it, a contestant, and the Job that runs them.
 
-- The **Rewarder** is the grader. Here, `resolved` gives a score of 1 when the ticket
+- The **Verifier** is the grader. Here, `resolved` gives a score of 1 when the ticket
   ends up done, and 0 otherwise.
 - The **Task** is one assignment: resolve this ticket, in this world, graded this way.
 - The **Benchmark** is the exam, a fixed set of Tasks.
@@ -32,22 +32,22 @@ it, a contestant, and the Job that runs them.
 
 The example assumes you have created the support queue `environment` from the
 [tutorial](../tutorials/support-queue.md). Save this code in a Python file so Plural
-can load the Rewarder function. A live run needs an API key: store a Plural API key
+can load the Verifier function. A live run needs an API key: store a Plural API key
 with `plural auth login --api-key-stdin`, or export `PLURAL_API_KEY`.
 
 ```python
-from plural import Agent, Benchmark, Client, Episode, Job, Task, RewarderOutput
-from plural.rewarders import DeterministicRewarder
+from plural import Agent, Benchmark, Client, Episode, Job, Task, VerifierOutput
+from plural.verifiers import DeterministicVerifier
 
-def resolved(episode: Episode) -> RewarderOutput:
-    return RewarderOutput(score=float(bool(episode.state.get("done"))))
+def resolved(episode: Episode) -> VerifierOutput:
+    return VerifierOutput(score=float(bool(episode.state.get("done"))))
 
-rewarder = DeterministicRewarder(name="resolved", final=resolved)
+verifier = DeterministicVerifier(name="resolved", check=resolved)
 task = Task(
     name="ticket-1",
     instructions="Resolve the support ticket.",
     environment=environment,
-    rewarders=(rewarder,),
+    verifiers=(verifier,),
 )
 benchmark = Benchmark(
     name="support",
@@ -63,7 +63,7 @@ job = Job(benchmark, agents=(agent,), client=Client())
 
 A few defaults to know:
 
-- Environment, Agent, Harness, Rewarder, and Task versions default to `0.1.0`. A
+- Environment, Agent, Harness, Verifier, and Task versions default to `0.1.0`. A
   Benchmark `version` is required.
 - A Job defaults to eval mode, one attempt, and concurrency one.
 - `client=Client()` authenticates the Job's model calls with your Plural API key. The
@@ -122,7 +122,7 @@ agent = context.agent(model="project/support-model", provider="project-gateway")
 workspace = Workspace(Project.find(), catalog=context.catalog)
 ```
 
-Passing `catalog` to `Workspace` validates the project's Agents and Rewarders against
+Passing `catalog` to `Workspace` validates the project's Agents and Verifiers against
 the same entries.
 
 A Job sends every model call through the Plural gateway at `PLURAL_GATEWAY_URL`,
@@ -142,7 +142,7 @@ for trial in result.trials:
     print(trial.status, trial.score, trial.receipt.artifact_hashes)
 ```
 
-Each Trial has a status, a score from its Rewarders, and a receipt that records the
+Each Trial has a status, a score from its Verifiers, and a receipt that records the
 exact inputs it used and the hash of every file it produced.
 
 For power users:
@@ -190,7 +190,7 @@ immediately, and never changes afterwards.
 
 `Client.push` saves one object from Python as an immutable, private revision. An
 object that references others needs their hosted revision ids, such as a Task's
-`environment_revision_id` and `rewarder_revision_ids`. See
+`environment_revision_id` and `verifier_revision_ids`. See
 [Updating and versioning](../project/updating.md).
 
 Every exported class and function, with its fields and signature, is listed in the

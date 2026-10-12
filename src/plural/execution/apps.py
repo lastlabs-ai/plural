@@ -3,7 +3,7 @@
 The Job starts one App host per Trial in the Environment workspace, before the
 Harness runs. Every action the Harness takes is a short client command that
 talks to that host, so the Harness never holds App secrets. After the episode
-the Job asks the host for each App's snapshots, lets function Rewarders query
+the Job asks the host for each App's snapshots, lets function Verifiers query
 the still-running Apps, and stops the host before the Runtime is destroyed.
 """
 
@@ -18,9 +18,9 @@ from typing import Any
 
 from plural.environments.definition import EnvironmentDefinition
 from plural.environments.env import normalize_initial_state
-from plural.rewarders import DeterministicRewarder
 from plural.sandbox import ExecRequest, FileUpload, SandboxHandle, SandboxProvider
 from plural.tasks import TaskDefinition
+from plural.verifiers import DeterministicVerifier
 
 WORKSPACE = "/workspace/environment"
 HOST_COMMAND = ("python", "-m", "plural.apps.daemon")
@@ -41,7 +41,7 @@ def environment_payload(task: TaskDefinition) -> dict[str, Any]:
     """What a Harness learns about the Environment.
 
     It lists each exposed action with the command that runs it, and nothing
-    about App state, rewarders, or secrets.
+    about App state, verifiers, or secrets.
 
     Returns:
         The ``environment`` field of the Harness run request.
@@ -132,10 +132,10 @@ def _source_files(folder: Path) -> list[Path]:
     )
 
 
-def step_rewarder_files(task: TaskDefinition) -> tuple[list[dict[str, str]], list[FileUpload]]:
-    """The Task's ``step`` hooks, and their source, for the App host to import.
+def reward_hook_files(task: TaskDefinition) -> tuple[list[dict[str, str]], list[FileUpload]]:
+    """The Task's ``reward`` hooks, and their source, for the App host to import.
 
-    A project Rewarder ships its whole folder; a function defined elsewhere
+    A project Verifier ships its whole folder; a function defined elsewhere
     ships the one file it is defined in.
 
     Returns:
@@ -146,24 +146,24 @@ def step_rewarder_files(task: TaskDefinition) -> tuple[list[dict[str, str]], lis
     """
     entries: list[dict[str, str]] = []
     uploads: list[FileUpload] = []
-    for binding in task.rewarders:
-        rewarder = binding.rewarder
-        if not isinstance(rewarder, DeterministicRewarder) or rewarder.step is None:
+    for binding in task.verifiers:
+        verifier = binding.verifier
+        if not isinstance(verifier, DeterministicVerifier) or verifier.reward is None:
             continue
-        hook = rewarder.step_fn
+        hook = verifier.reward_fn
         if hook is None:
             raise ValueError(
-                f"Rewarder {rewarder.name!r} names its step hook {rewarder.step_ref!r}, but "
+                f"Verifier {verifier.name!r} names its reward hook {verifier.reward_ref!r}, but "
                 "it was never imported, so there is no code to run. Load the Task from its "
                 "project, or pass the function itself."
             )
         source = inspect.getsourcefile(hook)
         if source is None:
-            raise ValueError(f"Rewarder {rewarder.name!r}: cannot find the step hook's source.")
+            raise ValueError(f"Verifier {verifier.name!r}: cannot find the reward hook's source.")
         path = Path(source).resolve()
-        folder = rewarder.source_dir.resolve() if rewarder.source_dir else path.parent
-        files = _source_files(folder) if rewarder.source_dir else [path]
-        stage = f".plural/rewarders/{rewarder.name}"
+        folder = verifier.source_dir.resolve() if verifier.source_dir else path.parent
+        files = _source_files(folder) if verifier.source_dir else [path]
+        stage = f".plural/verifiers/{verifier.name}"
         uploads.extend(
             FileUpload(
                 path=f"{stage}/{item.relative_to(folder).as_posix()}", data=item.read_bytes()
@@ -172,8 +172,8 @@ def step_rewarder_files(task: TaskDefinition) -> tuple[list[dict[str, str]], lis
         )
         entries.append(
             {
-                "name": rewarder.name,
-                "version": rewarder.version,
+                "name": verifier.name,
+                "version": verifier.version,
                 "dir": stage,
                 "python": f"{path.relative_to(folder).as_posix()}:{hook.__qualname__}",
             }
@@ -182,20 +182,20 @@ def step_rewarder_files(task: TaskDefinition) -> tuple[list[dict[str, str]], lis
 
 
 def host_files(task: TaskDefinition) -> tuple[FileUpload, ...]:
-    """The files the App host reads: the Environment, the Task, and its ``step`` hooks.
+    """The files the App host reads: the Environment, the Task, and its ``reward`` hooks.
 
     Returns:
         Uploads relative to the Environment workspace.
     """
     environment = task.environment
     state = normalize_initial_state(environment, task.state or {})
-    rewarders, sources = step_rewarder_files(task)
+    verifiers, sources = reward_hook_files(task)
     task_file = {
         "initial_state": state,
         "info": task.info,
         "seed": None,
         "task": {"name": task.task_id, "metadata": task.metadata},
-        "rewarders": rewarders,
+        "verifiers": verifiers,
     }
     return (
         FileUpload(
@@ -284,7 +284,7 @@ async def query_host(
     env: Mapping[str, str],
     timeout: float,
 ) -> Any:
-    """Run one read-only App action for a Rewarder.
+    """Run one read-only App action for a Verifier.
 
     Returns:
         The action's observation.
@@ -320,6 +320,6 @@ __all__ = [
     "missing_app_secrets",
     "query_host",
     "start_host",
-    "step_rewarder_files",
+    "reward_hook_files",
     "stop_host",
 ]

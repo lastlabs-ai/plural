@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix="plural-scaffold-") as temporary:
     os.environ["PLURAL_CONFIG_HOME"] = str(Path(temporary) / "config")
     call("project", "init", "demo")
     os.chdir("demo")
-    for kind, name in (("env", "queue"), ("rewarder", "resolved"), ("task", "refund")):
+    for kind, name in (("env", "queue"), ("verifier", "resolved"), ("task", "refund")):
         call(kind, "init", name)
     print(call("task", "list", "--local"))
     # Scaffolds are deliberately incomplete; validation says what to fill in.

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from plural import Agent, Benchmark, Harness, Task
 from plural.environments.definition import EnvironmentDefinition
 from plural.project import public_schema
-from plural.rewarders import AgentRewarder, DeterministicRewarder, HumanRewarder
+from plural.verifiers import AgentVerifier, DeterministicVerifier, HumanVerifier
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "src" / "plural" / "schemas" / "packages"
@@ -20,9 +20,9 @@ MODELS: tuple[tuple[str, type[BaseModel]], ...] = (
     ("Environment", EnvironmentDefinition),
     ("Harness", Harness),
     ("Task", Task),
-    ("DeterministicRewarder", DeterministicRewarder),
-    ("AgentRewarder", AgentRewarder),
-    ("HumanRewarder", HumanRewarder),
+    ("DeterministicVerifier", DeterministicVerifier),
+    ("AgentVerifier", AgentVerifier),
+    ("HumanVerifier", HumanVerifier),
     ("Agent", Agent),
     ("Benchmark", Benchmark),
 )

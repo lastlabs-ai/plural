@@ -39,7 +39,7 @@ algorithms consume its records but are not part of its public domain model.
 | Runtime | `Runtime` | `runtime:` in `environment.yaml` | none | content hash |
 | Agent | `Agent` | `agents/<name>/agent.yaml` | `agent` | name, version, content hash |
 | Harness | `Harness` | `harnesses/<name>/harness.yaml` | `harness` | name, version, content hash |
-| Rewarder | `DeterministicRewarder`, `AgentRewarder`, `HumanRewarder` | `rewarders/<name>/rewarder.yaml` | `rewarder` | name, version, content hash |
+| Verifier | `DeterministicVerifier`, `AgentVerifier`, `HumanVerifier` | `verifiers/<name>/verifier.yaml` | `verifier` | name, version, content hash |
 | Task | `Task` | `tasks/<name>/task.yaml` | `task` | name, version, content hash |
 | Benchmark | `Benchmark` | `benchmarks/<name>/benchmark.yaml` | `benchmark` | name, required semantic version, content hash |
 | Job | `Job` | none; output only | `run`, `job` | a new id for every run |
@@ -47,7 +47,7 @@ algorithms consume its records but are not part of its public domain model.
 
 Shareable definitions use `name` and `version`. Versions are ordinary semantic
 versions such as `1.0.0`; protocol and schema versions never appear in public
-names or constructors. Environment, Agent, Rewarder, and Task default to
+names or constructors. Environment, Agent, Verifier, and Task default to
 `0.1.0`. A Benchmark requires an explicit version because it is the unit users
 push, compare, and share.
 
@@ -65,14 +65,14 @@ push, compare, and share.
   optional Harness, and metadata. It does not own an Environment or Task.
 - A Harness is one optional Agent execution strategy. Packaging, binding,
   capability grants, and digests are derived internally from that one value.
-- A Rewarder owns its information, criteria, evidence requirements, Runtime,
-  its `final` behavior, which produces the score, and an optional `step`
-  behavior, which produces per-step rewards. Deterministic, agent, and human Rewarders share one
+- A Verifier owns its information, criteria, evidence requirements, Runtime,
+  its `check` behavior, which produces the score, and an optional `reward`
+  behavior, which produces per-step rewards. Deterministic, agent, and human Verifiers share one
   result contract.
 - A Task owns instructions, goals, information, metadata, one Environment,
-  Rewarders, task resources, initial state, and reset options.
+  Verifiers, task resources, initial state, and reset options.
 - A Benchmark owns an ordered list of pinned Tasks, its scoring rules, and its
-  primary metric, which is always the Rewarder `score`.
+  primary metric, which is always the Verifier `score`.
 - A Job owns a Task or Benchmark source, Agents, eval/train mode, attempts,
   concurrency, and retry policy.
 - A Trial is one Agent × Task × independent attempt. Runtime retries are Trial
@@ -88,21 +88,21 @@ An Environment episode follows one transition pipeline:
 4. update that App's state;
 5. produce the Agent-visible observation, the action's result, the only part of
    the transition the model sees;
-6. run the Environment's `on_step`, then each Task Rewarder's `step` against
+6. run the Environment's `on_step`, then each Task Verifier's `reward` against
    the transition, with read-only access to every App, and record the rewards in
    the reward ledger, never in the model's context;
 7. repeat until an App terminates or truncates, the Agent finishes, or a budget
    truncates the episode;
 8. snapshot every App, and persist the trajectory, App states, observation,
    rendering, reward ledger, logs, and artifacts;
-9. run Task Rewarders against filtered evidence;
+9. run Task Verifiers against filtered evidence;
 10. aggregate scores into the Trial and Benchmark result.
 
-Rewarders credit one transition and are recorded on the episode in every mode;
-hindsight rewarders may later credit a step, turn, or span of a finished
-trajectory. `Trial.step_reward_total` is the episode's total. Rewarders assess completed
-Trials and are the only source of a score, and a reward never contributes to
-one. They do not share lifecycle hooks or result types. An episode's stop reason
+Verifiers credit one transition and are recorded on the episode in every mode;
+hindsight verifiers may later credit a step, turn, or span of a finished
+trajectory. `Trial.step_reward_total` is the episode's total. Verifiers assess completed
+Trials and are the only source of a score. A reward contributes to one only when a
+Verifier's `check` is `total_reward`, which scores by that Verifier's own rewards. They do not share lifecycle hooks or result types. An episode's stop reason
 is one of `plural.STOP_REASONS`.
 
 ## Model catalog
@@ -170,7 +170,7 @@ task = Task(
     name="easy-01",
     instructions="Guess the hidden word.",
     environment=workspace.get("env", "wordle"),
-    rewarders=[workspace.get("rewarder", "solved")],
+    verifiers=[workspace.get("verifier", "solved")],
     initial_state={"secret": "crane"},
 )
 benchmark = Benchmark(name="wordle", version="1.0.0", tasks=[task])

@@ -39,7 +39,7 @@ PACKAGE_NAV = [
     ("Build", "/docs/guides/connect-mcp-server", "guides/connect-mcp-server.md"),
     ("Build", "/docs/project/runtimes", "project/runtimes.md"),
     ("Build", "/docs/project/tasks", "project/tasks.md"),
-    ("Build", "/docs/project/rewarders", "project/rewarders.md"),
+    ("Build", "/docs/project/verifiers", "project/verifiers.md"),
     ("Build", "/docs/project/harnesses", "project/harnesses.md"),
     ("Build", "/docs/project/agents", "project/agents.md"),
     ("Build", "/docs/project/benchmarks", "project/benchmarks.md"),

@@ -13,7 +13,7 @@ from plural.catalog.models import ModelCatalog, ModelSpec
 
 if TYPE_CHECKING:
     from plural.agents import Agent
-    from plural.rewarders import AgentRewarder
+    from plural.verifiers import AgentVerifier
 
 
 class CatalogContext:
@@ -55,15 +55,15 @@ class CatalogContext:
 
         return Agent.from_catalog(self.catalog, **fields)
 
-    def agent_rewarder(self, **fields: Any) -> AgentRewarder:
-        """Create an AgentRewarder against this effective catalog.
+    def agent_verifier(self, **fields: Any) -> AgentVerifier:
+        """Create an AgentVerifier against this effective catalog.
 
         Returns:
-            A validated AgentRewarder.
+            A validated AgentVerifier.
         """
-        from plural.rewarders import AgentRewarder
+        from plural.verifiers import AgentVerifier
 
-        return AgentRewarder.from_catalog(self.catalog, **fields)
+        return AgentVerifier.from_catalog(self.catalog, **fields)
 
 
 __all__ = ["CatalogContext"]

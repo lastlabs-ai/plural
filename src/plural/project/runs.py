@@ -4,7 +4,7 @@ Every run creates a new Job. A run names exactly one Task or Benchmark and
 either a model (with an optional Harness) or a saved Agent. It records the
 exact version and content hash of every resource it used.
 
-Local runs snapshot the Environment, Rewarder, and Harness sources they
+Local runs snapshot the Environment, Verifier, and Harness sources they
 execute into the Job directory, so a rerun uses the original files even after
 the project has changed. Hosted runs use pushed revisions only.
 
@@ -49,8 +49,8 @@ from plural.project.layout import (
     BENCHMARK,
     ENVIRONMENT,
     HARNESS,
-    REWARDER,
     TASK,
+    VERIFIER,
     ProjectError,
     ResourceRef,
 )
@@ -65,9 +65,9 @@ from plural.project.sync import (
     resolve_pinned,
     revision_label,
 )
-from plural.rewarders import DeterministicRewarder, WeightedRewarder
 from plural.studio import Studio, slugify
 from plural.tasks import TaskDefinition
+from plural.verifiers import DeterministicVerifier, WeightedVerifier
 
 DEFAULT_HARNESS = "native"
 """The Harness a run uses when none is named: Plural's built-in action loop.
@@ -763,7 +763,7 @@ def find_local_trial(workspace: Workspace, trial_id: str) -> tuple[str, Path]:
 
 
 def local_trial(workspace: Workspace, trial_id: str) -> dict[str, Any]:
-    """One local Trial: its result, Rewarder evidence, and artifact paths.
+    """One local Trial: its result, Verifier evidence, and artifact paths.
 
     Returns:
         The Trial view.
@@ -789,8 +789,8 @@ def local_trial(workspace: Workspace, trial_id: str) -> dict[str, Any]:
         "rerun_of_job_id": record.get("rerun_of_job_id"),
         "rerun_of_trial_id": record.get("rerun_of_trial_id"),
         **(_trial_summary(result) if result else {"status": "running"}),
-        "rewarders": (
-            [item.model_dump(mode="json") for item in result.rewarder_results] if result else []
+        "verifiers": (
+            [item.model_dump(mode="json") for item in result.verifier_results] if result else []
         ),
         "credentials": (
             [item.model_dump(mode="json") for item in result.credentials] if result else []
@@ -1024,23 +1024,23 @@ def _snapshot_sources(workspace: Workspace, spec: JobSpec) -> JobSpec:
             update={"source": source.model_copy(update={"uri": str(target)})}
         )
 
-    def rewarders(task: TaskDefinition) -> tuple[WeightedRewarder, ...]:
-        for item in task.rewarders:
-            rewarder = item.rewarder
-            if isinstance(rewarder, DeterministicRewarder) and (
-                rewarder.final_fn is not None or rewarder.step_fn is not None
+    def verifiers(task: TaskDefinition) -> tuple[WeightedVerifier, ...]:
+        for item in task.verifiers:
+            verifier = item.verifier
+            if isinstance(verifier, DeterministicVerifier) and (
+                verifier.check_fn is not None or verifier.reward_fn is not None
             ):
                 directory = workspace.project.resource_dir(
-                    ResourceRef(REWARDER.name, rewarder.name)
+                    ResourceRef(VERIFIER.name, verifier.name)
                 )
-                snapshot("rewarder", rewarder.name, directory, rewarder._source_digest)
-        return task.rewarders
+                snapshot("verifier", verifier.name, directory, verifier._source_digest)
+        return task.verifiers
 
     def task(definition: TaskDefinition) -> TaskDefinition:
         return definition.model_copy(
             update={
                 "environment": environment(definition.environment),
-                "rewarders": rewarders(definition),
+                "verifiers": verifiers(definition),
             }
         )
 
@@ -1088,22 +1088,22 @@ def _load_local(workspace: Workspace, job_id: str) -> tuple[JobSpec, RunRecord]:
 
 
 def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
-    """Re-import Python Rewarder hooks from the Job's snapshot.
+    """Re-import Python Verifier hooks from the Job's snapshot.
 
     A saved spec names each hook as ``file.py:function`` with a digest. The
-    function is imported from the snapshot, and the resulting Rewarder must
+    function is imported from the snapshot, and the resulting Verifier must
     hash exactly as it did when the Job first ran.
 
     Returns:
         The spec with callable hooks restored.
     """
 
-    def load(rewarder: DeterministicRewarder, directory: Path, reference: str) -> Any:
+    def load(verifier: DeterministicVerifier, directory: Path, reference: str) -> Any:
         file_name, _, function_name = reference.rpartition(":")
         path = directory / file_name
         if not path.is_file():
             raise ProjectError(
-                f"Rewarder {rewarder.name!r} source is missing from the Job snapshot ({path})."
+                f"Verifier {verifier.name!r} source is missing from the Job snapshot ({path})."
             )
         module_name = f"_plural_rerun_{uuid.uuid4().hex}"
         spec_obj = importlib.util.spec_from_file_location(module_name, path)
@@ -1119,13 +1119,13 @@ def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
             function = getattr(function, part)
         return function
 
-    def rebind(item: WeightedRewarder) -> WeightedRewarder:
-        rewarder = item.rewarder
-        if not isinstance(rewarder, DeterministicRewarder):
+    def rebind(item: WeightedVerifier) -> WeightedVerifier:
+        verifier = item.verifier
+        if not isinstance(verifier, DeterministicVerifier):
             return item
         hooks = {
             field: hook
-            for field, hook in (("final", rewarder.final), ("step", rewarder.step))
+            for field, hook in (("check", verifier.check), ("reward", verifier.reward))
             if isinstance(hook, dict) and hook.get("python")
         }
         if not hooks:
@@ -1134,25 +1134,25 @@ def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
         digest = next(iter(digests))
         if not digest or len(digests) > 1:
             raise ProjectError(
-                f"Rewarder {rewarder.name!r} was recorded without a source digest and cannot "
+                f"Verifier {verifier.name!r} was recorded without a source digest and cannot "
                 "be rerun."
             )
-        directory = _snapshot_path(workspace, "rewarder", rewarder.name, digest)
+        directory = _snapshot_path(workspace, "verifier", verifier.name, digest)
         update = {
-            field: load(rewarder, directory, str(hook["python"])) for field, hook in hooks.items()
+            field: load(verifier, directory, str(hook["python"])) for field, hook in hooks.items()
         }
-        rebound = rewarder.model_copy(update=update)
+        rebound = verifier.model_copy(update=update)
         rebound.bind_source(digest, directory)
-        if rebound.content_hash != rewarder.content_hash:
+        if rebound.content_hash != verifier.content_hash:
             raise ProjectError(
-                f"Rewarder {rewarder.name!r} in the Job snapshot no longer matches the "
+                f"Verifier {verifier.name!r} in the Job snapshot no longer matches the "
                 "recorded revision."
             )
-        return item.model_copy(update={"rewarder": rebound})
+        return item.model_copy(update={"verifier": rebound})
 
     def task(definition: TaskDefinition) -> TaskDefinition:
         return definition.model_copy(
-            update={"rewarders": tuple(rebind(item) for item in definition.rewarders)}
+            update={"verifiers": tuple(rebind(item) for item in definition.verifiers)}
         )
 
     if isinstance(spec.source, TaskJobSource):

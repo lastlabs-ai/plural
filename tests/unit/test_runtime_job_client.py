@@ -9,14 +9,14 @@ from pydantic import Field, ValidationError
 from plural import (
     Agent,
     App,
-    DeterministicRewarder,
+    DeterministicVerifier,
     Environment,
     Episode,
     Job,
-    RewarderOutput,
     Runtime,
     State,
     Task,
+    VerifierOutput,
     action,
 )
 from plural.common import ExecutionTarget
@@ -24,8 +24,8 @@ from plural.environments.definition import EnvironmentRuntime
 from plural.sandbox import NetworkMode
 
 
-def solved(episode: Episode) -> RewarderOutput:
-    return RewarderOutput(score=1.0)
+def solved(episode: Episode) -> VerifierOutput:
+    return VerifierOutput(score=1.0)
 
 
 def _task() -> Task:
@@ -33,7 +33,7 @@ def _task() -> Task:
         name="easy-01",
         instructions="Solve.",
         environment=Environment(name="wordle", runtime=Runtime.docker()),
-        rewarders=[DeterministicRewarder(name="solved", final=solved)],
+        verifiers=[DeterministicVerifier(name="solved", check=solved)],
     )
 
 

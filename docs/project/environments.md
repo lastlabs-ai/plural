@@ -21,7 +21,7 @@ that world.
 
 A support desk works the same way with more Apps. A CRM, reached through its MCP
 server, holds the tickets. A table of refund policies sits beside it. Each Task picks
-one ticket, and a [Rewarder](rewarders.md), the grader, checks whether the work was
+one ticket, and a [Verifier](verifiers.md), the grader, checks whether the work was
 done correctly.
 
 ## How an Environment works
@@ -68,7 +68,7 @@ Before writing code, answer five questions:
 1. **What should the Agent accomplish?** Choose one workflow, such as resolving a support ticket.
 2. **Which systems does it use?** Each one is an App. Connect the ones that already exist, such as an MCP server, and write the rest in Python.
 3. **What can it do?** Offer a few focused actions that match the real workflow.
-4. **How will you know it succeeded?** Keep the expected outcome in State, where a Rewarder can read it.
+4. **How will you know it succeeded?** Keep the expected outcome in State, where a Verifier can read it.
 5. **When should it stop?** Decide what counts as finished, and set a turn and time budget. See [How an episode ends](#how-an-episode-ends).
 
 Start small. Add cases and complexity once you can explain why a known good run
@@ -84,7 +84,7 @@ These three parts describe the interaction:
 - **The observation** is whatever an action returns. It is the only thing the Agent
   sees after acting.
 
-So return what the Agent should see, and never copy State into it. A Rewarder reads
+So return what the Agent should see, and never copy State into it. A Verifier reads
 the final State to check the result.
 
 This split controls what Plural shows the model. It is not a security boundary; when
@@ -269,7 +269,7 @@ Trial, the record of one attempt. The full set of values is `plural.STOP_REASONS
   Agent calls it when the work is done or when it can't make progress, and its
   optional `summary` becomes the Trial's response.
 - **A budget cuts it short.** `max_turns`, `max_seconds`, and `max_cost_usd` truncate
-  the episode instead of failing the Trial, so you still get a trajectory and Rewarder
+  the episode instead of failing the Trial, so you still get a trajectory and Verifier
   results.
 
 `terminated` and `truncated` are recorded separately from `stop_reason`, because
@@ -280,23 +280,23 @@ finished early from a world that declared the Task over.
 
 A **reward** is a small bit of credit for one move. It answers "which action deserved
 the credit?", which is what a training system needs. A score answers a different
-question: did the attempt succeed? Rewards are recorded on the episode in every mode,
-and they never count toward a score.
+question: did the attempt succeed? Rewards come from the Task's Verifiers and are
+recorded on the episode in every mode.
 
 An Environment gives no rewards itself. What deserves credit depends on the Task, so
-rewards come from the Task's [Rewarders](rewarders.md): a Rewarder's `step` check runs
+rewards come from the Task's [Verifiers](verifiers.md): a Verifier's `reward` function runs
 right after each action, beside the Apps, and can read every App. See
-[Reward each step](rewarders.md#reward-each-step).
+[Reward each step](verifiers.md#reward-each-step).
 
 The precise rules:
 
-- The `reward` returned by `step` is the total of every `step` check that gave one.
-  `info["rewards"]` breaks that total down by Rewarder, with its version and the App
+- The `reward` returned by `step` is the total of every `reward` function that gave one.
+  `info["rewards"]` breaks that total down by Verifier, with its version and the App
   that acted.
 - `previous_state` and `current_state` are detached JSON snapshots of the acting App,
   so read them like dictionaries rather than as your `State` class. An MCP App
   provides them only with `snapshot_on_step: true`.
-- A `step` check that raises is recorded as `0.0`, with its error in that breakdown,
+- A `reward` function that raises is recorded as `0.0`, with its error in that breakdown,
   because a bug in a reward must not fail an action that already changed the world.
 - `on_step` on an `Environment` subclass changes the world after an action. It can't
   return a reward.
@@ -309,7 +309,7 @@ reward ends up in the Trial's reward ledger. A trainer reads them from there; se
 
 The example above always uses the same ticket. For a useful benchmark, reuse the
 Environment with different case data. Each [Task](tasks.md) supplies instructions,
-picks its case, and attaches one or more [Rewarders](rewarders.md).
+picks its case, and attaches one or more [Verifiers](verifiers.md).
 
 A few rules decide what a Task can pass in:
 
@@ -325,7 +325,7 @@ A few rules decide what a Task can pass in:
   load case data through `initial_state` instead.
 
 The [support queue tutorial](../tutorials/support-queue.md) shows how an App loads the
-Task's ticket and how Rewarders score the finished workflow.
+Task's ticket and how Verifiers score the finished workflow.
 
 ## Display views
 
@@ -458,7 +458,7 @@ Runtime.daytona(
 )
 ```
 
-Use your actual model endpoint hostname. Rewarders have their own `RewarderRuntime`;
+Use your actual model endpoint hostname. Verifiers have their own `VerifierRuntime`;
 model judges also need to reach their endpoint.
 
 ### Compute, timeouts, and persistence
@@ -638,7 +638,7 @@ Agent lists its credentials, with their scopes, in its `agent.yaml`, and
 `plural agent credential set AGENT NAME` stores each value. A secret comes from your
 shell when you exported it, and otherwise from the hosted project, where
 `plural secret set NAME` stores it encrypted. Values go only to the process that runs
-the Apps and to Rewarder queries, never to the model or its Harness. See
+the Apps and to Verifier queries, never to the model or its Harness. See
 [Credentials and secrets](../concepts/apps.md#credentials-and-secrets).
 
 ### Runtime variables
@@ -690,7 +690,7 @@ OpenAI-compatible endpoint needs none; see [Agents](agents.md).
   people see in the run viewer. See [Display views](#display-views).
 - **Harness policy:** limit which custom Harnesses may run here and what they may do.
   See [Harnesses](harnesses.md).
-- **Rewards:** give per-step credit from a Task's Rewarders. See [Rewards](#rewards).
+- **Rewards:** give per-step credit from a Task's Verifiers. See [Rewards](#rewards).
 
 ## Build a complete example
 

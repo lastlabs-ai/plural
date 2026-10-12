@@ -45,7 +45,7 @@ def action(
     Args:
         fn: Method to register (decorator usage).
         name: Optional explicit action name. Defaults to the method name.
-        read_only: The action never changes state. Rewarders may call only
+        read_only: The action never changes state. Verifiers may call only
             read-only actions after the episode.
         timeout_seconds: How long one call may run.
 

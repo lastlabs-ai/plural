@@ -1,17 +1,17 @@
 """Reward a support episode: each step that moves the ticket on, and the outcome."""
 
-from plural import Episode, RewarderOutput, Step
+from plural import Episode, Step, VerifierOutput
 
 ORDER = ("open", "triaged", "drafted", "resolved")
 
 
-def final(episode: Episode) -> RewarderOutput:
+def check(episode: Episode) -> VerifierOutput:
     """Score 1 when the ticket was resolved with the expected category and a reply."""
     state = episode.state
     drafted = bool(str(state.get("draft_reply") or "").strip())
     correct = bool(state.get("done") and state.get("category") == state.get("expected") and drafted)
     score = float(correct)
-    return RewarderOutput(
+    return VerifierOutput(
         score=score,
         scores={"correct_category": score, "response_drafted": float(drafted)},
         evidence=[
@@ -27,7 +27,7 @@ def final(episode: Episode) -> RewarderOutput:
     )
 
 
-def step(step: Step) -> float:
+def reward(step: Step) -> float:
     """Credit each action that moves the ticket forward."""
     if step.error:
         return 0.0

@@ -1,8 +1,8 @@
 {
   "$defs": {
-    "AgentRewarder": {
+    "AgentVerifier": {
       "additionalProperties": false,
-      "description": "Model-judge rewarder with its own runtime and connectivity policy.",
+      "description": "Model-judge verifier with its own runtime and connectivity policy.",
       "properties": {
         "criteria": {
           "items": {
@@ -63,7 +63,7 @@
           "title": "Provider"
         },
         "runtime": {
-          "$ref": "#/$defs/RewarderRuntime"
+          "$ref": "#/$defs/VerifierRuntime"
         },
         "secrets": {
           "default": [],
@@ -91,7 +91,7 @@
         "model",
         "instructions"
       ],
-      "title": "AgentRewarder",
+      "title": "AgentVerifier",
       "type": "object"
     },
     "BenchmarkCategory": {
@@ -143,7 +143,7 @@
     },
     "BenchmarkScoring": {
       "additionalProperties": false,
-      "description": "How a release turns attempts into one score per configuration.\n\nRepeated attempts of a Task are averaged first. Task scores are then\ncombined with ``task_weights``; a Task without a weight counts once. Step\nrewards never contribute: only the Rewarder score on each Trial does.\n\nAttributes:\n    metric: Human-readable name of the success metric, such as\n        ``\"Resolution rate\"``. It labels the Rewarder score; it never\n        selects a different value to rank on.\n    description: What a score means, in words a reader can act on.\n    aggregation: How Task scores combine. ``\"weighted_mean\"`` averages\n        attempts per Task, then takes the ``task_weights`` mean.\n    score_range: Lowest and highest possible Task score.\n    success_threshold: A Task attempt at or above this score counts as a\n        success. ``None`` means the Benchmark has no pass/fail notion.\n    task_weights: Weight per Task name. Unlisted Tasks weigh 1.\n    coverage_required: Weighted share of Tasks that must have a score\n        before a result can be ranked officially.\n    agent_failure: How an attempt that ended without a Rewarder score\n        because of the Agent (for example, a budget ran out) is scored.\n        ``\"zero\"`` scores it at the bottom of the range.\n    infrastructure_error: Attempts lost to the runtime or provider are\n        excluded from scores and reported separately.\n    min_tasks_for_interval: Fewest scored Tasks before an uncertainty\n        interval is reported. Below this, uncertainty is shown as unknown.",
+      "description": "How a release turns attempts into one score per configuration.\n\nRepeated attempts of a Task are averaged first. Task scores are then\ncombined with ``task_weights``; a Task without a weight counts once. Only the\nVerifier score on each Trial counts; step rewards reach it only through a\nVerifier whose check is ``total_reward``.\n\nAttributes:\n    metric: Human-readable name of the success metric, such as\n        ``\"Resolution rate\"``. It labels the Verifier score; it never\n        selects a different value to rank on.\n    description: What a score means, in words a reader can act on.\n    aggregation: How Task scores combine. ``\"weighted_mean\"`` averages\n        attempts per Task, then takes the ``task_weights`` mean.\n    score_range: Lowest and highest possible Task score.\n    success_threshold: A Task attempt at or above this score counts as a\n        success. ``None`` means the Benchmark has no pass/fail notion.\n    task_weights: Weight per Task name. Unlisted Tasks weigh 1.\n    coverage_required: Weighted share of Tasks that must have a score\n        before a result can be ranked officially.\n    agent_failure: How an attempt that ended without a Verifier score\n        because of the Agent (for example, a budget ran out) is scored.\n        ``\"zero\"`` scores it at the bottom of the range.\n    infrastructure_error: Attempts lost to the runtime or provider are\n        excluded from scores and reported separately.\n    min_tasks_for_interval: Fewest scored Tasks before an uncertainty\n        interval is reported. Below this, uncertainty is shown as unknown.",
       "properties": {
         "agent_failure": {
           "default": "zero",
@@ -230,10 +230,14 @@
       "title": "BenchmarkScoring",
       "type": "object"
     },
-    "DeterministicRewarder": {
+    "DeterministicVerifier": {
       "additionalProperties": false,
-      "description": "Code that rewards an episode: per step, at the end, or both.\n\n``final`` scores the finished episode; that score is what Tasks and\nBenchmarks rank on. It is a function of the :class:`Episode`, a\n``{\"python\": \"reward.py:final\"}`` reference, or a command argv.\n\n``step`` rewards each action while the episode runs. It is a function of\none :class:`Step`, or a ``{\"python\": \"reward.py:step\"}`` reference, and\nruns in the Runtime beside the Apps, so it can read every App. What it\nreturns goes to the Trial's reward ledger and never into the score.",
+      "description": "Code that verifies an episode: it scores the end, rewards each step, or both.\n\n``check`` scores the finished episode; that score is what Tasks and\nBenchmarks rank on. It is a function of the :class:`Episode`, a\n``{\"python\": \"verify.py:check\"}`` reference, or a command argv.\n\n``reward`` rewards each action while the episode runs. It is a function of\none :class:`Step`, or a ``{\"python\": \"verify.py:reward\"}`` reference, and\nruns in the Runtime beside the Apps, so it can read every App. What it\nreturns goes to the Trial's reward ledger. Rewards reach the score only\nwhen ``check`` is :func:`total_reward`.",
       "properties": {
+        "check": {
+          "default": null,
+          "title": "Check"
+        },
         "criteria": {
           "default": [],
           "items": {
@@ -246,10 +250,6 @@
           "default": true,
           "title": "Evidence Required",
           "type": "boolean"
-        },
-        "final": {
-          "default": null,
-          "title": "Final"
         },
         "info": {
           "default": null,
@@ -272,12 +272,16 @@
           "type": "string"
         },
         "result_path": {
-          "default": "rewarder-result.json",
+          "default": "verifier-result.json",
           "title": "Result Path",
           "type": "string"
         },
+        "reward": {
+          "default": null,
+          "title": "Reward"
+        },
         "runtime": {
-          "$ref": "#/$defs/RewarderRuntime"
+          "$ref": "#/$defs/VerifierRuntime"
         },
         "secrets": {
           "default": [],
@@ -286,10 +290,6 @@
           },
           "title": "Secrets",
           "type": "array"
-        },
-        "step": {
-          "default": null,
-          "title": "Step"
         },
         "version": {
           "default": "0.1.0",
@@ -306,7 +306,7 @@
       "required": [
         "name"
       ],
-      "title": "DeterministicRewarder",
+      "title": "DeterministicVerifier",
       "type": "object"
     },
     "EnvironmentResource": {
@@ -562,9 +562,9 @@
       "title": "EvaluationTrack",
       "type": "object"
     },
-    "HumanRewarder": {
+    "HumanVerifier": {
       "additionalProperties": false,
-      "description": "Human review rewarder.",
+      "description": "Human review verifier.",
       "properties": {
         "criteria": {
           "items": {
@@ -623,7 +623,7 @@
         "name",
         "criteria"
       ],
-      "title": "HumanRewarder",
+      "title": "HumanVerifier",
       "type": "object"
     },
     "NetworkMode": {
@@ -712,53 +712,6 @@
       "title": "ResourceRequirements",
       "type": "object"
     },
-    "RewarderRuntime": {
-      "additionalProperties": false,
-      "description": "Machine for a rewarder that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
-      "properties": {
-        "image": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Image"
-        },
-        "network": {
-          "$ref": "#/$defs/NetworkMode",
-          "default": "public"
-        },
-        "network_allowlist": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Network Allowlist",
-          "type": "array"
-        },
-        "provider": {
-          "default": "docker",
-          "minLength": 1,
-          "title": "Provider",
-          "type": "string"
-        },
-        "resources": {
-          "$ref": "#/$defs/ResourceRequirements"
-        },
-        "timeout_seconds": {
-          "default": 60,
-          "exclusiveMinimum": 0,
-          "title": "Timeout Seconds",
-          "type": "number"
-        }
-      },
-      "title": "RewarderRuntime",
-      "type": "object"
-    },
     "RubricCriterion": {
       "additionalProperties": false,
       "description": "One Agent or Human rubric criterion.",
@@ -799,7 +752,7 @@
     },
     "SecretReference": {
       "additionalProperties": false,
-      "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Rewarders.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
+      "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
       "properties": {
         "description": {
           "default": "",
@@ -875,30 +828,30 @@
           "title": "Resources",
           "type": "array"
         },
-        "rewarders": {
+        "verifiers": {
           "items": {
             "discriminator": {
               "mapping": {
-                "agent": "#/$defs/AgentRewarder",
-                "deterministic": "#/$defs/DeterministicRewarder",
-                "human": "#/$defs/HumanRewarder"
+                "agent": "#/$defs/AgentVerifier",
+                "deterministic": "#/$defs/DeterministicVerifier",
+                "human": "#/$defs/HumanVerifier"
               },
               "propertyName": "kind"
             },
             "oneOf": [
               {
-                "$ref": "#/$defs/DeterministicRewarder"
+                "$ref": "#/$defs/DeterministicVerifier"
               },
               {
-                "$ref": "#/$defs/AgentRewarder"
+                "$ref": "#/$defs/AgentVerifier"
               },
               {
-                "$ref": "#/$defs/HumanRewarder"
+                "$ref": "#/$defs/HumanVerifier"
               }
             ]
           },
           "minItems": 1,
-          "title": "Rewarders",
+          "title": "Verifiers",
           "type": "array"
         },
         "version": {
@@ -911,9 +864,56 @@
         "name",
         "instructions",
         "environment",
-        "rewarders"
+        "verifiers"
       ],
       "title": "Task",
+      "type": "object"
+    },
+    "VerifierRuntime": {
+      "additionalProperties": false,
+      "description": "Machine for a verifier that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
+      "properties": {
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkMode",
+          "default": "public"
+        },
+        "network_allowlist": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Network Allowlist",
+          "type": "array"
+        },
+        "provider": {
+          "default": "docker",
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "resources": {
+          "$ref": "#/$defs/ResourceRequirements"
+        },
+        "timeout_seconds": {
+          "default": 60,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "title": "VerifierRuntime",
       "type": "object"
     }
   },

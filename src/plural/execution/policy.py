@@ -20,7 +20,6 @@ from plural.environments.definition import (
     HarnessGrant,
     HarnessPolicy,
 )
-from plural.rewarders import RewarderRuntime, runtime_is_custom
 from plural.sandbox.models import (
     Capability,
     CapabilityError,
@@ -31,6 +30,7 @@ from plural.sandbox.models import (
     SandboxRequirements,
     environment_required_capabilities,
 )
+from plural.verifiers import VerifierRuntime, runtime_is_custom
 
 PolicyLayer = Literal["provider", "project", "environment", "harness", "agent"]
 
@@ -137,14 +137,14 @@ def _cap_resources(
     )
 
 
-def rewarder_score_sandbox(
+def verifier_score_sandbox(
     environment: EnvironmentDefinition,
-    runtime: RewarderRuntime,
+    runtime: VerifierRuntime,
 ) -> tuple[str, SandboxRequirements]:
-    """Choose the sandbox a rewarder check runs in.
+    """Choose the sandbox a verifier check runs in.
 
     A default runtime uses the Task Environment. Anything else uses the
-    rewarder's own provider, image, and network.
+    verifier's own provider, image, and network.
 
     Returns:
         The provider name and the sandbox requirements for the check.
@@ -152,7 +152,7 @@ def rewarder_score_sandbox(
     if runtime_is_custom(runtime):
         return (
             runtime.provider,
-            sandbox_requirements_for(environment, rewarder_runtime=runtime),
+            sandbox_requirements_for(environment, verifier_runtime=runtime),
         )
     return environment.runtime.provider, sandbox_requirements_for(environment)
 
@@ -162,7 +162,7 @@ def sandbox_requirements_for(
     *,
     network: NetworkMode | None = None,
     resources: ResourceRequirements | None = None,
-    rewarder_runtime: RewarderRuntime | None = None,
+    verifier_runtime: VerifierRuntime | None = None,
     harness_digest: str | None = None,
 ) -> SandboxRequirements:
     """Build sandbox requirements from an environment runtime."""
@@ -170,18 +170,18 @@ def sandbox_requirements_for(
     identity = environment.identity.digest
     if harness_digest:
         identity = f"{identity}:{harness_digest}"
-    if rewarder_runtime is not None:
+    if verifier_runtime is not None:
         return SandboxRequirements(
-            image=rewarder_runtime.image,
+            image=verifier_runtime.image,
             snapshot=None,
             declarative_image=None,
-            execution_identity=f"{identity}:rewarder",
+            execution_identity=f"{identity}:verifier",
             build_context=None,
             dockerfile=None,
-            resources=rewarder_runtime.resources,
-            network=rewarder_runtime.network,
-            network_allowlist=rewarder_runtime.network_allowlist,
-            timeout_seconds=rewarder_runtime.timeout_seconds,
+            resources=verifier_runtime.resources,
+            network=verifier_runtime.network,
+            network_allowlist=verifier_runtime.network_allowlist,
+            timeout_seconds=verifier_runtime.timeout_seconds,
             persistent=False,
             compose=False,
             read_only_root=False,

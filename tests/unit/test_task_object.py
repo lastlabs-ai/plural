@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
-from plural.rewarders import DeterministicRewarder
 from plural.tasks import Task
+from plural.verifiers import DeterministicVerifier
 
 
 class _FakeRevisionAPI:
@@ -40,7 +40,7 @@ class _FakeTasksAPI(_FakeRevisionAPI):
 class _FakeClient:
     def __init__(self) -> None:
         self.environments = _FakeRevisionAPI()
-        self.rewarders = _FakeRevisionAPI()
+        self.verifiers = _FakeRevisionAPI()
         self.tasks = _FakeTasksAPI()
 
 
@@ -48,12 +48,12 @@ def _task() -> Task:
     environment = EnvironmentDefinition(
         name="World", overview="World", runtime=EnvironmentRuntime()
     )
-    rewarder = DeterministicRewarder(name="correct", final=("python", "reward.py"))
+    verifier = DeterministicVerifier(name="correct", check=("python", "verify.py"))
     return Task(
         name="demo-task",
         instructions="Do the thing.",
         environment=environment,
-        rewarders=[rewarder],
+        verifiers=[verifier],
     )
 
 
