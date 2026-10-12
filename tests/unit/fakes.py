@@ -186,8 +186,10 @@ class FakeProvider(SandboxProvider):
                 for app in declared.get("apps") or []
             }
             result["game"] = {"control": "owned", "initial": {"step": 0}, "final": {"step": 1}}
+        elif operation == "states":
+            result = [{"step": 0, "state": {"game": {"step": 0}}}]
         elif operation == "query":
-            arguments = json.loads(request.stdin or b"{}")
+            arguments = json.loads(request.stdin or b"{}").get("arguments") or {}
             result = {"app": request.command[4], "action": request.command[5], **arguments}
         elif operation == "stop":
             result = "stopped"

@@ -163,7 +163,12 @@ class AppHost:
         *,
         verifiers: Sequence[RewardHook] = (),
         task: StepTask | None = None,
+        private_state: bool = False,
     ) -> None:
+        # When the Harness shares this workspace, the full App State, which may hold
+        # a secret, must not sit in a file it can read: keep it in memory and hand it
+        # to the Job over the control socket instead.
+        self.private_state = private_state
         self.environment = environment
         self.definition = environment.definition()
         self.apps: dict[str, App[Any]] = {item.name: item for item in environment.apps}
@@ -180,6 +185,7 @@ class AppHost:
         self.started = False
         self._effects: list[dict[str, Any]] = []
         self._recorded: dict[str, Any] = {}
+        self._states: list[dict[str, Any]] = []
 
     # Episode operations.
 
@@ -444,10 +450,21 @@ class AppHost:
             line.update(app=app, action=action)
         if error is not None:
             line["error"] = error
+        self._states.append(line)
+        if self.private_state:
+            return
         root = self.workspace / ".plural" / "apps"
         root.mkdir(parents=True, exist_ok=True)
         with (root / STATES_FILE).open("w" if step == 0 else "a", encoding="utf-8") as handle:
             handle.write(json.dumps(line, sort_keys=True, default=str) + "\n")
+
+    def recorded_states(self) -> list[dict[str, Any]]:
+        """Each step's recorded App State, for the Job to store as ``states.jsonl``.
+
+        Returns:
+            One entry per step, oldest first.
+        """
+        return list(self._states)
 
     def _snapshot(self, app: App[Any]) -> Any:
         if not app.has_snapshot():
@@ -521,6 +538,8 @@ class AppHost:
                 json.dumps(envelope["view"], sort_keys=True, default=str) + "\n",
                 encoding="utf-8",
             )
+        if self.private_state:
+            return
         for name, app in self.apps.items():
             if not app.snapshot_on_step:
                 continue

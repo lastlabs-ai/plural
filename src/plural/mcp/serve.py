@@ -90,6 +90,9 @@ def main(argv: list[str] | None = None) -> None:
         del args[at : at + 2]
     if len(args) != 1:
         raise SystemExit("usage: python -m plural.mcp.serve file.py:name [--http [--port N]]")
+    from plural.apps.daemon import not_dumpable
+
+    not_dumpable()
     server = _load(args[0])
     if http:
         serve_http(server, port)

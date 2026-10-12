@@ -9,6 +9,7 @@ import functools
 import json
 import math
 import os
+import secrets as token_source
 import shlex
 import sys
 import time
@@ -35,9 +36,11 @@ from plural.execution.apps import (
     environment_payload,
     finish_host,
     host_files,
+    host_inputs,
     missing_app_secrets,
     query_host,
     start_host,
+    states_host,
     stop_host,
 )
 from plural.execution.bootstrap import (
@@ -248,14 +251,6 @@ async def _optional_json(
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
-
-
-async def _optional_file(provider: Any, handle: Any, path: str, *, root: str) -> bytes:
-    try:
-        files = await provider.download_files(handle, (path,), root=root)
-    except (FileNotFoundError, KeyError, OSError):
-        return b""
-    return files[0].data if files else b""
 
 
 def _requirements(task: TaskDefinition, package: HarnessPackage) -> SandboxRequirements:
@@ -566,6 +561,8 @@ class Trial:
         try:
             harness_env, secrets = _harness_environment(agent, package, self.environ)
             host_env, runtime_secrets = runtime_values(task.environment, self.environ)
+            # Lets the Job, and not the Harness, read the Apps' State or end the episode.
+            control = token_source.token_urlsafe(32)
             try:
                 app_secrets = app_secret_values(task.environment, self.environ)
                 credential_values, credential_uses = resolve_credentials(
@@ -615,7 +612,14 @@ class Trial:
                         except ValueError as exc:
                             raise ExecutionFailure(ErrorCode.CONFIGURATION, str(exc)) from exc
                         await provider.upload_files(handle, staged, root=WORKSPACE)
-                        await start_host(provider, handle, env=host_env, secrets=app_secrets)
+                        await start_host(
+                            provider,
+                            handle,
+                            env=host_env,
+                            secrets=app_secrets,
+                            token=control,
+                            inputs=host_inputs(task),
+                        )
                 request = HarnessRunRequest(
                     request_id=self.spec.trial_id,
                     task=task.public_payload,
@@ -684,7 +688,7 @@ class Trial:
                     handle, paths, root="/workspace/harness"
                 )
                 if task.environment.apps:
-                    app_report = await finish_host(provider, handle, env=host_env)
+                    app_report = await finish_host(provider, handle, env=host_env, token=control)
                     last = await _optional_json(
                         provider, handle, ".plural/apps/observation.json", root=WORKSPACE
                     )
@@ -693,10 +697,12 @@ class Trial:
                     environment_view_doc = await _optional_json(
                         provider, handle, ".plural/apps/view.json", root=WORKSPACE
                     )
-                    states = await _optional_file(
-                        provider, handle, f".plural/apps/{STATES_FILE}", root=WORKSPACE
-                    )
-                    if states:
+                    recorded = await states_host(provider, handle, env=host_env, token=control)
+                    if recorded:
+                        states = "".join(
+                            json.dumps(line, sort_keys=True, default=str) + "\n"
+                            for line in recorded
+                        ).encode()
                         artifacts = _with_artifact(
                             artifacts, DownloadedFile(path=STATES_FILE, data=states)
                         )
@@ -764,7 +770,7 @@ class Trial:
                         trace_id,
                         observation=environment_observation,
                         apps=app_report,
-                        query=self._app_query(provider, handle, host_env)
+                        query=self._app_query(provider, handle, host_env, control)
                         if task.environment.apps
                         else None,
                     )
@@ -772,7 +778,7 @@ class Trial:
                 self._active.pop((provider.name, handle.sandbox_id), None)
                 async with phase("cleanup"):
                     if task.environment.apps:
-                        await stop_host(provider, handle, env=host_env)
+                        await stop_host(provider, handle, env=host_env, token=control)
                     await provider.destroy(handle)
             awaiting = any(item.status == "awaiting_review" for item in verifier_results)
             score, scores = _aggregate(task, verifier_results)
@@ -986,6 +992,7 @@ class Trial:
         provider: SandboxProvider,
         handle: SandboxHandle,
         env: Mapping[str, str],
+        token: str,
     ) -> Callable[[str, str, dict[str, Any]], Any]:
         """A blocking App query for function Verifiers, which run in a worker thread."""
         loop = asyncio.get_running_loop()
@@ -1003,6 +1010,7 @@ class Trial:
                     arguments,
                     env=env,
                     timeout=timeouts.get((app, action), 60.0) + 30,
+                    token=token,
                 ),
                 loop,
             )

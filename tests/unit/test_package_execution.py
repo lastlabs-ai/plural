@@ -590,13 +590,21 @@ async def test_app_host_holds_secrets_and_verifiers_query_it_before_teardown(
 
     assert result.status == "succeeded", result.trials[0].error_message
     operations = [item.command[3] for item in provider.host_calls]
-    assert operations == ["start", "finish", "query", "stop"]
+    assert operations == ["start", "finish", "states", "query", "stop"]
     start = provider.host_calls[0]
-    assert json.loads(start.stdin or b"{}") == {"CRM_TOKEN": "token-in-host-only"}
+    started = json.loads(start.stdin or b"{}")
+    assert started["secrets"] == {"CRM_TOKEN": "token-in-host-only"}
+    control = started["token"]
+    assert len(control) >= 32
     assert "CRM_TOKEN" not in start.env
+    for call in provider.host_calls[1:]:
+        assert json.loads(call.stdin or b"{}")["token"] == control
+        assert call.env["PLURAL_APPS_CONTROL_STDIN"] == "1"
     harness = provider.harness_requests[0]
     assert "CRM_TOKEN" not in harness.env
     assert b"token-in-host-only" not in (harness.stdin or b"")
+    assert control.encode() not in (harness.stdin or b"")
+    assert control not in json.dumps(harness.env)
     payload = json.loads(harness.stdin or b"{}")["environment"]
     commands = {item["name"]: item["command"] for item in payload["actions"]}
     assert commands["get_record"] == [
@@ -612,7 +620,11 @@ async def test_app_host_holds_secrets_and_verifiers_query_it_before_teardown(
     execution = store.trial_path(spec.plan().trials[0]) / "executions/0/artifacts"
     assert json.loads((execution / "apps.json").read_text())["game"]["final"] == {"step": 1}
     uploaded = provider.files["docker-0"]
-    assert json.loads(uploaded[".plural/apps/task.json"])["initial_state"] == {"game": {"step": 0}}
+    # The hidden initial State never lands in the shared workspace; it rides the start stdin.
+    task_file = json.loads(uploaded[".plural/apps/task.json"])
+    assert "initial_state" not in task_file
+    assert started["inputs"]["initial_state"] == {"game": {"step": 0}}
+    assert b'"step": 0' not in uploaded[".plural/apps/task.json"]
 
 
 async def test_missing_app_secrets_fail_before_a_runtime_starts(tmp_path: Path) -> None:
@@ -667,7 +679,7 @@ async def test_each_agent_supplies_its_own_credential_and_the_trial_records_it(
         for item in provider.host_calls
         if item.command[3] == "start"
     ]
-    assert sorted(item["CRM_TOKEN"] for item in started) == [
+    assert sorted(item["secrets"]["CRM_TOKEN"] for item in started) == [
         "admin-token-from-shell",
         "sales-token",
     ]

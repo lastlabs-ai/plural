@@ -691,3 +691,48 @@ def test_app_host_numbers_steps_and_records_the_state_each_one_left(tmp_path: Pa
     assert lines[1]["state"] == lines[2]["state"] == {}
     assert lines[3]["state"]["wordle"]["solved"] is True
     assert lines[3]["action"] == "guess"
+
+
+def test_a_private_host_keeps_state_off_disk_but_still_records_it(tmp_path: Path) -> None:
+    host = AppHost(
+        Environment(apps=[Wordle()], runtime=Runtime.local()),
+        workspace=tmp_path,
+        private_state=True,
+    )
+    host.reset(initial_state={"wordle": {"secret": "slate"}})
+    host.step("guess", {"word": "crane"})
+
+    apps = tmp_path / ".plural" / "apps"
+    assert not (apps / "states.jsonl").exists()
+    assert not (apps / "wordle" / "state.json").exists()
+    # The Job still gets the State over the control socket, secret and all.
+    states = host.recorded_states()
+    assert states[0]["state"]["wordle"]["secret"] == "slate"
+    assert states[-1]["state"]["wordle"]["guesses"] == ["crane"]
+
+
+def test_a_controlled_host_lets_the_harness_act_but_not_read_or_restart(
+    workspace: Path,
+) -> None:
+    daemon.start(workspace, token="job-only")
+    try:
+        assert daemon.call("reset", root=workspace)["kind"] == "reset"
+        daemon.call("step", root=workspace, action="guess", arguments={"word": "crane"})
+        for operation, fields in (
+            ("finish", {}),
+            ("states", {}),
+            ("stop", {}),
+            ("query", {"app": "crm", "action": "list_records", "arguments": {}}),
+        ):
+            with pytest.raises(PermissionError, match="Only the Job"):
+                daemon.call(operation, root=workspace, **fields)
+            with pytest.raises(PermissionError, match="Only the Job"):
+                daemon.call(operation, root=workspace, token="guess", **fields)
+        again = daemon.call("reset", root=workspace)
+        assert again["info"]["error"] == "The episode has already started; it cannot be reset."
+        report = daemon.call("finish", root=workspace, token="job-only")
+        assert report["wordle"]["final"]["solved"] is False
+        states = daemon.call("states", root=workspace, token="job-only")
+        assert states[0]["state"]["wordle"]["secret"] == "slate"
+    finally:
+        daemon.call("stop", root=workspace, token="job-only")

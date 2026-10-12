@@ -184,16 +184,17 @@ def reward_hook_files(task: TaskDefinition) -> tuple[list[dict[str, str]], list[
 def host_files(task: TaskDefinition) -> tuple[FileUpload, ...]:
     """The files the App host reads: the Environment, the Task, and its ``reward`` hooks.
 
+    The Task's initial State never lands here: it would sit in the shared
+    workspace where the Harness could read it, so a Job sends it to the host on
+    stdin with :func:`host_inputs`. The file names only the Task and its
+    Verifiers.
+
     Returns:
         Uploads relative to the Environment workspace.
     """
     environment = task.environment
-    state = normalize_initial_state(environment, task.state or {})
     verifiers, sources = reward_hook_files(task)
     task_file = {
-        "initial_state": state,
-        "info": task.info,
-        "seed": None,
         "task": {"name": task.task_id, "metadata": task.metadata},
         "verifiers": verifiers,
     }
@@ -208,6 +209,19 @@ def host_files(task: TaskDefinition) -> tuple[FileUpload, ...]:
         ),
         *sources,
     )
+
+
+def host_inputs(task: TaskDefinition) -> dict[str, Any]:
+    """The Task's reset inputs, for the host's start stdin rather than a file.
+
+    Returns:
+        The initial State, info, and seed the host resets each App with.
+    """
+    return {
+        "initial_state": normalize_initial_state(task.environment, task.state or {}),
+        "info": task.info,
+        "seed": None,
+    }
 
 
 async def _host(
@@ -247,10 +261,14 @@ async def start_host(
     *,
     env: Mapping[str, str],
     secrets: Mapping[str, str],
+    token: str,
+    inputs: Mapping[str, Any],
 ) -> None:
-    """Start the App host with the Runtime variables and the Apps' secrets.
+    """Start the App host with the Runtime variables, the Apps' secrets, and a control token.
 
-    Secret values travel on stdin, not in any process environment.
+    Secret values, the Task's initial State, and the token travel on stdin, not
+    in any process environment or file. Only a caller with the token can read
+    the Apps' State or end the episode.
     """
     await _host(
         provider,
@@ -258,20 +276,56 @@ async def start_host(
         ("start",),
         env=env,
         timeout=START_TIMEOUT_SECONDS,
-        stdin=json.dumps(dict(secrets)).encode(),
+        stdin=json.dumps(
+            {"secrets": dict(secrets), "token": token, "inputs": dict(inputs)}, default=str
+        ).encode(),
     )
 
 
+def _controlled(env: Mapping[str, str]) -> dict[str, str]:
+    return {**env, "PLURAL_APPS_CONTROL_STDIN": "1"}
+
+
+def _token(token: str, arguments: Mapping[str, Any] | None = None) -> bytes:
+    return json.dumps({"token": token, "arguments": dict(arguments or {})}).encode()
+
+
 async def finish_host(
-    provider: SandboxProvider, handle: SandboxHandle, *, env: Mapping[str, str]
+    provider: SandboxProvider, handle: SandboxHandle, *, env: Mapping[str, str], token: str
 ) -> dict[str, Any]:
     """Each App's control level and initial and final snapshots.
 
     Returns:
         App name to ``{control, initial, final}``; empty when the host is gone.
     """
-    report = await _host(provider, handle, ("finish",), env=env, timeout=FINISH_TIMEOUT_SECONDS)
+    report = await _host(
+        provider,
+        handle,
+        ("finish",),
+        env=_controlled(env),
+        timeout=FINISH_TIMEOUT_SECONDS,
+        stdin=_token(token),
+    )
     return report if isinstance(report, dict) else {}
+
+
+async def states_host(
+    provider: SandboxProvider, handle: SandboxHandle, *, env: Mapping[str, str], token: str
+) -> list[dict[str, Any]]:
+    """Each step's recorded App State, kept in the host rather than on the shared disk.
+
+    Returns:
+        One entry per step; empty when the host recorded none.
+    """
+    result = await _host(
+        provider,
+        handle,
+        ("states",),
+        env=_controlled(env),
+        timeout=FINISH_TIMEOUT_SECONDS,
+        stdin=_token(token),
+    )
+    return result if isinstance(result, list) else []
 
 
 async def query_host(
@@ -283,6 +337,7 @@ async def query_host(
     *,
     env: Mapping[str, str],
     timeout: float,
+    token: str,
 ) -> Any:
     """Run one read-only App action for a Verifier.
 
@@ -293,18 +348,20 @@ async def query_host(
         provider,
         handle,
         ("query", app, action),
-        env=env,
+        env=_controlled(env),
         timeout=timeout,
-        stdin=json.dumps(dict(arguments)).encode(),
+        stdin=_token(token, arguments),
     )
 
 
 async def stop_host(
-    provider: SandboxProvider, handle: SandboxHandle, *, env: Mapping[str, str]
+    provider: SandboxProvider, handle: SandboxHandle, *, env: Mapping[str, str], token: str
 ) -> None:
     """Stop the App host so Apps close their sessions before teardown."""
     with contextlib.suppress(Exception):
-        await _host(provider, handle, ("stop",), env=env, timeout=60)
+        await _host(
+            provider, handle, ("stop",), env=_controlled(env), timeout=60, stdin=_token(token)
+        )
 
 
 __all__ = [
@@ -317,9 +374,11 @@ __all__ = [
     "environment_payload",
     "finish_host",
     "host_files",
+    "host_inputs",
     "missing_app_secrets",
     "query_host",
     "start_host",
+    "states_host",
     "reward_hook_files",
     "stop_host",
 ]

@@ -1,7 +1,7 @@
 """The App host process inside a Runtime, and the client every action command uses.
 
 A Job starts one App host per Trial, in the Environment workspace, before the
-Harness runs, with the Apps' secret values as JSON on stdin::
+Harness runs, with the Apps' secret values and a control token as JSON on stdin::
 
     python -m plural.apps.daemon start
 
@@ -16,6 +16,14 @@ runs is a short client call over a local socket::
     python -m plural.apps.daemon finish               # snapshots for Verifiers
     python -m plural.apps.daemon stop
 
+A host started with a control token answers ``query``, ``finish``, ``stop``,
+``states``, and any ``reset`` after the first only to callers that present it,
+so the Harness can start the episode and act, but cannot read State, end the
+episode, or start it over. The Job sends the token on stdin with
+``PLURAL_APPS_CONTROL_STDIN=1``. In that mode the host keeps full App State,
+which may hold a secret, in memory rather than in the shared workspace, and the
+Job reads it back with ``states`` and ``finish``.
+
 A client that finds no host running starts one with its own environment, so
 the same commands work on a laptop without a Job.
 """
@@ -24,6 +32,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import hmac
 import json
 import os
 import socket
@@ -32,6 +41,7 @@ import sys
 import tempfile
 import time
 import traceback
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +55,24 @@ IDLE_SECONDS = float(os.environ.get("PLURAL_APPS_IDLE_SECONDS") or 3600)
 START_SECONDS = float(os.environ.get("PLURAL_APPS_START_SECONDS") or 120)
 _MAX_MESSAGE = 64 * 1024 * 1024
 _SECRETS_ON_STDIN = "PLURAL_APPS_SECRETS_ON_STDIN"
+_CONTROL_STDIN = "PLURAL_APPS_CONTROL_STDIN"
+_CONTROLLED = frozenset({"query", "finish", "stop", "states"})
+_PR_SET_DUMPABLE = 4
+
+
+def not_dumpable() -> None:
+    """Keep this process's memory, environment, and open files from its own user.
+
+    On Linux a process that is not dumpable cannot be read through ``/proc`` or
+    traced by another process of the same user without ``CAP_SYS_PTRACE``. The
+    setting lasts until the process runs another program.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    import ctypes
+
+    with contextlib.suppress(OSError, AttributeError):
+        ctypes.CDLL(None, use_errno=True).prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0)
 
 
 def workspace() -> Path:
@@ -95,7 +123,7 @@ def _receive(connection: socket.socket) -> dict[str, Any]:
 # The host.
 
 
-def _load_host(root: Path) -> Any:
+def _load_host(root: Path, private_state: bool = False) -> Any:
     from plural.apps.host import AppHost, load_reward_hooks
     from plural.apps.mcp import hide_from_hooks
     from plural.environments.definition import EnvironmentDefinition
@@ -119,6 +147,7 @@ def _load_host(root: Path) -> Any:
             info=task.get("info"),
             metadata=dict(about.get("metadata") or {}),
         ),
+        private_state=private_state,
     )
 
 
@@ -130,13 +159,17 @@ def _task_file(root: Path) -> dict[str, Any]:
     return task
 
 
-def _task_inputs(root: Path) -> dict[str, Any]:
-    """The Task's initial state, info, and seed, written by the Job.
+def _task_inputs(root: Path, provided: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The Task's initial state, info, and seed.
+
+    A Job sends these to the host on stdin, so the hidden initial State never
+    lands in the shared workspace. A local client that starts the host itself
+    falls back to ``task.json``.
 
     Returns:
         Keyword arguments for :meth:`AppHost.reset`.
     """
-    task = _task_file(root)
+    task = dict(provided) if provided is not None else _task_file(root)
     state = task.get("initial_state")
     seed = task.get("seed")
     return {
@@ -146,12 +179,39 @@ def _task_inputs(root: Path) -> dict[str, Any]:
     }
 
 
-def _handle(host: Any, root: Path, request: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+class _Control:
+    """Which callers may do what: the control token, and whether the episode started."""
+
+    def __init__(self, token: str | None, inputs: Mapping[str, Any] | None = None) -> None:
+        self.token = token
+        self.inputs = inputs
+        self.started = False
+
+    def allows(self, request: dict[str, Any]) -> bool:
+        if not self.token:
+            return True
+        presented = request.get("token")
+        return isinstance(presented, str) and hmac.compare_digest(presented, self.token)
+
+
+def _handle(
+    host: Any, root: Path, request: dict[str, Any], control: _Control | None = None
+) -> tuple[dict[str, Any], bool]:
+    control = control or _Control(None)
     operation = request.get("op")
     if operation == "ping":
         return {"ok": True, "result": "pong"}, False
+    if operation in _CONTROLLED and not control.allows(request):
+        return {
+            "ok": False,
+            "error": f"Only the Job may {operation} the Apps.",
+            "kind": "PermissionError",
+        }, False
     if operation == "reset":
-        return {"ok": True, "result": host.reset(**_task_inputs(root))}, False
+        if control.started and not control.allows(request):
+            return {"ok": True, "result": _already_started(host)}, False
+        control.started = True
+        return {"ok": True, "result": host.reset(**_task_inputs(root, control.inputs))}, False
     if operation == "step":
         arguments = request.get("arguments")
         if not isinstance(arguments, dict):
@@ -164,9 +224,20 @@ def _handle(host: Any, root: Path, request: dict[str, Any]) -> tuple[dict[str, A
         return {"ok": True, "result": result}, False
     if operation == "finish":
         return {"ok": True, "result": host.snapshot()}, False
+    if operation == "states":
+        return {"ok": True, "result": host.recorded_states()}, False
     if operation == "stop":
         return {"ok": True, "result": "stopped"}, True
     return {"ok": False, "error": f"unknown App host operation {operation!r}"}, False
+
+
+def _already_started(host: AppHost) -> dict[str, Any]:
+    return host._envelope(
+        "reset",
+        observation=None,
+        rendered="",
+        info={"error": "The episode has already started; it cannot be reset."},
+    )
 
 
 def _argument_error(host: AppHost, request: dict[str, Any]) -> dict[str, Any]:
@@ -181,14 +252,22 @@ def _argument_error(host: AppHost, request: dict[str, Any]) -> dict[str, Any]:
 
 def serve(root: Path) -> None:
     """Run the App host for one workspace until stopped or idle."""
+    not_dumpable()
+    token: str | None = None
+    inputs: Mapping[str, Any] | None = None
     if os.environ.pop(_SECRETS_ON_STDIN, None) == "1":
         received = json.loads(sys.stdin.read() or "{}")
         if isinstance(received, dict):
-            os.environ.update({str(key): str(value) for key, value in received.items()})
+            secrets = received.get("secrets")
+            token = str(received.get("token") or "") or None
+            given = received.get("inputs")
+            inputs = given if isinstance(given, dict) and given else None
+            os.environ.update({str(key): str(value) for key, value in dict(secrets or {}).items()})
+    control = _Control(token, inputs)
+    host = _load_host(root, private_state=bool(token))
     path = socket_path(root)
     with contextlib.suppress(FileNotFoundError):
         os.unlink(path)
-    host = _load_host(root)
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(path)
     os.chmod(path, 0o600)
@@ -207,13 +286,14 @@ def serve(root: Path) -> None:
                 connection.settimeout(None)
                 stop = False
                 try:
-                    response, stop = _handle(host, root, _receive(connection))
+                    response, stop = _handle(host, root, _receive(connection), control)
                 except Exception as exc:  # noqa: BLE001 - every failure goes back to the caller
+                    # The traceback goes to the host's log, not to the caller.
+                    traceback.print_exc()
                     response = {
                         "ok": False,
                         "error": f"{type(exc).__name__}: {exc}",
                         "kind": type(exc).__name__,
-                        "traceback": traceback.format_exc()[-4000:],
                     }
                 if stop:
                     # The caller destroys the Runtime once it has the reply.
@@ -257,11 +337,17 @@ def running(root: Path) -> bool:
         return False
 
 
-def start(root: Path, secrets: dict[str, str] | None = None) -> None:
+def start(
+    root: Path,
+    secrets: dict[str, str] | None = None,
+    token: str | None = None,
+    inputs: Mapping[str, Any] | None = None,
+) -> None:
     """Start the App host for ``root`` in the background and wait until it answers.
 
-    ``secrets`` reach the host through a pipe rather than its environment, so
-    they do not appear in the host's process listing.
+    ``secrets``, the control ``token``, and the Task's ``inputs`` reach the host
+    through a pipe rather than its environment or a file, so they do not appear
+    in the host's process listing or the shared workspace.
 
     Raises:
         RuntimeError: When the host exits or does not answer in time.
@@ -271,19 +357,25 @@ def start(root: Path, secrets: dict[str, str] | None = None) -> None:
     log = root / LOG_FILE
     log.parent.mkdir(parents=True, exist_ok=True)
     command = [sys.executable, "-m", "plural.apps.daemon", "serve", str(root)]
-    env = {**os.environ, _SECRETS_ON_STDIN: "1"} if secrets else None
+    private = secrets or token or inputs is not None
+    env = {**os.environ, _SECRETS_ON_STDIN: "1"} if private else None
     with log.open("ab") as stream:
         process = subprocess.Popen(  # noqa: S603 - the interpreter running Plural
             command,
             cwd=str(root),
             env=env,
-            stdin=subprocess.PIPE if secrets else subprocess.DEVNULL,
+            stdin=subprocess.PIPE if private else subprocess.DEVNULL,
             stdout=stream,
             stderr=stream,
             start_new_session=True,
         )
-    if secrets and process.stdin is not None:
-        process.stdin.write(json.dumps(secrets).encode())
+    if private and process.stdin is not None:
+        process.stdin.write(
+            json.dumps(
+                {"secrets": secrets or {}, "token": token, "inputs": dict(inputs or {})},
+                default=str,
+            ).encode()
+        )
         process.stdin.close()
     deadline = time.monotonic() + START_SECONDS
     while time.monotonic() < deadline:
@@ -303,9 +395,13 @@ def call(
     *,
     root: Path | None = None,
     timeout: float | None = None,
+    token: str | None = None,
     **fields: Any,
 ) -> Any:
     """Send one operation to the App host, starting it first when needed.
+
+    ``token`` is the control token the Job started the host with, for the
+    operations only the Job may run.
 
     Returns:
         The operation's result.
@@ -318,7 +414,10 @@ def call(
         if operation in {"stop", "finish"}:
             return None
         start(base)
-    response = _request(base, {"op": operation, **fields}, timeout=timeout)
+    request = {"op": operation, **fields}
+    if token:
+        request["token"] = token
+    response = _request(base, request, timeout=timeout)
     if response.get("ok") is not True:
         kind = str(response.get("kind") or "")
         message = str(response.get("error") or "App host failed")
@@ -341,14 +440,31 @@ def main(argv: list[str] | None = None) -> None:
         serve(Path(rest[0]).resolve() if rest else root)
         return
     if operation == "start":
+        not_dumpable()
         raw = "" if sys.stdin.isatty() else sys.stdin.read().strip()
         received = json.loads(raw) if raw else {}
-        if not isinstance(received, dict):
-            raise SystemExit("start reads a JSON object of secret values on stdin")
-        start(root, {str(key): str(value) for key, value in received.items()} or None)
+        if not isinstance(received, dict) or not isinstance(received.get("secrets", {}), dict):
+            raise SystemExit(
+                'start reads {"secrets": {...}, "token": "...", "inputs": {...}} on stdin'
+            )
+        secrets = {str(key): str(value) for key, value in received.get("secrets", {}).items()}
+        given = received.get("inputs")
+        start(
+            root,
+            secrets or None,
+            str(received.get("token") or "") or None,
+            given if isinstance(given, dict) else None,
+        )
         print(json.dumps({"ok": True}))
         return
     timeout = float(os.environ.get("PLURAL_APPS_CALL_TIMEOUT") or 0) or None
+    token: str | None = None
+    controlled_input: Any = None
+    if os.environ.get(_CONTROL_STDIN) == "1":
+        not_dumpable()
+        envelope = json.loads(sys.stdin.read() or "{}")
+        token = str(envelope.get("token") or "") or None
+        controlled_input = envelope.get("arguments")
     if operation == "step":
         if len(rest) != 1:
             raise SystemExit("usage: python -m plural.apps.daemon step <action>")
@@ -361,13 +477,22 @@ def main(argv: list[str] | None = None) -> None:
     elif operation == "query":
         if len(rest) != 2:
             raise SystemExit("usage: python -m plural.apps.daemon query <app> <action>")
-        raw = sys.stdin.read().strip()
-        arguments = json.loads(raw) if raw else {}
+        if token is not None:
+            arguments = controlled_input or {}
+        else:
+            raw = sys.stdin.read().strip()
+            arguments = json.loads(raw) if raw else {}
         result = call(
-            "query", root=root, timeout=timeout, app=rest[0], action=rest[1], arguments=arguments
+            "query",
+            root=root,
+            timeout=timeout,
+            token=token,
+            app=rest[0],
+            action=rest[1],
+            arguments=arguments,
         )
-    elif operation in {"reset", "finish", "stop"}:
-        result = call(operation, root=root, timeout=timeout)
+    elif operation in {"reset", "finish", "stop", "states"}:
+        result = call(operation, root=root, timeout=timeout, token=token)
     else:
         raise SystemExit(f"unknown operation {operation!r}")
     print(json.dumps(result, sort_keys=True, default=str))

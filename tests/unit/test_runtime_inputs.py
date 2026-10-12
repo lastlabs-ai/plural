@@ -11,7 +11,12 @@ from pydantic import ValidationError
 from plural import Resource, Runtime, RuntimeVariable, Secret
 from plural.apps.definition import AppAction, AppDefinition
 from plural.environments.definition import EnvironmentDefinition
-from plural.execution.apps import app_secret_values, host_files, missing_app_secrets
+from plural.execution.apps import (
+    app_secret_values,
+    host_files,
+    host_inputs,
+    missing_app_secrets,
+)
 from plural.execution.engine import Trial
 from plural.execution.inputs import resource_uploads, runtime_values
 from plural.harness.native_runner import _action_environment
@@ -189,10 +194,8 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
     assert staged["/workspace/resources"]["task-resources/ticket.txt"] == b"case"
     assert "/workspace/environment" not in staged
     files = {item.path: item.data for item in host_files(task)}
+    # The hidden initial State is not in the shared file; it goes to the host on stdin.
     assert json.loads(files[".plural/apps/task.json"]) == {
-        "initial_state": {"game": {"seed": 42}},
-        "info": {"hint": "visible"},
-        "seed": None,
         "task": {"name": "case", "metadata": {"tier": "gold"}},
         "verifiers": [
             {
@@ -202,6 +205,11 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
                 "python": "test_runtime_inputs.py:gentle",
             }
         ],
+    }
+    assert host_inputs(task) == {
+        "initial_state": {"game": {"seed": 42}},
+        "info": {"hint": "visible"},
+        "seed": None,
     }
     assert b"def gentle(step)" in files[".plural/verifiers/gentle/test_runtime_inputs.py"]
     assert (

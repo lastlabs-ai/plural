@@ -295,6 +295,12 @@ Only this Verifier's step rewards count, not those of other Verifiers on the Tas
 any hindsight credit. `total_reward` needs a `reward` function. Without it, the
 score would always be 0.
 
+The App and its Environment decide the **horizon** the reward sums over, by when the
+episode ends: `terminated()` on an App, or the Environment's limits. The same `reward`
+function scores a short episode or a long one, so an Agent playing one poker hand and an
+Agent playing a whole match are each scored by the points earned over their own episode.
+Choose the horizon in the Environment and Task; the Verifier does not change.
+
 ## AgentVerifier
 
 An `AgentVerifier` uses an **AI model as a judge**. It reads the completed Episode and
