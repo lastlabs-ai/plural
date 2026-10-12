@@ -340,3 +340,17 @@ def test_a_verifier_needs_a_check_a_reward_or_both() -> None:
     assert not rewards_only.scores
     with pytest.raises(ValueError, match="Give it check"):
         DeterministicVerifier(name="empty")
+
+
+def test_an_earlier_ledger_reads_its_rewarder_as_the_verifier() -> None:
+    record = RewardRecord.model_validate(
+        {
+            "target": {"kind": "step", "event_id": "evt-1"},
+            "value": 0.5,
+            "source": "app",
+            "rewarder": "solved",
+            "version": "1",
+        }
+    )
+    assert (record.verifier, record.source) == ("solved", "step")
+    assert "rewarder" not in record.model_dump()

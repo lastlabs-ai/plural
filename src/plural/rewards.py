@@ -145,6 +145,17 @@ class RewardRecord(FrozenModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _earlier_ledger(cls, data: Any) -> Any:
+        # Ledgers written before Verifiers gave rewards name a rewarder, with source "app".
+        if isinstance(data, dict) and "rewarder" in data and "verifier" not in data:
+            data = {**data, "verifier": data["rewarder"]}
+            del data["rewarder"]
+            if data.get("source") == "app":
+                data["source"] = "step"
+        return data
+
     @model_validator(mode="after")
     def _finite(self) -> RewardRecord:
         if not math.isfinite(self.value) or not math.isfinite(self.weight):
