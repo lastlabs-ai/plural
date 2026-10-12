@@ -1028,7 +1028,9 @@ def _snapshot_sources(workspace: Workspace, spec: JobSpec) -> JobSpec:
         for item in task.verifiers:
             verifier = item.verifier
             if isinstance(verifier, DeterministicVerifier) and (
-                verifier.check_fn is not None or verifier.reward_fn is not None
+                verifier.check_fn is not None
+                or verifier.reward_fn is not None
+                or verifier.hindsight_fn is not None
             ):
                 directory = workspace.project.resource_dir(
                     ResourceRef(VERIFIER.name, verifier.name)
@@ -1125,7 +1127,11 @@ def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
             return item
         hooks = {
             field: hook
-            for field, hook in (("check", verifier.check), ("reward", verifier.reward))
+            for field, hook in (
+                ("check", verifier.check),
+                ("reward", verifier.reward),
+                ("hindsight", verifier.hindsight),
+            )
             if isinstance(hook, dict) and hook.get("python")
         }
         if not hooks:

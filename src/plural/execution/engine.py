@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from plural.agents import AgentBinding
+from plural.apps.host import STATES_FILE
 from plural.atif import ATIF_FILE, episode_to_atif
 from plural.benchmarks.results import AttemptEvidence, aggregate_configuration
 from plural.benchmarks.rules import BenchmarkScoring
@@ -81,7 +82,6 @@ from plural.jobs import (
 from plural.rewards import (
     LEDGER_FILE,
     HindsightTrial,
-    HindsightVerifier,
     RewardRecord,
     dump_ledger,
     online_records,
@@ -112,6 +112,7 @@ from plural.verifiers import (
     VerifierDefinition,
     VerifierOutput,
     VerifierRuntime,
+    hindsight_hooks,
 )
 
 
@@ -247,6 +248,14 @@ async def _optional_json(
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+async def _optional_file(provider: Any, handle: Any, path: str, *, root: str) -> bytes:
+    try:
+        files = await provider.download_files(handle, (path,), root=root)
+    except (FileNotFoundError, KeyError, OSError):
+        return b""
+    return files[0].data if files else b""
 
 
 def _requirements(task: TaskDefinition, package: HarnessPackage) -> SandboxRequirements:
@@ -475,12 +484,10 @@ class Trial:
         environ: Mapping[str, str],
         project_policy: ProjectPolicy,
         resource_resolvers: Mapping[str, ResourceResolver] | None = None,
-        hindsight: Sequence[HindsightVerifier] = (),
         credentials: Mapping[str, CredentialValue | str] | None = None,
     ) -> None:
         self.spec = spec
         self.job_spec = job_spec
-        self.hindsight = tuple(hindsight)
         self.credentials = dict(credentials or {})
         self.provider_for = provider_for
         self.store = store
@@ -686,6 +693,13 @@ class Trial:
                     environment_view_doc = await _optional_json(
                         provider, handle, ".plural/apps/view.json", root=WORKSPACE
                     )
+                    states = await _optional_file(
+                        provider, handle, f".plural/apps/{STATES_FILE}", root=WORKSPACE
+                    )
+                    if states:
+                        artifacts = _with_artifact(
+                            artifacts, DownloadedFile(path=STATES_FILE, data=states)
+                        )
                 environment_observation = environment_observation or await _optional_json(
                     provider, handle, "observation.json", root="/workspace/harness"
                 )
@@ -1028,17 +1042,18 @@ class Trial:
         apps: Mapping[str, Any] | None,
         score: float | None,
     ) -> list[RewardRecord]:
-        """Online rewards from the episode, then any hindsight verifiers' records.
+        """Online rewards from the episode, then each Verifier's ``hindsight`` credit.
 
-        A hindsight verifier that fails is reported and skipped; rewards never
-        fail a Trial or change its score.
+        A hindsight hook that fails is reported and skipped; rewards never fail
+        a Trial or change its score.
 
         Returns:
             The Trial's reward ledger.
         """
         events = _episode_records(artifacts)
         ledger = online_records(events)
-        if not self.hindsight or not events:
+        hooks = hindsight_hooks(self.task.verifiers)
+        if not hooks or not events:
             return ledger
         trial = HindsightTrial(
             events,
@@ -1048,7 +1063,7 @@ class Trial:
             task_id=self.task.task_id,
             trial_id=self.spec.trial_id,
         )
-        for verifier in self.hindsight:
+        for verifier in hooks:
             try:
                 ledger.extend(verifier.apply(trial))
             except Exception as exc:  # noqa: BLE001 - a reward label never fails a Trial
@@ -1058,7 +1073,7 @@ class Trial:
                     "running",
                     trial_id=self.spec.trial_id,
                     data={
-                        "message": f"hindsight verifier {verifier.name!r} failed",
+                        "message": f"Verifier {verifier.name!r} hindsight failed",
                         "verifier": verifier.name,
                         "error": str(exc)[:1000],
                     },
@@ -1598,11 +1613,9 @@ class JobRunner:
         progress: Callable[[TrialSpec, TrialResult], None] | None = None,
         project_policy: ProjectPolicy | None = None,
         catalog: ModelCatalog | None = None,
-        hindsight: Sequence[HindsightVerifier] = (),
         credentials: Mapping[str, Mapping[str, CredentialValue | str]] | None = None,
     ) -> None:
         self.spec = spec
-        self.hindsight = tuple(hindsight)
         self.credentials = dict(credentials or {})
         self.catalog = catalog or ModelCatalog()
         self.plan = spec.plan(self.catalog)
@@ -1748,7 +1761,6 @@ class JobRunner:
                         environ=self.environ,
                         resource_resolvers=self.resource_resolvers,
                         project_policy=self.project_policy,
-                        hindsight=self.hindsight,
                         credentials=self._agent_credentials(trial_spec),
                     )
                     self._trials.add(trial)

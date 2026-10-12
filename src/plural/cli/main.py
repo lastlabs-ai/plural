@@ -10,7 +10,7 @@ from plural.cli.credential_commands import credential_app
 from plural.cli.models_commands import models_app
 from plural.cli.project_commands import project_app
 from plural.cli.resource_commands import resource_app
-from plural.cli.reward_commands import rewards_app
+from plural.cli.reward_commands import rewards_app, verifier_apply, verifier_try
 from plural.cli.run_commands import job_app, review_app, run, trial_app
 from plural.cli.runtime_commands import runtime_app
 from plural.cli.secret_commands import project_secret_source, secret_app
@@ -34,6 +34,12 @@ for _kind in KINDS:
     _group = resource_app(_kind)
     if _kind.name == "agent":
         _group.add_typer(credential_app, name="credential")
+    if _kind.name == "verifier":
+        _group.command("try")(verifier_try)
+        _group.command("apply")(verifier_apply)
+    if _kind.name == "verifier":
+        _group.command("try")(verifier_try)
+        _group.command("apply")(verifier_apply)
     app.add_typer(_group, name=_kind.cli)
 app.command("run")(run)
 app.add_typer(job_app, name="job")

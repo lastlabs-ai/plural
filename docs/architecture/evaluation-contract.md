@@ -99,8 +99,8 @@ An Environment episode follows one transition pipeline:
 10. aggregate scores into the Trial and Benchmark result.
 
 Verifiers credit one transition and are recorded on the episode in every mode;
-hindsight verifiers may later credit a step, turn, or span of a finished
-trajectory. `Trial.step_reward_total` is the episode's total. Verifiers assess completed
+a Verifier's `hindsight` function may later credit a step, turn, or span of a
+finished trajectory. `Trial.step_reward_total` is the episode's total. Verifiers assess completed
 Trials and are the only source of a score. A reward contributes to one only when a
 Verifier's `check` is `total_reward`, which scores by that Verifier's own rewards. They do not share lifecycle hooks or result types. An episode's stop reason
 is one of `plural.STOP_REASONS`.

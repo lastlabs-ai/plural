@@ -20,7 +20,7 @@ keeping the evidence behind every score.
    and score.
 
 A score is what a Verifier's `check` produces, and it is the only thing a
-Benchmark ranks on. Rewards, from a Verifier's `reward` function or a hindsight verifier,
+Benchmark ranks on. Rewards, from a Verifier's `reward` or `hindsight` function,
 are recorded in each Trial's reward ledger for training. They count toward a
 score only when a Verifier's `check` is `total_reward`. Only what an action returns is ever shown to the model; scores, rewards,
 State, and private Verifier data never reach it.

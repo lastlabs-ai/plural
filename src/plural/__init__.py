@@ -97,7 +97,6 @@ from plural.rewards import (
     HindsightTrial,
     RewardRecord,
     RewardTarget,
-    hindsight_verifier,
 )
 from plural.sandbox import (
     Capability,
@@ -179,7 +178,6 @@ __all__ = [
     "Verifier",
     "VerifierOutput",
     "action",
-    "hindsight_verifier",
     "total_reward",
     "initial",
     "Credit",

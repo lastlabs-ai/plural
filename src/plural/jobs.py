@@ -779,7 +779,6 @@ class Job:
         catalog: ModelCatalog | None = None,
         client: Any = None,
         api_key: str | None = None,
-        hindsight: Sequence[Any] = (),
         credentials: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         if not isinstance(source, (Task, Benchmark)):
@@ -796,12 +795,6 @@ class Job:
         if any(not isinstance(agent, Agent) for agent in agents):
             raise TypeError(
                 "Cannot create Job.\nagents must be Agent instances created from a catalog model."
-            )
-        from plural.rewards import HindsightVerifier
-
-        if any(not isinstance(item, HindsightVerifier) for item in hindsight):
-            raise TypeError(
-                "Cannot create Job.\nhindsight must list functions marked with @hindsight_verifier."
             )
         if client is not None and api_key:
             raise ValueError(
@@ -854,7 +847,6 @@ class Job:
             "store": store,
             "environ": environ,
             "resource_resolvers": resource_resolvers,
-            "hindsight": tuple(hindsight) or None,
             "credentials": {
                 agent: {name: CredentialValue(value) for name, value in values.items()}
                 for agent, values in (credentials or {}).items()

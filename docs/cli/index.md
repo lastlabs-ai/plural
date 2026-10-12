@@ -59,7 +59,7 @@ plural job show|rerun|push JOB_ID
 plural trial show|rerun TRIAL_ID
 plural review list
 plural review submit TRIAL_ID --verifier NAME --score SCORE
-plural rewards apply PATH.py:NAME (--trial TRIAL_ID... | --job JOB_ID)
+plural verifier try|apply NAME (--trial TRIAL_ID... | --job JOB_ID)
 plural rewards show TRIAL_ID
 plural rewards export (--trial TRIAL_ID... | --job JOB_ID) [--verifier NAME[@VERSION]]
 plural models list

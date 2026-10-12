@@ -518,11 +518,13 @@ _VERIFIER_YAML = """\
 # Verifier: what counts as a good episode for the Tasks that list it.
 # check scores the finished episode; Tasks and Benchmarks rank on that score.
 # reward rewards each action, for training. It changes the score only when
-# check is total_reward.
+# check is total_reward. hindsight credits steps once the episode is over.
+# Try changes on stored Trials with `plural verifier try {name} --job JOB_ID`.
 name: {name}
 kind: deterministic
 check: verify.py:check
 # reward: verify.py:reward
+# hindsight: verify.py:hindsight
 weight: 1
 """
 

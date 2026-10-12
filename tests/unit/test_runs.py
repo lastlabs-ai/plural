@@ -315,48 +315,81 @@ def test_verifier_data_never_reaches_the_harness(project: Project, tmp_path: Pat
         assert private not in visible, private
 
 
-def test_rewards_apply_labels_a_stored_trial_and_export_joins_the_ledger(
+def test_a_verifier_tries_and_applies_its_rewards_on_a_stored_trial(
     project: Project,
 ) -> None:
     code, output, job = cli("run", "--task", "refund", "--agent", "baseline", "--json")
     assert code == 0, output
     [trial] = job["trials"]
-    (project.root / "labels.py").write_text(
-        "from plural import HindsightTrial, RewardTarget, hindsight_verifier\n\n\n"
-        "@hindsight_verifier(version='3')\n"
+    directory = project.root / "verifiers/resolved"
+    (directory / "verifier.yaml").write_text(
+        (directory / "verifier.yaml")
+        .read_text()
+        .replace("version: 0.1.0", "version: 0.2.0")
+        .replace(
+            "reward: verify.py:reward", "reward: verify.py:reward\nhindsight: verify.py:scored"
+        )
+    )
+    source = (directory / "verify.py").read_text()
+    (directory / "verify.py").write_text(
+        source.replace(
+            'return 1.0 if step.current_state["done"] else 0.0',
+            'return 0.5 if step.apps["queue"].state.done else 0.0',
+        )
+        + "\n\nfrom plural import HindsightTrial, RewardTarget\n\n\n"
         "def scored(trial: HindsightTrial):\n"
         "    for step in trial.steps('submit'):\n"
         "        yield trial.credit(RewardTarget.step(step['event_id']), trial.score or 0)\n"
     )
+    ledger_before = cli("rewards", "show", trial["trial_id"], "--json")[2]
+
+    code, output, tried = cli("verifier", "try", "resolved", "--trial", trial["trial_id"], "--json")
+    assert code == 0, output
+    [result] = tried["trials"]
+    assert result["problems"] == []
+    assert result["score"] == 1.0
+    assert result["step_total"] == 0.5
+    assert result["hindsight_total"] == 1.0
+    assert cli("rewards", "show", trial["trial_id"], "--json")[2] == ledger_before
 
     code, output, applied = cli(
-        "rewards", "apply", "labels.py:scored", "--trial", trial["trial_id"], "--json"
+        "verifier", "apply", "resolved", "--trial", trial["trial_id"], "--json"
     )
     assert code == 0, output
-    assert applied["version"] == "3"
-    assert applied["trials"][0]["trial_id"] == trial["trial_id"]
-    labeled = applied["trials"][0]["records"]
-    assert labeled >= 1
-
+    assert applied["version"] == "0.2.0"
+    assert applied["trials"][0]["new_records"] == 2
     code, output, ledger = cli("rewards", "show", trial["trial_id"], "--json")
-    assert code == 0, output
-    assert [(item["source"], item["verifier"], item["app"]) for item in ledger] == [
-        ("step", "resolved", "queue"),
-        ("hindsight", "scored", None),
+    assert [(item["source"], item["version"], item["value"]) for item in ledger] == [
+        ("step", "0.1.0", 1.0),
+        ("step", "0.2.0", 0.5),
+        ("hindsight", "0.2.0", 1.0),
     ]
-    assert ledger[0]["target"] == ledger[1]["target"]
-    assert ledger[1]["value"] == 1.0
+    assert ledger[0]["target"] == ledger[1]["target"] == ledger[2]["target"]
+
+    code, output, again = cli(
+        "verifier", "apply", "resolved", "--trial", trial["trial_id"], "--json"
+    )
+    assert code == 0, output
+    assert again["trials"][0]["new_records"] == 0
+    assert again["trials"][0]["skipped"] == ["hindsight", "step"]
 
     out = project.root / "train.jsonl"
     code, output, _ = cli(
-        "rewards", "export", "--job", job["job_id"], "--verifier", "scored@3", "--out", str(out)
+        "rewards",
+        "export",
+        "--job",
+        job["job_id"],
+        "--verifier",
+        "resolved@0.2.0",
+        "--out",
+        str(out),
     )
     assert code == 0, output
     [line] = out.read_text().splitlines()
     exported = json.loads(line)
     assert exported["trial_id"] == trial["trial_id"]
     assert exported["score"] == 1.0
-    assert [item["verifier"] for item in exported["rewards"]] == ["scored"]
+    assert sorted(item["value"] for item in exported["rewards"]) == [0.5, 1.0]
 
 
 def test_run_has_no_traces_option(project: Project) -> None:

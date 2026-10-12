@@ -195,8 +195,9 @@ else.
 
 The Verifier is the grader. `verifiers/solved/verifier.yaml` declares a deterministic
 Verifier (a `DeterministicVerifier` in Python), meaning a small piece of code that
-checks the answer exactly. Its `check` scores the finished game, and its `reward`
-check rewards each guess. Both are functions in `verify.py`:
+checks the answer exactly. Its `check` scores the finished game, its `reward` rewards
+each guess, and its `hindsight` credits the solving guess once the game is over. All
+three are functions in `verify.py`:
 
 ```yaml
 name: solved
@@ -204,6 +205,7 @@ version: 0.1.0
 kind: deterministic
 check: verify.py:check
 reward: verify.py:reward
+hindsight: verify.py:fewer_guesses
 weight: 1
 ```
 
@@ -241,8 +243,22 @@ def reward(step: Step) -> float:
     return 1.0 if solved else 0.0
 ```
 
-Its rewards go to the Trial's reward ledger, `rewards.jsonl`. They don't change the
-score, since `check` decides it, and the AI never sees them.
+Some credit can only be judged at the end. `fewer_guesses` runs after `check` and
+credits the solving guess more when it took fewer guesses:
+
+```python
+def fewer_guesses(trial: HindsightTrial):
+    """Credit the solving guess more when it took fewer guesses."""
+    guesses = trial.steps("guess")
+    if trial.score and guesses:
+        yield trial.credit(guesses[-1]["event_id"], 1.0 - 0.1 * (len(guesses) - 1))
+```
+
+Both kinds of reward go to the Trial's reward ledger, `rewards.jsonl`. They don't
+change the score, since `check` decides it, and the AI never sees them. To change a
+reward and see what it gives on games you already played, use
+`plural verifier try solved --job JOB_ID`; see
+[Label stored Trials](../running/training.md#label-stored-trials).
 
 ### Two Agents
 

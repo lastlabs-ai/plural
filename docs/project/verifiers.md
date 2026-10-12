@@ -211,12 +211,58 @@ raises is recorded with its error and a value of 0; it never fails the Agent's a
 
 Each reward is written to the Trial's reward ledger, `rewards.jsonl`, with the
 Verifier's name and version and the step it credits. The Agent never sees it: only an
-action's observation reaches the model. For credit you can only judge once the
-attempt is over, such as a model call that was wasted, use a
-[hindsight Verifier](../running/training.md).
+action's observation reaches the model.
 
-A Verifier needs `check`, `reward`, or both. One with only `reward` gives rewards and no
-score, so every Task also needs at least one Verifier with `check`.
+### Credit in hindsight
+
+Some credit can only be judged once the attempt is over: the guess that solved it,
+weighted by how few it took, or a model call that turned out to be wasted. Give the
+Verifier a `hindsight` function. It runs after `check`, reads the whole finished Trial,
+and credits whichever steps or model calls deserve it:
+
+```yaml
+check: verify.py:check
+reward: verify.py:reward
+hindsight: verify.py:fewer_guesses
+```
+
+```python
+from plural import HindsightTrial
+
+
+def fewer_guesses(trial: HindsightTrial):
+    """Credit the solving guess more when it took fewer guesses."""
+    guesses = trial.steps("guess")
+    if trial.score:
+        yield trial.credit(guesses[-1]["event_id"], 1.0 - 0.1 * (len(guesses) - 1))
+```
+
+`trial.score` is the Trial's score, `trial.steps(action)` lists the Environment steps,
+`trial.model_calls()` the model calls, and `trial.apps` each App's initial and final
+State. Its credit goes in the same ledger, marked `hindsight`.
+
+A Verifier needs at least one of `check`, `reward`, and `hindsight`. One without
+`check` gives rewards and no score, so every Task also needs at least one Verifier
+with `check`.
+
+### Try a Verifier on stored Trials
+
+You can change a Verifier and see what it gives on Trials you already ran, without
+running the Agent again:
+
+```bash
+plural verifier try solved --job JOB_ID
+plural verifier apply solved --job JOB_ID
+```
+
+`try` prints the score, rewards, and hindsight credit the Verifier gives now, and saves
+nothing. `apply` adds those rewards to each Trial's ledger under the Verifier's name
+and version. See [Label stored Trials](../running/training.md#label-stored-trials).
+
+`reward` runs again on each recorded step, against the State each App had then. A Trial
+records that State for Python Apps and for `mcp` Apps with a `snapshot` command. In
+replay, `step.apps[name].state` is the recorded State, but `query` is unavailable,
+because the App is no longer running.
 
 To try step rewards on an Environment in Python, pass Verifiers, or plain functions of
 a `Step`, when you reset it:
@@ -245,8 +291,8 @@ from plural import DeterministicVerifier, total_reward
 DeterministicVerifier(name="progress", check=total_reward, reward=progress)
 ```
 
-Only this Verifier's rewards count, not those of other Verifiers on the Task or of
-hindsight Verifiers. `total_reward` needs a `reward` function. Without it, the
+Only this Verifier's step rewards count, not those of other Verifiers on the Task or
+any hindsight credit. `total_reward` needs a `reward` function. Without it, the
 score would always be 0.
 
 ## AgentVerifier

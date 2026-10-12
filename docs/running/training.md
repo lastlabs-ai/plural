@@ -124,45 +124,50 @@ Task, the same Environment can be rewarded differently for different Tasks. See
 [Reward each step](../project/verifiers.md#reward-each-step). Train mode also
 writes each step's reward as a `reward` event in the Job's progress events.
 
-**After the episode, in hindsight.** A hindsight verifier reads a whole finished
-Trial, including its score, every step, and each App's final State, and credits
-whichever moves deserve it. It suits signals you can only judge at the end, such as
-"the guess that solved it, weighted by how few it took", or labels you decide on
-later:
+**After the episode, in hindsight.** A Verifier's `hindsight` function reads a whole
+finished Trial, including its score, every step, and each App's final State, and
+credits whichever moves deserve it. It suits signals you can only judge at the end,
+such as "the guess that solved it, weighted by how few it took". It runs on every
+Trial of a Task that lists the Verifier. See
+[Credit in hindsight](../project/verifiers.md#credit-in-hindsight).
 
-```python
-from plural import HindsightTrial, hindsight_verifier
+### Label stored Trials
 
-
-@hindsight_verifier(version="1")
-def fewer_guesses(trial: HindsightTrial):
-    """Credit the solving guess more when it took fewer guesses."""
-    guesses = trial.steps("guess")
-    if trial.score:
-        yield trial.credit(guesses[-1]["event_id"], 1.0 - 0.1 * (len(guesses) - 1))
-```
-
-`trial.steps(action)` lists the Environment steps, `trial.model_calls()` the model
-calls, and `trial.apps` each App's initial and final State. Bump `version` when the
-logic changes, so an export can pick which labels to use.
-
-Run it on Trials you already have. This labels a stored Job without running anything
-again:
+Rewards are often designed after the data exists. Edit a Verifier's `reward` or
+`hindsight`, then see what it would give on Trials you already ran. Nothing runs the
+Agent again, and nothing is saved:
 
 ```bash
-plural rewards apply verifiers.py:fewer_guesses --job JOB_ID
+plural verifier try solved --job JOB_ID
+```
+
+```text
+TRIAL_ID: score 1, 5 step reward(s) totalling +1, 1 hindsight totalling +0.7
+  step  e2     +0.000  step
+  step  e3     +0.000  step
+  step  e4     +0.000  step
+  step  e5     +1.000  step
+  step  e5     +0.700  hindsight
+```
+
+`reward` runs again on each recorded step, against the State each App had at that
+step, and `hindsight` on the finished trajectory. When the numbers look right, bump
+the Verifier's `version` and record them:
+
+```bash
+plural verifier apply solved --job JOB_ID
 plural rewards show TRIAL_ID
 ```
 
 ```text
-step  e2     +0.000  step:solved
-step  e3     +0.000  step:solved
-step  e4     +0.000  step:solved
-step  e5     +1.000  step:solved
-step  e5     +0.700  hindsight:fewer_guesses@1
+step  e5     +1.000  step:solved@0.1.0
+step  e5     +1.000  step:solved@0.2.0
+step  e5     +0.700  hindsight:solved@0.2.0
 ```
 
-Or pass `hindsight=[fewer_guesses]` to the `Job` to label each Trial as it finishes.
+Each version's records sit beside the others, so an export can pick which labels to
+use. A Trial that already has records from the Verifier's current version is left as
+it is.
 
 If you pushed the Job with `plural job push`, `apply` adds the new records to the
 hosted Trials' ledgers too, where the Trial page shows each reward on the step it

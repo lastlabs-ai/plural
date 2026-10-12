@@ -110,9 +110,11 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
 - **Step reward:** a reward for one action, given while the attempt runs.
   *Precisely:* what a Verifier's `reward` function returns after each action, recorded
   with source `step`, the Verifier's name and version, and the step it credits.
-- **Hindsight verifier:** a rule that hands out rewards after an attempt is over,
-  looking at the whole thing. *Precisely:* a function marked `@hindsight_verifier`,
-  applied to finished Trials with `plural rewards apply` or a Job's `hindsight`.
+- **Hindsight credit:** rewards a Verifier hands out after an attempt is over,
+  looking at the whole thing. *Precisely:* what a Verifier's `hindsight` function
+  returns for a finished Trial, recorded with source `hindsight`. It runs after `check`
+  on every Trial of a Task that lists the Verifier, and on stored Trials with
+  `plural verifier apply`.
 - **Reward ledger:** every reward one attempt earned, wherever it came from.
   *Precisely:* `rewards.jsonl` in a Trial's artifacts, one record per reward, with its
   source, verifier, version, target, and value.

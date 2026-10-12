@@ -845,7 +845,7 @@ same name.
 ```
 
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, hindsight: 'Sequence[Any]' = (), credentials: 'Mapping[str, Mapping[str, str]] | None' = None) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None) -> 'None'
 ```
 
 ### plural.Job.run_async
@@ -1575,7 +1575,7 @@ plural.action(fn: 'Callable[..., Any] | None' = None, *, name: 'str | None' = No
 
 ## plural.DeterministicVerifier
 
-Code that verifies an episode: it scores the end, rewards each step, or both.
+Code that verifies an episode: it scores the end, rewards actions, or both.
 
 ```text
 ``check`` scores the finished episode; that score is what Tasks and
@@ -1587,6 +1587,12 @@ one :class:`Step`, or a ``{"python": "verify.py:reward"}`` reference, and
 runs in the Runtime beside the Apps, so it can read every App. What it
 returns goes to the Trial's reward ledger. Rewards reach the score only
 when ``check`` is :func:`total_reward`.
+
+``hindsight`` credits the finished trajectory as a whole: a function of a
+:class:`~plural.rewards.HindsightTrial` that returns
+:class:`~plural.rewards.Credit` values, or a ``{"python":
+"verify.py:efficiency"}`` reference. It runs after the score, and can also
+run later on stored Trials with ``plural verifier apply``.
 ```
 
 ### plural.DeterministicVerifier.bind_source

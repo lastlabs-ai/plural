@@ -94,7 +94,7 @@ One versioned unit of work in a Python-authored Environment.
 
 ## DeterministicVerifier
 
-Code that verifies an episode: it scores the end, rewards each step, or both.
+Code that verifies an episode: it scores the end, rewards actions, or both.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
@@ -106,6 +106,7 @@ Code that verifies an episode: it scores the end, rewards each step, or both.
 - **`kind`** — `"deterministic"`; optional. Default: `"deterministic"`.
 - **`check`** — `JSON value`; optional. Default: `null`.
 - **`reward`** — `JSON value`; optional. Default: `null`.
+- **`hindsight`** — `JSON value`; optional. Default: `null`.
 - **`runtime`** — `VerifierRuntime`; optional.
 - **`result_path`** — `string`; optional. Default: `"verifier-result.json"`.
 - **`evidence_required`** — `boolean`; optional. Default: `true`.

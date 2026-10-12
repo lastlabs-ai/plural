@@ -470,7 +470,7 @@ def _build_verifier(
     prepared = dict(payload)
     prepared.setdefault("kind", "deterministic")
     bound = False
-    for hook in ("check", "reward"):
+    for hook in ("check", "reward", "hindsight"):
         reference = prepared.get(hook)
         if not (isinstance(reference, str) and _looks_like_reference(reference)):
             continue

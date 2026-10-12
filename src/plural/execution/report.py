@@ -497,7 +497,7 @@ def publish_rewards(
 ) -> int:
     """Add each execution's reward ledger to its hosted Trial's ledger.
 
-    Use this after a hindsight verifier appends to a pushed Job's ledgers.
+    Use this after ``plural verifier apply`` appends to a pushed Job's ledgers.
     The hosted ledger keeps each record once, so publishing again adds only
     new records. Executions not yet published are skipped; ``publish_job``
     sends their whole ledger with them.

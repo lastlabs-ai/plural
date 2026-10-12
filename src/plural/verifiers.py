@@ -6,7 +6,7 @@ import hashlib
 import inspect
 import math
 import shlex
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -18,6 +18,7 @@ from plural.apps.definition import SecretReference
 from plural.catalog import ModelCatalog
 from plural.common import FrozenModel, RoutingSpec
 from plural.identity import revision_hash
+from plural.rewards import HindsightVerifier
 from plural.sandbox.models import NetworkMode, ResourceRequirements
 
 
@@ -388,7 +389,7 @@ class Verifier(FrozenModel):
 
 
 class DeterministicVerifier(Verifier):
-    """Code that verifies an episode: it scores the end, rewards each step, or both.
+    """Code that verifies an episode: it scores the end, rewards actions, or both.
 
     ``check`` scores the finished episode; that score is what Tasks and
     Benchmarks rank on. It is a function of the :class:`Episode`, a
@@ -399,11 +400,18 @@ class DeterministicVerifier(Verifier):
     runs in the Runtime beside the Apps, so it can read every App. What it
     returns goes to the Trial's reward ledger. Rewards reach the score only
     when ``check`` is :func:`total_reward`.
+
+    ``hindsight`` credits the finished trajectory as a whole: a function of a
+    :class:`~plural.rewards.HindsightTrial` that returns
+    :class:`~plural.rewards.Credit` values, or a ``{"python":
+    "verify.py:efficiency"}`` reference. It runs after the score, and can also
+    run later on stored Trials with ``plural verifier apply``.
     """
 
     kind: Literal["deterministic"] = "deterministic"
     check: Any = None
     reward: Any = None
+    hindsight: Any = None
     runtime: VerifierRuntime = Field(default_factory=VerifierRuntime)
     result_path: str = "verifier-result.json"
     evidence_required: bool = True
@@ -428,20 +436,20 @@ class DeterministicVerifier(Verifier):
             )
         elif isinstance(check, list):
             payload["check"] = tuple(str(item) for item in check)
-        reward = payload.get("reward")
-        if isinstance(reward, str):
-            payload["reward"] = {"python": reward}
+        for hook in ("reward", "hindsight"):
+            if isinstance(payload.get(hook), str):
+                payload[hook] = {"python": payload[hook]}
         payload.pop("required_artifacts", None)
         payload.pop("evidence", None)
         return payload
 
     @model_validator(mode="after")
     def _valid_hooks(self) -> DeterministicVerifier:
-        if self.check is None and self.reward is None:
+        if self.check is None and self.reward is None and self.hindsight is None:
             raise ValueError(
                 f"Cannot create DeterministicVerifier {self.name!r}.\n"
                 "Give it check, to score the finished episode, reward, to reward each "
-                "action, or both:\n"
+                "action, hindsight, to credit the finished trajectory, or several:\n"
                 "  DeterministicVerifier(name='solved', check=solved, reward=progress)"
             )
         check = self.check
@@ -476,9 +484,21 @@ class DeterministicVerifier(Verifier):
                 "  def reward(step: Step) -> float | None: ...\n"
                 f"Got {type(reward).__name__}: {reward!r}."
             )
+        hindsight = self.hindsight
+        if hindsight is not None and not (
+            (callable(hindsight) and _accepts_episode(hindsight))
+            or (isinstance(hindsight, dict) and hindsight.get("python"))
+        ):
+            raise ValueError(
+                f"Cannot create DeterministicVerifier {self.name!r}.\n"
+                "hindsight must be a function that accepts one HindsightTrial, or a "
+                "'verify.py:efficiency' reference. Define it like:\n"
+                "  def efficiency(trial: HindsightTrial): yield trial.credit(...)\n"
+                f"Got {type(hindsight).__name__}: {hindsight!r}."
+            )
         return self
 
-    @field_serializer("check", "reward")
+    @field_serializer("check", "reward", "hindsight")
     def _serialize_hook(self, hook: Any) -> Any:
         if hook is total_reward:
             return {"builtin": TOTAL_REWARD}
@@ -490,9 +510,10 @@ class DeterministicVerifier(Verifier):
 
     def _hash_payload(self) -> dict[str, Any]:
         payload = self.model_dump(mode="json")
-        # A Verifier with no reward hashes as it did before reward existed.
-        if payload.get("reward") is None:
-            payload.pop("reward", None)
+        # A Verifier without a hook hashes as it did before that hook existed.
+        for hook in ("reward", "hindsight"):
+            if payload.get(hook) is None:
+                payload.pop(hook, None)
         return payload
 
     def _callable_reference(self, hook: Callable[..., Any]) -> dict[str, str]:
@@ -537,6 +558,11 @@ class DeterministicVerifier(Verifier):
         return _reference(self.reward)
 
     @property
+    def hindsight_ref(self) -> str | None:
+        """``hindsight`` as a ``file.py:function`` reference, if it is one."""
+        return _reference(self.hindsight)
+
+    @property
     def check_fn(self) -> Callable[[Episode], Any] | None:
         """``check`` as an in-process function, if it is one."""
         return self.check if callable(self.check) else None
@@ -545,6 +571,11 @@ class DeterministicVerifier(Verifier):
     def reward_fn(self) -> Callable[..., Any] | None:
         """``reward`` as an in-process function, if it is one."""
         return self.reward if callable(self.reward) else None
+
+    @property
+    def hindsight_fn(self) -> Callable[..., Any] | None:
+        """``hindsight`` as an in-process function, if it is one."""
+        return self.hindsight if callable(self.hindsight) else None
 
     @property
     def source_dir(self) -> Path | None:
@@ -580,6 +611,28 @@ class DeterministicVerifier(Verifier):
                 "The function must accept one argument: the finished Episode.\n"
                 f"Cause: {exc}"
             ) from exc
+
+
+def hindsight_hooks(verifiers: Iterable[Any]) -> list[HindsightVerifier]:
+    """The ``hindsight`` hooks of these Verifiers that can run in this process.
+
+    Accepts Verifiers or a Task's weighted Verifiers. A hook still named only by
+    reference, such as one pulled from a hosted project without its source, is
+    left out.
+
+    Returns:
+        One runner per hook, recording under the Verifier's name and version.
+    """
+    hooks: list[HindsightVerifier] = []
+    for item in verifiers:
+        verifier = getattr(item, "verifier", item)
+        if isinstance(verifier, DeterministicVerifier) and verifier.hindsight_fn is not None:
+            hooks.append(
+                HindsightVerifier(
+                    verifier.hindsight_fn, name=verifier.name, version=verifier.version
+                )
+            )
+    return hooks
 
 
 TOTAL_REWARD = "total_reward"

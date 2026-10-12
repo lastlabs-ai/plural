@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from plural.environments.env import Environment
 
 STEP_PROTOCOL = "plural-step-v1"
+STATES_FILE = "states.jsonl"
 
 
 class AppHandle:
@@ -175,8 +176,10 @@ class AppHost:
         self.task = task or StepTask()
         self.initial: dict[str, Any] = {}
         self.turns = 0
+        self.steps = 0
         self.started = False
         self._effects: list[dict[str, Any]] = []
+        self._recorded: dict[str, Any] = {}
 
     # Episode operations.
 
@@ -205,7 +208,10 @@ class AppHost:
                 texts.append((name, payload, rendered))
         self.initial = {name: self._snapshot(app) for name, app in self.apps.items()}
         self.turns = 0
+        self.steps = 0
         self.started = True
+        self._recorded = {}
+        self._record_states(0)
         if len(texts) == 1:
             observation, rendered = texts[0][1], texts[0][2]
         elif texts:
@@ -233,6 +239,7 @@ class AppHost:
 
         if not self.started:
             self.reset()
+        self.steps += 1
         route = self.routes.get(name)
         if route is None:
             available = ", ".join(self.routes) or "none"
@@ -241,7 +248,10 @@ class AppHost:
                 action=name,
                 observation=None,
                 rendered="",
-                info={"error": f"unknown action {name!r}; available actions: {available}"},
+                info={
+                    "step": self.steps,
+                    "error": f"unknown action {name!r}; available actions: {available}",
+                },
             )
         app_name, action_name = route
         app = self.apps[app_name]
@@ -257,6 +267,7 @@ class AppHost:
             reward, signals = self._reward(
                 app_name, action_name, arguments, None, str(exc), previous, previous
             )
+            self._record_states(self.steps, app=app_name, action=action_name, error=str(exc))
             return self._envelope(
                 "step",
                 app=app_name,
@@ -265,7 +276,7 @@ class AppHost:
                 rendered="",
                 reward=reward,
                 rewards=signals,
-                info={**app.step_info(), "error": str(exc)},
+                info={**app.step_info(), "step": self.steps, "error": str(exc)},
                 view=self._view(app_name),
             )
         latency_ms = round((time.monotonic() - started) * 1000, 3)
@@ -285,7 +296,12 @@ class AppHost:
         reward, signals = self._reward(
             app_name, action_name, arguments, payload, None, previous, current
         )
-        info: dict[str, Any] = {**app.step_info(), "latency_ms": latency_ms}
+        self._record_states(self.steps, app=app_name, action=action_name)
+        info: dict[str, Any] = {
+            **app.step_info(),
+            "step": self.steps,
+            "latency_ms": latency_ms,
+        }
         if self._effects:
             info["effects"] = list(self._effects)
         return self._envelope(
@@ -398,6 +414,41 @@ class AppHost:
             signals.append(entry)
         return total, signals
 
+    def _record_states(
+        self,
+        step: int,
+        *,
+        app: str | None = None,
+        action: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Append the State of each App that changed to ``states.jsonl``, beside the Apps.
+
+        Step 0 holds every App's State after reset; each later step only the
+        Apps whose State it changed. Replaying a Verifier's ``reward`` on a
+        stored Trial reads this file. It stays in the Runtime's workspace and
+        is collected with the Trial's artifacts, never sent to the Harness.
+        """
+        if self.workspace is None:
+            return
+        changed: dict[str, Any] = {}
+        for name, item in self.apps.items():
+            if not item.snapshot_on_step:
+                continue
+            snapshot = self._snapshot(item)
+            if step == 0 or snapshot != self._recorded.get(name):
+                changed[name] = snapshot
+                self._recorded[name] = snapshot
+        line: dict[str, Any] = {"step": step, "state": changed}
+        if app is not None:
+            line.update(app=app, action=action)
+        if error is not None:
+            line["error"] = error
+        root = self.workspace / ".plural" / "apps"
+        root.mkdir(parents=True, exist_ok=True)
+        with (root / STATES_FILE).open("w" if step == 0 else "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(line, sort_keys=True, default=str) + "\n")
+
     def _snapshot(self, app: App[Any]) -> Any:
         if not app.has_snapshot():
             return None
@@ -487,6 +538,7 @@ def _accepts_seed(app: App[Any]) -> bool:
 
 
 __all__ = [
+    "STATES_FILE",
     "STEP_PROTOCOL",
     "AppHandle",
     "AppHost",

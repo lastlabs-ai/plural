@@ -232,7 +232,7 @@
     },
     "DeterministicVerifier": {
       "additionalProperties": false,
-      "description": "Code that verifies an episode: it scores the end, rewards each step, or both.\n\n``check`` scores the finished episode; that score is what Tasks and\nBenchmarks rank on. It is a function of the :class:`Episode`, a\n``{\"python\": \"verify.py:check\"}`` reference, or a command argv.\n\n``reward`` rewards each action while the episode runs. It is a function of\none :class:`Step`, or a ``{\"python\": \"verify.py:reward\"}`` reference, and\nruns in the Runtime beside the Apps, so it can read every App. What it\nreturns goes to the Trial's reward ledger. Rewards reach the score only\nwhen ``check`` is :func:`total_reward`.",
+      "description": "Code that verifies an episode: it scores the end, rewards actions, or both.\n\n``check`` scores the finished episode; that score is what Tasks and\nBenchmarks rank on. It is a function of the :class:`Episode`, a\n``{\"python\": \"verify.py:check\"}`` reference, or a command argv.\n\n``reward`` rewards each action while the episode runs. It is a function of\none :class:`Step`, or a ``{\"python\": \"verify.py:reward\"}`` reference, and\nruns in the Runtime beside the Apps, so it can read every App. What it\nreturns goes to the Trial's reward ledger. Rewards reach the score only\nwhen ``check`` is :func:`total_reward`.\n\n``hindsight`` credits the finished trajectory as a whole: a function of a\n:class:`~plural.rewards.HindsightTrial` that returns\n:class:`~plural.rewards.Credit` values, or a ``{\"python\":\n\"verify.py:efficiency\"}`` reference. It runs after the score, and can also\nrun later on stored Trials with ``plural verifier apply``.",
       "properties": {
         "check": {
           "default": null,
@@ -250,6 +250,10 @@
           "default": true,
           "title": "Evidence Required",
           "type": "boolean"
+        },
+        "hindsight": {
+          "default": null,
+          "title": "Hindsight"
         },
         "info": {
           "default": null,

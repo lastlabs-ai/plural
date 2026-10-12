@@ -668,3 +668,26 @@ def test_app_host_in_process_query() -> None:
     host = AppHost(Environment(apps=[Wordle()], runtime=Runtime.local()))
     host.reset()
     assert host.query("wordle", "remaining", {}) == 6
+
+
+def test_app_host_numbers_steps_and_records_the_state_each_one_left(tmp_path: Path) -> None:
+    host = AppHost(Environment(apps=[Wordle()], runtime=Runtime.local()), workspace=tmp_path)
+    host.reset(initial_state={"wordle": {"secret": "slate"}})
+    envelopes = [
+        host.step("guess", {"word": "toolong"}),
+        host.step("remaining", {}),
+        host.step("guess", {"word": "slate"}),
+    ]
+
+    assert [item["info"]["step"] for item in envelopes] == [1, 2, 3]
+    assert all("state" not in json.dumps(item["info"]) for item in envelopes)
+    lines = [
+        json.loads(line)
+        for line in (tmp_path / ".plural/apps/states.jsonl").read_text().splitlines()
+    ]
+    assert [line["step"] for line in lines] == [0, 1, 2, 3]
+    assert lines[0]["state"]["wordle"]["guesses"] == []
+    assert lines[1]["error"] == "a guess must have five letters"
+    assert lines[1]["state"] == lines[2]["state"] == {}
+    assert lines[3]["state"]["wordle"]["solved"] is True
+    assert lines[3]["action"] == "guess"

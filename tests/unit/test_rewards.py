@@ -13,17 +13,17 @@ from plural import (
     DeterministicVerifier,
     Episode,
     HindsightTrial,
-    Job,
     RewardTarget,
     Step,
-    hindsight_verifier,
     total_reward,
 )
 from plural.agents import AgentBinding, AgentDefinition
 from plural.execution import JobRunner, JobStore
+from plural.execution.replay import replay_verifier
 from plural.jobs import JobSpec, TaskJobSource, TITORecord
 from plural.rewards import (
     LEDGER_FILE,
+    HindsightVerifier,
     RewardRecord,
     align_tito,
     append_ledger,
@@ -115,12 +115,13 @@ def test_a_rejected_action_still_gets_its_step_rewards() -> None:
     ]
 
 
-def test_hindsight_verifiers_credit_any_event_and_reject_unknown_ones() -> None:
-    @hindsight_verifier(version="2")
-    def no_deletes(trial: HindsightTrial):
+def test_hindsight_credits_any_event_and_rejects_unknown_ones() -> None:
+    def deletes(trial: HindsightTrial):
         for step in trial.steps("crm__delete_record"):
             yield trial.credit(step["event_id"], -1.0, reason="deleted a record")
         yield trial.credit(RewardTarget.span("e2", 0, 13), 0.5)
+
+    no_deletes = HindsightVerifier(deletes, name="no_deletes", version="2")
 
     trial = HindsightTrial(EPISODE, score=1.0)
     records = no_deletes.apply(trial)
@@ -131,9 +132,10 @@ def test_hindsight_verifiers_credit_any_event_and_reject_unknown_ones() -> None:
     assert all(item.source == "hindsight" for item in records)
     assert records[0].metadata == {"reason": "deleted a record"}
 
-    @hindsight_verifier
-    def stray(trial: HindsightTrial) -> Credit:
+    def missing(trial: HindsightTrial) -> Credit:
         return trial.credit("e99", 1.0)
+
+    stray = HindsightVerifier(missing, name="stray", version="1")
 
     with pytest.raises(ValueError, match="does not have"):
         stray.apply(trial)
@@ -147,14 +149,9 @@ def test_the_ledger_is_append_only(tmp_path: Path) -> None:
     assert [item.value for item in read_ledger(path)] == [0.25, 0.25, 9.0]
 
 
-def test_applying_a_hindsight_verifier_again_adds_nothing(tmp_path: Path) -> None:
-    @hindsight_verifier(version="1")
-    def solved(trial: HindsightTrial) -> Credit:
-        return trial.credit("e3", 1.0)
-
-    @hindsight_verifier(version="2")
-    def solved_v2(trial: HindsightTrial) -> Credit:
-        return trial.credit("e3", 0.5)
+def test_applying_hindsight_again_adds_nothing(tmp_path: Path) -> None:
+    solved = HindsightVerifier(lambda trial: trial.credit("e3", 1.0), name="solved", version="1")
+    solved_v2 = HindsightVerifier(lambda trial: trial.credit("e3", 0.5), name="solved", version="2")
 
     path = tmp_path / LEDGER_FILE
     trial = HindsightTrial(EPISODE, score=1.0, trial_id="trl_a")
@@ -253,49 +250,59 @@ class _StepProvider(FakeProvider):
         return result
 
 
-async def test_a_job_writes_online_and_hindsight_rewards_to_the_trial_ledger(
+async def test_a_job_writes_step_and_hindsight_rewards_to_the_trial_ledger(
     tmp_path: Path,
 ) -> None:
     from test_package_execution import make_task
 
-    @hindsight_verifier
     def finished(trial: HindsightTrial):
         assert trial.score == 1.0
         yield trial.credit(RewardTarget.event("e4"), 1.0)
 
-    @hindsight_verifier
     def broken(trial: HindsightTrial):
         raise RuntimeError("bad label")
 
+    task = make_task("one", "docker")
+    task = task.model_copy(
+        update={
+            "verifiers": (
+                *task.verifiers,
+                WeightedVerifier(verifier=DeterministicVerifier(name="broken", hindsight=broken)),
+                WeightedVerifier(
+                    verifier=DeterministicVerifier(
+                        name="finished", version="0.2.0", hindsight=finished
+                    )
+                ),
+            )
+        }
+    )
     spec = JobSpec(
-        source=TaskJobSource(task=make_task("one", "docker")),
+        source=TaskJobSource(task=task),
         agents=(AgentBinding(agent=AgentDefinition(name="agent", model="test/model")),),
     )
     store = JobStore(tmp_path / "jobs")
-    result = await JobRunner(
-        spec, provider=_StepProvider("docker"), store=store, hindsight=(broken, finished)
-    ).run()
+    result = await JobRunner(spec, provider=_StepProvider("docker"), store=store).run()
 
     assert result.status == "succeeded"
     trial = spec.plan().trials[0]
     ledger = read_ledger(store.trial_path(trial) / "executions/0/artifacts" / LEDGER_FILE)
-    assert [(item.source, item.verifier) for item in ledger] == [
-        ("step", "progress"),
-        ("step", "careful"),
-        ("hindsight", "finished"),
+    assert [(item.source, item.verifier, item.version) for item in ledger] == [
+        ("step", "progress", "1.0.0"),
+        ("step", "careful", "2"),
+        ("hindsight", "finished", "0.2.0"),
     ]
     events = (store.job_path(spec.job_id) / "events.jsonl").read_text()
     assert "bad label" in events
     assert result.trials[0].score == 1.0
 
 
-def test_job_rejects_plain_functions_as_hindsight_verifiers() -> None:
-    from test_runtime_job_client import _task
-
-    from plural import Agent
-
-    with pytest.raises(TypeError, match="@hindsight_verifier"):
-        Job(_task(), agents=[Agent(model="openai/gpt-5.6-luna")], hindsight=[lambda trial: []])
+def test_a_verifier_may_give_only_hindsight_credit() -> None:
+    verifier = DeterministicVerifier(name="efficiency", hindsight="verify.py:efficiency")
+    assert not verifier.scores
+    assert verifier.model_dump(mode="json")["hindsight"] == {"python": "verify.py:efficiency"}
+    with pytest.raises(ValueError, match="accepts one HindsightTrial"):
+        DeterministicVerifier(name="bad", hindsight=42)
+    assert "hindsight" not in DeterministicVerifier(name="plain", check=["true"])._hash_payload()
 
 
 def _progress(step: Step) -> float:
@@ -354,3 +361,18 @@ def test_an_earlier_ledger_reads_its_rewarder_as_the_verifier() -> None:
     )
     assert (record.verifier, record.source) == ("solved", "step")
     assert "rewarder" not in record.model_dump()
+
+
+def test_replaying_a_verifier_reports_what_a_stored_trial_cannot_support(tmp_path: Path) -> None:
+    (tmp_path / "episode.jsonl").write_text(
+        json.dumps({"kind": "environment.step", "event_id": "e1", "action": "guess"}) + "\n"
+    )
+    replay = replay_verifier(
+        DeterministicVerifier(name="solved", check=["true"], reward=lambda step: 1.0),
+        tmp_path,
+    )
+
+    assert replay.rewards == []
+    assert replay.output is None
+    assert any("no recorded State per step" in item for item in replay.problems)
+    assert any("check runs as a command" in item for item in replay.problems)

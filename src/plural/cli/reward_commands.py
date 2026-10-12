@@ -1,8 +1,10 @@
-"""``plural rewards``: label stored Trials with hindsight verifiers and export training data.
+"""Rewards on stored Trials: ``plural verifier try|apply`` and ``plural rewards show|export``.
 
 Rewards live in each Trial's ``rewards.jsonl`` ledger, beside the trajectory.
-``apply`` appends to it without rerunning anything; ``export`` joins it with
-the trajectory and any TITO records.
+``plural verifier try`` runs a Verifier's hooks on stored Trials and prints what
+it would give; ``plural verifier apply`` appends those rewards to the ledgers.
+Neither runs the Agent. ``export`` joins a ledger with the trajectory and any
+TITO records.
 """
 
 from __future__ import annotations
@@ -24,6 +26,8 @@ from plural.cli.common import (
     workspace,
 )
 from plural.errors import PluralError
+from plural.execution.replay import Replay, replay_verifier
+from plural.execution.store import JobStore
 from plural.jobs import TrialResult
 from plural.project import ProjectError, Workspace
 from plural.project.runs import RUN_RECORD, find_local_trial, finished_local_job
@@ -31,14 +35,15 @@ from plural.rewards import (
     LEDGER_FILE,
     RewardRecord,
     append_ledger,
-    load_verifier,
     read_ledger,
     training_export,
-    trial_from_artifacts,
 )
+from plural.verifiers import DeterministicVerifier, StepTask
 
 rewards_app = typer.Typer(
-    help="Label stored Trials with hindsight verifiers and export training data.",
+    help=(
+        "Show a Trial's rewards and export training data. Add rewards with `plural verifier apply`."
+    ),
     no_args_is_help=True,
 )
 
@@ -112,40 +117,165 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text("utf-8").splitlines() if line.strip()]
 
 
-@rewards_app.command("apply")
+def _step_task(space: Workspace, trial_dir: Path) -> StepTask:
+    """The Task a stored Trial worked on, as a replayed ``reward`` sees it."""
+    name = ""
+    try:
+        name = TrialResult.model_validate_json(
+            (trial_dir / "result.json").read_text("utf-8")
+        ).receipt.task_pin.name
+        spec = JobStore(space.project.jobs_dir).load_spec(trial_dir.parent.parent.name)
+    except (OSError, ValueError):
+        return StepTask(name=name)
+    task = next((item for item in spec.tasks if item.task_id == name), None)
+    if task is None:
+        return StepTask(name=name)
+    return StepTask(name=task.task_id, info=task.info, metadata=dict(task.metadata))
+
+
+def _replays(
+    name: str, trial: list[str], job: str | None
+) -> tuple[Workspace, DeterministicVerifier, list[tuple[Path, Path, Replay]]]:
+    space = workspace()
+    verifier = space.get("verifier", name)
+    if not isinstance(verifier, DeterministicVerifier):
+        raise ProjectError(
+            f"Verifier {name!r} is a {verifier.kind} Verifier. Only code Verifiers "
+            "(kind: deterministic) run on stored Trials."
+        )
+    replays = []
+    for trial_dir in _trial_dirs(space, trial, job):
+        artifacts = _latest_artifacts(trial_dir)
+        replay = replay_verifier(
+            verifier,
+            artifacts,
+            task=_step_task(space, trial_dir),
+            trial_id=trial_dir.name,
+            score=_score(trial_dir),
+        )
+        replays.append((trial_dir, artifacts, replay))
+    return space, verifier, replays
+
+
+def _summary(replay: Replay) -> dict[str, Any]:
+    step = [item.value for item in replay.rewards if item.source == "step"]
+    hindsight = [item.value for item in replay.rewards if item.source == "hindsight"]
+    return {
+        "score": replay.output.score if replay.output else None,
+        "step_rewards": len(step),
+        "step_total": sum(step),
+        "hindsight_rewards": len(hindsight),
+        "hindsight_total": sum(hindsight),
+        "problems": replay.problems,
+    }
+
+
 @handled
-def rewards_apply(
-    verifier: str = typer.Argument(help="The hindsight verifier, as path.py:name."),
+def verifier_try(
+    name: str = typer.Argument(help="The Verifier, by name."),
     trial: list[str] = typer.Option([], "--trial", help="A local Trial id. Repeatable."),
     job: str | None = typer.Option(None, "--job", help="Every Trial of this local Job."),
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Run a hindsight verifier on stored Trials and append its rewards to their ledgers."""
-    space = workspace()
-    function = load_verifier(verifier, space.project.root)
-    applied: list[dict[str, Any]] = []
-    for trial_dir in _trial_dirs(space, trial, job):
-        artifacts = _latest_artifacts(trial_dir)
-        view = trial_from_artifacts(artifacts, score=_score(trial_dir))
-        view.trial_id = trial_dir.name
-        records = function.apply(view)
-        added = append_ledger(artifacts / LEDGER_FILE, records)
-        applied.append({"trial_id": trial_dir.name, "records": len(records), "new_records": added})
-    hosted, problem = _publish(space, _trial_dirs(space, trial, job))
+    """Run a Verifier on stored Trials and print what it gives, without saving anything.
+
+    Its reward runs again on each recorded step, its hindsight on the finished
+    trajectory, and a Python check on the stored episode. Edit the Verifier and
+    run this again to see the difference; the Agent is not run.
+    """
+    _, verifier, replays = _replays(name, trial, job)
     payload = {
-        "verifier": function.name,
-        "version": function.version,
+        "verifier": verifier.name,
+        "version": verifier.version,
+        "trials": [
+            {
+                "trial_id": trial_dir.name,
+                **_summary(replay),
+                "rewards": [item.model_dump(mode="json") for item in replay.rewards],
+            }
+            for trial_dir, _, replay in replays
+        ],
+    }
+
+    def text() -> None:
+        for trial_dir, _, replay in replays:
+            summary = _summary(replay)
+            score = "" if summary["score"] is None else f"score {summary['score']:g}, "
+            typer.echo(
+                f"{trial_dir.name}: {score}{summary['step_rewards']} step reward(s) "
+                f"totalling {summary['step_total']:+g}"
+                + (
+                    f", {summary['hindsight_rewards']} hindsight totalling "
+                    f"{summary['hindsight_total']:+g}"
+                    if replay.rewards and summary["hindsight_rewards"]
+                    else ""
+                )
+            )
+            for item in replay.rewards:
+                typer.echo(
+                    f"  {item.target.kind:<5} {item.target.event_id:<6} {item.value:+.3f}  "
+                    f"{item.source}"
+                )
+            for problem in replay.problems:
+                note(problem)
+
+    emit(payload, as_json=as_json, text=text)
+
+
+@handled
+def verifier_apply(
+    name: str = typer.Argument(help="The Verifier, by name."),
+    trial: list[str] = typer.Option([], "--trial", help="A local Trial id. Repeatable."),
+    job: str | None = typer.Option(None, "--job", help="Every Trial of this local Job."),
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Run a Verifier on stored Trials and add its rewards to their ledgers.
+
+    Records are kept under the Verifier's name and version. A Trial that already
+    has rewards from this version is left as it is: bump the Verifier's version
+    when its logic changes, so an export can choose which labels to use. Pushed
+    Jobs get the new records in the hosted project too.
+    """
+    space, verifier, replays = _replays(name, trial, job)
+    applied: list[dict[str, Any]] = []
+    for trial_dir, artifacts, replay in replays:
+        existing = {
+            item.source
+            for item in read_ledger(artifacts / LEDGER_FILE)
+            if item.verifier == verifier.name and item.version == verifier.version
+        }
+        records = [item for item in replay.rewards if item.source not in existing]
+        added = append_ledger(artifacts / LEDGER_FILE, records)
+        applied.append(
+            {
+                "trial_id": trial_dir.name,
+                "records": len(records),
+                "new_records": added,
+                "skipped": sorted(existing & {item.source for item in replay.rewards}),
+                "problems": replay.problems,
+            }
+        )
+    hosted, problem = _publish(space, [trial_dir for trial_dir, _, _ in replays])
+    payload = {
+        "verifier": verifier.name,
+        "version": verifier.version,
         "trials": applied,
         "hosted_records": hosted,
     }
 
     def text() -> None:
         for item in applied:
-            known = item["records"] - item["new_records"]
-            typer.echo(
-                f"{item['trial_id']}: {item['records']} reward(s) from {function.name}"
-                + (f", {known} already in its ledger" if known else "")
+            skipped = (
+                f"; {', '.join(item['skipped'])} rewards from version "
+                f"{verifier.version!r} were already there"
+                if item["skipped"]
+                else ""
             )
+            typer.echo(f"{item['trial_id']}: added {item['new_records']} reward(s){skipped}")
+            for message in item["problems"]:
+                note(message)
+        if any(item["skipped"] for item in applied):
+            note("Bump the Verifier's version to record new labels beside the old ones.")
         if hosted:
             typer.echo(f"Recorded {hosted} new reward(s) in the hosted project.")
         if problem:

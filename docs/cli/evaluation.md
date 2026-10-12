@@ -322,7 +322,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ job        List, inspect, and rerun Jobs.                                                        │
 │ trial      Inspect and rerun Trials.                                                             │
 │ review     List and submit human reviews.                                                        │
-│ rewards    Label stored Trials with hindsight verifiers and export training data.                │
+│ rewards    Show a Trial's rewards and export training data. Add rewards with `plural verifier    │
+│            apply`.                                                                               │
 │ models     List the models you may run.                                                          │
 │ runtime    Choose where Environments run.                                                        │
 │ secret     Set the secrets your Apps need in the hosted project.                                 │
@@ -1602,34 +1603,14 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural rewards [OPTIONS] COMMAND [ARGS]...
 
- Label stored Trials with hindsight verifiers and export training data.
+ Show a Trial's rewards and export training data. Add rewards with `plural verifier apply`.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ apply   Run a hindsight verifier on stored Trials and append its rewards to their ledgers.       │
 │ show    List a Trial's reward ledger.                                                            │
 │ export  Write one training record per Trial: model turns with TITO tokens and their rewards.     │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural rewards apply`
-
-```text
-
- Usage: plural rewards apply [OPTIONS] {verifier}
-
- Run a hindsight verifier on stored Trials and append its rewards to their ledgers.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    verifier      <str>  The hindsight verifier, as path.py:name. [required]                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --trial        <str>  A local Trial id. Repeatable.                                              │
-│ --job          <str>  Every Trial of this local Job.                                             │
-│ --json                Print machine-readable JSON.                                               │
-│ --help                Show this message and exit.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2559,6 +2540,32 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
+│ try       Run a Verifier on stored Trials and print what it gives, without saving anything.      │
+│ apply     Run a Verifier on stored Trials and add its rewards to their ledgers.                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier apply`
+
+```text
+
+ Usage: plural verifier apply [OPTIONS] {name}
+
+ Run a Verifier on stored Trials and add its rewards to their ledgers.
+
+ Records are kept under the Verifier's name and version. A Trial that already
+ has rewards from this version is left as it is: bump the Verifier's version
+ when its logic changes, so an export can choose which labels to use. Pushed
+ Jobs get the new records in the hosted project too.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Verifier, by name. [required]                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --trial        <str>  A local Trial id. Repeatable.                                              │
+│ --job          <str>  Every Trial of this local Job.                                             │
+│ --json                Print machine-readable JSON.                                               │
+│ --help                Show this message and exit.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2688,6 +2695,29 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --hosted          Only read the hosted project.                                                  │
 │ --json            Print machine-readable JSON.                                                   │
 │ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier try`
+
+```text
+
+ Usage: plural verifier try [OPTIONS] {name}
+
+ Run a Verifier on stored Trials and print what it gives, without saving anything.
+
+ Its reward runs again on each recorded step, its hindsight on the finished
+ trajectory, and a Python check on the stored episode. Edit the Verifier and
+ run this again to see the difference; the Agent is not run.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Verifier, by name. [required]                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --trial        <str>  A local Trial id. Repeatable.                                              │
+│ --job          <str>  Every Trial of this local Job.                                             │
+│ --json                Print machine-readable JSON.                                               │
+│ --help                Show this message and exit.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

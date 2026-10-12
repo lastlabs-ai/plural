@@ -14,18 +14,16 @@ A record targets one of three things, through a :class:`RewardTarget`:
 - a span inside an event: character offsets into its text, or a token range on
   the TITO record of that model call.
 
-Rewards come from two places. Step rewards are given while the episode runs,
-by the ``reward`` hook of each of the Task's Verifiers, beside the Apps.
-Hindsight rewards are given after it ends, by :func:`hindsight_verifier`
-functions that read the whole trajectory, the Apps' snapshots, and the score.
-Run them in a Job with ``Job(..., hindsight=[...])``, or later on stored Trials
-with ``plural rewards apply``.
+Both come from the Task's Verifiers. Step rewards are given while the episode
+runs, by each Verifier's ``reward`` hook, beside the Apps. Hindsight rewards are
+given after it ends, by its ``hindsight`` hook, which reads the whole
+trajectory, the Apps' snapshots, and the score. ``plural verifier apply`` runs
+both again on stored Trials.
 """
 
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -198,7 +196,7 @@ def append_ledger(path: str | Path, records: Iterable[RewardRecord]) -> int:
     """Append records to a ledger, creating it if needed.
 
     Nothing is overwritten, and a record whose ``record_id`` is already in the
-    ledger is skipped, so applying the same hindsight verifier again adds nothing.
+    ledger is skipped, so applying the same Verifier version again adds nothing.
 
     Returns:
         How many records were added.
@@ -262,11 +260,11 @@ def online_records(episode: Sequence[Mapping[str, Any]]) -> list[RewardRecord]:
     return records
 
 
-# Hindsight verifiers.
+# Hindsight credit.
 
 
 class Credit(FrozenModel):
-    """What a hindsight verifier returns: a value for one target."""
+    """What a Verifier's ``hindsight`` function returns: a value for one target."""
 
     target: RewardTarget
     value: float
@@ -274,7 +272,7 @@ class Credit(FrozenModel):
 
 
 class HindsightTrial:
-    """Everything a hindsight verifier can read about one finished Trial.
+    """Everything a Verifier's ``hindsight`` function can read about one finished Trial.
 
     ``events`` is the episode record list, each with an ``event_id``. ``apps``
     maps each App name to its snapshots (``initial``, ``check``, ``control``).
@@ -334,7 +332,7 @@ class HindsightTrial:
 
 
 class HindsightVerifier:
-    """A function that scores rewards after an episode. Make one with :func:`hindsight_verifier`."""
+    """A Verifier's ``hindsight`` hook, ready to run on a finished Trial."""
 
     def __init__(self, fn: Callable[[HindsightTrial], Any], *, name: str, version: str) -> None:
         self.fn = fn
@@ -373,7 +371,7 @@ class HindsightVerifier:
             credit = item if isinstance(item, Credit) else Credit.model_validate(item)
             if credit.target.event_id not in known:
                 raise ValueError(
-                    f"hindsight verifier {self.name!r} targets event "
+                    f"Verifier {self.name!r} hindsight targets event "
                     f"{credit.target.event_id!r}, which this Trial does not have"
                 )
             identity = [
@@ -397,39 +395,6 @@ class HindsightVerifier:
                 )
             )
         return records
-
-
-def hindsight_verifier(
-    fn: Callable[[HindsightTrial], Any] | None = None,
-    *,
-    name: str | None = None,
-    version: str = "1",
-) -> Any:
-    """Mark a function that scores rewards after an episode ends.
-
-    The function receives a :class:`HindsightTrial` and returns
-    :class:`Credit` values, usually built with ``trial.credit(...)``::
-
-        @hindsight_verifier(version="2")
-        def no_deletes(trial: HindsightTrial):
-            for step in trial.steps("crm__delete_record"):
-                yield trial.credit(step["event_id"], -1.0)
-
-    Bump ``version`` when the logic changes, so a training export can pick
-    which labels to use.
-
-    Returns:
-        A :class:`HindsightVerifier`, or a decorator that makes one.
-    """
-
-    def wrap(function: Callable[[HindsightTrial], Any]) -> HindsightVerifier:
-        if not callable(function) or not inspect.signature(function).parameters:
-            raise TypeError("a hindsight verifier is a function that takes a HindsightTrial")
-        return HindsightVerifier(
-            function, name=name or str(getattr(function, "__name__", "hindsight")), version=version
-        )
-
-    return wrap(fn) if fn is not None else wrap
 
 
 # Training export.
@@ -613,25 +578,6 @@ def _select(
     return chosen
 
 
-def load_verifier(reference: str, root: Path | None = None) -> HindsightVerifier:
-    """Load ``path.py:name`` as a hindsight verifier.
-
-    Returns:
-        The verifier.
-
-    Raises:
-        TypeError: When the reference does not name a hindsight verifier.
-    """
-    from plural.environments.env import load_reference
-
-    value = load_reference(reference, root or Path.cwd())
-    if isinstance(value, HindsightVerifier):
-        return value
-    if callable(value):
-        return HindsightVerifier(value, name=getattr(value, "__name__", reference), version="1")
-    raise TypeError(f"{reference} is not a hindsight verifier")
-
-
 def trial_from_artifacts(folder: Path, *, score: float | None = None) -> HindsightTrial:
     """Build a :class:`HindsightTrial` from one stored execution's artifacts.
 
@@ -668,8 +614,6 @@ __all__ = [
     "append_ledger",
     "dump_ledger",
     "event_id",
-    "hindsight_verifier",
-    "load_verifier",
     "online_records",
     "parse_ledger",
     "read_ledger",
