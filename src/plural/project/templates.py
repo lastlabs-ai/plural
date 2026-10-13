@@ -68,7 +68,7 @@ def title(name: str) -> str:
     return name.replace("-", " ").capitalize()
 
 
-MIN_SDK_VERSION = "0.15"
+MIN_SDK_VERSION = "0.21"
 """The oldest SDK that reads this project layout; new projects require it."""
 
 

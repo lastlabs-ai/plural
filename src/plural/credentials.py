@@ -87,8 +87,8 @@ def resolve(
 ) -> tuple[dict[str, str], tuple[CredentialUse, ...]]:
     """The credential values for one Trial, and what to record about them.
 
-    A value comes from ``supplied`` (the Agent's stored credentials, or ones
-    passed to the Job) first, then from an exported variable of the same name.
+    A value comes from ``supplied`` (the running user's saved credentials, or
+    ones passed to the Job) first, then from an exported variable of the same name.
 
     Returns:
         Name to value for the App host, and one audit record per App and name.
@@ -115,6 +115,21 @@ def resolve(
             "credentials: in that Agent's agent.yaml, with the scopes it grants, and run "
             "with --agent."
         )
+    unscoped = [
+        f"  {item.name} for App {app.name!r}: {', '.join(lacking)}"
+        for app in environment.apps
+        for item in app.credentials
+        if item.name in agent.credentials
+        and (lacking := sorted(set(item.scopes) - set(agent.credentials[item.name].scopes)))
+    ]
+    if unscoped:
+        raise CredentialError(
+            f"Agent {agent.name!r} does not grant the scopes Environment "
+            f"{environment.name!r} needs:\n"
+            + "\n".join(unscoped)
+            + "\nAdd them to the credential's scopes in that Agent's agent.yaml, if the "
+            "credential really grants them."
+        )
     values: dict[str, CredentialValue] = {}
     missing: list[str] = []
     for name in sorted({*wanted, *optional}):
@@ -131,8 +146,8 @@ def resolve(
         raise CredentialError(
             f"Agent {agent.name!r} declares {', '.join(missing)} but has no value for "
             + ("it" if len(missing) == 1 else "them")
-            + ". Store each with `plural agent credential set "
-            + f"{agent.name} NAME`, or export it for a local run."
+            + ". Save your value of each with `plural credential set NAME`, or "
+            "export it for a local run."
         )
     uses = tuple(
         CredentialUse(

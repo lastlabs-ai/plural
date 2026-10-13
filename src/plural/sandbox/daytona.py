@@ -11,8 +11,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
-from plural.sandbox.base import SandboxProvider
+from plural.sandbox.base import KILL_USER_PROCESSES, SandboxProvider
 from plural.sandbox.models import (
+    AppIsolation,
     Capability,
     CapabilityError,
     DownloadedFile,
@@ -24,10 +25,44 @@ from plural.sandbox.models import (
     ProviderCapabilities,
     ProviderDoctor,
     ProviderUnavailableError,
+    SandboxError,
     SandboxHandle,
     SandboxRequirements,
     safe_relative_path,
 )
+
+APP_USER = "plural-apps"
+AGENT_USER = "plural-agent"
+_CREATE_USERS = f"""set -e
+id -u {APP_USER} >/dev/null 2>&1 || useradd --system --user-group --no-create-home \\
+    --home-dir /nonexistent --shell /usr/sbin/nologin {APP_USER}
+id -u {AGENT_USER} >/dev/null 2>&1 || useradd --user-group --create-home \\
+    --shell /bin/sh {AGENT_USER}
+if sudo -n -u {AGENT_USER} -- sudo -n true >/dev/null 2>&1; then
+    echo "{AGENT_USER} can sudo, so it would not be kept from the App host" >&2
+    exit 1
+fi
+"""
+_OPEN_WORKSPACE = 'for path in "$@"; do mkdir -p "$path" && chmod -R a+rwX "$path"; done'
+SEAT_USER = "plural-seat-{index}"
+_CREATE_SEAT_USERS = """set -e
+for name in "$@"; do
+    id -u "$name" >/dev/null 2>&1 || useradd --user-group --create-home --shell /bin/sh "$name"
+    if sudo -n -u "$name" -- sudo -n true >/dev/null 2>&1; then
+        echo "$name can sudo, so it would not be kept from the other seats" >&2
+        exit 1
+    fi
+done
+"""
+_CHECK_ARTIFACT = """root=$1
+path="$1/$2"
+[ "$(realpath -e -- "$root")" = "$root" ] || exit 3
+[ -L "$path" ] && exit 3
+target=$(realpath -e -- "$path" 2>/dev/null) || exit 3
+case "$target" in "$root"/*) ;; *) exit 3 ;; esac
+[ -f "$target" ] && [ -r "$target" ] || exit 3
+printf '%s' "$target"
+"""
 
 
 class DaytonaSandboxAdapter(Protocol):
@@ -355,18 +390,92 @@ class DaytonaProvider(SandboxProvider):
         for upload in files:
             await remote.upload_file(upload.data, f"{root.rstrip('/')}/{upload.path}")
 
+    async def isolate_apps(self, handle: SandboxHandle) -> AppIsolation:
+        """Create an App host user and an unprivileged Harness user.
+
+        Daytona's default user can ``sudo``, so a Harness running as it could
+        read anything. Here the Harness runs as ``plural-agent``, which cannot,
+        and the App host as ``plural-apps``.
+
+        Returns:
+            Both users, or no ``app_user`` when the image has no passwordless
+            ``sudo`` or ``useradd``.
+        """
+        result = await self.exec(
+            handle,
+            ExecRequest(
+                command=("sudo", "-n", "sh", "-c", _CREATE_USERS),
+                cwd="/",
+                timeout_seconds=60,
+            ),
+        )
+        if result.timed_out or result.exit_code != 0:
+            return AppIsolation()
+        return AppIsolation(app_user=APP_USER, agent_user=AGENT_USER)
+
+    async def isolate_seats(self, handle: SandboxHandle, seats: Sequence[str]) -> dict[str, str]:
+        """Create one unprivileged user for each seat's Harness.
+
+        Returns:
+            Seat to user, or empty when the image has no passwordless ``sudo``
+            or ``useradd``.
+        """
+        names = [SEAT_USER.format(index=index) for index in range(len(seats))]
+        result = await self.exec(
+            handle,
+            ExecRequest(
+                command=("sudo", "-n", "sh", "-c", _CREATE_SEAT_USERS, "plural", *names),
+                cwd="/",
+                timeout_seconds=60,
+            ),
+        )
+        if result.timed_out or result.exit_code != 0:
+            return {}
+        return dict(zip(seats, names, strict=True))
+
+    async def open_workspace(
+        self, handle: SandboxHandle, isolation: AppIsolation, paths: Sequence[str]
+    ) -> None:
+        """Let the Harness user write the staged folders, which the default user owns.
+
+        Raises:
+            SandboxError: When the folders cannot be opened to it.
+        """
+        if not isolation.agent_user or not paths:
+            return
+        result = await self.exec(
+            handle,
+            ExecRequest(
+                command=("sudo", "-n", "sh", "-c", _OPEN_WORKSPACE, "plural", *paths),
+                cwd="/",
+                timeout_seconds=120,
+            ),
+        )
+        if result.timed_out or result.exit_code != 0:
+            detail = (result.stderr or result.stdout).decode(errors="replace")[-500:]
+            raise SandboxError(f"Could not open the workspace to the Harness user: {detail}")
+
     async def exec(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
-        """Execute through ``sandbox.process.exec``."""
+        """Execute through ``sandbox.process.exec``.
+
+        A ``user`` other than ``root`` runs through ``sudo -n -E -u``, which
+        fails rather than falling back to the default user.
+        """
         if request.stdin is not None:
             raise CapabilityError("Daytona process.exec does not support stdin in this adapter")
+        command = request.command
+        user = request.user
+        if user and user != "root":
+            command = ("sudo", "-n", "-E", "-u", user, "--", *command)
+            user = None
         started = time.monotonic()
         try:
             code, stdout, stderr = await self._remote(handle).exec(
-                request.command,
+                command,
                 cwd=request.cwd,
                 env=request.env,
                 timeout=request.timeout_seconds,
-                user=request.user,
+                user=user,
             )
         except TimeoutError:
             return ExecResult(
@@ -396,6 +505,61 @@ class DaytonaProvider(SandboxProvider):
                 )
             )
         return tuple(output)
+
+    async def download_artifacts(
+        self,
+        handle: SandboxHandle,
+        paths: Sequence[str],
+        *,
+        root: str = "/workspace",
+        user: str | None = None,
+    ) -> tuple[DownloadedFile, ...]:
+        """Download Harness-declared files, refusing any that is not a regular file inside ``root``.
+
+        Daytona's file API reads as the sandbox's default user, which can read
+        the App host's folder, so a symlink or a path that resolves outside
+        ``root`` is refused first, as the Harness's ``user`` when given, and
+        the resolved file is what is read.
+
+        Raises:
+            FileNotFoundError: When a declared path is not a regular file inside ``root``.
+        """
+        remote = self._remote(handle)
+        base = root.rstrip("/") or "/"
+        output = []
+        for path in paths:
+            safe = safe_relative_path(path)
+            checked = await self.exec(
+                handle,
+                ExecRequest(
+                    command=("sh", "-c", _CHECK_ARTIFACT, "plural", base, safe),
+                    cwd="/",
+                    timeout_seconds=60,
+                    user=user,
+                ),
+            )
+            resolved = checked.stdout.decode(errors="replace").strip()
+            if checked.timed_out or checked.exit_code != 0 or not resolved.startswith(base + "/"):
+                raise FileNotFoundError(f"declared output is not a regular file: {safe}")
+            output.append(DownloadedFile(path=safe, data=await remote.download_file(resolved)))
+        return tuple(output)
+
+    async def stop_user_processes(self, handle: SandboxHandle, users: Sequence[str | None]) -> None:
+        """Kill, as root, what the Harnesses' own users left running.
+
+        The default user is skipped: it is the one Daytona runs its own tools as.
+        """
+        named = [item for item in dict.fromkeys(users) if item and item != "root"]
+        if not named:
+            return
+        await self.exec(
+            handle,
+            ExecRequest(
+                command=("sudo", "-n", "sh", "-c", KILL_USER_PROCESSES, "plural", *named),
+                cwd="/",
+                timeout_seconds=30,
+            ),
+        )
 
     async def cancel(self, handle: SandboxHandle) -> None:
         """Delete the sandbox to force cancellation."""

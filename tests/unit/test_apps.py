@@ -408,7 +408,7 @@ def test_a_project_secret_fills_a_setting_you_have_not_exported(
 
         # An Agent's credential never falls back to a project secret of the same name.
         calls.clear()
-        with pytest.raises(MCPError, match="plural agent credential set"):
+        with pytest.raises(MCPError, match="plural credential set"):
             expand("Bearer ${CRM_TOKEN}", credentials={"CRM_TOKEN"})
         assert calls == []
 
@@ -631,13 +631,15 @@ def test_app_host_keeps_state_across_action_commands(workspace: Path) -> None:
     assert step["rendered"] == "created record 1"
     step = _cli(workspace, "step", "guess", stdin='{"word": "slate"}')
     assert step["terminated"] is True
-    assert step["reward"] == 2.5
-    assert step["rewards"] == [{"name": "won", "version": "1.0.0", "app": "wordle", "value": 2.5}]
+    assert "reward" not in step and "rewards" not in step
     listed = _cli(workspace, "query", "crm", "list_records")
     assert listed == {"records": [{"id": "1", "name": "Acme"}]}
     report = _cli(workspace, "finish")
-    assert report["wordle"]["final"]["solved"] is True
-    assert report["crm"]["control"] == "owned"
+    assert report["apps"]["wordle"]["final"]["solved"] is True
+    assert report["apps"]["crm"]["control"] == "owned"
+    guess = report["steps"][-1]
+    assert guess["reward"] == 2.5
+    assert guess["rewards"] == [{"name": "won", "version": "1.0.0", "app": "wordle", "value": 2.5}]
     assert (workspace / ".plural/apps/wordle/state.json").is_file()
 
 
@@ -719,20 +721,20 @@ def test_a_controlled_host_lets_the_harness_act_but_not_read_or_restart(
         assert daemon.call("reset", root=workspace)["kind"] == "reset"
         daemon.call("step", root=workspace, action="guess", arguments={"word": "crane"})
         for operation, fields in (
+            ("hello", {}),
             ("finish", {}),
-            ("states", {}),
             ("stop", {}),
             ("query", {"app": "crm", "action": "list_records", "arguments": {}}),
         ):
             with pytest.raises(PermissionError, match="Only the Job"):
                 daemon.call(operation, root=workspace, **fields)
-            with pytest.raises(PermissionError, match="Only the Job"):
+            with pytest.raises(daemon.AppHostTampered):
                 daemon.call(operation, root=workspace, token="guess", **fields)
         again = daemon.call("reset", root=workspace)
         assert again["info"]["error"] == "The episode has already started; it cannot be reset."
         report = daemon.call("finish", root=workspace, token="job-only")
-        assert report["wordle"]["final"]["solved"] is False
-        states = daemon.call("states", root=workspace, token="job-only")
-        assert states[0]["state"]["wordle"]["secret"] == "slate"
+        assert report["apps"]["wordle"]["final"]["solved"] is False
+        assert report["states"][0]["state"]["wordle"]["secret"] == "slate"
+        assert [step["action"] for step in report["steps"]] == ["guess"]
     finally:
         daemon.call("stop", root=workspace, token="job-only")

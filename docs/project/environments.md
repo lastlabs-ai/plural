@@ -56,10 +56,11 @@ flowchart LR
 > **Good to know:** The Agent only ever sees the Task's instructions and what its
 > actions return. It never sees an App's State, a score, or a reward.
 
-Two optional extras build on this. **Rewards** give small bits of credit for
-individual moves when you train a model; they are never part of a score. **Credentials**,
-such as the CRM token the Agent acts with, are declared by name on the App that needs
-them and supplied by the Agent that runs.
+Two things sit just outside this loop. **Rewards**, small bits of credit for
+individual moves when you train a model, come from the Task's
+[Verifiers](verifiers.md), never from the Environment. **Credentials**, such as the
+CRM token the Agent acts with, are declared by name on the App that needs them and
+supplied by the Agent that runs.
 
 ## Start with the work you want to measure
 
@@ -224,6 +225,8 @@ What each field means:
   `plural runtime use <runtime> <environment>`, which fills this block in for you.
 - `harness_policy`, `limits`, `guardrails`, and `metadata` take the same values as the
   Environment arguments of those names.
+- `party` makes it an Environment several Agents share, such as `{min: 2, max: 8}`
+  for poker. See [Several Agents in one Task](multi-agent.md).
 
 Every path must stay inside the Environment folder. Check the Environment, then save
 it to your hosted project:
@@ -288,8 +291,7 @@ rewards come from the Task's [Verifiers](verifiers.md): a Verifier's `reward` fu
 right after each action, beside the Apps, and can read every App. See
 [Reward each step](verifiers.md#reward-each-step).
 
-The precise rules:
-
+:::details The precise rules
 - The `reward` returned by `step` is the total of every `reward` function that gave one.
   `info["rewards"]` breaks that total down by Verifier, with its version and the App
   that acted.
@@ -300,6 +302,7 @@ The precise rules:
   because a bug in a reward must not fail an action that already changed the world.
 - `on_step` on an `Environment` subclass changes the world after an action. It can't
   return a reward.
+:::
 
 Rewards can also be assigned after the fact, from a whole trajectory, and every
 reward ends up in the Trial's reward ledger. A trainer reads them from there; see
@@ -632,10 +635,11 @@ crm = App.mcp(
 )
 ```
 
-A Job checks before it starts anything that the Agent carries every credential and
-that every secret has a value, and fails at once, naming the App and the name. The
-Agent lists its credentials, with their scopes, in its `agent.yaml`, and
-`plural agent credential set AGENT NAME` stores each value. A secret comes from your
+A Job checks before it starts anything that the Agent declares every credential and
+has a value for each, and that every secret has a value, and fails at once, naming the
+App and the name. The Agent lists its credentials, with their scopes, in its
+`agent.yaml`, and each person who runs it saves their own value with
+`plural credential set NAME`. A secret comes from your
 shell when you exported it, and otherwise from the hosted project, where
 `plural secret set NAME` stores it encrypted. Values go only to the process that runs
 the Apps and to Verifier queries, never to the model or its Harness. See

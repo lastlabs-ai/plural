@@ -589,18 +589,28 @@ async def test_app_host_holds_secrets_and_verifiers_query_it_before_teardown(
     ).run()
 
     assert result.status == "succeeded", result.trials[0].error_message
-    operations = [item.command[3] for item in provider.host_calls]
-    assert operations == ["start", "finish", "states", "query", "stop"]
+    assert [item.command[3] for item in provider.host_calls] == ["start"] + ["control"] * 4
+    assert [item["op"] for item in provider.control_requests] == [
+        "hello",
+        "finish",
+        "query",
+        "stop",
+    ]
     start = provider.host_calls[0]
+    # Never the workspace, where Python would import what the Harness left.
+    assert {item.cwd for item in provider.host_calls} == {"/"}
     started = json.loads(start.stdin or b"{}")
     assert started["secrets"] == {"CRM_TOKEN": "token-in-host-only"}
     control = started["token"]
     assert len(control) >= 32
     assert "CRM_TOKEN" not in start.env
     for call in provider.host_calls[1:]:
-        assert json.loads(call.stdin or b"{}")["token"] == control
-        assert call.env["PLURAL_APPS_CONTROL_STDIN"] == "1"
+        # Control requests carry a signature, never the token itself.
+        assert control.encode() not in (call.stdin or b"")
+        assert control not in json.dumps(call.env)
+    assert all(item["auth"] and item["nonce"] for item in provider.control_requests)
     harness = provider.harness_requests[0]
+    assert harness.env["PLURAL_APPS_MANAGED"] == "1"
     assert "CRM_TOKEN" not in harness.env
     assert b"token-in-host-only" not in (harness.stdin or b"")
     assert control.encode() not in (harness.stdin or b"")
@@ -619,12 +629,16 @@ async def test_app_host_holds_secrets_and_verifiers_query_it_before_teardown(
     assert seen["state"]["game"] == {"step": 1}
     execution = store.trial_path(spec.plan().trials[0]) / "executions/0/artifacts"
     assert json.loads((execution / "apps.json").read_text())["game"]["final"] == {"step": 1}
-    uploaded = provider.files["docker-0"]
     # The hidden initial State never lands in the shared workspace; it rides the start stdin.
-    task_file = json.loads(uploaded[".plural/apps/task.json"])
+    task_file = json.loads(provider.uploads[".plural/apps/task.json"])
     assert "initial_state" not in task_file
     assert started["inputs"]["initial_state"] == {"game": {"step": 0}}
-    assert b'"step": 0' not in uploaded[".plural/apps/task.json"]
+    assert b'"step": 0' not in provider.uploads[".plural/apps/task.json"]
+    # What was staged for the host is gone before the Harness runs.
+    remaining = provider.files["docker-0"]
+    assert not any(path.startswith((".plural/apps/", ".plural/verifiers/")) for path in remaining)
+    receipt = json.loads((execution.parent / "result.json").read_text())
+    assert receipt["app_isolation"] == "none"
 
 
 async def test_missing_app_secrets_fail_before_a_runtime_starts(tmp_path: Path) -> None:
@@ -730,5 +744,5 @@ async def test_an_agent_that_declares_a_credential_needs_its_value(tmp_path: Pat
         agents=(AgentBinding(agent=agent),),
     )
     runner = JobRunner(spec, provider=FakeProvider("docker"), store=JobStore(tmp_path / "jobs"))
-    with pytest.raises(ExecutionFailure, match="plural agent credential set sales-bot"):
+    with pytest.raises(ExecutionFailure, match="plural credential set NAME"):
         await runner.run()

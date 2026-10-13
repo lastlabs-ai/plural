@@ -32,6 +32,7 @@ from plural.environments import (  # noqa: I001 - Environments load before Apps
     ExecutionLimits,
     HarnessPolicy,
     Observation,
+    Party,
     Resource,
     Runtime,
     RuntimePackages,
@@ -70,6 +71,7 @@ from plural.harness import (
     HarnessResult,
     HarnessStep,
     HarnessTask,
+    SeatTurn,
 )
 from plural.jobs import (
     AgentAggregate,
@@ -162,6 +164,7 @@ __all__ = [
     "EvaluationTrack",
     "Episode",
     "ExecutionLimits",
+    "Party",
     "Harness",
     "HarnessPolicy",
     "HumanVerifier",
@@ -255,6 +258,7 @@ __all__ = [
     "Sampler",
     "SandboxProvider",
     "SandboxRequirements",
+    "SeatTurn",
     "TITORecord",
     "TaskPin",
     "TimeoutError",

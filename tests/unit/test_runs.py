@@ -11,7 +11,9 @@ from project_fixtures import write_project
 from typer.testing import CliRunner
 
 from plural.cli.main import app
+from plural.environments import Party
 from plural.project import Project, ProjectError, Workspace
+from plural.project.layout import ResourceRef
 from plural.project.runs import DEFAULT_HARNESS, RunRequest, plan_run
 
 runner = CliRunner()
@@ -59,6 +61,22 @@ def test_run_sources_and_agents_are_validated(
 ) -> None:
     with pytest.raises(ProjectError, match=message):
         plan(project, **fields)
+
+
+def test_an_environment_party_reaches_the_task_and_plural_run_names_the_way_to_run_it(
+    project: Project,
+) -> None:
+    manifest = project.root / "environments/queue/environment.yaml"
+    local = manifest.read_text()
+    manifest.write_text(local + "party: {min: 2, max: 8}\n")
+    with pytest.raises(ProjectError, match="OS user of its own"):
+        Workspace(project).load(ResourceRef("task", "refund"))
+    docker = local.replace("provider: local", "provider: docker")
+    manifest.write_text(docker + "party: {min: 2, max: 8}\n")
+    task = Workspace(project).load(ResourceRef("task", "refund")).value
+    assert task._environment_definition().party == Party(min=2, max=8)
+    with pytest.raises(ProjectError, match="party of Agents.*Job"):
+        plan(project, task="refund", model="openai/gpt-5.6-luna")
 
 
 def test_model_runs_default_to_the_documented_harness_and_respect_the_policy(
@@ -157,7 +175,7 @@ def test_an_app_credential_comes_from_the_agent_that_runs(
     monkeypatch.delenv("QUEUE_TOKEN")
     code, output, _ = cli("run", "--task", "refund", "--agent", "baseline")
     assert code == 1
-    assert "plural agent credential set baseline NAME" in output
+    assert "plural credential set NAME" in output
 
     monkeypatch.setenv("QUEUE_TOKEN", "queue-token-value")
     code, output, job = cli("run", "--task", "refund", "--agent", "baseline", "--json")

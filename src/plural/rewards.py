@@ -38,6 +38,7 @@ from plural.common import FrozenModel
 
 LEDGER_FILE = "rewards.jsonl"
 RewardSource = Literal["step", "environment", "hindsight", "judge", "human"]
+# "environment" is kept only so ledgers written before every reward came from a Verifier still read.
 TextField = Literal["text", "reasoning"]
 
 
@@ -138,6 +139,8 @@ class RewardRecord(FrozenModel):
     verifier: str = Field(min_length=1)
     version: str = ""
     app: str | None = None
+    seat: str | None = None
+    """The seat credited, when several Agents share the episode."""
     off_recording: bool = False
     """True when a replayed App answered this step from its fallback, not a recording."""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -214,9 +217,8 @@ def online_records(episode: Sequence[Mapping[str, Any]]) -> list[RewardRecord]:
     """The step rewards recorded on each step of an ``episode.jsonl``.
 
     Each Verifier's ``reward`` signal becomes one record targeting that step,
-    including on a step whose action rejected its input. A step that reports
-    a total reward with no signals, as a third-party Environment may, becomes
-    one ``environment`` record named ``reward``.
+    including on a step whose action rejected its input. A step's bare
+    ``reward`` total is not a record: every reward comes from a Verifier.
 
     Returns:
         The records, in step order.
@@ -234,6 +236,7 @@ def online_records(episode: Sequence[Mapping[str, Any]]) -> list[RewardRecord]:
             if signal.get("error"):
                 continue
             app = signal.get("app")
+            seat = signal.get("seat")
             records.append(
                 RewardRecord(
                     target=target,
@@ -243,17 +246,7 @@ def online_records(episode: Sequence[Mapping[str, Any]]) -> list[RewardRecord]:
                     verifier=str(signal.get("name") or "reward"),
                     version=str(signal.get("version") or ""),
                     app=str(app) if app else None,
-                    off_recording=off_recording,
-                )
-            )
-        reward = record.get("reward")
-        if not signals and not record.get("error") and isinstance(reward, (int, float)) and reward:
-            records.append(
-                RewardRecord(
-                    target=target,
-                    value=float(reward),
-                    source="environment",
-                    verifier="reward",
+                    seat=str(seat) if seat else None,
                     off_recording=off_recording,
                 )
             )
@@ -562,17 +555,19 @@ def _select(
         wanted = verifiers
     else:
         wanted = dict.fromkeys(verifiers)
-    # The ledger is append-only, so the last version written is the latest.
-    latest: dict[str, str] = {}
+    # The ledger is append-only, so the last version written is the latest. A
+    # Verifier's step and hindsight rewards are written at different times, so
+    # each source keeps its own latest version.
+    latest: dict[tuple[str, str], str] = {}
     for item in usable:
-        latest[item.verifier] = item.version
+        latest[(item.verifier, item.source)] = item.version
     chosen: list[RewardRecord] = []
     for item in usable:
         if wanted is not None and item.verifier not in wanted:
             continue
         version = wanted.get(item.verifier) if wanted is not None else None
         if version is None:
-            version = latest.get(item.verifier, "")
+            version = latest.get((item.verifier, item.source), "")
         if item.version == version:
             chosen.append(item)
     return chosen

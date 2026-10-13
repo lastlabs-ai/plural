@@ -32,7 +32,6 @@ class SupportHarness(Harness):
                 {{
                     "type": "action",
                     "observation": step.observation,
-                    "reward": step.reward,
                     "terminated": step.terminated,
                 }},
             ),
@@ -133,6 +132,7 @@ def test_class_runner_standardizes_sync_and_async_harnesses(
     assert step["observation"] == {"status": "complete", "value": "done"}
     assert step["turn"] == 1
     assert step["duration_ms"] >= 0
+    assert "reward" not in step
 
 
 def test_environment_tools_and_unknown_action_are_clear() -> None:

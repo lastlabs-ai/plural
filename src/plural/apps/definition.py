@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import Field, field_validator, model_validator
 
@@ -32,6 +32,9 @@ class SecretReference(FrozenModel):
     name: str = Field(pattern=r"^[A-Z_][A-Z0-9_]*$")
     required: bool = True
     description: str = ""
+    scopes: tuple[str, ...] = ()
+    """For a credential: the scopes the App needs it to grant. The running
+    Agent must declare every one of them for that credential."""
 
     @model_validator(mode="before")
     @classmethod
@@ -43,14 +46,16 @@ class SecretReference(FrozenModel):
     @field_validator("name")
     @classmethod
     def _application_name(cls, value: str) -> str:
+        # The App host puts these values in its environment, so none may
+        # change how it or the programs it starts run.
         if value in {
             "PATH",
             "HOME",
-            "PYTHONPATH",
-            "PYTHONHOME",
-            "LD_PRELOAD",
+            "TMPDIR",
+            "BASH_ENV",
+            "NODE_OPTIONS",
             "PLURAL_RESOURCES_DIR",
-        } or value.startswith(("DYLD_", "PLURAL_")):
+        } or value.startswith(("DYLD_", "LD_", "PYTHON", "PLURAL_")):
             raise ValueError("Secrets cannot replace execution or resource controls")
         return value
 
@@ -108,6 +113,22 @@ class AppDefinition(FrozenModel):
     has_reset: bool = False
     has_snapshot: bool = False
     control: AppControl = "owned"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _earned_control(cls, value: Any) -> Any:
+        # A definition can come from anywhere, so its control level is never
+        # taken on trust: it is at least as cautious as the App's settings imply.
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        derived = settings_control(payload)
+        declared = payload.get("control") or "owned"
+        if derived is not None and _CAUTION.get(str(declared), 0) < _CAUTION[derived]:
+            payload["control"] = derived
+        if payload.get("kind") != "replay" and payload.get("control") == "replayed":
+            payload["control"] = derived or "owned"
+        return payload
 
     @field_validator("name")
     @classmethod
@@ -170,6 +191,46 @@ def derive_control(kind: AppKind, *, local: bool, has_reset: bool) -> AppControl
     return "sandboxed" if has_reset else "live"
 
 
+_CAUTION: dict[str, int] = {"owned": 0, "sandboxed": 1, "replayed": 1, "live": 2}
+
+
+def settings_control(app: Any) -> AppControl | None:
+    """The control level an App definition's own settings earn, when they decide it.
+
+    An MCP App is local when a ``server`` or ``command`` starts it in the
+    Runtime and it is not marked ``remote``; an OpenAPI App when its ``local``
+    setting says so. Either is remote when it acts with an Agent's
+    credentials, since those reach a system outside the Runtime, and an MCP
+    App is when it holds project secrets unless ``remote`` is ``False``. A remote App
+    is ``sandboxed`` only with a reset its settings show: a ``reset`` command,
+    a ``plural_reset`` hook tool, or a Python subclass. A Python App's level is its
+    author's declaration, so it returns ``None``.
+
+    Returns:
+        The earned level, or ``None`` for a Python App.
+    """
+    if not isinstance(app, dict):
+        return None
+    kind = app.get("kind") or "python"
+    if kind == "replay":
+        return "replayed"
+    raw = app.get("config")
+    config: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    if kind == "mcp":
+        local = bool(config.get("server") or config.get("command")) and not config.get("remote")
+        if config.get("remote") is None and (app.get("secrets") or config.get("secrets")):
+            local = False
+    elif kind == "openapi":
+        local = bool(config.get("local"))
+    else:
+        return None
+    if app.get("credentials") or config.get("credentials"):
+        local = False
+    hooks = config.get("hooks") or ()
+    has_reset = bool(config.get("reset") or "plural_reset" in hooks or app.get("python"))
+    return derive_control(cast(AppKind, kind), local=local, has_reset=has_reset)
+
+
 TOOL_NAME_LIMIT = 64
 _UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
 
@@ -191,8 +252,9 @@ def exposed_names(apps: Sequence[tuple[str, Sequence[str]]]) -> dict[tuple[str, 
     Each action keeps its own name, with characters model providers reject
     replaced by ``_``. Only a name another App also offers, or one of the
     episode's own (``reset``, ``step``, ``finish``), is prefixed with the App's
-    name, so adding an App never renames the tools of the others. Names stay
-    within 64 characters and are unique.
+    name. A clash prefixes every App that offers the name, so adding an App
+    can rename another App's tool: ``guess`` becomes ``wordle__guess``. Names
+    stay within 64 characters and are unique.
 
     Returns:
         ``(app, action)`` to the exposed name.
@@ -288,5 +350,6 @@ __all__ = [
     "derive_control",
     "exposed_actions",
     "exposed_names",
+    "settings_control",
     "tool_parameters",
 ]

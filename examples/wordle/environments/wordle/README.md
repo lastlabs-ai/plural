@@ -1,44 +1,27 @@
 # Wordle
 
-## Overview
-
 Guess a hidden five-letter word in six tries. A Task only sets the secret.
-
-## Apps
-
-One Python App, `Wordle` in `environment.py`. Its actions are the Agent's moves, and its
-State is the hidden game.
 
 ## Actions
 
-`guess(word)` is the only move. The result marks each letter: `+` correct, `?` present in the word, `-` absent. A word that is not in `words.txt` is rejected. It does not use a guess, but it does use one of the Trial's turns.
-
-## Word list
-
-`words.txt` holds every accepted word, one per line: the 14,855 guesses Wordle accepts, from [tabatkins/wordle-list](https://github.com/tabatkins/wordle-list) (MIT). `Wordle.words()` reads it once per process. A Task's secret must be in it.
+`guess(word)` is the only move. The result marks each letter: `+` correct, `?` in the
+word somewhere else, `-` absent. A word that is not in `words.txt` is refused. It does
+not use a guess, but it does use one of the Trial's turns.
 
 ## State
 
-`secret` is the hidden word. A Task sets it with `initial_state`; a blank secret is chosen from `words.txt` using the seed. `guesses`, `remaining`, and `solved` are episode progress. The Agent never sees State. A Verifier does.
+`secret` is the hidden word; a Task sets it with `initial_state`, and a blank one is
+picked from `words.txt` using the seed. `guesses`, `found` (the letters placed so far,
+such as `cr..e`), and `solved` are the game's progress. The Agent never sees State. A
+Verifier does.
 
 ## What the Agent sees
 
-What `guess` returns: the guessed word, its marks, and how many guesses remain or that the
-word is solved. The secret never appears in it.
+What `guess` returns: the word, its marks, and how many guesses are left or that it is
+solved. The secret never appears in it.
 
-## Rewards
+## Word list
 
-The `solved` verifier gives per-step credit for training. Rewards never contribute to a score.
-
-## Resources
-
-Files listed under `resources:` in `environment.yaml`, staged into the runtime.
-
-## Runtime
-
-`runtime:` in `environment.yaml` says where the Environment and Agent run.
-
-## Settings
-
-`harness_policy` limits which Agent harnesses may run here. `limits` caps each Trial's
-turns, seconds, and cost.
+`words.txt` holds the 14,855 guesses Wordle accepts, from
+[tabatkins/wordle-list](https://github.com/tabatkins/wordle-list) (MIT). It is also an
+Environment resource, so a Harness can read it from `/workspace/resources`.

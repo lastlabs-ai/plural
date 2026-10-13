@@ -310,24 +310,25 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help                        Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ run        Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.      │
-│ auth       Sign in, sign out, and choose the hosted account or project commands use.             │
-│ project    Create, register, and inspect projects.                                               │
-│ env        Create, validate, push, pull, and inspect Environments.                               │
-│ verifier   Create, validate, push, pull, and inspect Verifiers.                                  │
-│ harness    Create, validate, push, pull, and inspect Harnesses.                                  │
-│ task       Create, validate, push, pull, and inspect Tasks.                                      │
-│ agent      Create, validate, push, pull, and inspect Agents.                                     │
-│ benchmark  Create, validate, push, pull, and inspect Benchmarks.                                 │
-│ job        List, inspect, and rerun Jobs.                                                        │
-│ trial      Inspect and rerun Trials.                                                             │
-│ review     List and submit human reviews.                                                        │
-│ rewards    Show a Trial's rewards and export training data. Add rewards with `plural verifier    │
-│            apply`.                                                                               │
-│ models     List the models you may run.                                                          │
-│ runtime    Choose where Environments run.                                                        │
-│ secret     Set the secrets your Apps need in the hosted project.                                 │
-│ session    Export and redeploy portable agent sessions.                                          │
+│ run         Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.     │
+│ auth        Sign in, sign out, and choose the hosted account or project commands use.            │
+│ project     Create, register, and inspect projects.                                              │
+│ credential  Save your values for the credentials Agents carry, such as your CRM token.           │
+│ env         Create, validate, push, pull, and inspect Environments.                              │
+│ verifier    Create, validate, push, pull, and inspect Verifiers.                                 │
+│ harness     Create, validate, push, pull, and inspect Harnesses.                                 │
+│ task        Create, validate, push, pull, and inspect Tasks.                                     │
+│ agent       Create, validate, push, pull, and inspect Agents.                                    │
+│ benchmark   Create, validate, push, pull, and inspect Benchmarks.                                │
+│ job         List, inspect, and rerun Jobs.                                                       │
+│ trial       Inspect and rerun Trials.                                                            │
+│ review      List and submit human reviews.                                                       │
+│ rewards     Show a Trial's rewards and export training data. Add rewards with `plural verifier   │
+│             apply`.                                                                              │
+│ models      List the models you may run.                                                         │
+│ runtime     Choose where Environments run.                                                       │
+│ secret      Set the secrets your Apps need in the hosted project.                                │
+│ session     Export and redeploy portable agent sessions.                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -343,91 +344,14 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init        Create a saved Agent: a model, instructions, and an optional Harness.                │
-│ validate    Check a resource and everything it depends on, without uploading.                    │
-│ push        Validate and push an immutable, private revision to the bound project.               │
-│ release     Label the revision matching your files with a release version, pushing it first.     │
-│ pull        Restore a hosted revision's editable files into this project.                        │
-│ show        Show a resource: the local copy if there is one, otherwise the hosted one.           │
-│ list        List resources of this kind, labeled local or hosted.                                │
-│ serve       Reserved: serve an Agent as an endpoint (not available yet).                         │
-│ credential  Store the credentials an Agent carries, such as the token of the user it acts as.    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural agent credential`
-
-```text
-
- Usage: plural agent credential [OPTIONS] COMMAND [ARGS]...
-
- Store the credentials an Agent carries, such as the token of the user it acts as.
-
- List each one under credentials: in the Agent's agent.yaml, with its scopes. Set its value with
- `plural agent credential set AGENT NAME`; `plural run --agent AGENT` then supplies it to the Apps
- that need it.
-
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list   List an Agent's stored credentials, never their values.                                   │
-│ set    Store an Agent's credential. Prompts without echoing.                                     │
-│ unset  Remove an Agent's stored credential.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural agent credential list`
-
-```text
-
- Usage: plural agent credential list [OPTIONS] {agent}
-
- List an Agent's stored credentials, never their values.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    agent      <str>  The Agent, by its folder name under agents/. [required]                   │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --json          Print machine-readable JSON.                                                     │
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural agent credential set`
-
-```text
-
- Usage: plural agent credential set [OPTIONS] {agent} {name}
-
- Store an Agent's credential. Prompts without echoing.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    agent      <str>  The Agent, by its folder name under agents/. [required]                   │
-│ *    name       <str>  The credential's name, as the App declares it. [required]                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --from-env          Read the value from the environment variable of that name.                   │
-│ --json              Print machine-readable JSON.                                                 │
-│ --help              Show this message and exit.                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural agent credential unset`
-
-```text
-
- Usage: plural agent credential unset [OPTIONS] {agent} {name}
-
- Remove an Agent's stored credential.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    agent      <str>  The Agent, by its folder name under agents/. [required]                   │
-│ *    name       <str>  The credential to remove. [required]                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --json          Print machine-readable JSON.                                                     │
-│ --help          Show this message and exit.                                                      │
+│ init      Create a saved Agent: a model, instructions, and an optional Harness.                  │
+│ validate  Check a resource and everything it depends on, without uploading.                      │
+│ push      Validate and push an immutable, private revision to the bound project.                 │
+│ release   Label the revision matching your files with a release version, pushing it first.       │
+│ pull      Restore a hosted revision's editable files into this project.                          │
+│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
+│ list      List resources of this kind, labeled local or hosted.                                  │
+│ serve     Reserved: serve an Agent as an endpoint (not available yet).                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -889,6 +813,77 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural credential`
+
+```text
+
+ Usage: plural credential [OPTIONS] COMMAND [ARGS]...
+
+ Save your values for the credentials Agents carry, such as your CRM token.
+
+ An Agent lists each credential under credentials: in its agent.yaml, with its scopes. Save your
+ value once with `plural credential set NAME`; every Agent you run that carries NAME uses it. Your
+ coworkers save their own.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ list   List the credentials you saved, never their values.                                       │
+│ set    Save your value for a credential. Prompts without echoing.                                │
+│ unset  Remove one of your saved credentials.                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural credential list`
+
+```text
+
+ Usage: plural credential list [OPTIONS]
+
+ List the credentials you saved, never their values.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural credential set`
+
+```text
+
+ Usage: plural credential set [OPTIONS] {name}
+
+ Save your value for a credential. Prompts without echoing.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The credential's name, as the App declares it. [required]                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --from-env          Read the value from the environment variable of that name.                   │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural credential unset`
+
+```text
+
+ Usage: plural credential unset [OPTIONS] {name}
+
+ Remove one of your saved credentials.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The credential to remove. [required]                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │

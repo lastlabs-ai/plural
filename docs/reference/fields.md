@@ -45,6 +45,7 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HarnessDefinition](#harnessdefinition)
 - [HarnessPolicy](#harnesspolicy)
 - [NetworkMode](#networkmode)
+- [Party](#party)
 - [ResourceRequirements](#resourcerequirements)
 - [RubricCriterion](#rubriccriterion)
 - [RuntimePackages](#runtimepackages)
@@ -68,6 +69,7 @@ Schema-v2 Environment: Apps composed with one Runtime and one set of limits.
 - **`runtime`** — `Runtime`; optional.
 - **`harness_policy`** — `HarnessPolicy`; optional.
 - **`limits`** — `ExecutionLimits`; optional.
+- **`party`** — `Party | null`; optional. Default: `null`. How many Agents share each episode, for a game such as poker. Leave it unset for an Environment one Agent works in alone.
 - **`metadata`** — `object`; optional.
 
 ## Harness
@@ -91,6 +93,7 @@ One versioned unit of work in a Python-authored Environment.
 - **`resources`** — `array of Resource`; optional. Default: `[]`.
 - **`initial_state`** — `object`; optional.
 - **`reset_options`** — `object`; optional.
+- **`seat_instructions`** — `object`; optional.
 
 ## DeterministicVerifier
 
@@ -397,6 +400,14 @@ Requested sandbox network policy.
 Allowed values: `"public" | "no-network" | "allowlist" | "public" | "no-network" | "allowlist"`.
 
 
+## Party
+
+How many Agents may share one episode of the Environment, such as 2 to 8 at poker.
+
+- **`min`** — `integer`; optional. Default: `2`. Constraints: `{"maximum": 100, "minimum": 2}`.
+- **`max`** — `integer`; optional. Default: `2`. Constraints: `{"maximum": 100, "minimum": 2}`.
+- **`isolation`** — `"isolated" | "shared"`; optional. Default: `"isolated"`. ``isolated``: each seat's Harness runs as its own OS user, and the Apps are the only thing the seats share; needs Docker or Daytona. ``shared``: every seat runs as one user and can read and write the others' files and the Environment's, for a team that works on the same files, or to try a party on the local Runtime. A shared seat could also act for another seat.
+
 ## ResourceRequirements
 
 Optional compute limits.
@@ -440,6 +451,7 @@ A named value an App needs, which it never stores itself.
 - **`name`** — `string`; required. Constraints: `{"pattern": "^[A-Z_][A-Z0-9_]*$"}`.
 - **`required`** — `boolean`; optional. Default: `true`.
 - **`description`** — `string`; optional. Default: `""`.
+- **`scopes`** — `array of string`; optional. Default: `[]`.
 
 ## VerifierRuntime
 

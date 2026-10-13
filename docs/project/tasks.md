@@ -40,6 +40,10 @@ Agent sees exactly what it should, and nothing more.
 Plural stores a Task's `reset_options` but does not yet pass them to `reset`. Use
 `initial_state`, or load the case in Environment code, instead.
 
+A Task whose Environment has a party, such as a game of poker, is played by several
+Agents, and `seat_instructions` gives one seat instructions of its own: see
+[Several Agents in one Task](multi-agent.md).
+
 ## Create a Task
 
 This Task uses the `environment` and `verifier` from the

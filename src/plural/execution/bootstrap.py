@@ -1,7 +1,7 @@
 """Make Plural importable inside Docker and remote sandboxes.
 
-An Environment written as a Python class runs as ``python -m
-plural.environments.runner``, and a Python Harness as ``python -m
+An Environment's Apps run in the App host as ``python -m
+plural.apps.daemon``, and a Python Harness as ``python -m
 plural.harness.class_runner``, so the sandbox needs the ``plural`` package.
 The local provider already runs the Python that has it. Every other provider
 gets it here, before the Harness starts:
@@ -79,7 +79,15 @@ import os, subprocess, sys, zipfile
 site, archive, *requirements = sys.argv[1:]
 if sys.version_info < (3, 10):
     sys.exit("Plural needs Python 3.10 or newer; this sandbox has %d.%d" % sys.version_info[:2])
-os.makedirs(site, exist_ok=True)
+# Every Plural process imports from here, so no one else may own or write it.
+top = os.path.dirname(site)
+for path in (top, site):
+    if os.path.lexists(path):
+        info = os.lstat(path)
+        if os.path.islink(path) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+            sys.exit(path + " exists and is not this installer's own folder")
+    else:
+        os.mkdir(path, 0o755)
 if requirements:
     code = subprocess.call([
         sys.executable, "-m", "pip", "install", "--quiet", "--no-cache-dir",
@@ -331,7 +339,9 @@ async def install_plural(
     Raises:
         PluralBootstrapError: When the sandbox cannot run or install it.
     """
-    env = {"PYTHONPATH": SEARCH_PATH}
+    # Only the image's own folder until the Job installs into RUNTIME_SITE: an
+    # entry the Job did not create is one a Harness could create first.
+    env = {"PYTHONPATH": IMAGE_SITE}
     names = {_name(item): item for item in distribution.packages}
     found = await _probe(provider, handle, env, tuple(names))
     present = found.get("version") == distribution.version
@@ -360,6 +370,7 @@ async def install_plural(
             cwd="/workspace",
             env={"HOME": "/tmp", "PIP_NO_INPUT": "1"},
             timeout_seconds=600,
+            user="root",
         ),
     )
     if result.exit_code != 0:
@@ -371,6 +382,7 @@ async def install_plural(
         raise PluralBootstrapError(
             f"Could not install {wanted} in the sandbox: {detail[-1500:] or result.exit_code}"
         )
+    env = {"PYTHONPATH": SEARCH_PATH}
     found = await _probe(provider, handle, env, tuple(names))
     if found.get("version") != distribution.version:
         raise PluralBootstrapError(

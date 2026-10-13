@@ -65,6 +65,27 @@ def test_the_agent_reads_both_volumes_without_changing_them(files: MCPApp) -> No
         files.call("read_file", {"path": "environment-resources/../../etc"})
 
 
+def test_a_planted_link_never_leads_outside_the_folders(tmp_path: Path, volumes: Path) -> None:
+    secret = tmp_path / "host-private.txt"
+    secret.write_text("control-token\n")
+    shared = volumes / "environment-resources" / "resources"
+    (shared / "notes.txt").symlink_to(secret)
+    (shared / "elsewhere").symlink_to(tmp_path, target_is_directory=True)
+    app = _app(tmp_path, "plural.mcp.files:server")
+    try:
+        app.reset({})
+        listing = app.call("list_files", {"path": "environment-resources", "recursive": True})
+        assert "notes.txt" not in listing and "elsewhere" not in listing
+        assert app.call("search_files", {"pattern": "control-token"}) == "No matches."
+        for path in ("resources/notes.txt", "resources/elsewhere/host-private.txt"):
+            with pytest.raises(ValueError, match="outside"):
+                app.call("read_file", {"path": f"environment-resources/{path}"})
+        with pytest.raises(ValueError, match="longer than"):
+            app.call("search_files", {"pattern": "a" * 501})
+    finally:
+        app.close()
+
+
 def test_tables_are_queryable_and_read_only(files: MCPApp) -> None:
     tables = {item["table"]: item for item in files.call("list_tables", {})["tables"]}
     assert set(tables) == {

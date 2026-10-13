@@ -28,7 +28,7 @@ from plural.cli.common import (
     signed_in,
     workspace,
 )
-from plural.cli.credential_commands import agent_credential_source, stored_credentials
+from plural.cli.credential_commands import account_credential_source, stored_credentials
 from plural.cli.runtime_commands import _project_studio
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
@@ -191,8 +191,7 @@ def run(
         if pulled:
             _print_pulled(pulled, err=as_json)
             space = Workspace(Project.at(root))
-    if agent:
-        use_credential_source(agent_credential_source(agent))
+    use_credential_source(account_credential_source())
     plan = plan_run(space, request, environ=environ)
     if dry_run:
         payload = _plan_payload(plan, hosted=hosted)
@@ -751,7 +750,7 @@ def _runtime_credentials(space: Workspace, plan: RunPlan, *, err: bool) -> None:
 
 
 def _stored_credentials(err: bool) -> CredentialSource:
-    """Look up the running Agent's stored credentials when the run starts."""
+    """Look up your saved credentials when the run starts."""
     return lambda spec, agent: stored_credentials(spec, agent, err=err)
 
 

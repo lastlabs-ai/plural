@@ -22,6 +22,7 @@ from plural.environments.definition import (
     ExecutionLimits,
     Guardrail,
     HarnessPolicy,
+    Party,
 )
 
 if TYPE_CHECKING:
@@ -79,6 +80,7 @@ class Environment:
     readme = ""
     _source_file: ClassVar[Path | None] = None
     metadata: dict[str, Any] = {}
+    party: Party | int | Mapping[str, int] | None = None
 
     def __init__(
         self,
@@ -94,6 +96,7 @@ class Environment:
         guardrails: Iterable[Guardrail] = (),
         harness_policy: HarnessPolicy | None = None,
         limits: ExecutionLimits | None = None,
+        party: Party | int | Mapping[str, int] | None = None,
         metadata: dict[str, Any] | None = None,
         source: str | Path | None = None,
     ) -> None:
@@ -126,6 +129,8 @@ class Environment:
         self.guardrails = tuple(guardrails)
         self.harness_policy = harness_policy or HarnessPolicy()
         self.limits = limits or ExecutionLimits()
+        chosen = type(self).party if party is None else party
+        self.party = None if chosen is None else Party.model_validate(chosen)
         self.metadata = deepcopy(type(self).metadata) if metadata is None else deepcopy(metadata)
         self._source: PackageSource | None = None
         self._source_bound = False
@@ -245,6 +250,7 @@ class Environment:
             runtime=self.runtime,
             harness_policy=self.harness_policy,
             limits=self.limits,
+            party=None if self.party is None else Party.model_validate(self.party),
             metadata=deepcopy(self.metadata),
             source=self.source,
         )
@@ -287,6 +293,7 @@ class Environment:
             guardrails=definition.guardrails,
             harness_policy=definition.harness_policy,
             limits=definition.limits,
+            party=definition.party,
             metadata=definition.metadata,
             source=base,
         )

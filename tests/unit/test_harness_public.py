@@ -136,8 +136,6 @@ def test_current_harness_docs_and_examples_hide_internal_tokens() -> None:
     paths = (
         ROOT / "docs/project/harnesses.md",
         ROOT / "docs/concepts/harness-policy.md",
-        ROOT / "examples/wordle/harnesses/word-list/harness.yaml",
-        ROOT / "examples/wordle/harnesses/word-list/harness.py",
         ROOT / "examples/first-project/harnesses/scripted-triage/harness.yaml",
         ROOT / "examples/first-project/harnesses/scripted-triage/harness.py",
         ROOT / "examples/jobs/minimal_harness/harness.yaml",

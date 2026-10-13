@@ -1,10 +1,11 @@
-"""``plural agent credential``: the values behind the credentials an Agent carries.
+"""``plural credential``: your values for the credentials Agents carry.
 
 An App names the credentials it needs, such as ``SALESFORCE_TOKEN``. An Agent
 lists the ones it carries, with their scopes, in its ``agent.yaml``. The values
-live here, encrypted with the hosted Agent, so each Agent acts with its own
-token and every Trial records which one it used. `plural run --agent` passes
-each value only to the App host, never to the Harness or the model.
+are yours: you save each one once, encrypted in your Plural account, and every
+Agent you run that carries that name acts with it. A coworker running the same
+Agent supplies their own. `plural run` passes each value only to the App host,
+never to the Harness or the model.
 """
 
 from __future__ import annotations
@@ -18,20 +19,28 @@ import httpx
 import typer
 
 from plural.apps.definition import SecretReference
-from plural.cli.common import JSON_OPTION, emit, fail, handled, muted, rows, success
-from plural.cli.runtime_commands import _project_studio
+from plural.cli.common import (
+    JSON_OPTION,
+    emit,
+    fail,
+    handled,
+    rows,
+    session,
+    signed_in,
+    success,
+)
 from plural.credentials import CredentialValue
-from plural.errors import NotFoundError, PluralError
+from plural.errors import PluralError
 from plural.jobs import JobSpec
 from plural.project import ProjectError
-from plural.studio import Studio, slugify
+from plural.studio import Studio
 
 credential_app = typer.Typer(
     help=(
-        "Store the credentials an Agent carries, such as the token of the user it acts as.\n\n"
-        "List each one under credentials: in the Agent's agent.yaml, with its scopes. "
-        "Set its value with `plural agent credential set AGENT NAME`; `plural run --agent "
-        "AGENT` then supplies it to the Apps that need it."
+        "Save your values for the credentials Agents carry, such as your CRM token.\n\n"
+        "An Agent lists each credential under credentials: in its agent.yaml, with its "
+        "scopes. Save your value once with `plural credential set NAME`; every Agent "
+        "you run that carries NAME uses it. Your coworkers save their own."
     ),
     no_args_is_help=True,
 )
@@ -48,18 +57,15 @@ def _name(value: str) -> str:
         )
 
 
+def _studio() -> Studio:
+    return signed_in(session()).studio(project=False)
+
+
 @credential_app.command("list")
 @handled
-def credential_list(
-    agent: str = typer.Argument(help="The Agent, by its folder name under agents/."),
-    as_json: bool = JSON_OPTION,
-) -> None:
-    """List an Agent's stored credentials, never their values."""
-    studio, project = _project_studio()
-    try:
-        items = studio.agents.credentials(slugify(agent))
-    except NotFoundError:
-        items = []
+def credential_list(as_json: bool = JSON_OPTION) -> None:
+    """List the credentials you saved, never their values."""
+    items = _studio().credentials.list()
     emit(
         items,
         as_json=as_json,
@@ -69,7 +75,7 @@ def credential_list(
                 ("NAME", "ENDS WITH", "UPDATED"),
             )
             if items
-            else typer.echo(f"No credentials stored for Agent {agent} in project {project}.")
+            else typer.echo("You have not saved any credentials.")
         ),
     )
 
@@ -77,104 +83,88 @@ def credential_list(
 @credential_app.command("set")
 @handled
 def credential_set(
-    agent: str = typer.Argument(help="The Agent, by its folder name under agents/."),
     name: str = typer.Argument(help="The credential's name, as the App declares it."),
     from_env: bool = typer.Option(
         False, "--from-env", help="Read the value from the environment variable of that name."
     ),
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Store an Agent's credential. Prompts without echoing."""
+    """Save your value for a credential. Prompts without echoing."""
     name = _name(name)
     if from_env:
         value = os.environ.get(name, "")
         if not value:
             fail(f"{name} is not set in your environment.")
     elif sys.stdin.isatty():
-        value = typer.prompt(f"Value of {name} for Agent {agent}", hide_input=True)
+        value = typer.prompt(f"Your value of {name}", hide_input=True)
     else:
         value = sys.stdin.read().rstrip("\n")
     if not value:
         fail(f"{name} needs a value.")
-    studio, project = _project_studio()
-    slug = slugify(agent)
-    try:
-        item = studio.agents.set_credential(slug, name, value)
-    except NotFoundError:
-        studio.agents.create(name=agent, slug=slug)
-        item = studio.agents.set_credential(slug, name, value)
+    item = _studio().credentials.set(name, value)
     emit(
         item,
         as_json=as_json,
-        text=lambda: success(
-            f"Set {name} for Agent {agent} in project {project} " + muted(f"(ends {item['hint']})")
-        ),
+        text=lambda: success(f"Saved {name} to your account (ends {item['hint']})."),
     )
 
 
 @credential_app.command("unset")
 @handled
 def credential_unset(
-    agent: str = typer.Argument(help="The Agent, by its folder name under agents/."),
     name: str = typer.Argument(help="The credential to remove."),
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Remove an Agent's stored credential."""
-    studio, project = _project_studio()
-    studio.agents.delete_credential(slugify(agent), _name(name))
+    """Remove one of your saved credentials."""
+    _studio().credentials.delete(_name(name))
     emit(
-        {"agent": agent, "name": name, "deleted": True},
+        {"name": name, "deleted": True},
         as_json=as_json,
-        text=lambda: success(f"Removed {name} from Agent {agent} in project {project}."),
+        text=lambda: success(f"Removed {name} from your account."),
     )
 
 
 def stored_credentials(
     spec: JobSpec, hosted_agent: str | None, *, err: bool
 ) -> dict[str, dict[str, CredentialValue]]:
-    """The run's Agent credentials stored in the hosted project.
+    """Your saved values for the credentials the run's Agents carry.
 
-    Only a saved Agent (``--agent``) has stored credentials; ``hosted_agent`` is
-    its folder name. Without a hosted project, or when you may not read its
-    credentials, the run uses what you exported, and its preflight names
-    anything still missing.
+    When you are not signed in, or with a key that may not read your
+    credentials (such as one made for CI), the run uses what you exported, and
+    its preflight names anything still missing.
 
     Returns:
         Agent name to credential name to value.
     """
-    if hosted_agent is None:
+    del hosted_agent
+    wanted = {
+        binding.name: sorted(binding.agent.credentials)
+        for binding in spec.agents
+        if binding.agent.credentials
+    }
+    if not wanted:
         return {}
-    out: dict[str, dict[str, CredentialValue]] = {}
-    for binding in spec.agents:
-        names = sorted(binding.agent.credentials)
-        if not names:
-            continue
-        try:
-            studio, _ = _project_studio()
-            grant = _resolve(studio, slugify(hosted_agent), names)
-        except NotFoundError:
-            continue
-        except (PluralError, ProjectError, OSError, httpx.HTTPError) as exc:
-            typer.echo(
-                f"! Agent credentials: {exc} Using credentials from your environment.", err=True
-            )
-            continue
-        if grant:
-            out[binding.name] = grant
-            typer.echo(
-                f"Using Agent {hosted_agent}'s stored credentials: {', '.join(sorted(grant))}.",
-                err=err,
-            )
-    return out
+    names = sorted({name for group in wanted.values() for name in group})
+    try:
+        grant = _resolve(_studio(), names)
+    except (PluralError, ProjectError, OSError, httpx.HTTPError) as exc:
+        typer.echo(f"! Credentials: {exc} Using credentials from your environment.", err=True)
+        return {}
+    if grant:
+        typer.echo(f"Using your saved credentials: {', '.join(sorted(grant))}.", err=err)
+    return {
+        agent: {name: grant[name] for name in group if name in grant}
+        for agent, group in wanted.items()
+    }
 
 
-def agent_credential_source(agent: str) -> Callable[[str], str | None]:
-    """Look up one of this Agent's stored credentials, once per name.
+def account_credential_source() -> Callable[[str], str | None]:
+    """Look up one of your saved credentials, once per name.
 
-    Planning a run loads its Apps, and a server that needs the Agent's own
-    token to list its tools gets it here. Without a hosted project, or when
-    you may not read the Agent's credentials, the lookup finds nothing and the
-    App names what is missing.
+    Planning a run loads its Apps, and a server that needs your token to list
+    its tools gets it here. When you are not signed in, or the key may not
+    read your credentials, the lookup finds nothing and the App names what is
+    missing.
     """
     found: dict[str, str | None] = {}
 
@@ -182,8 +172,7 @@ def agent_credential_source(agent: str) -> Callable[[str], str | None]:
         if name not in found:
             found[name] = None
             try:
-                studio, _ = _project_studio()
-                grant = _resolve(studio, slugify(agent), [name])
+                grant = _resolve(_studio(), [name])
             except (PluralError, ProjectError, OSError, httpx.HTTPError):
                 return None
             if name in grant:
@@ -193,8 +182,8 @@ def agent_credential_source(agent: str) -> Callable[[str], str | None]:
     return lookup
 
 
-def _resolve(studio: Studio, agent: str, names: list[str]) -> dict[str, CredentialValue]:
-    found = studio.agents.resolve_credentials(agent, names).get("credentials") or {}
+def _resolve(studio: Studio, names: list[str]) -> dict[str, CredentialValue]:
+    found = studio.credentials.resolve(names).get("credentials") or {}
     out: dict[str, CredentialValue] = {}
     for name, item in found.items():
         if not isinstance(item, dict) or not item.get("value"):
@@ -208,4 +197,4 @@ def _resolve(studio: Studio, agent: str, names: list[str]) -> dict[str, Credenti
     return out
 
 
-__all__ = ["agent_credential_source", "credential_app", "stored_credentials"]
+__all__ = ["account_credential_source", "credential_app", "stored_credentials"]

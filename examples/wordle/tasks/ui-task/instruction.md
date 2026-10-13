@@ -1,1 +1,0 @@
-Guess the hidden five-letter word in as few guesses as you can. Call `guess` with one five-letter word at a time and stop as soon as the board says solved.

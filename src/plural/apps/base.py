@@ -74,6 +74,11 @@ class App(Generic[StateT]):
     """The Task's ``info``, available to :meth:`reset`."""
     workspace: Path
     """The Environment workspace: the folder holding its files in a Runtime."""
+    seats: tuple[str, ...] = ()
+    """The Task's seats, such as ``("button", "big_blind")``, when several Agents
+    play. Empty for a Task one Agent works alone. Set before :meth:`reset`."""
+    seat: str | None = None
+    """The seat taking the current action, while an action runs; ``None`` alone."""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -181,6 +186,31 @@ class App(Generic[StateT]):
     def truncated(self) -> bool:
         """Return whether this App cut the episode short."""
         return False
+
+    def turn(self) -> str | Sequence[str] | None:
+        """Which seats may act now, when several Agents share the episode.
+
+        Return one seat, as in a turn-based game; several, for moves made at
+        the same time; an empty sequence while nobody may; or ``None``, the
+        default, when any seat may act whenever it likes. An action from a seat
+        that may not act is refused before it runs. With several Apps, a seat
+        may act only when every App that answers allows it.
+
+        Returns:
+            The seats that may act, or ``None`` for any.
+        """
+        return None
+
+    def observe(self, seat: str) -> Any:
+        """What ``seat`` sees when its turn comes, such as its own cards.
+
+        Each seat's Agent gets this before it acts, and only its own. Return
+        ``None``, the default, when a seat learns everything from its actions.
+
+        Returns:
+            The seat's observation, or ``None``.
+        """
+        return None
 
     def step_info(self) -> dict[str, Any]:
         """Bookkeeping about the last action, recorded on the step.

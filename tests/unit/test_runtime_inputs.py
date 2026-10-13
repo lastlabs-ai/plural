@@ -201,7 +201,7 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
             {
                 "name": "gentle",
                 "version": "0.1.0",
-                "dir": ".plural/verifiers/gentle",
+                "dir": ".plural/verifiers/0",
                 "python": "test_runtime_inputs.py:gentle",
             }
         ],
@@ -211,7 +211,7 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
         "info": {"hint": "visible"},
         "seed": None,
     }
-    assert b"def gentle(step)" in files[".plural/verifiers/gentle/test_runtime_inputs.py"]
+    assert b"def gentle(step)" in files[".plural/verifiers/0/test_runtime_inputs.py"]
     assert (
         EnvironmentDefinition.model_validate_json(files[".plural/apps/environment.json"]).identity
         == task.environment.identity

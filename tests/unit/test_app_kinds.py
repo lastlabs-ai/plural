@@ -258,6 +258,7 @@ def test_environment_yaml_lists_apps_of_every_connected_kind(
                 mcp:
                   server: plural.mcp.files:server
                   secrets: [CRM_EXPORT_TOKEN]
+                  remote: false
               - name: payments
                 replay:
                   recordings: trace.json
@@ -287,3 +288,65 @@ def test_environment_yaml_lists_apps_of_every_connected_kind(
         {"name": "CRM_EXPORT_TOKEN", "required": True, "set": False, "source": None}
     ]
     assert {"name": "getOrder", "mutates_state": False} in summary["orders"]["actions"]
+
+
+def test_openapi_path_parameters_cannot_leave_their_segment(
+    tmp_path: Path, api: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ORDERS_TOKEN", TOKEN)
+    environment = _orders_env(tmp_path, api)
+    environment.reset()
+    for value in ("..", ".", "1\r\nX-Injected: yes"):
+        *_, info = environment.step("getOrder", id=value)
+        assert "must name one item" in info["error"]
+    *_, info = environment.step("getOrder", id="../orders")
+    assert info["error"].startswith("HTTP 404")
+    environment.close()
+
+
+def test_openapi_request_errors_never_show_a_credential(
+    tmp_path: Path, api: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ORDERS_TOKEN", f"{TOKEN}\r")
+    environment = _orders_env(tmp_path, api)
+    environment.reset()
+    *_, info = environment.step("getOrder", id="1")
+    assert "could not build a valid request" in info["error"]
+    assert TOKEN not in info["error"]
+    environment.close()
+
+
+def test_a_fetched_openapi_document_does_not_choose_where_credentials_go(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import plural.apps.openapi as openapi
+
+    document = {**SPEC, "servers": [{"url": "https://elsewhere.example"}]}
+    monkeypatch.setattr(openapi, "load_document", lambda *args, **kwargs: document)
+    monkeypatch.setenv("ORDERS_TOKEN", TOKEN)
+    app = OpenAPIApp(
+        name="orders",
+        spec="https://vendor.example/openapi.json",
+        headers={"Authorization": "Bearer ${ORDERS_TOKEN}"},
+        secrets=["ORDERS_TOKEN"],
+    )
+    with pytest.raises(ValueError, match="needs base_url"):
+        app.call("getOrder", {"id": "1"})
+
+
+def test_an_mcp_server_holding_a_secret_is_remote_unless_declared_local() -> None:
+    from plural.apps.definition import settings_control
+
+    server = {"server": "plural.mcp.files:server", "secrets": ["DB_TOKEN"]}
+    assert settings_control({"kind": "mcp", "config": server}) == "live"
+    assert settings_control({"kind": "mcp", "config": {**server, "remote": False}}) == "owned"
+    assert settings_control({"kind": "mcp", "config": {"command": ["srv"]}}) == "owned"
+
+
+def test_a_one_line_jsonl_recording_loads(tmp_path: Path) -> None:
+    from plural.apps.replay import read_recordings
+
+    recording = {"action": "get_order", "arguments": {"id": "1"}, "result": {"id": "1"}}
+    path = tmp_path / "calls.jsonl"
+    path.write_text(json.dumps(recording) + "\n")
+    assert read_recordings(path) == [recording]

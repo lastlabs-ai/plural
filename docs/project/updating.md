@@ -123,10 +123,10 @@ number, a release version, or a content hash of at least 7 hex digits. Use it
 wherever a command names a Task, Benchmark, or Agent to run, show, or pull:
 
 ```bash
-plural run --benchmark wordlebench@1.0.0 --model openai/gpt-5.6-luna
+plural run --benchmark wordle@1.0.0 --model openai/gpt-5.6-luna
 plural run --task refund@2 --agent baseline@sha256:61d8a0c --hosted
-plural benchmark show wordlebench@3
-plural benchmark pull wordlebench@1.0.0 --force
+plural benchmark show wordle@3
+plural benchmark pull wordle@1.0.0 --force
 ```
 
 What happens when you run one:
@@ -136,7 +136,7 @@ What happens when you run one:
   `.plural/versions/` and runs that copy. Your working files are never touched, and the
   Job lands in `.plural/jobs` like any other.
 - An input you name without a version, such as `--agent baseline` beside
-  `--benchmark wordlebench@1.0.0`, still comes from your working copy.
+  `--benchmark wordle@1.0.0`, still comes from your working copy.
 
 Restoring needs a signed-in, registered project. A revision that was never pushed
 cannot be recalled.
@@ -144,10 +144,10 @@ cannot be recalled.
 `plural <kind> show name@3` shows that one revision, and `plural <kind> pull name@3`
 replaces the working copy with it, keeping a backup of files that differ.
 
-The web app takes the same form: open `/benchmarks/wordlebench@1.0.0` or
-`/benchmarks/wordlebench@3` to see that revision's leaderboard. The API resolves a
+The web app takes the same form: open `/benchmarks/wordle@1.0.0` or
+`/benchmarks/wordle@3` to see that revision's leaderboard. The API resolves a
 number, version, or hash wherever it takes a revision id, as in
-`GET /api/v1/benchmarks/wordlebench/revisions/1.0.0`.
+`GET /api/v1/benchmarks/wordle/revisions/1.0.0`.
 
 ## Going deeper
 

@@ -1,7 +1,8 @@
 """Run a Verifier again on a stored Trial, without running the Agent.
 
-``reward`` is replayed step by step from the Trial's ``episode.jsonl`` and the
-App State recorded around each step in ``states.jsonl``. ``hindsight`` and an
+``reward`` is replayed step by step from the App host's record of each step in
+``steps.jsonl`` (``episode.jsonl`` for older Trials) and the App State recorded
+around each step in ``states.jsonl``. ``hindsight`` and an
 in-process ``check`` run on the stored artifacts as they did live. Apps are
 gone by then, so ``step.apps`` and ``episode.apps`` hold recorded State, and
 ``query`` cannot be called.
@@ -10,12 +11,13 @@ gone by then, so ``step.apps`` and ``episode.apps`` hold recorded State, and
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from plural.apps.host import STATES_FILE
+from plural.apps.host import STATES_FILE, STEPS_FILE
 from plural.rewards import (
     LEDGER_FILE,
     HindsightVerifier,
@@ -94,56 +96,98 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text("utf-8").splitlines() if line.strip()]
 
 
+def _step_number(record: Mapping[str, Any]) -> int | None:
+    info = record.get("info")
+    value = info.get("step") if isinstance(info, Mapping) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _step_rewards(
     verifier: DeterministicVerifier,
     events: Sequence[Mapping[str, Any]],
     states: Sequence[Mapping[str, Any]],
     task: StepTask,
-) -> list[RewardRecord]:
+    *,
+    steps: Sequence[Mapping[str, Any]] = (),
+) -> tuple[list[RewardRecord], list[str]]:
+    """Replay ``reward`` on each step, as the App host ran it live.
+
+    The steps come from the host's ``steps.jsonl`` when the Trial has one, and
+    otherwise from ``episode.jsonl``. Each reward targets the episode record
+    for that step. As live, a hook that raises or returns a value that is not
+    a finite number gives that step no reward, and the rest still run.
+
+    Returns:
+        The rewards, and a problem for each step whose hook failed.
+    """
     fn = verifier.reward_fn
     assert fn is not None
     by_step = {int(line["step"]): line for line in states if "step" in line}
+    identifiers: dict[int, str] = {}
+    for record in events:
+        number = _step_number(record)
+        if record.get("kind") == "environment.step" and number is not None:
+            info = record.get("info") or {}
+            if not (isinstance(info, Mapping) and info.get("unverified")):
+                identifiers.setdefault(
+                    number,
+                    str(record.get("event_id") or event_id(int(record.get("sequence") or 0))),
+                )
+    source = (
+        list(steps)
+        if steps
+        else [record for record in events if record.get("kind") == "environment.step"]
+    )
     current: dict[str, Any] = dict((by_step.get(0) or {}).get("state") or {})
     records: list[RewardRecord] = []
+    problems: list[str] = []
     turns = 0
-    for record in events:
-        if record.get("kind") != "environment.step":
-            continue
-        info = record.get("info") if isinstance(record.get("info"), Mapping) else {}
-        line = by_step.get(int((info or {}).get("step") or 0))
-        if line is None or not line.get("app"):
+    for record in source:
+        number = _step_number(record)
+        line = by_step.get(number) if number is not None else None
+        if number is None or line is None or not line.get("app"):
             continue
         app = str(line["app"])
         previous = current.get(app)
         current.update(line.get("state") or {})
         turns += 1
+        info = record.get("info") if isinstance(record.get("info"), Mapping) else {}
+        error = (info or {}).get("error") or record.get("error") or line.get("error")
         step = Step(
             task=task,
             turn=turns,
             app=app,
             action=str(line.get("action") or record.get("action") or ""),
             arguments=dict(record.get("arguments") or {}),
-            observation=None if record.get("error") else record.get("observation"),
-            error=record.get("error") or line.get("error"),
+            observation=None if error else record.get("observation"),
+            error=error,
             previous_state=previous,
             current_state=current.get(app),
             apps={name: _RecordedApp(name, state) for name, state in current.items()},
         )
-        value = fn(step)
-        if value is None:
+        try:
+            value = fn(step)
+            if value is None:
+                continue
+            number_value = float(value)
+            if not math.isfinite(number_value):
+                raise ValueError(f"reward must be a finite number, not {number_value!r}")
+        except Exception as exc:  # noqa: BLE001 - as live, one step's failure is reported
+            problems.append(f"reward failed on step {number}: {type(exc).__name__}: {exc}")
             continue
-        identifier = record.get("event_id") or event_id(int(record.get("sequence") or 0))
+        identifier = identifiers.get(number) or event_id(int(record.get("sequence") or 0))
         records.append(
             RewardRecord(
-                target=RewardTarget.step(str(identifier)),
-                value=float(value),
+                target=RewardTarget.step(identifier),
+                value=number_value,
                 source="step",
                 verifier=verifier.name,
                 version=verifier.version,
                 app=app,
+                off_recording=bool((info or {}).get("off_recording")),
             )
         )
-    return records
+    return records, problems
 
 
 def replay_verifier(
@@ -174,10 +218,15 @@ def replay_verifier(
                 "It ran before Plural recorded it, or its Apps do not snapshot each step."
             )
         else:
-            try:
-                result.rewards.extend(_step_rewards(verifier, events, states, task or StepTask()))
-            except Exception as exc:  # noqa: BLE001 - report it and keep going
-                result.problems.append(f"reward failed: {type(exc).__name__}: {exc}")
+            rewards, problems = _step_rewards(
+                verifier,
+                events,
+                states,
+                task or StepTask(),
+                steps=_jsonl(artifacts / STEPS_FILE),
+            )
+            result.rewards.extend(rewards)
+            result.problems.extend(problems)
     if verifier.hindsight is not None:
         fn = verifier.hindsight_fn
         if fn is None:
@@ -208,14 +257,17 @@ def replay_verifier(
         else:
             apps_file = artifacts / "apps.json"
             apps = json.loads(apps_file.read_text("utf-8")) if apps_file.is_file() else {}
+            # With Apps only the host's observation.json counts, never the Harness's own file.
+            sources = (
+                ("observation.json",)
+                if apps_file.is_file()
+                else ("final-observation.json", "observation.json")
+            )
             observation: Any = next(
                 (
-                    json.loads(path.read_text("utf-8"))
-                    for path in (
-                        artifacts / "final-observation.json",
-                        artifacts / "observation.json",
-                    )
-                    if path.is_file()
+                    json.loads((artifacts / name).read_text("utf-8"))
+                    for name in sources
+                    if (artifacts / name).is_file()
                 ),
                 {},
             )

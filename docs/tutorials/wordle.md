@@ -2,11 +2,11 @@
 route: /docs/tutorials/wordle
 title: Wordle
 order: 115
-description: Walk through a Wordle project whose game is one App that keeps the secret word on State, score it with a deterministic Verifier, and run it from the CLI or the Python SDK.
+description: Walk through a Wordle project that uses every core concept, an App that keeps the secret on State, a Verifier that scores and rewards, an Agent, and a Benchmark, and run it with a model from the CLI or Python.
 audience: all
 nav: true
 nav_group: Tutorials
-outcome: You can run and interpret a three-Task Wordle Benchmark from the CLI or Python, offline or with a model.
+outcome: You can run a model on a five-game Wordle Benchmark from the CLI or Python, and read every message it sent.
 ---
 # Wordle
 
@@ -21,10 +21,9 @@ AI never does.**
 
 By the end you will have:
 
-- seen how the project keeps the secret word hidden from the AI,
-- run a three-game exam offline, from the command line and from Python,
-- run it with a real model, and
-- read the results, including every guess the AI made.
+- seen how each piece of a Plural project fits together,
+- had a real model play a five-game exam, from the command line and from Python,
+- read the results, down to every message the model sent.
 
 ## Before you start
 
@@ -38,39 +37,37 @@ cp -R plural/examples/wordle wordle
 cd wordle
 ```
 
-No account or key is needed until [Run it with a model](#run-it-with-a-model).
+Exploring the files needs nothing. Running a game calls a model, so it needs a Plural
+account; see [Run it](#run-it).
 
 ## What is in the project
 
-In the words from [Core concepts](../getting-started/concepts.md), this tutorial uses:
+Every [core concept](../getting-started/concepts.md) appears once:
 
-- **The world** (Environment): `wordle`, with one [App](../concepts/apps.md), the game itself.
-- **Three assignments** (Tasks): `crane`, `slate`, and `point`, each with one secret word.
-- **The grader** (Verifier): `solved`, which checks whether the word was found.
-- **The exam** (Benchmark): `wordle`, the three games together.
-- **Two contestants** (Agents): `word-list`, which guesses from a fixed list and calls no
-  model, and `luna`, a real model.
+| Concept | In this project |
+| --- | --- |
+| **App** | The game, `Wordle`, which keeps the secret word on its State |
+| **Environment** | `wordle`: the game, the word list, and where it runs |
+| **Task** | `crane`, `slate`, `point`, `storm`, and `nymph`: one secret word each |
+| **Verifier** | `solved`: scores each game and rewards each guess |
+| **Agent** | `luna`: a model and the instructions it plays by |
+| **Harness** | `native`, Plural's built-in loop, which `luna` plays with |
+| **Benchmark** | `wordle`: the five games, ranked by score |
+| **Job** and **Trial** | Each run you start, and each game played in it |
 
 On disk:
 
 ```text
-environments/wordle/            environment.yaml, environment.py, README.md, words.txt
-tasks/crane/, slate/, point/    task.yaml, instruction.md (one secret word each)
-verifiers/solved/               verifier.yaml, verify.py
-harnesses/word-list/            harness.yaml, harness.py (guesses a fixed list, no model)
-agents/word-list/               agent.yaml (runs the word-list Harness)
-agents/luna/                    agent.yaml (a model on the native harness)
-benchmarks/wordle/              benchmark.yaml, README.md
-run.py                          the same run from the Python SDK
+environments/wordle/          environment.yaml, environment.py, README.md, words.txt
+tasks/<word>/                 task.yaml, instruction.md, for crane, slate, point, storm, nymph
+verifiers/solved/             verifier.yaml, verify.py
+agents/luna/                  agent.yaml
+benchmarks/wordle/            benchmark.yaml, README.md
+run.py                        the same run from the Python SDK
 ```
 
 `project.yaml`, `plural.lock`, and `pyproject.toml` sit at the top, as in every
 project.
-
-The folder also holds a larger exam you can try once you have finished:
-`benchmarks/wordlebench` (seven more games, `case-01` to `case-03`, `medium-01`,
-`medium-02`, `hard-01`, and `hard-02`), two more model Agents (`plain` and `tracker`),
-and a `board` Harness. [Extend it](#extend-it) shows how to use them.
 
 ### The game is one App
 
@@ -90,27 +87,20 @@ class Game(State):
         max_length=5,
         pattern=r"^([a-z]{5})?$",
     )
-    remaining: int = 6
-    solved: bool = False
     guesses: list[str] = Field(default_factory=list)
+    found: str = "....."
+    solved: bool = False
 ```
 
 `initial()` marks `secret` as a field a Task may set. That is how each Task chooses its
-word.
+word. `found` records the letters placed so far, such as `cr..e`; the grader uses it to
+reward progress.
 
-The game has one move, `guess`. It checks the word against the list of accepted words,
-marks each letter, and returns the result. The accepted words live in `words.txt` next
-to the game, one per line: the 14,855 guesses Wordle accepts.
+The game has one move, `guess`:
 
 ```python
 class Wordle(App[Game]):
     """Guess a hidden five-letter word in six tries."""
-
-    def reset(self, initial_state):
-        """Start an episode. A blank secret is chosen from words.txt using the seed."""
-        super().reset(initial_state)
-        ...
-        return "6 guesses left. Guess any five-letter word."
 
     @action
     def guess(
@@ -118,20 +108,19 @@ class Wordle(App[Game]):
         word: Annotated[str, Field(min_length=5, max_length=5, pattern=r"^[a-z]{5}$")],
     ) -> str:
         """Guess one word. + is correct, ? is elsewhere in the word, - is absent."""
-        word = word.strip().lower()
         if word not in self.words():
             raise ValueError(f"{word!r} is not in the word list")
         ...
-        return f"{word}  {marks_text}\n{status}"
+        return f"{word}  {' '.join(GLYPHS[mark] for mark in scored)}\n{status}"
 
     def terminated(self) -> bool:
-        return self.state.solved or self.state.remaining <= 0
+        return self.state.solved or len(self.state.guesses) >= GUESSES
 ```
 
-`reset` starts each game, and what it returns is the first thing the AI sees. `word`
-has to be exactly five lowercase letters. That limit is part of the action schema, so
-the model and the Actions tab both see it. A word that isn't in the list raises
-`ValueError`, so the AI is told why and can try again.
+The docstring is the description the AI reads, and the `word` limits are part of the
+action's schema, so the model sees them too. A word that isn't in the list raises
+`ValueError`: the AI is told why and can try again. The game ends when `terminated()`
+sees the word solved or no guesses left.
 
 The marks are Wordle's colors written as symbols: `+` is the right letter in the right
 place (green), `?` is in the word somewhere else (yellow), and `-` is not in the word
@@ -142,35 +131,41 @@ point  + + + + +
 solved
 ```
 
-The docstring on `guess` is the description the AI reads. The game ends when
-`terminated()` sees the puzzle solved or no guesses left.
+:::details The rest of the App: reset and the board view
+`reset` starts each game, and what it returns is the first thing the AI sees. A Task
+that leaves `secret` blank gets a word picked from `words.txt` using the Trial's seed.
 
-Files beside `environment.py` travel with the Environment, so the word list is there in
-a container or a hosted run too.
+`view()` returns the board for the run viewer: each guess and its marks, never the
+secret. See [Display views](../project/environments.md#display-views).
+:::
 
-`environment.yaml` names the App class, the runtime, and the limits on each attempt.
-With one Python App, `python:` names it directly:
+### The Environment
+
+`environments/wordle/environment.yaml` names the App, the files the world starts with,
+where it runs, and the limits on each game:
 
 ```yaml
 name: wordle
-version: 0.1.1
+version: 1.0.0
 description: Guess a hidden five-letter word. Each guess is marked correct, present, or absent.
 overview: Six guesses. The secret stays on State, and the Agent only sees what each guess returns.
 python: environment.py:Wordle
 readme: README.md
-resources: []
+resources:
+  - words.txt
 runtime:
   provider: local
-harness_policy:
-  mode: allow_all
 limits:
-  max_turns: 6
+  max_turns: 8
   max_seconds: 120
 ```
 
-The `local` runtime runs the game directly on your machine, as a trusted subprocess.
-It is not a sandbox. `provider: docker` runs each Trial in a container instead, and
-`plural run` adds Plural to its image for you.
+- `words.txt` holds the 14,855 guesses Wordle accepts. The App reads it from its own
+  folder. Listing it under `resources` also puts it in `/workspace/resources`, where a
+  Harness that reads files, such as a coding agent, can look words up.
+- `local` runs the game directly on your machine, so the project runs anywhere. It is
+  not a sandbox: use `provider: docker` to run each game in a container.
+- `max_turns: 8` leaves room for two refused words on top of six guesses.
 
 ### Each Task sets one secret
 
@@ -178,7 +173,7 @@ A Task is one game. `tasks/crane/task.yaml`:
 
 ```yaml
 name: crane
-version: 0.1.0
+version: 1.0.0
 instructions: instruction.md
 environment: wordle
 verifiers:
@@ -187,144 +182,170 @@ initial_state:
   secret: crane
 ```
 
-`slate` and `point` differ only in their name and secret. Because the secret is State,
-the AI never sees it. It sees `instruction.md` and what each guess returns, nothing
-else.
+The other four differ only in their name and secret. Because the secret is State, the
+AI never sees it. It sees `instruction.md` and what each guess returns, nothing else.
 
-### The Verifier reads the final State
+### The Verifier scores each game
 
-The Verifier is the grader. `verifiers/solved/verifier.yaml` declares a deterministic
-Verifier (a `DeterministicVerifier` in Python), meaning a small piece of code that
-checks the answer exactly. Its `check` scores the finished game, its `reward` rewards
-each guess, and its `hindsight` credits the solving guess once the game is over. All
-three are functions in `verify.py`:
-
-```yaml
-name: solved
-version: 0.1.0
-kind: deterministic
-check: verify.py:check
-reward: verify.py:reward
-hindsight: verify.py:fewer_guesses
-weight: 1
-```
-
-The `check` reads the game's final State, which the AI never saw. With one App,
-`episode.state` is that App's State:
+The Verifier is the grader. `solved` is a deterministic Verifier (a
+`DeterministicVerifier` in Python): a small piece of code that checks the answer
+exactly. Its `check`, in `verifiers/solved/verify.py`, reads the game's final State,
+which the AI never saw:
 
 ```python
-from plural import Episode, VerifierOutput
-
-
 def check(episode: Episode) -> VerifierOutput:
-    """Score 1 when the secret was guessed and 0 otherwise. Report guesses used."""
-    guesses = episode.state.get("guesses") or []
-    solved = bool(episode.state.get("solved"))
-    detail = f"solved in {len(guesses)}" if solved else f"unsolved after {len(guesses)}"
+    """Score 1 when the secret was found and 0 otherwise. Report the guesses used."""
+    guesses = len(episode.state["guesses"])
+    solved = episode.state["solved"]
     return VerifierOutput(
         score=float(solved),
-        scores={"guesses": float(len(guesses))},
-        evidence=[detail],
+        scores={"guesses": float(guesses)},
+        evidence=[f"solved in {guesses}" if solved else f"unsolved after {guesses}"],
     )
 ```
 
 The grader looks at what actually happened in the game, not at the AI's claim that it
-won. `score` is what the Benchmark ranks on. The `guesses` sub-score shows how
-efficiently each puzzle was solved, but it does not affect ranking.
+won. `score` is what the Benchmark ranks on. The `guesses` sub-score shows how quickly
+each game was solved, but it does not affect ranking.
 
-The `reward` function runs after every guess and gives per-guess credit for training:
+:::details Rewards: credit for each guess, for training
+The same Verifier also hands out **rewards**: credit on single guesses that a training
+system can learn from. `verifier.yaml` names all three functions:
+
+```yaml
+name: solved
+version: 1.0.0
+kind: deterministic
+check: verify.py:check
+reward: verify.py:reward
+hindsight: verify.py:fewer_guesses
+```
+
+`reward` runs after every guess. It sees the State before and after, and gives 0.2 for
+each letter the guess newly put in place:
 
 ```python
 def reward(step: Step) -> float:
-    """One point for the guess that solves the word, minus a little for an invalid one."""
+    """0.2 for each letter a guess newly puts in place, and -0.1 for a refused word."""
     if step.error:
         return -0.1
-    solved = step.current_state["solved"] and not step.previous_state["solved"]
-    return 1.0 if solved else 0.0
+    before = step.previous_state["found"].count(".")
+    after = step.current_state["found"].count(".")
+    return round(0.2 * (before - after), 2)
 ```
 
-Some credit can only be judged at the end. `fewer_guesses` runs after `check` and
-credits the solving guess more when it took fewer guesses:
+`fewer_guesses` runs once the game is over, when you can judge things no single guess
+shows, and credits the winning guess more the sooner it came:
 
 ```python
 def fewer_guesses(trial: HindsightTrial):
-    """Credit the solving guess more when it took fewer guesses."""
+    """Once the game is won, credit the winning guess more the fewer guesses it took."""
     guesses = trial.steps("guess")
     if trial.score and guesses:
-        yield trial.credit(guesses[-1]["event_id"], 1.0 - 0.1 * (len(guesses) - 1))
+        yield trial.credit(guesses[-1]["event_id"], round(1.0 - 0.1 * (len(guesses) - 1), 2))
 ```
 
-Both kinds of reward go to the Trial's reward ledger, `rewards.jsonl`. They don't
-change the score, since `check` decides it, and the AI never sees them. To change a
-reward and see what it gives on games you already played, use
+Both go to the Trial's reward ledger, `rewards.jsonl`. They never change the score, and
+the AI never sees them. To try a changed reward on games you already played, run
 `plural verifier try solved --job JOB_ID`; see
 [Label stored Trials](../running/training.md#label-stored-trials).
+:::
 
-### Two Agents
+### The Agent
 
-The Agents are the contestants.
-
-`agents/word-list/agent.yaml` runs the `word-list` Harness, which guesses the words
-listed in `harnesses/word-list/harness.yaml` in order and calls no model. The `model`
-is recorded but never called, and with `auth_mode: none` the Agent needs no
-credential:
-
-```yaml
-name: word-list
-version: 0.1.0
-model: openai/gpt-5.6-luna
-harness: word-list
-auth_mode: none
-```
-
-`agents/luna/agent.yaml` is a model with instructions. It names no Harness, so it uses
-`native`, Plural's built-in tool loop:
+An Agent is a contestant: a model and the instructions it plays by.
+`agents/luna/agent.yaml`:
 
 ```yaml
 name: luna
-version: 0.1.0
+version: 1.0.0
 model: openai/gpt-5.6-luna
-instructions: Play Wordle with the guess action. Use the marks to narrow the word, and stop as soon as it is solved.
+instructions: >
+  You play Wordle. Call guess with one five-letter word at a time. A reply marks
+  each letter: + correct, ? in the word somewhere else, - absent. Use every mark
+  to narrow the next guess.
 ```
 
-That is everything. Time to play.
+It names no Harness, so it plays with `native`, Plural's built-in loop. A **Harness**
+is the loop between the model and the game: it shows the model the instructions and
+what each action returned, offers it `guess` as a tool, and takes the action the model
+picks. It only ever passes along what the AI is allowed to see: never the secret, the
+score, or a reward.
 
-## Run it offline
+:::details Use another loop, or your own model
+- `harness: claude-code` or `harness: codex` runs a well-known agent loop instead, and
+  a Python `Harness` subclass runs one you write; see
+  [Harnesses](../project/harnesses.md).
+- `endpoint:` points the Agent at your own OpenAI-compatible server instead of the
+  Plural gateway, and needs no Plural key; see [Agents](../project/agents.md).
+:::
 
-Start with the `word-list` Agent. It needs no account or key, so it is the quickest
-way to check the project is wired correctly. Validate the Benchmark, which also checks
-every Task, Verifier, and Environment it uses, then run it:
+### The Benchmark
+
+`benchmarks/wordle/benchmark.yaml` is the exam: the five games, and how results are
+ranked:
+
+```yaml
+name: wordle
+version: 1.0.0
+tasks: [crane, slate, point, storm, nymph]
+scoring:
+  metric: Games solved
+  aggregation: weighted_mean
+  score_range: [0.0, 1.0]
+  success_threshold: 1.0
+  agent_failure: zero
+  infrastructure_error: exclude
+```
+
+The Agent's score is the share of games it solved. A game lost to a crash on your side,
+rather than the Agent's, is left out and reported separately.
+
+## Run it
+
+Running a game calls a model through the Plural gateway, which bills it at the
+provider's price: a few cents for this Benchmark. Sign in once, which stores a Plural
+API key for you:
+
+```bash
+plural auth login
+```
+
+Validate the Benchmark, which also checks every Task, Verifier, and Environment it
+uses, then run it with `luna`:
 
 ```bash
 plural benchmark validate wordle
-plural run --benchmark wordle --agent word-list
+plural run --benchmark wordle --agent luna
 ```
 
-You should see the Benchmark confirmed as valid, then one line per game as it
-finishes. Your ids will differ, and the games may finish in a different order:
+You should see one line per game as it finishes. Your ids will differ, the games may
+finish in a different order, and a model may not play the same way twice:
 
 ```text
-benchmark/wordle is valid: sha256:f1155eaf88b1869cd4f6a8a8bd3f23cc58d8d370c87baa62f7c1ae5184e0533b
-Running benchmark/wordle local with word-list (openai/gpt-5.6-luna) locally: 3 trial(s), 3 at a time (auto: every Trial at once).
-  [1/3] trl_c53f6596c1834b751964f862  crane  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
-  [2/3] trl_ccd3f1712d34eddbd923e951  slate  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
-  [3/3] trl_3aba06619e94795c19a42df5  point  succeeded  score=1.000  | 3 succeeded, 0 failed, mean 1.000
-Job job_68c5dde6a6c6f1aa9303254f succeeded.
-  word-list: mean score 1.000 over 3 trial(s), 3 succeeded
-Details: plural job show job_68c5dde6a6c6f1aa9303254f
+Running benchmark/wordle local with luna (openai/gpt-5.6-luna) locally: 5 trial(s), 5 at a time (auto: every Trial at once).
+  [1/5] trl_49f1abde184c29875cccba31  crane  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
+  [2/5] trl_506e8fe955a473c5392b07d8  slate  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
+  [3/5] trl_1e9c501ec2ba6f578be6d8fe  nymph  succeeded  score=1.000  | 3 succeeded, 0 failed, mean 1.000
+  [4/5] trl_1f2adcdea70605ea8f835b89  storm  succeeded  score=1.000  | 4 succeeded, 0 failed, mean 1.000
+  [5/5] trl_10723e07ab67be6e92f42fe1  point  succeeded  score=1.000  | 5 succeeded, 0 failed, mean 1.000
+Job job_d9dbdde2f7b0e81cad12f704 succeeded.
+  luna: mean score 1.000 over 5 trial(s), 5 succeeded
+Details: plural job show job_d9dbdde2f7b0e81cad12f704
 ```
 
-Three for three. The whole run is one **Job**, and each game is a **Trial**: three
-Tasks and one Agent make three Trials.
+The whole run is one **Job**, and each game is a **Trial**: five Tasks and one Agent
+make five Trials. To try a single game, or another model without an Agent file, run
+`plural run --task crane --model openai/gpt-5.6-luna`.
 
-Don't read too much into the perfect score. The `word-list` Harness guesses crane,
-slate, audio, point, and heart in that order, which covers these three secrets, so it
-always wins. It proves the project works, not that anything plays well.
+> **Good to know:** *succeeded* means the game ran to the end; the score says how well
+> the Agent did. A game the Agent loses still succeeds, with a score of 0. A crash
+> would be `failed`.
 
 ## Run it from Python
 
 Everything the command line does, you can also do from Python. `run.py` loads the same
-pieces by name and runs the same Benchmark with the same Agent:
+pieces by name and runs the same Benchmark:
 
 ```python
 from pathlib import Path
@@ -335,50 +356,28 @@ from plural.project import Project, Workspace
 if __name__ == "__main__":
     workspace = Workspace(Project.find(Path(__file__).parent))
     benchmark = workspace.get("benchmark", "wordle")
-    agent = workspace.get("agent", "word-list")
+    agent = workspace.get("agent", "luna")
     result = Job(benchmark, agents=[agent]).run()
     for trial in result.trials:
         print(f"{trial.receipt.task_pin.name}: score={trial.score}")
 ```
 
-`Project.find()` looks upward from the directory you give it, or from the current
-directory, to find `project.yaml`. Run the script with the Python environment you
-installed Plural into:
+Run it with the Python environment you installed Plural into:
 
 ```bash
 python run.py
 ```
 
-You should see one score per game:
-
 ```text
 crane: score=1.0
 slate: score=1.0
+nymph: score=1.0
+storm: score=1.0
 point: score=1.0
 ```
 
-> **Good to know:** The Python run executes locally like `plural run`, but it is not
-> recorded as a Job. It does not appear in `plural job list`, and `plural job rerun`
-> cannot repeat it.
-
-## Run it with a model
-
-Now let a real model play. This calls a model through the Plural gateway and can
-incur charges.
-
-Every model call needs a Plural API key. `plural auth login` stores one for you, or
-create one in the web app under Keys and store it with
-`plural auth login --api-key-stdin` or export `PLURAL_API_KEY`. Then try one game, and
-the whole Benchmark:
-
-```bash
-plural run --task crane --model openai/gpt-5.6-luna
-plural run --benchmark wordle --agent luna
-```
-
-`--model` without `--harness` uses `native`, the same loop the `luna` Agent uses. The
-model sees `instruction.md` and the result of each guess. It never sees the secret,
-the score, or any reward.
+> **Good to know:** The Python run is not recorded as a Job, so it does not appear in
+> `plural job list`.
 
 ## Read the results
 
@@ -390,78 +389,50 @@ plural job show <job-id>
 plural trial show <trial-id>
 ```
 
-`job show` lists each word with its status and score. `trial show` prints the grader's
-evidence and where the game's files are kept:
+`trial show` prints the grader's evidence and where the game's files are kept:
 
 ```text
-Trial trl_3aba06619e94795c19a42df5 (local) succeeded
-  Job:            job_68c5dde6a6c6f1aa9303254f
-  Task:           point
+Trial trl_1e9c501ec2ba6f578be6d8fe (local) succeeded
+  Job:            job_d9dbdde2f7b0e81cad12f704
+  Task:           nymph
   Score:          1.0
-  Artifacts:      /path/to/wordle/.plural/jobs/job_68c5dde6a6c6f1aa9303254f/trials/trl_3aba06619e94795c19a42df5/executions/0/artifacts
-  Logs:           /path/to/wordle/.plural/jobs/job_68c5dde6a6c6f1aa9303254f/trials/trl_3aba06619e94795c19a42df5/executions/0/logs
+  Artifacts:      /path/to/wordle/.plural/jobs/job_d9dbdde2f7b0e81cad12f704/trials/trl_1e9c501ec2ba6f578be6d8fe/executions/0/artifacts
+  Logs:           /path/to/wordle/.plural/jobs/job_d9dbdde2f7b0e81cad12f704/trials/trl_1e9c501ec2ba6f578be6d8fe/executions/0/logs
   Verifier solved: succeeded score=1.0
-    - solved in 4
+    - solved in 3
 ```
 
-`point` was the fourth word on the list, so it was solved in 4.
+`trajectory.json` in the Artifacts folder is the conversation, in the chat format most
+tools already read: each message's `role` and `content`, the model's tool calls, and
+what each call returned, beside the run's `status`, `time_elapsed`, and `finalized`.
+After the instructions, this game went:
 
-> **Good to know:** A Trial that succeeded can still score 0. That is a missed word,
-> not a crashed run.
+```json
+{"role": "assistant", "tool_calls": [{"function": {"name": "guess", "arguments": "{\"word\":\"crane\"}"}}]}
+{"role": "tool", "content": "crane  - - - ? -\n5 left"}
+{"role": "assistant", "tool_calls": [{"function": {"name": "guess", "arguments": "{\"word\":\"night\"}"}}]}
+{"role": "tool", "content": "night  + - - ? -\n4 left"}
+{"role": "assistant", "tool_calls": [{"function": {"name": "guess", "arguments": "{\"word\":\"nymph\"}"}}]}
+{"role": "tool", "content": "nymph  + + + + +\nsolved"}
+```
 
-If two words score differently, look at the guesses before you change the model or the
+The reward ledger, `rewards.jsonl`, tells the same story guess by guess: `night`
+placed the `n` (0.2), `nymph` placed the other four letters (0.8), and once the game
+was won, `fewer_guesses` credited that guess with 0.8.
+
+If two games score differently, read the messages before you change the model or the
 instructions. `plural job rerun <job-id>` repeats a Job with exactly the inputs it
 pinned.
 
-### What is in the Artifacts folder
-
-The `Artifacts` directory holds the full record of the game:
-
-- `episode.jsonl`: each guess, with what the AI saw after it and the game's display
-  view.
-- `trajectory.jsonl`: each guess and what came back, as the `word-list` Harness
-  recorded it. A model run writes `trajectory.json` instead: the model's chat
-  messages, turn by turn.
+:::details Everything else in the Artifacts folder
 - `atif-trajectory.json`: the same turns in ATIF, with each call's tokens and cost.
-- `apps.json`: the game's State at the start and the end, which is what the Verifier
-  read.
-- `state.json`: the final State on its own: the secret and the guess history.
-- `observation.json`: the last thing the AI saw.
-- `rewards.jsonl`: the per-guess rewards, one line per guess.
-- `view.json`: the final display view, the grid of guesses and marks that the run
-  viewer draws.
-
-The score and the `guesses` sub-score are in the Trial's `result.json`. The display
-view shows guesses and marks, never the secret; see
-[Display views](../project/environments.md#display-views).
-
-## Extend it
-
-Once the basics work, the project has room to grow.
-
-**Compare how Agents play.** `plain` is a model on the native loop. `tracker` is the
-same model on the `board` Harness, which keeps a running record of every mark and
-shows the model that record each turn, never the secret. Run both on the larger
-seven-game exam and compare them (these call a model):
-
-```bash
-plural run --benchmark wordlebench --agent plain
-plural run --benchmark wordlebench --agent tracker
-```
-
-A few more directions:
-
-- **Judge how the Agent played, not only whether it won,** with an
-  [AgentVerifier](../project/verifiers.md#agentverifier) or a
-  [HumanVerifier](../project/verifiers.md#humanverifier).
-- **Shape the per-guess credit for training.** The `solved` Verifier's `reward` function
-  gives 1 point for the guess that solves the word. Credit green letters too, or add a
-  second Verifier with its own `reward`; see
-  [Reward each step](../project/verifiers.md#reward-each-step). Rewards are recorded
-  in `rewards.jsonl`. To score by them instead, see
-  [Make the reward the score](../project/verifiers.md#make-the-reward-the-score).
-- **Connect a real system next to the game,** such as an MCP server; see
-  [Connect an MCP server](../guides/connect-mcp-server.md).
+- `episode.jsonl` and `steps.jsonl`: each guess, and what the AI saw after it.
+- `apps.json` and `state.json`: the game's State, which is what the Verifier read.
+- `states.jsonl`: the State after every guess, so you can replay rewards later.
+- `rewards.jsonl`: the reward ledger.
+- `view.json`: the board the run viewer draws.
+- `result.json`: the score, the `guesses` sub-score, and the evidence.
+:::
 
 ## Push it and run hosted
 
@@ -476,12 +447,9 @@ plural agent push luna --with-deps
 plural run --benchmark wordle --agent luna --hosted --follow
 ```
 
-`project init --push` registers the project, named `wordle` in `project.yaml`, with a
-new private hosted project and selects it as your scope. If `wordle` already exists in
-the account, add `--connect` to use it. `--with-deps` also pushes the Tasks, Verifier,
-and Environment the Benchmark uses. `--hosted` runs the pushed revisions, first pushing
-any input the hosted project does not hold yet, and `--follow` streams progress until
-the Job finishes.
+`project init --push` registers the project with a new private hosted project.
+`--with-deps` also pushes the Tasks, Verifier, and Environment the Benchmark uses, and
+`--follow` streams progress until the Job finishes.
 
 > **Good to know:** Pushing never makes anything public. Sharing is a separate action
 > in the Plural web app.
@@ -490,5 +458,6 @@ the Job finishes.
 
 - Build your own project with [Getting started](../getting-started.md#add-resources).
 - Read [Environments](../project/environments.md) to design a world of your own.
-- Try the [support queue tutorial](support-queue.md) for a project with several moves
-  per Task.
+- Read [Several Agents in one Task](../project/multi-agent.md) to have several Agents
+  share one game.
+- Shape rewards for training with [Reward each step](../project/verifiers.md#reward-each-step).

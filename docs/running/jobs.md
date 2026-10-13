@@ -31,8 +31,8 @@ A run picks one Task (`-t`) or Benchmark (`-b`) and one Agent (`-a`) or model
 (`-m`). Preview it first with `--dry-run`, then run it for real:
 
 ```bash
-plural run -b wordle -a word-list --dry-run
-plural run -b wordle -a word-list
+plural run -b wordle -a luna --dry-run
+plural run -b wordle -a luna
 plural job list
 plural job show JOB_ID
 plural job rerun JOB_ID
@@ -84,7 +84,7 @@ from plural.project import Project, Workspace
 
 workspace = Workspace(Project.find())
 benchmark = workspace.get("benchmark", "wordle")
-agent = workspace.get("agent", "word-list")
+agent = workspace.get("agent", "luna")
 result = Job(benchmark, agents=[agent]).run()
 ```
 
@@ -111,8 +111,9 @@ model runs, and `job.concurrency_reason` says which limit set it; see
 [Attempts and concurrency](../guides/jobs.md#attempts-and-concurrency).
 
 Only rate limits, provider unavailability, timeouts, and Runtime unavailability
-are retried. The wait before a retry starts at 0.25 seconds and doubles each time,
-up to 10 seconds.
+are retried. A Harness that timed out after the App host ran one of its actions
+keeps that outcome rather than getting another try. The wait before a retry starts
+at 0.25 seconds and doubles each time, up to 10 seconds.
 
 > **Tip:** Do not use retries to hide configuration, evidence, or policy errors.
 > Fix those instead.

@@ -64,6 +64,31 @@ class MCPError(RuntimeError):
 _secret_source: Callable[[str], str | None] | None = None
 _credential_source: Callable[[str], str | None] | None = None
 _hidden_from_hooks: frozenset[str] = frozenset()
+_protected: frozenset[str] = frozenset()
+
+
+def protect_values(values: Mapping[str, str]) -> None:
+    """Keep these names, every App's secrets and credentials, out of App subprocesses.
+
+    The App host calls this with everything the Job sent it. An App's server or
+    hook then receives only the names that App declares, so a third-party
+    server for one App never sees another App's secret or the running Agent's
+    credential for another system.
+    """
+    global _protected  # noqa: PLW0603 - one Environment per App host
+    _protected = frozenset(values)
+
+
+def subprocess_environ(own: Iterable[str] = ()) -> dict[str, str]:
+    """The environment for one App's server or hook.
+
+    Returns:
+        This process's environment without any protected name, except ``own``.
+    """
+    allowed = frozenset(own)
+    return {
+        key: value for key, value in os.environ.items() if key not in _protected or key in allowed
+    }
 
 
 def use_secret_source(source: Callable[[str], str | None] | None) -> None:
@@ -97,6 +122,15 @@ def hide_from_hooks(names: Iterable[str]) -> None:
     """
     global _hidden_from_hooks  # noqa: PLW0603 - one Environment per App host
     _hidden_from_hooks = frozenset(names)
+
+
+def hidden_from_hooks() -> frozenset[str]:
+    """The running Agent's credential names, which no reset or snapshot hook receives.
+
+    Returns:
+        The names :func:`hide_from_hooks` set.
+    """
+    return _hidden_from_hooks
 
 
 def expand(
@@ -134,14 +168,14 @@ def expand(
         if found is None and name in agent_owned:
             raise MCPError(
                 f"{name} is a credential the running Agent supplies, and it is not set "
-                "here. Export it to reach the server now; a run takes it from the Agent, "
-                f"set with `plural agent credential set <agent> {name}`."
+                "here. Export it to reach the server now, or save your value with "
+                f"`plural credential set {name}`."
             )
         if found is None:
             raise MCPError(
                 f"{name} is not set. Export it, store it in the hosted project with "
-                f"`plural secret set {name}`, or, for an Agent's credential, with "
-                f"`plural agent credential set <agent> {name}`."
+                f"`plural secret set {name}`, or, for an Agent's credential, save your "
+                f"value with `plural credential set {name}`."
             )
         return found
 
@@ -184,7 +218,7 @@ class _Stdio:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=stderr,
-                env={**os.environ, **env},
+                env={**subprocess_environ(), **env},
                 cwd=cwd,
             )
         except FileNotFoundError as exc:
@@ -253,14 +287,16 @@ class _Stdio:
 class _Http:
     """JSON-RPC over MCP's Streamable HTTP transport."""
 
-    def __init__(self, url: str, *, headers: Mapping[str, str]) -> None:
+    def __init__(self, url: str, *, headers: Mapping[str, str], timeout_seconds: float) -> None:
         import httpx
 
         self.url = url
         self.headers = dict(headers)
         self.session_id: str | None = None
         self.protocol: str | None = None
-        self._client = httpx.Client(timeout=None, follow_redirects=True)
+        # A redirect would carry the App's headers, which may hold a secret, to
+        # another address; name the final URL instead.
+        self._client = httpx.Client(timeout=timeout_seconds, follow_redirects=False)
         self._pending: list[dict[str, Any]] = []
 
     def send(self, message: dict[str, Any]) -> None:
@@ -284,6 +320,11 @@ class _Http:
             self.session_id = session
         if response.status_code == 202 or "id" not in message or "method" not in message:
             return
+        if response.is_redirect:
+            raise MCPError(
+                f"MCP server {self.url} redirected to {response.headers.get('location')!r}. "
+                "Set the App's url to that address."
+            )
         if response.status_code in {401, 403}:
             raise MCPError(
                 f"MCP server {self.url} refused the request ({response.status_code}). "
@@ -352,7 +393,7 @@ class MCPClient:
         self.transport: _Stdio | _Http = (
             _Stdio(command, env=env or {}, cwd=cwd, log=log)
             if command
-            else _Http(str(url), headers=headers or {})
+            else _Http(str(url), headers=headers or {}, timeout_seconds=timeout_seconds)
         )
         result = self.request(
             "initialize",
@@ -520,7 +561,9 @@ class MCPApp(App[State]):
         remote: The server runs in the Runtime but acts on a system outside
             it, such as a data lake, so a fresh server is not a fresh system.
             Its control level is then ``sandboxed`` with a reset hook and
-            ``live`` without one, as for a server reached by ``url``.
+            ``live`` without one, as for a server reached by ``url``. Left
+            unset, a server given project ``secrets`` is taken to be remote;
+            set ``False`` to declare that it keeps all its state in the Runtime.
 
     Subclass ``MCPApp`` to write ``reset`` or ``snapshot`` in Python with
     :meth:`call_tool`.
@@ -550,7 +593,7 @@ class MCPApp(App[State]):
         description: str | None = None,
         timeout_seconds: float = 60,
         hooks: Sequence[str] | None = None,
-        remote: bool = False,
+        remote: bool | None = None,
     ) -> None:
         super().__init__(
             name=name or type(self).name or None,
@@ -623,7 +666,10 @@ class MCPApp(App[State]):
                 key: expand(value, environ, credentials=owned) for key, value in self.env.items()
             }
             if self._local_command():
-                env = {APP_DIR: environ[APP_DIR], "TMPDIR": environ[APP_DIR], **env}
+                declared = {
+                    name: environ[name] for name in self._declared_names() if name in environ
+                }
+                env = {**declared, APP_DIR: environ[APP_DIR], "TMPDIR": environ[APP_DIR], **env}
             self._client = MCPClient(
                 command=self._local_command() or None,
                 url=self.url,
@@ -642,7 +688,7 @@ class MCPApp(App[State]):
             return [sys.executable, "-m", "plural.mcp.serve", self.server]
         return self.command
 
-    def call_tool(self, tool: str, **arguments: Any) -> Any:
+    def call_tool(self, tool: str, /, **arguments: Any) -> Any:
         """Call one of the server's tools and return its observation.
 
         Use this from a Python ``reset`` or ``snapshot`` override.
@@ -773,9 +819,13 @@ class MCPApp(App[State]):
 
         Returns:
             True for a server named with ``server`` or started as a command,
-            unless it is marked ``remote``.
+            unless it is marked ``remote``, acts with an Agent's credentials, or
+            holds project secrets without ``remote=False``, any of which means
+            it reaches a system outside the Runtime.
         """
-        return bool(self._local_command()) and not self.remote
+        if not self._local_command() or self.remote or self.credentials:
+            return False
+        return self.remote is False or not self.secrets
 
     def close(self) -> None:
         """Close the MCP session and delete the episode's folder."""
@@ -792,7 +842,7 @@ class MCPApp(App[State]):
         Returns:
             A copy of the environment for the server and its hooks.
         """
-        environ = dict(os.environ)
+        environ = subprocess_environ(self._declared_names())
         if self._local_command():
             if self._app_dir is None:
                 self._app_dir = Path(tempfile.mkdtemp(prefix=f"plural-{self.name}-"))
@@ -803,6 +853,11 @@ class MCPApp(App[State]):
 
     def _credential_names(self) -> frozenset[str]:
         return frozenset(SecretReference.model_validate(item).name for item in self.credentials)
+
+    def _declared_names(self) -> frozenset[str]:
+        return self._credential_names() | frozenset(
+            SecretReference.model_validate(item).name for item in self.secrets
+        )
 
     def _hook_environ(self) -> dict[str, str]:
         """The hook's environment: the App's, without any Agent's credentials.
@@ -876,7 +931,10 @@ __all__ = [
     "MCPClient",
     "MCPError",
     "expand",
+    "hidden_from_hooks",
     "hide_from_hooks",
+    "protect_values",
+    "subprocess_environ",
     "tool_action",
     "tool_text",
     "use_credential_source",

@@ -226,6 +226,13 @@ def plan_run(
                 f"Environment {task._environment_definition().name!r} does not allow Harness "
                 f"{harness_name!r}. Allowed: {allowed}. Pass --harness <name>."
             )
+    shared = [task.name for task in tasks if task._environment_definition().party is not None]
+    if shared:
+        raise ProjectError(
+            f"{', '.join(shared)} {'is' if len(shared) == 1 else 'are'} played by a party of "
+            "Agents, and plural run runs one. Run it from Python with "
+            "Job(task, agents=[...]), or create a hosted Job that names the party."
+        )
     attempts = request.attempts or 1
     auto = request.concurrency == "auto"
     job = Job(

@@ -25,6 +25,7 @@ from plural.environments.definition import (
     ExecutionLimits,
     Guardrail,
     HarnessPolicy,
+    Party,
 )
 from plural.tasks import BenchmarkRelease
 
@@ -108,6 +109,13 @@ class EnvironmentManifest(ManifestModel):
     runtime: dict[str, Any] = Field(default_factory=lambda: {"provider": "docker"})
     harness_policy: HarnessPolicy = Field(default_factory=HarnessPolicy)
     limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
+    party: Party | None = Field(
+        default=None,
+        description=(
+            "How many Agents share each episode, such as {min: 2, max: 8} for poker, or one "
+            "number for an exact size. Leave it out for an Environment one Agent works alone."
+        ),
+    )
     guardrails: list[Guardrail] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -154,6 +162,13 @@ class TaskManifest(ManifestModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     initial_state: dict[str, Any] = Field(default_factory=dict)
     reset_options: dict[str, Any] = Field(default_factory=dict)
+    seat_instructions: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "For an Environment with a party: what one seat alone is told after the Task's "
+            "instructions, keyed seat_1, seat_2, and so on."
+        ),
+    )
 
 
 class HarnessManifest(ManifestModel):

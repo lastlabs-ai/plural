@@ -12,9 +12,9 @@ for the Agent boundary are explicit:
 
 - ``observation`` is the value the Environment returned to the Harness. It is
   the only part of a step a Harness may place in the Agent's context.
-- ``reward``, ``terminated``, ``truncated``, ``info``, and ``view`` are episode
-  bookkeeping. They are recorded for credit assignment, evaluation, and
-  display, and are never Agent input.
+- ``terminated``, ``truncated``, ``info``, and ``view`` are episode
+  bookkeeping. They are recorded for evaluation and display, and are never
+  Agent input. A Harness never sees a reward.
 """
 
 from __future__ import annotations
@@ -124,7 +124,6 @@ class EpisodeRecorder:
         action: str,
         arguments: dict[str, Any],
         observation: Any = None,
-        reward: float | None = None,
         rewards: list[dict[str, Any]] | None = None,
         terminated: bool | None = None,
         truncated: bool | None = None,
@@ -143,7 +142,6 @@ class EpisodeRecorder:
             action=action,
             arguments=arguments,
             observation=observation,
-            reward=reward,
             rewards=rewards or [],
             terminated=terminated,
             truncated=truncated,

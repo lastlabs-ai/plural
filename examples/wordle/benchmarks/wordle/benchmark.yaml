@@ -1,17 +1,20 @@
-# Benchmark: a named collection of Tasks and the rules for ranking results.
+# Benchmark: a fixed set of Tasks and the rules for ranking results.
+# It ranks on the Verifier's score only; rewards never change it.
 name: wordle
 version: 1.0.0
-description: Solve three Wordle puzzles against the full Wordle word list.
+description: Five Wordle games against the full Wordle word list.
 purpose: >-
-  Checks that an Agent reads feedback from an Environment and uses it to narrow
-  its next action, on a problem small enough to inspect by hand.
+  Checks that an Agent reads the feedback from each action and uses it to narrow the
+  next one, on a problem small enough to inspect by hand.
 tasks:
   - crane
   - slate
   - point
+  - storm
+  - nymph
 scoring:
-  metric: Puzzles solved
-  description: Share of puzzles solved within six guesses.
+  metric: Games solved
+  description: Share of games solved within six guesses.
   aggregation: weighted_mean
   score_range: [0.0, 1.0]
   success_threshold: 1.0

@@ -223,10 +223,10 @@ for the baseline; see [Training and RL](../running/training.md).
 
 ## Give the Agent credentials
 
-When an App acts as a user of a real system, such as a CRM, the token it needs belongs
-to the Agent, not the App. Each Agent carries its own credentials, so two Agents can
-work in the same Environment as different users with different permissions, and every
-Trial records which Agent's token acted.
+When an App acts as a user of a real system, such as a CRM, it needs that user's
+token. The Agent says which tokens it needs; **each person saves their own**. You and
+a coworker can run the same Agent in the same project, each as yourselves, with your
+own permissions, and every Trial records whose token acted.
 
 List each credential in `agent.yaml`, by the name the App declares, with the scopes the
 token grants:
@@ -238,39 +238,47 @@ model: openai/gpt-5.6
 credentials:
   CRM_TOKEN:
     scopes: [read:accounts, write:opportunities]
-    description: The sales team's integration user.
+    description: Your Salesforce token.
 ```
 
-Then store each value with the Agent in the hosted project:
+Then save your own value once, from the CLI or under **Credentials** on your Profile:
 
 ```bash
-plural agent credential set sales-bot CRM_TOKEN
-plural agent credential list sales-bot
-plural agent validate sales-bot
+plural credential set CRM_TOKEN
 ```
 
-`set` prompts for the value without echoing it, or reads it with `--from-env`. `list`
-and `validate` show which credentials have a value, never the values. For a local run
-you can export the value instead; the stored one wins when both exist.
+Every Agent you run that needs `CRM_TOKEN` now uses yours. Your coworker runs the same
+command with their token, and their runs use theirs. Values are encrypted, never shown
+again, and only you can use yours.
 
 - The value goes only to the process that runs the Apps. The model and its Harness
   never receive it, and it is never written to the project or the Trial.
-- `scopes` is what you declare the token may do. Plural records it on each Trial; the
-  system that issued the token enforces it.
-- A run stops before it starts when the Agent lacks a credential an App needs, or has
-  no value for one. A `--model` run has no Agent to carry credentials, so it can only
-  use Apps that need none.
-- Each Trial records, per credential: the App, the Agent and its revision, the scopes,
-  where the value came from (`hosted`, `environment`, or `provided` from Python), and a
-  short fingerprint of the value. `plural trial show` prints it.
+- A run stops before it starts when an App needs a credential the Agent doesn't
+  declare, or a scope it doesn't list, or when you have no value for it.
 
-In Python, declare them on the Agent and pass the values to the Job by Agent name:
+:::details Where a value can come from
+`plural run` uses, in order, a value you saved to your account, then one exported in
+your environment. CI, which signs in with a project API key rather than as you, can't
+read anyone's saved credentials, so export the values there instead. In Python, pass
+them to the Job by Agent name:
 
 ```python
 agent = Agent(model="openai/gpt-5.6", name="sales-bot",
               credentials={"CRM_TOKEN": {"scopes": ["read:accounts"]}})
 Job(task, [agent], credentials={"sales-bot": {"CRM_TOKEN": token}}).run()
 ```
+
+`plural credential list` shows the names you have saved, never the values, and
+`plural credential unset NAME` removes one.
+:::
+
+:::details What each Trial records
+Per credential: the App, the Agent and its revision, the scopes, where the value came
+from (`hosted`, `environment`, or `provided` from Python), a short fingerprint of the
+value, and, for a saved value, which user saved it. `plural trial show` prints it.
+`scopes` is what you declare the token may do; the system that issued the token
+enforces what it can really do.
+:::
 
 ## Evaluate the Agent
 

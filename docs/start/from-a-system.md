@@ -95,21 +95,21 @@ credentials:
     scopes: [read:accounts, write:opportunities]
 ```
 
-Then store the value with the Agent, and check it:
+Then save your own token to your account, and check the Agent:
 
 ```bash
-plural agent credential set sales-bot CRM_TOKEN
+plural credential set CRM_TOKEN
 plural agent validate sales-bot
 ```
 
 Runs that use the CRM App then take `--agent sales-bot`.
 
 **What just happened.** `${CRM_TOKEN}` stays a reference in `environment.yaml`, listed
-under the App's `credentials`; the value never enters your project. `plural agent
-credential set` prompts for it without echoing it and stores it encrypted with the
-hosted Agent. The value goes only to the process that runs the Apps, never to the model
-or its Harness, and each Trial records which Agent's token acted, its scopes, and a
-fingerprint of the value. A `--model` run carries no credentials, so it can't use this
+under the App's `credentials`; the value never enters your project. `plural credential
+set` prompts for it without echoing it and saves it, encrypted, to your account; a
+coworker saves their own. The value goes only to the process that runs the Apps, never
+to the model or its Harness, and each Trial records whose token acted, its scopes, and
+a fingerprint of the value. A `--model` run carries no credentials, so it can't use this
 App. See [Supply credentials](../guides/connect-mcp-server.md#4-supply-credentials).
 
 ## 4. Choose a control level
@@ -144,6 +144,10 @@ A server you start in the Runtime is `owned` because a fresh server is a fresh s
 That stops being true when its tools read or write something outside, such as a data
 lake. Mark the App `remote: true` under `mcp:` and Plural treats it like a remote
 server: `live`, or `sandboxed` once it has a reset hook.
+
+A server that holds project `secrets` is treated that way already, since a secret
+usually unlocks an outside system. If yours only unlocks something inside the Runtime,
+such as a local database, mark it `remote: false`.
 :::
 
 ## 5. Write a Verifier that queries the App

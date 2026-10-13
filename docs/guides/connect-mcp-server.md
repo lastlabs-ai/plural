@@ -149,8 +149,8 @@ apps:
 ```
 
 Plural refuses an App that references a name it doesn't list, so nothing can be
-forgotten. Then give the Agent its credentials. List each in its `agent.yaml`, with
-the scopes the token grants, and store each value with the Agent:
+forgotten. Then have the Agent declare them. List each in its `agent.yaml`, with
+the scopes the token grants, and save your own values to your account:
 
 ```yaml
 # agents/sales-bot/agent.yaml
@@ -163,23 +163,24 @@ credentials:
 ```
 
 ```bash
-plural agent credential set sales-bot CRM_TOKEN
-plural agent credential set sales-bot ACME_API_KEY
+plural credential set CRM_TOKEN
+plural credential set ACME_API_KEY
 plural run --task close-deal --agent sales-bot
 ```
 
-`plural agent credential set` prompts for the value without echoing it, and
-`plural agent credential list sales-bot` shows which are stored, never their values.
-For a quick local run you can export the value instead.
+`plural credential set` prompts for the value without echoing it, and
+`plural credential list` shows which you have saved, never their values. You can also
+save them under **Credentials** on your Profile. Each coworker saves their own, so the
+same Agent acts as whoever runs it. You can export a value instead, as CI does.
 
-A run stops before it starts when the Agent doesn't carry a credential an App needs, or
-has no value for one, naming the App and the credential. A run with `--model` carries
-no credentials, so it can't use an App that needs one; save an Agent instead.
+A run stops before it starts when the Agent doesn't declare a credential an App needs,
+or you have no value for one, naming the App and the credential. A run with `--model`
+declares no credentials, so it can't use an App that needs one; save an Agent instead.
 
 The value goes only to the process that runs the Apps. It is never written to the
 project or the Trial, shown to the model, or given to its Harness. Each Trial records
-the Agent, its revision, the declared scopes, where the value came from, and a short
-fingerprint of it; `plural trial show` prints that record. Plural doesn't enforce the
+the Agent, its revision, the declared scopes, where the value came from and whose it
+was, and a short fingerprint of it; `plural trial show` prints that record. Plural doesn't enforce the
 scopes; the system that issued the token does.
 
 ### Setup secrets
@@ -199,6 +200,8 @@ plural secret set CRM_ADMIN_TOKEN
 A server started with `command` runs inside the Runtime, and Plural starts a new
 process for every Trial, so it is `owned` and can be used anywhere. It starts fresh
 only if it keeps its data in `${PLURAL_APP_DIR}`, as in [step 1](#1-add-the-server-to-an-environment).
+One that holds project `secrets` is treated as reaching an outside system, like a
+remote server, unless you mark it `remote: false`.
 
 A remote server is shared. If one Trial creates a record, the next Trial sees it, and
 scores stop being comparable. With no way to reset it, the App is `live`:
@@ -351,7 +354,7 @@ environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local
 | `headers` | HTTP headers for a `url` server. Values may contain `${NAME}`, a credential or secret. |
 | `env` | Environment variables for a `server` or `command` server. Values may contain `${NAME}`, a credential or secret, and `${PLURAL_APP_DIR}`, the episode's empty folder. |
 | `cwd` | Working folder for a `command` server, relative to the Environment. |
-| `remote` | Set `true` when a `server` or `command` server works on a system outside the Runtime, such as a data lake. The App is then `live`, or `sandboxed` with a `reset` hook, instead of `owned`. |
+| `remote` | Set `true` when a `server` or `command` server works on a system outside the Runtime, such as a data lake. The App is then `live`, or `sandboxed` with a `reset` hook, instead of `owned`. Left unset, a server with `secrets` is treated as `true`; set `false` when its secrets only unlock something inside the Runtime. |
 | `tools` | Offer only these tools. |
 | `exclude` | Never offer these tools. |
 | `reset` | Command run at the start of each episode, with the App's starting state as JSON on stdin. |
@@ -369,7 +372,7 @@ environment = Environment(name="support-desk", apps=[crm], runtime=Runtime.local
 | Error | What to do |
 | --- | --- |
 | `Agent 'gpt-5.6' does not carry: CRM_TOKEN, for App crm` | List `CRM_TOKEN` under `credentials:` in the Agent's `agent.yaml` and run with `--agent`. A `--model` run carries no credentials. |
-| `Agent 'sales-bot' declares CRM_TOKEN but has no value for it` | Store it with `plural agent credential set sales-bot CRM_TOKEN`, or export it for a local run. |
+| `Agent 'sales-bot' declares CRM_TOKEN but has no value for it` | Save yours with `plural credential set CRM_TOKEN`, or export it. |
 | `App 'crm' needs CRM_ADMIN_TOKEN` | A setup secret is missing. Export it, or store it with `plural secret set CRM_ADMIN_TOKEN`. |
 | `references CRM_TOKEN but does not list it` | Add the name to the App's `credentials`, or to its `secrets` if the project supplies it. |
 | `Cannot start MCP server 'npx'` | The command isn't installed where the Apps run. Install it, or use its full path. |

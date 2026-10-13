@@ -8,7 +8,14 @@ from collections.abc import Iterable, Mapping
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from plural.apps.definition import (
     AppDefinition,
@@ -503,6 +510,65 @@ class ExecutionLimits(FrozenModel):
     max_cost_usd: float | None = Field(default=None, gt=0)
 
 
+MAX_PARTY = 100
+
+
+PartyIsolation = Literal["isolated", "shared"]
+
+
+class Party(FrozenModel):
+    """How many Agents may share one episode of the Environment, such as 2 to 8 at poker.
+
+    An Environment with a party is played by several Agents at once, each in a
+    seat of its own: ``seat_1`` to ``seat_N`` for a party of N. A Job names the
+    Agents in the party, and its size must fall between ``min`` and ``max``.
+    """
+
+    min: int = Field(default=2, ge=2, le=MAX_PARTY)
+    max: int = Field(default=2, ge=2, le=MAX_PARTY)
+    isolation: PartyIsolation = Field(
+        default="isolated",
+        description="``isolated``: each seat's Harness runs as its own OS user, and the "
+        "Apps are the only thing the seats share; needs Docker or Daytona. ``shared``: "
+        "every seat runs as one user and can read and write the others' files and the "
+        "Environment's, for a team that works on the same files, or to try a party on "
+        "the local Runtime. A shared seat could also act for another seat.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_size(cls, value: Any) -> Any:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return {"min": value, "max": value}
+        return value
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Party:
+        if self.min > self.max:
+            raise ValueError(f"party min {self.min} is more than its max {self.max}")
+        return self
+
+    def check(self, size: int) -> str | None:
+        """Why a party of ``size`` cannot play, or ``None`` when it can.
+
+        Returns:
+            The reason, for a size outside ``min`` to ``max``.
+        """
+        if self.min <= size <= self.max:
+            return None
+        allowed = str(self.min) if self.min == self.max else f"{self.min} to {self.max}"
+        return f"a party of {size} Agents cannot play; this Environment takes {allowed}"
+
+
+def party_seats(size: int) -> tuple[str, ...]:
+    """The seats of a party of ``size``: ``seat_1`` to ``seat_<size>``.
+
+    Returns:
+        The seat names, in order.
+    """
+    return tuple(f"seat_{index}" for index in range(1, size + 1))
+
+
 def _merged(items: Iterable[SecretReference]) -> tuple[SecretReference, ...]:
     """Each name once; required wins when two Apps disagree.
 
@@ -537,11 +603,24 @@ class EnvironmentDefinition(FrozenModel):
     runtime: EnvironmentRuntime = Field(default_factory=EnvironmentRuntime)
     harness_policy: HarnessPolicy = Field(default_factory=HarnessPolicy)
     limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
+    party: Party | None = Field(
+        default=None,
+        description="How many Agents share each episode, for a game such as poker. "
+        "Leave it unset for an Environment one Agent works in alone.",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
     source: PackageSource | None = Field(
         default=None,
         json_schema_extra={"x-internal": True},
     )
+
+    @model_serializer(mode="wrap")
+    def _omit_no_party(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        # An Environment one Agent works in serializes as it did before parties.
+        if isinstance(data, dict) and self.party is None:
+            data.pop("party", None)
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -616,6 +695,29 @@ class EnvironmentDefinition(FrozenModel):
         clashes = sorted({name for name in exposed if exposed.count(name) > 1})
         if clashes:
             raise ValueError(f"Environment exposes duplicate action names: {clashes}")
+        if self.party is not None:
+            if not self.apps:
+                raise ValueError(
+                    f"Environment {self.name!r} has a party, so it needs an App its Agents share."
+                )
+            asking = [item.name for item in self.apps if item.credentials]
+            if asking:
+                # The host acts for every seat, so it could not keep one seat's credential
+                # from another.
+                raise ValueError(
+                    f"Environment {self.name!r} has a party, but its Apps {', '.join(asking)} "
+                    "ask for Agent credentials, and the party shares one App host. Use "
+                    "project secrets instead."
+                )
+            if self.party.isolation == "isolated" and self.runtime.provider == "local":
+                # Every process on the local Runtime runs as you, so one seat's
+                # Harness could read another's folder, token, and memory.
+                raise ValueError(
+                    f"Environment {self.name!r} has a party, so each seat needs an OS user "
+                    "of its own, and the local Runtime runs every seat as you. Use "
+                    "Runtime.docker(), which runs on your machine too, or Runtime.daytona(), "
+                    "or set party isolation to 'shared' if the seats may see each other."
+                )
         return self
 
     @property
@@ -679,6 +781,7 @@ class EnvironmentDefinition(FrozenModel):
             # Apps that need no credentials keep the identity they had before credentials.
             if not app["credentials"]:
                 del app["credentials"]
+
         digest = self.source.digest if self.source else None
         payload["source_digest"] = digest
         return revision_hash("environment", payload)
@@ -703,8 +806,11 @@ __all__ = [
     "Guardrail",
     "HarnessPolicy",
     "HarnessGrant",
+    "MAX_PARTY",
+    "Party",
     "Resource",
     "Runtime",
     "Secret",
     "SecretReference",
+    "party_seats",
 ]

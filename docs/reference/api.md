@@ -842,10 +842,14 @@ Simple public runner for a Task or Benchmark and catalog-backed Agents.
 ``{"sales-bot": {"SALESFORCE_TOKEN": token}}``. A credential an Agent
 declares and is not given here is read from the exported variable of the
 same name.
+
+For a Task whose Environment has a party, ``party`` lists the Agents that
+share each episode, in seat order; list one Agent more than once for
+self-play. Left out, every Agent in ``agents`` plays, once each.
 ```
 
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None) -> 'None'
 ```
 
 ### plural.Job.run_async
@@ -984,6 +988,10 @@ Directory that holds one resource.
 ```text
 Returns:
     The resource directory, whether or not it exists.
+
+Raises:
+    ValueError: When the name is not one folder name, such as one a
+        hosted record supplied with ``/`` or ``..``.
 ```
 
 ### plural.project.layout.Project.manifest_path
@@ -1466,7 +1474,7 @@ from the state of several Apps.
 ```
 
 ```python
-plural.Environment(*, apps: 'Iterable[App[Any]]' = (), runtime: 'EnvironmentRuntime | Mapping[str, Any] | None' = None, name: 'str | None' = None, version: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'Iterable[EnvironmentResource]' = (), guardrails: 'Iterable[Guardrail]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, metadata: 'dict[str, Any] | None' = None, source: 'str | Path | None' = None) -> 'None'
+plural.Environment(*, apps: 'Iterable[App[Any]]' = (), runtime: 'EnvironmentRuntime | Mapping[str, Any] | None' = None, name: 'str | None' = None, version: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'Iterable[EnvironmentResource]' = (), guardrails: 'Iterable[Guardrail]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, party: 'Party | int | Mapping[str, int] | None' = None, metadata: 'dict[str, Any] | None' = None, source: 'str | Path | None' = None) -> 'None'
 ```
 
 ### plural.Environment.on_step
@@ -1651,10 +1659,15 @@ are the acting App's snapshots around the action, or ``None`` when it does
 not snapshot on each step. ``apps`` reads any App, by name: ``state`` for
 a Python App, ``snapshot()``, and ``query(action, **arguments)`` for a
 read-only action. Nothing here reaches the Agent.
+
+When several Agents share the episode, ``seat`` is the one that acted and
+``seats`` lists them all. A number a ``reward`` hook returns credits the
+acting seat; a mapping of seat to number credits each seat named, as in a
+zero-sum game.
 ```
 
 ```python
-plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>) -> None
+plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = ()) -> None
 ```
 
 ## plural.environments.types.Observation
@@ -1880,10 +1893,63 @@ Download exact declared files.
 ### plural.SandboxProvider.download_artifacts
 
 ```python
-download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace') -> 'tuple[DownloadedFile, ...]'
+download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace', user: 'str | None' = None) -> 'tuple[DownloadedFile, ...]'
 ```
 
-Download declared artifact files.
+Download files a Harness declared, which ``user`` wrote, as regular files only.
+
+### plural.SandboxProvider.stop_user_processes
+
+```python
+stop_user_processes(self, handle: 'SandboxHandle', users: 'Sequence[str | None]') -> 'None'
+```
+
+Kill every process the Harnesses' users still run, once their run has ended.
+
+```text
+``None`` names the sandbox's default user. A provider that cannot do
+this safely does nothing; the App host refuses actions after the Job's
+``finish`` either way.
+```
+
+### plural.SandboxProvider.isolate_apps
+
+```python
+isolate_apps(self, handle: 'SandboxHandle') -> 'AppIsolation'
+```
+
+Prepare a separate OS user for the App host, when this sandbox can.
+
+```text
+Returns:
+    The users to run the App host and the Harness as; no ``app_user``
+    when the sandbox cannot separate them.
+```
+
+### plural.SandboxProvider.open_workspace
+
+```python
+open_workspace(self, handle: 'SandboxHandle', isolation: 'AppIsolation', paths: 'Sequence[str]') -> 'None'
+```
+
+Let ``isolation.agent_user`` write the Harness's folders, once staging is done.
+
+### plural.SandboxProvider.isolate_seats
+
+```python
+isolate_seats(self, handle: 'SandboxHandle', seats: 'Sequence[str]') -> 'dict[str, str]'
+```
+
+Prepare one OS user for each seat's Harness, when this sandbox can.
+
+```text
+Each must differ from the App host's user and from every other seat's,
+and must not be able to become another user, so one seat's Harness
+cannot read another's files or process.
+
+Returns:
+    Seat to user, or empty when the sandbox cannot separate them.
+```
 
 ### plural.SandboxProvider.cancel
 
@@ -2088,6 +2154,39 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Stream exact files into the writable workspace mount.
 
+### plural.DockerProvider.isolate_apps
+
+```python
+isolate_apps(self, handle: 'SandboxHandle') -> 'AppIsolation'
+```
+
+Run the App host as its own unprivileged user.
+
+```text
+The container runs everything else as ``65532``, with every capability
+dropped, so the Harness cannot read the App host's ``0700`` folder or
+its process.
+
+Returns:
+    The App host's user, and the default user for the Harness.
+```
+
+### plural.DockerProvider.isolate_seats
+
+```python
+isolate_seats(self, handle: 'SandboxHandle', seats: 'Sequence[str]') -> 'dict[str, str]'
+```
+
+Run each seat's Harness as its own unprivileged user.
+
+```text
+Every capability is dropped, so no seat's user can read another's
+``0700`` folder or process, or the App host's.
+
+Returns:
+    Seat to a numeric user, ``65400`` for the first.
+```
+
 ### plural.DockerProvider.exec
 
 ```python
@@ -2103,6 +2202,31 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 ```
 
 Stream exact declared paths out and reject non-regular files.
+
+### plural.DockerProvider.download_artifacts
+
+```python
+download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace', user: 'str | None' = None) -> 'tuple[DownloadedFile, ...]'
+```
+
+Read a Harness's files as the user that wrote them, which owns its folder.
+
+```text
+No capability is kept, so only a seat's own user can enter its ``0700`` folder.
+```
+
+### plural.DockerProvider.stop_user_processes
+
+```python
+stop_user_processes(self, handle: 'SandboxHandle', users: 'Sequence[str | None]') -> 'None'
+```
+
+Kill what each Harness user left running, as that user, since no capability is kept.
+
+```text
+``None`` is the container's default user, whose ``sleep`` keeps it alive
+as PID 1 and is spared.
+```
 
 ### plural.DockerProvider.cancel
 
@@ -2168,6 +2292,51 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Upload exact in-memory files.
 
+### plural.DaytonaProvider.isolate_apps
+
+```python
+isolate_apps(self, handle: 'SandboxHandle') -> 'AppIsolation'
+```
+
+Create an App host user and an unprivileged Harness user.
+
+```text
+Daytona's default user can ``sudo``, so a Harness running as it could
+read anything. Here the Harness runs as ``plural-agent``, which cannot,
+and the App host as ``plural-apps``.
+
+Returns:
+    Both users, or no ``app_user`` when the image has no passwordless
+    ``sudo`` or ``useradd``.
+```
+
+### plural.DaytonaProvider.isolate_seats
+
+```python
+isolate_seats(self, handle: 'SandboxHandle', seats: 'Sequence[str]') -> 'dict[str, str]'
+```
+
+Create one unprivileged user for each seat's Harness.
+
+```text
+Returns:
+    Seat to user, or empty when the image has no passwordless ``sudo``
+    or ``useradd``.
+```
+
+### plural.DaytonaProvider.open_workspace
+
+```python
+open_workspace(self, handle: 'SandboxHandle', isolation: 'AppIsolation', paths: 'Sequence[str]') -> 'None'
+```
+
+Let the Harness user write the staged folders, which the default user owns.
+
+```text
+Raises:
+    SandboxError: When the folders cannot be opened to it.
+```
+
 ### plural.DaytonaProvider.exec
 
 ```python
@@ -2176,6 +2345,11 @@ exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
 
 Execute through ``sandbox.process.exec``.
 
+```text
+A ``user`` other than ``root`` runs through ``sudo -n -E -u``, which
+fails rather than falling back to the default user.
+```
+
 ### plural.DaytonaProvider.download_files
 
 ```python
@@ -2183,6 +2357,36 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 ```
 
 Download exact declared files.
+
+### plural.DaytonaProvider.download_artifacts
+
+```python
+download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace', user: 'str | None' = None) -> 'tuple[DownloadedFile, ...]'
+```
+
+Download Harness-declared files, refusing any that is not a regular file inside ``root``.
+
+```text
+Daytona's file API reads as the sandbox's default user, which can read
+the App host's folder, so a symlink or a path that resolves outside
+``root`` is refused first, as the Harness's ``user`` when given, and
+the resolved file is what is read.
+
+Raises:
+    FileNotFoundError: When a declared path is not a regular file inside ``root``.
+```
+
+### plural.DaytonaProvider.stop_user_processes
+
+```python
+stop_user_processes(self, handle: 'SandboxHandle', users: 'Sequence[str | None]') -> 'None'
+```
+
+Kill, as root, what the Harnesses' own users left running.
+
+```text
+The default user is skipped: it is the one Daytona runs its own tools as.
+```
 
 ### plural.DaytonaProvider.cancel
 

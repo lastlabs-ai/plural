@@ -1,25 +1,22 @@
-# Environment: the Apps an Agent works with, plus runtime and settings.
+# Environment: the Apps an Agent works with, plus where they run and the limits.
 # Wordle is one Python App: the Wordle class in environment.py.
-# README.md explains both to the people who use this Environment.
 name: wordle
-version: 0.1.1
+version: 1.0.0
 description: Guess a hidden five-letter word. Each guess is marked correct, present, or absent.
 overview: Six guesses. The secret stays on State, and the Agent only sees what each guess returns.
 python: environment.py:Wordle
 readme: README.md
 
-# Files staged into the runtime, relative to this directory.
-resources: []
-#  - resources/policy.md
+# Files every Task starts with. The App reads words.txt from its own folder; listing
+# it here also puts it in /workspace/resources, where a Harness may read it.
+resources:
+  - words.txt
 
-# local runs the Environment as a trusted subprocess on this machine. For
-# container isolation use provider: docker; plural run adds Plural to the image.
+# local runs on this machine as a trusted subprocess, so the project runs anywhere.
+# Use provider: docker to run each Trial in a container instead.
 runtime:
   provider: local
 
-# Settings: which Agent harnesses may run here, and per-Trial limits.
-harness_policy:
-  mode: allow_all
 limits:
-  max_turns: 6
+  max_turns: 8
   max_seconds: 120

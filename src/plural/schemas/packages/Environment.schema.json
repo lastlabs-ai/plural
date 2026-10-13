@@ -634,6 +634,38 @@
       "title": "NetworkMode",
       "type": "string"
     },
+    "Party": {
+      "additionalProperties": false,
+      "description": "How many Agents may share one episode of the Environment, such as 2 to 8 at poker.\n\nAn Environment with a party is played by several Agents at once, each in a\nseat of its own: ``seat_1`` to ``seat_N`` for a party of N. A Job names the\nAgents in the party, and its size must fall between ``min`` and ``max``.",
+      "properties": {
+        "isolation": {
+          "default": "isolated",
+          "description": "``isolated``: each seat's Harness runs as its own OS user, and the Apps are the only thing the seats share; needs Docker or Daytona. ``shared``: every seat runs as one user and can read and write the others' files and the Environment's, for a team that works on the same files, or to try a party on the local Runtime. A shared seat could also act for another seat.",
+          "enum": [
+            "isolated",
+            "shared"
+          ],
+          "title": "Isolation",
+          "type": "string"
+        },
+        "max": {
+          "default": 2,
+          "maximum": 100,
+          "minimum": 2,
+          "title": "Max",
+          "type": "integer"
+        },
+        "min": {
+          "default": 2,
+          "maximum": 100,
+          "minimum": 2,
+          "title": "Min",
+          "type": "integer"
+        }
+      },
+      "title": "Party",
+      "type": "object"
+    },
     "ResourceRequirements": {
       "additionalProperties": false,
       "description": "Optional compute limits.",
@@ -783,6 +815,14 @@
           "default": true,
           "title": "Required",
           "type": "boolean"
+        },
+        "scopes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes",
+          "type": "array"
         }
       },
       "required": [
@@ -836,6 +876,18 @@
       "default": "",
       "title": "Overview",
       "type": "string"
+    },
+    "party": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Party"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "How many Agents share each episode, for a game such as poker. Leave it unset for an Environment one Agent works in alone."
     },
     "python": {
       "anyOf": [

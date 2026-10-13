@@ -145,12 +145,43 @@ def _seconds(start: Any, end: Any) -> float | None:
     return delta.total_seconds()
 
 
+def _without_model(ordered: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The episode of a Harness that called no model, as chat turns.
+
+    Returns:
+        The reset observation as the user turn, then each step as an assistant
+        tool call followed by what the Environment returned.
+    """
+    messages: list[dict[str, Any]] = []
+    for record in ordered:
+        kind = record.get("kind")
+        if kind == "environment.reset" and record.get("observation") is not None:
+            messages.append({"role": "user", "content": _step_content(record)})
+        elif kind == "environment.step":
+            call_id = str(record.get("tool_call_id") or record.get("event_id") or "")
+            name = str(record.get("action") or "")
+            arguments = record.get("arguments")
+            messages.append(
+                _assistant("", None, [{"id": call_id, "name": name, "arguments": arguments}])
+            )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": name,
+                    "content": _step_content(record),
+                }
+            )
+    return messages
+
+
 def episode_to_messages(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     """Convert ``plural.episode/v1`` records into one chat transcript.
 
     The transcript is the last request the model received, which already holds
     every earlier turn, followed by the model's final reply and the tool results
-    that came after it.
+    that came after it. A Harness that called no model gets its steps as tool
+    calls instead.
 
     Returns:
         ``{"messages", "status", "time_elapsed", "finalized"}``, the shape of
@@ -160,6 +191,17 @@ def episode_to_messages(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         (dict(item) for item in records if isinstance(item, Mapping)),
         key=lambda item: int(item.get("sequence") or 0),
     )
+    if not any(item.get("kind") == "model.call" for item in ordered):
+        status = _status(ordered)
+        elapsed = (
+            _seconds(ordered[0].get("started_at"), ordered[-1].get("ended_at")) if ordered else None
+        )
+        return {
+            "messages": _without_model(ordered),
+            "status": status,
+            **({"time_elapsed": round(elapsed, 3)} if elapsed is not None else {}),
+            "finalized": status == "completed",
+        }
     requested: list[Mapping[str, Any]] = []
     tail: list[dict[str, Any]] = []
     last_call: dict[str, Any] | None = None

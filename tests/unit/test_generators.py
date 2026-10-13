@@ -71,7 +71,7 @@ def test_add_mcp_creates_the_environment_and_discovers_the_servers_tools(
     assert "secrets" not in manifest["apps"][0]["mcp"]
     readme = (project.root / "environments/records-desk/README.md").read_text()
     assert "RECORDS_TOKEN" in readme
-    assert "plural agent credential set" in readme
+    assert "plural credential set" in readme
 
     code, output, _ = cli("env", "add", "records-desk", "--mcp", "https://records.dev/mcp")
     assert code != 0

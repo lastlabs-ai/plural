@@ -43,6 +43,7 @@ plugins:
           - project/environments.md
           - project/runtimes.md
           - project/tasks.md
+          - project/multi-agent.md
           - project/verifiers.md
           - project/harnesses.md
           - project/agents.md
@@ -105,6 +106,7 @@ nav:
       - Connect an MCP server: guides/connect-mcp-server.md
       - Runtimes: project/runtimes.md
       - Tasks: project/tasks.md
+      - Several Agents in one Task: project/multi-agent.md
       - Verifiers: project/verifiers.md
       - Harnesses: project/harnesses.md
       - Agents: project/agents.md

@@ -6,14 +6,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from plural.tracing.schema import Trace
-from plural.tracing.sinks import JSONLSink, SQLiteSink, traces_from_jsonl
+from plural.tracing.sinks import traces_from_jsonl
 
 MANIFEST_SCHEMA_VERSION = "2.0.0"
 HASH_ALGORITHM = "sha256"
@@ -89,31 +89,6 @@ class TraceDataset(BaseModel):
             traces=list(traces),
             metadata=metadata or {},
         )
-
-    @classmethod
-    def from_sink(
-        cls,
-        sink: JSONLSink | SQLiteSink | Path | str,
-        name: str,
-        *,
-        where: Callable[[Trace], bool] | None = None,
-        filter: TraceFilter | None = None,
-        revision: str = "0.1.0",
-    ) -> TraceDataset:
-        if isinstance(sink, (str, Path)):
-            traces = traces_from_jsonl(sink)
-        elif isinstance(sink, JSONLSink):
-            traces = sink.read_all()
-        elif isinstance(sink, SQLiteSink):
-            traces = sink.query(limit=100_000)
-        else:
-            raise TypeError(f"unsupported sink type: {type(sink)}")
-        selected = [
-            trace
-            for trace in traces
-            if (where is None or where(trace)) and (filter is None or filter.matches(trace))
-        ]
-        return cls.from_traces(name, selected, revision=revision)
 
     def save(self, path: str | Path) -> None:
         target = Path(path)

@@ -209,7 +209,7 @@ it.
 
 | Level | Meaning | Examples |
 | --- | --- | --- |
-| `owned` | The state lives inside the Runtime, so every Trial starts fresh. | A FastMCP server named with `server`, Plural's files server, a Python App, an MCP server started with `command` that keeps its data in `${PLURAL_APP_DIR}`, an OpenAPI App with `local: true` |
+| `owned` | The state lives inside the Runtime, so every Trial starts fresh. | A FastMCP server named with `server`, Plural's files server, a Python App, an MCP server started with `command` that keeps its data in `${PLURAL_APP_DIR}` and holds no secrets, an OpenAPI App with `local: true` |
 | `sandboxed` | The system is remote, but a reset hook returns it to the Task's starting state. | A remote MCP server with a `reset` command that seeds a sandbox tenant; a server marked `remote: true` with a reset hook |
 | `live` | The system is remote and shared, and Plural can't reset it. | A remote MCP server or API with no reset hook; a server marked `remote: true` without one |
 | `replayed` | The App answers from recordings. Nothing real is called. | A replay App |
@@ -223,7 +223,11 @@ The rules that follow from it:
   from the Task's state.
 - An action is treated as one that changes state unless it says otherwise: an MCP
   tool with the `readOnlyHint` annotation, an OpenAPI `GET`, `HEAD`, or `OPTIONS`, or
-  a Python action marked `read_only`.
+  a Python action marked `read_only`. For a third-party server, that annotation is
+  the server's own claim, so review its tools before you benchmark a `live` App.
+- An MCP server started in the Runtime that holds project `secrets` is taken to
+  reach an outside system, as if marked `remote: true`. Set `remote: false` when the
+  secret only unlocks something inside the Runtime, such as a local database.
 
 To use a remote system in a Benchmark, point it at a sandbox and give it a reset hook,
 which makes it `sandboxed`.
@@ -262,10 +266,10 @@ A Verifier's `reward` function reads the same Apps after every action, through
 An App never holds a credential's value. It declares the names it needs, and
 `${NAME}` stands for the value in headers and server variables. There are two kinds:
 
-- **Credentials** come from the Agent that runs. Use them for anything the Agent acts
-  with, such as the Salesforce token of the user it works as. Each Agent carries its
-  own token, so its scopes decide what it can do, and every Trial records which Agent's
-  credential was used.
+- **Credentials** are what the Agent acts with, such as the Salesforce token of the
+  user it works as. The Agent declares which it needs, and each person who runs it
+  saves their own value, so it acts as them, with their permissions. Every Trial
+  records whose credential was used.
 - **Secrets** come from the project. Use them only for setup: a `reset` or `snapshot`
   command's admin token, or a key a Verifier needs. Those commands never see an
   Agent's credentials.
@@ -292,27 +296,38 @@ credentials:
     scopes: [read:accounts, write:opportunities]
 ```
 
-Store each value with the Agent, then run it:
+Save your own value once, from the CLI or under **Credentials** on your Profile, then
+run the Agent:
 
 ```bash
-plural agent credential set sales-bot CRM_TOKEN
+plural credential set CRM_TOKEN
 plural run --task close-deal --agent sales-bot
 ```
 
-Before anything starts, the Job checks that the Agent carries every credential the
-Apps need and has a value for each. A run with `--model` carries none, so it can't use
-an App that needs one. For a local run you can export the value instead of storing it.
+Before anything starts, the Job checks that the Agent declares every credential the
+Apps need and that you have a value for each. A run with `--model` has no Agent to
+declare any, so it can't use an App that needs one. You can export the value instead
+of saving it, as CI does.
 
 Values travel only to the process that runs the Apps and to Verifier queries made
 through it. They are never written to the project or the Trial, shown to the model,
 or given to its Harness. Each Trial records, for every credential: the App, the Agent
-and its revision, the declared scopes, where the value came from, and a short
-fingerprint of the value, so you can tell which token acted without storing it.
+and its revision, the declared scopes, where the value came from and whose it was, and
+a short fingerprint of the value, so you can tell which token acted without storing it.
 `plural trial show` prints this record, and so does the Trial page.
 
-Plural doesn't enforce scopes. The system that issued the token does; Plural records
-what you declared. Run `plural env validate` to see what each App needs, and
-`plural agent validate` to see which credentials an Agent has values for.
+An App can name the scopes it needs a credential to grant:
+
+```yaml
+credentials:
+  - name: CRM_TOKEN
+    scopes: [write:opportunities]
+```
+
+A Job then refuses an Agent whose declared scopes for that credential lack any of
+them. That checks what the Agent's owner declared; the system that issued the token
+still enforces what it can really do. Run `plural env validate` to see what each App
+needs, and `plural agent validate` to see which credentials an Agent has values for.
 
 ## Apps hold facts, not rewards
 
@@ -331,6 +346,12 @@ def solved(step: Step) -> float:
 
 Name it as the `reward` of a Verifier the Task lists. See
 [Reward each step](../project/verifiers.md#reward-each-step).
+
+## Apps several Agents share
+
+When an Environment has a party, several Agents act on the same Apps, each from a seat. An App decides whose turn it
+is with `turn()`, reads the acting seat as `self.seat`, and gives each seat its own view
+with `observe(seat)`. See [Several Agents in one Task](../project/multi-agent.md).
 
 ## Where to go next
 

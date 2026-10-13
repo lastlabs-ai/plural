@@ -12,7 +12,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, PrivateAttr, ValidationInfo, field_serializer, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationInfo,
+    field_serializer,
+    model_validator,
+)
 
 from plural.apps.definition import SecretReference
 from plural.catalog import ModelCatalog
@@ -167,6 +174,11 @@ class Episode(FrozenModel):
     of App name to final snapshot. Neither is ever shown to the Agent.
     ``observation`` is what the Agent last saw. ``rewards`` are the values this
     Verifier's ``reward`` gave each step, in order; :func:`total_reward` sums them.
+
+    When several Agents share the episode, ``seats`` names them, each step in
+    ``trajectory`` carries the ``seat`` that took it, and ``seat_rewards`` holds
+    this Verifier's rewards for each seat. Return each seat's score in
+    :attr:`VerifierOutput.seats`.
     """
 
     observation: dict[str, Any] = Field(default_factory=dict)
@@ -177,6 +189,8 @@ class Episode(FrozenModel):
     usage: EpisodeUsage = Field(default_factory=EpisodeUsage)
     outcome: EpisodeOutcome = Field(default_factory=EpisodeOutcome)
     rewards: tuple[float, ...] = ()
+    seats: tuple[str, ...] = ()
+    seat_rewards: dict[str, tuple[float, ...]] = Field(default_factory=dict)
 
     @classmethod
     def from_apps(cls, report: Mapping[str, Any], **fields: Any) -> Episode:
@@ -217,6 +231,11 @@ class Step:
     not snapshot on each step. ``apps`` reads any App, by name: ``state`` for
     a Python App, ``snapshot()``, and ``query(action, **arguments)`` for a
     read-only action. Nothing here reaches the Agent.
+
+    When several Agents share the episode, ``seat`` is the one that acted and
+    ``seats`` lists them all. A number a ``reward`` hook returns credits the
+    acting seat; a mapping of seat to number credits each seat named, as in a
+    zero-sum game.
     """
 
     task: StepTask
@@ -229,6 +248,8 @@ class Step:
     previous_state: Any = None
     current_state: Any = None
     apps: Mapping[str, Any] = field(default_factory=dict)
+    seat: str | None = None
+    seats: tuple[str, ...] = ()
 
 
 class VerifierOutput(FrozenModel):
@@ -238,12 +259,16 @@ class VerifierOutput(FrozenModel):
     sub-metrics behind it. Step rewards are separate: a ``reward`` hook returns a
     number per action, which goes to the reward ledger. It reaches a score only
     when ``check`` is :func:`total_reward`.
+
+    For a Task with seats, ``seats`` gives each seat's score, and ``score`` the
+    episode's, such as their mean. Each Agent is ranked by its seats' scores.
     """
 
     score: float
     scores: dict[str, float] = Field(default_factory=dict)
     evidence: tuple[str, ...] = ()
     feedback: str = ""
+    seats: dict[str, float] = Field(default_factory=dict)
 
     def validated_finite(self) -> VerifierOutput:
         """Reject non-finite scores.
@@ -251,7 +276,8 @@ class VerifierOutput(FrozenModel):
         Returns:
             This output when all scores are finite.
         """
-        if any(not math.isfinite(item) for item in (self.score, *self.scores.values())):
+        values = (self.score, *self.scores.values(), *self.seats.values())
+        if any(not math.isfinite(item) for item in values):
             raise ValueError("Verifier emitted non-finite scores")
         return self
 
@@ -408,6 +434,19 @@ class DeterministicVerifier(Verifier):
     run later on stored Trials with ``plural verifier apply``.
     """
 
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        json_schema_extra={
+            "anyOf": [
+                {"required": ["check"]},
+                {"required": ["command"]},
+                {"required": ["reward"]},
+                {"required": ["hindsight"]},
+            ]
+        },
+    )
+
     kind: Literal["deterministic"] = "deterministic"
     check: Any = None
     reward: Any = None
@@ -428,6 +467,14 @@ class DeterministicVerifier(Verifier):
         if "check" not in payload and "command" in payload:
             payload["check"] = payload.pop("command")
         check = payload.get("check")
+        if isinstance(check, dict) and "reward" in check:
+            raise ValueError(
+                f"Cannot create DeterministicVerifier {payload.get('name')!r}.\n"
+                "check: {reward: ...} was removed. Score by this Verifier's own "
+                "rewards with:\n"
+                "  check: total_reward\n"
+                "  reward: verify.py:progress"
+            )
         if check == TOTAL_REWARD or check == {"builtin": TOTAL_REWARD}:
             payload["check"] = total_reward
         elif isinstance(check, str):
@@ -645,9 +692,20 @@ def total_reward(episode: Episode) -> VerifierOutput:
     ``DeterministicVerifier(name="return", check=total_reward, reward=progress)``,
     or ``check: total_reward`` in ``verifier.yaml``.
 
+    With seats, each seat scores the total of its own rewards, and the
+    episode the mean of those.
+
     Returns:
         The total of ``episode.rewards`` as the score.
     """
+    if episode.seats:
+        seats = {seat: math.fsum(episode.seat_rewards.get(seat, ())) for seat in episode.seats}
+        mean = math.fsum(seats.values()) / len(seats)
+        return VerifierOutput(
+            score=mean,
+            seats=seats,
+            evidence=tuple(f"{seat}: rewards totalling {value:g}" for seat, value in seats.items()),
+        )
     total = float(sum(episode.rewards))
     return VerifierOutput(
         score=total, evidence=(f"{len(episode.rewards)} step rewards totalling {total:g}",)

@@ -59,6 +59,8 @@ A local `plural run` writes this folder at the project root:
         apps.json
         observation.json
         view.json
+        steps.jsonl
+        states.jsonl
         rewards.jsonl
 ```
 
@@ -68,11 +70,20 @@ hold:
 - `run.json` pins the version and content hash of every input, which is what
   `plural job rerun` reuses.
 - `episode.jsonl` is the episode record: every reset, step, and model call in
-  order, with token usage and timing.
+  order, with token usage and timing. With Apps, each step carries the App host's
+  observation, rewards, and outcome rather than the Harness's; a step the host never
+  ran is marked `unverified` and earns nothing.
+- `steps.jsonl` is the App host's own record of every action it ran, and
+  `states.jsonl` each App's State after each step. They are what scoring, step
+  rewards, and `plural verifier try|apply` read. A Harness can't write either: a
+  file it returns under one of these names, or as `rewards.jsonl` or `apps.json`, is
+  dropped.
 - `trajectory.json` is the Agent's conversation as plain chat messages: each has
   a `role` and `content`, plus `reasoning_content` and `tool_calls` on the
   model's turns. It is exactly what the model was sent, followed by its final
-  reply, beside the episode's `status`, `time_elapsed`, and `finalized`.
+  reply, beside the episode's `status`, `time_elapsed`, and `finalized`. Every
+  run gets one. When the Harness called no model, each step is written as a tool
+  call and the observation it returned.
 - `atif-trajectory.json` is the same episode as an
   [ATIF](traces.md#read-the-support-episode) document of the Agent's turns, with
   each call's tokens, cost, and timing.

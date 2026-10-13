@@ -27,6 +27,7 @@ def test_top_level_commands_are_the_documented_set() -> None:
     commands = set(_root().commands)
     assert commands == {
         "auth",
+        "credential",
         "project",
         *RESOURCE_GROUPS,
         "run",
@@ -45,7 +46,7 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
     root = _root()
     extras = {
         "benchmark": {"add", "remove"},
-        "agent": {"serve", "credential"},
+        "agent": {"serve"},
         "env": {"add", "eject-files", "serve"},
         "verifier": {"try", "apply"},
     }

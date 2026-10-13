@@ -107,7 +107,7 @@ def ticket_closed(episode: Episode) -> VerifierOutput:
     )
 ```
 
-- `initial` and `check` are the App's State before the first action and after the
+- `initial` and `final` are the App's State before the first action and after the
   last. For an MCP or OpenAPI App, they are what its `snapshot` hook printed.
 - `control` is the App's [control level](../concepts/apps.md#control-levels).
 - `query(action, **arguments)` calls one of the App's read-only actions while the
@@ -125,7 +125,7 @@ def ticket_closed(episode: Episode) -> VerifierOutput:
 
 `query` refuses an action that can change state, so a Verifier can't alter what it
 checks. It is available to function Verifiers during a Trial; when a Verifier runs
-later, such as on a Trial pulled from a hosted project, read `check` instead.
+later, such as on a Trial pulled from a hosted project, read `final` instead.
 
 The function must live in a Python file. In a project, each Verifier is a folder under
 `verifiers/`, named after it. This command creates
@@ -207,11 +207,15 @@ def reply_matches_crm(step: Step) -> float | None:
 ```
 
 Return a number, or `None` when this step gives no signal. A `reward` function that
-raises is recorded with its error and a value of 0; it never fails the Agent's action.
+raises, or returns a value that isn't a finite number, is recorded with its error and a
+value of 0; it never fails the Agent's action.
 
 Each reward is written to the Trial's reward ledger, `rewards.jsonl`, with the
 Verifier's name and version and the step it credits. The Agent never sees it: only an
-action's observation reaches the model.
+action's observation reaches the model. The `reward` function runs inside the App
+host, as its own OS user on Docker and Daytona, so the Agent's Harness can't read its
+code or change what it gives. The host's record of each step, `steps.jsonl`, is the
+one Plural keeps; see [Security](../operations/security.md#separate-information).
 
 ### Credit in hindsight
 
@@ -239,7 +243,9 @@ def fewer_guesses(trial: HindsightTrial):
 
 `trial.score` is the Trial's score, `trial.steps(action)` lists the Environment steps,
 `trial.model_calls()` the model calls, and `trial.apps` each App's initial and final
-State. Its credit goes in the same ledger, marked `hindsight`.
+State. Its credit goes in the same ledger, marked `hindsight`. When the Task has a
+`HumanVerifier`, hindsight waits until the review is in, so `trial.score` is the
+reviewed score.
 
 A Verifier needs at least one of `check`, `reward`, and `hindsight`. One without
 `check` gives rewards and no score, so every Task also needs at least one Verifier
@@ -468,7 +474,8 @@ verifiers:
   - customer-review
 ```
 
-Choose only the checks your workflow needs. In this combination, the exact completion
+Each Verifier a Task lists needs its own name, since its rewards and score are
+recorded under it. Choose only the checks your workflow needs. In this combination, the exact completion
 check, the judged reply quality, and the human helpfulness score all count toward the
 Trial's score.
 

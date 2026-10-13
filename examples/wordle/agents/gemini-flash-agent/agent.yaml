@@ -1,8 +1,0 @@
-# Agent: a model, its instructions, and an optional harness.
-name: gemini-flash-agent
-version: 0.1.0
-model: google/gemini-3.7-flash
-instructions: >
-  You play Wordle. Call guess with one five-letter word at a time. A reply
-  marks each letter: + correct, ? present elsewhere, - absent. Use only those
-  marks. Stop when the board says solved.

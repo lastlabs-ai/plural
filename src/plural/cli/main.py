@@ -30,13 +30,9 @@ app = typer.Typer(
 )
 app.add_typer(auth_app, name="auth")
 app.add_typer(project_app, name="project")
+app.add_typer(credential_app, name="credential")
 for _kind in KINDS:
     _group = resource_app(_kind)
-    if _kind.name == "agent":
-        _group.add_typer(credential_app, name="credential")
-    if _kind.name == "verifier":
-        _group.command("try")(verifier_try)
-        _group.command("apply")(verifier_apply)
     if _kind.name == "verifier":
         _group.command("try")(verifier_try)
         _group.command("apply")(verifier_apply)

@@ -107,11 +107,10 @@ def test_a_rejected_action_still_gets_its_step_rewards() -> None:
         "reward": -0.1,
         "rewards": [{"name": "solved", "version": "1", "app": "game", "value": -0.1}],
     }
-    legacy = {"sequence": 2, "event_id": "e2", "kind": "environment.step", "reward": 0.5}
-    records = online_records([rejected, legacy])
+    bare = {"sequence": 2, "event_id": "e2", "kind": "environment.step", "reward": 0.5}
+    records = online_records([rejected, bare])
     assert [(item.source, item.verifier, item.value) for item in records] == [
         ("step", "solved", -0.1),
-        ("environment", "reward", 0.5),
     ]
 
 

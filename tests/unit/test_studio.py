@@ -10,7 +10,7 @@ from plural import Agent, Client, Environment, Runtime, Task
 from plural.agents import AgentBinding, AgentDefinition
 from plural.environments.definition import EnvironmentDefinition
 from plural.jobs import BenchmarkJobSource, JobSpec
-from plural.studio import studio_base_url
+from plural.studio import UPLOAD_TIMEOUT, Studio, studio_base_url
 from plural.tasks import BenchmarkDefinition, TaskDefinition
 from plural.verifiers import DeterministicVerifier, WeightedVerifier
 
@@ -74,6 +74,26 @@ def test_upload_trace_tito_uses_canonical_binary_route(tmp_path: Path) -> None:
     )
     assert route.calls.last.request.headers["x-project-id"] == "project_1"
     assert route.calls.last.request.headers["authorization"] == "Bearer plural_test"
+
+
+@respx.mock
+def test_upload_trace_tito_streams_a_file_with_a_long_timeout(tmp_path: Path) -> None:
+    route = respx.post(f"{BASE}/traces/trace/artifacts/tito").mock(
+        side_effect=[httpx.Response(401), httpx.Response(200, json={"id": "t"})]
+    )
+    source = tmp_path / "tito.ndjson"
+    source.write_bytes(b'{"schema_version":"1"}\n' * 5000)
+    studio = Studio(api_root=BASE, token="old", project="project_1", refresh=lambda: "fresh")
+
+    assert studio.traces.upload_tito("trace", source) == {"id": "t"}
+
+    assert route.call_count == 2
+    request = route.calls.last.request
+    assert request.headers["authorization"] == "Bearer fresh"
+    assert request.headers["content-length"] == str(source.stat().st_size)
+    assert "transfer-encoding" not in request.headers
+    assert request.content == source.read_bytes()
+    assert request.extensions["timeout"] == UPLOAD_TIMEOUT.as_dict()
 
 
 @respx.mock

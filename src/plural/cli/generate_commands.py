@@ -114,8 +114,8 @@ def _write(generated: Generated, *, as_json: bool) -> None:
         if generated.credentials:
             typer.echo(
                 "\nAn Agent supplies each credential. List them under credentials: in its "
-                "agent.yaml, store each with `plural agent credential set AGENT NAME`, and "
-                "run with --agent."
+                "agent.yaml, save your value of each with `plural credential set NAME`, "
+                "and run with --agent."
             )
         if problem:
             typer.echo(

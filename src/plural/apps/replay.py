@@ -102,7 +102,8 @@ def read_recordings(path: Path) -> list[dict[str, Any]]:
     except json.JSONDecodeError:
         raw = [json.loads(line) for line in text.splitlines() if line.strip()]
     if isinstance(raw, Mapping):
-        raw = raw.get("recordings") or raw.get("messages") or raw.get("events") or []
+        wrapped = raw.get("recordings") or raw.get("messages") or raw.get("events")
+        raw = wrapped if wrapped is not None else [raw]
     return normalize_recordings(raw)
 
 
@@ -175,6 +176,7 @@ class ReplayApp(App[State]):
         self._last: dict[str, Any] = {}
         self._calls = 0
         self._off_recording = 0
+        self._used: set[int] = set()
 
     def recordings(self) -> list[dict[str, Any]]:
         """The recorded calls, read once.
@@ -270,12 +272,20 @@ class ReplayApp(App[State]):
                 f"unknown action {action!r}; available actions: {', '.join(sorted(known))}"
             )
         self._calls += 1
-        same = [item for item in self.recordings() if item["action"] == action]
+        same = [
+            (index, item)
+            for index, item in enumerate(self.recordings())
+            if item["action"] == action
+        ]
         wanted = _canonical(arguments)
-        for item in same:
-            if _canonical(item["arguments"]) == wanted:
-                self._last = {"replay": "exact"}
-                return item["result"]
+        exact = [index for index, item in same if _canonical(item["arguments"]) == wanted]
+        if exact:
+            # A call recorded more than once answers with each recording in turn,
+            # then keeps the last, as a system whose state moved on would.
+            index = next((item for item in exact if item not in self._used), exact[-1])
+            self._used.add(index)
+            self._last = {"replay": "exact"}
+            return self.recordings()[index]["result"]
         self._off_recording += 1
         self._last = {"replay": self.fallback, "off_recording": True}
         if not same:
@@ -285,7 +295,7 @@ class ReplayApp(App[State]):
             )
         if self.fallback == "error":
             raise ValueError(f"No recorded {action} call matches these arguments.")
-        best = max(same, key=lambda item: _overlap(item["arguments"], arguments))
+        _, best = max(same, key=lambda pair: _overlap(pair[1]["arguments"], arguments))
         return best["result"]
 
     def step_info(self) -> dict[str, Any]:
@@ -306,6 +316,7 @@ class ReplayApp(App[State]):
         self._last = {}
         self._calls = 0
         self._off_recording = 0
+        self._used = set()
         return None
 
     def snapshot(self) -> dict[str, int]:

@@ -15,10 +15,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 import yaml
 
 from plural.apps.mcp import referenced_variables
+from plural.apps.openapi import load_document
 from plural.project.templates import title
 from plural.recorded import RecordedTrace, app_action, recordings_by_app, tools_by_app
 
@@ -118,9 +120,10 @@ def _environment(
     )
     credential_lines = (
         "\n".join(f"- `{item}`" for item in credentials)
-        + "\n\nThe Agent that runs supplies these, so it acts as its own user with its own "
-        "scopes. List each under `credentials:` in the Agent's `agent.yaml`, store its "
-        "value with `plural agent credential set AGENT NAME`, and run with `--agent`.\n"
+        + "\n\nThe Agent that runs supplies these, so it acts as the user who runs it, "
+        "with the scopes it declares. List each under `credentials:` in the Agent's "
+        "`agent.yaml`, save your value with `plural credential set NAME`, and run with "
+        "`--agent`.\n"
         if credentials
         else "None.\n"
     )
@@ -259,6 +262,17 @@ def mcp_app(
     )
 
 
+def _pinned_server(spec: str) -> str | None:
+    """The first server a fetched OpenAPI document names, as an absolute URL.
+
+    Returns:
+        The URL, or ``None`` when the document names no server.
+    """
+    servers = load_document(spec, Path.cwd()).get("servers")
+    url = servers[0].get("url") if isinstance(servers, list) and servers else None
+    return urljoin(spec, url) if isinstance(url, str) and url else None
+
+
 def openapi_app(
     app: str,
     *,
@@ -281,6 +295,8 @@ def openapi_app(
     """
     names, needed = _references(secrets, credentials, headers or {})
     settings: dict[str, Any] = {"spec": spec_file[0] if spec_file else spec}
+    if not base_url and not spec_file and (names or needed):
+        base_url = _pinned_server(spec)
     if base_url:
         settings["base_url"] = base_url
     if headers:

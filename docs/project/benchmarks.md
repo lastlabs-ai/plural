@@ -419,5 +419,5 @@ The interval shown beside a score is a 95% normal approximation over Task scores
 is reported only when at least `min_tasks_for_interval` Tasks (five by default) have
 results, and it does not include attempt-to-attempt variation. Cost is USD per attempt
 and latency is seconds per attempt, each averaged over the attempts that reported
-them; the count of measured attempts is always shown. Per-step Environment rewards are
+them; the count of measured attempts is always shown. Per-step rewards are
 never part of a score.

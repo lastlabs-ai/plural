@@ -1,0 +1,10 @@
+# Task: one game. The instructions, the Environment it runs in, and the Verifier.
+name: storm
+version: 1.0.0
+instructions: instruction.md
+environment: wordle
+verifiers:
+  - solved
+# The hidden word. It is State, so the Agent never sees it.
+initial_state:
+  secret: storm

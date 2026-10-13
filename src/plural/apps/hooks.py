@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -26,8 +26,19 @@ def argv(value: str | Sequence[str] | None) -> list[str]:
     return shlex.split(value) if isinstance(value, str) else [str(item) for item in value]
 
 
-def run_hook(app: str, command: Sequence[str], *, stdin: str, cwd: Path, timeout: float) -> str:
+def run_hook(
+    app: str,
+    command: Sequence[str],
+    *,
+    stdin: str,
+    cwd: Path,
+    timeout: float,
+    env: Mapping[str, str] | None = None,
+) -> str:
     """Run one hook command and return what it printed.
+
+    ``env`` is the hook's whole environment: the App's own setup secrets,
+    never another App's or the running Agent's credentials.
 
     Returns:
         Its standard output.
@@ -40,6 +51,7 @@ def run_hook(app: str, command: Sequence[str], *, stdin: str, cwd: Path, timeout
         input=stdin.encode(),
         capture_output=True,
         cwd=str(cwd),
+        env=dict(env) if env is not None else None,
         timeout=timeout,
         check=False,
     )

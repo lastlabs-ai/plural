@@ -2,7 +2,7 @@
   "$defs": {
     "AgentCredential": {
       "additionalProperties": false,
-      "description": "A credential this Agent supplies to the Apps it works with.\n\nThe value, such as the Salesforce token of the user this Agent acts as, is\nnever part of the Agent: it is stored with ``plural agent credential set``\nor exported, and reaches only the App host. ``scopes`` records what the\ntoken may do, as you describe it; the system that issued the token enforces\nthem, and every Trial records them for audit.",
+      "description": "A credential this Agent supplies to the Apps it works with.\n\nThe value, such as the Salesforce token of the user this Agent acts as, is\nnever part of the Agent: each person who runs it saves their own with\n``plural credential set`` or exports it, and it reaches only the App host.\n``scopes`` records what the token may do, as you describe it; the system\nthat issued the token enforces them, and every Trial records them for audit.",
       "properties": {
         "description": {
           "default": "",

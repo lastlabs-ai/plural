@@ -16,7 +16,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 import httpx
 import yaml
@@ -24,12 +24,28 @@ import yaml
 from plural.apps.base import App
 from plural.apps.definition import AppAction, SecretReference
 from plural.apps.hooks import argv, run_hook, snapshot_output
-from plural.apps.mcp import expand, referenced_variables
+from plural.apps.mcp import expand, hidden_from_hooks, referenced_variables, subprocess_environ
 from plural.environments.types import State
 
 _METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
 _READ_ONLY = frozenset({"get", "head", "options"})
 _LOCATIONS = ("path", "query", "header")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _path_value(name: str, value: Any) -> str:
+    """A path parameter's value, refused when it could leave its path segment.
+
+    Returns:
+        The value as text.
+
+    Raises:
+        ValueError: For ``.``, ``..``, or a control character; the Agent sees it.
+    """
+    text = str(value)
+    if text in {".", ".."} or _CONTROL.search(text):
+        raise ValueError(f"{name} must name one item, not {text!r}")
+    return text
 
 
 def load_document(spec: str, workspace: Path, *, timeout: float = 30) -> dict[str, Any]:
@@ -47,6 +63,13 @@ def load_document(spec: str, workspace: Path, *, timeout: float = 30) -> dict[st
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise ValueError(f"Could not fetch the OpenAPI document {spec}: {exc}") from exc
+        requested, final = httpx.URL(spec), response.url
+        if final.host != requested.host or (
+            requested.scheme == "https" and final.scheme != "https"
+        ):
+            raise ValueError(
+                f"The OpenAPI document {spec} redirected to {final}. Set spec to that address."
+            )
         text = response.text
     else:
         path = Path(spec) if Path(spec).is_absolute() else workspace / spec
@@ -300,6 +323,12 @@ class OpenAPIApp(App[State]):
                 f"OpenAPI App {self.name!r} needs base_url: its document lists no servers"
             )
         if self.spec and self.spec.startswith(("http://", "https://")):
+            if referenced_variables(self.headers.values()):
+                raise ValueError(
+                    f"OpenAPI App {self.name!r} sends secrets or credentials in its headers, "
+                    f"so it needs base_url: a document fetched from {self.spec} may not "
+                    "choose where they go"
+                )
             return urljoin(self.spec, url)
         return url
 
@@ -327,7 +356,10 @@ class OpenAPIApp(App[State]):
             raise ValueError(f"{action} needs {', '.join(missing)}")
         path = str(binding["path"])
         for parameter in binding.get("path_params") or ():
-            path = path.replace("{" + parameter + "}", str(values.pop(parameter)))
+            # Encoded whole, so a value cannot add path segments or a query.
+            path = path.replace(
+                "{" + parameter + "}", quote(_path_value(parameter, values.pop(parameter)), safe="")
+            )
         query = {
             item: values.pop(item) for item in binding.get("query_params") or () if item in values
         }
@@ -335,7 +367,10 @@ class OpenAPIApp(App[State]):
         headers = {k: expand(v, credentials=owned) for k, v in self.headers.items()}
         for item in binding.get("header_params") or ():
             if item in values:
-                headers[item] = str(values.pop(item))
+                value = str(values.pop(item))
+                if _CONTROL.search(value):
+                    raise ValueError(f"{item} cannot contain control characters")
+                headers[item] = value
         body: Any = None
         fields = binding.get("body_fields")
         if fields is not None:
@@ -355,6 +390,9 @@ class OpenAPIApp(App[State]):
                 headers=headers,
                 json=body,
             )
+        except httpx.LocalProtocolError as exc:
+            # Its message can quote a header value, such as a credential.
+            raise ValueError(f"{action} could not build a valid request") from exc
         except httpx.HTTPError as exc:
             raise ValueError(f"{action} could not reach the API: {exc}") from exc
         if response.status_code >= 400:
@@ -383,6 +421,7 @@ class OpenAPIApp(App[State]):
             stdin=json.dumps(dict(initial_state)),
             cwd=self.workspace,
             timeout=self.timeout_seconds,
+            env=self._hook_environ(),
         )
         return output.strip() or None
 
@@ -400,8 +439,23 @@ class OpenAPIApp(App[State]):
             stdin="",
             cwd=self.workspace,
             timeout=self.timeout_seconds,
+            env=self._hook_environ(),
         )
         return snapshot_output(self.name, output)
+
+    def _hook_environ(self) -> dict[str, str]:
+        """The hook's environment: this App's setup secrets, never any credential.
+
+        Returns:
+            The environment for a reset or snapshot command.
+        """
+        hidden = hidden_from_hooks() | {
+            SecretReference.model_validate(item).name for item in self.credentials
+        }
+        environ = subprocess_environ(
+            SecretReference.model_validate(item).name for item in self.secrets
+        )
+        return {key: value for key, value in environ.items() if key not in hidden}
 
     def has_reset(self) -> bool:
         """Whether a reset command or Python override sets up each episode.
@@ -423,9 +477,10 @@ class OpenAPIApp(App[State]):
         """Whether the API runs inside the Runtime.
 
         Returns:
-            The ``local`` setting.
+            The ``local`` setting, unless the App acts with an Agent's
+            credentials, which reach a system outside the Runtime.
         """
-        return self.local
+        return self.local and not self.credentials
 
     def close(self) -> None:
         """Close the HTTP client."""

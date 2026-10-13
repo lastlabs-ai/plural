@@ -31,10 +31,10 @@ class AgentCredential(FrozenModel):
     """A credential this Agent supplies to the Apps it works with.
 
     The value, such as the Salesforce token of the user this Agent acts as, is
-    never part of the Agent: it is stored with ``plural agent credential set``
-    or exported, and reaches only the App host. ``scopes`` records what the
-    token may do, as you describe it; the system that issued the token enforces
-    them, and every Trial records them for audit.
+    never part of the Agent: each person who runs it saves their own with
+    ``plural credential set`` or exports it, and it reaches only the App host.
+    ``scopes`` records what the token may do, as you describe it; the system
+    that issued the token enforces them, and every Trial records them for audit.
     """
 
     scopes: tuple[str, ...] = ()

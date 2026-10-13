@@ -45,7 +45,7 @@ from plural.providers.openai_compatible import (
 from plural.routing.policies import RoutingPolicy
 from plural.routing.router import AttemptRecord, Router
 from plural.tracing.redaction import Redactor, Sampler
-from plural.tracing.schema import Attempt, Trace, TraceContext, new_trace_id
+from plural.tracing.schema import Attempt, Trace, TraceContext
 from plural.tracing.sinks import JSONLSink, Sink
 from plural.tracing.writer import TraceWriter
 from plural.types import ChatRequest, ChatResponse, Message, StreamChunk, Tool
@@ -795,17 +795,3 @@ def _auth_probe(provider: Provider, name: str) -> tuple[str, dict[str, str] | No
         api_key = getattr(config, "api_key", "") if config is not None else ""
         return path, {"Authorization": f"Bearer {api_key}"}
     return "/models", None
-
-
-def start_trace(**kwargs: Any) -> Trace:
-    """Create an empty trace for manual / environment use.
-
-    Args:
-        **kwargs: Fields forwarded to :class:`~plural.tracing.schema.Trace`.
-
-    Returns:
-        A new :class:`~plural.tracing.schema.Trace`.
-    """
-    if "trace_id" not in kwargs:
-        kwargs["trace_id"] = new_trace_id()
-    return Trace(**kwargs)

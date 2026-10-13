@@ -63,6 +63,10 @@ what happened: every step the AI took, what it cost, how long it took, and the e
 version of everything involved. Group Tasks into a **Benchmark** and you get a
 leaderboard for your own work.
 
+Some work isn't done alone. Seat a **party** of Agents in one Task and they can
+cooperate, like a team splitting a job, or compete, like players at a poker table.
+Each one sees only its own side, and each gets its own score.
+
 ## Evaluate, route, train
 
 **Evaluate.** Run the models you are considering against your own Tasks and compare
@@ -102,4 +106,3 @@ project. Nothing you push is ever public unless you choose to publish it.
 - Want to see a finished project first? The
   [support queue tutorial](tutorials/support-queue.md) runs completely offline, with
   no account or key.
-- Upgrading from 0.14? Read [Migrate to 0.15](migration/projects.md).

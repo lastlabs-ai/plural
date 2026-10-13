@@ -30,6 +30,7 @@ import io
 import json
 import re
 import sqlite3
+import time
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
@@ -43,10 +44,14 @@ MAX_TABLE_BYTES = 16 * 1024 * 1024
 MAX_LISTED = 500
 MAX_MATCHES = 100
 MAX_ROWS = 200
+MAX_QUERY_SECONDS = 20
+MAX_WRITE_BYTES = MAX_READ_BYTES
 SCRATCH = "scratch"
 _TABLE_SUFFIXES = {".csv", ".json", ".jsonl"}
 _DATABASE_SUFFIXES = {".sqlite", ".sqlite3", ".db"}
 _IDENTIFIER = re.compile(r"[^A-Za-z0-9_]+")
+MAX_PATTERN = 500
+MAX_SEARCHED_LINE = 2000
 _READ_ONLY_SQL = {
     sqlite3.SQLITE_SELECT,
     sqlite3.SQLITE_READ,
@@ -80,8 +85,11 @@ def _resolve(path: str, folders: dict[str, Path]) -> tuple[str, Path] | None:
     folder = folders.get(parts[0])
     if folder is None:
         raise ValueError(f"No folder {parts[0]!r}. Start with one of: {', '.join(folders)}")
-    target = (folder / Path(*parts[1:])).resolve() if parts[1:] else folder.resolve()
-    if not target.is_relative_to(folder.resolve()):
+    given = folder / Path(*parts[1:])
+    target = given.resolve() if parts[1:] else folder.resolve()
+    if not target.is_relative_to(folder.resolve()) or any(
+        (folder / Path(*parts[1 : index + 1])).is_symlink() for index in range(1, len(parts))
+    ):
         raise ValueError(f"{path} is outside {parts[0]}")
     return parts[0], target
 
@@ -91,9 +99,19 @@ def _display(name: str, folder: Path, target: Path) -> str:
     return name if relative == "." else f"{name}/{relative}"
 
 
+def _contained(path: Path, folder: Path) -> bool:
+    """Whether ``path`` is a real entry inside ``folder``, not a link out of it."""
+    return not path.is_symlink() and path.resolve().is_relative_to(folder.resolve())
+
+
 def _walk(folder: Path) -> Iterator[Path]:
+    # The Agent can write these folders, and this server runs as the App host's
+    # user, so a link it planted must never lead the server outside them.
     for path in sorted(folder.rglob("*")):
-        if any(part.startswith(".") for part in path.relative_to(folder).parts):
+        relative = path.relative_to(folder).parts
+        if any(part.startswith(".") for part in relative):
+            continue
+        if not _contained(path, folder):
             continue
         yield path
 
@@ -217,12 +235,20 @@ class _Tables:
         return {"tables": tables, "skipped": self.skipped}
 
     def query(self, sql: str) -> dict[str, Any]:
+        deadline = time.monotonic() + MAX_QUERY_SECONDS
+        self.connection.set_progress_handler(lambda: time.monotonic() > deadline, 10_000)
         try:
             cursor = self.connection.execute(sql)
+            columns = [item[0] for item in cursor.description or ()]
+            rows = [dict(row) for row in cursor.fetchmany(MAX_ROWS + 1)]
         except sqlite3.DatabaseError as exc:
+            if time.monotonic() > deadline:
+                raise ValueError(
+                    f"query ran longer than {MAX_QUERY_SECONDS} seconds and was stopped"
+                ) from exc
             raise ValueError(f"query failed: {exc}. Only SELECT statements are allowed.") from exc
-        columns = [item[0] for item in cursor.description or ()]
-        rows = [dict(row) for row in cursor.fetchmany(MAX_ROWS + 1)]
+        finally:
+            self.connection.set_progress_handler(None, 0)
         return {
             "columns": columns,
             "rows": rows[:MAX_ROWS],
@@ -263,7 +289,7 @@ def build(*, writable: bool = False, name: str = "files") -> FastMCP:
         entries = _walk(target) if recursive else sorted(target.iterdir())
         lines = []
         for entry in entries:
-            if entry.name.startswith("."):
+            if entry.name.startswith(".") or not _contained(entry, folders[name]):
                 continue
             shown = _display(name, folders[name], entry.resolve())
             lines.append(
@@ -303,6 +329,8 @@ def build(*, writable: bool = False, name: str = "files") -> FastMCP:
 
         `glob`, such as *.md, limits which files are searched.
         """
+        if len(pattern) > MAX_PATTERN:
+            raise ValueError(f"pattern is longer than {MAX_PATTERN} characters")
         try:
             expression = re.compile(pattern)
         except re.error as exc:
@@ -329,7 +357,7 @@ def build(*, writable: bool = False, name: str = "files") -> FastMCP:
                 for number, line in enumerate(
                     data.decode("utf-8", errors="replace").splitlines(), 1
                 ):
-                    if expression.search(line):
+                    if expression.search(line[:MAX_SEARCHED_LINE]):
                         matches.append(f"{shown}:{number}: {line[:300]}")
                         if len(matches) >= MAX_MATCHES:
                             return "\n".join([*matches, f"… stopped at {MAX_MATCHES} matches"])
@@ -358,6 +386,8 @@ def build(*, writable: bool = False, name: str = "files") -> FastMCP:
                 raise ValueError(
                     "Only scratch/ can be written; the resource folders are read-only."
                 )
+            if len(content.encode()) > MAX_WRITE_BYTES:
+                raise ValueError(f"content is larger than {MAX_WRITE_BYTES} bytes")
             target = resolved[1]
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
