@@ -156,6 +156,25 @@ try:
         assert failed_quality["trials"][0]["score"] == 0, failed_quality
         ModelFixture.wrong = False
 
+        shutil.copytree(root / "verifiers/correct-category", root / "verifiers/progress")
+        progress_file = root / "verifiers/progress/verifier.yaml"
+        progress = yaml.safe_load(progress_file.read_text())
+        progress.update(name="progress", check="total_reward")
+        progress_file.write_text(yaml.safe_dump(progress, sort_keys=False))
+        shutil.copytree(root / "tasks/ticket-1", root / "tasks/progress-case")
+        task_file = root / "tasks/progress-case/task.yaml"
+        task = yaml.safe_load(task_file.read_text())
+        task.update(name="progress-case", verifiers=["progress"])
+        task_file.write_text(yaml.safe_dump(task, sort_keys=False))
+        by_reward = json.loads(_run("run", "-t", "progress-case", "-a", "careful", "--json"))
+        ledger = [
+            json.loads(line)
+            for path in (root / ".plural/jobs" / by_reward["job_id"]).rglob("rewards.jsonl")
+            for line in path.read_text().splitlines()
+        ]
+        total = sum(r["value"] for r in ledger if r["verifier"] == "progress")
+        assert total > 0 and by_reward["trials"][0]["score"] == total, (by_reward, ledger)
+
         _run("verifier", "init", "triage-review")
         (root / "verifiers/triage-review/verify.py").unlink()
         (root / "verifiers/triage-review/verifier.yaml").write_text(
@@ -203,8 +222,8 @@ try:
         assert stored.status == "succeeded" and stored.trials[0].score == 1, stored
         print(
             f"PASS: 6 validators, dry-run, native loop, 6-Trial benchmark, "
-            f"zero-score case, local review completion ({ModelFixture.calls} controlled "
-            f"model responses)."
+            f"zero-score case, total-reward score, local review completion "
+            f"({ModelFixture.calls} controlled model responses)."
         )
 finally:
     server.shutdown()

@@ -1,6 +1,6 @@
-# Task: instructions, the one Environment it runs in, and the Verifiers that score it.
+# Task: one game. The instructions, the Environment it runs in, and the Verifier.
 name: crane
-version: 0.1.0
+version: 1.0.0
 instructions: instruction.md
 environment: wordle
 verifiers:

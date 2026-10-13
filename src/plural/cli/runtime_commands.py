@@ -62,7 +62,8 @@ runtime_app.add_typer(policy_app, name="policy")
 SET_OPTION = typer.Option(
     None,
     "--set",
-    help="A setting as key=value, such as --set cpus=2. Repeat for more. "
+    help="A setting as key=value, such as --set cpus=2. Repeat for more; repeat a list "
+    "setting to add items, such as --set python_packages=duckdb --set python_packages=polars. "
     "See `plural runtime provider <id>` for every key.",
 )
 CREDENTIAL_OPTION = typer.Option(
@@ -158,7 +159,9 @@ def _parse_settings(values: list[str] | None) -> dict[str, Any]:
         key, separator, value = item.partition("=")
         if not separator or not key.strip():
             raise ProjectError(f"--set {item!r} must look like key=value.")
-        settings[key.strip()] = value
+        key = key.strip()
+        # Repeating a key adds to a list setting, such as python_packages.
+        settings[key] = f"{settings[key]}\n{value}" if key in settings else value
     return settings
 
 
@@ -199,7 +202,7 @@ def _display(field: dict[str, Any], value: Any) -> str:
         return muted(field["placeholder"] or "Provider default")
     if field["kind"] == "select":
         return _option_label(field, value)
-    if field["kind"] == "hosts" and isinstance(value, list):
+    if field["kind"] in {"hosts", "packages"} and isinstance(value, list):
         return ", ".join(value)
     if field["kind"] == "boolean":
         return "Yes" if value else "No"
@@ -234,6 +237,14 @@ def _ask_field(field: dict[str, Any], current: Any) -> Any:
             if any(option["value"] == answer for option in options):
                 return answer
             typer.echo(f"  Enter a number from 1 to {len(options)}.")
+    if field["kind"] == "packages":
+        listed = " ".join(current or [])
+        answer = typer.prompt(
+            "  Packages, separated by spaces (e.g. duckdb>=1.1 polars)",
+            default=listed,
+            show_default=bool(listed),
+        ).strip()
+        return answer.split() or None
     shown = ", ".join(current) if isinstance(current, list) else current
     answer = typer.prompt(
         "  Value" if not field["placeholder"] else f"  Value (e.g. {field['placeholder']})",

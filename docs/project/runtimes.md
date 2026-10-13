@@ -122,13 +122,49 @@ runtime:
 The settings are copied, not linked. A saved Environment revision never changes, so
 editing a Runtime later does not change Environments that already use it. Run
 `plural runtime use` again, then push, to pick up the change. The Environment's
-[Runtime variables](environments.md#runtime-variables-and-secrets) are kept.
+[Runtime variables](environments.md#runtime-variables) are kept.
 
 On pluralintel.com, open an Environment, go to its **Runtime** tab, and choose a
 project Runtime.
 
 When a Runtime uses your own credentials and they are not already set in your shell, `plural run` fetches them from the project Runtime, if you are allowed
 to use them. They are used only for that run and are never saved in the Job.
+
+## Packages
+
+When an App needs a package beyond Plural, such as `duckdb` or a warehouse client,
+list it in the Environment's `runtime`:
+
+```yaml
+runtime:
+  provider: daytona
+  python_packages:
+    - duckdb>=1.1
+    - snowflake-connector-python
+```
+
+Each entry is one requirement, as you would give it to `pip install`. Plural installs
+them alongside itself when the Runtime starts, skips any already installed, and checks
+afterwards that each one is. A Docker Runtime builds them into its image once and reuses it.
+
+- On a project Runtime, add them in the **Python packages** field of its **Software**
+  step on pluralintel.com, one per line, or from the CLI by repeating `--set`:
+
+  ```bash
+  plural runtime create big-box --provider daytona \
+    --set 'python_packages=duckdb>=1.1' --set python_packages=polars
+  ```
+
+  `plural runtime use` copies them into `environment.yaml` with the other settings.
+- The `local` Runtime installs nothing. It runs in your own Python, so a Job checks
+  first and names any package that Python lacks, for you to install.
+- Installing needs network access from the Runtime. With `network: none`, bake the
+  packages into the image with `dockerfile` or `image` instead.
+
+:::details Other package managers
+`python_packages` is shorthand for `packages: {python: [...]}`. Python is the only
+package manager today; others will be added beside it under `packages`.
+:::
 
 ## Runtime templates and policy
 

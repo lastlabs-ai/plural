@@ -323,7 +323,7 @@ def policy_case_environment(payload: dict[str, Any]) -> EnvironmentDefinition:
     return EnvironmentDefinition(
         name=str(payload.get("name") or "env"),
         runtime=EnvironmentRuntime.model_validate(runtime),
-        actions=tuple(payload.get("actions") or ()),
+        apps=tuple(payload.get("apps") or ()),
         harness_policy=HarnessPolicy.model_validate(payload.get("harness_policy") or {}),
     )
 

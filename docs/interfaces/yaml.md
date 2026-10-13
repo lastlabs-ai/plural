@@ -35,7 +35,7 @@ its kind. That file is the resource's **manifest**. A project looks like this:
 ```text
 project.yaml                  project name and description
 plural.lock                   written by Plural and updated by push; commit it, do not edit it
-environments/<name>/          environment.yaml, environment.py, README.md, optional resources/
+environments/<name>/          environment.yaml, server.py or environment.py, README.md, optional resources/
 tasks/<name>/                 task.yaml, instruction.md, optional resources/
 verifiers/<name>/             verifier.yaml, verify.py
 harnesses/<name>/             harness.yaml, harness.py
@@ -137,14 +137,33 @@ construct a `Job` in Python. With three Tasks and one Agent,
 
 ## Include Python behavior
 
-An **Environment** (the world the Agent acts in) needs code as well as settings.
-`environment.yaml` names the class beside it and the Runtime it runs in:
+An **Environment** (the world the Agent acts in) is a set of
+[Apps](../concepts/apps.md). With one Python App, `environment.yaml` names the App
+class beside it and the Runtime it runs in:
 
 ```yaml
 name: support-queue
 version: 1.0.0
 python: environment.py:SupportQueue
 readme: README.md
+runtime:
+  provider: local
+```
+
+With several, or with an App that connects an existing system, list them under
+`apps`. Each entry is a Python App or a named `mcp`, `openapi`, `data`, or `replay`
+App with that kind's settings:
+
+```yaml
+name: support-desk
+apps:
+  - python: apps/queue.py:SupportQueue
+  - name: crm
+    mcp:
+      url: https://sandbox.mcp.example.com/v1
+      headers:
+        Authorization: Bearer ${CRM_TOKEN}
+      credentials: [CRM_TOKEN]
 runtime:
   provider: local
 ```
@@ -166,7 +185,7 @@ A deterministic Verifier names its function:
 name: correct-category
 version: 0.1.0
 kind: deterministic
-check: verify.py:verify
+check: verify.py:check
 ```
 
 Plural imports the referenced object and hashes the whole resource folder, so helper

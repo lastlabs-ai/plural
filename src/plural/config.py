@@ -46,16 +46,17 @@ def resolve_gateway_url(
     """Resolve the hosted gateway URL.
 
     Prefer an explicit constructor value, then ``PLURAL_GATEWAY_URL``, then
-    ``PLURAL_API_URL``, then the production default.
+    ``PLURAL_API_URL``, then the production default. The gateway is served under
+    ``/v1`` of the API, so it is added to ``PLURAL_API_URL`` when missing.
 
     Returns:
         The gateway base URL without a trailing slash.
     """
     env = os.environ if environ is None else environ
-    raw = (
-        explicit
-        or env.get("PLURAL_GATEWAY_URL")
-        or env.get("PLURAL_API_URL")
-        or DEFAULT_SETTINGS.gateway_base_url
-    )
-    return raw.rstrip("/")
+    gateway = explicit or env.get("PLURAL_GATEWAY_URL")
+    if gateway:
+        return gateway.rstrip("/")
+    api = (env.get("PLURAL_API_URL") or "").rstrip("/")
+    if api:
+        return api if api.endswith("/v1") else f"{api}/v1"
+    return DEFAULT_SETTINGS.gateway_base_url.rstrip("/")

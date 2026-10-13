@@ -1,5 +1,26 @@
 {
   "$defs": {
+    "AgentCredential": {
+      "additionalProperties": false,
+      "description": "A credential this Agent supplies to the Apps it works with.\n\nThe value, such as the Salesforce token of the user this Agent acts as, is\nnever part of the Agent: each person who runs it saves their own with\n``plural credential set`` or exports it, and it reaches only the App host.\n``scopes`` records what the token may do, as you describe it; the system\nthat issued the token enforces them, and every Trial records them for audit.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "scopes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes",
+          "type": "array"
+        }
+      },
+      "title": "AgentCredential",
+      "type": "object"
+    },
     "FileDeclaration": {
       "additionalProperties": false,
       "description": "A file emitted or consumed by a package.",
@@ -224,7 +245,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "A catalog-backed model and its optional execution harness.",
+  "description": "A catalog-backed model and its optional execution harness.\n\nTo evaluate your own agent or model server instead, give ``endpoint``: the\nbase URL of an OpenAI-compatible API (one that serves\n``/chat/completions``). ``model`` is then sent to it as is and need not be\nin the catalog, and ``endpoint_key`` names the secret holding its API key.\nPlural's native Harness calls it with the Environment's actions as tools.",
   "properties": {
     "auth_mode": {
       "default": "environment",
@@ -236,6 +257,37 @@
       ],
       "title": "Auth Mode",
       "type": "string"
+    },
+    "credentials": {
+      "additionalProperties": {
+        "$ref": "#/$defs/AgentCredential"
+      },
+      "title": "Credentials",
+      "type": "object"
+    },
+    "endpoint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Endpoint"
+    },
+    "endpoint_key": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Endpoint Key"
     },
     "fallback_models": {
       "default": [],

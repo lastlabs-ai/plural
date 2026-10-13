@@ -1,9 +1,14 @@
-"""Canonical Python Environment authoring and Trace datasets."""
+"""Environments compose Apps; Trace datasets collect what happened in them."""
 
+from __future__ import annotations
+
+import importlib
+from typing import TYPE_CHECKING, Any
+
+from plural.apps.definition import AppAction, AppDefinition
 from plural.environments.action_registry import action
 from plural.environments.dataset import TraceDataset, TraceFilter
 from plural.environments.definition import (
-    Action,
     EnvironmentDefinition,
     EnvironmentIdentity,
     EnvironmentResource,
@@ -12,33 +17,52 @@ from plural.environments.definition import (
     Guardrail,
     HarnessGrant,
     HarnessPolicy,
-    NativeAction,
+    Party,
     Resource,
-    RewarderDefinition,
     Runtime,
+    RuntimePackages,
     RuntimeVariable,
     Secret,
     SecretReference,
 )
-from plural.environments.env import Environment, rewarder
 from plural.environments.types import Observation, State, initial
 
+if TYPE_CHECKING:
+    from plural.environments.env import ActionCall, Environment
+
+# Loaded on first use: Environment depends on App, whose module imports the
+# helpers in this package.
+_LAZY = {
+    "ActionCall": "plural.environments.env",
+    "Environment": "plural.environments.env",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module = _LAZY.get(name)
+    if module is None:
+        raise AttributeError(f"module 'plural.environments' has no attribute {name!r}")
+    return getattr(importlib.import_module(module), name)
+
+
 __all__ = [
-    "Action",
+    "ActionCall",
+    "AppAction",
+    "AppDefinition",
     "Environment",
     "EnvironmentIdentity",
     "EnvironmentDefinition",
     "EnvironmentResource",
     "EnvironmentRuntime",
     "ExecutionLimits",
+    "Party",
     "Guardrail",
     "HarnessPolicy",
     "HarnessGrant",
-    "NativeAction",
     "Observation",
-    "RewarderDefinition",
     "Resource",
     "Runtime",
+    "RuntimePackages",
     "RuntimeVariable",
     "Secret",
     "SecretReference",
@@ -47,5 +71,4 @@ __all__ = [
     "TraceFilter",
     "action",
     "initial",
-    "rewarder",
 ]

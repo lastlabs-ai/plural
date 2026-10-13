@@ -1,4 +1,4 @@
-"""The episode contract: who ends an episode, and where reward is recorded."""
+"""The episode contract: who ends an episode, and that the Harness never keeps a reward."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from plural.environments.runner import PROTOCOL
+from plural.apps.host import STEP_PROTOCOL as PROTOCOL
 from plural.harness import native_runner
 from plural.harness.protocol import HarnessRunRequest
 
@@ -205,7 +205,7 @@ def test_exhausting_turns_truncates_instead_of_failing(
     assert result["terminated"] is False
 
 
-def test_reward_is_recorded_but_never_shown_to_the_agent(
+def test_the_harness_neither_records_nor_shows_a_reward(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     request = _request(tmp_path)
@@ -223,16 +223,9 @@ def test_reward_is_recorded_but_never_shown_to_the_agent(
 
     result, episode, _trace = native_runner._run("native.actions.v1", request)
 
-    assert episode.rewards == [
-        {
-            "type": "reward",
-            "turn": 1,
-            "action": "act",
-            "value": 0.75,
-            "signals": [{"name": "progress", "value": 0.75, "weight": 1.0}],
-        }
-    ]
-    assert result["total_reward"] == 0.75
+    assert "rewards" not in episode.document()
+    assert "total_reward" not in result
+    assert "reward" not in episode.transitions[-1]
     tool = next(item for item in episode.messages if item.get("role") == "tool")
     assert "closer" in tool["content"]
     assert "0.75" not in tool["content"]
@@ -391,6 +384,47 @@ def test_trajectory_reads_as_chat_turns(tmp_path: Path, monkeypatch: pytest.Monk
     assert "0.75" not in json.dumps(document)
 
 
+def test_a_harness_without_a_model_still_reads_as_chat_turns() -> None:
+    from plural.transcript import episode_to_messages
+
+    clock = {"started_at": "2026-01-01T00:00:00+00:00", "ended_at": "2026-01-01T00:00:02+00:00"}
+    records = [
+        {"sequence": 1, "kind": "environment.reset", "observation": {"text": "6 left"}, **clock},
+        {
+            "sequence": 2,
+            "event_id": "e2",
+            "kind": "environment.step",
+            "action": "guess",
+            "arguments": {"word": "crane"},
+            "observation": {"text": "+ + + + +"},
+            "rewards": [{"verifier": "solved", "value": 1.0}],
+            "terminated": True,
+            **clock,
+        },
+    ]
+
+    document = episode_to_messages(records)
+
+    assert document["messages"] == [
+        {"role": "user", "content": "6 left"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "e2",
+                    "type": "function",
+                    "function": {"name": "guess", "arguments": '{"word": "crane"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "e2", "name": "guess", "content": "+ + + + +"},
+    ]
+    assert document["status"] == "completed"
+    assert document["time_elapsed"] == 2.0
+    assert "solved" not in json.dumps(document)
+
+
 def test_native_episode_matches_the_recorded_contract() -> None:
     from plural.harness import episode
     from plural.usage import normalize_usage
@@ -442,7 +476,7 @@ def test_native_loop_records_model_calls_and_steps(
     assert episode.records[3]["messages_offset"] == call["message_count"]
     step = episode.records[2]
     assert step["action"] == "act"
-    assert step["reward"] == 0.75
+    assert "reward" not in step
     assert step["tool_call_id"] == "call-act"
     assert result["cost_usd"] == pytest.approx(0.0005)
 

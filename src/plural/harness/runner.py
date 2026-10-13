@@ -99,15 +99,24 @@ class HarnessRunner:
         *,
         env: dict[str, str] | None = None,
         timeout_seconds: float | None = None,
+        user: str | None = None,
+        setup: bool = True,
+        private: bool = False,
     ) -> HarnessExecution:
-        """Execute and enforce protocol and declared-output boundaries."""
-        await self.setup(
-            handle,
-            definition,
-            request,
-            env=env,
-            timeout_seconds=timeout_seconds,
-        )
+        """Execute and enforce protocol and declared-output boundaries.
+
+        ``user`` runs the healthcheck and the Harness; setup, unless the caller
+        already ran it, runs as root. ``private`` makes every file the Harness
+        creates readable by its own user only, as for a seat.
+        """
+        if setup:
+            await self.setup(
+                handle,
+                definition,
+                request,
+                env=env,
+                timeout_seconds=timeout_seconds,
+            )
         if definition.healthcheck is not None:
             health = await self.provider.exec(
                 handle,
@@ -116,6 +125,7 @@ class HarnessRunner:
                     cwd=request.workspace,
                     env=env or {},
                     timeout_seconds=min(timeout_seconds or 30, 30),
+                    user=user,
                 ),
             )
             if health.timed_out or health.exit_code != 0:
@@ -153,6 +163,8 @@ class HarnessRunner:
                 *command,
             )
             stdin = None
+        if private:
+            command = ("sh", "-c", 'umask 077; exec "$@"', "plural-seat", *command)
         run_env = dict(env or {})
         tools = f"{request.workspace.rstrip('/')}/.plural/tools/bin"
         path_value = run_env.get("PATH") or os.environ.get("PATH") or "/usr/local/bin:/usr/bin:/bin"
@@ -169,6 +181,7 @@ class HarnessRunner:
                 env=run_env,
                 timeout_seconds=timeout_seconds,
                 stdin=stdin,
+                user=user,
             ),
         )
         if result.timed_out:

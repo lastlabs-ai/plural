@@ -111,8 +111,8 @@ private keys (`id_rsa`, `*.pem`, `*.key`), `.netrc`, and `credentials.json`.
 Remove the file, or list it in the resource's `.pluralignore`. It also refuses a
 resource directory that contains a symbolic link, and a package over 100 MiB
 compressed. The service repeats the credential check and rejects archives with
-absolute paths, `..` components, or links. Keep secrets in Environment secret
-references, not in resource directories.
+absolute paths, `..` components, or links. Declare secrets by name on the App that
+needs them, and keep their values out of resource directories.
 
 `.pluralignore` sits in the resource directory, beside its manifest. Each line is
 one file path relative to that directory, such as `data/raw.csv`; lines starting

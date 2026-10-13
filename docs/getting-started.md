@@ -2,203 +2,134 @@
 route: /docs/getting-started
 title: Getting started
 order: 20
-description: Go from a new account to your first scored run. Sign up, install Plural, sign in with your API key, build a small Task, run it on your computer, then push it and run it on Plural's servers.
+description: Go from a new account to your first scored run. Sign up, install Plural, sign in, build a small Task, run it on your computer, then run it on Plural's servers.
 audience: all
 nav: true
 nav_group: Start
 ---
 # Getting started
 
-By the end of this page you will have a Plural account, an API key, a project on your
-computer with one working Task in it, and a scored result you can inspect and rerun.
-If you want, you will also have run the same thing on Plural's servers.
+By the end of this page you'll have built one small Task, run a model on it, and
+looked at its score. It takes about half an hour, and most of that is writing the Task.
 
-Plan on about half an hour. The setup steps take a few minutes each; most of the time
-goes into describing your first Task.
-
-If words like Environment, Task, and Verifier are new, read
-[Core concepts](getting-started/concepts.md) first. It takes about five minutes. If
-you would rather watch a finished project run before building your own, try the
-[support queue tutorial](tutorials/support-queue.md). It runs offline, with no account
-or key.
+New to words like Environment, Task, and Verifier? Read
+[Core concepts](getting-started/concepts.md) first; it takes five minutes. Want to see
+a finished project run before building your own? The
+[support queue tutorial](tutorials/support-queue.md) runs offline, with no account.
 
 ## Create an account
 
-Everything starts at [pluralintel.com](https://pluralintel.com).
-
-1. **Sign up.** Use your email and a password, or continue with Google or GitHub.
-2. **Confirm your email.** If you signed up with email, Plural sends you a link. Open
-   it to verify your address.
-3. **Take the short tour.** It shows you the project switcher at the top of the
-   sidebar and the model Catalog in the top navigation.
-4. **Create your first API key.** The tour ends by creating an account API key named
-   `test_key`. An API key is a long secret string that lets the `plural` command on
-   your computer act on your account and call models.
-
-> **Good to know:** The key is shown only once. Copy it somewhere safe, such as a
-> password manager, before you leave the page. If you lose it, create a new one; you
-> can make and manage more keys under **Keys** in your account.
-
-You will use this key in [Sign in](#sign-in), right after you install Plural.
+1. Sign up at [pluralintel.com](https://pluralintel.com) with email, Google, or GitHub.
+2. Take the short tour. It ends by creating your first **API key**, a secret string
+   that lets the `plural` command act on your account and call models.
+3. Copy the key somewhere safe, such as a password manager. It is shown only once. If
+   you lose it, make a new one under **Keys**.
 
 ## Install
 
-Plural comes as a Python package. It gives you two things: the `plural` command, which
-you type into a terminal, and a Python SDK for people who prefer to write code. You
-need Python 3.10 or newer.
+You need Python 3.10 or newer.
 
-Install it with pip:
-
+:::tabs
+:::tab pip
 ```bash
-python -m pip install "plural>=0.18.0"
+python -m pip install "plural[mcp]>=0.21.0"
 ```
-
-Or, if you use uv, install the `plural` command as a tool:
-
+:::tab uv
 ```bash
-uv tool install "plural>=0.18.0"
+uv tool install "plural[mcp]>=0.21.0"
 ```
+:::
 
-To check that it worked, run `plural --help`. It prints the list of commands.
+Check it worked with `plural --help`.
 
-**Docker.** By default, Plural runs each AI's world inside Docker. Think of Docker as a
-sealed box: the AI can do whatever the Task allows inside the box, but it cannot touch
-the rest of your computer. Install [Docker](https://www.docker.com/) and make sure it
-is running before you run anything that uses the default runtime.
+Then install [Docker](https://www.docker.com/) and start it. Plural runs each
+attempt inside a Docker container, a sealed box: the AI can do whatever the Task
+allows inside it, and nothing outside it.
 
-For power users: to use the Python SDK from a uv-managed project, also run
-`uv add "plural>=0.18.0"` inside that project. Optional extras include
-`plural[daytona]` for the Daytona Runtime and `plural[keyring]` to store credentials in
-your OS keyring.
+:::details Optional extras
+- `plural[mcp]` (above) lets Plural run MCP servers, which new projects use.
+- `plural[daytona]` adds the Daytona Runtime.
+- `plural[keyring]` stores your credentials in your OS keyring.
+
+To use the Python SDK from a uv project, run `uv add "plural[mcp]>=0.21.0"` inside it.
+:::
 
 ## Sign in
 
-Signing in connects the `plural` command on your computer to your Plural account. Do it
-now with the `test_key` you created in the tour, and every step after this one just
-works.
-
-There are two ways to sign in, and they are good for different things:
-
-- **A browser login** opens pluralintel.com and you approve it there. Plural then
-  stores a 30-day API key for the account selected in the browser, your personal
-  account or an organization. It works for everything, including model calls.
-- **An API key** is a secret you create in the web app under Keys. Use one for CI, or
-  when you want a key that does not expire or is limited to one project.
-
-:::tabs
-:::tab API key
-Paste the key when prompted (it is not shown as you type), or pipe it in. Plural
-stores it for you:
+Connect the `plural` command to your account with the key from the tour. It asks for
+the key without showing it as you type:
 
 ```bash
 plural auth login --api-key-stdin
 ```
 
-Or keep it in an environment variable instead:
+That's it. The key is stored in your user config folder (or OS keyring), never in your
+project, so it can't be committed by accident.
 
-```bash
-export PLURAL_API_KEY=plural_...
-```
-
-If the key is already in `PLURAL_API_KEY`, `plural auth login --from-env` stores it
-without printing it.
-:::tab Browser login
-This opens your browser to approve the login:
-
-```bash
-plural auth login
-plural auth status
-```
-
-`plural auth status` checks the credential with the service and shows where your
-commands are pointed.
+:::details Other ways to sign in
+- **Browser login.** `plural auth login` opens pluralintel.com, you approve it there,
+  and Plural stores a 30-day key for the account you picked. Check it with
+  `plural auth status`.
+- **Environment variable.** `export PLURAL_API_KEY=plural_...` works anywhere, which
+  is handy in CI. `plural auth login --from-env` stores a key from that variable
+  without printing it.
+- **Project keys.** A project key is an API key limited to one project. It can reach
+  only that project and can't create new ones.
+- **Organizations.** A login acts for one account. To work in another organization,
+  select it in the web app and run `plural auth login` again. Signed in to an
+  organization, `plural models list` shows the models it allows.
 :::
-
-Either way, the credential is stored in your user config folder (or your OS keyring),
-never in your project files. Keep keys out of source files, Agent instructions, and
-Task files.
-
-For power users:
-
-- A browser login acts for one account. To work in another organization, select it in
-  the web app and run `plural auth login` again. The key it stores is listed under
-  Keys in that account, and `plural auth logout` deletes it.
-- A **project key** is an API key limited to one project. It can only reach that
-  project and cannot create new ones.
-- Signed in to an organization, `plural models list` shows the models your
-  organization offers; add `--all` for the whole catalog. When a run starts, the
-  service refuses any model your organization does not permit.
 
 ## Create a project
 
-A project is a folder that holds everything you build: your worlds, assignments,
-graders, and contestants. Creating one works offline and needs no account:
+A project is a folder that holds everything you build. Creating one works offline:
 
 ```bash
 plural project init my-eval
 cd my-eval
 ```
 
-That creates a few starter files:
+You can run every `plural` command from anywhere inside this folder.
 
-- `project.yaml`: the project's name and description. This file is what marks the
-  folder as a Plural project.
-- `plural.lock`: a record of the hosted versions your resources depend on. Plural
-  updates it when you push or pull. Commit it to version control, and do not edit it by
-  hand.
-- `pyproject.toml` and `README.md`.
-- A `.gitignore` that leaves out `.plural/`, the folder where Plural keeps local state
-  such as the records of your runs.
-
-Each thing you add later gets its own folder, named after it. Here is the full layout,
-for reference:
-
+:::details What's in a project
 ```text
-project.yaml            name and description
-plural.lock             hosted revisions; commit it
-pyproject.toml          dependencies = ["plural>=0.18.0"]
-.plural/                local state: hosted binding, jobs/, backups/ (gitignored)
-environments/<name>/    environment.yaml, environment.py, README.md, resources/
-tasks/<name>/           task.yaml, instruction.md, resources/
+project.yaml            name and description; marks the folder as a project
+plural.lock             hosted revisions; commit it, never edit it
+pyproject.toml          the project's Python dependencies
+.plural/                local state and run records (gitignored)
+environments/<name>/    environment.yaml, server.py or environment.py, README.md
+tasks/<name>/           task.yaml, instruction.md
 verifiers/<name>/       verifier.yaml, verify.py
 harnesses/<name>/       harness.yaml, harness.py
 agents/<name>/          agent.yaml
 benchmarks/<name>/      benchmark.yaml, README.md
 ```
 
-Commands look upward from wherever you are to find `project.yaml`, so you can run them
-from any folder inside the project.
+Each resource gets its own folder, named after it, and resources refer to each other
+by name.
+:::
 
 ## Add resources
 
-A **resource** is any one of the building blocks from
-[Core concepts](getting-started/concepts.md). For a first run you need three:
-
-- an **Environment**, the world the AI works in (here, a support desk),
-- a **Verifier**, the grader that scores the finished work, and
-- a **Task**, one assignment in that world (here, a refund request).
-
-Each `init` command writes a template for you to fill in:
+For a first run you need three things: an **Environment** (here, a support desk), a
+**Verifier** to grade the work, and a **Task** (here, a refund request).
 
 ```bash
-plural env init support-desk
+plural env init support-desk --python
 plural verifier init resolved
 plural task init refund --environment support-desk --verifier resolved
 ```
 
-The templates mark every place you need to fill in with `PLURAL-TODO`:
+Each command writes a template. Search for `PLURAL-TODO` and fill in each one:
 
-- `environments/support-desk/environment.py`: what the world holds (its State), what
-  the AI is shown (its Observation), and the moves it can make (its `@action`
-  methods). Keep the answers on State, never on the Observation, so the AI cannot
-  read them.
-- `environments/support-desk/README.md`: what the world is and how to use it.
-- `verifiers/resolved/verify.py`: compare how things ended with what the Task asked
-  for, and return a score.
-- `tasks/refund/instruction.md`: what the AI must accomplish, in plain language. Set
-  the Task's starting State under `initial_state` in `task.yaml`.
+| File | What to write |
+| --- | --- |
+| `environments/support-desk/environment.py` | The App: its State (the hidden facts) and its `@action` methods (the moves). What an action returns is all the AI sees, so keep answers on State. |
+| `verifiers/resolved/verify.py` | Compare how things ended with what the Task asked for, and return a score. |
+| `tasks/refund/instruction.md` | What the AI must do, in plain language. |
+| `tasks/refund/task.yaml` | The starting State, under `initial_state`. |
 
-When you think you are done, ask Plural to check your work:
+Then ask Plural to check your work:
 
 ```bash
 plural task validate refund
@@ -208,26 +139,24 @@ plural task validate refund
 task/refund is valid: version 0.1.0, sha256:4c7c807a30fe...
 ```
 
-`validate` checks the resource and everything it depends on, and lists any template
-text you left unfinished. Nothing runs until it passes, so it is a good habit to
-validate after every edit.
+`validate` checks the Task and everything it uses, and points at any `PLURAL-TODO`
+you missed. Nothing runs until it passes, so validate after every edit.
 
-A few details worth knowing:
-
+:::details Handy details
 - Inside a resource's folder you can leave off the name: `plural task validate` in
   `tasks/refund/` validates `refund`.
-- Every resource kind has the same verbs: `init`, `validate`, `show`, `list`, `push`,
-  and `pull`. They work for `env`, `task`, `verifier`, `harness`, `agent`, and
-  `benchmark`.
-- A new Environment uses the `docker` runtime (`runtime.provider: docker` in
-  `environment.yaml`), so Docker must be running when you run it. The `local` runtime
-  avoids Docker, but it runs the Environment as a trusted subprocess directly on your
-  machine and is not a sandbox. Use it only for code you trust.
+- Every kind of resource has the same verbs: `init`, `validate`, `show`, `list`,
+  `push`, and `pull`.
+- Without `--python`, `plural env init` writes an MCP server (`server.py`) instead of
+  a Python App. Both work the same way in a run.
+- The `local` Runtime skips Docker and runs the Environment directly on your machine.
+  It is not a sandbox, so use it only for code you trust.
+:::
 
 ## Run locally
 
-Now run your Task against a model from the catalog. Start with a **dry run**, which
-shows what would happen without running anything or calling a model:
+Start with a **dry run**. It shows what would run without calling a model, and needs
+no key:
 
 ```bash
 plural run --task refund --model openai/gpt-5.6-luna --dry-run
@@ -241,45 +170,30 @@ verifier/resolved         0.1.0    sha256:9f13af9d2534
 task/refund               0.1.0    sha256:4c7c807a30fe
 ```
 
-The table lists every input with its version and a content hash, a fingerprint of the
-exact files. A dry run needs no key. Using `--model` without `--harness` plays with
-`native`, Plural's built-in loop. To see which model ids you can use, run
-`plural models list` or browse the [model catalog](https://pluralintel.com/models).
+Every input is pinned by version and a content hash, a fingerprint of the exact files.
+That's how Plural can rerun this months from now and get the same experiment.
 
-A real run calls the model, which can cost money. Every model call goes through the
-Plural gateway, which bills it at the exact provider price, using the API key you
-signed in with:
+Now run it for real. This calls the model, billed at the provider's price:
 
 ```bash
 plural run --task refund --model openai/gpt-5.6-luna
 ```
 
-If you skipped [Sign in](#sign-in), the run stops before calling the model and tells
-you how to add a key.
-
-Every run is a new **Job**, and each attempt inside it is a **Trial**. The run prints
-the Job id and one line per Trial with its score. Use those ids to look at the results:
+The run prints a **Job** id and one line per **Trial** with its score. Dig in:
 
 ```bash
-plural job list
-plural job show <job-id>
-plural trial show <trial-id>
-plural job rerun <job-id>
+plural job show <job-id>      # each Trial, its status and score
+plural trial show <trial-id>  # the score, the Verifier's evidence, and the logs
+plural job rerun <job-id>     # run again with exactly the same inputs
 ```
 
-- `job show` lists each Trial with its Task, status, and score.
-- `trial show` prints the score, each Verifier's evidence, and where the Trial's
-  artifacts and logs are.
-- `job rerun` runs the Job again with the exact inputs it used the first time, even if
-  you have edited your files since, and creates a new Job linked to the original.
-
-Plural records each local Job under `.plural/jobs/<job-id>/`, with every input pinned
-by version and content hash.
+Browse model ids with `plural models list` or the
+[model catalog](https://pluralintel.com/models).
 
 ### Compare Agents on a Benchmark
 
-One Task is a start. To compare contestants across many Tasks, group the Tasks into a
-**Benchmark** (the exam) and save an **Agent** (a model plus its instructions):
+One Task is a start. To compare models across many Tasks, group them into a
+**Benchmark** and save an **Agent**, a model plus its instructions:
 
 ```bash
 plural benchmark init support
@@ -287,95 +201,65 @@ plural benchmark add refund --benchmark support
 plural agent init careful --model openai/gpt-5.6-luna
 ```
 
-Fill in the `PLURAL-TODO` places in `benchmarks/support/benchmark.yaml` (what the
-Benchmark measures and what a score means) and `benchmarks/support/README.md`, and
-write the Agent's `instructions` in `agents/careful/agent.yaml`. Then validate and run:
+Fill in the `PLURAL-TODO`s in `benchmarks/support/` and write the Agent's
+`instructions` in `agents/careful/agent.yaml`. Then:
 
 ```bash
 plural benchmark validate support
 plural run --benchmark support --agent careful
 ```
 
+Make a second Agent with a different model or instructions, run it too, and compare.
+
 ## Push and run hosted
 
-So far everything ran on your computer. To have Plural run it for you on its servers,
-you **push** your project to a private hosted project. Pushing never makes anything
-public.
-
-First, register the project. Run this from inside it:
+So far everything ran on your computer. To have Plural run it for you, connect the
+folder to a private hosted project, then add `--hosted`:
 
 ```bash
 plural project init my-eval --push
-```
-
-The name must match `name` in `project.yaml`. This creates a private hosted project
-(or connects to an existing one), remembers the link in `.plural/project.json`, and
-points your commands at that project. It does not change any of your local files.
-
-Then push what the run uses and start a hosted run:
-
-```bash
-plural benchmark push support --with-deps
-plural agent push careful --with-deps
 plural run --benchmark support --agent careful --hosted --follow
 ```
 
-- `--with-deps` also pushes everything the Benchmark or Agent depends on that is not
-  hosted yet.
-- `--hosted` runs on Plural's servers instead of your computer.
-- `--follow` streams progress until the Job finishes.
+`--hosted` pushes anything the run needs that isn't on Plural yet, then runs it on
+Plural's servers. `--follow` streams progress until the Job finishes. You can also
+watch it in the web app under **Jobs**.
 
-You can also watch hosted runs in the web app under **Jobs**, in the project you pushed
-to.
+Pushing never makes anything public. Sharing on the Hub is a separate step you take in
+the web app.
 
-### How pushing works
+:::details How pushing works
+- Each push saves an unchangeable snapshot called a **revision**, such as `#4`.
+  Pushing unchanged content reuses the existing revision, so you never bump a version
+  by hand. To give a revision a name people can cite, run
+  `plural <kind> release NAME 1.0.0`.
+- You can push explicitly too: `plural benchmark push support --with-deps` pushes the
+  Benchmark and everything it uses.
+- A push validates first and uploads nothing unless all of it can succeed.
+- A push refuses files that look like credentials, such as `.env` or private keys.
+  List any other file to leave out in a `.pluralignore` in the resource's folder.
+- If someone else changed a resource in the hosted project since you last synced, the
+  push stops rather than write over their work.
+:::
 
-This is the detail to read when a push is refused or you want to know exactly what
-gets uploaded.
-
-- Each push saves an unchangeable snapshot called a **revision**. A pushed revision is
-  available in its private project immediately.
-- A push validates first and uploads nothing unless the whole push can succeed.
-- Pushing unchanged content reuses the existing revision. Changed content becomes the
-  resource's next numbered revision, such as `#4`; you never bump a version. To give a
-  revision a name people can cite, run `plural <kind> release NAME 1.0.0`.
-- Push refuses files that look like credentials, such as `.env` or private keys, and
-  manifest paths that point outside the resource folder. To leave a file out of a push,
-  list it in a `.pluralignore` file in the resource folder.
-- `--hosted` runs pushed revisions. If the hosted project is missing anything the run
-  uses, `plural run --hosted` pushes it first, as a new numbered revision of any
-  resource whose files changed. If someone else changed a resource
-  in the hosted project since you last synced, the push stops so nothing is written on
-  top of their work.
-- Listing a project on the Hub or publishing a Benchmark is a separate, explicit action
-  in the Plural web app.
-
-## Scope
-
-Scope is where hosted commands go by default: your account as a whole, or one hosted
-project. Registering a project with `--push` already sets it, so most people never need
-to change it.
+:::details Scope: where hosted commands go
+`plural project init --push` points your commands at that hosted project, so most
+people never touch scope. To change it:
 
 ```bash
-plural auth scope
+plural auth scope                  # show the current scope
 plural auth scope --project my-eval
-plural auth scope --account
-plural auth scope --org personal
+plural auth scope --account        # your account as a whole
+plural auth scope --org personal   # switch organization
 ```
 
-- `plural auth scope` on its own shows the current scope.
-- `--project` selects an existing hosted project.
-- `--account` selects account scope.
-- `--org` switches between organization accounts; `personal` selects your own.
+Scope changes where commands go, never what your key may do. A push is refused when
+the scope points at a different project than the folder is connected to.
+:::
 
-Changing scope changes where commands go, never what your credential is allowed to do.
-Plural checks the new scope with the service before saving it; if the check fails, the
-previous scope stays in place. A push is refused when your scope points at a different
-project than the one this folder is registered with.
+## Prefer Python?
 
-## Use the SDK
-
-If you prefer Python to the command line, the SDK loads the same resources by name:
+Everything above works from the SDK too. It reads the same project folder:
 
 ```python
 from plural import Job
@@ -387,25 +271,21 @@ agent = workspace.get("agent", "careful")
 result = Job(benchmark, agents=[agent]).run()
 ```
 
-That runs on your computer, like `plural run`, with one difference: the Job is not
-recorded. It does not appear in `plural job list`, and `plural job rerun` cannot repeat
-it.
+:::details How an SDK run differs from plural run
+It runs on your computer, like `plural run`, but the Job isn't recorded, so it doesn't
+appear in `plural job list` and `plural job rerun` can't repeat it. It finds your key
+in `PLURAL_API_KEY`, in `api_key=`, or through `Client()`, which also reads the key
+`plural auth login` stored.
+:::
 
-A Job that calls a model sends every call through the Plural gateway with your API key.
-It finds the key in `PLURAL_API_KEY`, in `api_key=`, or through a `Client`.
-`Client()` reads `PLURAL_API_KEY` or the API key `plural auth login` stored:
-
-```python
-from plural import Client, Job
-
-job = Job(benchmark, agents=[agent], client=Client())
-```
-
-The Job still runs on your computer. The [Python SDK guide](sdk/evaluation.md) covers
-the rest of the SDK.
+See the [Python SDK guide](sdk/evaluation.md).
 
 ## Where to go next
 
-- Walk through a complete, finished project in the
-  [support queue tutorial](tutorials/support-queue.md).
-- Read the [CLI guide](cli/evaluation.md) for every command.
+- **[Start here](start/index.md)** picks up from what you already have: traces from an
+  agent you run, a system like an MCP server, or nothing yet.
+- **[Several Agents in one Task](project/multi-agent.md)** sets Agents to cooperate or
+  compete.
+- **[The support queue tutorial](tutorials/support-queue.md)** walks through a finished
+  project.
+- **[The CLI guide](cli/evaluation.md)** has every command.

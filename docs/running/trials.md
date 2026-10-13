@@ -51,7 +51,7 @@ hosted project. `--follow` streams progress until the Trial finishes. For a
 tracked or hosted Job, you can see the same Trials in the web app under Jobs.
 
 A Trial moves through these states: planned, queued, provisioning, running,
-verifying, awaiting_review, and then a terminal state. It waits in
+scoring, awaiting_review, and then a terminal state. It waits in
 `awaiting_review` only when a person needs to grade it; see [Reviews](reviews.md).
 
 Progress events are append-only status updates, written to the Job's
@@ -168,7 +168,7 @@ many calls left each one out.
 
 The receipt's `phases` list the measured phases of an execution:
 `agent_setup`, `environment_setup`, `agent_execution`, `artifact_collection`,
-`verification`, and `cleanup`, each with `started_at` and `completed_at`.
+`scoring`, and `cleanup`, each with `started_at` and `completed_at`.
 Phases can repeat and overlap, so their sum is the work done, not the wall
 clock time. Each Verifier result also carries its own `started_at` and
 `completed_at`.

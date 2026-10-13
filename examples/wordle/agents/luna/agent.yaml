@@ -1,6 +1,9 @@
-# Agent: a model and its instructions. No harness means Plural's built-in
-# tool loop (native).
+# Agent: a model and its instructions. No harness, so it uses native, Plural's
+# built-in tool loop.
 name: luna
-version: 0.1.0
+version: 1.0.0
 model: openai/gpt-5.6-luna
-instructions: Play Wordle with the guess action. Use the marks to narrow the word, and stop as soon as it is solved.
+instructions: >
+  You play Wordle. Call guess with one five-letter word at a time. A reply marks
+  each letter: + correct, ? in the word somewhere else, - absent. Use every mark
+  to narrow the next guess.

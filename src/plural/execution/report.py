@@ -26,17 +26,25 @@ import json
 import queue
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from plural import __version__
+from plural.execution.steps import STEPS_FILE, episode_terminated
 from plural.execution.store import JobStore
 from plural.harness.episode import EPISODE_FILE, EPISODE_SCHEMA
-from plural.jobs import JobPlan, JobSpec, ProgressEvent, TrialResult, VerifierResult
-from plural.studio import Studio
+from plural.jobs import (
+    JobPlan,
+    JobSpec,
+    ProgressEvent,
+    TrialResult,
+    VerifierResult,
+)
+from plural.rewards import LEDGER_FILE, read_ledger
+from plural.studio import UPLOAD_TIMEOUT, Studio
 from plural.usage import TokenUsage, UsageTotals
 
 EVENT_BATCH = 200
@@ -256,8 +264,28 @@ def _hosted_results(
     return out
 
 
+def _host_steps(artifacts: Path) -> list[dict[str, Any]] | None:
+    path = artifacts / STEPS_FILE
+    if not path.is_file():
+        return None
+    steps: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            steps.append(row)
+    return steps
+
+
 def _outcome(artifacts: Path, records: list[dict[str, Any]]) -> dict[str, Any]:
-    """How the episode ended, as the Harness reported it in ``result.json``."""
+    """How the episode ended.
+
+    The stop reason is the Harness's, from ``result.json``. With Apps, whether
+    the Environment ended and the step reward total come from the App host's
+    ``steps.jsonl``, since the Harness is the code under test.
+    """
     path = artifacts / "result.json"
     reported: dict[str, Any] = {}
     if path.exists():
@@ -280,6 +308,10 @@ def _outcome(artifacts: Path, records: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     if "total_reward" not in outcome and rewards:
         outcome["total_reward"] = float(sum(rewards))
+    steps = _host_steps(artifacts)
+    if steps is not None:
+        outcome["terminated"], outcome["truncated"] = episode_terminated(steps)
+        outcome["total_reward"] = float(sum(float(step.get("reward") or 0) for step in steps))
     return outcome
 
 
@@ -377,7 +409,6 @@ def publish_execution(
     uploaded = 0
     for entry in manifest:
         relative = str(entry["path"])
-        data = (artifacts_root / relative).read_bytes()
         studio.request(
             "POST",
             f"{path}/artifacts",
@@ -386,8 +417,9 @@ def publish_execution(
                 "role": _ROLES.get(str(entry.get("role")), "output"),
                 "producer": "harness",
             },
-            content=data,
+            content=artifacts_root / relative,
             content_type=str(entry.get("media_type") or "application/octet-stream"),
+            timeout=UPLOAD_TIMEOUT,
         )
         uploaded += 1
 
@@ -399,14 +431,19 @@ def publish_execution(
         usage["agent"] = {"cost_usd": receipt.cost_usd}
     report: dict[str, Any] = {
         **_outcome(artifacts_root, records),
+        "credentials": [item.model_dump(mode="json") for item in result.credentials],
         "usage": usage,
         "phases": [phase.model_dump(mode="json") for phase in receipt.phases],
         "runtime": {
             "plural_version": __version__,
             "provider": receipt.runtime_provider,
             "worker": worker_id,
+            **({"app_isolation": result.app_isolation} if result.app_isolation else {}),
         },
     }
+    if result.seats:
+        report["seats"] = [item.model_dump(mode="json") for item in result.seats]
+        report["seat_isolation"] = result.seat_isolation
     final = result.status
     if final in {"succeeded", "awaiting_review"}:
         studio.request("POST", f"{path}/transition", json={"status": "verifying"})
@@ -426,13 +463,25 @@ def publish_execution(
     return Published(execution_id, str(done.get("status") or final), len(events), uploaded)
 
 
-def _hosted_trials(studio: Studio, hosted_job_id: str) -> dict[tuple[str, str, int], str]:
+_HostedKey = tuple[str, str, int]
+
+
+def _hosted_trials(studio: Studio, hosted_job_id: str) -> dict[_HostedKey, str]:
     return {
         (str(item.get("task_name")), str(item.get("agent_name")), int(item["attempt"])): str(
             item["id"]
         )
         for item in studio.jobs.trials(hosted_job_id)
     }
+
+
+def _result_key(result: TrialResult, pins: Mapping[str, AgentPin]) -> _HostedKey:
+    """The hosted Trial a local result belongs to, by the hosted Agent's name.
+
+    A Trial several Agents share is the first seat's Agent's.
+    """
+    receipt = result.receipt
+    return (receipt.task_pin.name, pins.get(receipt.agent_digest, ("", None))[0], receipt.attempt)
 
 
 def publish_job(
@@ -462,11 +511,12 @@ def publish_job(
             key=lambda path: int(path.name),
         )
         for execution_root in executions:
-            receipt = TrialResult.model_validate_json(
+            outcome = TrialResult.model_validate_json(
                 (execution_root / "result.json").read_text(encoding="utf-8")
-            ).receipt
-            name, definition = pins.get(receipt.agent_digest, ("", None))
-            key = (receipt.task_pin.name, name, receipt.attempt)
+            )
+            receipt = outcome.receipt
+            _, definition = pins.get(receipt.agent_digest, ("", None))
+            key = _result_key(outcome, pins)
             target = hosted.get(key)
             if target is None:
                 raise PublishError(
@@ -482,6 +532,61 @@ def publish_job(
                 )
             )
     return published
+
+
+def publish_rewards(
+    studio: Studio,
+    store: JobStore,
+    local_job_id: str,
+    hosted_job_id: str,
+    *,
+    trial_ids: Collection[str] | None = None,
+    agents: Mapping[str, AgentPin] | None = None,
+) -> int:
+    """Add each execution's reward ledger to its hosted Trial's ledger.
+
+    Use this after ``plural verifier apply`` appends to a pushed Job's ledgers.
+    The hosted ledger keeps each record once, so publishing again adds only
+    new records. Executions not yet published are skipped; ``publish_job``
+    sends their whole ledger with them.
+
+    Returns:
+        How many records the hosted ledgers did not have.
+    """
+    pins = dict(agents) if agents is not None else agent_pins(store.load_spec(local_job_id))
+    hosted = _hosted_trials(studio, hosted_job_id)
+    added = 0
+    trials_root = store.job_path(local_job_id) / "trials"
+    for trial_root in sorted(path for path in trials_root.iterdir() if path.is_dir()):
+        if trial_ids is not None and trial_root.name not in trial_ids:
+            continue
+        for execution_root in sorted(
+            (path for path in (trial_root / "executions").iterdir() if path.name.isdigit()),
+            key=lambda path: int(path.name),
+        ):
+            ledger = read_ledger(execution_root / "artifacts" / LEDGER_FILE)
+            if not ledger:
+                continue
+            outcome = TrialResult.model_validate_json(
+                (execution_root / "result.json").read_text(encoding="utf-8")
+            )
+            receipt = outcome.receipt
+            target = hosted.get(_result_key(outcome, pins))
+            if target is None:
+                continue
+            execution = studio.trials.create_execution(
+                target,
+                idempotency_key=execution_key(
+                    receipt.job_id, receipt.trial_id, receipt.execution_id
+                ),
+            )
+            response = studio.trials.add_rewards(
+                target,
+                [item.model_dump(mode="json") for item in ledger],
+                execution_id=str(execution["id"]),
+            )
+            added += int(response.get("added") or 0)
+    return added
 
 
 class HostedTracker:
@@ -527,7 +632,7 @@ class HostedTracker:
         self._local = {trial.trial_id: trial for trial in plan.trials}
         self._heartbeat_seconds = heartbeat_seconds
         self._queue: queue.Queue[ProgressEvent | None] = queue.Queue()
-        self._hosted: dict[tuple[str, str, int], str] | None = None
+        self._hosted: dict[_HostedKey, str] | None = None
         self._executions: dict[tuple[str, int], str] = {}
         self._active: set[str] = set()
         self._last_beat = time.monotonic()
@@ -660,4 +765,5 @@ __all__ = [
     "execution_key",
     "publish_execution",
     "publish_job",
+    "publish_rewards",
 ]

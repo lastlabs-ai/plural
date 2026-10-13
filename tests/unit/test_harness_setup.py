@@ -178,3 +178,17 @@ def test_local_installer_fails_clearly_without_node(
     monkeypatch.setattr("plural.harness.install.shutil.which", lambda _name: None)
     with pytest.raises(SystemExit, match="Node.js"):
         install_main(["claude-code", "2.1.236"])
+
+
+def test_a_remote_installer_installs_system_wide_and_leaves_the_workspace_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ran: list[tuple[str, ...]] = []
+    monkeypatch.setenv("PLURAL_RUNTIME_PROVIDER", "docker")
+    monkeypatch.setenv("PLURAL_TOOLS_PREFIX", str(tmp_path / "tools"))
+    monkeypatch.setattr("plural.harness.install._run", ran.append)
+    found = iter([None, "/usr/local/bin/hermes"])
+    monkeypatch.setattr("plural.harness.install.shutil.which", lambda _name: next(found))
+    install_main(["hermes", "0.19.0"])
+    assert ran and "--prefix" not in ran[0]
+    assert not (tmp_path / "tools").exists()

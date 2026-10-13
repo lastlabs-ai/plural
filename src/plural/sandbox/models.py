@@ -228,6 +228,24 @@ class SandboxHandle(SandboxModel):
     metadata: dict[str, str] = Field(default_factory=dict)
 
 
+class AppIsolation(SandboxModel):
+    """The OS users that keep an Environment's App host apart from the Harness.
+
+    ``app_user`` runs the App host, its App servers, and the Job's control
+    requests. ``agent_user`` runs the Harness, or ``None`` for the sandbox's
+    default user. With no ``app_user`` both share one user, so a Harness could
+    read the host's private folder: the Trial records that as ``none``.
+    """
+
+    app_user: str | None = None
+    agent_user: str | None = None
+
+    @property
+    def level(self) -> str:
+        """``os_user`` when the App host has a user of its own, else ``none``."""
+        return "os_user" if self.app_user else "none"
+
+
 class FileUpload(SandboxModel):
     """One in-memory file copied into a sandbox."""
 
@@ -320,6 +338,7 @@ def safe_relative_path(value: str) -> str:
 
 
 __all__ = [
+    "AppIsolation",
     "Capability",
     "CapabilityError",
     "DeclarativeImage",

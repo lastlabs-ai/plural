@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from collections.abc import Sequence
+from typing import Any
 
+from plural.apps import daemon
 from plural.sandbox import (
     Capability,
     DownloadedFile,
@@ -54,6 +57,17 @@ class FakeProvider(SandboxProvider):
         self.active = 0
         self.max_active = 0
         self.harness_runs = 0
+        self.host_calls: list[ExecRequest] = []
+        self.harness_requests: list[ExecRequest] = []
+        self.bootstraps: dict[str, dict[str, Any]] = {}
+        self.environments: dict[str, dict[str, Any]] = {}
+        self.control_requests: list[dict[str, Any]] = []
+        self.host_steps: list[dict[str, Any]] = []
+        self.uploads: dict[str, bytes] = {}
+        self.sealed: list[tuple[str, ...]] = []
+        self.episode = _EPISODE
+        self.result = b'{"answer": 42}'
+        self.forge_host = False
 
     async def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(
@@ -85,8 +99,13 @@ class FakeProvider(SandboxProvider):
     ) -> None:
         for item in files:
             self.files[handle.sandbox_id][item.path] = item.data
+            self.uploads[item.path] = item.data
 
     async def exec(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
+        if request.command[:3] == ("python", "-m", "plural.apps.daemon"):
+            return self._app_host(handle, request)
+        if request.command[:2] == ("python", "-c"):
+            return self._python(handle, request)
         if request.stdin is None:
             self.files[handle.sandbox_id]["verifier-result.json"] = json.dumps(
                 {
@@ -97,6 +116,7 @@ class FakeProvider(SandboxProvider):
             ).encode()
             return ExecResult(exit_code=0, duration_seconds=0.001)
         self.harness_runs += 1
+        self.harness_requests.append(request)
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
@@ -107,8 +127,8 @@ class FakeProvider(SandboxProvider):
             payload = json.loads(request.stdin)
             assert payload["model_resolution"]["catalog_model_id"] == "test/model"
             assert payload["model_resolution"]["upstream_id"] == "model"
-            self.files[handle.sandbox_id]["result.json"] = b'{"answer": 42}'
-            self.files[handle.sandbox_id]["episode.jsonl"] = _EPISODE
+            self.files[handle.sandbox_id]["result.json"] = self.result
+            self.files[handle.sandbox_id]["episode.jsonl"] = self.episode
             self.files[handle.sandbox_id]["state.json"] = b'{"step": 1}'
             self.files[handle.sandbox_id]["observation.json"] = b'{"text": "done"}'
             self.files[handle.sandbox_id]["view.json"] = b'{"kind": "text", "text": "done"}'
@@ -157,6 +177,70 @@ class FakeProvider(SandboxProvider):
         finally:
             self.active -= 1
 
+    def _app_host(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
+        """Answer App host commands as one App named ``game`` would, signing like the host."""
+        self.host_calls.append(request)
+        files = self.files[handle.sandbox_id]
+        operation = request.command[3]
+        if operation == "start":
+            boot = json.loads(request.stdin or files.get(daemon.BOOTSTRAP_FILE) or b"{}")
+            self.bootstraps[handle.sandbox_id] = boot
+            self.environments[handle.sandbox_id] = json.loads(
+                files.get(daemon.ENVIRONMENT_FILE) or b"{}"
+            )
+            return ExecResult(exit_code=0, stdout=b'{"ok": true}\n', duration_seconds=0.001)
+        raw = request.stdin or base64.b64decode(request.command[5])
+        sent = json.loads(raw)
+        self.control_requests.append(sent)
+        op = sent["op"]
+        result: object = None
+        if op == "hello":
+            result = {"pid": 7, "uid": 65533, "private": "/workspace/.plural-apps-x"}
+        elif op == "finish":
+            declared = self.environments.get(handle.sandbox_id) or {}
+            apps = {
+                app["name"]: {"control": app.get("control", "owned"), "initial": {}, "final": {}}
+                for app in declared.get("apps") or []
+            }
+            apps["game"] = {"control": "owned", "initial": {"step": 0}, "final": {"step": 1}}
+            result = {
+                "apps": apps,
+                "steps": list(self.host_steps),
+                "states": [{"step": 0, "state": {"game": {"step": 0}}}],
+                "observation": {"text": "board"},
+                "view": {},
+            }
+        elif op == "query":
+            result = {"app": sent["app"], "action": sent["action"], **sent["arguments"]}
+        elif op == "stop":
+            result = "stopped"
+        # A forged host signs without the Trial's token, which it never saw.
+        token = "forged" if self.forge_host else str(self.bootstraps[handle.sandbox_id]["token"])
+        payload = json.loads(daemon.canonical({"ok": True, "result": result}))
+        signed = {**payload, "mac": daemon._mac(token, sent["nonce"], payload)}
+        return ExecResult(
+            exit_code=0, stdout=(json.dumps(signed) + "\n").encode(), duration_seconds=0.001
+        )
+
+    def _python(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
+        script = request.command[2]
+        if "shutil.rmtree" in script:
+            # The Job removing what it staged for the App host.
+            files = self.files[handle.sandbox_id]
+            self.sealed.append(request.command[4:])
+            for name in request.command[4:]:
+                for path in [item for item in files if item == name or item.startswith(name + "/")]:
+                    del files[path]
+            return ExecResult(exit_code=0, duration_seconds=0.001)
+        if "os.access" in script:
+            # The isolation probe: the Harness's user cannot read the host's folder.
+            return ExecResult(exit_code=1, duration_seconds=0.001)
+        # Plural's install probe: report this machine's version as installed.
+        import plural
+
+        version = json.dumps({"version": plural.__version__}).encode()
+        return ExecResult(exit_code=0, stdout=version + b"\n", duration_seconds=0.001)
+
     async def download_files(
         self,
         handle: SandboxHandle,
@@ -164,9 +248,11 @@ class FakeProvider(SandboxProvider):
         *,
         root: str = "/workspace",
     ) -> tuple[DownloadedFile, ...]:
-        return tuple(
-            DownloadedFile(path=path, data=self.files[handle.sandbox_id][path]) for path in paths
-        )
+        files = self.files[handle.sandbox_id]
+        missing = [path for path in paths if path not in files]
+        if missing:
+            raise FileNotFoundError(missing[0])
+        return tuple(DownloadedFile(path=path, data=files[path]) for path in paths)
 
     async def cancel(self, handle: SandboxHandle) -> None:
         return

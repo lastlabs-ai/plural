@@ -12,8 +12,9 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
-from plural.sandbox.base import SandboxProvider
+from plural.sandbox.base import KILL_USER_PROCESSES, SandboxProvider
 from plural.sandbox.models import (
+    AppIsolation,
     Capability,
     CapabilityError,
     DownloadedFile,
@@ -31,6 +32,13 @@ from plural.sandbox.models import (
 )
 
 HOST_ALIAS = "host.docker.internal"
+DEFAULT_USER = "65532:65532"
+"""The container's default user, which runs the Harness."""
+APP_USER = "65533:65533"
+"""The App host's user: not the container's default ``65532``, which runs the Harness."""
+SEAT_UID = 65400
+"""The first seat's user; each later seat takes the next number."""
+MAX_SEATS = 100
 _LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 
 
@@ -252,7 +260,7 @@ class DockerProvider(SandboxProvider):
             "--cap-drop",
             "ALL",
             "--user",
-            "65532:65532",
+            DEFAULT_USER,
             "--pids-limit",
             str(requirements.resources.pids or 256),
             "--tmpfs",
@@ -325,6 +333,33 @@ class DockerProvider(SandboxProvider):
                 remote_path,
             )
 
+    async def isolate_apps(self, handle: SandboxHandle) -> AppIsolation:
+        """Run the App host as its own unprivileged user.
+
+        The container runs everything else as ``65532``, with every capability
+        dropped, so the Harness cannot read the App host's ``0700`` folder or
+        its process.
+
+        Returns:
+            The App host's user, and the default user for the Harness.
+        """
+        self._validate(handle)
+        return AppIsolation(app_user=APP_USER)
+
+    async def isolate_seats(self, handle: SandboxHandle, seats: Sequence[str]) -> dict[str, str]:
+        """Run each seat's Harness as its own unprivileged user.
+
+        Every capability is dropped, so no seat's user can read another's
+        ``0700`` folder or process, or the App host's.
+
+        Returns:
+            Seat to a numeric user, ``65400`` for the first.
+        """
+        self._validate(handle)
+        if len(seats) > MAX_SEATS:
+            return {}
+        return {seat: f"{SEAT_UID + index}:{SEAT_UID + index}" for index, seat in enumerate(seats)}
+
     async def exec(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
         """Execute argv and capture logs, enforcing a host-side timeout."""
         container = self._validate(handle)
@@ -376,32 +411,70 @@ class DockerProvider(SandboxProvider):
         self, handle: SandboxHandle, paths: Sequence[str], *, root: str = "/workspace"
     ) -> tuple[DownloadedFile, ...]:
         """Stream exact declared paths out and reject non-regular files."""
+        return await self._download(handle, paths, root=root, user=None)
+
+    async def download_artifacts(
+        self,
+        handle: SandboxHandle,
+        paths: Sequence[str],
+        *,
+        root: str = "/workspace",
+        user: str | None = None,
+    ) -> tuple[DownloadedFile, ...]:
+        """Read a Harness's files as the user that wrote them, which owns its folder.
+
+        No capability is kept, so only a seat's own user can enter its ``0700`` folder.
+        """
+        return await self._download(handle, paths, root=root, user=user)
+
+    async def _download(
+        self,
+        handle: SandboxHandle,
+        paths: Sequence[str],
+        *,
+        root: str,
+        user: str | None,
+    ) -> tuple[DownloadedFile, ...]:
         container = self._validate(handle)
+        as_user = ("--user", user) if user else ()
         output: list[DownloadedFile] = []
         for path in paths:
             safe = safe_relative_path(path)
             remote_path = f"{root.rstrip('/')}/{safe}"
             regular, _stdout, _stderr = await self._run(
-                "exec",
-                container,
-                "test",
-                "-f",
-                remote_path,
-                check=False,
+                "exec", *as_user, container, "test", "-f", remote_path, check=False
             )
             symlink, _stdout, _stderr = await self._run(
-                "exec",
-                container,
-                "test",
-                "-L",
-                remote_path,
-                check=False,
+                "exec", *as_user, container, "test", "-L", remote_path, check=False
             )
             if regular != 0 or symlink == 0:
                 raise FileNotFoundError(f"declared output is not a regular file: {safe}")
-            _code, data, _stderr = await self._run("exec", container, "cat", remote_path)
+            _code, data, _stderr = await self._run("exec", *as_user, container, "cat", remote_path)
             output.append(DownloadedFile(path=safe, data=data))
         return tuple(output)
+
+    async def stop_user_processes(self, handle: SandboxHandle, users: Sequence[str | None]) -> None:
+        """Kill what each Harness user left running, as that user, since no capability is kept.
+
+        ``None`` is the container's default user, whose ``sleep`` keeps it alive
+        as PID 1 and is spared.
+        """
+        container = self._validate(handle)
+        for user in dict.fromkeys(item or DEFAULT_USER for item in users):
+            uid = user.split(":", 1)[0]
+            await self._run(
+                "exec",
+                "--user",
+                user,
+                container,
+                "sh",
+                "-c",
+                KILL_USER_PROCESSES,
+                "plural",
+                uid,
+                timeout=30,
+                check=False,
+            )
 
     async def cancel(self, handle: SandboxHandle) -> None:
         """Kill the container to force all active processes to stop."""

@@ -36,11 +36,12 @@ RUNTIME_KEYS = frozenset(
         "network",
         "allowed_hosts",
         "read_only_root",
+        "python_packages",
     }
 )
 """Setting keys that map onto ``EnvironmentRuntime`` fields rather than ``placement``."""
 
-FieldKind = Literal["text", "url", "integer", "number", "select", "boolean", "hosts"]
+FieldKind = Literal["text", "url", "integer", "number", "select", "boolean", "hosts", "packages"]
 FieldGroup = Literal["image", "machine", "network", "placement"]
 
 _HOST = re.compile(
@@ -211,6 +212,23 @@ def _network(modes: tuple[str, ...]) -> tuple[RuntimeField, ...]:
     return (network, hosts)
 
 
+def _python_packages(*, local: bool = False) -> RuntimeField:
+    help = "Python packages the Environment needs, one per line, such as duckdb>=1.1. " + (
+        "The local Runtime installs nothing: Plural checks they are installed in "
+        "the Python that runs the Job and says how to install any that are missing."
+        if local
+        else "Installed in every sandbox before an episode starts, alongside Plural."
+    )
+    return RuntimeField(
+        key="python_packages",
+        label="Python packages",
+        help=help,
+        kind="packages",
+        group="image",
+        placeholder="duckdb>=1.1",
+    )
+
+
 RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
     RuntimeProviderSpec(
         id="daytona",
@@ -266,6 +284,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
             _memory(provider_default=1024),
             *_network(("public", "no-network", "allowlist")),
             _timeout(),
+            _python_packages(),
             RuntimeField(
                 key="api_url",
                 label="API URL",
@@ -311,6 +330,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
             ),
             *_network(("public", "no-network")),
             _timeout(),
+            _python_packages(),
             RuntimeField(
                 key="domain",
                 label="Domain",
@@ -411,6 +431,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
             ),
             *_network(("public", "no-network")),
             _timeout(),
+            _python_packages(),
         ),
     ),
     RuntimeProviderSpec(
@@ -460,6 +481,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
             ),
             *_network(("public",)),
             _timeout(),
+            _python_packages(),
         ),
     ),
     RuntimeProviderSpec(
@@ -494,6 +516,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
             ),
             *_network(("public",)),
             _timeout(),
+            _python_packages(),
         ),
         notes=(
             "Instance size and the container image are set in the Worker's wrangler "
@@ -547,6 +570,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
                 default=False,
             ),
             _timeout(),
+            _python_packages(),
         ),
     ),
     RuntimeProviderSpec(
@@ -558,7 +582,7 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
         category="self_managed",
         runner="built_in",
         target="local",
-        fields=(_timeout(),),
+        fields=(_timeout(), _python_packages(local=True)),
         notes=("Local runs cannot limit network access, CPU, or memory.",),
     ),
     RuntimeProviderSpec(
@@ -676,6 +700,20 @@ def _hosts(field: RuntimeField, value: Any) -> list[str]:
     return hosts
 
 
+def _packages(field: RuntimeField, value: Any) -> list[str]:
+    from plural.environments.definition import RuntimePackages
+
+    items = value.split("\n") if isinstance(value, str) else list(value or ())
+    wanted = [str(item).strip() for item in items if str(item).strip()]
+    try:
+        return list(RuntimePackages(python=tuple(wanted)).python)
+    except ValueError as exc:
+        reason = exc.errors()[0]["msg"] if hasattr(exc, "errors") else str(exc)
+        raise RuntimeSettingsError(
+            f"{field.label}: {reason.removeprefix('Value error, ')}"
+        ) from None
+
+
 def _url(field: RuntimeField, value: Any) -> str:
     text = str(value).strip()
     if not re.match(r"^https?://[^\s/]+", text):
@@ -690,6 +728,8 @@ def _clean_value(field: RuntimeField, value: Any) -> Any:
         return _boolean(field, value)
     if field.kind == "hosts":
         return _hosts(field, value)
+    if field.kind == "packages":
+        return _packages(field, value)
     if field.kind == "url":
         return _url(field, value)
     text = str(value).strip()
@@ -854,7 +894,7 @@ def runtime_from_settings(
         RuntimeSettingsError: When settings are invalid.
     """
     from plural.common import ExecutionTarget
-    from plural.environments.definition import EnvironmentRuntime
+    from plural.environments.definition import EnvironmentRuntime, RuntimePackages
 
     spec = require_provider(provider)
     values = resolved_settings(provider, settings)
@@ -885,6 +925,7 @@ def runtime_from_settings(
         network=network,
         network_allowlist=tuple(values.get("allowed_hosts") or ()),
         resources=resources,
+        packages=RuntimePackages(python=tuple(values.get("python_packages") or ())),
         read_only_root=bool(values.get("read_only_root", False)),
         timeout_seconds=values.get("timeout_seconds", 300),
         placement={
@@ -918,6 +959,7 @@ def settings_from_runtime(runtime: EnvironmentRuntime) -> dict[str, Any]:
         "network": runtime.network.value,
         "allowed_hosts": list(runtime.network_allowlist),
         "read_only_root": runtime.read_only_root,
+        "python_packages": list(runtime.packages.python),
         **runtime.placement,
     }
     return {

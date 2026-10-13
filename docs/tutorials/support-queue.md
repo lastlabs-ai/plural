@@ -62,7 +62,7 @@ On disk it looks like this:
 ```text
 project.yaml                  project name and description
 plural.lock                   hosted revisions; commit it
-pyproject.toml                dependencies = ["plural>=0.18.0"]
+pyproject.toml                dependencies = ["plural>=0.21"]
 environments/support-queue/   environment.yaml, environment.py, README.md, resources/policy.md
 tasks/ticket-1/, ticket-2/, ticket-3/   task.yaml, instruction.md
 verifiers/correct-category/   verifier.yaml, verify.py
@@ -101,11 +101,11 @@ anywhere yet. The next few sections open each piece so you know what the run wil
 
 ### The Environment
 
-The Environment is the help desk. It knows each ticket, including the right answer,
-and it offers the AI four moves: `inspect_ticket`, `categorize`, `draft_response`, and
-`resolve`.
+The Environment is the help desk. It has one [App](../concepts/apps.md),
+`SupportQueue`, which knows each ticket, including the right answer, and offers the AI
+four moves: `inspect_ticket`, `categorize`, `draft_response`, and `resolve`.
 
-`environments/support-queue/environment.yaml` names the Python class that holds that
+`environments/support-queue/environment.yaml` names the App class that holds that
 behavior, the files placed in the world, and the limits on each attempt:
 
 ```yaml
@@ -131,9 +131,9 @@ Environment directly on your machine, as a trusted subprocess. It is not a sandb
 use `docker` instead for code you do not trust.
 
 `environment.py` holds the behavior. The important idea is the split between what the
-desk knows and what the AI is shown. **State** is the full truth, including the
-`expected` category. The **Observation** is what the AI sees, and it leaves `expected`
-out, so the AI can never read the answer:
+desk knows and what the AI is shown. **State** is the App's private truth, including
+the `expected` category. Each action returns what the AI may see, and that leaves
+`expected` out, so the AI can never read the answer:
 
 ```python
 class QueueState(State):
@@ -148,25 +148,30 @@ class QueueState(State):
     done: bool = False
 
 
-class QueueObservation(Observation):
-    ticket_id: str = ""
-    customer_tier: str = ""
-    issue: str = ""
-    policy: str = ""
-    category: str = ""
-    draft_reply: str = ""
-    status: str = "open"
-    done: bool = False
+class SupportQueue(App[QueueState]):
+    def _visible(self) -> dict:
+        """What the Agent may see. The expected category stays hidden."""
+        return {
+            "ticket_id": self.state.ticket_id,
+            "issue": self.state.issue,
+            "policy": self.state.policy,
+            "category": self.state.category,
+            "status": self.state.status,
+            # ...and the rest of the ticket, never "expected".
+        }
+
+    @action
+    def inspect_ticket(self) -> dict:
+        """Read the ticket and the support policy that applies to it."""
+        return self._visible()
 ```
 
-Each of the four moves is a method marked `@action`, and its docstring is the
-description the AI reads. The episode ends when `terminated()` sees the ticket
-resolved.
+`reset` looks up the Task's ticket and fills in the rest of State. Each of the four
+moves is a method marked `@action`, and its docstring is the description the AI reads.
+The episode ends when `terminated()` sees the ticket resolved.
 
-The Environment also defines `reward()`, which gives 0.25 each time the ticket moves
-forward, from open to triaged to drafted to resolved. A reward is per-step credit
-recorded for training. It never counts toward the score and is never shown to the
-Agent.
+The App only reports what happens. Judging it, at the end and after each move, is
+the Verifier's job.
 
 ### The Tasks
 
@@ -185,19 +190,21 @@ initial_state:
   ticket_id: ticket-1
 ```
 
-The model sees `instruction.md` and the Environment's Observations, and nothing else:
-not the State, the score, or the rewards.
+The model sees `instruction.md` and what its actions return, and nothing else: not the
+State, the score, or the rewards.
 
 ### The Verifier
 
-The Verifier is the grader. It marks the finished attempt, not the AI's own claim that
-it did well. `verifiers/correct-category/verifier.yaml` points at a small Python check:
+The Verifier decides what counts as good work. Its `check` marks the finished
+attempt, not the AI's own claim that it did well, and its `reward` function credits each
+move. `verifiers/correct-category/verifier.yaml` points at both, in `verify.py`:
 
 ```yaml
 name: correct-category
 version: 0.1.0
 kind: deterministic
-check: verify.py:verify
+check: verify.py:check
+reward: verify.py:reward
 weight: 1
 ```
 
@@ -208,7 +215,7 @@ returns a score of 1 or 0 with evidence explaining why:
 from plural import Episode, VerifierOutput
 
 
-def verify(episode: Episode) -> VerifierOutput:
+def check(episode: Episode) -> VerifierOutput:
     """Score 1 when the ticket was resolved with the expected category and a reply."""
     state = episode.state
     drafted = bool(str(state.get("draft_reply") or "").strip())
@@ -424,12 +431,14 @@ wrong, compare their trajectories side by side.
 
 The `Artifacts` directory holds the full record of the attempt:
 
-- `trajectory.json`: the Agent's turns as chat messages, with the Observation after
-  each action.
+- `trajectory.json`: the Agent's turns as chat messages, with what each action
+  returned.
 - `atif-trajectory.json`: the same turns in ATIF, with each call's tokens and cost.
 - `episode.jsonl`: the underlying record of every step and model call, one per line.
-- `observation.json`: the final Observation, which is what the Agent saw.
+- `observation.json`: the last thing an action returned, which is what the Agent saw.
 - `state.json`: the final State, including the `expected` category the Agent never saw.
+- `apps.json`: each App's State at the start and the end, with its control level.
+- `rewards.jsonl`: the reward ledger, one line per reward.
 - `result.json`: the Agent's final response.
 
 Each Verifier's score, sub-scores, evidence, and feedback are in the Trial's

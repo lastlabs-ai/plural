@@ -1,5 +1,146 @@
 {
   "$defs": {
+    "AppAction": {
+      "additionalProperties": false,
+      "description": "One move an App offers the Agent.\n\n``name`` is the App's own name for the action (a Python method name or an\nMCP tool name), which is how the App is called. The Agent sees it under\nits exposed name: the same name, with any character a model provider\nrejects replaced, and prefixed ``<app>__`` only when another App offers\nthe same name.",
+      "properties": {
+        "binding": {
+          "additionalProperties": true,
+          "title": "Binding",
+          "type": "object"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "mutates_state": {
+          "default": true,
+          "title": "Mutates State",
+          "type": "boolean"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "timeout_seconds": {
+          "default": 30,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "AppAction",
+      "type": "object"
+    },
+    "AppDefinition": {
+      "additionalProperties": false,
+      "description": "One App inside an Environment.\n\n``python`` names the App class as ``file.py:Class`` inside the Environment's\nsource package. ``config`` holds the keyword arguments the App was built\nwith, so the App host can rebuild the same App inside a Runtime.",
+      "properties": {
+        "actions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AppAction"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "control": {
+          "default": "owned",
+          "enum": [
+            "owned",
+            "sandboxed",
+            "live",
+            "replayed"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "credentials": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SecretReference"
+          },
+          "title": "Credentials",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "has_reset": {
+          "default": false,
+          "title": "Has Reset",
+          "type": "boolean"
+        },
+        "has_snapshot": {
+          "default": false,
+          "title": "Has Snapshot",
+          "type": "boolean"
+        },
+        "kind": {
+          "default": "python",
+          "enum": [
+            "python",
+            "mcp",
+            "openapi",
+            "replay"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "python": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Python"
+        },
+        "secrets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SecretReference"
+          },
+          "title": "Secrets",
+          "type": "array"
+        },
+        "state_schema": {
+          "additionalProperties": true,
+          "title": "State Schema",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "AppDefinition",
+      "type": "object"
+    },
     "Capability": {
       "description": "Individual controls a provider can enforce.",
       "enum": [
@@ -266,6 +407,10 @@
           "title": "Network Allowlist",
           "type": "array"
         },
+        "packages": {
+          "$ref": "#/$defs/RuntimePackages",
+          "description": "Packages installed in the Runtime before an episode. In environment.yaml, list Python ones under python_packages. On the local Runtime they must already be installed."
+        },
         "persistent": {
           "default": false,
           "title": "Persistent",
@@ -476,66 +621,6 @@
       "title": "HarnessPolicy",
       "type": "object"
     },
-    "NativeAction": {
-      "additionalProperties": false,
-      "description": "An action owned by an Environment.",
-      "properties": {
-        "command": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Command",
-          "type": "array"
-        },
-        "description": {
-          "minLength": 1,
-          "title": "Description",
-          "type": "string"
-        },
-        "kind": {
-          "default": "command",
-          "enum": [
-            "command",
-            "python"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "mutates_state": {
-          "default": true,
-          "title": "Mutates State",
-          "type": "boolean"
-        },
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "observation_schema": {
-          "additionalProperties": true,
-          "title": "Observation Schema",
-          "type": "object"
-        },
-        "parameters": {
-          "additionalProperties": true,
-          "title": "Parameters",
-          "type": "object"
-        },
-        "timeout_seconds": {
-          "default": 30,
-          "exclusiveMinimum": 0,
-          "title": "Timeout Seconds",
-          "type": "number"
-        }
-      },
-      "required": [
-        "name",
-        "description"
-      ],
-      "title": "NativeAction",
-      "type": "object"
-    },
     "NetworkMode": {
       "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
       "enum": [
@@ -548,6 +633,38 @@
       ],
       "title": "NetworkMode",
       "type": "string"
+    },
+    "Party": {
+      "additionalProperties": false,
+      "description": "How many Agents may share one episode of the Environment, such as 2 to 8 at poker.\n\nAn Environment with a party is played by several Agents at once, each in a\nseat of its own: ``seat_1`` to ``seat_N`` for a party of N. A Job names the\nAgents in the party, and its size must fall between ``min`` and ``max``.",
+      "properties": {
+        "isolation": {
+          "default": "isolated",
+          "description": "``isolated``: each seat's Harness runs as its own OS user, and the Apps are the only thing the seats share; needs Docker or Daytona. ``shared``: every seat runs as one user and can read and write the others' files and the Environment's, for a team that works on the same files, or to try a party on the local Runtime. A shared seat could also act for another seat.",
+          "enum": [
+            "isolated",
+            "shared"
+          ],
+          "title": "Isolation",
+          "type": "string"
+        },
+        "max": {
+          "default": 2,
+          "maximum": 100,
+          "minimum": 2,
+          "title": "Max",
+          "type": "integer"
+        },
+        "min": {
+          "default": 2,
+          "maximum": 100,
+          "minimum": 2,
+          "title": "Min",
+          "type": "integer"
+        }
+      },
+      "title": "Party",
+      "type": "object"
     },
     "ResourceRequirements": {
       "additionalProperties": false,
@@ -622,59 +739,20 @@
       "title": "ResourceRequirements",
       "type": "object"
     },
-    "RewarderDefinition": {
+    "RuntimePackages": {
       "additionalProperties": false,
-      "description": "A named state-transition reward signal scored inside each step.",
+      "description": "Packages installed in the Runtime before an episode, by package manager.\n\nEach list holds what you would pass to that manager, one package per entry.",
       "properties": {
-        "command": {
+        "python": {
           "default": [],
           "items": {
             "type": "string"
           },
-          "title": "Command",
+          "title": "Python",
           "type": "array"
-        },
-        "description": {
-          "default": "",
-          "title": "Description",
-          "type": "string"
-        },
-        "implementation_digest": {
-          "default": "",
-          "title": "Implementation Digest",
-          "type": "string"
-        },
-        "kind": {
-          "default": "command",
-          "enum": [
-            "command",
-            "python"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "timeout_seconds": {
-          "default": 30,
-          "exclusiveMinimum": 0,
-          "title": "Timeout Seconds",
-          "type": "number"
-        },
-        "weight": {
-          "default": 1,
-          "exclusiveMinimum": 0,
-          "title": "Weight",
-          "type": "number"
         }
       },
-      "required": [
-        "name"
-      ],
-      "title": "RewarderDefinition",
+      "title": "RuntimePackages",
       "type": "object"
     },
     "RuntimeVariable": {
@@ -721,7 +799,7 @@
     },
     "SecretReference": {
       "additionalProperties": false,
-      "description": "A named credential supplied when a Job runs, with an explicit execution target.",
+      "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
       "properties": {
         "description": {
           "default": "",
@@ -738,15 +816,13 @@
           "title": "Required",
           "type": "boolean"
         },
-        "target": {
-          "default": "environment",
-          "enum": [
-            "environment",
-            "harness",
-            "verifier"
-          ],
-          "title": "Target",
-          "type": "string"
+        "scopes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes",
+          "type": "array"
         }
       },
       "required": [
@@ -757,14 +833,14 @@
     }
   },
   "additionalProperties": false,
-  "description": "Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent.",
+  "description": "Schema-v2 Environment: Apps composed with one Runtime and one set of limits.\n\nTasks, Verifiers, and mode are intentionally absent. Every action belongs\nto exactly one App; ``python`` optionally names an Environment subclass\nwhose ``on_step``, ``terminated``, or ``truncated`` span several Apps.",
   "properties": {
-    "actions": {
+    "apps": {
       "default": [],
       "items": {
-        "$ref": "#/$defs/NativeAction"
+        "$ref": "#/$defs/AppDefinition"
       },
-      "title": "Actions",
+      "title": "Apps",
       "type": "array"
     },
     "description": {
@@ -796,28 +872,39 @@
       "title": "Name",
       "type": "string"
     },
-    "observation_schema": {
-      "additionalProperties": true,
-      "title": "Observation Schema",
-      "type": "object"
-    },
     "overview": {
       "default": "",
       "title": "Overview",
       "type": "string"
     },
+    "party": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Party"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "How many Agents share each episode, for a game such as poker. Leave it unset for an Environment one Agent works in alone."
+    },
+    "python": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Python"
+    },
     "readme": {
       "default": "",
       "title": "Readme",
       "type": "string"
-    },
-    "reset_command": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "title": "Reset Command",
-      "type": "array"
     },
     "resources": {
       "default": [],
@@ -827,29 +914,8 @@
       "title": "Resources",
       "type": "array"
     },
-    "rewarders": {
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/RewarderDefinition"
-      },
-      "title": "Rewarders",
-      "type": "array"
-    },
     "runtime": {
       "$ref": "#/$defs/EnvironmentRuntime"
-    },
-    "secrets": {
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/SecretReference"
-      },
-      "title": "Secrets",
-      "type": "array"
-    },
-    "state_schema": {
-      "additionalProperties": true,
-      "title": "State Schema",
-      "type": "object"
     },
     "version": {
       "default": "0.1.0",

@@ -53,7 +53,7 @@ Projects written for Plural 0.14 or earlier use a different layout; see
 ```bash
 plural project init support-eval
 cd support-eval
-plural env init support-queue
+plural env init support-queue --python
 plural verifier init correct-category
 plural task init ticket-1 -e support-queue -v correct-category
 plural benchmark init support-triage
@@ -310,21 +310,25 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help                        Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ run        Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.      │
-│ auth       Sign in, sign out, and choose the hosted account or project commands use.             │
-│ project    Create, register, and inspect projects.                                               │
-│ env        Create, validate, push, pull, and inspect Environments.                               │
-│ verifier   Create, validate, push, pull, and inspect Verifiers.                                  │
-│ harness    Create, validate, push, pull, and inspect Harnesses.                                  │
-│ task       Create, validate, push, pull, and inspect Tasks.                                      │
-│ agent      Create, validate, push, pull, and inspect Agents.                                     │
-│ benchmark  Create, validate, push, pull, and inspect Benchmarks.                                 │
-│ job        List, inspect, and rerun Jobs.                                                        │
-│ trial      Inspect and rerun Trials.                                                             │
-│ review     List and submit human reviews.                                                        │
-│ models     List the models you may run.                                                          │
-│ runtime    Choose where Environments run.                                                        │
-│ session    Export and redeploy portable agent sessions.                                          │
+│ run         Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.     │
+│ auth        Sign in, sign out, and choose the hosted account or project commands use.            │
+│ project     Create, register, and inspect projects.                                              │
+│ credential  Save your values for the credentials Agents carry, such as your CRM token.           │
+│ env         Create, validate, push, pull, and inspect Environments.                              │
+│ verifier    Create, validate, push, pull, and inspect Verifiers.                                 │
+│ harness     Create, validate, push, pull, and inspect Harnesses.                                 │
+│ task        Create, validate, push, pull, and inspect Tasks.                                     │
+│ agent       Create, validate, push, pull, and inspect Agents.                                    │
+│ benchmark   Create, validate, push, pull, and inspect Benchmarks.                                │
+│ job         List, inspect, and rerun Jobs.                                                       │
+│ trial       Inspect and rerun Trials.                                                            │
+│ review      List and submit human reviews.                                                       │
+│ rewards     Show a Trial's rewards and export training data. Add rewards with `plural verifier   │
+│             apply`.                                                                              │
+│ models      List the models you may run.                                                         │
+│ runtime     Choose where Environments run.                                                       │
+│ secret      Set the secrets your Apps need in the hosted project.                                │
+│ session     Export and redeploy portable agent sessions.                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -816,6 +820,77 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
+### `plural credential`
+
+```text
+
+ Usage: plural credential [OPTIONS] COMMAND [ARGS]...
+
+ Save your values for the credentials Agents carry, such as your CRM token.
+
+ An Agent lists each credential under credentials: in its agent.yaml, with its scopes. Save your
+ value once with `plural credential set NAME`; every Agent you run that carries NAME uses it. Your
+ coworkers save their own.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ list   List the credentials you saved, never their values.                                       │
+│ set    Save your value for a credential. Prompts without echoing.                                │
+│ unset  Remove one of your saved credentials.                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural credential list`
+
+```text
+
+ Usage: plural credential list [OPTIONS]
+
+ List the credentials you saved, never their values.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural credential set`
+
+```text
+
+ Usage: plural credential set [OPTIONS] {name}
+
+ Save your value for a credential. Prompts without echoing.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The credential's name, as the App declares it. [required]                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --from-env          Read the value from the environment variable of that name.                   │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural credential unset`
+
+```text
+
+ Usage: plural credential unset [OPTIONS] {name}
+
+ Remove one of your saved credentials.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The credential to remove. [required]                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
 ### `plural env`
 
 ```text
@@ -828,13 +903,91 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init      Create a new Environment from the standard template.                                   │
-│ validate  Check a resource and everything it depends on, without uploading.                      │
-│ push      Validate and push an immutable, private revision to the bound project.                 │
-│ release   Label the revision matching your files with a release version, pushing it first.       │
-│ pull      Restore a hosted revision's editable files into this project.                          │
-│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
-│ list      List resources of this kind, labeled local or hosted.                                  │
+│ init         Create an Environment whose App is a FastMCP server you write.                      │
+│ eject-files  Copy Plural's ready-made files server into an Environment, to change what it        │
+│              offers.                                                                             │
+│ serve        Serve an App's FastMCP server over HTTP, to try its tools in any MCP client.        │
+│ add          Add a system to an Environment as an App, creating the Environment if it is new.    │
+│ validate     Check a resource and everything it depends on, without uploading.                   │
+│ push         Validate and push an immutable, private revision to the bound project.              │
+│ release      Label the revision matching your files with a release version, pushing it first.    │
+│ pull         Restore a hosted revision's editable files into this project.                       │
+│ show         Show a resource: the local copy if there is one, otherwise the hosted one.          │
+│ list         List resources of this kind, labeled local or hosted.                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env add`
+
+```text
+
+ Usage: plural env add [OPTIONS] {name}
+
+ Add a system to an Environment as an App, creating the Environment if it is new.
+
+ Give one source per call: --mcp, --openapi, or --traces. Run it again to
+ add another system. With --traces it also drafts Tasks and a Benchmark,
+ and running it again with newer traces adds their calls, tools, systems,
+ and Tasks; existing Tasks are kept.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  Environment to add to; created if it does not exist. [required]            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --mcp                <str>               An MCP server: its Streamable HTTP URL, or the command  │
+│                                          that starts it over stdio, such as 'npx -y              │
+│                                          @modelcontextprotocol/server-memory'.                   │
+│ --openapi            <str>               An HTTP API's OpenAPI document: a file or a URL.        │
+│ --traces             <str>               Recorded conversations: JSON or JSONL of {"messages":   │
+│                                          [...]}, or Plural Traces. Each system they call becomes │
+│                                          a replay App, and Tasks and a Benchmark are drafted     │
+│                                          from them.                                              │
+│ --app                <str>               The App's name. It prefixes an action only when another │
+│                                          App offers the same name. Default: from the source,     │
+│                                          such as linear for https://mcp.linear.app/mcp. With     │
+│                                          --traces, the App for tool calls whose names carry no   │
+│                                          app__ prefix (default: tools).                          │
+│ --header             <str>               An HTTP header, KEY=VALUE. Repeatable. Use ${NAME}.     │
+│ --env                <str>               An MCP server variable, KEY=VALUE. Repeatable. Use      │
+│                                          ${NAME}.                                                │
+│ --tool               <str>               Only offer this MCP tool. Repeatable. Default: every    │
+│                                          tool.                                                   │
+│ --base-url           <str>               Where to send API requests. Default: the document's     │
+│                                          servers.                                                │
+│ --operation          <str>               Only offer this API operationId. Repeatable.            │
+│ --secret             <str>               A setup secret the project supplies, for reset and      │
+│                                          snapshot hooks. Repeatable. Without it, ${NAME} in a    │
+│                                          header or variable is a credential the Agent supplies.  │
+│ --credential         <str>               A credential the running Agent supplies, such as its    │
+│                                          own API token. Repeatable. ${NAME} in a header or       │
+│                                          variable is added for you.                              │
+│ --judge-model        <str>               With --traces: model for the drafted judge.             │
+│                                          [default: openai/gpt-5.6-luna]                          │
+│ --max-tasks          <int range> [x>=1]  With --traces: draft at most this many Tasks,           │
+│                                          preferring traces that call different tools.            │
+│                                          [default: 50]                                           │
+│ --runtime            <str>               Where a new Environment runs: local (a trusted          │
+│                                          subprocess), docker, or daytona. Default: local.        │
+│ --json                                   Print machine-readable JSON.                            │
+│ --help                                   Show this message and exit.                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env eject-files`
+
+```text
+
+ Usage: plural env eject-files [OPTIONS] {name}
+
+ Copy Plural's ready-made files server into an Environment, to change what it offers.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  Environment to copy the files server into. [required]                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --as          <str>  File to write, in the Environment folder. [default: files_server.py]        │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -844,13 +997,14 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural env init [OPTIONS] {name}
 
- Create a new Environment from the standard template.
+ Create an Environment whose App is a FastMCP server you write.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    name      <str>  Environment name. [required]                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --python          Start from a Python App class instead of a FastMCP server.                     │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -939,6 +1093,26 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural env serve`
+
+```text
+
+ Usage: plural env serve [OPTIONS] {name}
+
+ Serve an App's FastMCP server over HTTP, to try its tools in any MCP client.
+
+ Trials don't use this: they talk to the server over stdin and stdout.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  Environment whose FastMCP server to serve. [required]                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --app         <str>  App to serve, when the Environment has several servers.                     │
+│ --port        <int>  Port on 127.0.0.1. [default: 3825]                                          │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1418,6 +1592,67 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
+### `plural rewards`
+
+```text
+
+ Usage: plural rewards [OPTIONS] COMMAND [ARGS]...
+
+ Show a Trial's rewards and export training data. Add rewards with `plural verifier apply`.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ show    List a Trial's reward ledger.                                                            │
+│ export  Write one training record per Trial: model turns with TITO tokens and their rewards.     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural rewards export`
+
+```text
+
+ Usage: plural rewards export [OPTIONS]
+
+ Write one training record per Trial: model turns with TITO tokens and their rewards.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --trial                                                  <str>   A local Trial id. Repeatable.   │
+│ --job                                                    <str>   Every Trial of this local Job.  │
+│ --verifier                                               <str>   Use only this verifier, as name │
+│                                                                  or name@version. Repeatable.    │
+│ --aggregate                                              <str>   Combine rewards on one target:  │
+│                                                                  sum, mean, last.                │
+│                                                                  [default: sum]                  │
+│ --include-off-recording    --no-include-off-recording            Keep rewards on steps a         │
+│                                                                  replayed App answered off its   │
+│                                                                  recording.                      │
+│                                                                  [default:                       │
+│                                                                  no-include-off-recording]       │
+│ --out                                                    <path>  Where to write JSONL.           │
+│                                                                  [default: training.jsonl]       │
+│ --help                                                           Show this message and exit.     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural rewards show`
+
+```text
+
+ Usage: plural rewards show [OPTIONS] {trial_id}
+
+ List a Trial's reward ledger.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    trial_id      <str>  A local Trial id. [required]                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
 ### `plural run`
 
 ```text
@@ -1512,7 +1747,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --provider              -p                       <str>  Configure a provider directly instead of │
 │                                                         a template.                              │
 │ --set                                            <str>  A setting as key=value, such as --set    │
-│                                                         cpus=2. Repeat for more. See `plural     │
+│                                                         cpus=2. Repeat for more; repeat a list   │
+│                                                         setting to add items, such as --set      │
+│                                                         python_packages=duckdb --set             │
+│                                                         python_packages=polars. See `plural      │
 │                                                         runtime provider <id>` for every key.    │
 │ --credential                                     <str>  A credential name, such as               │
 │                                                         DAYTONA_API_KEY, to be prompted for      │
@@ -1570,7 +1808,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --set                                          <str>  A setting as key=value, such as --set      │
-│                                                       cpus=2. Repeat for more. See `plural       │
+│                                                       cpus=2. Repeat for more; repeat a list     │
+│                                                       setting to add items, such as --set        │
+│                                                       python_packages=duckdb --set               │
+│                                                       python_packages=polars. See `plural        │
 │                                                       runtime provider <id>` for every key.      │
 │ --unset                                        <str>  Return a setting to its default.           │
 │ --credential                                   <str>  A credential name, such as                 │
@@ -1729,9 +1970,13 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --provider              -p                            <str>  Provider id.                        │
 │ --set                                                 <str>  A setting as key=value, such as     │
-│                                                              --set cpus=2. Repeat for more. See  │
-│                                                              `plural runtime provider <id>` for  │
-│                                                              every key.                          │
+│                                                              --set cpus=2. Repeat for more;      │
+│                                                              repeat a list setting to add items, │
+│                                                              such as --set                       │
+│                                                              python_packages=duckdb --set        │
+│                                                              python_packages=polars. See `plural │
+│                                                              runtime provider <id>` for every    │
+│                                                              key.                                │
 │ --credential                                          <str>  A credential name, such as          │
 │                                                              DAYTONA_API_KEY, to be prompted for │
 │                                                              without echoing; KEY=VALUE also     │
@@ -1808,7 +2053,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --set                                               <str>  A setting as key=value, such as --set │
-│                                                            cpus=2. Repeat for more. See `plural  │
+│                                                            cpus=2. Repeat for more; repeat a     │
+│                                                            list setting to add items, such as    │
+│                                                            --set python_packages=duckdb --set    │
+│                                                            python_packages=polars. See `plural   │
 │                                                            runtime provider <id>` for every key. │
 │ --unset                                             <str>  Return a setting to its default.      │
 │ --credential                                        <str>  A credential name, such as            │
@@ -1900,6 +2148,76 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --all           Every Environment in the project.                                                │
 │ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural secret`
+
+```text
+
+ Usage: plural secret [OPTIONS] COMMAND [ARGS]...
+
+ Set the secrets your Apps need in the hosted project.
+
+ `plural env validate` lists the secrets each App needs. Set one with `plural secret set NAME`;
+ `plural run` then supplies it to the App.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ list    List the secrets set in the project, never their values.                                 │
+│ set     Set a secret's value in the hosted project. Prompts without echoing.                     │
+│ delete  Remove a secret's value from the hosted project.                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural secret delete`
+
+```text
+
+ Usage: plural secret delete [OPTIONS] {name}
+
+ Remove a secret's value from the hosted project.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The secret to remove. [required]                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural secret list`
+
+```text
+
+ Usage: plural secret list [OPTIONS]
+
+ List the secrets set in the project, never their values.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural secret set`
+
+```text
+
+ Usage: plural secret set [OPTIONS] {name}
+
+ Set a secret's value in the hosted project. Prompts without echoing.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The secret's name, as the App declares it. [required]                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --from-env          Read the value from the environment variable of that name.                   │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2217,6 +2535,32 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
+│ try       Run a Verifier on stored Trials and print what it gives, without saving anything.      │
+│ apply     Run a Verifier on stored Trials and add its rewards to their ledgers.                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier apply`
+
+```text
+
+ Usage: plural verifier apply [OPTIONS] {name}
+
+ Run a Verifier on stored Trials and add its rewards to their ledgers.
+
+ Records are kept under the Verifier's name and version. A Trial that already
+ has rewards from this version is left as it is: bump the Verifier's version
+ when its logic changes, so an export can choose which labels to use. Pushed
+ Jobs get the new records in the hosted project too.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Verifier, by name. [required]                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --trial        <str>  A local Trial id. Repeatable.                                              │
+│ --job          <str>  Every Trial of this local Job.                                             │
+│ --json                Print machine-readable JSON.                                               │
+│ --help                Show this message and exit.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2346,6 +2690,29 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --hosted          Only read the hosted project.                                                  │
 │ --json            Print machine-readable JSON.                                                   │
 │ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier try`
+
+```text
+
+ Usage: plural verifier try [OPTIONS] {name}
+
+ Run a Verifier on stored Trials and print what it gives, without saving anything.
+
+ Its reward runs again on each recorded step, its hindsight on the finished
+ trajectory, and a Python check on the stored episode. Edit the Verifier and
+ run this again to see the difference; the Agent is not run.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Verifier, by name. [required]                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --trial        <str>  A local Trial id. Repeatable.                                              │
+│ --job          <str>  Every Trial of this local Job.                                             │
+│ --json                Print machine-readable JSON.                                               │
+│ --help                Show this message and exit.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

@@ -837,8 +837,19 @@ plural.tracing.resources.trace_json_schema() -> 'dict[str, Any]'
 
 Simple public runner for a Task or Benchmark and catalog-backed Agents.
 
+```text
+``credentials`` gives each Agent's credential values by Agent name, such as
+``{"sales-bot": {"SALESFORCE_TOKEN": token}}``. A credential an Agent
+declares and is not given here is read from the exported variable of the
+same name.
+
+For a Task whose Environment has a party, ``party`` lists the Agents that
+share each episode, in seat order; list one Agent more than once for
+self-play. Left out, every Agent in ``agents`` plays, once each.
+```
+
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None) -> 'None'
 ```
 
 ### plural.Job.run_async
@@ -977,6 +988,10 @@ Directory that holds one resource.
 ```text
 Returns:
     The resource directory, whether or not it exists.
+
+Raises:
+    ValueError: When the name is not one folder name, such as one a
+        hosted record supplied with ``/`` or ``..``.
 ```
 
 ### plural.project.layout.Project.manifest_path
@@ -1444,110 +1459,39 @@ Read hosted upload metadata when a prior sync was registered.
 
 ## plural.Environment
 
-A Task-bound world with a ``reset`` / ``step`` episode API.
+Apps the Agent acts in, with one Runtime, policy, and set of limits.
 
 ```text
-Compile typed declarations into one immutable execution view. A Task pins
-one Environment version. The Job or Harness constructs this instance for
-that Task, calls :meth:`reset`, then applies Agent moves with :meth:`step`.
-``reset`` and ``step`` are not Agent-facing ``@action`` tools.
+An Environment owns the episode: ``reset`` and ``step``, the table of
+actions every App offers, and the rule that the Agent only ever sees an
+action's observation. Most Environments need no subclass::
+
+    environment = Environment(apps=[Wordle()], runtime=Runtime.docker())
+
+Subclass it only when Apps affect one another. Override :meth:`on_step`
+to react after any App's action, or :meth:`terminated` to end the episode
+from the state of several Apps.
 ```
 
 ```python
-plural.Environment(*, name: 'str | None' = None, version: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'tuple[EnvironmentResource, ...] | list[EnvironmentResource]' = (), runtime: 'EnvironmentRuntime | None' = None, secrets: 'tuple[SecretReference, ...] | list[SecretReference]' = (), guardrails: 'tuple[Guardrail, ...] | list[Guardrail]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, metadata: 'dict[str, Any] | None' = None, state: 'StateT | None' = None, observation: 'ObsT | None' = None, info: 'Any' = None, reset_command: 'tuple[str, ...] | list[str] | None' = None) -> 'None'
+plural.Environment(*, apps: 'Iterable[App[Any]]' = (), runtime: 'EnvironmentRuntime | Mapping[str, Any] | None' = None, name: 'str | None' = None, version: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'Iterable[EnvironmentResource]' = (), guardrails: 'Iterable[Guardrail]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, party: 'Party | int | Mapping[str, int] | None' = None, metadata: 'dict[str, Any] | None' = None, source: 'str | Path | None' = None) -> 'None'
 ```
 
-### plural.Environment.observation_snapshot
+### plural.Environment.on_step
 
 ```python
-observation_snapshot(self) -> 'Any'
+on_step(self, call: 'ActionCall', result: 'Any', apps: 'Mapping[str, Any]') -> 'None'
 ```
 
-Return a detached, JSON-safe agent-visible observation.
-
-### plural.Environment.state_snapshot
-
-```python
-state_snapshot(self) -> 'Any'
-```
-
-Return a detached, JSON-safe internal state snapshot.
-
-### plural.Environment.view
-
-```python
-view(self) -> 'dict[str, Any]'
-```
-
-Return an optional Environment-owned render document.
+React after any App's action, for effects that span Apps.
 
 ```text
-Returns:
-    A JSON-safe view. Empty means Intel falls back to the observation.
-```
+``apps`` maps each App's name to a handle with ``call(action, **args)``,
+``snapshot()``, and ``state``. An effect here is not an Agent action and
+is not shown to the Agent. Apps never call each other directly.
 
-### plural.Environment.persist
-
-```python
-persist(self, directory: 'str | Path' = '.') -> 'None'
-```
-
-Write ``state.json``, ``observation.json``, and ``view.json``.
-
-### plural.Environment.from_config
-
-```python
-from_config(**fields: 'Any') -> 'Environment[Any, Any]'
-```
-
-Restore a serialized public Environment configuration.
-
-```text
-This is primarily used by :mod:`plural.project`; users normally author
-Python subclasses.
-
-Returns:
-    An Environment backed by the validated serialized configuration.
-```
-
-### plural.Environment.reset
-
-```python
-reset(self, *, seed: 'int | None' = None, options: 'dict[str, Any] | None' = None) -> 'tuple[ObsT, dict[str, Any]]'
-```
-
-Start a new episode.
-
-```text
-Returns ``(observation, info)``. The Job
-or Harness calls this after attaching the Environment to a Task. It is
-not an Agent action and does not take a Task name. Subclasses override
-this to load the bound Task's initial state. ``options`` is harness
-configuration, not an Agent argument.
-
-Returns:
-    The initial observation and reset information.
-```
-
-### plural.Environment.step
-
-```python
-step(self, action: 'Any' = None, /, **kwargs: 'Any') -> 'tuple[ObsT, float, bool, bool, dict[str, Any]]'
-```
-
-Apply one Agent action.
-
-```text
-Returns ``(observation, reward,
-terminated, truncated, info)``. ``action`` is a mapping with
-``name`` plus parameters, an action name plus kwargs, or kwargs
-alone when the Environment has a single ``@action``.
-
-``reward`` sums :meth:`reward` and every ``@rewarder`` for this one
-transition. ``info["rewards"]`` breaks the total down by name.
-
-Returns:
-    Observation, reward, terminal flags, and step information.
+Rewards are not given here: they depend on the Task, so they come from
+the ``reward`` hook of a Task's Verifier.
 ```
 
 ### plural.Environment.terminated
@@ -1556,13 +1500,7 @@ Returns:
 terminated(self) -> 'bool'
 ```
 
-Return whether the Environment ended the episode.
-
-```text
-Override this to end the episode when the world reaches a Task success
-or failure state. The default never terminates, which leaves the stop
-decision to the Agent or the Harness budget.
-```
+Return whether the episode is over. Default: any App says it is.
 
 ### plural.Environment.truncated
 
@@ -1570,58 +1508,166 @@ decision to the Agent or the Harness budget.
 truncated(self) -> 'bool'
 ```
 
-Return whether the Environment cut the episode short.
+Return whether the episode was cut short. Default: any App says so.
 
-```text
-Override this to stop an episode that cannot usefully continue but did
-not reach a success or failure state. Harness turn, time, and cost
-budgets truncate independently of this method.
-```
-
-### plural.Environment.reward
+### plural.Environment.reset
 
 ```python
-reward(self, previous_state: 'Any', current_state: 'Any', action: 'Mapping[str, Any]', result: 'Any') -> 'float'
+reset(self, *, initial_state: 'Mapping[str, Any] | None' = None, info: 'Any' = None, seed: 'int | None' = None, verifiers: 'Sequence[Any]' = ()) -> 'tuple[Any, dict[str, Any]]'
 ```
 
-Return the step reward. Default is ``0``.
+Start an episode in this process.
+
+```text
+``initial_state`` maps each App's name to its starting state; with one
+App it may be that App's state directly. ``verifiers`` gives each
+:meth:`step` its reward: Verifiers with a ``reward`` hook, or functions
+of one :class:`~plural.Step`.
+
+Returns:
+    The opening observation and reset information.
+```
+
+### plural.Environment.step
+
+```python
+step(self, action: 'str | Mapping[str, Any] | None' = None, /, **kwargs: 'Any') -> 'tuple[Any, float, bool, bool, dict[str, Any]]'
+```
+
+Apply one Agent action in this process.
+
+```text
+``action`` is an exposed action name with keyword arguments, or a
+mapping with ``name`` and the arguments. With exactly one action the
+name may be omitted.
+
+Returns:
+    Observation, reward, terminated, truncated, and step information.
+```
+
+### plural.Environment.snapshot
+
+```python
+snapshot(self) -> 'dict[str, Any]'
+```
+
+Return each App's state, as a Verifier receives it after the episode.
+
+### plural.Environment.close
+
+```python
+close(self) -> 'None'
+```
+
+End the in-process episode and release every App's connections.
 
 ## plural.action
 
-Mark an :class:`~plural.environments.env.Environment` method as a native action.
+Mark an :class:`~plural.apps.App` method as an action the Agent can take.
 
 ```text
 Args:
     fn: Method to register (decorator usage).
     name: Optional explicit action name. Defaults to the method name.
+    read_only: The action never changes state. Verifiers may call only
+        read-only actions after the episode.
+    timeout_seconds: How long one call may run.
 
 Returns:
     The original method (decorator) or a decorator.
 ```
 
 ```python
-plural.action(fn: 'Callable[..., Any] | None' = None, *, name: 'str | None' = None) -> 'Any'
+plural.action(fn: 'Callable[..., Any] | None' = None, *, name: 'str | None' = None, read_only: 'bool' = False, timeout_seconds: 'float' = 30) -> 'Any'
 ```
 
-## plural.rewarder
+## plural.DeterministicVerifier
 
-Declare a named state-transition reward signal.
+Code that verifies an episode: it scores the end, rewards actions, or both.
 
 ```text
-The callable must accept ``previous_state, current_state, action, result``.
-Every rewarder runs inside :meth:`Environment.step` immediately after the
-action that changed the world, so it scores one transition and supports
-credit assignment. ``weight`` scales its contribution to the step reward.
+``check`` scores the finished episode; that score is what Tasks and
+Benchmarks rank on. It is a function of the :class:`Episode`, a
+``{"python": "verify.py:check"}`` reference, or a command argv.
 
-Rewards are recorded on the episode. They never contribute to a Verifier
-score.
+``reward`` rewards each action while the episode runs. It is a function of
+one :class:`Step`, or a ``{"python": "verify.py:reward"}`` reference, and
+runs in the Runtime beside the Apps, so it can read every App. What it
+returns goes to the Trial's reward ledger. Rewards reach the score only
+when ``check`` is :func:`total_reward`.
 
+``hindsight`` credits the finished trajectory as a whole: a function of a
+:class:`~plural.rewards.HindsightTrial` that returns
+:class:`~plural.rewards.Credit` values, or a ``{"python":
+"verify.py:efficiency"}`` reference. It runs after the score, and can also
+run later on stored Trials with ``plural verifier apply``.
+```
+
+### plural.DeterministicVerifier.bind_source
+
+```python
+bind_source(self, digest: 'str', directory: 'Path | None' = None) -> 'None'
+```
+
+Fingerprint callable hooks by the package that ships them.
+
+### plural.DeterministicVerifier.bind_source_digest
+
+```python
+bind_source_digest(self, digest: 'str') -> 'None'
+```
+
+Fingerprint callable hooks by the package that ships them.
+
+### plural.DeterministicVerifier.invoke
+
+```python
+invoke(self, episode: 'Episode') -> 'VerifierOutput'
+```
+
+Run ``check`` in-process on the finished Episode.
+
+```text
 Returns:
-    A decorated rewarder callable.
+    A validated VerifierOutput.
+```
+
+### plural.DeterministicVerifier.model_post_init
+
+```python
+model_post_init(self: 'BaseModel', context: 'Any', /) -> 'None'
+```
+
+This function is meant to behave like a BaseModel method to initialize private attributes.
+
+```text
+It takes context as an argument since that's what pydantic-core passes when calling it.
+
+Args:
+    self: The BaseModel instance.
+    context: The context.
+```
+
+## plural.Step
+
+One action the Agent took, as a Verifier's ``reward`` hook sees it.
+
+```text
+``observation`` is what the Agent saw back; ``error`` is set instead when
+the action rejected its input. ``previous_state`` and ``current_state``
+are the acting App's snapshots around the action, or ``None`` when it does
+not snapshot on each step. ``apps`` reads any App, by name: ``state`` for
+a Python App, ``snapshot()``, and ``query(action, **arguments)`` for a
+read-only action. Nothing here reaches the Agent.
+
+When several Agents share the episode, ``seat`` is the one that acted and
+``seats`` lists them all. A number a ``reward`` hook returns credits the
+acting seat; a mapping of seat to number credits each seat named, as in a
+zero-sum game.
 ```
 
 ```python
-plural.rewarder(fn: 'Callable[..., float] | None' = None, *, name: 'str | None' = None, weight: 'float' = 1, timeout_seconds: 'float' = 30) -> 'Any'
+plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = ()) -> None
 ```
 
 ## plural.environments.types.Observation
@@ -1847,10 +1893,63 @@ Download exact declared files.
 ### plural.SandboxProvider.download_artifacts
 
 ```python
-download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace') -> 'tuple[DownloadedFile, ...]'
+download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace', user: 'str | None' = None) -> 'tuple[DownloadedFile, ...]'
 ```
 
-Download declared artifact files.
+Download files a Harness declared, which ``user`` wrote, as regular files only.
+
+### plural.SandboxProvider.stop_user_processes
+
+```python
+stop_user_processes(self, handle: 'SandboxHandle', users: 'Sequence[str | None]') -> 'None'
+```
+
+Kill every process the Harnesses' users still run, once their run has ended.
+
+```text
+``None`` names the sandbox's default user. A provider that cannot do
+this safely does nothing; the App host refuses actions after the Job's
+``finish`` either way.
+```
+
+### plural.SandboxProvider.isolate_apps
+
+```python
+isolate_apps(self, handle: 'SandboxHandle') -> 'AppIsolation'
+```
+
+Prepare a separate OS user for the App host, when this sandbox can.
+
+```text
+Returns:
+    The users to run the App host and the Harness as; no ``app_user``
+    when the sandbox cannot separate them.
+```
+
+### plural.SandboxProvider.open_workspace
+
+```python
+open_workspace(self, handle: 'SandboxHandle', isolation: 'AppIsolation', paths: 'Sequence[str]') -> 'None'
+```
+
+Let ``isolation.agent_user`` write the Harness's folders, once staging is done.
+
+### plural.SandboxProvider.isolate_seats
+
+```python
+isolate_seats(self, handle: 'SandboxHandle', seats: 'Sequence[str]') -> 'dict[str, str]'
+```
+
+Prepare one OS user for each seat's Harness, when this sandbox can.
+
+```text
+Each must differ from the App host's user and from every other seat's,
+and must not be able to become another user, so one seat's Harness
+cannot read another's files or process.
+
+Returns:
+    Seat to user, or empty when the sandbox cannot separate them.
+```
 
 ### plural.SandboxProvider.cancel
 
@@ -2055,6 +2154,39 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Stream exact files into the writable workspace mount.
 
+### plural.DockerProvider.isolate_apps
+
+```python
+isolate_apps(self, handle: 'SandboxHandle') -> 'AppIsolation'
+```
+
+Run the App host as its own unprivileged user.
+
+```text
+The container runs everything else as ``65532``, with every capability
+dropped, so the Harness cannot read the App host's ``0700`` folder or
+its process.
+
+Returns:
+    The App host's user, and the default user for the Harness.
+```
+
+### plural.DockerProvider.isolate_seats
+
+```python
+isolate_seats(self, handle: 'SandboxHandle', seats: 'Sequence[str]') -> 'dict[str, str]'
+```
+
+Run each seat's Harness as its own unprivileged user.
+
+```text
+Every capability is dropped, so no seat's user can read another's
+``0700`` folder or process, or the App host's.
+
+Returns:
+    Seat to a numeric user, ``65400`` for the first.
+```
+
 ### plural.DockerProvider.exec
 
 ```python
@@ -2070,6 +2202,31 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 ```
 
 Stream exact declared paths out and reject non-regular files.
+
+### plural.DockerProvider.download_artifacts
+
+```python
+download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace', user: 'str | None' = None) -> 'tuple[DownloadedFile, ...]'
+```
+
+Read a Harness's files as the user that wrote them, which owns its folder.
+
+```text
+No capability is kept, so only a seat's own user can enter its ``0700`` folder.
+```
+
+### plural.DockerProvider.stop_user_processes
+
+```python
+stop_user_processes(self, handle: 'SandboxHandle', users: 'Sequence[str | None]') -> 'None'
+```
+
+Kill what each Harness user left running, as that user, since no capability is kept.
+
+```text
+``None`` is the container's default user, whose ``sleep`` keeps it alive
+as PID 1 and is spared.
+```
 
 ### plural.DockerProvider.cancel
 
@@ -2135,6 +2292,51 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Upload exact in-memory files.
 
+### plural.DaytonaProvider.isolate_apps
+
+```python
+isolate_apps(self, handle: 'SandboxHandle') -> 'AppIsolation'
+```
+
+Create an App host user and an unprivileged Harness user.
+
+```text
+Daytona's default user can ``sudo``, so a Harness running as it could
+read anything. Here the Harness runs as ``plural-agent``, which cannot,
+and the App host as ``plural-apps``.
+
+Returns:
+    Both users, or no ``app_user`` when the image has no passwordless
+    ``sudo`` or ``useradd``.
+```
+
+### plural.DaytonaProvider.isolate_seats
+
+```python
+isolate_seats(self, handle: 'SandboxHandle', seats: 'Sequence[str]') -> 'dict[str, str]'
+```
+
+Create one unprivileged user for each seat's Harness.
+
+```text
+Returns:
+    Seat to user, or empty when the image has no passwordless ``sudo``
+    or ``useradd``.
+```
+
+### plural.DaytonaProvider.open_workspace
+
+```python
+open_workspace(self, handle: 'SandboxHandle', isolation: 'AppIsolation', paths: 'Sequence[str]') -> 'None'
+```
+
+Let the Harness user write the staged folders, which the default user owns.
+
+```text
+Raises:
+    SandboxError: When the folders cannot be opened to it.
+```
+
 ### plural.DaytonaProvider.exec
 
 ```python
@@ -2143,6 +2345,11 @@ exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
 
 Execute through ``sandbox.process.exec``.
 
+```text
+A ``user`` other than ``root`` runs through ``sudo -n -E -u``, which
+fails rather than falling back to the default user.
+```
+
 ### plural.DaytonaProvider.download_files
 
 ```python
@@ -2150,6 +2357,36 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 ```
 
 Download exact declared files.
+
+### plural.DaytonaProvider.download_artifacts
+
+```python
+download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace', user: 'str | None' = None) -> 'tuple[DownloadedFile, ...]'
+```
+
+Download Harness-declared files, refusing any that is not a regular file inside ``root``.
+
+```text
+Daytona's file API reads as the sandbox's default user, which can read
+the App host's folder, so a symlink or a path that resolves outside
+``root`` is refused first, as the Harness's ``user`` when given, and
+the resolved file is what is read.
+
+Raises:
+    FileNotFoundError: When a declared path is not a regular file inside ``root``.
+```
+
+### plural.DaytonaProvider.stop_user_processes
+
+```python
+stop_user_processes(self, handle: 'SandboxHandle', users: 'Sequence[str | None]') -> 'None'
+```
+
+Kill, as root, what the Harnesses' own users left running.
+
+```text
+The default user is skipped: it is the one Daytona runs its own tools as.
+```
 
 ### plural.DaytonaProvider.cancel
 

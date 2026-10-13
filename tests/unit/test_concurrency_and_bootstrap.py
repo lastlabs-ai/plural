@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fakes import FakeProvider
 
 from plural.agents import AgentBinding, AgentDefinition
+from plural.apps.definition import AppDefinition
 from plural.common import ExecutionTarget
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
 from plural.execution import JobRunner, JobStore
@@ -18,6 +20,7 @@ from plural.execution.bootstrap import (
     PluralBootstrapError,
     PluralDistribution,
     install_plural,
+    missing_packages,
     needs_plural,
     prepare_requirements,
     resolve_distribution,
@@ -41,7 +44,7 @@ def _task(
     name: str,
     provider: str = "docker",
     *,
-    reset: tuple[str, ...] = (),
+    apps: tuple[AppDefinition, ...] = (),
     resources: ResourceRequirements | None = None,
 ) -> TaskDefinition:
     target = {
@@ -60,13 +63,13 @@ def _task(
                 resources=resources or ResourceRequirements(),
                 **local,
             ),
-            reset_command=reset,
+            apps=apps,
         ),
         verifiers=(
             WeightedVerifier(
                 verifier=DeterministicVerifier(
                     name="exact",
-                    command=("python", "verify.py"),
+                    check=("python", "verify.py"),
                     runtime=VerifierRuntime(provider=provider),
                 )
             ),
@@ -173,7 +176,8 @@ async def test_job_progress_reports_partial_results_while_trials_run(tmp_path: P
 def test_only_sandboxes_that_run_plural_code_need_it() -> None:
     plain = _task("plain")
     runner = _task(
-        "runner", reset=("python", "-m", "plural.environments.runner", "env.py:Env", "reset")
+        "runner",
+        apps=(AppDefinition(name="game", kind="python", python="env.py:Game", actions=()),),
     )
 
     assert not needs_plural(plain)
@@ -200,19 +204,31 @@ def test_runtime_version_selects_this_code_or_a_release() -> None:
 class _Sandbox(FakeProvider):
     """Answers the probe with whatever version was installed so far."""
 
-    def __init__(self, *, preinstalled: str | None = None, install_exit: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        preinstalled: str | None = None,
+        install_exit: int = 0,
+        packages: tuple[str, ...] = (),
+    ) -> None:
         super().__init__("daytona")
         self.version = preinstalled
         self.install_exit = install_exit
+        self.installed = set(packages)
         self.commands: list[ExecRequest] = []
 
     async def exec(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
         self.commands.append(request)
-        if request.command[-1].strip().endswith("print(json.dumps(info))"):
-            info = {"version": self.version} if self.version else {"error": "ModuleNotFound"}
+        if request.command[2].strip().endswith("print(json.dumps(info))"):
+            info: dict[str, Any] = (
+                {"version": self.version} if self.version else {"error": "ModuleNotFound"}
+            )
+            info["missing"] = [name for name in request.command[3:] if name not in self.installed]
             return ExecResult(exit_code=0, stdout=json.dumps(info).encode(), duration_seconds=0)
         if self.install_exit == 0:
-            self.version = "9.9.9"
+            if request.command[4] != "-" or self.version is None:
+                self.version = "9.9.9"
+            self.installed |= {item.split(">")[0].split("=")[0] for item in request.command[5:]}
         return ExecResult(exit_code=self.install_exit, stderr=b"no pip", duration_seconds=0)
 
 
@@ -293,6 +309,86 @@ async def test_docker_gets_an_image_built_once_with_plural_layered_on() -> None:
     assert seen["key"] == distribution.key
     unchanged = SandboxRequirements(image="python:3.12-slim")
     assert await prepare_requirements(_Sandbox(), unchanged, distribution) is unchanged
+
+
+async def test_the_environments_packages_are_installed_with_plural_or_on_their_own(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "__init__.py").write_text("__version__ = '9.9.9'\n")
+    distribution = PluralDistribution(
+        version="9.9.9",
+        requirements=("pydantic>=2",),
+        source=tmp_path,
+        packages=("duckdb>=1.1", "polars"),
+    )
+
+    fresh = _Sandbox()
+    await install_plural(fresh, await _handle(fresh), distribution, network=NetworkMode.PUBLIC)
+    assert fresh.commands[1].command[-3:] == ("pydantic>=2", "duckdb>=1.1", "polars")
+
+    plural_only = _Sandbox(preinstalled="9.9.9", packages=("polars",))
+    handle = await _handle(plural_only)
+    await install_plural(plural_only, handle, distribution, network=NetworkMode.PUBLIC)
+    assert plural_only.commands[0].command[3:] == ("duckdb", "polars")
+    assert plural_only.commands[1].command[4:] == ("-", "duckdb>=1.1")
+    assert plural_only.files[handle.sandbox_id] == {}
+
+    ready = _Sandbox(preinstalled="9.9.9", packages=("duckdb", "polars"))
+    await install_plural(ready, await _handle(ready), distribution, network=NetworkMode.NONE)
+    assert len(ready.commands) == 1
+
+    offline = _Sandbox(preinstalled="9.9.9")
+    with pytest.raises(PluralBootstrapError, match="duckdb>=1.1 polars cannot be installed"):
+        await install_plural(
+            offline, await _handle(offline), distribution, network=NetworkMode.NONE
+        )
+
+
+async def test_docker_bakes_the_environments_packages_into_its_image() -> None:
+    seen: dict[str, str] = {}
+
+    class _Docker(FakeProvider):
+        async def extend_image(
+            self, requirements: SandboxRequirements, context: Path, key: str
+        ) -> SandboxRequirements:
+            seen["requirements"] = (context / "requirements.txt").read_text()
+            seen["key"] = key
+            return requirements
+
+    plain = resolve_distribution(None)
+    with_packages = resolve_distribution(None, packages=("duckdb>=1.1",))
+    await prepare_requirements(_Docker("docker"), SandboxRequirements(), with_packages)
+
+    assert seen["requirements"].endswith("duckdb>=1.1\n")
+    assert seen["key"] != plain.key
+
+
+def test_missing_packages_reads_this_python() -> None:
+    assert missing_packages(["pydantic>=2", "pydantic<1", "surely-not-installed-xyz"]) == [
+        "pydantic<1",
+        "surely-not-installed-xyz",
+    ]
+    assert missing_packages(['surely-not-installed-xyz; python_version < "3"']) == []
+
+
+def test_runtime_packages_take_one_requirement_per_entry() -> None:
+    runtime = EnvironmentRuntime.docker(
+        packages={"python": ["duckdb>=1.1", "polars[sql]", "duckdb>=1.1"]}
+    )
+
+    assert runtime.packages.python == ("duckdb>=1.1", "polars[sql]")
+    flat = EnvironmentRuntime.model_validate(
+        {
+            "provider": "local",
+            "allow_unsafe_local": True,
+            "targets": ["local"],
+            "python_packages": ["duckdb"],
+        }
+    )
+    assert flat.packages.python == ("duckdb",)
+    for bad in ("--index-url https://example.com", "duckdb\npolars", ""):
+        with pytest.raises(ValueError, match="not a Python requirement"):
+            EnvironmentRuntime.docker(packages={"python": [bad]})
 
 
 def test_docker_points_loopback_urls_at_the_host() -> None:

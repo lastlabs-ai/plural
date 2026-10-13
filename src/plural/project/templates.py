@@ -68,7 +68,7 @@ def title(name: str) -> str:
     return name.replace("-", " ").capitalize()
 
 
-MIN_SDK_VERSION = "0.15"
+MIN_SDK_VERSION = "0.21"
 """The oldest SDK that reads this project layout; new projects require it."""
 
 
@@ -96,7 +96,7 @@ def project_scaffold(name: str) -> Scaffold:
                 f'name = "{name}"\n'
                 'version = "0.1.0"\n'
                 'requires-python = ">=3.11"\n'
-                f'dependencies = ["plural>={MIN_SDK_VERSION}"]\n'
+                f'dependencies = ["plural[mcp]>={MIN_SDK_VERSION}"]\n'
             ),
             "README.md": _PROJECT_README.format(name=name),
             ".gitignore": ".plural/\n__pycache__/\n.venv/\n",
@@ -109,7 +109,7 @@ _PROJECT_README = """# {name}
 A Plural project. Each resource is a directory named after it:
 
 ```
-environments/<name>/   environment.yaml, environment.py, README.md, resources/
+environments/<name>/   environment.yaml, server.py, README.md, resources/
 tasks/<name>/          task.yaml, instruction.md, resources/
 verifiers/<name>/      verifier.yaml, verify.py
 harnesses/<name>/      harness.yaml
@@ -139,13 +139,27 @@ def resource_scaffold(
     verifiers: tuple[str, ...] = (),
     model: str | None = None,
     harness: str | None = None,
+    python: bool = False,
 ) -> Scaffold:
     """Files for ``plural <kind> init <name>``.
+
+    An Environment starts as one App whose server is written with FastMCP;
+    ``python=True`` starts it as a Python ``App`` class instead.
 
     Returns:
         The resource scaffold, relative to the resource directory.
     """
     cls = class_name(name)
+    if kind is ENVIRONMENT and not python:
+        app = name.replace("-", "_")
+        return Scaffold(
+            files={
+                ENVIRONMENT.manifest: _MCP_ENVIRONMENT_YAML.format(name=name, app=app),
+                "server.py": _MCP_SERVER_PY.format(title=title(name), app=app),
+                "README.md": _MCP_ENVIRONMENT_README.format(title=title(name)),
+            },
+            directories=("resources",),
+        )
     if kind is ENVIRONMENT:
         return Scaffold(
             files={
@@ -220,15 +234,171 @@ def resource_scaffold(
     raise ValueError(f"no scaffold for {kind.name}")
 
 
-_ENVIRONMENT_YAML = """\
-# Environment: identity, resources, runtime, and settings.
-# Behavior (actions, state, observations, rewards) is Python in environment.py.
+_MCP_ENVIRONMENT_YAML = """\
+# Environment: the Apps an Agent works with, plus runtime and settings.
 # README.md explains both to the people who use this Environment.
 name: {name}
 description: ""
 overview: ""
+readme: README.md
+
+# Each App is one system the Agent works with. This one is the FastMCP server in
+# server.py: every tool is an action the Agent can take. Plural starts a fresh copy
+# for every Trial. Add more Apps to this list, such as a hosted MCP server:
+#   - name: crm
+#     mcp:
+#       url: https://mcp.example.com/v1
+#       headers: {{Authorization: "Bearer ${{CRM_TOKEN}}"}}
+#       credentials: [CRM_TOKEN]
+# or Plural's ready-made server over this Environment's and the Task's files:
+#   - name: files
+#     mcp:
+#       server: plural.mcp.files:server
+apps:
+  - name: {app}
+    mcp:
+      server: server.py:mcp
+
+# Files every Task can read, relative to this directory. In a Trial they are in
+# environment-resources/, read-only; a Task's own files are beside them in
+# task-resources/. server.py reads them with plural.mcp.environment_resources().
+resources: []
+#  - resources/policy.md
+
+# Where the Environment and Agent run. provider selects a Runtime preset:
+# docker (sandboxed), local (a trusted subprocess, not a sandbox), or daytona.
+runtime:
+  provider: docker
+  image: python:3.12-slim
+
+# Settings: which Agent harnesses may run here, and per-Trial limits.
+harness_policy:
+  mode: allow_all
+limits:
+  max_turns: 8
+  max_seconds: 120
+"""
+
+_MCP_SERVER_PY = '''\
+"""{title}: the MCP server behind this Environment's App.
+
+Every @mcp.tool is an action the Agent can take. Its docstring is what the
+Agent reads, and what it returns is what the Agent sees next. Mark tools that
+change nothing with readOnlyHint, so Benchmarks and Verifiers can rely on them.
+
+Plural starts this server fresh for every Trial. @plural.mcp.reset loads a
+Task's starting state and @plural.mcp.snapshot reports state to Verifiers; the
+Agent sees neither as a tool.
+"""
+
+from fastmcp import FastMCP
+
+import plural.mcp
+
+mcp = FastMCP("{app}")
+
+# PLURAL-TODO: replace this with the state your tools read and change.
+STATE: dict = {{"goal": "", "answer": "", "done": False}}
+
+
+@plural.mcp.reset(mcp)
+def start(initial_state: dict) -> str:
+    """Start an episode from the Task's initial_state. Return what the Agent sees first."""
+    STATE.update(goal=initial_state.get("goal", ""), answer="", done=False)
+    return f"Goal: {{STATE['goal']}}"
+
+
+# PLURAL-TODO: replace these tools with the moves your Agent needs.
+@mcp.tool(annotations={{"readOnlyHint": True}})
+def read_resource(path: str) -> str:
+    """Read a file this Environment provides, such as resources/policy.md."""
+    folder = plural.mcp.environment_resources()
+    target = (folder / path).resolve()
+    if not target.is_relative_to(folder.resolve()) or not target.is_file():
+        raise ValueError(f"No file {{path}}")
+    return target.read_text()
+
+
+@mcp.tool
+def submit(answer: str) -> str:
+    """Submit a final answer."""
+    STATE.update(answer=answer, done=True)
+    return "Submitted."
+
+
+@plural.mcp.snapshot(mcp)
+def state() -> dict:
+    """The state Verifiers read. The Agent never sees it."""
+    return STATE
+'''
+
+_MCP_ENVIRONMENT_README = """\
+# {title}
+
+## Overview
+
+<!-- PLURAL-TODO: describe the world this Environment simulates and what an Agent does in it. -->
+
+## Apps
+
+Each App is one system the Agent works with. `server.py` is a FastMCP server; its tools
+are the Agent's actions. `apps:` in `environment.yaml` can add others, such as a hosted
+MCP server.
+
+## Actions
+
+Functions marked `@mcp.tool`. Their docstrings are what the Agent reads, and what each
+returns is what the Agent sees next.
+
+## State
+
+What `@plural.mcp.snapshot` returns. Each Task's `initial_state` reaches
+`@plural.mcp.reset`. The Agent never sees State; Verifiers do.
+
+## Rewards
+
+An Environment gives no rewards. Each Task's Verifiers do: `check` scores the finished
+episode, and `reward` rewards each action. See `verifiers/`.
+
+## Resources
+
+Files listed under `resources:` in `environment.yaml`. In a Trial they are read-only in
+`environment-resources/`, beside the Task's own files in `task-resources/`.
+
+## Runtime
+
+`runtime:` in `environment.yaml` says where the Environment and Agent run. The server
+needs FastMCP: `pip install 'plural[mcp]'`.
+
+## Settings
+
+`harness_policy` limits which Agent harnesses may run here. `limits` caps each Trial's
+turns, seconds, and cost.
+"""
+
+_ENVIRONMENT_YAML = """\
+# Environment: the Apps an Agent works with, plus runtime and settings.
+# README.md explains both to the people who use this Environment.
+name: {name}
+description: ""
+overview: ""
+
+# An App is a named bundle of actions. This one is the Python class in
+# environment.py. To compose several Apps, list them under apps instead.
 python: environment.py:{cls}
 readme: README.md
+
+# Connect an existing system as another App. Any MCP server works:
+# apps:
+#   - python: environment.py:{cls}
+#   - name: files
+#     mcp:
+#       server: plural.mcp.files:server
+#   - name: crm
+#     mcp:
+#       url: https://mcp.example.com/v1
+#       headers: {{Authorization: "Bearer ${{CRM_TOKEN}}"}}
+#       credentials: [CRM_TOKEN]
 
 # Files staged into the runtime, relative to this directory.
 resources: []
@@ -249,19 +419,17 @@ limits:
 """
 
 _ENVIRONMENT_PY = '''\
-"""{title} Environment.
+"""{title}.
 
-Actions are the moves an Agent can make. State is private to the Environment;
-Verifiers read it and the Agent never does. The Observation is the only thing
-the Agent sees. Rewards are per-step credit for training and never contribute
-to a Verifier score.
+An App is the moves an Agent can make. What an action returns is what the
+Agent sees next. State is private: Verifiers read it and the Agent never does.
 """
 
-from plural import Environment, Observation, State, action, initial
+from plural import App, State, action, initial
 
 
 class {cls}State(State):
-    """Private world state."""
+    """Private state for one episode."""
 
     # PLURAL-TODO: declare the fields a Task starts from (with initial()) and the fields actions change.
     goal: str = initial("", description="What this Task asks the Agent to achieve.")
@@ -269,19 +437,13 @@ class {cls}State(State):
     done: bool = False
 
 
-class {cls}Observation(Observation):
-    """What the Agent sees. Never put answers, scores, or rewards here."""
+class {cls}(App[{cls}State]):
+    """PLURAL-TODO: one sentence the Agent reads about this App."""
 
-    goal: str = ""
-    done: bool = False
-
-
-class {cls}(Environment[{cls}Observation, {cls}State]):
-    def reset(self, *, seed=None, options=None):
-        """Start an episode from the Task's initial state. Called by the Job, not the Agent."""
-        _, info = super().reset(seed=seed, options=options)
-        self.observation = {cls}Observation(goal=self.state.goal)
-        return self.observation, info
+    def reset(self, initial_state):
+        """Start an episode from the Task's initial state. Return what the Agent sees first."""
+        super().reset(initial_state)
+        return f"Goal: {{self.state.goal}}"
 
     # PLURAL-TODO: replace this action with the moves your Agent needs. Its docstring is the Agent's description.
     @action
@@ -289,15 +451,10 @@ class {cls}(Environment[{cls}Observation, {cls}State]):
         """Submit a final answer and end the episode."""
         self.state.answer = answer
         self.state.done = True
-        self.observation = {cls}Observation(goal=self.state.goal, done=True)
         return "Submitted."
 
     def terminated(self) -> bool:
         return self.state.done
-
-    def reward(self, previous_state, current_state, action, result) -> float:
-        """Per-step credit for one transition. Recorded for training; never part of the score."""
-        return 0.0
 '''
 
 _ENVIRONMENT_README = """\
@@ -307,22 +464,25 @@ _ENVIRONMENT_README = """\
 
 <!-- PLURAL-TODO: describe the world this Environment simulates and what an Agent does in it. -->
 
+## Apps
+
+Each App is a named bundle of actions. `environment.py` defines a Python App;
+`apps:` in `environment.yaml` can add others, such as an MCP server.
+
 ## Actions
 
-Methods marked `@action` in `environment.py`. Their docstrings are what the Agent reads.
+Methods marked `@action`. Their docstrings are what the Agent reads, and what
+each returns is what the Agent sees next.
 
 ## State
 
 Private fields in the `State` class. Fields marked `initial()` are set by each Task's
 `initial_state`. The Agent never sees State; Verifiers do.
 
-## Observations
-
-Fields in the `Observation` class: the only thing the Agent sees after each action.
-
 ## Rewards
 
-`reward()` returns per-step credit for training. Rewards never contribute to a score.
+An Environment gives no rewards. Each Task's Verifiers do: `check` scores the finished
+episode, and `reward` rewards each action. See `verifiers/`.
 
 ## Resources
 
@@ -343,7 +503,8 @@ _TASK_YAML = """\
 # Verifiers that score it. Files under resources/ are given to the Agent.
 name: {name}
 instructions: instruction.md
-{environment}{verifiers}# Values for the Environment State fields marked initial().
+{environment}{verifiers}# Values for the App State fields marked initial(). With several Apps,
+# key them by App name: {{crm: {{...}}, wordle: {{...}}}}.
 initial_state: {{}}
 """
 
@@ -354,25 +515,36 @@ _TASK_INSTRUCTION = """\
 """
 
 _VERIFIER_YAML = """\
-# Verifier: scores a finished episode. Its score, never the step rewards, is
-# what Tasks and Benchmarks rank on.
+# Verifier: what counts as a good episode for the Tasks that list it.
+# check scores the finished episode; Tasks and Benchmarks rank on that score.
+# reward rewards each action, for training. It changes the score only when
+# check is total_reward. hindsight credits steps once the episode is over.
+# Try changes on stored Trials with `plural verifier try {name} --job JOB_ID`.
 name: {name}
 kind: deterministic
-check: verify.py:verify
+check: verify.py:check
+# reward: verify.py:reward
+# hindsight: verify.py:hindsight
 weight: 1
 """
 
 _VERIFIER_PY = '''\
-"""Score a finished episode from its final State and Observation."""
+"""Verify an episode: score the finished episode with check, and reward each action with reward."""
 
-from plural import Episode, VerifierOutput
+from plural import Episode, VerifierOutput, Step
 
 
-def verify(episode: Episode) -> VerifierOutput:
+def check(episode: Episode) -> VerifierOutput:
     """Return a score from 0 to 1 with evidence a reviewer can check."""
     # PLURAL-TODO: compare episode.state with what the Task asked for.
     done = bool(episode.state.get("done"))
     return VerifierOutput(score=float(done), evidence=[f"done={done}"])
+
+
+def reward(step: Step) -> float | None:
+    """Reward one action, or return None to give none. Turn it on in verifier.yaml."""
+    # PLURAL-TODO: read step.observation, step.current_state, or step.apps["name"].
+    return -0.1 if step.error else None
 '''
 
 _HARNESS_YAML = """\
@@ -405,7 +577,7 @@ name: {name}
 
 _BENCHMARK_YAML = """\
 # Benchmark: a named collection of Tasks and the rules for ranking results.
-# Results rank on the Verifier score only; step rewards never contribute.
+# Results rank on the Verifier score only; rewards count only through a check of total_reward.
 name: {name}
 description: ""
 # PLURAL-TODO: state the motivation: what this Benchmark measures and why it matters.

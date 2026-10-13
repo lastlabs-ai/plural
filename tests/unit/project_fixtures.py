@@ -35,7 +35,7 @@ FILES = {
           mode: allow_all
     """,
     "environments/queue/environment.py": '''
-        from plural import Environment, Observation, State, action, initial
+        from plural import App, State, action, initial
 
 
         class QueueState(State):
@@ -45,33 +45,22 @@ FILES = {
             done: bool = False
 
 
-        class QueueObservation(Observation):
-            order: str = ""
-            message: str = ""
-            done: bool = False
+        class Queue(App[QueueState]):
+            """A refund queue."""
 
-
-        class Queue(Environment[QueueObservation, QueueState]):
-            def reset(self, *, seed=None, options=None):
-                _, info = super().reset(seed=seed, options=options)
-                self.observation = QueueObservation(order=self.state.order)
-                return self.observation, info
+            def reset(self, initial_state):
+                super().reset(initial_state)
+                return f"Order {self.state.order} is waiting."
 
             @action
             def submit(self, answer: str) -> str:
                 """Submit the resolution: refunded or denied."""
                 self.state.answer = answer
                 self.state.done = True
-                self.observation = QueueObservation(
-                    order=self.state.order, message="Submitted.", done=True
-                )
                 return "Submitted."
 
             def terminated(self) -> bool:
                 return self.state.done
-
-            def reward(self, previous_state, current_state, action, result) -> float:
-                return 1.0 if current_state["done"] else 0.0
     ''',
     "environments/queue/README.md": """
         # Queue
@@ -85,16 +74,21 @@ FILES = {
         name: resolved
         version: 0.1.0
         kind: deterministic
-        check: verify.py:verify
+        check: verify.py:check
+        reward: verify.py:reward
     """,
     "verifiers/resolved/verify.py": """
-        from plural import Episode, VerifierOutput
+        from plural import Episode, VerifierOutput, Step
 
 
-        def verify(episode: Episode) -> VerifierOutput:
+        def check(episode: Episode) -> VerifierOutput:
             expected = "refunded" if episode.state.get("refundable") else "denied"
             correct = episode.state.get("answer") == expected
             return VerifierOutput(score=float(correct), evidence=[f"expected={expected}"])
+
+
+        def reward(step: Step) -> float:
+            return 1.0 if step.current_state["done"] else 0.0
     """,
     "tasks/refund/task.yaml": """
         name: refund

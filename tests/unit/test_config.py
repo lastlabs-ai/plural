@@ -23,5 +23,14 @@ def test_resolve_gateway_url_prefers_gateway_over_api_url() -> None:
     )
 
 
+def test_resolve_gateway_url_serves_the_gateway_under_the_api_url() -> None:
+    assert resolve_gateway_url(environ={"PLURAL_API_URL": "http://localhost:8765/"}) == (
+        "http://localhost:8765/v1"
+    )
+    assert resolve_gateway_url(environ={"PLURAL_API_URL": "http://localhost:8765/v1"}) == (
+        "http://localhost:8765/v1"
+    )
+
+
 def test_resolve_gateway_url_falls_back_to_default() -> None:
     assert resolve_gateway_url(environ={}) == DEFAULT_SETTINGS.gateway_base_url.rstrip("/")

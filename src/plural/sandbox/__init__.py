@@ -10,6 +10,7 @@ from plural.sandbox.daytona import (
 from plural.sandbox.docker import DockerProvider
 from plural.sandbox.local import LocalProvider
 from plural.sandbox.models import (
+    AppIsolation,
     Capability,
     CapabilityError,
     DeclarativeImage,
@@ -33,6 +34,7 @@ from plural.sandbox.models import (
 from plural.sandbox.registry import ProviderRegistry, default_registry
 
 __all__ = [
+    "AppIsolation",
     "Capability",
     "CapabilityError",
     "DeclarativeImage",

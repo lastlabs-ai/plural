@@ -92,10 +92,11 @@ def test_agent_catalog_provider_fallback_and_single_harness(tmp_path) -> None:
         )
 
 
-def test_verifier_contract_uses_check_criteria_and_catalog_models() -> None:
+def test_verifier_contract_uses_final_criteria_and_catalog_models() -> None:
     deterministic = solved(weight=3)
     assert deterministic.check == ("python", "verifier.py")
     assert deterministic.command == deterministic.check
+    assert deterministic.scores
     assert deterministic.weight == 3
 
     criterion = RubricCriterion(name="quality", description="Response quality.")

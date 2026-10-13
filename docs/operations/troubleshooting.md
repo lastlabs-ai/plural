@@ -36,7 +36,7 @@ The command may be missing, or it may belong to an older version of Plural.
 Activate the environment where Plural is installed. Run
 `python -m pip show plural` and `plural --help`, then compare with the
 [CLI command reference](../cli/evaluation.md#command-reference). Projects need
-`plural>=0.18.0`.
+`plural>=0.21.0`.
 
 ### Removed commands
 
@@ -125,10 +125,10 @@ An absolute path on your laptop is not automatically available in a remote sandb
 Constructing `Task(..., environment=..., verifiers=...)` fails unless the
 Environment class lives in a `.py` file and each deterministic Verifier's
 `check` is a function, or a `file.py:function` reference, that accepts an
-`Episode`, such as `verify.py:verify` in the examples.
+`Episode`, such as `verify.py:check` in the examples.
 
-The function receives the final Observation, State, trajectory, artifacts, and
-usage. If it returns anything other than a `VerifierOutput`, the Trial fails with no
+The function receives each App's State, the last observation, the trajectory,
+artifacts, and usage. If it returns anything other than a `VerifierOutput`, the Trial fails with no
 score and a message that names the Verifier.
 
 ## The Verifier script or result is missing

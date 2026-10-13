@@ -10,7 +10,15 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from plural.agents import Agent, AgentBinding, AgentDefinition
 from plural.catalog import ModelCatalog
@@ -24,7 +32,13 @@ from plural.common import (
     stable_id,
 )
 from plural.config import resolve_gateway_url
-from plural.environments.definition import EnvironmentDefinition, EnvironmentIdentity, HarnessGrant
+from plural.credentials import CredentialUse, CredentialValue
+from plural.environments.definition import (
+    EnvironmentDefinition,
+    EnvironmentIdentity,
+    HarnessGrant,
+    party_seats,
+)
 from plural.sandbox.models import NetworkMode
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
 
@@ -199,6 +213,8 @@ class TITORecord(FrozenModel):
 
     schema_version: Literal["1"] = "1"
     step: int = Field(ge=0)
+    event_id: str | None = None
+    """The ``event_id`` of the model call this record captured."""
     tokenizer: str = Field(min_length=1)
     model: str = Field(min_length=1)
     input_token_ids: tuple[int, ...]
@@ -211,10 +227,17 @@ class TITORecord(FrozenModel):
     input_len: int = Field(ge=0)
     output_len: int = Field(ge=0)
     observation_len: int = Field(ge=0)
+    output_token_offsets: tuple[tuple[int, int], ...] | None = None
+    """Each output token's character range in ``output_text``, when the Harness knows it.
+
+    A training export uses it to turn a character span reward into a token range.
+    """
 
     @model_validator(mode="after")
     def _validated_lengths(self) -> TITORecord:
         size = len(self.output_token_ids)
+        if self.output_token_offsets is not None and len(self.output_token_offsets) != size:
+            raise ValueError("output_token_offsets must have one range per output token")
         if len(self.output_logprobs) != size or len(self.output_top_logprobs) != size:
             raise ValueError(
                 "output_token_ids, output_logprobs, and output_top_logprobs lengths must match"
@@ -309,12 +332,14 @@ class VerifierResult(FrozenModel):
     scores: dict[str, float] = Field(default_factory=dict)
     evidence: tuple[str, ...] = ()
     feedback: str = ""
+    seats: dict[str, float] = Field(default_factory=dict)
+    """Each seat's score, for a Task several Agents share."""
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
     @model_validator(mode="after")
     def _finite(self) -> VerifierResult:
-        values = [*self.scores.values()]
+        values = [*self.scores.values(), *self.seats.values()]
         if self.score is not None:
             values.append(self.score)
         if any(not math.isfinite(item) for item in values):
@@ -411,12 +436,41 @@ class JobSpec(FrozenModel):
             "and rerun gets its own Job and Trial ids and never overwrites another."
         ),
     )
+    party: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "For a Task whose Environment has a party: the Agents, by name, that share "
+            "each episode, in seat order. Name an Agent more than once for self-play. "
+            "Empty, every Agent of the Job plays, once each."
+        ),
+    )
+
+    @model_serializer(mode="wrap")
+    def _omit_no_party(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        # A Job without a party serializes, and so hashes, as it did before parties.
+        if isinstance(data, dict) and not self.party:
+            data.pop("party", None)
+        return data
 
     @model_validator(mode="after")
     def _compatible(self) -> JobSpec:
         agent_ids = [agent.agent_id for agent in self.agents]
         if len(agent_ids) != len(set(agent_ids)):
             raise ValueError("agents must have unique identities")
+        names = {agent.name for agent in self.agents}
+        unknown = sorted(set(self.party) - names)
+        if unknown:
+            raise ValueError(
+                f"party names {', '.join(map(repr, unknown))}, which are not Agents of the "
+                f"Job; its Agents are {', '.join(sorted(names))}"
+            )
+        for task in self.tasks:
+            if task.party is None:
+                continue
+            reason = task.party.check(len(self.party_agents))
+            if reason is not None:
+                raise ValueError(f"Task {task.task_id!r}: {reason}.")
         for task in self.tasks:
             target = task.environment.runtime.requested_target
             if target not in task.environment.runtime.available_targets():
@@ -426,6 +480,14 @@ class JobSpec(FrozenModel):
                 raise ValueError(
                     f"Environment {task.environment.name!r} provider is not enforceable: {reason}"
                 )
+            if self.mode is JobMode.TRAIN:
+                live = [item.name for item in task.environment.apps if item.control == "live"]
+                if live:
+                    raise ValueError(
+                        f"A train Job cannot use Task {task.task_id!r}: its Environment has "
+                        f"live Apps ({', '.join(live)}) that Plural cannot reset, so episodes "
+                        "would not start from the Task's state. Give each a reset hook."
+                    )
             for agent in self.agents:
                 resolve_trial_harness_grant(task.environment, agent.agent)
         return self
@@ -434,6 +496,14 @@ class JobSpec(FrozenModel):
     def tasks(self) -> tuple[TaskDefinition, ...]:
         """Selected Tasks in deterministic order."""
         return self.source.tasks
+
+    @property
+    def party_agents(self) -> tuple[AgentBinding, ...]:
+        """The Agents that share each episode of a Task with a party, in seat order."""
+        if not self.party:
+            return self.agents
+        by_name = {agent.name: agent for agent in self.agents}
+        return tuple(by_name[name] for name in self.party)
 
     @property
     def content_hash(self) -> str:
@@ -453,6 +523,8 @@ class JobSpec(FrozenModel):
         }
         if self.run_id is not None:
             identity["run_id"] = self.run_id
+        if self.party:
+            identity["party"] = self.party
         return stable_id("job", identity)
 
     def plan(self, catalog: ModelCatalog | None = None) -> JobPlan:
@@ -467,8 +539,22 @@ class JobSpec(FrozenModel):
         resolutions = {
             agent.agent_id: _resolve_model(agent, effective_catalog) for agent in self.agents
         }
-        trials = tuple(
-            TrialSpec(
+
+        def trial(task: TaskDefinition, attempt: int, party: Sequence[AgentBinding]) -> TrialSpec:
+            agent = party[0]
+            seats = tuple(
+                SeatAssignment(
+                    seat=seat,
+                    agent_id=player.agent_id,
+                    agent_name=player.name,
+                    model=resolutions[player.agent_id],
+                    harness=player.harness,
+                    harness_grant=resolve_trial_harness_grant(task.environment, player.agent),
+                )
+                for seat, player in zip(party_seats(len(party)), party, strict=True)
+                if task.party is not None
+            )
+            return TrialSpec(
                 job_id=self.job_id,
                 agent_id=agent.agent_id,
                 agent_name=agent.name,
@@ -485,9 +571,19 @@ class JobSpec(FrozenModel):
                 mode=self.mode,
                 runtime_provider=task.environment.runtime.provider,
                 placement=task.environment.runtime.placement,
+                seats=seats,
             )
+
+        solo = [task for task in self.tasks if task.party is None]
+        shared = [task for task in self.tasks if task.party is not None]
+        trials = tuple(
+            trial(task, attempt, (agent,))
             for agent in self.agents
-            for task in self.tasks
+            for task in solo
+            for attempt in range(1, self.attempts + 1)
+        ) + tuple(
+            trial(task, attempt, self.party_agents)
+            for task in shared
             for attempt in range(1, self.attempts + 1)
         )
         lock = JobLock(
@@ -515,8 +611,23 @@ class JobSpec(FrozenModel):
         return JobPlan(job_id=self.job_id, spec_hash=self.content_hash, lock=lock, trials=trials)
 
 
+class SeatAssignment(FrozenModel):
+    """Which Agent plays one seat of a Trial several Agents share."""
+
+    seat: str
+    agent_id: str
+    agent_name: str
+    model: ModelResolution
+    harness: HarnessBinding | None = None
+    harness_grant: HarnessGrant | None = None
+
+
 class TrialSpec(FrozenModel):
-    """One independent Agent attempt."""
+    """One independent Agent attempt.
+
+    For a Task with seats, ``seats`` names the Agent in each, and ``agent_id``
+    is the first seat's.
+    """
 
     job_id: str
     agent_id: str
@@ -536,21 +647,29 @@ class TrialSpec(FrozenModel):
     mode: JobMode
     runtime_provider: str
     placement: dict[str, str] = Field(default_factory=dict)
+    seats: tuple[SeatAssignment, ...] = ()
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
     @property
     def trial_id(self) -> str:
         """Stable identity independent of TrialExecution retries."""
-        return stable_id(
-            "trl",
-            {
-                "job_id": self.job_id,
-                "agent_id": self.agent_id,
-                "task_digest": self.task_digest,
-                "attempt": self.attempt,
-            },
-        )
+        identity: dict[str, Any] = {
+            "job_id": self.job_id,
+            "agent_id": self.agent_id,
+            "task_digest": self.task_digest,
+            "attempt": self.attempt,
+        }
+        if self.seats:
+            identity["seats"] = [[item.seat, item.agent_id] for item in self.seats]
+        return stable_id("trl", identity)
+
+    @property
+    def agent_ids(self) -> tuple[str, ...]:
+        """Every Agent in the Trial, once each, in seat order."""
+        if not self.seats:
+            return (self.agent_id,)
+        return tuple(dict.fromkeys(item.agent_id for item in self.seats))
 
 
 class TrialExecution(FrozenModel):
@@ -676,6 +795,28 @@ class TrialReceipt(FrozenModel):
         return content_hash(payload)
 
 
+class SeatResult(FrozenModel):
+    """How one seat of a Trial several Agents share did.
+
+    ``score`` weighs each Verifier's score for this seat as the Trial's own
+    score weighs theirs; a Verifier that scores no seats gives every seat
+    its episode score. ``artifact_root`` is where the seat's Harness output,
+    its trace from its own side of the table, sits among the Trial's artifacts.
+    """
+
+    seat: str
+    agent_id: str
+    agent_name: str
+    agent_digest: str
+    score: float | None = None
+    step_reward_total: float = 0.0
+    steps: int = Field(default=0, ge=0)
+    trace_id: str | None = None
+    artifact_root: str = ""
+    cost_usd: float | None = Field(default=None, ge=0)
+    error_message: str | None = None
+
+
 class TrialResult(FrozenModel):
     """Typed Trial outcome."""
 
@@ -687,6 +828,18 @@ class TrialResult(FrozenModel):
     trace_id: str | None = None
     error_code: ErrorCode | None = None
     error_message: str | None = None
+    credentials: tuple[CredentialUse, ...] = ()
+    """Which Agent credentials the Apps used, for audit. Never their values."""
+    app_isolation: Literal["os_user", "none"] | None = None
+    """How the App host was kept from the Harness: ``os_user`` when it ran as
+    its own OS user and the Harness could not read its folder, ``none`` when
+    they shared one, as on the local Runtime. ``None`` without Apps."""
+    seats: tuple[SeatResult, ...] = ()
+    """Each seat's Agent and score, for a Task several Agents share."""
+    seat_isolation: Literal["os_user", "none"] | None = None
+    """How seats were kept from one another: ``os_user`` when each seat's
+    Harness ran as its own OS user, unable to read another's files or
+    process. ``None`` without seats."""
 
     @model_validator(mode="after")
     def _shape(self) -> TrialResult:
@@ -729,13 +882,24 @@ class JobResult(FrozenModel):
 
 
 class Job:
-    """Simple public runner for a Task or Benchmark and catalog-backed Agents."""
+    """Simple public runner for a Task or Benchmark and catalog-backed Agents.
+
+    ``credentials`` gives each Agent's credential values by Agent name, such as
+    ``{"sales-bot": {"SALESFORCE_TOKEN": token}}``. A credential an Agent
+    declares and is not given here is read from the exported variable of the
+    same name.
+
+    For a Task whose Environment has a party, ``party`` lists the Agents that
+    share each episode, in seat order; list one Agent more than once for
+    self-play. Left out, every Agent in ``agents`` plays, once each.
+    """
 
     def __init__(
         self,
         source: Task | Benchmark,
         agents: Sequence[Agent],
         *,
+        party: Sequence[Agent] | None = None,
         mode: JobMode = JobMode.EVAL,
         attempts: int = 1,
         concurrency: int | Literal["auto"] = 1,
@@ -753,6 +917,7 @@ class Job:
         catalog: ModelCatalog | None = None,
         client: Any = None,
         api_key: str | None = None,
+        credentials: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         if not isinstance(source, (Task, Benchmark)):
             raise TypeError(
@@ -784,9 +949,17 @@ class Job:
             job_source = TaskJobSource(task=source._definition())
         else:
             job_source = BenchmarkJobSource(benchmark=source._definition())
+        bindings = tuple(AgentBinding(agent=agent._definition()) for agent in self.agents)
+        members: list[str] = []
+        for member in party or ():
+            index = next((i for i, agent in enumerate(self.agents) if agent is member), None)
+            if index is None:
+                raise ValueError("Cannot create Job.\nEvery Agent in party must also be in agents.")
+            members.append(bindings[index].name)
         self.spec = JobSpec(
             source=job_source,
-            agents=tuple(AgentBinding(agent=agent._definition()) for agent in self.agents),
+            agents=bindings,
+            party=tuple(members),
             mode=mode,
             attempts=attempts,
             priority=priority,
@@ -820,6 +993,11 @@ class Job:
             "store": store,
             "environ": environ,
             "resource_resolvers": resource_resolvers,
+            "credentials": {
+                agent: {name: CredentialValue(value) for name, value in values.items()}
+                for agent, values in (credentials or {}).items()
+            }
+            or None,
             "progress": progress,
             "project_policy": project_policy,
             "catalog": self.catalog,
@@ -839,7 +1017,12 @@ class Job:
         ):
             return current
         agents = getattr(self.spec, "agents", ())
-        if agents and all(binding.auth_mode == "none" for binding in agents):
+        judged = any(
+            getattr(binding.verifier, "kind", None) == "agent"
+            for task in getattr(self.spec, "tasks", ())
+            for binding in task.verifiers
+        )
+        if agents and not judged and all(binding.auth_mode == "none" for binding in agents):
             # Credential-free Jobs never call a live model endpoint, so no
             # Plural or provider key is required to run them.
             return current
@@ -862,9 +1045,20 @@ class Job:
         if current.get("PLURAL_API_KEY"):
             current.setdefault("PLURAL_GATEWAY_URL", resolve_gateway_url(None, current))
             return current
+        if (
+            agents
+            and not judged
+            and all(
+                binding.auth_mode == "none" or binding.agent.endpoint is not None
+                for binding in agents
+            )
+        ):
+            # Agents with their own endpoint call it directly, not the gateway.
+            return current
         raise ValueError(
             "Cannot run Job.\n"
-            "A live model call goes through the Plural gateway and needs a Plural API key.\n"
+            "A live model call, by an Agent or a model-judge Verifier, goes through the "
+            "Plural gateway and needs a Plural API key.\n"
             "SDK:  Job(task, agents=[agent], client=Client())\n"
             "SDK:  Job(task, agents=[agent], api_key='...')\n"
             "CLI:  plural auth login && plural run --task <name> --model <model>"
@@ -927,6 +1121,8 @@ __all__ = [
     "PhaseName",
     "PhaseTiming",
     "TrialReceipt",
+    "SeatAssignment",
+    "SeatResult",
     "TrialResult",
     "TrialSpec",
     "TrialStatus",

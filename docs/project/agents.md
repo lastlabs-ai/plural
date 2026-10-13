@@ -35,8 +35,8 @@ support tickets in the next.
 
 ## What an Agent sees
 
-An Agent only ever sees two things: the Task's instructions and the Environment's
-Observations (the part of the world it is shown). It never sees the score, the
+An Agent only ever sees two things: the Task's instructions and what its actions
+return. It never sees the score, the
 rewards, the hidden State, or anything the grader knows. That keeps the test fair.
 
 ## Find a model
@@ -142,6 +142,8 @@ The fields, for reference:
 - `harness_kwargs` sets a built-in Harness's options.
 - `auth_mode: none` marks an Agent whose Harness never calls a model, so it runs
   without credentials.
+- `endpoint` and `endpoint_key` point the Agent at its own model server; see
+  [Use your own endpoint](#use-your-own-endpoint).
 
 Model keys and other credentials are never written in `agent.yaml`.
 
@@ -178,6 +180,106 @@ Harness declares the environment variable names it reads, and the Agent's
 the run starts, the error lists it and does not include the value. See
 [Harnesses](harnesses.md).
 
+## Use your own endpoint
+
+To evaluate a model that isn't in the catalog, such as a fine-tuned model you serve
+yourself, give the Agent the address of any OpenAI-compatible server. Its model calls
+then go straight there, not through the Plural gateway:
+
+```python
+from plural import Agent
+
+tuned = Agent(
+    name="support-tuned",
+    model="support-tuned-v3",
+    endpoint="https://models.example.com/v1",
+    endpoint_key="TUNED_API_KEY",
+    instructions="Follow the support policy and finish the ticket using the available tools.",
+)
+```
+
+```yaml
+name: support-tuned
+version: 0.1.0
+model: support-tuned-v3
+endpoint: https://models.example.com/v1
+endpoint_key: TUNED_API_KEY
+instructions: Follow the support policy and finish the ticket using the available tools.
+```
+
+- `model` is whatever name your server expects. It isn't checked against the catalog.
+- `endpoint` is the server's base URL; Plural calls `{endpoint}/chat/completions`.
+- `endpoint_key` is optional. It names the secret holding the server's API key, never
+  the key itself. Export it, or store it in the hosted project with
+  `plural secret set NAME`, before `plural run`. It is sent only as the request's
+  bearer token, and a missing value stops the run before it starts.
+- An endpoint Agent uses the native Harness, and can't set `harness`, `provider`,
+  `fallback_models`, or `secret_names`.
+- A Job whose Agents all use their own endpoints, or `auth_mode: none`, needs no
+  Plural API key. The endpoint must be reachable from the Runtime.
+
+This is the usual way to check a trained model against the same Benchmark you used
+for the baseline; see [Training and RL](../running/training.md).
+
+## Give the Agent credentials
+
+When an App acts as a user of a real system, such as a CRM, it needs that user's
+token. The Agent says which tokens it needs; **each person saves their own**. You and
+a coworker can run the same Agent in the same project, each as yourselves, with your
+own permissions, and every Trial records whose token acted.
+
+List each credential in `agent.yaml`, by the name the App declares, with the scopes the
+token grants:
+
+```yaml
+name: sales-bot
+version: 0.1.0
+model: openai/gpt-5.6
+credentials:
+  CRM_TOKEN:
+    scopes: [read:accounts, write:opportunities]
+    description: Your Salesforce token.
+```
+
+Then save your own value once, from the CLI or under **Credentials** on your Profile:
+
+```bash
+plural credential set CRM_TOKEN
+```
+
+Every Agent you run that needs `CRM_TOKEN` now uses yours. Your coworker runs the same
+command with their token, and their runs use theirs. Values are encrypted, never shown
+again, and only you can use yours.
+
+- The value goes only to the process that runs the Apps. The model and its Harness
+  never receive it, and it is never written to the project or the Trial.
+- A run stops before it starts when an App needs a credential the Agent doesn't
+  declare, or a scope it doesn't list, or when you have no value for it.
+
+:::details Where a value can come from
+`plural run` uses, in order, a value you saved to your account, then one exported in
+your environment. CI, which signs in with a project API key rather than as you, can't
+read anyone's saved credentials, so export the values there instead. In Python, pass
+them to the Job by Agent name:
+
+```python
+agent = Agent(model="openai/gpt-5.6", name="sales-bot",
+              credentials={"CRM_TOKEN": {"scopes": ["read:accounts"]}})
+Job(task, [agent], credentials={"sales-bot": {"CRM_TOKEN": token}}).run()
+```
+
+`plural credential list` shows the names you have saved, never the values, and
+`plural credential unset NAME` removes one.
+:::
+
+:::details What each Trial records
+Per credential: the App, the Agent and its revision, the scopes, where the value came
+from (`hosted`, `environment`, or `provided` from Python), a short fingerprint of the
+value, and, for a saved value, which user saved it. `plural trial show` prints it.
+`scopes` is what you declare the token may do; the system that issued the token
+enforces what it can really do.
+:::
+
 ## Evaluate the Agent
 
 From the command line, run a saved Agent on a Task, or try a model without saving an
@@ -196,7 +298,10 @@ A few things to know:
 - A local run is recorded under `.plural/jobs/`. A run with `--hosted` is recorded in
   the hosted project, where you can also see it in the web app under Jobs.
 - A live local run sends every model call through the Plural gateway, so it needs a
-  Plural API key, such as the one `plural auth login` stores.
+  Plural API key, such as the one `plural auth login` stores. An Agent with its own
+  `endpoint` is the exception.
+- To turn conversations an agent already had into Tasks, see
+  [Start from traces](../start/from-traces.md).
 
 In Python, given a Task named `task`, run the Agent with your Client:
 

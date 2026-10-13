@@ -52,7 +52,10 @@ class BuiltinHarnessOptions(FrozenModel):
 
     version: str | None = Field(
         default=None,
-        description="Override the release-pinned CLI version.",
+        description="Override the release-pinned CLI version, such as 1.2.3.",
+        # A release number only: setup installs it as root, so an npm alias,
+        # URL, or path here would install someone else's package.
+        pattern=r"^[0-9]+(\.[0-9]+){0,3}([-+.][0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$",
     )
     config: dict[str, Any] | None = Field(
         default=None,

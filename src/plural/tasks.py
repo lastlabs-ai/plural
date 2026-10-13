@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from plural.benchmarks.rules import (
     BenchmarkCategory,
@@ -20,10 +20,11 @@ from plural.environments.definition import (
     EnvironmentDefinition,
     EnvironmentResource,
     ExecutionLimits,
+    Party,
 )
-from plural.environments.env import Environment
+from plural.environments.env import Environment, normalize_initial_state
 from plural.identity import revision_hash
-from plural.verifiers import DeterministicVerifier, VerifierDefinition, WeightedVerifier
+from plural.verifiers import VerifierDefinition, WeightedVerifier
 
 
 def _json_type_name(value: Any) -> str:
@@ -60,26 +61,58 @@ def _schema_types(spec: Mapping[str, Any]) -> set[str]:
 def validate_task_state(
     *,
     task_id: str,
-    environment_name: str,
+    environment: EnvironmentDefinition,
     state: Any,
-    state_schema: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Validate Task-injected Environment state against the pinned schema.
+) -> dict[str, dict[str, Any]]:
+    """Validate a Task's initial state against each App's state schema.
+
+    The state is keyed by App name. With one App it may be that App's state
+    directly. An App with no state schema, such as an MCP App, accepts any
+    object and hands it to its reset hook.
 
     Returns:
-        The accepted state mapping, or an empty mapping when ``state`` is omitted.
+        The initial state keyed by App name, or an empty mapping when omitted.
 
     Raises:
-        ValueError: When ``state`` has unknown keys, wrong types, or is missing
-            a required field that has no default.
+        ValueError: When the state names no App, or an App's part has unknown
+            keys, wrong types, or misses a required field.
     """
     if state is None:
         return {}
     if not isinstance(state, dict):
         raise ValueError(
-            f"Cannot create Task {task_id!r} on Environment {environment_name!r}.\n"
+            f"Cannot create Task {task_id!r} on Environment {environment.name!r}.\n"
             f"initial_state must be an object, got {_json_type_name(state)}."
         )
+    try:
+        keyed = normalize_initial_state(environment, state)
+    except ValueError as exc:
+        raise ValueError(
+            f"Cannot create Task {task_id!r} on Environment {environment.name!r}.\n{exc}"
+        ) from None
+    for app_name, app_state in keyed.items():
+        schema = environment.app(app_name).state_schema
+        if schema:
+            _validate_app_state(
+                task_id=task_id,
+                label=app_name if len(environment.apps) > 1 else environment.name,
+                prefix=f"initial_state.{app_name}"
+                if len(environment.apps) > 1
+                else "initial_state",
+                state=app_state,
+                state_schema=schema,
+            )
+    return keyed
+
+
+def _validate_app_state(
+    *,
+    task_id: str,
+    label: str,
+    prefix: str,
+    state: Mapping[str, Any],
+    state_schema: Mapping[str, Any],
+) -> None:
     properties = state_schema.get("properties")
     fields = properties if isinstance(properties, dict) else {}
     settable = {
@@ -91,7 +124,7 @@ def validate_task_state(
     errors: list[str] = []
     if unknown:
         errors.append(
-            "initial_state has fields the Environment State does not define: "
+            f"{prefix} has fields the App State does not define: "
             + ", ".join(repr(key) for key in unknown)
             + "."
         )
@@ -101,7 +134,7 @@ def validate_task_state(
             continue
         if settable and key not in settable:
             errors.append(
-                f"initial_state cannot set {key!r}. "
+                f"{prefix} cannot set {key!r}. "
                 "Only State fields marked with initial() can be supplied by a Task."
             )
             continue
@@ -109,7 +142,7 @@ def validate_task_state(
         actual = _json_type_name(value)
         if expected and actual not in expected and not (value is None and "null" in expected):
             errors.append(
-                f"initial_state {key!r} expected {' or '.join(sorted(expected))}, got {actual}."
+                f"{prefix} {key!r} expected {' or '.join(sorted(expected))}, got {actual}."
             )
             continue
         errors.extend(_constraint_errors(key, value, spec))
@@ -121,15 +154,14 @@ def validate_task_state(
                 continue
             if settable and key not in settable:
                 continue
-            errors.append(f"initial_state is missing required State field {key!r}.")
+            errors.append(f"{prefix} is missing required State field {key!r}.")
     if errors:
         available = ", ".join(sorted(fields)) if fields else "(none)"
         raise ValueError(
-            f"Cannot create Task {task_id!r} on Environment {environment_name!r}.\n"
+            f"Cannot create Task {task_id!r} on {label!r}.\n"
             + "\n".join(errors)
-            + f"\n{environment_name} State fields: {available}"
+            + f"\n{label} State fields: {available}"
         )
-    return {str(key): value for key, value in state.items()}
 
 
 def _constraint_errors(key: str, value: Any, spec: Mapping[str, Any]) -> list[str]:
@@ -197,6 +229,49 @@ def _constraint_phrase(spec: Mapping[str, Any]) -> str | None:
     return None
 
 
+def live_app_problems(task_name: str, environment: EnvironmentDefinition) -> list[str]:
+    """Why a Benchmark cannot include this Task's Environment, if it cannot.
+
+    A ``live`` App has no reset hook, so Plural cannot return it to the Task's
+    starting point. One whose actions can change state would let one attempt
+    change what the next one sees, so results would not be comparable.
+
+    Returns:
+        One message per ``live`` App with an action that can change state.
+    """
+    problems: list[str] = []
+    for app in environment.apps:
+        if app.control != "live":
+            continue
+        changing = [item.name for item in app.actions if item.mutates_state]
+        if changing:
+            problems.append(
+                f"Task {task_name!r} uses live App {app.name!r}, whose actions "
+                f"{', '.join(changing)} can change state that Plural cannot reset. "
+                "Give the App a reset hook so each attempt starts from the Task's state, "
+                "or limit it to read-only tools."
+            )
+    return problems
+
+
+def benchmark_problems(task_name: str, environment: EnvironmentDefinition) -> list[str]:
+    """Why a Benchmark cannot include this Task's Environment, if it cannot.
+
+    Benchmarks for several Agents are coming soon, so a Task with a party is
+    refused until ranking a party, and its seats' policy, is designed.
+
+    Returns:
+        One message per reason, ``live`` Apps first.
+    """
+    problems = live_app_problems(task_name, environment)
+    if environment.party is not None:
+        problems.append(
+            f"Task {task_name!r} is played by several Agents at once. Benchmarks for "
+            "several Agents are coming soon; run the Task in a Job without a Benchmark."
+        )
+    return problems
+
+
 def _task_bind_errors(task: Task) -> list[str]:
     errors: list[str] = []
     environment = task.environment
@@ -216,52 +291,55 @@ def _task_bind_errors(task: Task) -> list[str]:
         if isinstance(environment, EnvironmentDefinition)
         else None
     )
-    if (
-        isinstance(environment, Environment)
-        and environment._actions()
-        and environment.source is None
-    ):
+    if not any(verifier.scores for verifier in task.verifiers):
         errors.append(
-            f"Cannot create Task {task.name!r}.\n"
-            f"Environment {environment.name!r} has @action methods but no source "
-            "tree, so a Job cannot execute them.\n"
-            "Define the Environment class in a .py file next to the files it needs."
+            f"{header}\nA Task needs at least one Verifier with a check, to score the finished "
+            "episode. A Verifier with only reward adds rewards, never a score."
         )
-    if not task.verifiers:
-        errors.append(
-            f"{header}\nA Task needs at least one Verifier that scores the completed Episode."
-        )
-    for verifier in task.verifiers:
-        if isinstance(verifier, DeterministicVerifier):
-            check = verifier.check
-            if not (
-                callable(check)
-                or (isinstance(check, dict) and check.get("python"))
-                or (isinstance(check, tuple) and check)
-            ):
-                errors.append(
-                    f"{header}\n"
-                    f"Verifier {verifier.name!r} check must be a function that accepts an Episode\n"
-                    "(observation, state, trajectory, artifacts, usage).\n"
-                    f"Got: {type(check).__name__}. Define it like:\n"
-                    "  def solved(episode: Episode) -> VerifierOutput: ...\n"
-                    "  DeterministicVerifier(name='solved', check=solved)"
-                )
     if definition is not None:
         try:
             validate_task_state(
                 task_id=task.name,
-                environment_name=definition.name,
+                environment=definition,
                 state=task.initial_state,
-                state_schema=definition.state_schema,
             )
         except ValueError as exc:
             errors.append(str(exc))
     return errors
 
 
+_SEAT = re.compile(r"^seat_([1-9][0-9]*)$")
+
+
+def _seat_instruction_errors(
+    task_id: str, instructions: Mapping[str, str], environment: EnvironmentDefinition
+) -> list[str]:
+    if not instructions:
+        return []
+    party = environment.party
+    if party is None:
+        return [
+            f"Task {task_id!r} gives seats instructions, but its Environment has no party. "
+            "Give the Environment a party, such as party=Party(min=2, max=8)."
+        ]
+    errors: list[str] = []
+    for seat in instructions:
+        match = _SEAT.match(seat)
+        if match is None or int(match.group(1)) > party.max:
+            errors.append(
+                f"Task {task_id!r} gives instructions to {seat!r}; its Environment's seats "
+                f"are seat_1 to seat_{party.max}."
+            )
+    return errors
+
+
 class Task(FrozenModel):
-    """One versioned unit of work in a Python-authored Environment."""
+    """One versioned unit of work in a Python-authored Environment.
+
+    In an Environment with a party, several Agents share each episode, one
+    per seat. Each gets ``instructions``, and then its seat's entry in
+    ``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.
+    """
 
     name: str = Field(min_length=1)
     version: str = "0.1.0"
@@ -274,6 +352,15 @@ class Task(FrozenModel):
     resources: tuple[EnvironmentResource, ...] = ()
     initial_state: dict[str, Any] = Field(default_factory=dict)
     reset_options: dict[str, Any] = Field(default_factory=dict)
+    seat_instructions: dict[str, str] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _omit_no_seats(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        # A Task without seat instructions serializes, and so hashes, as it did before them.
+        if isinstance(data, dict) and not self.seat_instructions:
+            data.pop("seat_instructions", None)
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -293,6 +380,10 @@ class Task(FrozenModel):
     def _validate_task(self) -> Task:
         semantic_version(self.version)
         errors = _task_bind_errors(self)
+        if not errors:
+            errors = _seat_instruction_errors(
+                self.name, self.seat_instructions, self._environment_definition()
+            )
         if errors:
             raise ValueError("\n".join(errors))
         return self
@@ -353,6 +444,9 @@ class Task(FrozenModel):
                 "resources": self.resources,
                 "initial_state": self.initial_state,
                 "reset_options": self.reset_options,
+                # Only a Task with seat instructions hashes them, so every other Task
+                # keeps its hash.
+                **({"seat_instructions": self.seat_instructions} if self.seat_instructions else {}),
             },
         )
 
@@ -389,6 +483,7 @@ class Task(FrozenModel):
             resources=self.resources,
             state=self.initial_state,
             reset_options=self.reset_options,
+            seat_instructions=self.seat_instructions,
         )
 
     def _definition(self) -> TaskDefinition:
@@ -416,15 +511,37 @@ class TaskDefinition(FrozenModel):
     resources: tuple[EnvironmentResource, ...] = ()
     state: dict[str, Any] = Field(default_factory=dict)
     reset_options: dict[str, Any] = Field(default_factory=dict)
+    seat_instructions: dict[str, str] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _omit_no_seats(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        # A Task without seat instructions serializes, and so hashes, as it did before them.
+        if isinstance(data, dict) and not self.seat_instructions:
+            data.pop("seat_instructions", None)
+        return data
 
     @model_validator(mode="after")
     def _state_fits_environment(self) -> TaskDefinition:
-        validate_task_state(
-            task_id=self.task_id,
-            environment_name=self.environment.name,
-            state=self.state,
-            state_schema=self.environment.state_schema,
+        validate_task_state(task_id=self.task_id, environment=self.environment, state=self.state)
+        seat_errors = _seat_instruction_errors(
+            self.task_id, self.seat_instructions, self.environment
         )
+        if seat_errors:
+            raise ValueError("\n".join(seat_errors))
+        names = [binding.verifier.name for binding in self.verifiers]
+        repeated = sorted({name for name in names if names.count(name) > 1})
+        if repeated:
+            # Rewards are recorded under the Verifier's name, so two would share one ledger.
+            raise ValueError(
+                f"Task {self.task_id!r} has more than one Verifier named "
+                f"{', '.join(map(repr, repeated))}. Give each a name of its own."
+            )
+        if not any(binding.verifier.scores for binding in self.verifiers):
+            raise ValueError(
+                f"Task {self.task_id!r} needs at least one Verifier with a check, to score "
+                "the finished episode."
+            )
         return self
 
     @property
@@ -437,6 +554,25 @@ class TaskDefinition(FrozenModel):
             "info": self.info,
             "metadata": self.metadata,
         }
+
+    @property
+    def party(self) -> Party | None:
+        """How many Agents share each episode; ``None`` for a Task one Agent works alone."""
+        return self.environment.party
+
+    def seat_payload(self, seat: str, seats: Sequence[str]) -> dict[str, Any]:
+        """The Task as one seat's Agent sees it: the shared directions, then its own.
+
+        Returns:
+            :attr:`public_payload` with this seat's name, instructions, and every seat.
+        """
+        payload = self.public_payload
+        own = self.seat_instructions.get(seat)
+        if own:
+            payload["instructions"] = f"{self.instructions}\n\n{own}"
+        payload["seat"] = seat
+        payload["seats"] = list(seats)
+        return payload
 
     @property
     def content_hash(self) -> str:
@@ -545,10 +681,22 @@ class BenchmarkDefinition(BenchmarkRelease):
         identities = [task.identity for task in self.tasks]
         if len(identities) != len(set(identities)):
             raise ValueError("benchmark Task revisions must be unique")
+        problems = [
+            problem
+            for task in self.tasks
+            for problem in benchmark_problems(task.task_id, task.environment)
+        ]
+        if problems:
+            raise ValueError(f"Cannot create Benchmark {self.name!r}.\n" + "\n".join(problems))
         self._validate_release(
             self.name, [(task.task_id, task.environment.limits) for task in self.tasks]
         )
         return self
+
+    @property
+    def reproducible(self) -> bool:
+        """Whether every Task starts from state Plural controls; false with a live App."""
+        return all(task.environment.reproducible for task in self.tasks)
 
     @property
     def content_hash(self) -> str:
@@ -620,6 +768,13 @@ class Benchmark(BenchmarkRelease):
         names = [task.name for task in self.tasks]
         if len(names) != len(set(names)):
             raise ValueError("benchmark Task names must be unique")
+        problems = [
+            problem
+            for task in self.tasks
+            for problem in benchmark_problems(task.name, task._environment_definition())
+        ]
+        if problems:
+            raise ValueError(f"Cannot create Benchmark {self.name!r}.\n" + "\n".join(problems))
         self._validate_release(
             self.name,
             [(task.name, task._environment_definition().limits) for task in self.tasks]
@@ -627,6 +782,11 @@ class Benchmark(BenchmarkRelease):
             else [(name, ExecutionLimits()) for name in names],
         )
         return self
+
+    @property
+    def reproducible(self) -> bool:
+        """Whether every Task starts from state Plural controls; false with a live App."""
+        return all(task._environment_definition().reproducible for task in self.tasks)
 
     @property
     def task_pins(self) -> tuple[TaskPin, ...]:

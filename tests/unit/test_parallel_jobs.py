@@ -29,7 +29,7 @@ def _task(name: str, provider: str = "docker") -> TaskDefinition:
             WeightedVerifier(
                 verifier=DeterministicVerifier(
                     name="exact",
-                    command=("python", "verify.py"),
+                    check=("python", "verify.py"),
                     runtime=VerifierRuntime(provider=provider),
                 )
             ),

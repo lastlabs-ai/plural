@@ -27,6 +27,9 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HumanVerifier](#humanverifier)
 - [Agent](#agent)
 - [Benchmark](#benchmark)
+- [AgentCredential](#agentcredential)
+- [AppAction](#appaction)
+- [AppDefinition](#appdefinition)
 - [BenchmarkCategory](#benchmarkcategory)
 - [BenchmarkScoring](#benchmarkscoring)
 - [Capability](#capability)
@@ -41,35 +44,32 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HarnessCapability](#harnesscapability)
 - [HarnessDefinition](#harnessdefinition)
 - [HarnessPolicy](#harnesspolicy)
-- [Action](#action)
 - [NetworkMode](#networkmode)
+- [Party](#party)
 - [ResourceRequirements](#resourcerequirements)
-- [Rewarder](#rewarder)
 - [RubricCriterion](#rubriccriterion)
+- [RuntimePackages](#runtimepackages)
 - [RuntimeVariable](#runtimevariable)
 - [Secret](#secret)
 - [VerifierRuntime](#verifierruntime)
 
 ## Environment
 
-Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent.
+Schema-v2 Environment: Apps composed with one Runtime and one set of limits.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`overview`** — `string`; optional. Default: `""`.
 - **`readme`** — `string`; optional. Default: `""`.
-- **`actions`** — `array of Action`; optional. Default: `[]`.
-- **`reset_command`** — `array of string`; optional. Default: `[]`.
-- **`observation_schema`** — `object`; optional.
-- **`state_schema`** — `object`; optional.
-- **`rewarders`** — `array of Rewarder`; optional. Default: `[]`.
+- **`apps`** — `array of AppDefinition`; optional. Default: `[]`.
+- **`python`** — `string | null`; optional. Default: `null`.
 - **`guardrails`** — `array of Guardrail`; optional. Default: `[]`.
 - **`resources`** — `array of Resource`; optional. Default: `[]`.
 - **`runtime`** — `Runtime`; optional.
-- **`secrets`** — `array of Secret`; optional. Default: `[]`.
 - **`harness_policy`** — `HarnessPolicy`; optional.
 - **`limits`** — `ExecutionLimits`; optional.
+- **`party`** — `Party | null`; optional. Default: `null`. How many Agents share each episode, for a game such as poker. Leave it unset for an Environment one Agent works in alone.
 - **`metadata`** — `object`; optional.
 
 ## Harness
@@ -93,10 +93,11 @@ One versioned unit of work in a Python-authored Environment.
 - **`resources`** — `array of Resource`; optional. Default: `[]`.
 - **`initial_state`** — `object`; optional.
 - **`reset_options`** — `object`; optional.
+- **`seat_instructions`** — `object`; optional.
 
 ## DeterministicVerifier
 
-Function or command that scores a completed Episode.
+Code that verifies an episode: it scores the end, rewards actions, or both.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
@@ -104,8 +105,11 @@ Function or command that scores a completed Episode.
 - **`criteria`** — `array of RubricCriterion`; optional. Default: `[]`.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
+- **`secrets`** — `array of Secret`; optional. Default: `[]`.
 - **`kind`** — `"deterministic"`; optional. Default: `"deterministic"`.
-- **`check`** — `JSON value`; required.
+- **`check`** — `JSON value`; optional. Default: `null`.
+- **`reward`** — `JSON value`; optional. Default: `null`.
+- **`hindsight`** — `JSON value`; optional. Default: `null`.
 - **`runtime`** — `VerifierRuntime`; optional.
 - **`result_path`** — `string`; optional. Default: `"verifier-result.json"`.
 - **`evidence_required`** — `boolean`; optional. Default: `true`.
@@ -120,6 +124,7 @@ Model-judge verifier with its own runtime and connectivity policy.
 - **`criteria`** — `array of RubricCriterion`; required. Constraints: `{"minItems": 1}`.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
+- **`secrets`** — `array of Secret`; optional. Default: `[]`.
 - **`kind`** — `"agent"`; optional. Default: `"agent"`.
 - **`model`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`instructions`** — `string`; required. Constraints: `{"minLength": 1}`.
@@ -137,6 +142,7 @@ Human review verifier.
 - **`criteria`** — `array of RubricCriterion`; required. Constraints: `{"minItems": 1}`.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
+- **`secrets`** — `array of Secret`; optional. Default: `[]`.
 - **`kind`** — `"human"`; optional. Default: `"human"`.
 - **`instructions`** — `string`; optional. Default: `""`.
 
@@ -156,6 +162,9 @@ A catalog-backed model and its optional execution harness.
 - **`harness_kwargs`** — `object`; optional.
 - **`auth_mode`** — `"environment" | "api_key" | "oauth" | "none"`; optional. Default: `"environment"`.
 - **`secret_names`** — `array of string`; optional. Default: `[]`.
+- **`endpoint`** — `string | null`; optional. Default: `null`.
+- **`endpoint_key`** — `string | null`; optional. Default: `null`.
+- **`credentials`** — `object`; optional.
 - **`metadata`** — `object`; optional.
 
 ## Benchmark
@@ -177,6 +186,41 @@ A semantic version that pins an ordered set of Tasks.
 - **`primary_metric`** — `string`; optional. Default: `"score"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`metadata`** — `object`; optional.
+
+## AgentCredential
+
+A credential this Agent supplies to the Apps it works with.
+
+- **`scopes`** — `array of string`; optional. Default: `[]`.
+- **`description`** — `string`; optional. Default: `""`.
+
+## AppAction
+
+One move an App offers the Agent.
+
+- **`name`** — `string`; required. Constraints: `{"maxLength": 128, "minLength": 1}`.
+- **`description`** — `string`; optional. Default: `""`.
+- **`parameters`** — `object`; optional.
+- **`mutates_state`** — `boolean`; optional. Default: `true`.
+- **`timeout_seconds`** — `number`; optional. Default: `30`. Constraints: `{"exclusiveMinimum": 0}`.
+- **`binding`** — `object`; optional.
+
+## AppDefinition
+
+One App inside an Environment.
+
+- **`name`** — `string`; required.
+- **`kind`** — `"python" | "mcp" | "openapi" | "replay"`; optional. Default: `"python"`.
+- **`description`** — `string`; optional. Default: `""`.
+- **`python`** — `string | null`; optional. Default: `null`.
+- **`config`** — `object`; optional.
+- **`actions`** — `array of AppAction`; optional. Default: `[]`.
+- **`secrets`** — `array of Secret`; optional. Default: `[]`.
+- **`credentials`** — `array of Secret`; optional. Default: `[]`.
+- **`state_schema`** — `object`; optional.
+- **`has_reset`** — `boolean`; optional. Default: `false`.
+- **`has_snapshot`** — `boolean`; optional. Default: `false`.
+- **`control`** — `"owned" | "sandboxed" | "live" | "replayed"`; optional. Default: `"owned"`.
 
 ## BenchmarkCategory
 
@@ -251,6 +295,7 @@ Where an Environment runs: Docker, a trusted local process, or a remote sandbox.
 - **`network`** — `NetworkMode`; optional. Default: `"public"`.
 - **`network_allowlist`** — `array of string`; optional. Default: `[]`.
 - **`resources`** — `ResourceRequirements`; optional.
+- **`packages`** — `RuntimePackages`; optional. Packages installed in the Runtime before an episode. In environment.yaml, list Python ones under python_packages. On the local Runtime they must already be installed.
 - **`read_only_root`** — `boolean`; optional. Default: `false`.
 - **`targets`** — `array of ExecutionTarget`; optional. Constraints: `{"uniqueItems": true}`.
 - **`persistent`** — `boolean`; optional. Default: `false`.
@@ -348,25 +393,20 @@ Environment ceiling for a Trial's optional Agent harness.
 - **`allowed_capabilities`** — `array of HarnessCapability | null`; optional. Default: `null`.
 - **`denied_capabilities`** — `array of HarnessCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
 
-## Action
-
-An action owned by an Environment.
-
-- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`description`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`kind`** — `"command" | "python"`; optional. Default: `"command"`.
-- **`command`** — `array of string`; optional. Default: `[]`.
-- **`parameters`** — `object`; optional.
-- **`observation_schema`** — `object`; optional.
-- **`mutates_state`** — `boolean`; optional. Default: `true`.
-- **`timeout_seconds`** — `number`; optional. Default: `30`. Constraints: `{"exclusiveMinimum": 0}`.
-
 ## NetworkMode
 
 Requested sandbox network policy.
 
 Allowed values: `"public" | "no-network" | "allowlist" | "public" | "no-network" | "allowlist"`.
 
+
+## Party
+
+How many Agents may share one episode of the Environment, such as 2 to 8 at poker.
+
+- **`min`** — `integer`; optional. Default: `2`. Constraints: `{"maximum": 100, "minimum": 2}`.
+- **`max`** — `integer`; optional. Default: `2`. Constraints: `{"maximum": 100, "minimum": 2}`.
+- **`isolation`** — `"isolated" | "shared"`; optional. Default: `"isolated"`. ``isolated``: each seat's Harness runs as its own OS user, and the Apps are the only thing the seats share; needs Docker or Daytona. ``shared``: every seat runs as one user and can read and write the others' files and the Environment's, for a team that works on the same files, or to try a party on the local Runtime. A shared seat could also act for another seat.
 
 ## ResourceRequirements
 
@@ -378,18 +418,6 @@ Optional compute limits.
 - **`disk_mb`** — `integer | null`; optional. Default: `null`.
 - **`storage_mb`** — `integer | null`; optional. Default: `null`.
 
-## Rewarder
-
-A named state-transition reward signal scored inside each step.
-
-- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
-- **`description`** — `string`; optional. Default: `""`.
-- **`kind`** — `"command" | "python"`; optional. Default: `"command"`.
-- **`command`** — `array of string`; optional. Default: `[]`.
-- **`implementation_digest`** — `string`; optional. Default: `""`.
-- **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
-- **`timeout_seconds`** — `number`; optional. Default: `30`. Constraints: `{"exclusiveMinimum": 0}`.
-
 ## RubricCriterion
 
 One Agent or Human rubric criterion.
@@ -399,6 +427,12 @@ One Agent or Human rubric criterion.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`min_score`** — `number`; optional. Default: `0`.
 - **`max_score`** — `number`; optional. Default: `1`.
+
+## RuntimePackages
+
+Packages installed in the Runtime before an episode, by package manager.
+
+- **`python`** — `array of string`; optional. Default: `[]`.
 
 ## RuntimeVariable
 
@@ -412,12 +446,12 @@ A launch-time variable declaration. Values are supplied to Job, never saved here
 
 ## Secret
 
-A named credential supplied when a Job runs, with an explicit execution target.
+A named value an App needs, which it never stores itself.
 
 - **`name`** — `string`; required. Constraints: `{"pattern": "^[A-Z_][A-Z0-9_]*$"}`.
 - **`required`** — `boolean`; optional. Default: `true`.
-- **`target`** — `"environment" | "harness" | "verifier"`; optional. Default: `"environment"`.
 - **`description`** — `string`; optional. Default: `""`.
+- **`scopes`** — `array of string`; optional. Default: `[]`.
 
 ## VerifierRuntime
 

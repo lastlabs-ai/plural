@@ -37,7 +37,9 @@ def main(argv: list[str] | None = None) -> None:
             str(Path.cwd() / ".plural" / "tools"),
         )
     )
-    prefix.mkdir(parents=True, exist_ok=True)
+    if provider == "local":
+        # Elsewhere setup installs system-wide; the workspace is not root's to write.
+        prefix.mkdir(parents=True, exist_ok=True)
     binary = BINARIES[name]
     if _on_path(binary):
         return

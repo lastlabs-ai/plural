@@ -2,25 +2,27 @@
 route: /docs/project/environments
 title: Environments
 order: 30
-description: "The world an AI works in: what it can see, what it can do, and what is really going on behind the scenes. Build one, save it, and choose where it runs."
+description: "The world an Agent works in: the Apps it can use, the Runtime they run in, and the limits of one attempt. Build one, save it, and choose where it runs."
 audience: all
 nav: true
 nav_group: Build
 ---
 # Environments
 
-An **Environment** is the world an AI works in. It decides what the Agent can see,
-which moves it can make, and how each move changes the world. You build it once and
-reuse it for many assignments, so every Agent is tested on the same terms.
+An **Environment** is the world an Agent works in. It is a set of
+[Apps](../concepts/apps.md), the systems the Agent can use, plus the Runtime they run
+in and the limits of one attempt. You build it once and reuse it for many assignments,
+so every Agent is tested on the same terms.
 
-Think of a game of Wordle. The game is the Environment: you can submit a guess, you
-see green, yellow, and gray tiles after each one, and the secret word stays hidden.
-Each secret word is a separate [Task](tasks.md), one assignment in that world.
+Think of a game of Wordle. The Environment has one App, the game: the Agent can
+submit a guess, it sees green, yellow, and gray tiles after each one, and the secret
+word stays hidden. Each secret word is a separate [Task](tasks.md), one assignment in
+that world.
 
-A support desk works the same way. The Environment holds the tickets and the support
-policy, and lets the Agent categorize a ticket, draft a reply, and resolve it. Each
-Task picks one ticket. A [Verifier](verifiers.md), the grader, then checks whether
-the work was done correctly.
+A support desk works the same way with more Apps. A CRM, reached through its MCP
+server, holds the tickets. A table of refund policies sits beside it. Each Task picks
+one ticket, and a [Verifier](verifiers.md), the grader, checks whether the work was
+done correctly.
 
 ## How an Environment works
 
@@ -28,138 +30,130 @@ Every Environment is built from a few parts. Here they are for both examples:
 
 | Part | What it means | Wordle | Support desk |
 | --- | --- | --- | --- |
-| **Actions** | The moves the Agent can make | `guess` | `categorize`, `resolve` |
-| **State** | The full truth, including what the Agent must not see | The secret word, the guesses so far | The right category, what has changed |
-| **Observation** | What the Agent is shown | The colored tiles | The ticket and the policy |
+| **Apps** | The systems the Agent works with | The game | The CRM and the refund policies |
+| **Actions** | The moves the Apps offer | `guess` | The CRM's tools, `policies__list_refunds` |
+| **State** | Each App's private truth | The secret word, the guesses so far | The tickets and their status |
+| **Observation** | What an action returns, the only thing the Agent sees | The colored tiles | A ticket, a policy row |
 | **Resources** | Files already in the world | A word list | A policy document |
-| **Runtime** | Where the world runs | Your own machine in the tutorial; a sealed Docker container for code you don't trust | The same |
+| **Runtime** | Where the Apps and the Agent run | Your own machine in the tutorial; a sealed Docker container for code you don't trust | The same |
 
-The Agent plays in a loop. It reads the Observation, picks an action, and the
-Environment updates its State and shows a new Observation. That repeats until the
-work is done or a budget runs out.
+The Agent works in a loop. It picks an action, the App that owns it runs it and may
+change its State, and what the action returns is the Agent's next observation. That
+repeats until the work is done or a budget runs out.
 
 ```mermaid
 flowchart LR
-  obs["Observation<br/>(what the Agent sees)"]
   agent[Agent]
-  act["Action<br/>(guess, categorize)"]
-  state["State<br/>(hidden truth)"]
-  obs --> agent
+  act["Action<br/>(guess, get_ticket)"]
+  app["App<br/>(keeps private State)"]
+  obs["Observation<br/>(what the action returned)"]
   agent --> act
-  act --> state
-  state --> obs
+  act --> app
+  app --> obs
+  obs --> agent
 ```
 
-> **Good to know:** The Agent only ever sees the Task's instructions and the
-> Observations. It never sees the State, a score, or a reward.
+> **Good to know:** The Agent only ever sees the Task's instructions and what its
+> actions return. It never sees an App's State, a score, or a reward.
 
-Two optional extras build on this. **Rewards** give small bits of credit for
-individual moves when you train a model; they are never part of a score. **Secrets**,
-such as an API key for a tool, are declared by name on the Environment and supplied
-only when a run starts.
+Two things sit just outside this loop. **Rewards**, small bits of credit for
+individual moves when you train a model, come from the Task's
+[Verifiers](verifiers.md), never from the Environment. **Credentials**, such as the
+CRM token the Agent acts with, are declared by name on the App that needs them and
+supplied by the Agent that runs.
 
 ## Start with the work you want to measure
 
 Before writing code, answer five questions:
 
 1. **What should the Agent accomplish?** Choose one workflow, such as resolving a support ticket.
-2. **What information would it have?** Show it the ticket and the policy that applies.
-3. **What can it do?** Define a few focused actions that match the real workflow.
-4. **How will you know it succeeded?** Keep the expected outcome where a Verifier can read it.
+2. **Which systems does it use?** Each one is an App. Connect the ones that already exist, such as an MCP server, and write the rest in Python.
+3. **What can it do?** Offer a few focused actions that match the real workflow.
+4. **How will you know it succeeded?** Keep the expected outcome in State, where a Verifier can read it.
 5. **When should it stop?** Decide what counts as finished, and set a turn and time budget. See [How an episode ends](#how-an-episode-ends).
 
 Start small. Add cases and complexity once you can explain why a known good run
 passes and a known bad run fails.
 
-## Actions, State, and Observation
+## Actions, State, and what the Agent sees
 
 These three parts describe the interaction:
 
 - **Actions** are the operations the Agent can call, such as `categorize` or `resolve`.
-- **State** holds the internal data: the expected answer and every change made during the run.
-- **Observation** holds the information you choose to show the Agent.
+- **State** holds an App's private data: the expected answer and every change made
+  during the run.
+- **The observation** is whatever an action returns. It is the only thing the Agent
+  sees after acting.
 
-After each action, the Agent sees the Environment's current `self.observation` and
-nothing else. An action's return value goes to reward signals but is never shown to
-the Agent. So update `self.observation` with what the Agent should see, and never copy
-State into it. A Verifier can read the final State to check the result.
+So return what the Agent should see, and never copy State into it. A Verifier reads
+the final State to check the result.
 
 This split controls what Plural shows the model. It is not a security boundary; when
 you run code you don't trust, use Runtime isolation as well. See [Runtime](#runtime).
 
 ## Define the Environment
 
-An Environment is a Python class. This small example lets an Agent sort one support
-request into the right team:
+This small example lets an Agent sort one support request into the right team. It is
+one Python App in one Environment:
 
 ```python
-from plural import Environment, Observation, Runtime, State, action, initial
+from plural import App, Environment, Runtime, State, action, initial
 
 
-class TicketObservation(Observation):
-    issue: str = "I was charged twice."
-    category: str = ""
-    done: bool = False
-
-    def render(self) -> str:
-        return f"{self.issue}\n{self.text}\nCategory: {self.category or 'unassigned'}"
-
-
-class TicketState(State):
+class Ticket(State):
+    issue: str = initial("I was charged twice.", description="The customer's message.")
     expected: str = initial("billing", description="The category this ticket should receive.")
     category: str = ""
-    done: bool = False
 
 
-class TicketTriage(Environment[TicketObservation, TicketState]):
-    name = "ticket-triage"
-    overview = "Assign a support request to the right team."
+class TicketTriage(App[Ticket]):
+    """Sort a support request into the right team."""
 
-    def reset(self, *, seed=None, options=None):
-        super().reset(seed=seed)
-        self.state = TicketState(seed=self.state.seed)
-        self.observation = TicketObservation(text="Choose billing, technical, or account.")
-        return self.observation, {}
+    def reset(self, initial_state):
+        super().reset(initial_state)
+        return f"{self.state.issue}\nChoose billing, technical, or account."
 
     @action
-    def categorize(self, category: str) -> TicketObservation:
+    def categorize(self, category: str) -> str:
         """Assign the ticket to billing, technical, or account."""
         if category not in {"billing", "technical", "account"}:
             raise ValueError("Choose billing, technical, or account")
         self.state.category = category
-        self.state.done = True
-        self.observation.category = category
-        self.observation.done = True
-        return self.observation
+        return f"Category: {category}"
 
     def terminated(self) -> bool:
-        return self.state.done
+        return bool(self.state.category)
 
 
-environment = TicketTriage(runtime=Runtime.local())
+environment = Environment(name="ticket-triage", apps=[TicketTriage()], runtime=Runtime.local())
 ```
 
 Reading it from the top:
 
-- `TicketObservation` is what the Agent sees. `render()` turns it into the text the
-  model reads.
-- `TicketState` is the hidden truth. `expected` is marked with `initial()`, so a Task
-  can set it.
-- `reset` starts a fresh attempt. `categorize` is an action, marked with `@action`.
+- `Ticket` is the App's private State. Fields marked with `initial()` are the ones a
+  Task can set, so each Task can bring its own ticket and expected category.
+- `reset` starts a fresh attempt. The default loads the Task's starting values into
+  `self.state`; what `reset` returns is the first thing the Agent sees.
+- `categorize` is an action, marked with `@action`. Its docstring tells the model what
+  it does, and what it returns is what the Agent sees next.
 - `terminated` tells Plural the ticket is done.
+- `Environment` puts the App in a Runtime. The App's name defaults to its class name
+  in snake case, `ticket_triage`. App names use lowercase letters, digits, and
+  underscores, because they prefix action names when there are several Apps.
 
-`runtime` is a required Environment parameter. It selects where the Environment and
-the Agent run. This example uses your own machine, which is fine for trusted
-development.
+`runtime` is a required Environment parameter. It selects where the Apps and the
+Agent run. This example uses your own machine, which is fine for trusted development.
 
-The Job, the run you start, calls `reset` to begin each attempt and then invokes the
-actions the Agent picks. Only Agent-facing methods use `@action`; `reset` and `step`
-are lifecycle methods. Typed action parameters tell the model which inputs each action
-accepts, and clear docstrings help it use them well. When an action raises
-`ValueError`, the Agent sees the message and the episode continues, so it can fix its
-input and try again.
+Typed action parameters tell the model which inputs each action accepts, and clear
+docstrings help it use them well. When an action raises `ValueError`, the Agent sees
+the message and the episode continues, so it can fix its input and try again. See
+[Actions](../concepts/actions.md) for everything an action can return.
 
-The directory that contains the class is its source package. Keep the code and data it
+To use several Apps, list them all. To add an effect that spans them, such as closing
+a CRM ticket when a refund goes through, subclass `Environment` and override
+`on_step`. See [Compose Apps](../concepts/apps.md#compose-apps-into-an-environment).
+
+The directory that contains the code is its source package. Keep the code and data it
 needs there, and keep credentials, caches, and generated results elsewhere. Plural
 records the source hash and copies the package into the Runtime.
 
@@ -175,14 +169,17 @@ plural env init ticket-triage
 ```text
 environments/ticket-triage/
 ├── environment.yaml
-├── environment.py
+├── server.py
 └── README.md
 ```
 
-The class lives in `environment.py`, and the folder is its source package. Add a
-`resources/` folder beside them when the Environment needs data files.
-`environment.yaml` holds everything else: its name, resources, Runtime, and settings.
-This is the manifest from the [first project](../tutorials/first-project.md):
+The App is the FastMCP server in `server.py`; see
+[Build an MCP server](../guides/build-mcp-server.md). With `--python`, the template
+is a Python App class in `environment.py` instead. Either way the folder is the
+Environment's source package. Add a `resources/` folder beside them when the
+Environment needs data files. `environment.yaml` holds everything else: its name,
+Apps, resources, Runtime, and settings. This is the manifest from the
+[first project](../tutorials/first-project.md), which uses a Python App:
 
 ```yaml
 name: support-queue
@@ -202,13 +199,23 @@ limits:
   max_seconds: 120
 ```
 
+To connect an existing system instead of writing one, add it:
+`plural env add NAME --mcp URL_OR_COMMAND`, `--openapi SPEC`, or `--traces FILE`
+creates the folder, or adds an App to an Environment you already have. Run it once per
+system. For files, add Plural's files server as an App. See
+[Start from a system](../start/from-a-system.md).
+
 What each field means:
 
-- `name` must match the folder name. The name and overview come from the manifest, so
-  the class does not need `name` or `overview` attributes.
-- `python` names the Environment class as `file.py:Class`.
-- `readme` points to `README.md`, which explains the actions, State, Observation,
-  rewards, and settings to the people who use the Environment.
+- `name` must match the folder name. The name and overview come from the manifest.
+- `python` names either one App class, as `file.py:Class`, for an Environment of one
+  Python App, or an `Environment` subclass whose `on_step` spans the Apps listed in
+  `apps`.
+- `apps` lists the Apps. Each entry is a Python App (`python: apps/crm.py:CRM`, with
+  optional `config`), or a named `mcp`, `openapi`, or `replay` App with that kind's
+  settings. See [Apps](../concepts/apps.md).
+- `readme` points to `README.md`, which explains the Apps, their actions and State,
+  and settings to the people who use the Environment.
 - `resources` lists files to stage, relative to the folder. A path is the
   [short form](#the-short-form); a mapping takes the same fields as `Resource`.
 - `runtime` picks a provider with `provider`, such as `docker`, `local`, or
@@ -216,8 +223,10 @@ What each field means:
   `plural runtime provider <provider>` lists them. The template uses `docker` with the
   `python:3.12-slim` image. To reuse a project [Runtime](runtimes.md), run
   `plural runtime use <runtime> <environment>`, which fills this block in for you.
-- `harness_policy`, `limits`, `secrets`, `guardrails`, and `metadata` take the same
-  values as the Environment arguments of those names.
+- `harness_policy`, `limits`, `guardrails`, and `metadata` take the same values as the
+  Environment arguments of those names.
+- `party` makes it an Environment several Agents share, such as `{min: 2, max: 8}`
+  for poker. See [Several Agents in one Task](multi-agent.md).
 
 Every path must stay inside the Environment folder. Check the Environment, then save
 it to your hosted project:
@@ -227,18 +236,23 @@ plural env validate ticket-triage
 plural env push ticket-triage
 ```
 
-A push saves an unchangeable revision that stays private to the project. It refuses
-files that look like credentials and paths that escape the folder. To leave out other
-files, list them in a `.pluralignore` file in the Environment folder. Credentials are
-never stored in the project; you supply them when the Job runs, as described in
-[Runtime variables and secrets](#runtime-variables-and-secrets).
+`validate` loads every App and prints its kind, [control
+level](../concepts/apps.md#control-levels), actions, and secrets, then the tools exactly
+as the model will see them. A push saves an
+unchangeable revision that stays private to the project. It refuses files that look
+like credentials and paths that escape the folder. To leave out other files, list them
+in a `.pluralignore` file in the Environment folder. Credentials are never stored in
+the project; you supply them when the Job runs, as described in
+[Secrets](#secrets).
 
 ## How an episode ends
 
-An **episode** is one play-through, from `reset` to the end. Every Agent action goes
-through `step`, which returns the same five values Gymnasium uses:
+An **episode** is one play-through, from `reset` to the end. Every Agent action is
+one step, which returns the same five values Gymnasium uses. You can drive an
+Environment yourself the same way, which is handy in tests:
 
 ```python
+observation, info = environment.reset(initial_state={"expected": "billing"})
 observation, reward, terminated, truncated, info = environment.step("categorize", category="billing")
 ```
 
@@ -249,15 +263,14 @@ reward or an end-of-game flag never leaks into the model's context.
 An episode can stop for three reasons. Each records a different `stop_reason` on the
 Trial, the record of one attempt. The full set of values is `plural.STOP_REASONS`.
 
-- **The Environment ends it.** Override `terminated()` when the world reaches a
+- **An App ends it.** Override `terminated()` on an App when its system reaches a
   success or failure state for the Task, as the example above does once the ticket is
   categorized. Override `truncated()` when the episode can't usefully continue but
-  reached neither outcome. Both default to `False`, so an Environment that never
-  overrides them leaves the decision to stop entirely to the Agent and the budget.
-- **The Agent ends it.** Plural adds a `finish` tool alongside your actions. The Agent
-  calls it when the work is done or when it can't make progress, and its optional
-  `summary` becomes the Trial's response. Declare an `@action` named `finish` if you
-  would rather handle that yourself.
+  reached neither outcome. Both default to `False`. The episode ends when any App
+  says so; override them on an `Environment` subclass to decide differently.
+- **The Agent ends it.** Plural adds a `finish` tool alongside the Apps' actions. The
+  Agent calls it when the work is done or when it can't make progress, and its
+  optional `summary` becomes the Trial's response.
 - **A budget cuts it short.** `max_turns`, `max_seconds`, and `max_cost_usd` truncate
   the episode instead of failing the Trial, so you still get a trajectory and Verifier
   results.
@@ -269,49 +282,31 @@ finished early from a world that declared the Task over.
 ## Rewards
 
 A **reward** is a small bit of credit for one move. It answers "which action deserved
-the credit?", which is what a training system needs. Verifiers answer a different
-question: did the attempt succeed? Rewards are recorded on the episode in every mode,
-and they never count toward a score.
+the credit?", which is what a training system needs. A score answers a different
+question: did the attempt succeed? Rewards come from the Task's Verifiers and are
+recorded on the episode in every mode.
 
-For a single signal, override `reward`:
+An Environment gives no rewards itself. What deserves credit depends on the Task, so
+rewards come from the Task's [Verifiers](verifiers.md): a Verifier's `reward` function runs
+right after each action, beside the Apps, and can read every App. See
+[Reward each step](verifiers.md#reward-each-step).
 
-```python
-class TicketTriage(Environment[TicketObservation, TicketState]):
-    def reward(self, previous_state, current_state, action, result) -> float:
-        return 1.0 if current_state["category"] == current_state["expected"] else 0.0
-```
+:::details The precise rules
+- The `reward` returned by `step` is the total of every `reward` function that gave one.
+  `info["rewards"]` breaks that total down by Verifier, with its version and the App
+  that acted.
+- `previous_state` and `current_state` are detached JSON snapshots of the acting App,
+  so read them like dictionaries rather than as your `State` class. An MCP App
+  provides them only with `snapshot_on_step: true`.
+- A `reward` function that raises is recorded as `0.0`, with its error in that breakdown,
+  because a bug in a reward must not fail an action that already changed the world.
+- `on_step` on an `Environment` subclass changes the world after an action. It can't
+  return a reward.
+:::
 
-For several named signals, declare a `@rewarder` for each. Every one runs inside
-`step`, right after the action that changed the world, and `weight` scales its
-contribution:
-
-```python
-from plural import rewarder
-
-
-class TicketTriage(Environment[TicketObservation, TicketState]):
-    @rewarder(weight=2)
-    def correct_category(self, previous_state, current_state, action, result) -> float:
-        return 1.0 if current_state["category"] == current_state["expected"] else 0.0
-
-    @rewarder
-    def progress(self, previous_state, current_state, action, result) -> float:
-        return 1.0 if current_state["category"] and not previous_state["category"] else 0.0
-```
-
-The precise rules:
-
-- Every reward signal takes exactly `previous_state, current_state, action, result`.
-- The two states are detached JSON snapshots taken before and after the action, so
-  read them like dictionaries rather than as your `State` class.
-- `action` is the action name plus its parameters, and `result` is whatever the action
-  returned.
-- The `reward` returned by `step` is the weighted total of `reward()` and every
-  rewarder, and `info["rewards"]` breaks that total down by name.
-- A signal that raises is recorded as `0.0`, with its error in that breakdown, because
-  a bug in a reward must not fail an action that already changed the world.
-
-A trainer reads these per-step values; see [Training and RL](../running/training.md).
+Rewards can also be assigned after the fact, from a whole trajectory, and every
+reward ends up in the Trial's reward ledger. A trainer reads them from there; see
+[Training and RL](../running/training.md).
 
 ## Connect Tasks and scoring
 
@@ -319,29 +314,29 @@ The example above always uses the same ticket. For a useful benchmark, reuse the
 Environment with different case data. Each [Task](tasks.md) supplies instructions,
 picks its case, and attaches one or more [Verifiers](verifiers.md).
 
-Use `reset` to load the chosen case and clear earlier progress. A few rules decide
-what a Task can pass in:
+A few rules decide what a Task can pass in:
 
+- `initial_state` sets each App's starting State, keyed by App name, such as
+  `{"crm": {...}, "policies": {...}}`. With one App, give its State directly.
+- Only State fields marked with `initial()` can be set. Pass constraints such as
+  `min_length=5` or `pattern=r"^[a-z]{5}$"` when a Task's value must match a rule.
+- Unmarked fields, such as a running list of guesses, belong to the episode, and a
+  Task cannot set them.
 - Task `info` is public, so it can hold a ticket ID but should not hold the answer key.
-- `initial_state` supplies schema-checked setup data. Your `reset` must preserve any
-  fields it needs.
-- Mark those State fields with `initial()`. Pass constraints such as `min_length=5` or
-  `pattern=r"^[a-z]{5}$"` when a Task's value must match a rule.
-- Unmarked fields, such as `done` or a running list of guesses, belong to the episode,
-  and a Task cannot set them.
-- `State.seed` is settable. `State.metadata` is not.
+  An App reads it in `reset` as `self.task_info`.
 - Plural stores a Task's `reset_options` but does not yet pass them to `reset`, so
   load case data through `initial_state` instead.
 
-The [support queue tutorial](../tutorials/support-queue.md) shows how the Environment
-loads the Task's ticket and scores the finished workflow.
+The [support queue tutorial](../tutorials/support-queue.md) shows how an App loads the
+Task's ticket and how Verifiers score the finished workflow.
 
 ## Display views
 
 A view is what *people* see when they watch a run in the run viewer. It is separate
-from the Observation, which is what the model sees. Override `view()` to control it.
-Plural records the view after the reset and after every step, for display and replay
-only. It never reaches the Agent, and it is not scored.
+from the observation, which is what the model sees. Override `view()` on an App to
+control it. Plural records the view after the reset and after every step, for display
+and replay only. It never reaches the Agent, and it is not scored. With several Apps,
+the viewer shows the view of the App that just acted.
 
 A view is plain data, not code. It declares a `schema` and a `kind` that the viewer
 knows how to draw, so a run can never ship its own rendering script:
@@ -493,25 +488,32 @@ Recreate the data each Trial needs in `reset`.
 ## Resources
 
 **Resources** are the files and data the world starts with, like the Wordle word list
-or the support policy. Environment resources are shared by every Task; Task resources
-belong to one case, such as a single customer's invoice. Each Trial gets a fresh copy
-of both:
+or the support policy. Think of them as volumes. The Environment has one, shared by
+every Task. A Task may have its own, for one case, such as a single customer's invoice.
+A Trial references both, read-only; it doesn't own them, and nothing done in a Trial
+changes them. The two sit side by side and never share a path:
 
 ```text
 /workspace/resources/
-  shared/             # Environment inputs
+  environment-resources/   # The Environment's files, for every Task
     policies/refunds.md
-  task/               # Inputs for this Task only
+  task-resources/          # This Task's files, when it has any
     invoice.csv
-  manifest.json       # File locations and SHA-256 hashes
+  manifest.json            # Every file's location and SHA-256 hash
 ```
 
-Use relative file paths. Task files never replace shared files, even when their names
-match. Environment code reads the root folder from `PLURAL_RESOURCES_DIR`, then shows
-the right information through actions or observations.
+Use relative file paths. `PLURAL_RESOURCES_DIR` holds the root folder. A FastMCP server
+reads the two folders with `plural.mcp.environment_resources()` and
+`plural.mcp.task_resources()`; see
+[Build an MCP server](../guides/build-mcp-server.md#read-files).
+For files the Agent should browse and query directly, add Plural's files server as an
+App: `server: plural.mcp.files:server`.
+
+The Agent reaches the files through the Apps' tools. A Harness that can read files,
+such as a coding agent, can also read both folders directly.
 
 > **Good to know:** Files are not added to the model's prompt automatically. The Agent
-> only learns what your code puts in the Observation.
+> only learns what a tool returns.
 
 There are four ways to supply a resource. The short form covers most cases; the rest
 are for power users.
@@ -614,12 +616,40 @@ A `Resource` declared with explicit fields and no `delivery` is a `descriptor`: 
 records the reference but stages no file, and your Environment code must load the data
 itself.
 
-## Runtime variables and secrets
+## Secrets
 
-Some Environments need settings or credentials, such as the address of a support API
-and a token for it. You declare their **names** on the Runtime, and supply the actual
-**values** only when you start a Job. That way no credential is ever saved with the
-Environment.
+An App never holds a credential's value; it lists the names it needs, and they are
+supplied when a run starts, so nothing secret is saved with the Environment. A
+**credential** is supplied by the Agent that runs, so each Agent acts with its own token
+and scopes. A **secret** is supplied by the project, for setup only, such as a reset
+hook's admin token:
+
+```python
+from plural import App
+
+crm = App.mcp(
+    "crm",
+    url="https://mcp.example.com/v1",
+    headers={"Authorization": "Bearer ${CRM_TOKEN}"},
+    credentials=["CRM_TOKEN"],
+)
+```
+
+A Job checks before it starts anything that the Agent declares every credential and
+has a value for each, and that every secret has a value, and fails at once, naming the
+App and the name. The Agent lists its credentials, with their scopes, in its
+`agent.yaml`, and each person who runs it saves their own value with
+`plural credential set NAME`. A secret comes from your
+shell when you exported it, and otherwise from the hosted project, where
+`plural secret set NAME` stores it encrypted. Values go only to the process that runs
+the Apps and to Verifier queries, never to the model or its Harness. See
+[Credentials and secrets](../concepts/apps.md#credentials-and-secrets).
+
+### Runtime variables
+
+Settings that belong to the Runtime rather than one App, such as the address of a
+service the Environment's code reads, are declared as variables on the Runtime and
+supplied when the Job starts:
 
 ```python
 import os
@@ -631,56 +661,40 @@ runtime = Runtime.docker(variables=[
         format="url",
         description="Base URL of the support API.",
     ),
-    RuntimeVariable(
-        name="SUPPORT_API_TOKEN",
-        secret=True,
-        description="Token with access to the evaluation support account.",
-    ),
 ])
 
 # Use this runtime when constructing your Environment and Task.
-job = Job(task, agents=[agent], environ={
-    "SUPPORT_API_URL": os.environ["SUPPORT_API_URL"],
-    "SUPPORT_API_TOKEN": os.environ["SUPPORT_API_TOKEN"],
-})
+job = Job(task, agents=[agent], environ={"SUPPORT_API_URL": os.environ["SUPPORT_API_URL"]})
 ```
 
-The precise rules, for anyone wiring up credentials:
+The precise rules:
 
 - Required declarations must have a nonempty value. Set `required=False` for optional
   inputs.
 - Supported formats are `text`, `url`, `integer`, and `json`.
-- Values are injected into the Environment's reset and action commands. Declarations
-  never contain values.
-- The Harness, the loop that drives the Agent, shares the Runtime and can read these
-  variables, so use trusted Harness code.
-
-`Secret` references are also injected according to their `environment`, `harness`, or
-`verifier` target. Environment secret references as metadata declare names and targets
-only; values are supplied when the Job runs and are never stored on the Environment.
-Verifier credentials are supplied to the scoring process. Managed stdout and stderr
-redact declared secrets, but Environment code must avoid writing credentials into
-observations or custom artifacts.
+- Values are injected into the Apps' process. Declarations never contain values.
+- The Harness, the loop that drives the Agent, shares the Runtime and can read
+  Runtime variables, so put credentials on Apps instead.
 
 Docker and Daytona connection credentials configure the machine that runs the Job,
-separately from these Task variables. Plural checks that the provider is available and
+separately from these variables. Plural checks that the provider is available and
 supports the requested controls when a run starts.
 
-Model calls are authenticated through the Job's `client` or `api_key` parameter. Every
-model call goes through the Plural gateway, so `plural run` needs a Plural API key:
-one stored with `plural auth login` or `plural auth login --api-key-stdin`, or an
-exported `PLURAL_API_KEY`.
+Model calls are authenticated through the Job's `client` or `api_key` parameter, and
+go through the Plural gateway, so `plural run` needs a Plural API key: one stored
+with `plural auth login`, or an exported `PLURAL_API_KEY`. An Agent that calls its own
+OpenAI-compatible endpoint needs none; see [Agents](agents.md).
 
 ## Optional components
 
 - **Metadata:** use `name`, `version`, and `overview` to identify the Environment; use
   `metadata` for labels and ownership.
-- **Display:** override `Observation.render()` to control the text the model reads, and
-  `Environment.view()` to control what people see in the run viewer. See
-  [Display views](#display-views).
+- **Display:** return an `Observation` with a `render()` method from an action to
+  control the text the model reads exactly, and override `App.view()` to control what
+  people see in the run viewer. See [Display views](#display-views).
 - **Harness policy:** limit which custom Harnesses may run here and what they may do.
   See [Harnesses](harnesses.md).
-- **Rewards:** attach per-step credit to state changes. See [Rewards](#rewards).
+- **Rewards:** give per-step credit from a Task's Verifiers. See [Rewards](#rewards).
 
 ## Build a complete example
 

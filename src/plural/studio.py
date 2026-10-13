@@ -10,6 +10,8 @@ import json
 import re
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import ExitStack
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 from urllib.parse import quote
 
@@ -38,6 +40,10 @@ if TYPE_CHECKING:
 JsonObject = dict[str, Any]
 JsonList = list[JsonObject]
 T = TypeVar("T", bound=BaseModel)
+
+# Artifact and TITO uploads can be gigabytes, and the server validates and
+# stores the whole body before it answers.
+UPLOAD_TIMEOUT = httpx.Timeout(60.0, write=600.0, read=3600.0)
 
 
 def slugify(name: str, *, fallback: str = "item") -> str:
@@ -601,11 +607,14 @@ class TracesAPI:
     def upload_tito(
         self,
         trace_id: str,
-        data: bytes,
+        data: bytes | Path,
         *,
         content_type: str = "application/x-ndjson; profile=tito-v1",
     ) -> JsonObject:
-        """Upload immutable, server-validated TITO NDJSON for a hosted Trace."""
+        """Upload immutable, server-validated TITO NDJSON for a hosted Trace.
+
+        Pass a ``Path`` to stream a large file instead of holding it in memory.
+        """
         return cast(
             JsonObject,
             self._studio.request(
@@ -613,6 +622,7 @@ class TracesAPI:
                 f"/traces/{quote(trace_id, safe='')}/artifacts/tito",
                 content=data,
                 content_type=content_type,
+                timeout=UPLOAD_TIMEOUT,
             ),
         )
 
@@ -759,6 +769,98 @@ class TrialsAPI:
     def watch(self, trial_id: str, *, cursor: int = 0) -> Iterator[JsonObject]:
         return self._studio.watch(f"/trials/{quote(trial_id)}/events", cursor=cursor)
 
+    def rewards(self, trial_id: str) -> JsonObject:
+        """The Trial's reward ledger and each verifier's total."""
+        return cast(JsonObject, self._studio.request("GET", f"/trials/{quote(trial_id)}/rewards"))
+
+    def add_rewards(
+        self,
+        trial_id: str,
+        records: Sequence[JsonObject],
+        *,
+        execution_id: str | None = None,
+    ) -> JsonObject:
+        """Append records to the Trial's ledger. Records it already has are ignored.
+
+        ``execution_id`` names the execution whose trajectory the targets refer to.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/trials/{quote(trial_id)}/rewards",
+                json={"records": list(records), "execution_id": execution_id},
+            ),
+        )
+
+
+class SecretsAPI:
+    """Values for the secrets the project's Apps and Verifiers declare.
+
+    Values are write-only except through :meth:`resolve`, which the service
+    grants to project contributors starting a run.
+    """
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def list(self) -> JsonList:
+        """Each secret set in the project, by name and hint, never its value."""
+        return cast(JsonList, self._studio.request("GET", "/secrets"))
+
+    def set(self, name: str, value: str) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request("PUT", f"/secrets/{quote(name)}", json={"value": value}),
+        )
+
+    def delete(self, name: str) -> None:
+        self._studio.request("DELETE", f"/secrets/{quote(name)}")
+
+    def resolve(self, names: Sequence[str]) -> JsonObject:
+        """``environ`` with the values set for ``names``, and the ``missing`` ones."""
+        return cast(
+            JsonObject,
+            self._studio.request("POST", "/secrets/resolve", json={"names": list(names)}),
+        )
+
+
+class CredentialsAPI:
+    """Your credentials: the values you supply to the Agents you run.
+
+    They belong to you, not to a project, so a coworker running the same Agent
+    supplies their own. The service returns values only to you, and only to a
+    browser session or your own ``plural auth login``.
+    """
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def list(self) -> JsonList:
+        """Each credential you saved, by name and hint, never its value."""
+        return cast(JsonList, self._studio.request("GET", "/account/credentials"))
+
+    def set(self, name: str, value: str) -> JsonObject:
+        """Save a credential's value, replacing any it had."""
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "PUT", f"/account/credentials/{quote(name)}", json={"value": value}
+            ),
+        )
+
+    def delete(self, name: str) -> None:
+        self._studio.request("DELETE", f"/account/credentials/{quote(name)}")
+
+    def resolve(self, names: Sequence[str]) -> JsonObject:
+        """``credentials`` (name to ``{value, updated_at}``) and the ``missing`` names."""
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST", "/account/credentials/resolve", json={"names": list(names)}
+            ),
+        )
+
 
 class ReviewsAPI:
     """Human review assignments and submissions."""
@@ -852,6 +954,8 @@ class Studio:
         self.packages = PackagesAPI(self)
         self.models = ModelsAPI(self)
         self.runtimes = RuntimesAPI(self)
+        self.secrets = SecretsAPI(self)
+        self.credentials = CredentialsAPI(self)
         self.environments = EnvironmentsAPI(self)
         self.tasks = TasksAPI(self)
         self.verifiers = VerifiersAPI(self)
@@ -908,10 +1012,10 @@ class Studio:
         *,
         json: Any = None,
         params: JsonObject | None = None,
-        content: bytes | None = None,
+        content: bytes | Path | None = None,
         content_type: str | None = None,
         project: bool = True,
-        timeout: float | None = 60,
+        timeout: float | httpx.Timeout | None = 60,
     ) -> httpx.Response:
         if json is not None and content is not None:
             raise InvalidRequestError("hosted request cannot contain JSON and raw content")
@@ -920,14 +1024,21 @@ class Studio:
             if content_type:
                 headers["Content-Type"] = content_type
             url = f"{self.api_root}{path}"
-            kwargs: dict[str, Any] = {
-                "headers": headers,
-                "json": json,
-                "params": params,
-                "content": content,
-                "timeout": timeout,
-            }
-            response = self._client().request(method, url, **kwargs)
+            with ExitStack() as stack:
+                # httpx streams an open file in chunks, with its Content-Length.
+                body = (
+                    stack.enter_context(content.open("rb"))
+                    if isinstance(content, Path)
+                    else content
+                )
+                kwargs: dict[str, Any] = {
+                    "headers": headers,
+                    "json": json,
+                    "params": params,
+                    "content": body,
+                    "timeout": timeout,
+                }
+                response = self._client().request(method, url, **kwargs)
             if response.status_code == 401 and attempt == 0 and self._refresh is not None:
                 token = self._refresh()
                 if token:
@@ -945,10 +1056,10 @@ class Studio:
         *,
         json: Any = None,
         params: JsonObject | None = None,
-        content: bytes | None = None,
+        content: bytes | Path | None = None,
         content_type: str | None = None,
         project: bool = True,
-        timeout: float | None = 60,
+        timeout: float | httpx.Timeout | None = 60,
     ) -> Any:
         response = self._send(
             method,
@@ -1028,6 +1139,7 @@ __all__ = [
     "AccountsAPI",
     "AgentsAPI",
     "BenchmarksAPI",
+    "CredentialsAPI",
     "EnvironmentsAPI",
     "HarnessesAPI",
     "JobsAPI",
@@ -1036,6 +1148,7 @@ __all__ = [
     "ProjectsAPI",
     "ReviewsAPI",
     "RuntimesAPI",
+    "SecretsAPI",
     "Studio",
     "TasksAPI",
     "TracesAPI",

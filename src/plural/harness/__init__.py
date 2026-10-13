@@ -7,6 +7,7 @@ from plural.harness.interface import (
     HarnessResult,
     HarnessStep,
     HarnessTask,
+    SeatTurn,
 )
 from plural.harness.models import Harness, HarnessDefinition
 
@@ -19,4 +20,5 @@ __all__ = [
     "HarnessResult",
     "HarnessStep",
     "HarnessTask",
+    "SeatTurn",
 ]

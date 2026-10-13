@@ -53,9 +53,11 @@ push, compare, and share.
 
 ## Ownership
 
-- An Environment owns its overview and README, typed State and Observation,
-  actions, transition Rewarders, shared resources, secret references, Runtime,
-  Harness policy, limits, and rendering output.
+- An App owns its actions, typed State, secret references, snapshot and reset behavior, and rendering output. Its control
+  level (`owned`, `sandboxed`, `live`, or `replayed`) is derived from its kind
+  and settings.
+- An Environment owns its overview and README, its Apps, the `on_step` hook that
+  spans them, shared resources, Runtime, Harness policy, and limits.
 - A Runtime owns the image or build, compute, filesystem, network, runtime
   variable declarations, persistence, and placement constraints. Secret values
   are never serialized.
@@ -64,7 +66,8 @@ push, compare, and share.
 - A Harness is one optional Agent execution strategy. Packaging, binding,
   capability grants, and digests are derived internally from that one value.
 - A Verifier owns its information, criteria, evidence requirements, Runtime,
-  and `check` behavior. Deterministic, agent, and human Verifiers share one
+  its `check` behavior, which produces the score, and an optional `reward`
+  behavior, which produces per-step rewards. Deterministic, agent, and human Verifiers share one
   result contract.
 - A Task owns instructions, goals, information, metadata, one Environment,
   Verifiers, task resources, initial state, and reset options.
@@ -80,23 +83,26 @@ push, compare, and share.
 An Environment episode follows one transition pipeline:
 
 1. bind the Task and validate task resources and initial state;
-2. reset the Environment;
-3. invoke an Agent action;
-4. update Environment state;
-5. produce the Agent-visible observation, the only part of the transition the
-   model sees;
-6. run every declared Rewarder against the transition and record the reward on
-   the episode, never in the model's context;
-7. repeat until the Environment terminates or truncates, the Agent finishes, or
-   a budget truncates the episode;
-8. persist the trajectory, state, observation, rendering, logs, and artifacts;
+2. reset every App with its part of the initial state, and snapshot each one;
+3. invoke an Agent action on the App that owns it;
+4. update that App's state;
+5. produce the Agent-visible observation, the action's result, the only part of
+   the transition the model sees;
+6. run the Environment's `on_step`, then each Task Verifier's `reward` against
+   the transition, with read-only access to every App, and record the rewards in
+   the reward ledger, never in the model's context;
+7. repeat until an App terminates or truncates, the Agent finishes, or a budget
+   truncates the episode;
+8. snapshot every App, and persist the trajectory, App states, observation,
+   rendering, reward ledger, logs, and artifacts;
 9. run Task Verifiers against filtered evidence;
 10. aggregate scores into the Trial and Benchmark result.
 
-Rewarders credit one transition and are recorded on the episode in every mode;
-`Trial.step_reward_total` is the episode's total. Verifiers assess completed
-Trials and are the only source of a score, and a reward never contributes to
-one. They do not share lifecycle hooks or result types. An episode's stop reason
+Verifiers credit one transition and are recorded on the episode in every mode;
+a Verifier's `hindsight` function may later credit a step, turn, or span of a
+finished trajectory. `Trial.step_reward_total` is the episode's total. Verifiers assess completed
+Trials and are the only source of a score. A reward contributes to one only when a
+Verifier's `check` is `total_reward`, which scores by that Verifier's own rewards. They do not share lifecycle hooks or result types. An episode's stop reason
 is one of `plural.STOP_REASONS`.
 
 ## Model catalog

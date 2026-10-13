@@ -29,6 +29,17 @@ python scripts/check_docs_starter.py
 mkdocs build --strict
 ```
 
+Keep each page's main path short and fold the rest into blocks a reader expands:
+
+```markdown
+:::details Every field Plural reads
+Body in ordinary Markdown: paragraphs, lists, tables, and code.
+:::
+```
+
+MkDocs renders them as collapsed admonitions, and Plural Intel as `<details>`. A block
+may not contain a heading, tabs, or another `:::details`; `check_docs.py` enforces it.
+
 The starter check runs actual package execution against a controlled model response
 server on localhost. It checks a complete benchmark, an incorrect classification,
 and a human review. It requires no model credentials and makes no model-service

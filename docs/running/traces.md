@@ -76,8 +76,8 @@ gateway's ID for it; a cost the gateway did not return stays empty rather than
 estimated. Rewards and Verifier scores stay beside the trajectory; neither
 appears in a step.
 
-When available, the final Environment State, Observation, rendering, trajectory,
-and Verifier results are copied into the execution artifacts and listed in the
+When available, each App's State, the last observation, the rendering, the
+trajectory, and Verifier results are copied into the execution artifacts and listed in the
 manifest. Missing runtime data remains absent. Preserve additional files
 explicitly rather than assuming every runtime file survives teardown.
 
@@ -121,6 +121,26 @@ Capture useful evidence, not only final prose. Record tool inputs and outcomes,
 relevant observations, model identity, errors, and the artifacts your scoring rule
 needs. Fields such as usage and latency depend on the integration actually
 recording them; do not infer them from an empty trace.
+
+## Build Tasks from traces you already have
+
+If an agent is already running somewhere, such as in production or another
+framework, its recorded conversations can become an Environment and Tasks:
+
+```bash
+plural env add support --traces conversations.json
+```
+
+This writes an Environment with one replay App per system the traces used, whose
+actions are the agent's tools, answered with the results that were recorded; one Task
+per trace, up to `--max-tasks`; a model-judge Verifier; and a Benchmark. Run any model
+on the Benchmark, and rerun the command with newer traces to add new tools and Tasks.
+[Start from traces](../start/from-traces.md) walks through it, including the trace
+format.
+
+Traces are for building Tasks, not for scoring. To compare the agent that produced
+them, run it on the same Benchmark as an Agent with its own `endpoint`; see
+[Use your own endpoint](../project/agents.md#use-your-own-endpoint).
 
 ## Reuse evidence responsibly
 

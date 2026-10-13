@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +12,7 @@ import pytest
 from fakes import FakeProvider
 
 from plural.agents import AgentBinding, AgentDefinition
+from plural.apps.definition import AppAction, AppDefinition, SecretReference
 from plural.atif import validate_atif
 from plural.common import (
     ErrorCode,
@@ -18,9 +23,14 @@ from plural.common import (
     HarnessProtocol,
     PackageSource,
 )
+from plural.credentials import CredentialValue, fingerprint
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
 from plural.execution import JobRunner, JobStore
-from plural.execution.engine import _bounded_artifact_evidence
+from plural.execution.engine import (
+    _AGENT_VERIFIER_SCRIPT,
+    ExecutionFailure,
+    _bounded_artifact_evidence,
+)
 from plural.jobs import BenchmarkJobSource, JobMode, JobSpec, RetryPolicy, TaskJobSource
 from plural.sandbox import (
     DownloadedFile,
@@ -33,8 +43,10 @@ from plural.tasks import BenchmarkDefinition, TaskDefinition
 from plural.verifiers import (
     AgentVerifier,
     DeterministicVerifier,
+    Episode,
     HumanVerifier,
     RubricCriterion,
+    VerifierOutput,
     VerifierRuntime,
     WeightedVerifier,
 )
@@ -48,9 +60,10 @@ class JudgeProvider(FakeProvider):
         self.judge_input: dict[str, Any] | None = None
 
     async def exec(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
-        if request.stdin is not None:
+        files = self.files[handle.sandbox_id]
+        if request.stdin is not None or ".plural/verifier-input.json" not in files:
             return await super().exec(handle, request)
-        payload = json.loads(self.files[handle.sandbox_id][".plural/verifier-input.json"])
+        payload = json.loads(files[".plural/verifier-input.json"])
         verifier = payload["agent_verifier"]
         self.judge_input = payload["judge_input"]
         assert verifier["criteria"] == [
@@ -63,9 +76,10 @@ class JudgeProvider(FakeProvider):
             }
         ]
         assert self.judge_input["environment_view"] == {
-            "observation": {"text": "done"},
+            "observation": {"text": "board"},
             "state": {"step": 1},
         }
+        assert self.judge_input["episode"]["apps"]["game"]["final"] == {"step": 1}
         requested = self.judge_input["requested_artifacts"]
         assert requested[0]["name"] == "result.json"
         assert json.loads(requested[0]["content"]) == {"answer": 42}
@@ -85,10 +99,18 @@ class JudgeProvider(FakeProvider):
         )
 
 
+GAME_APP = AppDefinition(
+    name="game",
+    kind="python",
+    python="game.py:Game",
+    actions=(AppAction(name="move", description="Make a move."),),
+)
+
+
 def exact_verifier(provider: str) -> DeterministicVerifier:
     return DeterministicVerifier(
         name=f"exact-{provider}",
-        command=("python", "verify.py"),
+        check=("python", "verify.py"),
         runtime=VerifierRuntime(provider=provider),
     )
 
@@ -135,14 +157,7 @@ async def test_agent_verifier_scores_configured_criteria_with_contracted_evidenc
     provider = JudgeProvider()
     environment = EnvironmentDefinition(
         name="judge-world",
-        observation_schema={
-            "type": "object",
-            "properties": {"text": {"type": "string"}},
-        },
-        state_schema={
-            "type": "object",
-            "properties": {"step": {"type": "integer"}},
-        },
+        apps=(GAME_APP,),
         runtime=EnvironmentRuntime(
             provider="docker",
             targets=frozenset({ExecutionTarget.DOCKER}),
@@ -186,6 +201,76 @@ async def test_agent_verifier_scores_configured_criteria_with_contracted_evidenc
     execution = store.trial_path(spec.plan().trials[0]) / "executions/0"
     assert "judge-secret" not in (execution / "logs/verifier.stdout.log").read_text()
     assert "***" in (execution / "logs/verifier.stdout.log").read_text()
+
+
+def _strict_schema_errors(schema: dict[str, Any], path: str = "$") -> list[str]:
+    errors: list[str] = []
+    if schema.get("type") == "object":
+        properties = schema.get("properties", {})
+        if not properties or set(schema.get("required", ())) != set(properties):
+            errors.append(f"{path} must list every property as required")
+        if schema.get("additionalProperties") is not False:
+            errors.append(f"{path} must set additionalProperties to false")
+        for name, child in properties.items():
+            errors.extend(_strict_schema_errors(child, f"{path}.{name}"))
+    if schema.get("type") == "array":
+        errors.extend(_strict_schema_errors(schema["items"], f"{path}[]"))
+    return errors
+
+
+def test_agent_verifier_script_sends_a_strict_schema_and_writes_its_output(
+    tmp_path: Path,
+) -> None:
+    requests: list[dict[str, Any]] = []
+
+    class Gateway(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append(body)
+            errors = _strict_schema_errors(body["response_format"]["json_schema"]["schema"])
+            if errors:
+                payload, status = {"error": {"message": "; ".join(errors)}}, 400
+            else:
+                output = {"score": 1, "scores": {"resolved": 1}, "evidence": ["ok"], "feedback": ""}
+                payload = {"choices": [{"message": {"content": json.dumps(output)}}]}
+                status = 200
+            data = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Gateway)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    verifier = AgentVerifier(
+        name="judge",
+        model="openai/gpt-5.6-luna",
+        instructions="Judge the episode.",
+        criteria=(RubricCriterion(name="resolved", description="0 or 1."),),
+    )
+    (tmp_path / ".plural").mkdir()
+    (tmp_path / ".plural/verifier-input.json").write_text(
+        json.dumps({"agent_verifier": verifier.model_dump(mode="json"), "judge_input": {}})
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", _AGENT_VERIFIER_SCRIPT],
+            cwd=tmp_path,
+            env={"PLURAL_GATEWAY_URL": f"http://127.0.0.1:{server.server_port}"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        server.shutdown()
+
+    assert completed.returncode == 0, completed.stderr
+    assert len(requests) == 1
+    written = json.loads((tmp_path / "agent-verifier-result.json").read_text())
+    assert written["scores"] == {"resolved": 1}
 
 
 async def test_cross_environment_scheduler_uses_each_runtime_and_bounds_concurrency(
@@ -417,7 +502,6 @@ async def test_retries_append_trial_executions_without_new_trial_identity(
     assert entries["trajectory.json"]["role"] == "trajectory"
     assert entries["atif-trajectory.json"]["role"] == "trajectory"
     assert entries["result.json"]["role"] == "result"
-    assert entries["state.json"]["role"] == "state"
     assert entries["observation.json"]["role"] == "observation"
     assert entries["view.json"]["role"] == "rendering"
     assert "trajectory.normalized.json" not in entries
@@ -454,3 +538,211 @@ def test_event_store_redacts_hidden_state_and_secrets(tmp_path: Path) -> None:
     )
     assert "secret-value" not in event.model_dump_json()
     assert event.data["hidden_state"] == "[redacted]"
+
+
+def _app_task(verifier: DeterministicVerifier) -> TaskDefinition:
+    crm = AppDefinition(
+        name="crm",
+        kind="mcp",
+        config={"url": "https://crm.example/mcp"},
+        actions=(
+            AppAction(name="get_record", description="Read.", mutates_state=False),
+            AppAction(name="create_record", description="Write."),
+        ),
+        secrets=("CRM_TOKEN",),
+        has_reset=True,
+        control="sandboxed",
+    )
+    environment = EnvironmentDefinition(
+        name="desk",
+        apps=(GAME_APP, crm),
+        runtime=EnvironmentRuntime(provider="docker", targets=frozenset({ExecutionTarget.DOCKER})),
+    )
+    return TaskDefinition(
+        task_id="desk-task",
+        instructions="Do the work.",
+        environment=environment,
+        verifiers=(WeightedVerifier(verifier=verifier),),
+        state={"game": {"step": 0}},
+    )
+
+
+async def test_app_host_holds_secrets_and_verifiers_query_it_before_teardown(
+    tmp_path: Path,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def check(episode: Episode) -> VerifierOutput:
+        seen["record"] = episode.apps["crm"].query("get_record", id="7")
+        seen["state"] = episode.state
+        return VerifierOutput(score=1, evidence=("queried",))
+
+    task = _app_task(DeterministicVerifier(name="queried", check=check))
+    spec = JobSpec(
+        source=TaskJobSource(task=task),
+        agents=(AgentBinding(agent=AgentDefinition(name="agent", model="test/model")),),
+    )
+    provider = FakeProvider("docker")
+    store = JobStore(tmp_path / "jobs")
+    result = await JobRunner(
+        spec, provider=provider, store=store, environ={"CRM_TOKEN": "token-in-host-only"}
+    ).run()
+
+    assert result.status == "succeeded", result.trials[0].error_message
+    assert [item.command[3] for item in provider.host_calls] == ["start"] + ["control"] * 4
+    assert [item["op"] for item in provider.control_requests] == [
+        "hello",
+        "finish",
+        "query",
+        "stop",
+    ]
+    start = provider.host_calls[0]
+    # Never the workspace, where Python would import what the Harness left.
+    assert {item.cwd for item in provider.host_calls} == {"/"}
+    started = json.loads(start.stdin or b"{}")
+    assert started["secrets"] == {"CRM_TOKEN": "token-in-host-only"}
+    control = started["token"]
+    assert len(control) >= 32
+    assert "CRM_TOKEN" not in start.env
+    for call in provider.host_calls[1:]:
+        # Control requests carry a signature, never the token itself.
+        assert control.encode() not in (call.stdin or b"")
+        assert control not in json.dumps(call.env)
+    assert all(item["auth"] and item["nonce"] for item in provider.control_requests)
+    harness = provider.harness_requests[0]
+    assert harness.env["PLURAL_APPS_MANAGED"] == "1"
+    assert "CRM_TOKEN" not in harness.env
+    assert b"token-in-host-only" not in (harness.stdin or b"")
+    assert control.encode() not in (harness.stdin or b"")
+    assert control not in json.dumps(harness.env)
+    payload = json.loads(harness.stdin or b"{}")["environment"]
+    commands = {item["name"]: item["command"] for item in payload["actions"]}
+    assert commands["get_record"] == [
+        "python",
+        "-m",
+        "plural.apps.daemon",
+        "step",
+        "get_record",
+    ]
+    assert payload["reset_command"][-1] == "reset"
+    assert seen["record"] == {"app": "crm", "action": "get_record", "id": "7"}
+    assert seen["state"]["game"] == {"step": 1}
+    execution = store.trial_path(spec.plan().trials[0]) / "executions/0/artifacts"
+    assert json.loads((execution / "apps.json").read_text())["game"]["final"] == {"step": 1}
+    # The hidden initial State never lands in the shared workspace; it rides the start stdin.
+    task_file = json.loads(provider.uploads[".plural/apps/task.json"])
+    assert "initial_state" not in task_file
+    assert started["inputs"]["initial_state"] == {"game": {"step": 0}}
+    assert b'"step": 0' not in provider.uploads[".plural/apps/task.json"]
+    # What was staged for the host is gone before the Harness runs.
+    remaining = provider.files["docker-0"]
+    assert not any(path.startswith((".plural/apps/", ".plural/verifiers/")) for path in remaining)
+    receipt = json.loads((execution.parent / "result.json").read_text())
+    assert receipt["app_isolation"] == "none"
+
+
+async def test_missing_app_secrets_fail_before_a_runtime_starts(tmp_path: Path) -> None:
+    task = _app_task(exact_verifier("docker"))
+    spec = JobSpec(
+        source=TaskJobSource(task=task),
+        agents=(AgentBinding(agent=AgentDefinition(name="agent", model="test/model")),),
+    )
+    provider = FakeProvider("docker")
+    runner = JobRunner(spec, provider=provider, store=JobStore(tmp_path / "jobs"))
+    with pytest.raises(ExecutionFailure, match="App 'crm' needs CRM_TOKEN") as caught:
+        await runner.run()
+
+    assert caught.value.code == ErrorCode.AUTHENTICATION
+    assert provider.created == []
+
+
+def _credential_task() -> TaskDefinition:
+    task = _app_task(exact_verifier("docker"))
+    crm = task.environment.app("crm").model_copy(
+        update={"secrets": (), "credentials": (SecretReference(name="CRM_TOKEN"),)}
+    )
+    environment = task.environment.model_copy(update={"apps": (GAME_APP, crm)})
+    return task.model_copy(update={"environment": environment})
+
+
+async def test_each_agent_supplies_its_own_credential_and_the_trial_records_it(
+    tmp_path: Path,
+) -> None:
+    sales = AgentDefinition(
+        name="sales-bot",
+        model="test/model",
+        credentials={"CRM_TOKEN": {"scopes": ["read:accounts"]}},
+    )
+    admin = AgentDefinition(name="admin-bot", model="test/model", credentials=["CRM_TOKEN"])
+    spec = JobSpec(
+        source=TaskJobSource(task=_credential_task()),
+        agents=(AgentBinding(agent=sales), AgentBinding(agent=admin)),
+    )
+    provider = FakeProvider("docker")
+    result = await JobRunner(
+        spec,
+        provider=provider,
+        store=JobStore(tmp_path / "jobs"),
+        environ={"CRM_TOKEN": "admin-token-from-shell"},
+        credentials={"sales-bot": {"CRM_TOKEN": CredentialValue("sales-token", source="hosted")}},
+    ).run()
+
+    assert result.status == "succeeded", [item.error_message for item in result.trials]
+    started = [
+        json.loads(item.stdin or b"{}")
+        for item in provider.host_calls
+        if item.command[3] == "start"
+    ]
+    assert sorted(item["secrets"]["CRM_TOKEN"] for item in started) == [
+        "admin-token-from-shell",
+        "sales-token",
+    ]
+    for request in provider.harness_requests:
+        assert "CRM_TOKEN" not in request.env
+        assert b"sales-token" not in (request.stdin or b"")
+        assert b"admin-token-from-shell" not in (request.stdin or b"")
+    audits = {item.credentials[0].agent: item.credentials[0] for item in result.trials}
+    assert audits["sales-bot"].app == "crm"
+    assert audits["sales-bot"].scopes == ("read:accounts",)
+    assert audits["sales-bot"].source == "hosted"
+    assert audits["sales-bot"].fingerprint == fingerprint("sales-token")
+    assert audits["admin-bot"].source == "environment"
+    assert audits["admin-bot"].scopes == ()
+    stored = (tmp_path / "jobs").rglob("result.json")
+    for path in stored:
+        text = path.read_text()
+        assert "sales-token" not in text
+        assert "admin-token-from-shell" not in text
+
+
+async def test_an_agent_without_the_credential_cannot_run_before_a_runtime_starts(
+    tmp_path: Path,
+) -> None:
+    spec = JobSpec(
+        source=TaskJobSource(task=_credential_task()),
+        agents=(AgentBinding(agent=AgentDefinition(name="gpt", model="test/model")),),
+    )
+    provider = FakeProvider("docker")
+    runner = JobRunner(
+        spec,
+        provider=provider,
+        store=JobStore(tmp_path / "jobs"),
+        environ={"CRM_TOKEN": "exported-but-not-carried"},
+    )
+    with pytest.raises(ExecutionFailure, match="Agent 'gpt' does not carry") as caught:
+        await runner.run()
+
+    assert caught.value.code == ErrorCode.AUTHENTICATION
+    assert "CRM_TOKEN, for App crm" in str(caught.value)
+    assert provider.created == []
+
+
+async def test_an_agent_that_declares_a_credential_needs_its_value(tmp_path: Path) -> None:
+    agent = AgentDefinition(name="sales-bot", model="test/model", credentials=["CRM_TOKEN"])
+    spec = JobSpec(
+        source=TaskJobSource(task=_credential_task()),
+        agents=(AgentBinding(agent=agent),),
+    )
+    runner = JobRunner(spec, provider=FakeProvider("docker"), store=JobStore(tmp_path / "jobs"))
+    with pytest.raises(ExecutionFailure, match="plural credential set NAME"):
+        await runner.run()

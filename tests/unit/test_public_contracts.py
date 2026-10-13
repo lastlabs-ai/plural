@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from plural.agents import AgentBinding, AgentDefinition
+from plural.apps.definition import AppDefinition
 from plural.common import (
     ExecutionTarget,
     HarnessBinding,
@@ -27,7 +28,7 @@ from plural.verifiers import DeterministicVerifier, WeightedVerifier
 
 
 def verifier(name: str = "exact") -> DeterministicVerifier:
-    return DeterministicVerifier(name=name, command=("python", "verify.py"))
+    return DeterministicVerifier(name=name, check=("python", "verify.py"))
 
 
 def task(name: str, environment: EnvironmentDefinition) -> TaskDefinition:
@@ -53,13 +54,20 @@ def test_v2_environment_rejects_v1_owned_fields() -> None:
 def test_task_state_is_validated_and_kept_off_the_public_payload() -> None:
     environment = EnvironmentDefinition(
         name="wordle",
-        state_schema={
-            "type": "object",
-            "properties": {
-                "secret": {"type": "string", "x-plural-hidden": True},
-                "remaining": {"type": "integer", "default": 6},
-            },
-        },
+        apps=(
+            AppDefinition(
+                name="wordle",
+                kind="python",
+                python="wordle.py:Wordle",
+                state_schema={
+                    "type": "object",
+                    "properties": {
+                        "secret": {"type": "string", "x-plural-hidden": True},
+                        "remaining": {"type": "integer", "default": 6},
+                    },
+                },
+            ),
+        ),
     )
     with pytest.raises(ValidationError, match="expected string, got integer"):
         TaskDefinition(

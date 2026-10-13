@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
 from plural import (
+    App,
     DeterministicVerifier,
     Environment,
     Episode,
@@ -14,25 +17,42 @@ from plural import (
     action,
     initial,
 )
+from plural.apps.definition import AppAction, AppDefinition
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
 from plural.execution.policy import verifier_score_sandbox
 from plural.tasks import validate_task_state
-from plural.verifiers import EpisodeOutcome, VerifierRuntime, score_from_rewards
+from plural.verifiers import AppSnapshot, VerifierRuntime
 
 
 def solved(episode: Episode) -> VerifierOutput:
-    return VerifierOutput(reward=float(bool(episode.observation.get("solved"))))
+    return VerifierOutput(score=float(bool(episode.observation.get("solved"))))
 
 
-def test_task_bind_accepts_action_environment_without_package_call() -> None:
-    class Wordle(Environment):
+def _environment(state_schema: dict[str, Any], *, name: str = "wordle") -> EnvironmentDefinition:
+    return EnvironmentDefinition(
+        name=name,
+        apps=(
+            AppDefinition(
+                name=name.replace("-", "_"),
+                kind="python",
+                python="game.py:Game",
+                actions=(AppAction(name="guess", description="Guess."),),
+                state_schema=state_schema,
+            ),
+        ),
+        runtime=Runtime.docker(),
+    )
+
+
+def test_task_bind_accepts_an_app_environment_without_package_call() -> None:
+    class Wordle(App):
         name = "wordle"
 
         @action
         def guess(self, word: str) -> dict[str, str]:
             return {"word": word}
 
-    environment = Wordle(runtime=Runtime.docker())
+    environment = Environment(apps=[Wordle()], runtime=Runtime.docker())
     task = Task(
         name="easy-01",
         instructions="Play.",
@@ -41,27 +61,29 @@ def test_task_bind_accepts_action_environment_without_package_call() -> None:
     )
     definition = environment.definition()
     assert environment.source is not None
-    assert definition.reset_command[:3] == ("python", "-m", "plural.environments.runner")
-    assert definition.actions[0].command[-1] == "guess"
+    assert definition.apps[0].python is not None
+    assert definition.apps[0].python.endswith(".Wordle")
+    assert [item.name for item in definition.actions] == ["guess"]
     assert task.environment is environment
 
 
-def test_reward_check_uses_a_named_rewarder() -> None:
-    verifier = DeterministicVerifier(name="efficiency", check={"reward": "efficiency"})
-    assert verifier.reward_source == "efficiency"
-    episode = Episode(
-        outcome=EpisodeOutcome(total_reward=3),
-        rewards=[
-            {
-                "signals": [
-                    {"name": "efficiency", "value": 2, "weight": 1},
-                    {"name": "other", "value": 9, "weight": 1},
-                ]
-            }
-        ],
+def test_episode_state_reads_one_app_directly_and_several_by_name() -> None:
+    one = Episode.from_apps({"game": {"control": "owned", "initial": {}, "final": {"step": 2}}})
+    assert one.state == {"step": 2}
+    assert one.apps["game"].final == {"step": 2}
+    several = Episode.from_apps(
+        {
+            "game": {"control": "owned", "initial": {}, "final": {"step": 2}},
+            "crm": {"control": "live", "initial": None, "final": None},
+        }
     )
-    assert score_from_rewards(episode, "efficiency").score == 2
-    assert score_from_rewards(episode, "total").score == 3
+    assert several.state == {"game": {"step": 2}, "crm": None}
+
+
+def test_app_queries_are_read_only() -> None:
+    snapshot = AppSnapshot(control="owned")
+    with pytest.raises(RuntimeError, match="only available to function Verifiers"):
+        snapshot.query("get_record", id="1")
 
 
 def test_default_verifier_runtime_uses_the_task_environment() -> None:
@@ -80,11 +102,11 @@ def test_default_verifier_runtime_uses_the_task_environment() -> None:
     assert requirements.image == "checker:latest"
 
 
-def test_verifier_rejects_non_callable_check() -> None:
+def test_verifier_rejects_non_callable_final() -> None:
     with pytest.raises(ValidationError, match="Cannot create DeterministicVerifier") as exc:
         DeterministicVerifier(name="solved", check=123)
     message = str(exc.value)
-    assert "function that accepts an Episode" in message
+    assert "function that accepts the finished Episode" in message
     assert "Got int" in message
 
 
@@ -103,57 +125,42 @@ def test_initial_constraints_live_on_the_schema_not_the_default() -> None:
     assert secret["minLength"] == 5
     assert secret["maxLength"] == 5
     assert secret["pattern"] == "^[a-z]{5}$"
-    schema = {"type": "object", "properties": {"secret": secret}}
+    environment = _environment({"type": "object", "properties": {"secret": secret}})
     assert validate_task_state(
-        task_id="easy-01",
-        environment_name="wordle",
-        state={"secret": "crane"},
-        state_schema=schema,
-    ) == {"secret": "crane"}
+        task_id="easy-01", environment=environment, state={"secret": "crane"}
+    ) == {"wordle": {"secret": "crane"}}
     with pytest.raises(ValueError, match="exactly 5 lowercase letters"):
-        validate_task_state(
-            task_id="easy-01",
-            environment_name="wordle",
-            state={"secret": "no"},
-            state_schema=schema,
-        )
+        validate_task_state(task_id="easy-01", environment=environment, state={"secret": "no"})
 
 
-def test_task_state_rejects_fields_the_environment_owns() -> None:
-    schema = {
-        "type": "object",
-        "properties": {
-            "secret": {"type": "string", "x-plural-initial": True},
-            "solved": {"type": "boolean"},
-        },
-    }
-    accepted = validate_task_state(
-        task_id="easy-01",
-        environment_name="wordle",
-        state={"secret": "crane"},
-        state_schema=schema,
+def test_task_state_rejects_fields_the_app_owns() -> None:
+    environment = _environment(
+        {
+            "type": "object",
+            "properties": {
+                "secret": {"type": "string", "x-plural-initial": True},
+                "solved": {"type": "boolean"},
+            },
+        }
     )
-    assert accepted == {"secret": "crane"}
+    accepted = validate_task_state(
+        task_id="easy-01", environment=environment, state={"wordle": {"secret": "crane"}}
+    )
+    assert accepted == {"wordle": {"secret": "crane"}}
     with pytest.raises(ValueError, match="cannot set 'solved'"):
-        validate_task_state(
-            task_id="easy-01",
-            environment_name="wordle",
-            state={"solved": True},
-            state_schema=schema,
-        )
+        validate_task_state(task_id="easy-01", environment=environment, state={"solved": True})
 
 
 def test_task_bind_rejects_unknown_initial_state() -> None:
-    environment = EnvironmentDefinition(
-        name="support-queue",
-        state_schema={
+    environment = _environment(
+        {
             "type": "object",
             "properties": {
                 "category": {"type": "string"},
                 "expected": {"type": "string"},
             },
         },
-        runtime=Runtime.docker(),
+        name="support-queue",
     )
     with pytest.raises(ValidationError, match="Cannot create Task 'ticket-1'") as exc:
         Task(
@@ -163,12 +170,10 @@ def test_task_bind_rejects_unknown_initial_state() -> None:
             verifiers=[DeterministicVerifier(name="solved", check=solved)],
             initial_state={"answer": "billing"},
         )
-    message = str(exc.value)
-    assert "does not define: 'answer'" in message
-    assert "support-queue State fields:" in message
+    assert "does not define: 'answer'" in str(exc.value)
 
 
-def test_function_verifier_binds_to_packageless_environment() -> None:
+def test_function_verifier_binds_to_an_environment_without_apps() -> None:
     task = Task(
         name="easy-01",
         instructions="Solve.",
@@ -176,4 +181,4 @@ def test_function_verifier_binds_to_packageless_environment() -> None:
         verifiers=[DeterministicVerifier(name="solved", check=solved)],
     )
     assert task.verifiers[0].name == "solved"
-    assert callable(task.verifiers[0].check)
+    assert task.verifiers[0].check_fn is solved

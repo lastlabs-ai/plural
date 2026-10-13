@@ -76,7 +76,6 @@ def _recorded(tmp_path: Path) -> list[dict]:
         action="guess",
         arguments={"word": "crane"},
         observation="C_A__",
-        reward=0.2,
         view={"kind": "marks-grid", "rows": []},
     )
     recorder.model_call(

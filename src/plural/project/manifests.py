@@ -18,14 +18,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from plural.environments.definition import (
     EnvironmentResource,
     ExecutionLimits,
     Guardrail,
     HarnessPolicy,
-    SecretReference,
+    Party,
 )
 from plural.tasks import BenchmarkRelease
 
@@ -47,11 +47,51 @@ class ProjectManifest(ManifestModel):
     description: str = ""
 
 
-class EnvironmentManifest(ManifestModel):
-    """``environment.yaml``: identity, resources, runtime, and settings.
+class AppManifest(ManifestModel):
+    """One entry of ``apps`` in ``environment.yaml``.
 
-    Actions, State, Observations, and rewards are Python behavior in the class
-    named by ``python``. ``runtime`` takes the keyword arguments of the matching
+    Give exactly one of:
+
+    - ``python``: an App class, ``apps/crm.py:CRM``, built with ``config``.
+    - ``mcp``: the settings of :meth:`plural.App.mcp`, such as ``server``,
+      ``command``, or ``url``, ``headers``, ``tools``, ``reset``, and ``credentials``.
+    - ``openapi`` or ``replay``: the settings of the matching
+      :class:`plural.App` factory.
+    """
+
+    name: str | None = None
+    python: str | None = None
+    config: dict[str, Any] = Field(default_factory=dict)
+    mcp: dict[str, Any] | None = None
+    openapi: dict[str, Any] | None = None
+    replay: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _one_source(self) -> AppManifest:
+        given = [key for key in ("python", "mcp", "openapi", "replay") if getattr(self, key)]
+        if len(given) != 1:
+            raise ValueError(
+                "an App needs exactly one of python, mcp, openapi, or replay"
+                + (f"; got {', '.join(given)}" if given else "")
+            )
+        if not self.python and not self.name:
+            raise ValueError(f"a {given[0]} App needs a name")
+        if self.config and not self.python:
+            raise ValueError("config applies to a python App; put settings under its kind")
+        return self
+
+    @property
+    def kind(self) -> str:
+        """Which source builds this App."""
+        return next(key for key in ("python", "mcp", "openapi", "replay") if getattr(self, key))
+
+
+class EnvironmentManifest(ManifestModel):
+    """``environment.yaml``: identity, Apps, resources, runtime, and settings.
+
+    ``python`` names either an App class, for an Environment of one Python App,
+    or an Environment subclass whose hooks, such as ``on_step``, span the Apps
+    listed in ``apps``. ``runtime`` takes the keyword arguments of the matching
     ``Runtime`` preset (``Runtime.docker()``, ``Runtime.local()``, or
     ``Runtime.daytona()``), selected by its ``provider``, or another catalog
     provider's settings. ``ref`` records the project Runtime the settings were
@@ -62,16 +102,45 @@ class EnvironmentManifest(ManifestModel):
     version: str = "0.1.0"
     description: str = ""
     overview: str = ""
-    python: str = Field(min_length=1)
+    python: str | None = None
+    apps: list[AppManifest] = Field(default_factory=list)
     readme: str | None = "README.md"
     resources: list[str | EnvironmentResource] = Field(default_factory=list)
     runtime: dict[str, Any] = Field(default_factory=lambda: {"provider": "docker"})
     harness_policy: HarnessPolicy = Field(default_factory=HarnessPolicy)
     limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
-    secrets: list[SecretReference] = Field(default_factory=list)
+    party: Party | None = Field(
+        default=None,
+        description=(
+            "How many Agents share each episode, such as {min: 2, max: 8} for poker, or one "
+            "number for an exact size. Leave it out for an Environment one Agent works alone."
+        ),
+    )
     guardrails: list[Guardrail] = Field(default_factory=list)
-    reset_command: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _moved_fields(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            if "secrets" in value:
+                raise ValueError(
+                    "secrets moved onto Apps: list each secret under the App that uses it, "
+                    "such as apps: [{name: crm, mcp: {url: ..., secrets: [CRM_TOKEN]}}], "
+                    "or as App.secrets on a Python App"
+                )
+            if "reset_command" in value:
+                raise ValueError(
+                    "reset_command moved onto Apps: give an MCP App a reset command, or "
+                    "override App.reset() in Python"
+                )
+        return value
+
+    @model_validator(mode="after")
+    def _has_apps(self) -> EnvironmentManifest:
+        if not self.python and not self.apps:
+            raise ValueError("an Environment needs Apps: set python to an App class, or list apps")
+        return self
 
 
 class TaskManifest(ManifestModel):
@@ -93,6 +162,13 @@ class TaskManifest(ManifestModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     initial_state: dict[str, Any] = Field(default_factory=dict)
     reset_options: dict[str, Any] = Field(default_factory=dict)
+    seat_instructions: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "For an Environment with a party: what one seat alone is told after the Task's "
+            "instructions, keyed seat_1, seat_2, and so on."
+        ),
+    )
 
 
 class HarnessManifest(ManifestModel):

@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from typing import Any
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from plural.common import FrozenModel
 from plural.harness.episode import EpisodeRecorder
@@ -149,12 +150,10 @@ class HarnessAgent:
 class HarnessStep(FrozenModel):
     """One Environment transition returned to a custom Harness.
 
-    ``reward`` is recorded on the episode for credit assignment. Do not place it
-    in the Agent's context: it can leak the expected outcome.
+    A Harness never sees a reward: the App host keeps every reward to itself.
     """
 
     observation: Any = None
-    reward: float = 0
     terminated: bool = False
     truncated: bool = False
     info: dict[str, Any] = Field(default_factory=dict)
@@ -162,6 +161,24 @@ class HarnessStep(FrozenModel):
     @property
     def done(self) -> bool:
         """Whether the Environment ended the episode."""
+        return self.terminated or self.truncated
+
+
+class SeatTurn(BaseModel):
+    """One seat's turn and view, in a Task several Agents share."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    seat: str = ""
+    your_turn: bool = False
+    waiting_for: tuple[str, ...] = ()
+    observation: Any = None
+    terminated: bool = False
+    truncated: bool = False
+
+    @property
+    def done(self) -> bool:
+        """Whether the episode has ended."""
         return self.terminated or self.truncated
 
 
@@ -189,6 +206,16 @@ class HarnessEnvironment:
     def observation(self) -> Any:
         """Return the latest observation seen by this Harness."""
         return self._observation
+
+    @property
+    def seated(self) -> bool:
+        """Whether this Harness plays one seat of a party.
+
+        A seat never calls :meth:`reset`, since the episode is shared and already
+        started; it calls :meth:`wait_for_turn` before each action instead.
+        """
+        command = self.raw.get("turn_command")
+        return isinstance(command, list) and bool(command)
 
     def tools(self) -> list[dict[str, Any]]:
         """Return Environment actions as OpenAI-compatible tools."""
@@ -221,7 +248,7 @@ class HarnessEnvironment:
             return self._observation
         started = self._recorder.start() if self._recorder else None
         try:
-            step, view = self._exec(tuple(str(item) for item in raw_command))
+            step, view, _ = self._exec(tuple(str(item) for item in raw_command))
         except Exception as exc:
             if self._recorder and started:
                 self._recorder.reset(started, error=str(exc))
@@ -235,7 +262,7 @@ class HarnessEnvironment:
         """Run one named Environment action.
 
         Returns:
-            The transition: observation, reward, terminated, truncated, info.
+            The transition: observation, terminated, truncated, info.
         """
         declaration = next(
             (item for item in self.actions if str(item.get("name") or "") == action),
@@ -253,7 +280,7 @@ class HarnessEnvironment:
             raise ValueError(f"Environment action {action!r} has no executable command")
         started = self._recorder.start() if self._recorder else None
         try:
-            step, view = self._exec(
+            step, view, signals = self._exec(
                 tuple(str(item) for item in raw_command),
                 stdin=json.dumps(arguments).encode(),
             )
@@ -271,7 +298,7 @@ class HarnessEnvironment:
                 action=action,
                 arguments=arguments,
                 observation=step.observation,
-                reward=step.reward,
+                rewards=signals,
                 terminated=step.terminated,
                 truncated=step.truncated,
                 info=step.info,
@@ -279,9 +306,55 @@ class HarnessEnvironment:
             )
         return step
 
+    def turn(self) -> SeatTurn:
+        """Whether this seat may act now, and its own view, for a Task several Agents share.
+
+        Returns:
+            The seat's turn and ``observe`` view; never another seat's.
+
+        Raises:
+            RuntimeError: When the Task has no party.
+        """
+        from plural.harness.native_runner import (
+            _action_environment,
+            _local_command,
+            _workspace_path,
+        )
+
+        raw_command = self.raw.get("turn_command")
+        if not isinstance(raw_command, list) or not raw_command:
+            raise RuntimeError("This Task has no party, so there are no turns to wait for.")
+        completed = subprocess.run(
+            _local_command([str(item) for item in raw_command]),
+            cwd=_workspace_path(self.workspace),
+            env=_action_environment(self.raw),
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).decode("utf-8", errors="replace")
+            raise RuntimeError(f"Could not ask whose turn it is: {detail[-2000:]}")
+        view = SeatTurn.model_validate_json(completed.stdout)
+        self._observation = view.observation
+        self.terminated = view.terminated
+        self.truncated = view.truncated
+        return view
+
+    def wait_for_turn(self, *, poll_seconds: float = 0.2) -> SeatTurn:
+        """Block until this seat may act or the episode ends.
+
+        Returns:
+            The seat's view at that moment.
+        """
+        while True:
+            view = self.turn()
+            if view.your_turn or view.done:
+                return view
+            time.sleep(poll_seconds)
+
     def _exec(
         self, command: tuple[str, ...], stdin: bytes | None = None
-    ) -> tuple[HarnessStep, dict[str, Any] | None]:
+    ) -> tuple[HarnessStep, dict[str, Any] | None, list[dict[str, Any]]]:
         from plural.harness.native_runner import (
             STEP_PROTOCOL,
             _action_environment,
@@ -304,25 +377,28 @@ class HarnessEnvironment:
             )
         text = completed.stdout.decode("utf-8", errors="replace").strip()
         if not text:
-            return HarnessStep(observation={}), None
+            return HarnessStep(observation={}), None, []
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
-            return HarnessStep(observation={"output": text}), None
+            return HarnessStep(observation={"output": text}), None, []
         if isinstance(parsed, dict) and parsed.get("protocol") == STEP_PROTOCOL:
             info = parsed.get("info")
             view = parsed.get("view")
+            signals = parsed.get("rewards")
             return (
                 HarnessStep(
                     observation=parsed.get("observation"),
-                    reward=float(parsed.get("reward") or 0),
                     terminated=bool(parsed.get("terminated")),
                     truncated=bool(parsed.get("truncated")),
                     info=info if isinstance(info, dict) else {},
                 ),
                 view if isinstance(view, dict) and view else None,
+                [item for item in signals if isinstance(item, dict)]
+                if isinstance(signals, list)
+                else [],
             )
-        return HarnessStep(observation=parsed), None
+        return HarnessStep(observation=parsed), None, []
 
 
 class HarnessResult(FrozenModel):
@@ -378,4 +454,5 @@ __all__ = [
     "HarnessResult",
     "HarnessStep",
     "HarnessTask",
+    "SeatTurn",
 ]

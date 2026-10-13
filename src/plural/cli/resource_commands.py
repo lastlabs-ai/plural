@@ -22,6 +22,7 @@ from plural.cli.common import (
     session,
     workspace,
 )
+from plural.cli.secret_commands import secret_status
 from plural.harness.builtins import BUILTIN_HARNESS_NAMES, builtin_schema, get_builtin
 from plural.project import (
     KINDS,
@@ -32,7 +33,7 @@ from plural.project import (
     Workspace,
     check_name,
 )
-from plural.project.layout import AGENT, BENCHMARK, HARNESS, TASK, split_version
+from plural.project.layout import AGENT, BENCHMARK, ENVIRONMENT, HARNESS, TASK, split_version
 from plural.project.membership import add_task, remove_task
 from plural.project.sync import (
     REBUILT_NOTE,
@@ -56,6 +57,112 @@ VERSIONED_NAME_HELP = (
 )
 
 
+def _app_summary(environment: Any) -> list[dict[str, Any]]:
+    """Each App's kind, control level, actions, secrets, and credentials, never values.
+
+    Returns:
+        One entry per App.
+    """
+    import os
+
+    from plural.cli.secret_commands import project_secret_names
+
+    definition = environment.definition()
+    names = {item.name for app in definition.apps for item in app.secrets}
+    stored = project_secret_names() if names - set(os.environ) else set()
+    return [
+        {
+            "name": app.name,
+            "kind": app.kind,
+            "control": app.control,
+            "actions": [
+                {"name": item.name, "mutates_state": item.mutates_state} for item in app.actions
+            ],
+            "secrets": [
+                {
+                    "name": item.name,
+                    "required": item.required,
+                    "set": bool(os.environ.get(item.name)) or item.name in stored,
+                    "source": "shell"
+                    if os.environ.get(item.name)
+                    else "project"
+                    if item.name in stored
+                    else None,
+                }
+                for item in app.secrets
+            ],
+            "credentials": [
+                {"name": item.name, "required": item.required, "description": item.description}
+                for item in app.credentials
+            ],
+        }
+        for app in definition.apps
+    ]
+
+
+def _agent_tools(environment: Any) -> list[dict[str, Any]]:
+    """The tools the model is offered, exactly as it sees them.
+
+    Returns:
+        One entry per tool, with the App and action it calls.
+    """
+    return [
+        {
+            "name": item.name,
+            "app": item.app,
+            "action": item.action,
+            "read_only": not item.mutates_state,
+            "description": item.description,
+        }
+        for item in environment.definition().actions
+    ]
+
+
+def _agent_credentials(agent: Any) -> list[dict[str, Any]]:
+    """The credentials an Agent declares, and whether you have a value. Never the value.
+
+    Returns:
+        One entry per credential.
+    """
+    import os
+
+    import httpx
+
+    from plural.cli.common import session, signed_in
+    from plural.errors import PluralError
+
+    declared = agent._definition().credentials
+    saved: set[str] = set()
+    if set(declared) - set(os.environ):
+        try:
+            studio = signed_in(session()).studio(project=False)
+            saved = {str(item["name"]) for item in studio.credentials.list()}
+        except (PluralError, ProjectError, OSError, httpx.HTTPError):
+            saved = set()
+    return [
+        {
+            "name": key,
+            "scopes": list(item.scopes),
+            "source": "account" if key in saved else "shell" if os.environ.get(key) else None,
+        }
+        for key, item in declared.items()
+    ]
+
+
+def _live_apps(benchmark: Any) -> list[str]:
+    """Live Apps a Benchmark's Tasks read from, each named once.
+
+    Returns:
+        App names, in the order the Tasks first use them.
+    """
+    live: list[str] = []
+    for task in benchmark.tasks:
+        for app in task.environment.definition().apps:
+            if not app.reproducible and app.name not in live:
+                live.append(app.name)
+    return live
+
+
 def resource_app(kind: ResourceKind) -> typer.Typer:
     """Build the command group for one resource kind.
 
@@ -67,6 +174,10 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         no_args_is_help=True,
     )
     _init_command(app, kind)
+    if kind is ENVIRONMENT:
+        from plural.cli.generate_commands import add_generators
+
+        add_generators(app)
 
     @app.command("validate")
     @handled
@@ -79,11 +190,63 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         ref = _ref(space, kind, name)
         resource = space.load(ref)
         payload = _local_payload(space, resource)
-        emit(
-            payload,
-            as_json=as_json,
-            text=lambda: typer.echo(f"{ref} is valid: {resource.content_hash}"),
-        )
+        apps = _app_summary(resource.value) if kind is ENVIRONMENT else None
+        tools = _agent_tools(resource.value) if kind is ENVIRONMENT else []
+        if apps is not None:
+            payload = {**payload, "apps": apps, "tools": tools}
+        credentials = _agent_credentials(resource.value) if kind is AGENT else []
+        if kind is AGENT:
+            payload = {**payload, "credentials": credentials}
+        live = _live_apps(resource.value) if kind is BENCHMARK else []
+        if kind is BENCHMARK:
+            payload = {**payload, "reproducible": not live, "live_apps": live}
+
+        def text() -> None:
+            typer.echo(f"{ref} is valid: {resource.content_hash}")
+            for app in apps or ():
+                typer.echo(f"\nApp {app['name']} ({app['kind']}, {app['control']})")
+                for action in app["actions"]:
+                    marker = "" if action["mutates_state"] else "  [read-only]"
+                    typer.echo(f"  {action['name']}{marker}")
+                for secret in app["secrets"]:
+                    status = secret_status(secret)
+                    typer.echo(f"  secret {secret['name']}: {status}")
+                for credential in app["credentials"]:
+                    typer.echo(
+                        f"  credential {credential['name']}: supplied by the Agent that runs"
+                    )
+            if tools:
+                typer.echo(f"\nThe Agent sees {len(tools)} tool{'s' if len(tools) != 1 else ''}:")
+                width = max(len(tool["name"]) for tool in tools)
+                for tool in tools:
+                    summary = tool["description"].splitlines()[0] if tool["description"] else ""
+                    if len(summary) > 72:
+                        summary = summary[:71] + "…"
+                    typer.echo(f"  {tool['name']:<{width}}  {summary}".rstrip())
+                if len(tools) > 40:
+                    typer.echo(
+                        "  That is a lot for one model to choose from; offer fewer with "
+                        "`tools:` or `exclude:` on an App."
+                    )
+            for credential in credentials:
+                scopes = ", ".join(credential["scopes"]) or "no scopes listed"
+                status = (
+                    "saved in your account"
+                    if credential["source"] == "account"
+                    else "set in your shell"
+                    if credential["source"] == "shell"
+                    else f"NOT SET: run `plural credential set {credential['name']}`"
+                )
+                typer.echo(f"  credential {credential['name']} ({scopes}): {status}")
+            if live:
+                one = len(live) == 1
+                typer.echo(
+                    f"\nNot reproducible: {', '.join(live)} "
+                    f"{'is a live App that only reads' if one else 'are live Apps that only read'}"
+                    ", so results can change as the data behind them changes."
+                )
+
+        emit(payload, as_json=as_json, text=text)
 
     @app.command("push")
     @handled
@@ -442,6 +605,21 @@ def _init_command(app: typer.Typer, kind: ResourceKind) -> None:
         ) -> None:
             """Create a saved Agent: a model, instructions, and an optional Harness."""
             create(name, model=model, harness=harness)
+
+    elif kind is ENVIRONMENT:
+
+        @app.command("init")
+        @handled
+        def init_environment(
+            name: str = typer.Argument(help="Environment name."),
+            python: bool = typer.Option(
+                False,
+                "--python",
+                help="Start from a Python App class instead of a FastMCP server.",
+            ),
+        ) -> None:
+            """Create an Environment whose App is a FastMCP server you write."""
+            create(name, python=python)
 
     else:
 

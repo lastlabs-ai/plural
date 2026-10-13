@@ -42,10 +42,15 @@ Plural API key, stored with `plural auth login --api-key-stdin` or set in
 plural project init NAME [--push]
 plural project show NAME
 plural project push
-plural env|task|verifier|harness|agent|benchmark init NAME
+plural env init NAME [--python]
+plural task|verifier|harness|agent|benchmark init NAME
 plural env|task|verifier|harness|agent|benchmark validate|show|push|pull [NAME]
 plural env|task|verifier|harness|agent|benchmark list
 plural benchmark add|remove TASK [--benchmark NAME]
+plural env add NAME (--mcp URL_OR_COMMAND | --openapi SPEC | --traces FILE) [--app APP]
+           [--header K=V] [--env K=V] [--tool NAME] [--operation ID] [--credential NAME]
+plural env eject-files NAME [--as FILE]
+plural env serve NAME [--app APP] [--port 3825]
 plural run (-t TASK | -b BENCHMARK) (-m MODEL [-h HARNESS] | -a AGENT)
            [--hosted [--follow] | --track] [--attempts N] [--concurrency N]
            [--plural-version VERSION] [--dry-run] [--json]
@@ -54,6 +59,9 @@ plural job show|rerun|push JOB_ID
 plural trial show|rerun TRIAL_ID
 plural review list
 plural review submit TRIAL_ID --verifier NAME --score SCORE
+plural verifier try|apply NAME (--trial TRIAL_ID... | --job JOB_ID)
+plural rewards show TRIAL_ID
+plural rewards export (--trial TRIAL_ID... | --job JOB_ID) [--verifier NAME[@VERSION]]
 plural models list
 plural auth login|logout|status|scope
 plural session export|import

@@ -53,15 +53,68 @@ Plural refuses to start a run when the selected provider cannot enforce a
 declared control. It cannot detect every provider bug or malicious
 implementation.
 
+**Opening a project runs its code.** Treat a project folder like any repository
+you clone. Commands that load an Environment, such as `plural env validate`,
+`plural run --dry-run`, and `plural env push`, import its Python files, start its MCP
+servers to list their tools, and fetch its OpenAPI documents, all on your machine
+and before any Runtime is involved. Run `plural` only in projects whose code you
+trust.
+
 ## Separate information
 
-After each action the Agent sees only the Observation. Scores, rewards,
+After each action the Agent sees only what the action returned. Scores, rewards,
 termination flags, State, and Verifier data never enter the model's context.
 
-That separation governs what Plural shows the model; it is not process
-isolation. Code running in the same Runtime can still read a staged file or
-process memory. Use separate processes, minimal staged files, and Runtime
-controls for actual isolation.
+That separation governs what Plural shows the model. A Runtime with Apps also
+keeps the Harness, which is the code under test, away from the grading:
+
+- **The App host runs as its own OS user.** On Docker and Daytona the process
+  that runs the Apps, their `reward` functions, and their secrets runs as a
+  separate user from the Harness. Its files live in a folder only that user can
+  read, and once it starts Plural deletes them from the shared workspace: the
+  Environment, the Task, each App's own files, and the Verifier code that
+  rewards steps. Each Trial records this as `app_isolation`.
+- **The host signs what it reports.** The Harness reaches the Apps only by
+  calling actions. Starting the host, collecting its records, and ending it are
+  signed with a key made for each Trial that the Harness never gets, so a
+  process pretending to be the host is caught and the Trial fails.
+- **The host's account is the one that counts.** Rewards, observations, and
+  whether the episode ended come from the host's record of each step,
+  `steps.jsonl`, not from what the Harness writes. A step the Harness reports
+  that the host never ran earns nothing and is marked unverified. The Verifiers
+  and the stored Trial never fall back to an `observation.json`, `state.json`,
+  or `view.json` the Harness wrote, even when no action ran.
+- **The episode ends when the Harness's run does.** Before Plural reads the
+  Harness's files or the host's record, it kills every process the Harness's
+  users still run, on Docker and Daytona, and the host then refuses any further
+  action, so nothing the Harness started can act while the Verifiers run. A
+  Harness that timed out after the host ran an action is not retried, so it
+  cannot re-roll an episode that was going badly.
+- **Declared files are read as regular files only.** A file the Harness
+  declares is collected only when it is a regular file inside the Harness's
+  folder, never a symlink or a path that leads to the host's folder.
+- **Each App's process sees only its own values.** An MCP server or OpenAPI
+  hook gets the credentials and secrets that App declares, not another App's.
+  Remote MCP servers may not redirect, so a credential header never follows a
+  redirect elsewhere.
+- **Verifier code never reaches the Runtime for scoring.** `check` runs after
+  the Harness has finished, outside the Runtime. Only `reward` functions run
+  beside the Apps, inside the host's private folder.
+- **Harness setup runs first.** A Harness's `setup` commands run as root, to
+  install its tools, so they run before the App host starts and before any
+  secret, seat token, or App file is in the Runtime. For the strongest
+  boundary, bake those tools into the Runtime image and leave `setup` empty.
+- **Seats in a party are kept apart.** Each seat's Harness runs as its own OS
+  user, in a folder no other seat can open, and the Trial fails rather than
+  play without that, unless the Environment's party chooses `shared` seats,
+  which the Trial records as `seat_isolation: none`. See
+  [What each seat sees](../project/multi-agent.md#what-each-seat-sees-and-what-it-cannot).
+
+On the `local` Runtime the Harness and the Apps share your user account, so
+there is no OS boundary and each Trial records `app_isolation: none`. Use Docker
+or Daytona for scores you rely on. Daytona isolation needs `sudo` and `useradd`
+in the image, and an Agent user that cannot use `sudo`; on an image without
+them the Trial runs without the boundary and records `app_isolation: none`.
 
 Verifiers (the graders) receive the full final Episode, including State. Isolate
 untrusted Verifier code and avoid capturing secrets.
@@ -75,25 +128,34 @@ private keys.
 
 Supply other secrets when the Job runs:
 
-- **Environment secrets.** An Environment declares `secrets` by name and target
-  (`environment`, `harness`, or `verifier`) and `RuntimeVariable` declarations
-  on its Runtime; the declarations never hold values. At run time Plural reads
-  the values from the Job's environment and injects them: `environment` and
-  `harness` targets into the Runtime the Environment and Harness share, and
-  `verifier` targets into the Verifier's process. A missing required value
-  stops the run before it starts.
+- **Credentials.** An App's credentials, such as a CRM token, belong to the
+  person running the Agent. Each person saves their own with
+  `plural credential set` or on their Profile; values are encrypted, and only
+  that person's own sign-in can use them. A project API key, as in CI, cannot,
+  so CI exports them instead. Like secrets, they reach only the App host.
+- **App secrets.** Each App declares the names of the secrets it needs, such as
+  the token for its MCP server; the declarations never hold values. At run time
+  Plural reads the values from the Job's environment, or from the hosted
+  project's secrets (`plural secret set`), and gives them only to the process that
+  runs the Apps and to Verifier queries. They never reach the Agent or its
+  Harness. A missing value stops the run before it starts, naming the App.
+- **Runtime variables.** `RuntimeVariable` declarations on a Runtime carry
+  settings into the Runtime. The Harness shares the Runtime and can read them,
+  so keep credentials on Apps instead.
 - **Harness secrets.** A custom Harness lists the names it reads in `secrets`,
   and an Agent grants a subset with `secret_names`. Granting a name the Harness
   did not declare fails before any value is forwarded.
 - **Model keys.** A Job passes model credentials to the Harness and to Agent
   Verifiers itself; you do not list them in `secret_names`.
 
-Never store values in YAML, Task info, State, Observation, resources, logs, or
+Never store values in YAML, Task info, State, action results, resources, logs, or
 artifacts.
 
 > **Good to know:** Plural replaces the exact values of injected secrets in the
-> Harness and Verifier logs it captures. It cannot catch an encoded or transformed
-> secret, and it does not redact artifacts or data your code sends elsewhere.
+> Harness and Verifier logs it captures, in the App host's step record, States,
+> and snapshots it stores, and in a Trial's error message. It cannot catch an
+> encoded or transformed secret, and it does not redact files the Harness writes
+> or data your code sends elsewhere.
 
 ## Hosted access
 

@@ -35,10 +35,15 @@ plugins:
           - index.md
           - getting-started/concepts.md
           - getting-started.md
+          - start/index.md
+          - start/from-traces.md
+          - start/from-a-system.md
+          - start/from-scratch.md
         Build:
           - project/environments.md
           - project/runtimes.md
           - project/tasks.md
+          - project/multi-agent.md
           - project/verifiers.md
           - project/harnesses.md
           - project/agents.md
@@ -89,10 +94,19 @@ nav:
       - Overview: index.md
       - Core concepts: getting-started/concepts.md
       - Getting started: getting-started.md
+      - Start here:
+          - start/index.md
+          - From traces: start/from-traces.md
+          - From a system: start/from-a-system.md
+          - From scratch: start/from-scratch.md
   - Build:
+      - Apps: concepts/apps.md
       - Environments: project/environments.md
+      - Build an MCP server: guides/build-mcp-server.md
+      - Connect an MCP server: guides/connect-mcp-server.md
       - Runtimes: project/runtimes.md
       - Tasks: project/tasks.md
+      - Several Agents in one Task: project/multi-agent.md
       - Verifiers: project/verifiers.md
       - Harnesses: project/harnesses.md
       - Agents: project/agents.md

@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, ValidationInfo, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from plural.catalog import ModelCatalog
 from plural.common import (
@@ -27,8 +27,66 @@ def _bundled_catalog() -> ModelCatalog:
     return ModelCatalog()
 
 
+class AgentCredential(FrozenModel):
+    """A credential this Agent supplies to the Apps it works with.
+
+    The value, such as the Salesforce token of the user this Agent acts as, is
+    never part of the Agent: each person who runs it saves their own with
+    ``plural credential set`` or exports it, and it reaches only the App host.
+    ``scopes`` records what the token may do, as you describe it; the system
+    that issued the token enforces them, and every Trial records them for audit.
+    """
+
+    scopes: tuple[str, ...] = ()
+    description: str = ""
+
+
+def _credential_map(value: Any) -> Any:
+    """Accept a list of names, or of ``{name, scopes}``, as well as a mapping.
+
+    Returns:
+        Name to credential settings.
+    """
+    if isinstance(value, (list, tuple)):
+        out: dict[str, Any] = {}
+        for item in value:
+            if isinstance(item, str):
+                out[item] = {}
+            elif isinstance(item, dict) and isinstance(item.get("name"), str):
+                out[item["name"]] = {key: v for key, v in item.items() if key != "name"}
+            else:
+                raise ValueError("each credential is a name or {name, scopes}")
+        return out
+    if isinstance(value, dict):
+        return {key: {} if item is None else item for key, item in value.items()}
+    return value
+
+
+def _credential_names(value: dict[str, AgentCredential]) -> dict[str, AgentCredential]:
+    from pydantic import ValidationError
+
+    from plural.apps.definition import SecretReference
+
+    for name in value:
+        try:
+            SecretReference(name=name)
+        except ValidationError:
+            raise ValueError(
+                f"{name!r} is not a usable credential name. Use upper-case letters, digits, "
+                "and underscores, such as SALESFORCE_TOKEN, matching the App's credentials."
+            ) from None
+    return dict(sorted(value.items()))
+
+
 class Agent(FrozenModel):
-    """A catalog-backed model and its optional execution harness."""
+    """A catalog-backed model and its optional execution harness.
+
+    To evaluate your own agent or model server instead, give ``endpoint``: the
+    base URL of an OpenAI-compatible API (one that serves
+    ``/chat/completions``). ``model`` is then sent to it as is and need not be
+    in the catalog, and ``endpoint_key`` names the secret holding its API key.
+    Plural's native Harness calls it with the Environment's actions as tools.
+    """
 
     model: str = Field(min_length=1)
     name: str = ""
@@ -42,7 +100,13 @@ class Agent(FrozenModel):
     harness_kwargs: dict[str, Any] = Field(default_factory=dict)
     auth_mode: Literal["environment", "api_key", "oauth", "none"] = "environment"
     secret_names: tuple[str, ...] = ()
+    endpoint: str | None = None
+    endpoint_key: str | None = None
+    credentials: dict[str, AgentCredential] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    _credential_map = field_validator("credentials", mode="before")(_credential_map)
+    _credential_names = field_validator("credentials")(_credential_names)
 
     @model_validator(mode="after")
     def _validate_public_agent(self, info: ValidationInfo) -> Agent:
@@ -50,6 +114,8 @@ class Agent(FrozenModel):
         catalog = context.get("catalog") or _bundled_catalog()
         if not isinstance(catalog, ModelCatalog):
             raise TypeError("catalog validation context must be a ModelCatalog")
+        if self.endpoint is not None or self.endpoint_key is not None:
+            return self._validate_endpoint_agent()
         selected = catalog.get(self.model)
         if selected is None:
             nearby = catalog.suggest(self.model)
@@ -124,6 +190,39 @@ class Agent(FrozenModel):
             )
         return self
 
+    def _validate_endpoint_agent(self) -> Agent:
+        name = self.name or self.model
+        if not self.endpoint or not self.endpoint.startswith(("http://", "https://")):
+            raise ValueError(
+                f"Cannot create Agent {name!r}.\n"
+                "endpoint must be the http(s) base URL of an OpenAI-compatible API, "
+                "such as https://agent.example.com/v1."
+            )
+        unsupported = [
+            label
+            for label, given in (
+                ("harness", self.harness is not None),
+                ("provider", self.provider is not None),
+                ("fallback_models", bool(self.fallback_models)),
+                ("secret_names", bool(self.secret_names)),
+            )
+            if given
+        ]
+        if unsupported:
+            raise ValueError(
+                f"Cannot create Agent {name!r}.\n"
+                f"An endpoint Agent runs on Plural's native Harness, so it takes no "
+                f"{', '.join(unsupported)}. Put its API key's name in endpoint_key."
+            )
+        if self.endpoint_key is not None:
+            from plural.apps.definition import SecretReference
+
+            SecretReference(name=self.endpoint_key)
+        semantic_version(self.version)
+        if not self.name:
+            object.__setattr__(self, "name", self.model.rsplit("/", 1)[-1])
+        return self
+
     @classmethod
     def from_catalog(cls, catalog: ModelCatalog, **fields: Any) -> Agent:
         """Create an Agent against an explicit effective catalog.
@@ -185,6 +284,9 @@ class Agent(FrozenModel):
             harness_kwargs=self.harness_kwargs,
             auth_mode=self.auth_mode,
             secret_names=self.secret_names,
+            endpoint=self.endpoint,
+            endpoint_key=self.endpoint_key,
+            credentials=self.credentials,
             metadata=self.metadata,
         )
 
@@ -203,7 +305,16 @@ class AgentDefinition(FrozenModel):
     harness_kwargs: dict[str, Any] = Field(default_factory=dict)
     auth_mode: Literal["environment", "api_key", "oauth", "none"] = "environment"
     secret_names: tuple[str, ...] = ()
+    endpoint: str | None = None
+    """An OpenAI-compatible base URL the native Harness calls instead of the gateway."""
+    endpoint_key: str | None = None
+    """The secret holding ``endpoint``'s API key."""
+    credentials: dict[str, AgentCredential] = Field(default_factory=dict)
+    """The credentials this Agent supplies to Apps, by name. Never their values."""
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    _credential_map = field_validator("credentials", mode="before")(_credential_map)
+    _credential_names = field_validator("credentials")(_credential_names)
 
     @model_validator(mode="after")
     def _package_matches_binding(self) -> AgentDefinition:
@@ -225,6 +336,9 @@ class AgentDefinition(FrozenModel):
     def content_hash(self) -> str:
         """Stable Agent revision digest, independent of where the Harness is stored."""
         payload = self.model_dump(mode="json", exclude={"harness", "harness_package"})
+        if not self.credentials:
+            # Agents with no credentials keep the identity they had before credentials.
+            del payload["credentials"]
         if self.harness_package is not None:
             payload["harness"] = self.harness_package.content_hash
         else:
@@ -298,4 +412,4 @@ class AgentBinding(FrozenModel):
         return content_hash(self)
 
 
-__all__ = ["Agent", "AgentBinding", "AgentDefinition", "RoutingSpec"]
+__all__ = ["Agent", "AgentBinding", "AgentCredential", "AgentDefinition", "RoutingSpec"]

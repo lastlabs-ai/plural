@@ -23,7 +23,7 @@ import json
 import shutil
 import sys
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +32,7 @@ from typing import Any, Literal
 from plural.agents import Agent
 from plural.agents.models import AgentDefinition
 from plural.common import HarnessPackage, PackageSource
+from plural.credentials import CredentialValue
 from plural.environments.definition import EnvironmentDefinition
 from plural.execution.capacity import recommend_concurrency
 from plural.harness.retrieval import source_digest
@@ -115,6 +116,10 @@ class RunPlan:
     def harness(self) -> str:
         """The Harness the Agent runs with; ``native`` when none is named."""
         return _harness_name(self.agent)
+
+
+CredentialSource = Callable[[JobSpec, str | None], Mapping[str, Mapping[str, CredentialValue]]]
+"""Looks up a run's stored Agent credentials: the Job and the saved Agent's folder name."""
 
 
 @dataclass(frozen=True)
@@ -221,6 +226,13 @@ def plan_run(
                 f"Environment {task._environment_definition().name!r} does not allow Harness "
                 f"{harness_name!r}. Allowed: {allowed}. Pass --harness <name>."
             )
+    shared = [task.name for task in tasks if task._environment_definition().party is not None]
+    if shared:
+        raise ProjectError(
+            f"{', '.join(shared)} {'is' if len(shared) == 1 else 'are'} played by a party of "
+            "Agents, and plural run runs one. Run it from Python with "
+            "Job(task, agents=[...]), or create a hosted Job that names the party."
+        )
     attempts = request.attempts or 1
     auto = request.concurrency == "auto"
     job = Job(
@@ -276,6 +288,7 @@ def run_local(
     environ: Mapping[str, str],
     progress: Any = None,
     tracking: Tracking | None = None,
+    credential_source: CredentialSource | None = None,
 ) -> tuple[str, JobResult]:
     """Execute a plan on this machine and record it under ``.plural/jobs``.
 
@@ -294,7 +307,15 @@ def run_local(
         harness=plan.harness,
         inputs=plan.pins,
     )
-    return _execute(workspace, spec, record, environ=environ, progress=progress, tracking=tracking)
+    return _execute(
+        workspace,
+        spec,
+        record,
+        environ=environ,
+        progress=progress,
+        tracking=tracking,
+        credential_source=credential_source,
+    )
 
 
 def rerun_local_job(
@@ -304,6 +325,7 @@ def rerun_local_job(
     environ: Mapping[str, str],
     progress: Any = None,
     tracking: Tracking | None = None,
+    credential_source: CredentialSource | None = None,
 ) -> tuple[str, JobResult]:
     """Run a recorded local Job again with its original pinned inputs.
 
@@ -324,7 +346,13 @@ def rerun_local_job(
         }
     )
     return _execute(
-        workspace, fresh, new_record, environ=environ, progress=progress, tracking=tracking
+        workspace,
+        fresh,
+        new_record,
+        environ=environ,
+        progress=progress,
+        tracking=tracking,
+        credential_source=credential_source,
     )
 
 
@@ -335,6 +363,7 @@ def rerun_local_trial(
     environ: Mapping[str, str],
     progress: Any = None,
     tracking: Tracking | None = None,
+    credential_source: CredentialSource | None = None,
 ) -> tuple[str, JobResult]:
     """Run one recorded local Trial again as a new one-Trial Job.
 
@@ -367,7 +396,13 @@ def rerun_local_trial(
         }
     )
     return _execute(
-        workspace, fresh, new_record, environ=environ, progress=progress, tracking=tracking
+        workspace,
+        fresh,
+        new_record,
+        environ=environ,
+        progress=progress,
+        tracking=tracking,
+        credential_source=credential_source,
     )
 
 
@@ -704,6 +739,18 @@ def local_job(workspace: Workspace, job_id: str) -> dict[str, Any]:
     }
 
 
+def local_job_spec(workspace: Workspace, job_id: str) -> JobSpec:
+    """The specification a local Job ran with.
+
+    Returns:
+        The Job's specification, with its Python checks re-imported.
+
+    Raises:
+        ProjectError: When there is no such local Job.
+    """
+    return _load_local(workspace, job_id)[0]
+
+
 def find_local_trial(workspace: Workspace, trial_id: str) -> tuple[str, Path]:
     """Locate a Trial among local Jobs.
 
@@ -752,6 +799,9 @@ def local_trial(workspace: Workspace, trial_id: str) -> dict[str, Any]:
         "verifiers": (
             [item.model_dump(mode="json") for item in result.verifier_results] if result else []
         ),
+        "credentials": (
+            [item.model_dump(mode="json") for item in result.credentials] if result else []
+        ),
         "artifacts": str(latest / "artifacts") if latest else None,
         "logs": str(latest / "logs") if latest else None,
     }
@@ -786,7 +836,8 @@ def _agent(
 
 def _harness_name(agent: Agent) -> str:
     if agent.harness is None:
-        return DEFAULT_HARNESS
+        package = agent._definition().harness_package
+        return package.definition.name if package is not None else DEFAULT_HARNESS
     if isinstance(agent.harness, str):
         return agent.harness
     package = agent._resolved_package()
@@ -836,12 +887,52 @@ def _execute(
     environ: Mapping[str, str],
     progress: Any,
     tracking: Tracking | None = None,
+    credential_source: CredentialSource | None = None,
 ) -> tuple[str, JobResult]:
-    from plural.execution.engine import JobRunner
+    from plural.credentials import CredentialError
+    from plural.credentials import resolve as resolve_credentials
+    from plural.execution.apps import describe_missing, missing_app_secrets
+    from plural.execution.engine import ExecutionFailure, JobRunner
     from plural.execution.report import HostedTracker
     from plural.execution.store import JobStore
 
-    needs_model = any(binding.auth_mode != "none" for binding in spec.agents)
+    missing: dict[str, list[str]] = {}
+    for task in spec.tasks:
+        for app, names in missing_app_secrets(task.environment, environ).items():
+            missing.setdefault(app, [])
+            missing[app].extend(name for name in names if name not in missing[app])
+    if missing:
+        raise ProjectError(describe_missing(missing))
+    hosted_agent = (
+        record.agent.removeprefix(f"{AGENT.name}/")
+        if record.agent.startswith(f"{AGENT.name}/")
+        else None
+    )
+    credentials = dict(credential_source(spec, hosted_agent)) if credential_source else {}
+    for task in spec.tasks:
+        for binding in spec.agents:
+            try:
+                resolve_credentials(
+                    task.environment,
+                    binding.agent,
+                    credentials.get(binding.name, {}),
+                    environ,
+                )
+            except CredentialError as exc:
+                hint = (
+                    "" if hosted_agent else "\nThis run used --model, which carries no credentials."
+                )
+                raise ProjectError(str(exc) + hint) from None
+    for binding in spec.agents:
+        key = binding.agent.endpoint_key
+        if key and not environ.get(key):
+            raise ProjectError(
+                f"Agent {binding.agent.name!r} needs {key} for its endpoint. Export it, or "
+                f"store it in the hosted project with `plural secret set {key}`."
+            )
+    needs_model = any(
+        binding.auth_mode != "none" and binding.agent.endpoint is None for binding in spec.agents
+    )
     if needs_model and not environ.get("PLURAL_API_KEY"):
         raise ProjectError(
             "This run calls a live model, which goes through the Plural gateway, and no "
@@ -873,14 +964,21 @@ def _execute(
     job_dir = store.job_path(spec.job_id)
     job_dir.mkdir(parents=True, exist_ok=True)
     _write_record(job_dir, record)
-    options: dict[str, Any] = {"store": store, "catalog": workspace.catalog, "environ": environ}
+    options: dict[str, Any] = {
+        "store": store,
+        "catalog": workspace.catalog,
+        "environ": environ,
+        "credentials": credentials,
+    }
     if progress is not None:
         options["progress"] = progress
     try:
         result = asyncio.run(JobRunner(spec, **options).run())
-    except BaseException:
+    except BaseException as exc:
         if tracker is not None and tracking is not None:
             tracking.errors = tracker.close(cancelled=True)
+        if isinstance(exc, ExecutionFailure):
+            raise ProjectError(str(exc)) from None
         raise
     if tracker is not None and tracking is not None:
         tracking.errors = tracker.close()
@@ -936,7 +1034,11 @@ def _snapshot_sources(workspace: Workspace, spec: JobSpec) -> JobSpec:
     def verifiers(task: TaskDefinition) -> tuple[WeightedVerifier, ...]:
         for item in task.verifiers:
             verifier = item.verifier
-            if isinstance(verifier, DeterministicVerifier) and verifier.checker is not None:
+            if isinstance(verifier, DeterministicVerifier) and (
+                verifier.check_fn is not None
+                or verifier.reward_fn is not None
+                or verifier.hindsight_fn is not None
+            ):
                 directory = workspace.project.resource_dir(
                     ResourceRef(VERIFIER.name, verifier.name)
                 )
@@ -995,28 +1097,18 @@ def _load_local(workspace: Workspace, job_id: str) -> tuple[JobSpec, RunRecord]:
 
 
 def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
-    """Re-import Python Verifier checks from the Job's snapshot.
+    """Re-import Python Verifier hooks from the Job's snapshot.
 
-    A saved spec names each check as ``file.py:function`` with a digest. The
+    A saved spec names each hook as ``file.py:function`` with a digest. The
     function is imported from the snapshot, and the resulting Verifier must
     hash exactly as it did when the Job first ran.
 
     Returns:
-        The spec with callable checks restored.
+        The spec with callable hooks restored.
     """
 
-    def rebind(item: WeightedVerifier) -> WeightedVerifier:
-        verifier = item.verifier
-        if not isinstance(verifier, DeterministicVerifier) or not verifier.python_ref:
-            return item
-        digest = verifier.check.get("digest") if isinstance(verifier.check, dict) else None
-        if not digest:
-            raise ProjectError(
-                f"Verifier {verifier.name!r} was recorded without a source digest and cannot "
-                "be rerun."
-            )
-        directory = _snapshot_path(workspace, "verifier", verifier.name, str(digest))
-        file_name, _, function_name = verifier.python_ref.rpartition(":")
+    def load(verifier: DeterministicVerifier, directory: Path, reference: str) -> Any:
+        file_name, _, function_name = reference.rpartition(":")
         path = directory / file_name
         if not path.is_file():
             raise ProjectError(
@@ -1034,8 +1126,36 @@ def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
         function: Any = module
         for part in function_name.split("."):
             function = getattr(function, part)
-        rebound = verifier.model_copy(update={"check": function})
-        rebound.bind_source_digest(str(digest))
+        return function
+
+    def rebind(item: WeightedVerifier) -> WeightedVerifier:
+        verifier = item.verifier
+        if not isinstance(verifier, DeterministicVerifier):
+            return item
+        hooks = {
+            field: hook
+            for field, hook in (
+                ("check", verifier.check),
+                ("reward", verifier.reward),
+                ("hindsight", verifier.hindsight),
+            )
+            if isinstance(hook, dict) and hook.get("python")
+        }
+        if not hooks:
+            return item
+        digests = {str(hook.get("digest") or "") for hook in hooks.values()}
+        digest = next(iter(digests))
+        if not digest or len(digests) > 1:
+            raise ProjectError(
+                f"Verifier {verifier.name!r} was recorded without a source digest and cannot "
+                "be rerun."
+            )
+        directory = _snapshot_path(workspace, "verifier", verifier.name, digest)
+        update = {
+            field: load(verifier, directory, str(hook["python"])) for field, hook in hooks.items()
+        }
+        rebound = verifier.model_copy(update=update)
+        rebound.bind_source(digest, directory)
         if rebound.content_hash != verifier.content_hash:
             raise ProjectError(
                 f"Verifier {verifier.name!r} in the Job snapshot no longer matches the "

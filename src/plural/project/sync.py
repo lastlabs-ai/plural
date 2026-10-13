@@ -1222,7 +1222,14 @@ def _files_from_definition(
             "environment": environments[0],
             "verifiers": verifiers,
         }
-        for key in ("goals", "info", "metadata", "initial_state", "reset_options"):
+        for key in (
+            "goals",
+            "info",
+            "metadata",
+            "initial_state",
+            "reset_options",
+            "seat_instructions",
+        ):
             if key in definition and not _is_default(TaskManifest, key, definition[key]):
                 manifest[key] = definition[key]
         TaskManifest.model_validate(manifest)
@@ -1249,6 +1256,9 @@ def _files_from_definition(
             "harness_kwargs",
             "auth_mode",
             "secret_names",
+            "endpoint",
+            "endpoint_key",
+            "credentials",
             "metadata",
         ):
             if key in definition and not _is_default(Agent, key, definition[key]):

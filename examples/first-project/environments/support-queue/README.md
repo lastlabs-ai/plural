@@ -6,6 +6,10 @@ A customer support queue with one open ticket per Task. The Agent reads the tick
 the policy that applies to it, assigns a category, drafts a reply, and resolves the
 ticket. The episode ends when the ticket is resolved.
 
+## Apps
+
+One Python App, `SupportQueue` in `environment.py`.
+
 ## Actions
 
 | Action | Arguments | Effect |
@@ -21,14 +25,14 @@ ticket. The episode ends when the ticket is resolved.
 category; it is private, so Agents never see it and the Verifier compares against it.
 The rest mirrors the ticket's progress: `category`, `draft_reply`, `status`, `done`.
 
-## Observations
+## What the Agent sees
 
-`ticket_id`, `customer_tier`, `issue`, `policy`, `category`, `draft_reply`, `status`,
-and `done`. The expected category is never observed.
+Every action returns `ticket_id`, `customer_tier`, `issue`, `policy`, `category`,
+`draft_reply`, `status`, and `done`. The expected category is never returned.
 
 ## Rewards
 
-0.25 for each step that advances the ticket (open, triaged, drafted, resolved). Rewards
+The `progress` verifier gives 0.25 for each step that advances the ticket (open, triaged, drafted, resolved). Rewards
 are recorded for training only and never contribute to a score.
 
 ## Resources

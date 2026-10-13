@@ -18,7 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 # This module is uploaded and run as a standalone script, so it cannot import
-# from the plural package. Keep these in sync with plural.environments.runner.PROTOCOL,
+# from the plural package. Keep these in sync with plural.apps.host.STEP_PROTOCOL,
 # plural.harness.episode, and plural.usage.normalize_usage; test_episode_contract.py
 # asserts they match.
 STEP_PROTOCOL = "plural-step-v1"
@@ -38,6 +38,10 @@ _ACTION_PROFILES = {"actions", "native.actions.v1"}
 
 # Budgets cut an episode short without the Environment declaring completion.
 _BUDGET_STOPS = {"max_turns", "max_seconds", "max_cost"}
+
+# Keep in sync with plural.apps.daemon.SEAT_TOKEN.
+SEAT_TOKEN = "PLURAL_SEAT_TOKEN"
+_TURN_POLL_SECONDS = (0.1, 0.25, 0.5, 1.0)
 
 _FINISH = "finish"
 _FINISH_TOOL = {
@@ -68,7 +72,6 @@ class _ToolOutcome:
 
     message: dict[str, Any]
     transition: dict[str, Any] | None = None
-    reward: dict[str, Any] | None = None
     terminated: bool = False
     truncated: bool = False
     finished: bool = False
@@ -154,20 +157,15 @@ class _Episode:
 
     messages: list[dict[str, Any]] = field(default_factory=list)
     transitions: list[dict[str, Any]] = field(default_factory=list)
-    rewards: list[dict[str, Any]] = field(default_factory=list)
     records: list[dict[str, Any]] = field(default_factory=list)
     _recorded_messages: int = 0
 
     def document(self) -> dict[str, Any]:
-        """Return the messages, transitions, and rewards of the episode."""
+        """Return the messages and transitions of the episode."""
         return {
             "messages": self.messages,
             "transitions": self.transitions,
-            "rewards": self.rewards,
         }
-
-    def total_reward(self) -> float:
-        return sum(float(item.get("value") or 0) for item in self.rewards)
 
     def record(
         self, kind: str, started: tuple[str, float], *, turn: int | None, **fields: Any
@@ -177,6 +175,7 @@ class _Episode:
             {
                 "schema": EPISODE_SCHEMA,
                 "sequence": len(self.records) + 1,
+                "event_id": f"e{len(self.records) + 1}",
                 "kind": kind,
                 "turn": turn,
                 "started_at": started[0],
@@ -326,9 +325,28 @@ def _run(
     truncated = bool(reset.get("truncated"))
     if terminated or truncated:
         stop_reason = "environment_terminated" if terminated else "environment_truncated"
+    seen_view: Any = None
     for turn in range(1, max_turns + 1):
         if stop_reason is not None:
             break
+        if environment.get("turn_command"):
+            seat = _await_turn(environment, deadline)
+            if seat is None:
+                stop_reason = "max_seconds"
+                break
+            if seat.get("terminated") or seat.get("truncated"):
+                terminated = terminated or bool(seat.get("terminated"))
+                truncated = truncated or bool(seat.get("truncated"))
+                stop_reason = (
+                    "environment_terminated" if seat.get("terminated") else "environment_truncated"
+                )
+                break
+            view = seat.get("observation")
+            if view is not None and view != seen_view:
+                seen_view = view
+                messages.append(
+                    {"role": "user", "content": f"Your turn.\n\n{_observation_text(view)}"}
+                )
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             stop_reason = "max_seconds"
@@ -374,8 +392,6 @@ def _run(
             messages.append(outcome.message)
             if outcome.transition is not None:
                 episode.transitions.append(outcome.transition)
-            if outcome.reward is not None:
-                episode.rewards.append(outcome.reward)
             if outcome.finished:
                 summary = outcome.summary
                 stop_reason = "agent_finished"
@@ -403,7 +419,6 @@ def _run(
             "stop_reason": stop_reason,
             "terminated": terminated,
             "truncated": truncated or stop_reason in _BUDGET_STOPS,
-            "total_reward": episode.total_reward(),
             "trace_id": trace_id,
         },
         episode,
@@ -458,7 +473,7 @@ def _record_outcome(
         arguments=arguments,
         observation=step.get("observation"),
         content=visible,
-        reward=step.get("reward"),
+        rewards=step.get("rewards") or [],
         terminated=step.get("terminated"),
         truncated=step.get("truncated"),
         info=info,
@@ -497,26 +512,32 @@ def _model_call(
 ) -> dict[str, Any]:
     if not model:
         raise ValueError("Agent model is required")
-    base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
-    if not base:
-        raise ValueError("native runner requires PLURAL_GATEWAY_URL for its model calls")
-    key = os.environ.get("PLURAL_API_KEY")
-    if not key and os.environ.get("PLURAL_ALLOW_NO_AUTH") != "1":
-        raise ValueError(
-            "native runner requires PLURAL_API_KEY "
-            "(or PLURAL_ALLOW_NO_AUTH=1 for an explicitly unauthenticated local gateway)"
-        )
+    endpoint = (os.environ.get("PLURAL_AGENT_ENDPOINT") or "").rstrip("/")
+    if endpoint:
+        base = endpoint
+        key = os.environ.get("PLURAL_AGENT_ENDPOINT_KEY")
+    else:
+        base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
+        if not base:
+            raise ValueError("native runner requires PLURAL_GATEWAY_URL for its model calls")
+        key = os.environ.get("PLURAL_API_KEY")
+        if not key and os.environ.get("PLURAL_ALLOW_NO_AUTH") != "1":
+            raise ValueError(
+                "native runner requires PLURAL_API_KEY "
+                "(or PLURAL_ALLOW_NO_AUTH=1 for an explicitly unauthenticated local gateway)"
+            )
     body: dict[str, Any] = {"model": model, "messages": messages}
     if tools:
         body["tools"] = tools
     for name in ("temperature", "max_tokens"):
         if routing.get(name) is not None:
             body[name] = routing[name]
-    body["routing"] = routing
     headers = {"Content-Type": "application/json"}
-    project = os.environ.get("PLURAL_PROJECT_ID")
-    if project:
-        headers["X-Plural-Project"] = project
+    if not endpoint:
+        body["routing"] = routing
+        project = os.environ.get("PLURAL_PROJECT_ID")
+        if project:
+            headers["X-Plural-Project"] = project
     if key:
         headers["Authorization"] = f"Bearer {key}"
     request = urllib.request.Request(
@@ -607,10 +628,15 @@ def _parse_envelope(text: str) -> dict[str, Any] | None:
     observation = parsed.get("observation")
     info = parsed.get("info")
     rendered = parsed.get("rendered")
+    signals = parsed.get("rewards")
+    if not isinstance(signals, list) and isinstance(info, dict):
+        signals = info.get("rewards")
     return {
         "observation": observation if isinstance(observation, dict) else {},
         "rendered": rendered if isinstance(rendered, str) else None,
-        "reward": float(parsed.get("reward") or 0),
+        "rewards": [item for item in signals if isinstance(item, dict)]
+        if isinstance(signals, list)
+        else [],
         "terminated": bool(parsed.get("terminated")),
         "truncated": bool(parsed.get("truncated")),
         "info": info if isinstance(info, dict) else {},
@@ -715,22 +741,11 @@ def _run_action(
             }
         )
     environment["observation"] = envelope["observation"]
-    # The Agent sees the rendered observation and its own errors. Reward stays
-    # out of context so it cannot be used to infer the answer.
+    # The Agent sees the rendered observation and its own errors.
     visible = _observation_text(envelope["observation"], envelope["rendered"])
     error = envelope["info"].get("error")
     if error:
         visible = "\n\n".join(part for part in (f"Error: {error}", visible) if part)
-    signals = envelope["info"].get("rewards")
-    reward = None
-    if envelope["reward"] or signals:
-        reward = {
-            "type": "reward",
-            "turn": turn,
-            "action": name,
-            "value": envelope["reward"],
-            "signals": signals if isinstance(signals, list) else [],
-        }
     return _ToolOutcome(
         message=_tool_observation(call, name, visible),
         transition={
@@ -739,13 +754,12 @@ def _run_action(
             "action": name,
             "arguments": arguments,
             "observation": envelope["observation"],
-            "reward": envelope["reward"],
+            "rewards": envelope["rewards"],
             "terminated": envelope["terminated"],
             "truncated": envelope["truncated"],
             "info": envelope["info"],
             "view": envelope["view"],
         },
-        reward=reward,
         terminated=envelope["terminated"],
         truncated=envelope["truncated"],
     )
@@ -805,7 +819,9 @@ def _reset_episode(
     workspace = Path(_workspace_path(str(environment.get("workspace") or "/workspace/environment")))
     workspace.mkdir(parents=True, exist_ok=True)
     task = _mapping(request.get("task"), "task")
-    (workspace / "task.json").write_text(json.dumps(task, sort_keys=True) + "\n", encoding="utf-8")
+    # A seat's directions are its own: they go in its folder, not the one every seat shares.
+    own = Path(_workspace_path(str(request.get("workspace")))) if task.get("seat") else workspace
+    (own / "task.json").write_text(json.dumps(task, sort_keys=True) + "\n", encoding="utf-8")
     record: dict[str, Any] = {"type": "reset", "turn": 0}
     command = [str(item) for item in environment.get("reset_command") or ()]
     if not command:
@@ -853,6 +869,38 @@ def _reset_episode(
     return record
 
 
+def _await_turn(environment: dict[str, Any], deadline: float) -> dict[str, Any] | None:
+    """Wait until this seat may act or the episode ends, and return its view.
+
+    Returns:
+        The host's ``turn`` answer, or ``None`` when the deadline passed first.
+    """
+    command = _local_command(list(environment.get("turn_command") or ()))
+    workspace = _workspace_path(str(environment.get("workspace") or "/workspace/environment"))
+    polls = 0
+    while time.monotonic() < deadline:
+        completed = subprocess.run(
+            command,
+            input=b"",
+            cwd=workspace,
+            env=_action_environment(environment),
+            capture_output=True,
+            timeout=max(1.0, min(30.0, deadline - time.monotonic())),
+            check=False,
+        )
+        if completed.returncode != 0:
+            error = completed.stderr.decode(errors="replace")[:1000]
+            raise RuntimeError(f"environment turn failed: {error or completed.returncode}")
+        answer = json.loads(completed.stdout.decode(errors="replace") or "{}")
+        if not isinstance(answer, dict):
+            raise RuntimeError("environment turn answered something other than an object")
+        if answer.get("your_turn") or answer.get("terminated") or answer.get("truncated"):
+            return answer
+        time.sleep(_TURN_POLL_SECONDS[min(polls, len(_TURN_POLL_SECONDS) - 1)])
+        polls += 1
+    return None
+
+
 def _emit(value: dict[str, Any]) -> None:
     print(
         json.dumps({"protocol": "plural-harness-v1", **value}, sort_keys=True),
@@ -867,7 +915,10 @@ def _action_environment(environment: dict[str, Any]) -> dict[str, str]:
         "LANG",
         "LC_ALL",
         "TMPDIR",
+        "HOME",
         "SYSTEMROOT",
+        "PLURAL_APPS_MANAGED",
+        SEAT_TOKEN,
         *environment.get("variable_names", []),
     }
     values = {key: value for key, value in os.environ.items() if key in names}

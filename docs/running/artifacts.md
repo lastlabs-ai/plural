@@ -56,8 +56,12 @@ A local `plural run` writes this folder at the project root:
         atif-trajectory.json
         result.json
         state.json
+        apps.json
         observation.json
         view.json
+        steps.jsonl
+        states.jsonl
+        rewards.jsonl
 ```
 
 Only files actually produced or captured are present. Here is what the main ones
@@ -66,17 +70,31 @@ hold:
 - `run.json` pins the version and content hash of every input, which is what
   `plural job rerun` reuses.
 - `episode.jsonl` is the episode record: every reset, step, and model call in
-  order, with token usage and timing.
+  order, with token usage and timing. With Apps, each step carries the App host's
+  observation, rewards, and outcome rather than the Harness's; a step the host never
+  ran is marked `unverified` and earns nothing.
+- `steps.jsonl` is the App host's own record of every action it ran, and
+  `states.jsonl` each App's State after each step. They are what scoring, step
+  rewards, and `plural verifier try|apply` read. A Harness can't write either: a
+  file it returns under one of these names, or as `rewards.jsonl` or `apps.json`, is
+  dropped.
 - `trajectory.json` is the Agent's conversation as plain chat messages: each has
   a `role` and `content`, plus `reasoning_content` and `tool_calls` on the
   model's turns. It is exactly what the model was sent, followed by its final
-  reply, beside the episode's `status`, `time_elapsed`, and `finalized`.
+  reply, beside the episode's `status`, `time_elapsed`, and `finalized`. Every
+  run gets one. When the Harness called no model, each step is written as a tool
+  call and the observation it returned.
 - `atif-trajectory.json` is the same episode as an
   [ATIF](traces.md#read-the-support-episode) document of the Agent's turns, with
   each call's tokens, cost, and timing.
 - `result.json` in `artifacts/` is the Harness's final response.
-- `state.json`, `observation.json`, and `view.json` are the Environment's final
-  State, Observation, and display view.
+- `state.json` is the final State: one App's, or a mapping from App name to State.
+- `apps.json` has each App's State at the start and the end, with its control level.
+  It is what a Verifier reads as `episode.apps`.
+- `observation.json` is the last thing an action returned, and `view.json` is the
+  final display view.
+- `rewards.jsonl` is the reward ledger: one line per reward, each tied to the step,
+  turn, or span it credits. See [Training and RL](training.md).
 
 A Harness that returns its own trajectory events also gets `trajectory.jsonl`, and
 anything else the Agent writes is captured beside them. Verifier scores and
@@ -96,8 +114,8 @@ endpoint, Environment, Verifiers, Agent, Harness, mode, Runtime, timing, and cos
 ## Episode scoring
 
 The grader sees more than the Agent does. A Verifier function receives the
-completed Episode: final Observation, full State, trajectory, artifacts, and
-usage. None of this reaches the Agent. A Verifier that runs a command receives
+completed Episode: each App's State, the last observation, the trajectory,
+artifacts, and usage. None of this reaches the Agent. A Verifier that runs a command receives
 every captured artifact in its scoring workspace. Isolate untrusted scoring code
 with its own `VerifierRuntime`.
 

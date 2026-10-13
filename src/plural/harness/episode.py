@@ -6,14 +6,15 @@ record per line. A Harness author does not write this file and cannot omit
 entries from it; it is the authoritative account of what happened, with timing
 taken from the runner's own clock.
 
-Each record carries ``schema: "plural.episode/v1"``. The fields that matter
+Each record carries ``schema: "plural.episode/v1"`` and an ``event_id`` that
+reward ledger entries target. The fields that matter
 for the Agent boundary are explicit:
 
 - ``observation`` is the value the Environment returned to the Harness. It is
   the only part of a step a Harness may place in the Agent's context.
-- ``reward``, ``terminated``, ``truncated``, ``info``, and ``view`` are episode
-  bookkeeping. They are recorded for credit assignment, evaluation, and
-  display, and are never Agent input.
+- ``terminated``, ``truncated``, ``info``, and ``view`` are episode
+  bookkeeping. They are recorded for evaluation and display, and are never
+  Agent input. A Harness never sees a reward.
 """
 
 from __future__ import annotations
@@ -81,6 +82,7 @@ class EpisodeRecorder:
             {
                 "schema": EPISODE_SCHEMA,
                 "sequence": self._sequence,
+                "event_id": f"e{self._sequence}",
                 "kind": kind,
                 "turn": turn,
                 "started_at": started_at,
@@ -122,14 +124,14 @@ class EpisodeRecorder:
         action: str,
         arguments: dict[str, Any],
         observation: Any = None,
-        reward: float | None = None,
+        rewards: list[dict[str, Any]] | None = None,
         terminated: bool | None = None,
         truncated: bool | None = None,
         info: dict[str, Any] | None = None,
         view: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> None:
-        """Record one Environment step."""
+        """Record one Environment step, with each verifier's signal in ``rewards``."""
         if not self._model_turn_open:
             self._turn += 1
         self._record(
@@ -140,7 +142,7 @@ class EpisodeRecorder:
             action=action,
             arguments=arguments,
             observation=observation,
-            reward=reward,
+            rewards=rewards or [],
             terminated=terminated,
             truncated=truncated,
             info=info or {},

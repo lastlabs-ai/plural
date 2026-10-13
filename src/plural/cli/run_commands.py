@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 import typer
 
+from plural.apps.mcp import use_credential_source
 from plural.auth import Session
 from plural.cli.common import (
     JSON_OPTION,
@@ -27,9 +28,11 @@ from plural.cli.common import (
     signed_in,
     workspace,
 )
+from plural.cli.credential_commands import account_credential_source, stored_credentials
+from plural.cli.runtime_commands import _project_studio
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
-from plural.jobs import JobResult, TrialResult, TrialSpec
+from plural.jobs import JobResult, JobSpec, TrialResult, TrialSpec
 from plural.project import ProjectError, Workspace
 from plural.project.layout import (
     AGENT,
@@ -42,12 +45,14 @@ from plural.project.layout import (
 )
 from plural.project.runs import (
     DEFAULT_HARNESS,
+    CredentialSource,
     RunPlan,
     RunRequest,
     Tracking,
     find_local_trial,
     finished_local_job,
     local_job,
+    local_job_spec,
     local_jobs,
     local_trial,
     plan_run,
@@ -186,6 +191,7 @@ def run(
         if pulled:
             _print_pulled(pulled, err=as_json)
             space = Workspace(Project.at(root))
+    use_credential_source(account_credential_source())
     plan = plan_run(space, request, environ=environ)
     if dry_run:
         payload = _plan_payload(plan, hosted=hosted)
@@ -223,8 +229,14 @@ def run(
         err=as_json,
     )
     _runtime_credentials(space, plan, err=as_json)
+    _project_secrets(space, plan.spec, environ, err=as_json)
     job_id, result = run_local(
-        space, plan, environ=environ, progress=_progress(as_json, total), tracking=tracking
+        space,
+        plan,
+        environ=environ,
+        progress=_progress(as_json, total),
+        tracking=tracking,
+        credential_source=_stored_credentials(as_json),
     )
     _finish_local(space, job_id, result, tracking, as_json=as_json)
 
@@ -386,12 +398,16 @@ def job_rerun(
     space = workspace()
     if (space.project.jobs_dir / job_id).is_dir():
         tracking = _tracking(space, session()) if track else None
+        environ = _project_secrets(
+            space, local_job_spec(space, job_id), _run_environ(session()), err=as_json
+        )
         new_id, result = rerun_local_job(
             space,
             job_id,
-            environ=_run_environ(session()),
+            environ=environ,
             progress=_progress(as_json),
             tracking=tracking,
+            credential_source=_stored_credentials(as_json),
         )
         _finish_local(space, new_id, result, tracking, as_json=as_json)
         return
@@ -446,18 +462,21 @@ def trial_rerun(
     """Run one Trial again with its pinned inputs, as a new one-Trial Job."""
     space = workspace()
     try:
-        find_local_trial(space, trial_id)
-        is_local = True
+        owner, _ = find_local_trial(space, trial_id)
     except ProjectError:
-        is_local = False
-    if is_local:
+        owner = None
+    if owner is not None:
         tracking = _tracking(space, session()) if track else None
+        environ = _project_secrets(
+            space, local_job_spec(space, owner), _run_environ(session()), err=as_json
+        )
         new_id, result = rerun_local_trial(
             space,
             trial_id,
-            environ=_run_environ(session()),
+            environ=environ,
             progress=_progress(as_json),
             tracking=tracking,
+            credential_source=_stored_credentials(as_json),
         )
         _finish_local(space, new_id, result, tracking, as_json=as_json)
         return
@@ -730,6 +749,55 @@ def _runtime_credentials(space: Workspace, plan: RunPlan, *, err: bool) -> None:
         )
 
 
+def _stored_credentials(err: bool) -> CredentialSource:
+    """Look up your saved credentials when the run starts."""
+    return lambda spec, agent: stored_credentials(spec, agent, err=err)
+
+
+def _needed_secrets(spec: JobSpec) -> list[str]:
+    """Secret names the Job's Apps, Verifiers, and endpoint Agents need."""
+    names: set[str] = set()
+    for task in spec.tasks:
+        names.update(item.name for item in task.environment.secrets)
+        for binding in task.verifiers:
+            names.update(item.name for item in binding.verifier.secrets)
+    for agent in spec.agents:
+        if agent.agent.endpoint_key:
+            names.add(agent.agent.endpoint_key)
+    return sorted(names)
+
+
+def _project_secrets(
+    space: Workspace, spec: JobSpec, environ: dict[str, str], *, err: bool
+) -> dict[str, str]:
+    """Fill secrets the run needs, and you have not exported, from the hosted project.
+
+    Values go into the Job's environment, which passes each to the App host,
+    Verifier, or endpoint that declared it, and never into this process's own.
+    Variables you already exported always win. Without a hosted project, or
+    when you may not read its secrets, the run uses what you exported, and
+    its preflight names anything still missing.
+    """
+    wanted = [name for name in _needed_secrets(spec) if not environ.get(name)]
+    if not wanted:
+        return environ
+    try:
+        studio, _ = _project_studio()
+    except ProjectError:
+        return environ
+    try:
+        grant = studio.secrets.resolve(wanted)
+    except PluralError as exc:
+        typer.echo(f"! Project secrets: {exc} Using secrets from your environment.", err=True)
+        return environ
+    found = {str(key): str(value) for key, value in (grant.get("environ") or {}).items()}
+    for key, value in found.items():
+        environ.setdefault(key, value)
+    if found:
+        typer.echo(f"Using project secrets: {', '.join(sorted(found))}.", err=err)
+    return environ
+
+
 def _run_environ(current: Session) -> dict[str, str]:
     """Process environment for a local run, with the gateway credential added.
 
@@ -916,6 +984,12 @@ def _print_job(payload: dict[str, Any]) -> None:
             ),
             ("trial", "task", "status", "score"),
         )
+    failed = [item for item in trials if item.get("error")]
+    for item in failed:
+        reason = str(item["error"]).strip().splitlines()[0][:200]
+        typer.echo(f"  {item['trial_id']} failed: {reason}")
+    if failed:
+        typer.echo(f"Details: plural trial show {failed[0]['trial_id']}")
 
 
 def _print_trial(payload: dict[str, Any]) -> None:
@@ -938,6 +1012,13 @@ def _print_trial(payload: dict[str, Any]) -> None:
         )
         for line in verifier.get("evidence") or []:
             typer.echo(f"    - {line}")
+    for credential in payload.get("credentials") or []:
+        scopes = ", ".join(credential.get("scopes") or []) or "no scopes listed"
+        typer.echo(
+            f"  Credential {credential.get('name')} for App {credential.get('app')}: "
+            f"Agent {credential.get('agent')} {credential.get('agent_revision')} ({scopes}), "
+            f"from {credential.get('source')}, {credential.get('fingerprint')}"
+        )
 
 
 def _print_hosted_reviews(items: list[dict[str, Any]]) -> None:

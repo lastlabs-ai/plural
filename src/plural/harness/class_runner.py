@@ -168,13 +168,20 @@ def _write_result(result: HarnessResult, environment: HarnessEnvironment) -> Non
     if result.logs:
         Path("logs.txt").write_text("\n".join(result.logs) + "\n", encoding="utf-8")
         artifacts.append("logs.txt")
+    episode = Path(EPISODE_FILE)
     if result.tito:
+        from plural.rewards import align_tito
+
+        recorded = (
+            [json.loads(line) for line in episode.read_text().splitlines() if line.strip()]
+            if episode.exists()
+            else []
+        )
         Path("tito.jsonl").write_text(
-            "".join(_dumps(item) + "\n" for item in result.tito),
+            "".join(_dumps(item) + "\n" for item in align_tito(result.tito, recorded)),
             encoding="utf-8",
         )
         artifacts.append("tito.jsonl")
-    episode = Path(EPISODE_FILE)
     if episode.exists() and episode.stat().st_size:
         artifacts.append(EPISODE_FILE)
     print(

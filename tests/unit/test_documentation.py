@@ -7,6 +7,9 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -19,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(sys.executable).with_name("plural")
 TUTORIALS = {
     "first-project": ("support-triage", "scripted"),
-    "wordle": ("wordle", "word-list"),
+    "wordle": ("wordle", "luna"),
 }
 
 
@@ -82,20 +85,87 @@ def test_tutorial_projects_validate_and_dry_run(directory: str, isolated: dict[s
     assert not (root / ".plural").exists()
 
 
-def test_wordle_runs_offline_from_the_cli(tmp_path: Path, isolated: dict[str, str]) -> None:
+GUESSES = ("crane", "slate", "audio", "point", "storm", "heart")
+
+
+class _WordleModel(BaseHTTPRequestHandler):
+    """An OpenAI-compatible model that guesses GUESSES in order, one per reply."""
+
+    def do_POST(self) -> None:
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        played = sum(message["role"] == "tool" for message in body["messages"])
+        message: dict[str, object] = {"role": "assistant", "content": "Out of words."}
+        if played < len(GUESSES):
+            arguments = json.dumps({"word": GUESSES[played]})
+            message = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"call_{played}",
+                        "type": "function",
+                        "function": {"name": "guess", "arguments": arguments},
+                    }
+                ],
+            }
+        payload = json.dumps(
+            {
+                "choices": [{"message": message}],
+                "usage": {"prompt_tokens": 9, "completion_tokens": 3},
+            }
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+@pytest.fixture
+def wordle_model() -> Iterator[str]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _WordleModel)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/v1"
+    finally:
+        server.shutdown()
+
+
+def test_wordle_runs_a_model_and_records_its_messages(
+    tmp_path: Path, isolated: dict[str, str], wordle_model: str
+) -> None:
     project = tmp_path / "wordle"
     shutil.copytree(ROOT / "examples" / "wordle", project)
+    agent = project / "agents" / "scripted"
+    agent.mkdir()
+    (agent / "agent.yaml").write_text(
+        "name: scripted\nversion: 1.0.0\nmodel: test/wordle\ninstructions: Play Wordle.\n"
+        f"endpoint: {wordle_model}\nendpoint_key: WORDLE_MODEL_KEY\n",
+        encoding="utf-8",
+    )
+    env = {**isolated, "WORDLE_MODEL_KEY": "unused"}
     job = json.loads(
-        _run(
-            str(CLI), "run", "-b", "wordle", "-a", "word-list", "--json", cwd=project, env=isolated
-        )
+        _run(str(CLI), "run", "-b", "wordle", "-a", "scripted", "--json", cwd=project, env=env)
     )
     assert job["status"] == "succeeded"
-    assert [trial["score"] for trial in job["trials"]] == [1.0, 1.0, 1.0]
-    shown = json.loads(
-        _run(str(CLI), "job", "show", job["job_id"], "--json", cwd=project, env=isolated)
-    )
-    assert shown["job_id"] == job["job_id"]
+    scores = {trial["task"]: trial["score"] for trial in job["trials"]}
+    assert scores == {"crane": 1.0, "slate": 1.0, "point": 1.0, "storm": 1.0, "nymph": 0.0}
+
+    artifacts = (project / ".plural" / "jobs").glob("*/trials/*/executions/0/artifacts")
+    (storm,) = [
+        path
+        for path in artifacts
+        if json.loads((path / "state.json").read_text(encoding="utf-8"))["secret"] == "storm"
+    ]
+    transcript = json.loads((storm / "trajectory.json").read_text(encoding="utf-8"))
+    assert set(transcript) >= {"messages", "status", "time_elapsed", "finalized"}
+    roles = [message["role"] for message in transcript["messages"]]
+    assert roles[:2] == ["system", "user"]
+    assert roles.count("tool") == 5
+    assert "storm" not in json.dumps(transcript["messages"][:2])
 
 
 @pytest.mark.parametrize("directory", sorted(TUTORIALS))
@@ -119,7 +189,7 @@ def test_audited_documentation_limits_remain_explicit() -> None:
     api = (ROOT / "docs/reference/api.md").read_text(encoding="utf-8")
     mkdocs = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
 
-    assert "Environment secret references as metadata" in runtime
+    assert "nothing secret is saved with the Environment" in runtime
     assert "does not expose the full contracted evidence view" in reviews
     assert "native APIs are not directly executed by Job" in integrations
     assert "post-resolution Pydantic constructor models" in fields

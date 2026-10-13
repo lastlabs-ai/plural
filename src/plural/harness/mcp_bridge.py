@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 # This module runs as a standalone stdio server. Keep in sync with
-# plural.environments.runner.PROTOCOL.
+# plural.apps.host.STEP_PROTOCOL.
 STEP_PROTOCOL = "plural-step-v1"
 
 

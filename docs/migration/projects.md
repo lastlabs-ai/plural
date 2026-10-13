@@ -32,7 +32,7 @@ project.yaml             name and description
 plural.lock              hosted revisions, updated by push and pull; commit it
 pyproject.toml           dependencies = ["plural>=0.18.0"]
 .plural/                 local state: hosted binding, Jobs, backups (gitignored)
-environments/<name>/     environment.yaml, environment.py, README.md
+environments/<name>/     environment.yaml, server.py or environment.py, README.md
 tasks/<name>/            task.yaml, instruction.md
 verifiers/<name>/        verifier.yaml, verify.py
 harnesses/<name>/        harness.yaml, harness.py
@@ -162,9 +162,9 @@ Follow these steps in order. Validation in step 5 reports anything you missed.
    generated directory. Until you fill a template in, `validate` reports what is still
    missing. A new Environment's template uses the `docker` runtime; set
    `runtime.provider` to what your old project used. Python behavior, such as an
-   Environment class or a Verifier check, stays Python and is referenced from the
-   manifest, for example
-   `python: environment.py:SupportQueue` or `check: verify.py:verify`.
+   Environment class or a Verifier's `check` and `reward` functions, stays Python and is
+   referenced from the manifest, for example
+   `python: environment.py:SupportQueue` or `check: verify.py:check`.
 4. Replace object references with names: a Task lists `environment: <name>` and
    `verifiers: [<name>]`, and a Benchmark lists `tasks: [<name>, ...]`.
 5. Check everything with `plural benchmark validate <name>`. It validates the

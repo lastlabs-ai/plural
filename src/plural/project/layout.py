@@ -243,7 +243,13 @@ class Project:
 
         Returns:
             The resource directory, whether or not it exists.
+
+        Raises:
+            ValueError: When the name is not one folder name, such as one a
+                hosted record supplied with ``/`` or ``..``.
         """
+        if ref.name in {"", ".", ".."} or "/" in ref.name or "\\" in ref.name:
+            raise ValueError(f"{ref.kind} name {ref.name!r} is not a folder name")
         return self.root / ref.info.directory / ref.name
 
     def manifest_path(self, ref: ResourceRef) -> Path:

@@ -69,8 +69,9 @@ class BenchmarkScoring(FrozenModel):
     """How a release turns attempts into one score per configuration.
 
     Repeated attempts of a Task are averaged first. Task scores are then
-    combined with ``task_weights``; a Task without a weight counts once. Step
-    rewards never contribute: only the Verifier score on each Trial does.
+    combined with ``task_weights``; a Task without a weight counts once. Only the
+    Verifier score on each Trial counts; step rewards reach it only through a
+    Verifier whose check is ``total_reward``.
 
     Attributes:
         metric: Human-readable name of the success metric, such as

@@ -11,7 +11,9 @@ from project_fixtures import write_project
 from typer.testing import CliRunner
 
 from plural.cli.main import app
+from plural.environments import Party
 from plural.project import Project, ProjectError, Workspace
+from plural.project.layout import ResourceRef
 from plural.project.runs import DEFAULT_HARNESS, RunRequest, plan_run
 
 runner = CliRunner()
@@ -61,6 +63,22 @@ def test_run_sources_and_agents_are_validated(
         plan(project, **fields)
 
 
+def test_an_environment_party_reaches_the_task_and_plural_run_names_the_way_to_run_it(
+    project: Project,
+) -> None:
+    manifest = project.root / "environments/queue/environment.yaml"
+    local = manifest.read_text()
+    manifest.write_text(local + "party: {min: 2, max: 8}\n")
+    with pytest.raises(ProjectError, match="OS user of its own"):
+        Workspace(project).load(ResourceRef("task", "refund"))
+    docker = local.replace("provider: local", "provider: docker")
+    manifest.write_text(docker + "party: {min: 2, max: 8}\n")
+    task = Workspace(project).load(ResourceRef("task", "refund")).value
+    assert task._environment_definition().party == Party(min=2, max=8)
+    with pytest.raises(ProjectError, match="party of Agents.*Job"):
+        plan(project, task="refund", model="openai/gpt-5.6-luna")
+
+
 def test_model_runs_default_to_the_documented_harness_and_respect_the_policy(
     project: Project,
 ) -> None:
@@ -105,6 +123,78 @@ def test_dry_run_reports_the_plan_without_creating_a_job(project: Project) -> No
     assert payload["harness"] == "scripted"
     assert len(payload["trials"]) == 2
     assert not project.jobs_dir.exists() or not any(project.jobs_dir.iterdir())
+
+
+def test_an_endpoint_agent_needs_its_own_key_and_no_plural_key(
+    project: Project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent = project.root / "agents/tuned/agent.yaml"
+    agent.parent.mkdir(parents=True)
+    agent.write_text(
+        "name: tuned\nversion: 0.1.0\nmodel: tuned-v1\n"
+        "endpoint: http://127.0.0.1:9/v1\nendpoint_key: TUNED_KEY\n"
+    )
+    monkeypatch.delenv("TUNED_KEY", raising=False)
+    code, output, _ = cli("run", "--task", "refund", "--agent", "tuned")
+    assert code == 1
+    assert "needs TUNED_KEY for its endpoint" in output
+    assert not project.jobs_dir.exists() or not any(project.jobs_dir.iterdir())
+
+    monkeypatch.setenv("TUNED_KEY", "sk-tuned")
+    code, output, _ = cli("run", "--task", "refund", "--agent", "tuned")
+    assert "Plural API key" not in output
+    assert "sk-tuned" not in output
+    assert any(project.jobs_dir.iterdir())
+
+
+def test_an_app_credential_comes_from_the_agent_that_runs(
+    project: Project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = project.root / "environments/queue/environment.py"
+    app.write_text(
+        app.read_text().replace(
+            '''    """A refund queue."""\n''',
+            '''    """A refund queue."""\n\n    credentials = ["QUEUE_TOKEN"]\n''',
+        )
+    )
+    monkeypatch.setenv("QUEUE_TOKEN", "queue-token-value")
+
+    code, output, _ = cli("run", "--task", "refund", "--model", "openai/gpt-5.6-luna")
+    assert code == 1
+    assert "does not carry" in output
+    assert "QUEUE_TOKEN, for App queue" in output
+    assert "This run used --model" in output
+
+    code, output, _ = cli("run", "--task", "refund", "--agent", "baseline")
+    assert code == 1
+    assert "Agent 'baseline' does not carry" in output
+    assert not project.jobs_dir.exists() or not any(project.jobs_dir.iterdir())
+
+    agent = project.root / "agents/baseline/agent.yaml"
+    agent.write_text(agent.read_text() + "credentials:\n  QUEUE_TOKEN:\n    scopes: [read:queue]\n")
+    monkeypatch.delenv("QUEUE_TOKEN")
+    code, output, _ = cli("run", "--task", "refund", "--agent", "baseline")
+    assert code == 1
+    assert "plural credential set NAME" in output
+
+    monkeypatch.setenv("QUEUE_TOKEN", "queue-token-value")
+    code, output, job = cli("run", "--task", "refund", "--agent", "baseline", "--json")
+    assert code == 0, output
+    assert "queue-token-value" not in output
+    [trial] = job["trials"]
+    code, output, shown = cli("trial", "show", trial["trial_id"], "--json")
+    assert code == 0, output
+    [used] = shown["credentials"]
+    assert used["app"] == "queue"
+    assert used["agent"] == "baseline"
+    assert used["scopes"] == ["read:queue"]
+    assert used["source"] == "environment"
+    assert used["fingerprint"].startswith("sha256:")
+    code, output, _ = cli("trial", "show", trial["trial_id"])
+    assert "Credential QUEUE_TOKEN for App queue: Agent baseline" in output
+    for path in project.jobs_dir.rglob("*"):
+        if path.is_file():
+            assert b"queue-token-value" not in path.read_bytes(), path
 
 
 def test_local_run_records_a_job_and_trials_can_be_inspected(project: Project) -> None:
@@ -241,3 +331,87 @@ def test_verifier_data_never_reaches_the_harness(project: Project, tmp_path: Pat
     assert "Review order A-1" in visible
     for private in ("SECRET", "verify.py", "resolved", '"score"', "refundable"):
         assert private not in visible, private
+
+
+def test_a_verifier_tries_and_applies_its_rewards_on_a_stored_trial(
+    project: Project,
+) -> None:
+    code, output, job = cli("run", "--task", "refund", "--agent", "baseline", "--json")
+    assert code == 0, output
+    [trial] = job["trials"]
+    directory = project.root / "verifiers/resolved"
+    (directory / "verifier.yaml").write_text(
+        (directory / "verifier.yaml")
+        .read_text()
+        .replace("version: 0.1.0", "version: 0.2.0")
+        .replace(
+            "reward: verify.py:reward", "reward: verify.py:reward\nhindsight: verify.py:scored"
+        )
+    )
+    source = (directory / "verify.py").read_text()
+    (directory / "verify.py").write_text(
+        source.replace(
+            'return 1.0 if step.current_state["done"] else 0.0',
+            'return 0.5 if step.apps["queue"].state.done else 0.0',
+        )
+        + "\n\nfrom plural import HindsightTrial, RewardTarget\n\n\n"
+        "def scored(trial: HindsightTrial):\n"
+        "    for step in trial.steps('submit'):\n"
+        "        yield trial.credit(RewardTarget.step(step['event_id']), trial.score or 0)\n"
+    )
+    ledger_before = cli("rewards", "show", trial["trial_id"], "--json")[2]
+
+    code, output, tried = cli("verifier", "try", "resolved", "--trial", trial["trial_id"], "--json")
+    assert code == 0, output
+    [result] = tried["trials"]
+    assert result["problems"] == []
+    assert result["score"] == 1.0
+    assert result["step_total"] == 0.5
+    assert result["hindsight_total"] == 1.0
+    assert cli("rewards", "show", trial["trial_id"], "--json")[2] == ledger_before
+
+    code, output, applied = cli(
+        "verifier", "apply", "resolved", "--trial", trial["trial_id"], "--json"
+    )
+    assert code == 0, output
+    assert applied["version"] == "0.2.0"
+    assert applied["trials"][0]["new_records"] == 2
+    code, output, ledger = cli("rewards", "show", trial["trial_id"], "--json")
+    assert [(item["source"], item["version"], item["value"]) for item in ledger] == [
+        ("step", "0.1.0", 1.0),
+        ("step", "0.2.0", 0.5),
+        ("hindsight", "0.2.0", 1.0),
+    ]
+    assert ledger[0]["target"] == ledger[1]["target"] == ledger[2]["target"]
+
+    code, output, again = cli(
+        "verifier", "apply", "resolved", "--trial", trial["trial_id"], "--json"
+    )
+    assert code == 0, output
+    assert again["trials"][0]["new_records"] == 0
+    assert again["trials"][0]["skipped"] == ["hindsight", "step"]
+
+    out = project.root / "train.jsonl"
+    code, output, _ = cli(
+        "rewards",
+        "export",
+        "--job",
+        job["job_id"],
+        "--verifier",
+        "resolved@0.2.0",
+        "--out",
+        str(out),
+    )
+    assert code == 0, output
+    [line] = out.read_text().splitlines()
+    exported = json.loads(line)
+    assert exported["trial_id"] == trial["trial_id"]
+    assert exported["score"] == 1.0
+    assert sorted(item["value"] for item in exported["rewards"]) == [0.5, 1.0]
+
+
+def test_run_has_no_traces_option(project: Project) -> None:
+    code, output, _ = cli("run", "--task", "refund", "--traces", "traces.jsonl")
+
+    assert code != 0
+    assert "No such option" in output

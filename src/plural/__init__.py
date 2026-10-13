@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-# Authoring: worlds (Environment owns Runtime, Resources, Rewarders).
 from plural.agents import Agent
+from plural.apps import App, AppDefinition
 from plural.benchmarks import BenchmarkCategory, BenchmarkScoring, EvaluationTrack
 
 # Hosting and models.
@@ -24,14 +24,18 @@ from plural.common import (
     content_hash,
     stable_id,
 )
-from plural.environments import (
-    Action,
+
+# Authoring: worlds (Environment owns Runtime, Resources, Verifiers).
+from plural.environments import (  # noqa: I001 - Environments load before Apps
+    ActionCall,
     Environment,
     ExecutionLimits,
     HarnessPolicy,
     Observation,
+    Party,
     Resource,
     Runtime,
+    RuntimePackages,
     RuntimeVariable,
     Secret,
     State,
@@ -39,7 +43,6 @@ from plural.environments import (
     TraceFilter,
     action,
     initial,
-    rewarder,
 )
 from plural.errors import (
     AuthenticationError,
@@ -68,6 +71,7 @@ from plural.harness import (
     HarnessResult,
     HarnessStep,
     HarnessTask,
+    SeatTurn,
 )
 from plural.jobs import (
     AgentAggregate,
@@ -90,6 +94,12 @@ from plural.jobs import (
     VerifierResult,
 )
 from plural.project import Project, ProjectError, ResourceRef, Workspace
+from plural.rewards import (
+    Credit,
+    HindsightTrial,
+    RewardRecord,
+    RewardTarget,
+)
 from plural.sandbox import (
     Capability,
     DaytonaProvider,
@@ -126,9 +136,11 @@ from plural.verifiers import (
     EpisodeUsage,
     HumanVerifier,
     RubricCriterion,
+    Step,
     Verifier,
     VerifierOutput,
     VerifierRuntime,
+    total_reward,
 )
 
 try:
@@ -138,8 +150,10 @@ except PackageNotFoundError:
 
 __all__ = [
     # Authoring.
-    "Action",
+    "ActionCall",
     "Agent",
+    "App",
+    "AppDefinition",
     "AgentVerifier",
     "Benchmark",
     "BenchmarkCategory",
@@ -150,13 +164,16 @@ __all__ = [
     "EvaluationTrack",
     "Episode",
     "ExecutionLimits",
+    "Party",
     "Harness",
     "HarnessPolicy",
     "HumanVerifier",
     "Observation",
     "Resource",
     "RubricCriterion",
+    "Step",
     "Runtime",
+    "RuntimePackages",
     "RuntimeVariable",
     "Secret",
     "State",
@@ -164,8 +181,12 @@ __all__ = [
     "Verifier",
     "VerifierOutput",
     "action",
+    "total_reward",
     "initial",
-    "rewarder",
+    "Credit",
+    "HindsightTrial",
+    "RewardRecord",
+    "RewardTarget",
     # Projects.
     "Project",
     "ProjectError",
@@ -237,6 +258,7 @@ __all__ = [
     "Sampler",
     "SandboxProvider",
     "SandboxRequirements",
+    "SeatTurn",
     "TITORecord",
     "TaskPin",
     "TimeoutError",

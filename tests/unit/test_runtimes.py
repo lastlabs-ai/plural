@@ -73,6 +73,20 @@ def test_settings_are_validated_with_readable_errors(
         clean_settings(provider, settings)
 
 
+def test_python_packages_are_one_requirement_per_line() -> None:
+    cleaned = clean_settings("docker", {"python_packages": "duckdb>=1.1,<2\n\npolars\npolars"})
+
+    assert cleaned == {"python_packages": ["duckdb>=1.1,<2", "polars"]}
+    runtime = runtime_from_settings("docker", cleaned)
+    assert runtime.packages.python == ("duckdb>=1.1,<2", "polars")
+    assert settings_from_runtime(runtime)["python_packages"] == ["duckdb>=1.1,<2", "polars"]
+    with pytest.raises(RuntimeSettingsError, match="Python packages: '-r reqs.txt' is not"):
+        clean_settings("docker", {"python_packages": ["-r reqs.txt"]})
+    for provider in RUNTIME_PROVIDERS:
+        if provider.status == "available":
+            assert provider.field("python_packages") is not None, provider.id
+
+
 def test_partial_settings_skip_required_fields_for_template_overrides() -> None:
     assert clean_settings("daytona", {"memory_mb": "2048"}, partial=True) == {"memory_mb": 2048}
 
@@ -168,12 +182,13 @@ def test_an_unset_ref_leaves_environment_hashes_unchanged(tmp_path: Path) -> Non
     )
     assert referenced.content_hash != definition.content_hash
     del payload["runtime"]["ref"]
+    del payload["runtime"]["packages"]
     from plural.identity import revision_hash
 
+    for item in payload["apps"]:
+        if not item["credentials"]:
+            del item["credentials"]
     payload["source_digest"] = definition.source.digest if definition.source else None
-    if payload["source_digest"] is not None:
-        for rewarder in payload["rewarders"]:
-            rewarder.pop("implementation_digest", None)
     assert revision_hash("environment", payload) == definition.content_hash
 
 
@@ -264,6 +279,10 @@ def test_create_from_a_provider_then_use_it_in_an_environment(
         "daytona",
         "--set",
         "target=eu",
+        "--set",
+        "python_packages=duckdb>=1.1",
+        "--set",
+        "python_packages=polars",
         "--credentials-from-env",
         "--no-input",
         "--json",
@@ -286,6 +305,7 @@ def test_create_from_a_provider_then_use_it_in_an_environment(
     assert manifest["runtime"]["provider"] == "daytona"
     assert manifest["runtime"]["ref"] == "agent-box"
     assert manifest["runtime"]["target"] == "eu"
+    assert manifest["runtime"]["python_packages"] == ["duckdb>=1.1", "polars"]
     code, output = hosted.cli("env", "validate", "queue")
     assert code == 0, output
 

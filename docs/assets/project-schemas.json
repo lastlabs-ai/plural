@@ -1,6 +1,147 @@
 {
   "Environment": {
     "$defs": {
+      "AppAction": {
+        "additionalProperties": false,
+        "description": "One move an App offers the Agent.\n\n``name`` is the App's own name for the action (a Python method name or an\nMCP tool name), which is how the App is called. The Agent sees it under\nits exposed name: the same name, with any character a model provider\nrejects replaced, and prefixed ``<app>__`` only when another App offers\nthe same name.",
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "title": "Parameters",
+            "type": "object"
+          },
+          "mutates_state": {
+            "default": true,
+            "title": "Mutates State",
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "default": 30,
+            "exclusiveMinimum": 0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          },
+          "binding": {
+            "additionalProperties": true,
+            "title": "Binding",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AppAction",
+        "type": "object"
+      },
+      "AppDefinition": {
+        "additionalProperties": false,
+        "description": "One App inside an Environment.\n\n``python`` names the App class as ``file.py:Class`` inside the Environment's\nsource package. ``config`` holds the keyword arguments the App was built\nwith, so the App host can rebuild the same App inside a Runtime.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "python",
+            "enum": [
+              "python",
+              "mcp",
+              "openapi",
+              "replay"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "python": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Python"
+          },
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "actions": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/AppAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "secrets": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SecretReference"
+            },
+            "title": "Secrets",
+            "type": "array"
+          },
+          "credentials": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SecretReference"
+            },
+            "title": "Credentials",
+            "type": "array"
+          },
+          "state_schema": {
+            "additionalProperties": true,
+            "title": "State Schema",
+            "type": "object"
+          },
+          "has_reset": {
+            "default": false,
+            "title": "Has Reset",
+            "type": "boolean"
+          },
+          "has_snapshot": {
+            "default": false,
+            "title": "Has Snapshot",
+            "type": "boolean"
+          },
+          "control": {
+            "default": "owned",
+            "enum": [
+              "owned",
+              "sandboxed",
+              "live",
+              "replayed"
+            ],
+            "title": "Control",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AppDefinition",
+        "type": "object"
+      },
       "Capability": {
         "description": "Individual controls a provider can enforce.",
         "enum": [
@@ -292,6 +433,10 @@
           "resources": {
             "$ref": "#/$defs/ResourceRequirements"
           },
+          "packages": {
+            "$ref": "#/$defs/RuntimePackages",
+            "description": "Packages installed in the Runtime before an episode. In environment.yaml, list Python ones under python_packages. On the local Runtime they must already be installed."
+          },
           "read_only_root": {
             "default": false,
             "title": "Read Only Root",
@@ -477,66 +622,6 @@
         "title": "HarnessPolicy",
         "type": "object"
       },
-      "NativeAction": {
-        "additionalProperties": false,
-        "description": "An action owned by an Environment.",
-        "properties": {
-          "name": {
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "description": {
-            "minLength": 1,
-            "title": "Description",
-            "type": "string"
-          },
-          "kind": {
-            "default": "command",
-            "enum": [
-              "command",
-              "python"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "command": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Command",
-            "type": "array"
-          },
-          "parameters": {
-            "additionalProperties": true,
-            "title": "Parameters",
-            "type": "object"
-          },
-          "observation_schema": {
-            "additionalProperties": true,
-            "title": "Observation Schema",
-            "type": "object"
-          },
-          "mutates_state": {
-            "default": true,
-            "title": "Mutates State",
-            "type": "boolean"
-          },
-          "timeout_seconds": {
-            "default": 30,
-            "exclusiveMinimum": 0,
-            "title": "Timeout Seconds",
-            "type": "number"
-          }
-        },
-        "required": [
-          "name",
-          "description"
-        ],
-        "title": "NativeAction",
-        "type": "object"
-      },
       "NetworkMode": {
         "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
         "enum": [
@@ -549,6 +634,38 @@
         ],
         "title": "NetworkMode",
         "type": "string"
+      },
+      "Party": {
+        "additionalProperties": false,
+        "description": "How many Agents may share one episode of the Environment, such as 2 to 8 at poker.\n\nAn Environment with a party is played by several Agents at once, each in a\nseat of its own: ``seat_1`` to ``seat_N`` for a party of N. A Job names the\nAgents in the party, and its size must fall between ``min`` and ``max``.",
+        "properties": {
+          "min": {
+            "default": 2,
+            "maximum": 100,
+            "minimum": 2,
+            "title": "Min",
+            "type": "integer"
+          },
+          "max": {
+            "default": 2,
+            "maximum": 100,
+            "minimum": 2,
+            "title": "Max",
+            "type": "integer"
+          },
+          "isolation": {
+            "default": "isolated",
+            "description": "``isolated``: each seat's Harness runs as its own OS user, and the Apps are the only thing the seats share; needs Docker or Daytona. ``shared``: every seat runs as one user and can read and write the others' files and the Environment's, for a team that works on the same files, or to try a party on the local Runtime. A shared seat could also act for another seat.",
+            "enum": [
+              "isolated",
+              "shared"
+            ],
+            "title": "Isolation",
+            "type": "string"
+          }
+        },
+        "title": "Party",
+        "type": "object"
       },
       "ResourceRequirements": {
         "additionalProperties": false,
@@ -623,59 +740,20 @@
         "title": "ResourceRequirements",
         "type": "object"
       },
-      "RewarderDefinition": {
+      "RuntimePackages": {
         "additionalProperties": false,
-        "description": "A named state-transition reward signal scored inside each step.",
+        "description": "Packages installed in the Runtime before an episode, by package manager.\n\nEach list holds what you would pass to that manager, one package per entry.",
         "properties": {
-          "name": {
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "description": {
-            "default": "",
-            "title": "Description",
-            "type": "string"
-          },
-          "kind": {
-            "default": "command",
-            "enum": [
-              "command",
-              "python"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "command": {
+          "python": {
             "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Command",
+            "title": "Python",
             "type": "array"
-          },
-          "implementation_digest": {
-            "default": "",
-            "title": "Implementation Digest",
-            "type": "string"
-          },
-          "weight": {
-            "default": 1,
-            "exclusiveMinimum": 0,
-            "title": "Weight",
-            "type": "number"
-          },
-          "timeout_seconds": {
-            "default": 30,
-            "exclusiveMinimum": 0,
-            "title": "Timeout Seconds",
-            "type": "number"
           }
         },
-        "required": [
-          "name"
-        ],
-        "title": "RewarderDefinition",
+        "title": "RuntimePackages",
         "type": "object"
       },
       "RuntimeVariable": {
@@ -722,7 +800,7 @@
       },
       "SecretReference": {
         "additionalProperties": false,
-        "description": "A named credential supplied when a Job runs, with an explicit execution target.",
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
         "properties": {
           "name": {
             "pattern": "^[A-Z_][A-Z0-9_]*$",
@@ -734,20 +812,18 @@
             "title": "Required",
             "type": "boolean"
           },
-          "target": {
-            "default": "environment",
-            "enum": [
-              "environment",
-              "harness",
-              "verifier"
-            ],
-            "title": "Target",
-            "type": "string"
-          },
           "description": {
             "default": "",
             "title": "Description",
             "type": "string"
+          },
+          "scopes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
           }
         },
         "required": [
@@ -758,7 +834,7 @@
       }
     },
     "additionalProperties": false,
-    "description": "Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent.",
+    "description": "Schema-v2 Environment: Apps composed with one Runtime and one set of limits.\n\nTasks, Verifiers, and mode are intentionally absent. Every action belongs\nto exactly one App; ``python`` optionally names an Environment subclass\nwhose ``on_step``, ``terminated``, or ``truncated`` span several Apps.",
     "properties": {
       "name": {
         "minLength": 1,
@@ -785,39 +861,25 @@
         "title": "Readme",
         "type": "string"
       },
-      "actions": {
+      "apps": {
         "default": [],
         "items": {
-          "$ref": "#/$defs/NativeAction"
+          "$ref": "#/$defs/AppDefinition"
         },
-        "title": "Actions",
+        "title": "Apps",
         "type": "array"
       },
-      "reset_command": {
-        "default": [],
-        "items": {
-          "type": "string"
-        },
-        "title": "Reset Command",
-        "type": "array"
-      },
-      "observation_schema": {
-        "additionalProperties": true,
-        "title": "Observation Schema",
-        "type": "object"
-      },
-      "state_schema": {
-        "additionalProperties": true,
-        "title": "State Schema",
-        "type": "object"
-      },
-      "rewarders": {
-        "default": [],
-        "items": {
-          "$ref": "#/$defs/RewarderDefinition"
-        },
-        "title": "Rewarders",
-        "type": "array"
+      "python": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Python"
       },
       "guardrails": {
         "default": [],
@@ -838,19 +900,23 @@
       "runtime": {
         "$ref": "#/$defs/EnvironmentRuntime"
       },
-      "secrets": {
-        "default": [],
-        "items": {
-          "$ref": "#/$defs/SecretReference"
-        },
-        "title": "Secrets",
-        "type": "array"
-      },
       "harness_policy": {
         "$ref": "#/$defs/HarnessPolicy"
       },
       "limits": {
         "$ref": "#/$defs/ExecutionLimits"
+      },
+      "party": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Party"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "How many Agents share each episode, for a game such as poker. Leave it unset for an Environment one Agent works in alone."
       },
       "metadata": {
         "additionalProperties": true,
@@ -916,6 +982,14 @@
             "title": "Metadata",
             "type": "object"
           },
+          "secrets": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SecretReference"
+            },
+            "title": "Secrets",
+            "type": "array"
+          },
           "kind": {
             "const": "agent",
             "default": "agent",
@@ -967,7 +1041,29 @@
       },
       "DeterministicVerifier": {
         "additionalProperties": false,
-        "description": "Function or command that scores a completed Episode.",
+        "anyOf": [
+          {
+            "required": [
+              "check"
+            ]
+          },
+          {
+            "required": [
+              "command"
+            ]
+          },
+          {
+            "required": [
+              "reward"
+            ]
+          },
+          {
+            "required": [
+              "hindsight"
+            ]
+          }
+        ],
+        "description": "Code that verifies an episode: it scores the end, rewards actions, or both.\n\n``check`` scores the finished episode; that score is what Tasks and\nBenchmarks rank on. It is a function of the :class:`Episode`, a\n``{\"python\": \"verify.py:check\"}`` reference, or a command argv.\n\n``reward`` rewards each action while the episode runs. It is a function of\none :class:`Step`, or a ``{\"python\": \"verify.py:reward\"}`` reference, and\nruns in the Runtime beside the Apps, so it can read every App. What it\nreturns goes to the Trial's reward ledger. Rewards reach the score only\nwhen ``check`` is :func:`total_reward`.\n\n``hindsight`` credits the finished trajectory as a whole: a function of a\n:class:`~plural.rewards.HindsightTrial` that returns\n:class:`~plural.rewards.Credit` values, or a ``{\"python\":\n\"verify.py:efficiency\"}`` reference. It runs after the score, and can also\nrun later on stored Trials with ``plural verifier apply``.",
         "properties": {
           "name": {
             "minLength": 1,
@@ -1002,6 +1098,14 @@
             "title": "Metadata",
             "type": "object"
           },
+          "secrets": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SecretReference"
+            },
+            "title": "Secrets",
+            "type": "array"
+          },
           "kind": {
             "const": "deterministic",
             "default": "deterministic",
@@ -1009,7 +1113,16 @@
             "type": "string"
           },
           "check": {
+            "default": null,
             "title": "Check"
+          },
+          "reward": {
+            "default": null,
+            "title": "Reward"
+          },
+          "hindsight": {
+            "default": null,
+            "title": "Hindsight"
           },
           "runtime": {
             "$ref": "#/$defs/VerifierRuntime"
@@ -1026,8 +1139,7 @@
           }
         },
         "required": [
-          "name",
-          "check"
+          "name"
         ],
         "title": "DeterministicVerifier",
         "type": "object"
@@ -1182,6 +1294,14 @@
             "title": "Metadata",
             "type": "object"
           },
+          "secrets": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SecretReference"
+            },
+            "title": "Secrets",
+            "type": "array"
+          },
           "kind": {
             "const": "human",
             "default": "human",
@@ -1325,6 +1445,40 @@
         "title": "RubricCriterion",
         "type": "object"
       },
+      "SecretReference": {
+        "additionalProperties": false,
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
+        "properties": {
+          "name": {
+            "pattern": "^[A-Z_][A-Z0-9_]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "scopes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SecretReference",
+        "type": "object"
+      },
       "VerifierRuntime": {
         "additionalProperties": false,
         "description": "Machine for a verifier that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
@@ -1374,7 +1528,7 @@
       }
     },
     "additionalProperties": false,
-    "description": "One versioned unit of work in a Python-authored Environment.",
+    "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.",
     "properties": {
       "name": {
         "minLength": 1,
@@ -1453,6 +1607,13 @@
       "reset_options": {
         "additionalProperties": true,
         "title": "Reset Options",
+        "type": "object"
+      },
+      "seat_instructions": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Seat Instructions",
         "type": "object"
       }
     },
@@ -1591,6 +1752,40 @@
         "title": "RubricCriterion",
         "type": "object"
       },
+      "SecretReference": {
+        "additionalProperties": false,
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
+        "properties": {
+          "name": {
+            "pattern": "^[A-Z_][A-Z0-9_]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "scopes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SecretReference",
+        "type": "object"
+      },
       "VerifierRuntime": {
         "additionalProperties": false,
         "description": "Machine for a verifier that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
@@ -1640,7 +1835,29 @@
       }
     },
     "additionalProperties": false,
-    "description": "Function or command that scores a completed Episode.",
+    "anyOf": [
+      {
+        "required": [
+          "check"
+        ]
+      },
+      {
+        "required": [
+          "command"
+        ]
+      },
+      {
+        "required": [
+          "reward"
+        ]
+      },
+      {
+        "required": [
+          "hindsight"
+        ]
+      }
+    ],
+    "description": "Code that verifies an episode: it scores the end, rewards actions, or both.\n\n``check`` scores the finished episode; that score is what Tasks and\nBenchmarks rank on. It is a function of the :class:`Episode`, a\n``{\"python\": \"verify.py:check\"}`` reference, or a command argv.\n\n``reward`` rewards each action while the episode runs. It is a function of\none :class:`Step`, or a ``{\"python\": \"verify.py:reward\"}`` reference, and\nruns in the Runtime beside the Apps, so it can read every App. What it\nreturns goes to the Trial's reward ledger. Rewards reach the score only\nwhen ``check`` is :func:`total_reward`.\n\n``hindsight`` credits the finished trajectory as a whole: a function of a\n:class:`~plural.rewards.HindsightTrial` that returns\n:class:`~plural.rewards.Credit` values, or a ``{\"python\":\n\"verify.py:efficiency\"}`` reference. It runs after the score, and can also\nrun later on stored Trials with ``plural verifier apply``.",
     "properties": {
       "name": {
         "minLength": 1,
@@ -1675,6 +1892,14 @@
         "title": "Metadata",
         "type": "object"
       },
+      "secrets": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/SecretReference"
+        },
+        "title": "Secrets",
+        "type": "array"
+      },
       "kind": {
         "const": "deterministic",
         "default": "deterministic",
@@ -1682,7 +1907,16 @@
         "type": "string"
       },
       "check": {
+        "default": null,
         "title": "Check"
+      },
+      "reward": {
+        "default": null,
+        "title": "Reward"
+      },
+      "hindsight": {
+        "default": null,
+        "title": "Hindsight"
       },
       "runtime": {
         "$ref": "#/$defs/VerifierRuntime"
@@ -1699,8 +1933,7 @@
       }
     },
     "required": [
-      "name",
-      "check"
+      "name"
     ],
     "title": "DeterministicVerifier",
     "type": "object"
@@ -1831,6 +2064,40 @@
         "title": "RubricCriterion",
         "type": "object"
       },
+      "SecretReference": {
+        "additionalProperties": false,
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
+        "properties": {
+          "name": {
+            "pattern": "^[A-Z_][A-Z0-9_]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "scopes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SecretReference",
+        "type": "object"
+      },
       "VerifierRuntime": {
         "additionalProperties": false,
         "description": "Machine for a verifier that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
@@ -1914,6 +2181,14 @@
         "additionalProperties": true,
         "title": "Metadata",
         "type": "object"
+      },
+      "secrets": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/SecretReference"
+        },
+        "title": "Secrets",
+        "type": "array"
       },
       "kind": {
         "const": "agent",
@@ -2003,6 +2278,40 @@
         ],
         "title": "RubricCriterion",
         "type": "object"
+      },
+      "SecretReference": {
+        "additionalProperties": false,
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
+        "properties": {
+          "name": {
+            "pattern": "^[A-Z_][A-Z0-9_]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "scopes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SecretReference",
+        "type": "object"
       }
     },
     "additionalProperties": false,
@@ -2041,6 +2350,14 @@
         "title": "Metadata",
         "type": "object"
       },
+      "secrets": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/SecretReference"
+        },
+        "title": "Secrets",
+        "type": "array"
+      },
       "kind": {
         "const": "human",
         "default": "human",
@@ -2062,6 +2379,27 @@
   },
   "Agent": {
     "$defs": {
+      "AgentCredential": {
+        "additionalProperties": false,
+        "description": "A credential this Agent supplies to the Apps it works with.\n\nThe value, such as the Salesforce token of the user this Agent acts as, is\nnever part of the Agent: each person who runs it saves their own with\n``plural credential set`` or exports it, and it reaches only the App host.\n``scopes`` records what the token may do, as you describe it; the system\nthat issued the token enforces them, and every Trial records them for audit.",
+        "properties": {
+          "scopes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "title": "AgentCredential",
+        "type": "object"
+      },
       "FileDeclaration": {
         "additionalProperties": false,
         "description": "A file emitted or consumed by a package.",
@@ -2286,7 +2624,7 @@
       }
     },
     "additionalProperties": false,
-    "description": "A catalog-backed model and its optional execution harness.",
+    "description": "A catalog-backed model and its optional execution harness.\n\nTo evaluate your own agent or model server instead, give ``endpoint``: the\nbase URL of an OpenAI-compatible API (one that serves\n``/chat/completions``). ``model`` is then sent to it as is and need not be\nin the catalog, and ``endpoint_key`` names the secret holding its API key.\nPlural's native Harness calls it with the Environment's actions as tools.",
     "properties": {
       "model": {
         "minLength": 1,
@@ -2395,6 +2733,37 @@
         "title": "Secret Names",
         "type": "array"
       },
+      "endpoint": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Endpoint"
+      },
+      "endpoint_key": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Endpoint Key"
+      },
+      "credentials": {
+        "additionalProperties": {
+          "$ref": "#/$defs/AgentCredential"
+        },
+        "title": "Credentials",
+        "type": "object"
+      },
       "metadata": {
         "additionalProperties": true,
         "title": "Metadata",
@@ -2445,6 +2814,14 @@
             "additionalProperties": true,
             "title": "Metadata",
             "type": "object"
+          },
+          "secrets": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SecretReference"
+            },
+            "title": "Secrets",
+            "type": "array"
           },
           "kind": {
             "const": "agent",
@@ -2544,7 +2921,7 @@
       },
       "BenchmarkScoring": {
         "additionalProperties": false,
-        "description": "How a release turns attempts into one score per configuration.\n\nRepeated attempts of a Task are averaged first. Task scores are then\ncombined with ``task_weights``; a Task without a weight counts once. Step\nrewards never contribute: only the Verifier score on each Trial does.\n\nAttributes:\n    metric: Human-readable name of the success metric, such as\n        ``\"Resolution rate\"``. It labels the Verifier score; it never\n        selects a different value to rank on.\n    description: What a score means, in words a reader can act on.\n    aggregation: How Task scores combine. ``\"weighted_mean\"`` averages\n        attempts per Task, then takes the ``task_weights`` mean.\n    score_range: Lowest and highest possible Task score.\n    success_threshold: A Task attempt at or above this score counts as a\n        success. ``None`` means the Benchmark has no pass/fail notion.\n    task_weights: Weight per Task name. Unlisted Tasks weigh 1.\n    coverage_required: Weighted share of Tasks that must have a score\n        before a result can be ranked officially.\n    agent_failure: How an attempt that ended without a Verifier score\n        because of the Agent (for example, a budget ran out) is scored.\n        ``\"zero\"`` scores it at the bottom of the range.\n    infrastructure_error: Attempts lost to the runtime or provider are\n        excluded from scores and reported separately.\n    min_tasks_for_interval: Fewest scored Tasks before an uncertainty\n        interval is reported. Below this, uncertainty is shown as unknown.",
+        "description": "How a release turns attempts into one score per configuration.\n\nRepeated attempts of a Task are averaged first. Task scores are then\ncombined with ``task_weights``; a Task without a weight counts once. Only the\nVerifier score on each Trial counts; step rewards reach it only through a\nVerifier whose check is ``total_reward``.\n\nAttributes:\n    metric: Human-readable name of the success metric, such as\n        ``\"Resolution rate\"``. It labels the Verifier score; it never\n        selects a different value to rank on.\n    description: What a score means, in words a reader can act on.\n    aggregation: How Task scores combine. ``\"weighted_mean\"`` averages\n        attempts per Task, then takes the ``task_weights`` mean.\n    score_range: Lowest and highest possible Task score.\n    success_threshold: A Task attempt at or above this score counts as a\n        success. ``None`` means the Benchmark has no pass/fail notion.\n    task_weights: Weight per Task name. Unlisted Tasks weigh 1.\n    coverage_required: Weighted share of Tasks that must have a score\n        before a result can be ranked officially.\n    agent_failure: How an attempt that ended without a Verifier score\n        because of the Agent (for example, a budget ran out) is scored.\n        ``\"zero\"`` scores it at the bottom of the range.\n    infrastructure_error: Attempts lost to the runtime or provider are\n        excluded from scores and reported separately.\n    min_tasks_for_interval: Fewest scored Tasks before an uncertainty\n        interval is reported. Below this, uncertainty is shown as unknown.",
         "properties": {
           "metric": {
             "default": "Score",
@@ -2633,7 +3010,29 @@
       },
       "DeterministicVerifier": {
         "additionalProperties": false,
-        "description": "Function or command that scores a completed Episode.",
+        "anyOf": [
+          {
+            "required": [
+              "check"
+            ]
+          },
+          {
+            "required": [
+              "command"
+            ]
+          },
+          {
+            "required": [
+              "reward"
+            ]
+          },
+          {
+            "required": [
+              "hindsight"
+            ]
+          }
+        ],
+        "description": "Code that verifies an episode: it scores the end, rewards actions, or both.\n\n``check`` scores the finished episode; that score is what Tasks and\nBenchmarks rank on. It is a function of the :class:`Episode`, a\n``{\"python\": \"verify.py:check\"}`` reference, or a command argv.\n\n``reward`` rewards each action while the episode runs. It is a function of\none :class:`Step`, or a ``{\"python\": \"verify.py:reward\"}`` reference, and\nruns in the Runtime beside the Apps, so it can read every App. What it\nreturns goes to the Trial's reward ledger. Rewards reach the score only\nwhen ``check`` is :func:`total_reward`.\n\n``hindsight`` credits the finished trajectory as a whole: a function of a\n:class:`~plural.rewards.HindsightTrial` that returns\n:class:`~plural.rewards.Credit` values, or a ``{\"python\":\n\"verify.py:efficiency\"}`` reference. It runs after the score, and can also\nrun later on stored Trials with ``plural verifier apply``.",
         "properties": {
           "name": {
             "minLength": 1,
@@ -2668,6 +3067,14 @@
             "title": "Metadata",
             "type": "object"
           },
+          "secrets": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SecretReference"
+            },
+            "title": "Secrets",
+            "type": "array"
+          },
           "kind": {
             "const": "deterministic",
             "default": "deterministic",
@@ -2675,7 +3082,16 @@
             "type": "string"
           },
           "check": {
+            "default": null,
             "title": "Check"
+          },
+          "reward": {
+            "default": null,
+            "title": "Reward"
+          },
+          "hindsight": {
+            "default": null,
+            "title": "Hindsight"
           },
           "runtime": {
             "$ref": "#/$defs/VerifierRuntime"
@@ -2692,8 +3108,7 @@
           }
         },
         "required": [
-          "name",
-          "check"
+          "name"
         ],
         "title": "DeterministicVerifier",
         "type": "object"
@@ -2988,6 +3403,14 @@
             "title": "Metadata",
             "type": "object"
           },
+          "secrets": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SecretReference"
+            },
+            "title": "Secrets",
+            "type": "array"
+          },
           "kind": {
             "const": "human",
             "default": "human",
@@ -3131,9 +3554,43 @@
         "title": "RubricCriterion",
         "type": "object"
       },
+      "SecretReference": {
+        "additionalProperties": false,
+        "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
+        "properties": {
+          "name": {
+            "pattern": "^[A-Z_][A-Z0-9_]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "scopes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SecretReference",
+        "type": "object"
+      },
       "Task": {
         "additionalProperties": false,
-        "description": "One versioned unit of work in a Python-authored Environment.",
+        "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.",
         "properties": {
           "name": {
             "minLength": 1,
@@ -3212,6 +3669,13 @@
           "reset_options": {
             "additionalProperties": true,
             "title": "Reset Options",
+            "type": "object"
+          },
+          "seat_instructions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Seat Instructions",
             "type": "object"
           }
         },

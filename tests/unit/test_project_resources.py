@@ -54,18 +54,17 @@ def test_the_sample_project_is_valid(project: Project) -> None:
         assert resource.content_hash.startswith("sha256:")
 
 
-def test_rewarders_hash_the_same_on_every_load_and_location(
+def test_verifiers_hash_the_same_on_every_load_and_location(
     project: Project, tmp_path: Path
 ) -> None:
     source = project.root / "environments/queue/environment.py"
-    edit(source, "action, initial", "action, initial, rewarder")
     edit(
         source,
         "    def terminated(self) -> bool:",
-        "    @rewarder\n"
-        "    def finished(self, previous_state, current_state, action, result) -> float:\n"
-        '        """Reward finishing."""\n'
-        '        return float(current_state["done"])\n'
+        "    @action(read_only=True)\n"
+        "    def status(self) -> str:\n"
+        '        """Report the answer so far."""\n'
+        "        return self.state.answer\n"
         "\n"
         "    def terminated(self) -> bool:",
     )

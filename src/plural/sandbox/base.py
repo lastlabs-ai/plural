@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from plural.sandbox.models import (
+    AppIsolation,
     CapabilityError,
     DownloadedFile,
     EffectiveSandboxPolicy,
@@ -18,6 +19,33 @@ from plural.sandbox.models import (
     SandboxHandle,
     SandboxRequirements,
 )
+
+KILL_USER_PROCESSES = """uids=""
+for name in "$@"; do
+    case "$name" in
+        *[!0-9]*) uid=$(id -u "$name" 2>/dev/null) || continue ;;
+        *) uid=$name ;;
+    esac
+    uids="$uids $uid"
+done
+[ -n "$uids" ] || exit 0
+for entry in /proc/[0-9]*; do
+    pid=${entry#/proc/}
+    case "$pid" in 1|"$$") continue ;; esac
+    owner=""
+    while read -r key real _rest; do
+        if [ "$key" = "Uid:" ]; then owner=$real; break; fi
+    done 2>/dev/null < "$entry/status"
+    for uid in $uids; do
+        if [ "$owner" = "$uid" ]; then kill -9 "$pid" 2>/dev/null; fi
+    done
+done
+exit 0
+"""
+"""Kill every process of the named users, or numeric ids, other than PID 1 and itself.
+
+It reads ``/proc`` rather than relying on ``pkill``, which slim images lack.
+"""
 
 
 class SandboxProvider(ABC):
@@ -88,10 +116,51 @@ class SandboxProvider(ABC):
         """Download exact declared files."""
 
     async def download_artifacts(
-        self, handle: SandboxHandle, paths: Sequence[str], *, root: str = "/workspace"
+        self,
+        handle: SandboxHandle,
+        paths: Sequence[str],
+        *,
+        root: str = "/workspace",
+        user: str | None = None,
     ) -> tuple[DownloadedFile, ...]:
-        """Download declared artifact files."""
+        """Download files a Harness declared, which ``user`` wrote, as regular files only."""
         return await self.download_files(handle, paths, root=root)
+
+    async def stop_user_processes(self, handle: SandboxHandle, users: Sequence[str | None]) -> None:
+        """Kill every process the Harnesses' users still run, once their run has ended.
+
+        ``None`` names the sandbox's default user. A provider that cannot do
+        this safely does nothing; the App host refuses actions after the Job's
+        ``finish`` either way.
+        """
+        return None
+
+    async def isolate_apps(self, handle: SandboxHandle) -> AppIsolation:
+        """Prepare a separate OS user for the App host, when this sandbox can.
+
+        Returns:
+            The users to run the App host and the Harness as; no ``app_user``
+            when the sandbox cannot separate them.
+        """
+        return AppIsolation()
+
+    async def open_workspace(
+        self, handle: SandboxHandle, isolation: AppIsolation, paths: Sequence[str]
+    ) -> None:
+        """Let ``isolation.agent_user`` write the Harness's folders, once staging is done."""
+        return None
+
+    async def isolate_seats(self, handle: SandboxHandle, seats: Sequence[str]) -> dict[str, str]:
+        """Prepare one OS user for each seat's Harness, when this sandbox can.
+
+        Each must differ from the App host's user and from every other seat's,
+        and must not be able to become another user, so one seat's Harness
+        cannot read another's files or process.
+
+        Returns:
+            Seat to user, or empty when the sandbox cannot separate them.
+        """
+        return {}
 
     @abstractmethod
     async def cancel(self, handle: SandboxHandle) -> None:

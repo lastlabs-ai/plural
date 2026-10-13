@@ -37,6 +37,40 @@
       ],
       "title": "RubricCriterion",
       "type": "object"
+    },
+    "SecretReference": {
+      "additionalProperties": false,
+      "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Z_][A-Z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "scopes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SecretReference",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -74,6 +108,14 @@
       "minLength": 1,
       "title": "Name",
       "type": "string"
+    },
+    "secrets": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SecretReference"
+      },
+      "title": "Secrets",
+      "type": "array"
     },
     "version": {
       "default": "0.1.0",

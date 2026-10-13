@@ -26,7 +26,7 @@ DISPLAY_NAMES = {
     "EnvironmentResource": "Resource",
     "EnvironmentRuntime": "Runtime",
     "NativeAction": "Action",
-    "RewarderDefinition": "Rewarder",
+    "VerifierDefinition": "Verifier",
     "SecretReference": "Secret",
 }
 for name, model in models:

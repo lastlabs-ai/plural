@@ -3,12 +3,26 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
+import re
+from collections.abc import Iterable, Mapping
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
+from plural.apps.definition import (
+    AppDefinition,
+    ExposedAction,
+    SecretReference,
+    exposed_actions,
+)
 from plural.common import (
     SHA256_PATTERN,
     ExecutionTarget,
@@ -42,27 +56,6 @@ class EnvironmentIdentity(FrozenModel):
         if SHA256_PATTERN.fullmatch(value) is None:
             raise ValueError("digest must be sha256:<64 lowercase hex characters>")
         return value
-
-
-class NativeAction(FrozenModel):
-    """An action owned by an Environment."""
-
-    name: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-    kind: Literal["command", "python"] = "command"
-    command: tuple[str, ...] = ()
-    parameters: dict[str, Any] = Field(
-        default_factory=lambda: {"type": "object", "additionalProperties": True}
-    )
-    observation_schema: dict[str, Any] = Field(default_factory=dict)
-    mutates_state: bool = True
-    timeout_seconds: float = Field(default=30, gt=0)
-
-    @model_validator(mode="after")
-    def _command_required(self) -> NativeAction:
-        if self.kind == "command" and not self.command:
-            raise ValueError("kind='command' requires a non-empty command")
-        return self
 
 
 class Guardrail(FrozenModel):
@@ -175,38 +168,37 @@ class RuntimeVariable(FrozenModel):
         return value
 
 
-class SecretReference(FrozenModel):
-    """A named credential supplied when a Job runs, with an explicit execution target."""
+_REQUIREMENT = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9._,\s-]*\])?(\s*[@<>=!~;(].*)?$"
+)
 
-    name: str = Field(pattern=r"^[A-Z_][A-Z0-9_]*$")
-    required: bool = True
-    target: Literal["environment", "harness", "verifier"] = "environment"
-    description: str = ""
 
-    @field_validator("name")
+class RuntimePackages(FrozenModel):
+    """Packages installed in the Runtime before an episode, by package manager.
+
+    Each list holds what you would pass to that manager, one package per entry.
+    """
+
+    python: tuple[str, ...] = ()
+    """Python requirements, such as ``duckdb>=1.1`` or ``snowflake-connector-python``."""
+
+    @field_validator("python")
     @classmethod
-    def _application_name(cls, value: str) -> str:
-        return RuntimeVariable._application_name(value)
+    def _python_requirements(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        cleaned: list[str] = []
+        for item in value:
+            text = item.strip()
+            if not _REQUIREMENT.match(text) or "\n" in text:
+                raise ValueError(
+                    f"{item!r} is not a Python requirement. Give one package per entry, "
+                    "such as duckdb or duckdb>=1.1, with no pip options."
+                )
+            if text not in cleaned:
+                cleaned.append(text)
+        return tuple(cleaned)
 
-
-class RewarderDefinition(FrozenModel):
-    """A named state-transition reward signal scored inside each step."""
-
-    name: str = Field(min_length=1)
-    description: str = ""
-    kind: Literal["command", "python"] = "command"
-    command: tuple[str, ...] = ()
-    implementation_digest: str = ""
-    weight: float = Field(default=1, gt=0)
-    timeout_seconds: float = Field(default=30, gt=0)
-
-    @model_validator(mode="after")
-    def _implementation(self) -> RewarderDefinition:
-        if self.kind == "command" and not self.command:
-            raise ValueError("command rewarders require a command")
-        if self.kind == "python" and not self.implementation_digest:
-            raise ValueError("python rewarders require an implementation_digest")
-        return self
+    def __bool__(self) -> bool:
+        return bool(self.python)
 
 
 class EnvironmentRuntime(FrozenModel):
@@ -233,6 +225,12 @@ class EnvironmentRuntime(FrozenModel):
         validation_alias=AliasChoices("network_allowlist", "allowed_hosts"),
     )
     resources: ResourceRequirements = Field(default_factory=ResourceRequirements)
+    packages: RuntimePackages = Field(
+        default_factory=RuntimePackages,
+        description="Packages installed in the Runtime before an episode. In "
+        "environment.yaml, list Python ones under python_packages. On the local "
+        "Runtime they must already be installed.",
+    )
     read_only_root: bool = False
     targets: frozenset[ExecutionTarget] = Field(
         default_factory=lambda: frozenset({ExecutionTarget.DOCKER, ExecutionTarget.REMOTE})
@@ -260,6 +258,8 @@ class EnvironmentRuntime(FrozenModel):
                 resources[target] = payload.pop(source)
         if "allowed_hosts" in payload and "network_allowlist" not in payload:
             payload["network_allowlist"] = payload.pop("allowed_hosts")
+        if "python_packages" in payload and "packages" not in payload:
+            payload["packages"] = {"python": payload.pop("python_packages") or ()}
         if resources:
             payload["resources"] = resources
         return payload
@@ -510,30 +510,117 @@ class ExecutionLimits(FrozenModel):
     max_cost_usd: float | None = Field(default=None, gt=0)
 
 
+MAX_PARTY = 100
+
+
+PartyIsolation = Literal["isolated", "shared"]
+
+
+class Party(FrozenModel):
+    """How many Agents may share one episode of the Environment, such as 2 to 8 at poker.
+
+    An Environment with a party is played by several Agents at once, each in a
+    seat of its own: ``seat_1`` to ``seat_N`` for a party of N. A Job names the
+    Agents in the party, and its size must fall between ``min`` and ``max``.
+    """
+
+    min: int = Field(default=2, ge=2, le=MAX_PARTY)
+    max: int = Field(default=2, ge=2, le=MAX_PARTY)
+    isolation: PartyIsolation = Field(
+        default="isolated",
+        description="``isolated``: each seat's Harness runs as its own OS user, and the "
+        "Apps are the only thing the seats share; needs Docker or Daytona. ``shared``: "
+        "every seat runs as one user and can read and write the others' files and the "
+        "Environment's, for a team that works on the same files, or to try a party on "
+        "the local Runtime. A shared seat could also act for another seat.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_size(cls, value: Any) -> Any:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return {"min": value, "max": value}
+        return value
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Party:
+        if self.min > self.max:
+            raise ValueError(f"party min {self.min} is more than its max {self.max}")
+        return self
+
+    def check(self, size: int) -> str | None:
+        """Why a party of ``size`` cannot play, or ``None`` when it can.
+
+        Returns:
+            The reason, for a size outside ``min`` to ``max``.
+        """
+        if self.min <= size <= self.max:
+            return None
+        allowed = str(self.min) if self.min == self.max else f"{self.min} to {self.max}"
+        return f"a party of {size} Agents cannot play; this Environment takes {allowed}"
+
+
+def party_seats(size: int) -> tuple[str, ...]:
+    """The seats of a party of ``size``: ``seat_1`` to ``seat_<size>``.
+
+    Returns:
+        The seat names, in order.
+    """
+    return tuple(f"seat_{index}" for index in range(1, size + 1))
+
+
+def _merged(items: Iterable[SecretReference]) -> tuple[SecretReference, ...]:
+    """Each name once; required wins when two Apps disagree.
+
+    Returns:
+        The references in first-seen order.
+    """
+    seen: dict[str, SecretReference] = {}
+    for item in items:
+        current = seen.get(item.name)
+        if current is None or (item.required and not current.required):
+            seen[item.name] = item
+    return tuple(seen.values())
+
+
 class EnvironmentDefinition(FrozenModel):
-    """Schema-v2 Environment. Tasks, Verifiers, and mode are intentionally absent."""
+    """Schema-v2 Environment: Apps composed with one Runtime and one set of limits.
+
+    Tasks, Verifiers, and mode are intentionally absent. Every action belongs
+    to exactly one App; ``python`` optionally names an Environment subclass
+    whose ``on_step``, ``terminated``, or ``truncated`` span several Apps.
+    """
 
     name: str = Field(min_length=1)
     version: str = "0.1.0"
     description: str = ""
     overview: str = ""
     readme: str = ""
-    actions: tuple[NativeAction, ...] = ()
-    reset_command: tuple[str, ...] = ()
-    observation_schema: dict[str, Any] = Field(default_factory=dict)
-    state_schema: dict[str, Any] = Field(default_factory=dict)
-    rewarders: tuple[RewarderDefinition, ...] = ()
+    apps: tuple[AppDefinition, ...] = ()
+    python: str | None = None
     guardrails: tuple[Guardrail, ...] = ()
     resources: tuple[EnvironmentResource, ...] = ()
     runtime: EnvironmentRuntime = Field(default_factory=EnvironmentRuntime)
-    secrets: tuple[SecretReference, ...] = ()
     harness_policy: HarnessPolicy = Field(default_factory=HarnessPolicy)
     limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
+    party: Party | None = Field(
+        default=None,
+        description="How many Agents share each episode, for a game such as poker. "
+        "Leave it unset for an Environment one Agent works in alone.",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
     source: PackageSource | None = Field(
         default=None,
         json_schema_extra={"x-internal": True},
     )
+
+    @model_serializer(mode="wrap")
+    def _omit_no_party(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        # An Environment one Agent works in serializes as it did before parties.
+        if isinstance(data, dict) and self.party is None:
+            data.pop("party", None)
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -547,8 +634,34 @@ class EnvironmentDefinition(FrozenModel):
             stale = {"tasks", "verifier", "mode", "context"} & set(value)
             if stale:
                 raise ValueError("schema-v2 Environment cannot own " + ", ".join(sorted(stale)))
-            payload = dict(value)
-            payload.pop("schema_version", None)
+            if value.get("verifiers"):
+                raise ValueError(
+                    "An Environment does not own Verifiers. List them on each Task under "
+                    "verifiers:, so what counts as a good episode can differ per Task."
+                )
+            moved = {"actions", "secrets", "state_schema", "observation_schema"} & {
+                key for key, item in value.items() if item
+            }
+            if moved:
+                raise ValueError(
+                    "An Environment no longer owns "
+                    + ", ".join(sorted(moved))
+                    + ". Declare them on an App and list it in apps."
+                )
+            payload = {
+                key: item
+                for key, item in value.items()
+                if key
+                not in {
+                    "schema_version",
+                    "actions",
+                    "verifiers",
+                    "secrets",
+                    "state_schema",
+                    "observation_schema",
+                    "reset_command",
+                }
+            }
             if "version" not in payload and "revision" in payload:
                 payload["version"] = payload.pop("revision")
             return payload
@@ -557,21 +670,93 @@ class EnvironmentDefinition(FrozenModel):
     @model_validator(mode="after")
     def _unique_names(self) -> EnvironmentDefinition:
         semantic_version(self.version)
-        overlap = {item.name for item in self.runtime.variables} & {
-            item.name for item in self.secrets
-        }
+        app_names = [item.name for item in self.apps]
+        if len(app_names) != len(set(app_names)):
+            raise ValueError("App names must be unique within an Environment")
+        resource_names = [item.name for item in self.resources]
+        if len(resource_names) != len(set(resource_names)):
+            raise ValueError("resource names must be unique")
+        variables = {item.name for item in self.runtime.variables}
+        secret_names = {item.name for item in self.secrets}
+        credential_names = {item.name for item in self.credentials}
+        overlap = sorted(variables & (secret_names | credential_names))
         if overlap:
-            raise ValueError("Declare each runtime variable or secret only once")
-        for label, values in (
-            ("action", self.actions),
-            ("resource", self.resources),
-            ("rewarder", self.rewarders),
-            ("secret", self.secrets),
-        ):
-            names = [item.name for item in values]
-            if len(names) != len(set(names)):
-                raise ValueError(f"{label} names must be unique")
+            raise ValueError(
+                f"{overlap[0]} is both a Runtime variable and an App secret; declare it once"
+            )
+        mixed = sorted(secret_names & credential_names)
+        if mixed:
+            raise ValueError(
+                f"{mixed[0]} is a secret of one App and a credential of another. A "
+                "credential comes from the Agent and a secret from the project, so one name "
+                "cannot be both; rename one of them."
+            )
+        exposed = [item.name for item in self.actions]
+        clashes = sorted({name for name in exposed if exposed.count(name) > 1})
+        if clashes:
+            raise ValueError(f"Environment exposes duplicate action names: {clashes}")
+        if self.party is not None:
+            if not self.apps:
+                raise ValueError(
+                    f"Environment {self.name!r} has a party, so it needs an App its Agents share."
+                )
+            asking = [item.name for item in self.apps if item.credentials]
+            if asking:
+                # The host acts for every seat, so it could not keep one seat's credential
+                # from another.
+                raise ValueError(
+                    f"Environment {self.name!r} has a party, but its Apps {', '.join(asking)} "
+                    "ask for Agent credentials, and the party shares one App host. Use "
+                    "project secrets instead."
+                )
+            if self.party.isolation == "isolated" and self.runtime.provider == "local":
+                # Every process on the local Runtime runs as you, so one seat's
+                # Harness could read another's folder, token, and memory.
+                raise ValueError(
+                    f"Environment {self.name!r} has a party, so each seat needs an OS user "
+                    "of its own, and the local Runtime runs every seat as you. Use "
+                    "Runtime.docker(), which runs on your machine too, or Runtime.daytona(), "
+                    "or set party isolation to 'shared' if the seats may see each other."
+                )
         return self
+
+    @property
+    def actions(self) -> tuple[ExposedAction, ...]:
+        """Every App action as the Agent sees it.
+
+        Each keeps its own name, made safe for every model provider, and is
+        prefixed ``<app>__`` only when another App offers the same name. With
+        several Apps, each description starts with the App's name, so the
+        model knows which system a tool acts on.
+        """
+        return exposed_actions(self.apps)
+
+    @property
+    def secrets(self) -> tuple[SecretReference, ...]:
+        """Every setup secret the Environment's Apps need, each listed once."""
+        return _merged(item for app in self.apps for item in app.secrets)
+
+    @property
+    def credentials(self) -> tuple[SecretReference, ...]:
+        """Every credential the running Agent must supply, each listed once."""
+        return _merged(item for app in self.apps for item in app.credentials)
+
+    def app(self, name: str) -> AppDefinition:
+        """Return one App by name.
+
+        Raises:
+            KeyError: When the Environment has no App of that name.
+        """
+        for item in self.apps:
+            if item.name == name:
+                return item
+        available = ", ".join(item.name for item in self.apps) or "none"
+        raise KeyError(f"Environment {self.name!r} has no App {name!r}; Apps: {available}")
+
+    @property
+    def reproducible(self) -> bool:
+        """Whether every App starts each Trial from the same state."""
+        return all(item.reproducible for item in self.apps)
 
     @property
     def revision(self) -> str:
@@ -588,14 +773,17 @@ class EnvironmentDefinition(FrozenModel):
         """Stable Environment revision digest."""
         payload = self.model_dump(mode="json", exclude={"source"})
         if payload["runtime"]["ref"] is None:
-            # Revisions from before runtime references keep their hash.
             del payload["runtime"]["ref"]
+        if not self.runtime.packages:
+            # Runtimes that install nothing keep the identity they had before packages.
+            del payload["runtime"]["packages"]
+        for app in payload["apps"]:
+            # Apps that need no credentials keep the identity they had before credentials.
+            if not app["credentials"]:
+                del app["credentials"]
+
         digest = self.source.digest if self.source else None
         payload["source_digest"] = digest
-        if digest is not None:
-            # The source files already cover a Python rewarder's code.
-            for rewarder in payload["rewarders"]:
-                rewarder.pop("implementation_digest", None)
         return revision_hash("environment", payload)
 
     @property
@@ -604,14 +792,12 @@ class EnvironmentDefinition(FrozenModel):
         return EnvironmentIdentity(name=self.name, revision=self.version, digest=self.content_hash)
 
 
-Action = NativeAction
 Resource = EnvironmentResource
 Runtime = EnvironmentRuntime
 Secret = SecretReference
 
 
 __all__ = [
-    "Action",
     "EnvironmentIdentity",
     "EnvironmentDefinition",
     "EnvironmentResource",
@@ -620,10 +806,11 @@ __all__ = [
     "Guardrail",
     "HarnessPolicy",
     "HarnessGrant",
-    "NativeAction",
-    "RewarderDefinition",
+    "MAX_PARTY",
+    "Party",
     "Resource",
     "Runtime",
     "Secret",
     "SecretReference",
+    "party_seats",
 ]

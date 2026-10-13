@@ -1,7 +1,10 @@
-# Verifier: scores a finished episode. Its score, never the step rewards, is
-# what Tasks and Benchmarks rank on.
+# Verifier: what counts as good work for the Tasks that list it.
+# check scores the finished game; that score is the only thing a Benchmark ranks on.
+# reward credits each guess while the game runs, and hindsight credits guesses once
+# it is over. Both go to the reward ledger, for training, and never change the score.
 name: solved
-version: 0.1.0
+version: 1.0.0
 kind: deterministic
-check: verify.py:verify
-weight: 1
+check: verify.py:check
+reward: verify.py:reward
+hindsight: verify.py:fewer_guesses

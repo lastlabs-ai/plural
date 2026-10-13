@@ -65,6 +65,14 @@
         "runtime": {
           "$ref": "#/$defs/VerifierRuntime"
         },
+        "secrets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SecretReference"
+          },
+          "title": "Secrets",
+          "type": "array"
+        },
         "version": {
           "default": "0.1.0",
           "title": "Version",
@@ -135,7 +143,7 @@
     },
     "BenchmarkScoring": {
       "additionalProperties": false,
-      "description": "How a release turns attempts into one score per configuration.\n\nRepeated attempts of a Task are averaged first. Task scores are then\ncombined with ``task_weights``; a Task without a weight counts once. Step\nrewards never contribute: only the Verifier score on each Trial does.\n\nAttributes:\n    metric: Human-readable name of the success metric, such as\n        ``\"Resolution rate\"``. It labels the Verifier score; it never\n        selects a different value to rank on.\n    description: What a score means, in words a reader can act on.\n    aggregation: How Task scores combine. ``\"weighted_mean\"`` averages\n        attempts per Task, then takes the ``task_weights`` mean.\n    score_range: Lowest and highest possible Task score.\n    success_threshold: A Task attempt at or above this score counts as a\n        success. ``None`` means the Benchmark has no pass/fail notion.\n    task_weights: Weight per Task name. Unlisted Tasks weigh 1.\n    coverage_required: Weighted share of Tasks that must have a score\n        before a result can be ranked officially.\n    agent_failure: How an attempt that ended without a Verifier score\n        because of the Agent (for example, a budget ran out) is scored.\n        ``\"zero\"`` scores it at the bottom of the range.\n    infrastructure_error: Attempts lost to the runtime or provider are\n        excluded from scores and reported separately.\n    min_tasks_for_interval: Fewest scored Tasks before an uncertainty\n        interval is reported. Below this, uncertainty is shown as unknown.",
+      "description": "How a release turns attempts into one score per configuration.\n\nRepeated attempts of a Task are averaged first. Task scores are then\ncombined with ``task_weights``; a Task without a weight counts once. Only the\nVerifier score on each Trial counts; step rewards reach it only through a\nVerifier whose check is ``total_reward``.\n\nAttributes:\n    metric: Human-readable name of the success metric, such as\n        ``\"Resolution rate\"``. It labels the Verifier score; it never\n        selects a different value to rank on.\n    description: What a score means, in words a reader can act on.\n    aggregation: How Task scores combine. ``\"weighted_mean\"`` averages\n        attempts per Task, then takes the ``task_weights`` mean.\n    score_range: Lowest and highest possible Task score.\n    success_threshold: A Task attempt at or above this score counts as a\n        success. ``None`` means the Benchmark has no pass/fail notion.\n    task_weights: Weight per Task name. Unlisted Tasks weigh 1.\n    coverage_required: Weighted share of Tasks that must have a score\n        before a result can be ranked officially.\n    agent_failure: How an attempt that ended without a Verifier score\n        because of the Agent (for example, a budget ran out) is scored.\n        ``\"zero\"`` scores it at the bottom of the range.\n    infrastructure_error: Attempts lost to the runtime or provider are\n        excluded from scores and reported separately.\n    min_tasks_for_interval: Fewest scored Tasks before an uncertainty\n        interval is reported. Below this, uncertainty is shown as unknown.",
       "properties": {
         "agent_failure": {
           "default": "zero",
@@ -224,9 +232,32 @@
     },
     "DeterministicVerifier": {
       "additionalProperties": false,
-      "description": "Function or command that scores a completed Episode.",
+      "anyOf": [
+        {
+          "required": [
+            "check"
+          ]
+        },
+        {
+          "required": [
+            "command"
+          ]
+        },
+        {
+          "required": [
+            "reward"
+          ]
+        },
+        {
+          "required": [
+            "hindsight"
+          ]
+        }
+      ],
+      "description": "Code that verifies an episode: it scores the end, rewards actions, or both.\n\n``check`` scores the finished episode; that score is what Tasks and\nBenchmarks rank on. It is a function of the :class:`Episode`, a\n``{\"python\": \"verify.py:check\"}`` reference, or a command argv.\n\n``reward`` rewards each action while the episode runs. It is a function of\none :class:`Step`, or a ``{\"python\": \"verify.py:reward\"}`` reference, and\nruns in the Runtime beside the Apps, so it can read every App. What it\nreturns goes to the Trial's reward ledger. Rewards reach the score only\nwhen ``check`` is :func:`total_reward`.\n\n``hindsight`` credits the finished trajectory as a whole: a function of a\n:class:`~plural.rewards.HindsightTrial` that returns\n:class:`~plural.rewards.Credit` values, or a ``{\"python\":\n\"verify.py:efficiency\"}`` reference. It runs after the score, and can also\nrun later on stored Trials with ``plural verifier apply``.",
       "properties": {
         "check": {
+          "default": null,
           "title": "Check"
         },
         "criteria": {
@@ -241,6 +272,10 @@
           "default": true,
           "title": "Evidence Required",
           "type": "boolean"
+        },
+        "hindsight": {
+          "default": null,
+          "title": "Hindsight"
         },
         "info": {
           "default": null,
@@ -267,8 +302,20 @@
           "title": "Result Path",
           "type": "string"
         },
+        "reward": {
+          "default": null,
+          "title": "Reward"
+        },
         "runtime": {
           "$ref": "#/$defs/VerifierRuntime"
+        },
+        "secrets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SecretReference"
+          },
+          "title": "Secrets",
+          "type": "array"
         },
         "version": {
           "default": "0.1.0",
@@ -283,8 +330,7 @@
         }
       },
       "required": [
-        "name",
-        "check"
+        "name"
       ],
       "title": "DeterministicVerifier",
       "type": "object"
@@ -579,6 +625,14 @@
           "title": "Name",
           "type": "string"
         },
+        "secrets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SecretReference"
+          },
+          "title": "Secrets",
+          "type": "array"
+        },
         "version": {
           "default": "0.1.0",
           "title": "Version",
@@ -722,9 +776,43 @@
       "title": "RubricCriterion",
       "type": "object"
     },
+    "SecretReference": {
+      "additionalProperties": false,
+      "description": "A named value an App needs, which it never stores itself.\n\nIn an App's ``secrets`` it is a setup secret, such as a sandbox's admin\ntoken, supplied by the project for reset and snapshot hooks and Verifiers.\nIn its ``credentials`` it is supplied by the Agent that runs, such as the\nSalesforce token of the user that Agent acts as. Either way the value\nreaches only the App host, never the Harness or the model.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Z_][A-Z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "scopes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SecretReference",
+      "type": "object"
+    },
     "Task": {
       "additionalProperties": false,
-      "description": "One versioned unit of work in a Python-authored Environment.",
+      "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.",
       "properties": {
         "environment": {
           "title": "Environment"
@@ -773,6 +861,13 @@
           },
           "title": "Resources",
           "type": "array"
+        },
+        "seat_instructions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Seat Instructions",
+          "type": "object"
         },
         "verifiers": {
           "items": {

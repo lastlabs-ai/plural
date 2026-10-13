@@ -2,4 +2,4 @@
 name = "wordle"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["plural>=0.15"]
+dependencies = ["plural>=0.21"]

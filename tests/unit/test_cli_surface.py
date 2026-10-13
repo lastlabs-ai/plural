@@ -27,21 +27,29 @@ def test_top_level_commands_are_the_documented_set() -> None:
     commands = set(_root().commands)
     assert commands == {
         "auth",
+        "credential",
         "project",
         *RESOURCE_GROUPS,
         "run",
         "job",
         "trial",
         "review",
+        "rewards",
         "models",
         "runtime",
+        "secret",
         "session",
     }
 
 
 def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
     root = _root()
-    extras = {"benchmark": {"add", "remove"}, "agent": {"serve"}}
+    extras = {
+        "benchmark": {"add", "remove"},
+        "agent": {"serve"},
+        "env": {"add", "eject-files", "serve"},
+        "verifier": {"try", "apply"},
+    }
     for name in RESOURCE_GROUPS:
         group = root.commands[name]
         assert isinstance(group, TyperGroup)
@@ -56,7 +64,9 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
         ("project", {"init", "push", "show"}),
         ("job", {"show", "list", "rerun", "push"}),
         ("trial", {"show", "rerun", "rescore"}),
+        ("rewards", {"show", "export"}),
         ("models", {"list"}),
+        ("secret", {"list", "set", "delete"}),
         (
             "runtime",
             {

@@ -9,7 +9,14 @@ import pytest
 from pydantic import ValidationError
 
 from plural import Resource, Runtime, RuntimeVariable, Secret
+from plural.apps.definition import AppAction, AppDefinition
 from plural.environments.definition import EnvironmentDefinition
+from plural.execution.apps import (
+    app_secret_values,
+    host_files,
+    host_inputs,
+    missing_app_secrets,
+)
 from plural.execution.engine import Trial
 from plural.execution.inputs import resource_uploads, runtime_values
 from plural.harness.native_runner import _action_environment
@@ -19,16 +26,18 @@ def inline(path="policy.md", content="shared"):
     return Resource(kind="file", name=path, path=path, delivery="inline", content=content)
 
 
-def test_scopes_are_isolated_and_manifest_contains_actual_hashes():
+def test_environment_and_task_resources_are_separate_read_only_volumes():
     uploads = resource_uploads((inline(),), (inline(content="case"),), None, {})
     files = {item.path: item.data for item in uploads}
-    assert files["shared/policy.md"] == b"shared"
-    assert files["task/policy.md"] == b"case"
+    assert files["environment-resources/policy.md"] == b"shared"
+    assert files["task-resources/policy.md"] == b"case"
+    assert {item.mode for item in uploads} == {0o444}
     manifest = json.loads(files["manifest.json"])
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
+    assert [item["scope"] for item in manifest["resources"]] == ["environment", "task"]
     assert manifest["resources"][1]["digest"] == "sha256:" + hashlib.sha256(b"case").hexdigest()
     next_run = resource_uploads((inline(),), (), None, {})
-    assert "task/policy.md" not in {item.path for item in next_run}
+    assert "task-resources/policy.md" not in {item.path for item in next_run}
 
 
 @pytest.mark.parametrize("path", ["../data", "/etc/passwd", "a/../b", "a//b", "a/", "a\\b"])
@@ -84,7 +93,6 @@ def test_launch_values_are_scoped_and_validated_without_disclosing_values():
                 RuntimeVariable(name="SUPPORT_URL", format="url"),
             ]
         ),
-        secrets=[Secret(name="JUDGE_TOKEN", target="verifier")],
     )
     supplied = {
         "SUPPORT_TOKEN": "private",
@@ -95,13 +103,40 @@ def test_launch_values_are_scoped_and_validated_without_disclosing_values():
     values, secrets = runtime_values(env, supplied)
     assert values == {"SUPPORT_TOKEN": "private", "SUPPORT_URL": "https://example.com"}
     assert secrets == {"SUPPORT_TOKEN": "private"}
-    assert runtime_values(env, supplied, target="verifier")[0] == {"JUDGE_TOKEN": "judge"}
     assert "private" not in env.model_dump_json()
     with pytest.raises(ValueError, match="Missing required runtime variable: SUPPORT_TOKEN"):
         runtime_values(env, {})
     with pytest.raises(ValueError, match="SUPPORT_URL must contain url") as caught:
         runtime_values(env, {**supplied, "SUPPORT_URL": "sensitive-invalid-value"})
     assert "sensitive-invalid-value" not in str(caught.value)
+
+
+def _crm_environment() -> EnvironmentDefinition:
+    crm = AppDefinition(
+        name="crm",
+        kind="mcp",
+        actions=(AppAction(name="get_record", description="Read."),),
+        secrets=(Secret(name="CRM_TOKEN"), Secret(name="CRM_REGION", required=False)),
+        control="live",
+    )
+    return EnvironmentDefinition(name="desk", apps=(crm,))
+
+
+def test_app_secrets_are_resolved_by_app_and_named_when_missing():
+    env = _crm_environment()
+    assert [item.name for item in env.secrets] == ["CRM_TOKEN", "CRM_REGION"]
+    assert app_secret_values(env, {"CRM_TOKEN": "t", "OTHER": "x"}) == {"CRM_TOKEN": "t"}
+    assert missing_app_secrets(env, {}) == {"crm": ["CRM_TOKEN"]}
+    with pytest.raises(ValueError, match="App 'crm' needs CRM_TOKEN") as caught:
+        app_secret_values(env, {"CRM_REGION": "eu-private"})
+    assert "eu-private" not in str(caught.value)
+
+
+def test_secret_names_cannot_shadow_runtime_variables():
+    with pytest.raises(ValidationError):
+        Secret(name="PATH")
+    with pytest.raises(ValidationError):
+        Secret(name="PLURAL_API_KEY")
 
 
 def test_reserved_variables_and_saved_values_rejected():
@@ -122,30 +157,65 @@ def test_action_environment_has_only_declared_inputs(monkeypatch, tmp_path):
     assert values["PLURAL_RESOURCES_DIR"] == str(tmp_path / "workspace/resources")
 
 
-def test_trial_stages_resources_and_initial_state_without_source():
+def gentle(step):
+    return 0.0
+
+
+def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
+    from plural import DeterministicVerifier
+
     staged = {}
 
     class Provider:
         async def upload_files(self, handle, files, *, root):
             staged[root] = {item.path: item.data for item in files}
 
+    game = AppDefinition(
+        name="game",
+        kind="python",
+        python="game.py:Game",
+        actions=(AppAction(name="move", description="Move."),),
+        state_schema={"properties": {"seed": {"type": "integer", "x-plural-initial": True}}},
+    )
     task = SimpleNamespace(
-        environment=EnvironmentDefinition(
-            name="test",
-            resources=(inline(),),
-            state_schema={"properties": {"seed": {"type": "integer"}}},
-        ),
+        environment=EnvironmentDefinition(name="test", resources=(inline(),), apps=(game,)),
         resources=(inline("ticket.txt", "case"),),
         state={"seed": 42},
         task_id="case",
+        info={"hint": "visible"},
+        metadata={"tier": "gold"},
+        verifiers=(SimpleNamespace(verifier=DeterministicVerifier(name="gentle", reward=gentle)),),
     )
     asyncio.run(
         Trial._stage_environment(
             SimpleNamespace(task=task, resource_resolvers={}), Provider(), None
         )
     )
-    assert staged["/workspace/resources"]["task/ticket.txt"] == b"case"
-    assert json.loads(staged["/workspace/environment"]["state.json"]) == {"seed": 42}
+    assert staged["/workspace/resources"]["task-resources/ticket.txt"] == b"case"
+    assert "/workspace/environment" not in staged
+    files = {item.path: item.data for item in host_files(task)}
+    # The hidden initial State is not in the shared file; it goes to the host on stdin.
+    assert json.loads(files[".plural/apps/task.json"]) == {
+        "task": {"name": "case", "metadata": {"tier": "gold"}},
+        "verifiers": [
+            {
+                "name": "gentle",
+                "version": "0.1.0",
+                "dir": ".plural/verifiers/0",
+                "python": "test_runtime_inputs.py:gentle",
+            }
+        ],
+    }
+    assert host_inputs(task) == {
+        "initial_state": {"game": {"seed": 42}},
+        "info": {"hint": "visible"},
+        "seed": None,
+    }
+    assert b"def gentle(step)" in files[".plural/verifiers/0/test_runtime_inputs.py"]
+    assert (
+        EnvironmentDefinition.model_validate_json(files[".plural/apps/environment.json"]).identity
+        == task.environment.identity
+    )
 
 
 def test_explicit_empty_job_environment_does_not_inherit_values(monkeypatch):

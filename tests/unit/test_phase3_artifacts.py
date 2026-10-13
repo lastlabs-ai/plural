@@ -91,7 +91,7 @@ def test_planning_pins_benchmark_task_and_catalog_endpoint() -> None:
             WeightedVerifier(
                 verifier=DeterministicVerifier(
                     name="check",
-                    command=("python", "check.py"),
+                    check=("python", "check.py"),
                     runtime=VerifierRuntime(),
                 )
             ),

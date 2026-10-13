@@ -22,17 +22,18 @@ In everyday terms first, then the fields each one holds:
 
 | Everyday idea | Object | What it holds |
 | --- | --- | --- |
-| The world | `Environment` | world, actions, state, observation, Runtime, resources, rewarders, limits, and rendering |
+| A system the AI works with | `App` | actions, State, credentials and secrets, snapshot and reset hooks, and rendering |
+| The world | `Environment` | Apps, Runtime, resources, Harness policy, limits, and the `on_step` hook |
 | One assignment | `Task` | instructions, one Environment, Verifiers, task resources, initial state |
-| The grader | `Verifier` | information, criteria, evidence, runtime, weight, check behavior |
+| What counts as good work | `Verifier` | information, criteria, evidence, runtime, weight, `check` (the score) and `reward` (per-step rewards) |
 | The contestant | `Agent` | model, provider, instructions, optional Harness, metadata |
 | How the contestant plays | `Harness` | interaction loop and extra tools for one Agent, bounded by the Environment's policy |
 | The exam | `Benchmark` | name, version, ordered Tasks, scoring rules, and metadata |
 | One run you start | `Job` | source, Agents, mode, attempts, concurrency, retry policy |
 | One attempt | `Trial` | one Agent × one Task × one planned attempt; Job output |
 
-Runtime, Resources, and Rewarders are part of the Environment. They are not objects of
-their own.
+Apps, Runtime, and Resources are part of the Environment, and Verifiers are part of an
+App. They are not run or versioned on their own.
 
 A few rules that matter:
 
@@ -41,7 +42,7 @@ A few rules that matter:
   `HarnessDefinition` is the flattened public schema that describes a packaged Harness
   in YAML and the API.
 - **Benchmark:** it ranks only on the Verifier `score` (`primary_metric` defaults to
-  `"score"`); rewards never contribute.
+  `"score"`); rewards count only through a Verifier whose `check` is `total_reward`.
 
 ## Versions and strict fields
 

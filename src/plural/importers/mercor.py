@@ -194,7 +194,7 @@ def import_mercor_trial(
     transitions = _read_json(root / "agent" / "tito_transitions.json")
     if transitions is None:
         transitions = _read_json(root / "tito_transitions.json")
-    # Mercor names the Verifier's score "reward" in its own export format.
+    # Mercor names its verifier's score "reward" in its own export format.
     verifier_raw = _read_json(root / "verifier" / "reward.json")
     verifier = verifier_raw if isinstance(verifier_raw, dict) else {}
     reported = verifier.get("reward") if isinstance(verifier, dict) else None

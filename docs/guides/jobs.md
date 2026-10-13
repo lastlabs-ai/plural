@@ -114,7 +114,7 @@ Jobs. Retry policy may add executions to a Trial but does not add Trials.
 number and the reason:
 
 ```text
-Running benchmark/wordle@1.0.0 with word-list (openai/gpt-5.6-luna) locally: 3 trial(s), 3 at a time (auto: every Trial at once).
+Running benchmark/wordle@1.0.0 with luna (openai/gpt-5.6-luna) locally: 5 trial(s), 5 at a time (auto: every Trial at once).
 ```
 
 A Trial spends most of its time waiting on the model, so `auto` takes the lowest
@@ -247,7 +247,7 @@ one-Trial Job whose `rerun_of_trial_id` points at the Trial. A hosted rerun is
 refused when the model catalog would now resolve the model differently.
 
 Each Job's `events.jsonl` is an append-only record of planning, provisioning,
-execution, verification, retries, human review, and the final status. A retry is
+execution, scoring, retries, human review, and the final status. A retry is
 a new execution inside the same Trial, not a new attempt. From Python,
 `job.run(resume=True)` keeps the Trials that already succeeded. A review
 submission completes only a Trial that is waiting at `awaiting_review`; see

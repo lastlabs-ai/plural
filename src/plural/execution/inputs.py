@@ -10,26 +10,33 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from plural.environments.definition import EnvironmentDefinition, EnvironmentResource
+from plural.mcp import ENVIRONMENT_RESOURCES, TASK_RESOURCES
 from plural.sandbox.models import FileUpload
 
 ResourceResolver = Callable[[EnvironmentResource], bytes]
 MAX_RESOURCE_BYTES = 16 * 1024 * 1024
+RESOURCES_ROOT = "/workspace/resources"
 
 
 def runtime_values(
-    environment: EnvironmentDefinition, environ: Mapping[str, str], *, target: str = "environment"
+    environment: EnvironmentDefinition, environ: Mapping[str, str]
 ) -> tuple[dict[str, str], dict[str, str]]:
+    """Values for the Runtime's declared variables, and which of them are secret.
+
+    App secrets are resolved separately, because only the App host receives them.
+
+    Returns:
+        All values, and the secret subset for redaction.
+    """
     values: dict[str, str] = {}
     secrets: dict[str, str] = {}
-    declarations: list[Any] = list(environment.runtime.variables) if target == "environment" else []
-    declarations += [item for item in environment.secrets if item.target == target]
-    for item in declarations:
+    for item in environment.runtime.variables:
         value = environ.get(item.name)
         if value is None or value == "":
             if item.required:
                 raise ValueError(f"Missing required runtime variable: {item.name}")
             continue
-        kind = getattr(item, "format", "text")
+        kind = item.format
         try:
             if kind == "integer":
                 int(value)
@@ -40,7 +47,7 @@ def runtime_values(
         except (ValueError, TypeError):
             raise ValueError(f"Runtime variable {item.name} must contain {kind}") from None
         values[item.name] = value
-        if getattr(item, "secret", True):
+        if item.secret:
             secrets[item.name] = value
     return values, secrets
 
@@ -51,9 +58,20 @@ def resource_uploads(
     source: Path | None,
     resolvers: Mapping[str, ResourceResolver],
 ) -> tuple[FileUpload, ...]:
+    """Stage the Environment's and the Task's resources, each in its own read-only folder.
+
+    The folders are volumes the Trial references, not files it owns, so they are
+    staged read-only and never share a path.
+
+    Returns:
+        The files to upload under the resources root, and their manifest.
+    """
     uploads: list[FileUpload] = []
     manifest: list[dict[str, Any]] = []
-    for scope, resources in (("shared", shared), ("task", task)):
+    for scope, folder, resources in (
+        ("environment", ENVIRONMENT_RESOURCES, shared),
+        ("task", TASK_RESOURCES, task),
+    ):
         paths: set[str] = set()
         for item in resources:
             if item.delivery == "descriptor":
@@ -90,8 +108,8 @@ def resource_uploads(
             digest = "sha256:" + hashlib.sha256(data).hexdigest()
             if item.digest is not None and item.digest != digest:
                 raise ValueError(f"Resource {item.name} does not match its expected digest")
-            destination = f"{scope}/{path}"
-            uploads.append(FileUpload(path=destination, data=data))
+            destination = f"{folder}/{path}"
+            uploads.append(FileUpload(path=destination, data=data, mode=0o444))
             manifest.append(
                 {
                     "scope": scope,
@@ -104,7 +122,8 @@ def resource_uploads(
     uploads.append(
         FileUpload(
             path="manifest.json",
-            data=json.dumps({"schema_version": 1, "resources": manifest}, sort_keys=True).encode(),
+            data=json.dumps({"schema_version": 2, "resources": manifest}, sort_keys=True).encode(),
+            mode=0o444,
         )
     )
     return tuple(uploads)
