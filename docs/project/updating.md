@@ -46,7 +46,7 @@ plural benchmark validate support-triage
 ```
 
 `plural <kind> validate <name>` also checks everything the resource depends on.
-`plural run` uses your local files unless you pass `--hosted` or
+`plural run` uses your local files unless you
 [name a retained revision](#calling-a-revision-by-name). In Python, created SDK objects
 are frozen values, so construct a new value rather than changing an existing one.
 
@@ -124,7 +124,7 @@ wherever a command names a Task, Benchmark, or Agent to run, show, or pull:
 
 ```bash
 plural run --benchmark wordle@1.0.0 --model openai/gpt-5.6-luna
-plural run --task refund@2 --agent baseline@sha256:61d8a0c --hosted
+plural run --task refund@2 --agent baseline@sha256:61d8a0c --record
 plural benchmark show wordle@3
 plural benchmark pull wordle@1.0.0 --force
 ```

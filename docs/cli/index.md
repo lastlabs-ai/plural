@@ -42,47 +42,65 @@ Plural API key, stored with `plural auth login --api-key-stdin` or set in
 plural project init NAME [--push]
 plural project show NAME
 plural project push
-plural env init NAME [--python]
-plural task|verifier|harness|agent|benchmark init NAME
+plural env init NAME [--python] [--bare]
+plural task init NAME [--environment ENV] [--verifier NAME]
+plural agent init NAME --model MODEL [--harness HARNESS]
+plural verifier|harness|benchmark init NAME
 plural env|task|verifier|harness|agent|benchmark validate|show|push|pull [NAME]
 plural env|task|verifier|harness|agent|benchmark list
+plural env|task|verifier|harness|agent|benchmark delete NAME [--hosted] [-y]
 plural benchmark add|remove TASK [--benchmark NAME]
-plural env add NAME (--mcp URL_OR_COMMAND | --openapi SPEC | --traces FILE) [--app APP]
-           [--header K=V] [--env K=V] [--tool NAME] [--operation ID] [--credential NAME]
-plural env eject-files NAME [--as FILE]
+plural app add ENV (--mcp URL_OR_COMMAND | --openapi SPEC | --traces FILE | --files-server)
+           [--app APP] [--header K=V] [--server-env K=V] [--tool NAME] [--operation ID]
+           [--credential NAME] [--copy]
+plural app list ENV
+plural app remove ENV APP
 plural env serve NAME [--app APP] [--port 3825]
-plural run (-t TASK | -b BENCHMARK) (-m MODEL [-h HARNESS] | -a AGENT)
-           [--hosted [--follow] | --track] [--attempts N] [--concurrency N]
+plural run (-t TASK | -b BENCHMARK) (-m MODEL [--harness HARNESS] | -a AGENT)
+           [--record] [--evaluation-track ID] [--attempts N] [--concurrency N]
            [--plural-version VERSION] [--dry-run] [--json]
 plural job list
-plural job show|rerun|push JOB_ID
+plural job show|rerun|record JOB_ID
 plural trial show|rerun TRIAL_ID
 plural review list
 plural review submit TRIAL_ID --verifier NAME --score SCORE
 plural verifier try|apply NAME (--trial TRIAL_ID... | --job JOB_ID)
-plural rewards show TRIAL_ID
-plural rewards export (--trial TRIAL_ID... | --job JOB_ID) [--verifier NAME[@VERSION]]
-plural models list
-plural auth login|logout|status|scope
+plural reward show TRIAL_ID
+plural reward export (--trial TRIAL_ID... | --job JOB_ID) [--verifier NAME[@VERSION]]
+plural model list
+plural secret list|set|delete
+plural credential list|set|delete
+plural auth login|logout|status
+plural auth scope [--account | --project NAME] [--org ORG]
 plural session export|import
 ```
 
 Arguments in brackets are optional. A resource name you leave out defaults to the
 resource folder you are in, and `benchmark add` and `benchmark remove` default to the
-Benchmark folder you are in.
+Benchmark folder you are in. Where a command takes NAME[@REF], REF is a revision
+number (@3), a release version (@1.0.0), or a content hash; `pull`, `show`, and `run`
+accept it.
+
+`delete` removes the resource's folder and refuses while another resource in the
+project uses it. Add `--hosted` to delete it from the hosted project too; Jobs and
+Trials that pinned its revisions can still read them. Resources are not renamed in
+place: create the new one, point its users at it, and delete the old one.
 
 ## Where runs happen
 
 - **Locally (the default).** Every run is a new Job, recorded under `.plural/jobs/`
   in your project.
-- **Locally, and recorded in your hosted project.** `plural run ... --track` runs on
+- **Locally, and recorded in your hosted project.** `plural run ... --record` runs on
   your machine and records the Job in your private hosted project as it goes.
-  `plural job push JOB_ID` does the same for a local Job that has already finished.
-- **On Plural's hosted infrastructure.** `plural run ... --hosted` sends the run to
-  Plural's workers and needs `plural auth login`. `--track` and `--hosted` push any
-  input your hosted project does not have yet before the run starts.
+  `plural job record JOB_ID` does the same for a local Job that has already finished.
+- **In cloud sandboxes.** An Environment whose `runtime` is a cloud provider, such as
+  `daytona`, runs each Trial in a remote sandbox. The Job still runs from your machine,
+  with or without `--record`.
 
-`-m` without `-h` uses `native`, Plural's built-in tool loop, as the **Harness** (the
+`--record` pushes any input your hosted project does not have yet before the run
+starts. Plural never runs a Job on its own servers.
+
+`-m` without `--harness` uses `native`, Plural's built-in tool loop, as the **Harness** (the
 loop that decides what the model does next).
 
 The [CLI guide](evaluation.md) walks through these commands and ends with the

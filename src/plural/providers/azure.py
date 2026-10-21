@@ -20,7 +20,12 @@ Examples:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from plural.providers.openai_compatible import OpenAICompatible
+
+if TYPE_CHECKING:
+    import httpx
 
 AZURE_V1_SUFFIX = "/openai/v1"
 
@@ -61,6 +66,8 @@ class AzureOpenAIProvider(OpenAICompatible):
         name: Provider slug.
         timeout_s: Request timeout in seconds.
         default_headers: Extra headers.
+        http_transport: Transport for synchronous requests.
+        async_http_transport: Transport for asynchronous requests.
 
     Raises:
         ConfigurationError: If neither ``endpoint`` nor ``base_url`` is given.
@@ -94,6 +101,8 @@ class AzureOpenAIProvider(OpenAICompatible):
         name: str | None = None,
         timeout_s: float | None = None,
         default_headers: dict[str, str] | None = None,
+        http_transport: httpx.BaseTransport | None = None,
+        async_http_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         from plural.errors import ConfigurationError
 
@@ -112,6 +121,8 @@ class AzureOpenAIProvider(OpenAICompatible):
             name=name,
             timeout_s=timeout_s,
             default_headers=default_headers,
+            http_transport=http_transport,
+            async_http_transport=async_http_transport,
         )
         if api_version:
             self._client.params = {"api-version": api_version}

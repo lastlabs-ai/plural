@@ -6,8 +6,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, ValidationInfo, field_validator, model_validator
+from pydantic import AliasChoices, Field, ValidationInfo, field_validator, model_validator
 
+from plural._deprecation import renamed_attribute, renamed_keys
 from plural.catalog import ModelCatalog
 from plural.common import (
     FrozenModel,
@@ -21,10 +22,26 @@ from plural.common import (
 from plural.harness.models import Harness, HarnessDefinition
 from plural.identity import revision_hash
 
+AuthMode = Literal["environment", "api_key", "oauth", "none"]
+
+AGENT_RENAMES = {
+    "harness_kwargs": "harness_config",
+    "auth_mode": "auth",
+    "secret_names": "secrets",
+}
+"""Old Agent field names, accepted on input for one release, and their new names."""
+
 
 @lru_cache(maxsize=1)
 def _bundled_catalog() -> ModelCatalog:
     return ModelCatalog()
+
+
+def _check_auth(auth: str, secrets: tuple[str, ...]) -> None:
+    if auth == "api_key" and not secrets:
+        raise ValueError("auth='api_key' requires the secret's name in secrets")
+    if auth == "none" and secrets:
+        raise ValueError("auth='none' cannot grant secrets")
 
 
 class AgentCredential(FrozenModel):
@@ -97,9 +114,21 @@ class Agent(FrozenModel):
     temperature: float | None = None
     max_tokens: int | None = Field(default=None, gt=0)
     harness: HarnessDefinition | Harness | str | None = None
-    harness_kwargs: dict[str, Any] = Field(default_factory=dict)
-    auth_mode: Literal["environment", "api_key", "oauth", "none"] = "environment"
-    secret_names: tuple[str, ...] = ()
+    harness_config: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("harness_config", "harness_kwargs"),
+        description="Options for a built-in Harness, such as reasoning_effort.",
+    )
+    auth: AuthMode = Field(
+        default="environment",
+        validation_alias=AliasChoices("auth", "auth_mode"),
+        description="How the Harness authenticates to the model; none when it calls no model.",
+    )
+    secrets: tuple[str, ...] = Field(
+        default=(),
+        validation_alias=AliasChoices("secrets", "secret_names"),
+        description="Names of the Harness's declared secrets this Agent grants it.",
+    )
     endpoint: str | None = None
     endpoint_key: str | None = None
     credentials: dict[str, AgentCredential] = Field(default_factory=dict)
@@ -107,6 +136,15 @@ class Agent(FrozenModel):
 
     _credential_map = field_validator("credentials", mode="before")(_credential_map)
     _credential_names = field_validator("credentials")(_credential_names)
+
+    harness_kwargs = renamed_attribute("harness_kwargs", "harness_config")
+    auth_mode = renamed_attribute("auth_mode", "auth")
+    secret_names = renamed_attribute("secret_names", "secrets")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _renamed_fields(cls, value: Any) -> Any:
+        return renamed_keys(value, AGENT_RENAMES, "Agent")
 
     @model_validator(mode="after")
     def _validate_public_agent(self, info: ValidationInfo) -> Agent:
@@ -119,11 +157,10 @@ class Agent(FrozenModel):
         selected = catalog.get(self.model)
         if selected is None:
             nearby = catalog.suggest(self.model)
-            hint = f" Nearby catalog IDs: {', '.join(nearby)}." if nearby else ""
+            hint = f" Did you mean {', '.join(nearby)}?" if nearby else ""
             raise ValueError(
-                f"Cannot create Agent {self.name or self.model!r}.\n"
-                f"model {self.model!r} is not registered in the effective ModelCatalog.{hint}\n"
-                "Use a bundled catalog ID or register the model with CatalogContext."
+                f"Unknown model {self.model!r}.{hint} `plural model list` shows every "
+                "model id; a model of your own is registered with CatalogContext."
             )
         if self.provider is not None and self.provider not in selected.host_providers():
             raise ValueError(
@@ -132,16 +169,12 @@ class Agent(FrozenModel):
         unknown_fallbacks = [model for model in self.fallback_models if catalog.get(model) is None]
         if unknown_fallbacks:
             raise ValueError(
-                "fallback models are not registered in the effective ModelCatalog: "
-                + ", ".join(repr(model) for model in unknown_fallbacks)
+                "unknown fallback models: " + ", ".join(repr(model) for model in unknown_fallbacks)
             )
         semantic_version(self.version)
         if not self.name:
             object.__setattr__(self, "name", self.model.rsplit("/", 1)[-1])
-        if self.auth_mode == "api_key" and not self.secret_names:
-            raise ValueError("api_key auth_mode requires a secret name")
-        if self.auth_mode == "none" and self.secret_names:
-            raise ValueError("none auth_mode cannot declare secrets")
+        _check_auth(self.auth, self.secrets)
         root = context.get("root")
         root_path = root if isinstance(root, Path) else Path.cwd()
         if isinstance(self.harness, str):
@@ -160,32 +193,31 @@ class Agent(FrozenModel):
                 )
             object.__setattr__(
                 self,
-                "harness_kwargs",
-                normalize_kwargs(self.harness, self.harness_kwargs, root=root_path),
+                "harness_config",
+                normalize_kwargs(self.harness, self.harness_config, root=root_path),
             )
-            undeclared = sorted(set(self.secret_names) - set(spec.secret_names))
+            undeclared = sorted(set(self.secrets) - set(spec.secret_names))
             if undeclared:
                 raise ValueError(
-                    f"Agent secret_names are not declared by Harness {self.harness!r}: "
-                    f"{undeclared!r}"
+                    f"Agent secrets are not declared by Harness {self.harness!r}: {undeclared!r}"
                 )
         elif self.harness is not None:
-            if self.harness_kwargs:
+            if self.harness_config:
                 raise ValueError(
-                    "harness_kwargs is only valid with a built-in Harness name such as "
+                    "harness_config is only valid with a built-in Harness name such as "
                     "'claude-code', 'codex', or 'hermes'"
                 )
             package = self.harness._package()
-            undeclared = sorted(set(self.secret_names) - set(package.definition.secret_names))
+            undeclared = sorted(set(self.secrets) - set(package.definition.secret_names))
             if undeclared:
                 raise ValueError(
-                    "Agent secret_names are not declared by Harness "
+                    "Agent secrets are not declared by Harness "
                     f"{package.definition.name!r}: "
                     f"{undeclared!r}"
                 )
-        elif self.harness_kwargs:
+        elif self.harness_config:
             raise ValueError(
-                "harness_kwargs requires harness to be a built-in name such as "
+                "harness_config requires harness to be a built-in name such as "
                 "'claude-code', 'codex', or 'hermes'"
             )
         return self
@@ -204,7 +236,7 @@ class Agent(FrozenModel):
                 ("harness", self.harness is not None),
                 ("provider", self.provider is not None),
                 ("fallback_models", bool(self.fallback_models)),
-                ("secret_names", bool(self.secret_names)),
+                ("secrets", bool(self.secrets)),
             )
             if given
         ]
@@ -247,7 +279,7 @@ class Agent(FrozenModel):
         if isinstance(self.harness, str):
             from plural.harness.builtins import resolve_builtin_package
 
-            return resolve_builtin_package(self.harness, self.harness_kwargs)
+            return resolve_builtin_package(self.harness, self.harness_config)
         return self.harness._package() if self.harness is not None else None
 
     @property
@@ -281,9 +313,9 @@ class Agent(FrozenModel):
             routing=self.routing,
             harness=(HarnessBinding.from_package(harness_package) if harness_package else None),
             harness_package=harness_package,
-            harness_kwargs=self.harness_kwargs,
-            auth_mode=self.auth_mode,
-            secret_names=self.secret_names,
+            harness_config=self.harness_config,
+            auth=self.auth,
+            secrets=self.secrets,
             endpoint=self.endpoint,
             endpoint_key=self.endpoint_key,
             credentials=self.credentials,
@@ -302,9 +334,16 @@ class AgentDefinition(FrozenModel):
     routing: RoutingSpec = Field(default_factory=RoutingSpec)
     harness: HarnessBinding | None = None
     harness_package: HarnessPackage | None = None
-    harness_kwargs: dict[str, Any] = Field(default_factory=dict)
-    auth_mode: Literal["environment", "api_key", "oauth", "none"] = "environment"
-    secret_names: tuple[str, ...] = ()
+    harness_config: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("harness_config", "harness_kwargs"),
+    )
+    auth: AuthMode = Field(
+        default="environment", validation_alias=AliasChoices("auth", "auth_mode")
+    )
+    secrets: tuple[str, ...] = Field(
+        default=(), validation_alias=AliasChoices("secrets", "secret_names")
+    )
     endpoint: str | None = None
     """An OpenAI-compatible base URL the native Harness calls instead of the gateway."""
     endpoint_key: str | None = None
@@ -316,6 +355,15 @@ class AgentDefinition(FrozenModel):
     _credential_map = field_validator("credentials", mode="before")(_credential_map)
     _credential_names = field_validator("credentials")(_credential_names)
 
+    harness_kwargs = renamed_attribute("harness_kwargs", "harness_config")
+    auth_mode = renamed_attribute("auth_mode", "auth")
+    secret_names = renamed_attribute("secret_names", "secrets")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _renamed_fields(cls, value: Any) -> Any:
+        return renamed_keys(value, AGENT_RENAMES, "AgentDefinition")
+
     @model_validator(mode="after")
     def _package_matches_binding(self) -> AgentDefinition:
         if self.harness is None and self.harness_package is not None:
@@ -326,16 +374,16 @@ class AgentDefinition(FrozenModel):
             and HarnessBinding.from_package(self.harness_package) != self.harness
         ):
             raise ValueError("harness_package does not match the exact harness binding")
-        if self.auth_mode == "api_key" and not self.secret_names:
-            raise ValueError("api_key auth_mode requires a secret name")
-        if self.auth_mode == "none" and self.secret_names:
-            raise ValueError("none auth_mode cannot declare secrets")
+        _check_auth(self.auth, self.secrets)
         return self
 
     @property
     def content_hash(self) -> str:
         """Stable Agent revision digest, independent of where the Harness is stored."""
         payload = self.model_dump(mode="json", exclude={"harness", "harness_package"})
+        # Renamed fields hash under their original names, so Agents keep their identity.
+        for old, new in AGENT_RENAMES.items():
+            payload[old] = payload.pop(new)
         if not self.credentials:
             # Agents with no credentials keep the identity they had before credentials.
             del payload["credentials"]
@@ -392,19 +440,23 @@ class AgentBinding(FrozenModel):
         return self.agent.harness_package
 
     @property
-    def harness_kwargs(self) -> dict[str, Any]:
+    def harness_config(self) -> dict[str, Any]:
         """Normalized built-in Harness options."""
-        return self.agent.harness_kwargs
+        return self.agent.harness_config
 
     @property
-    def auth_mode(self) -> str:
+    def auth(self) -> str:
         """Authentication mode."""
-        return self.agent.auth_mode
+        return self.agent.auth
 
     @property
-    def secret_names(self) -> tuple[str, ...]:
+    def secrets(self) -> tuple[str, ...]:
         """Secret references granted to the harness."""
-        return self.agent.secret_names
+        return self.agent.secrets
+
+    harness_kwargs = renamed_attribute("harness_kwargs", "harness_config")
+    auth_mode = renamed_attribute("auth_mode", "auth")
+    secret_names = renamed_attribute("secret_names", "secrets")
 
     @property
     def content_hash(self) -> str:

@@ -173,6 +173,19 @@ def test_task_bind_rejects_unknown_initial_state() -> None:
     assert "does not define: 'answer'" in str(exc.value)
 
 
+def test_task_refuses_two_verifiers_with_one_name() -> None:
+    with pytest.raises(ValidationError, match="More than one Verifier is named 'solved'"):
+        Task(
+            name="easy-01",
+            instructions="Solve.",
+            environment=Environment(name="wordle", runtime=Runtime.docker()),
+            verifiers=[
+                DeterministicVerifier(name="solved", check=solved),
+                DeterministicVerifier(name="solved", check=solved),
+            ],
+        )
+
+
 def test_function_verifier_binds_to_an_environment_without_apps() -> None:
     task = Task(
         name="easy-01",

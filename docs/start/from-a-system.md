@@ -1,7 +1,7 @@
 ---
 route: /docs/start/from-a-system
 title: Start from a system
-order: 23
+order: 24
 description: "Add the systems your work happens in, such as an MCP server, an HTTP API, or a database, to an Environment as Apps. Then write a Verifier that checks the systems themselves and run models against it."
 audience: all
 nav: true
@@ -24,14 +24,14 @@ are the same for your own system.
 
 | Your system offers | Add it with |
 | --- | --- |
-| An MCP server, started locally or reached at a URL | `plural env add ENV --mcp URL_OR_COMMAND` |
-| An HTTP API with an OpenAPI document | `plural env add ENV --openapi SPEC` |
-| Recorded conversations of an agent using it | `plural env add ENV --traces FILE`; see [Start from traces](from-traces.md) |
+| An MCP server, started locally or reached at a URL | `plural app add ENV --mcp URL_OR_COMMAND` |
+| An HTTP API with an OpenAPI document | `plural app add ENV --openapi SPEC` |
+| Recorded conversations of an agent using it | `plural app add ENV --traces FILE`; see [Start from traces](from-traces.md) |
 | Files: documents, CSV, JSON, JSONL, or SQLite, with no API | Plural's files server, `server: plural.mcp.files:server`; see [Build an MCP server](../guides/build-mcp-server.md#start-from-plurals-files-server) |
 | A database, warehouse, or data lake | Your own FastMCP server; see [Build an MCP server](../guides/build-mcp-server.md#work-in-a-data-lake-or-warehouse) |
 | Nothing an Agent can call yet | `plural env init`, then write the tools; see [Build an MCP server](../guides/build-mcp-server.md) |
 
-`plural env add` adds one system to an Environment as an App, whose actions are what
+`plural app add` adds one system to an Environment as an App, whose actions are what
 the system offers. It creates the Environment the first time, writing an ordinary
 `environment.yaml`, and adds to it after that, so you run it once per system. A hosted
 MCP server can also be added from the Environment's Apps tab, with **Add system**.
@@ -45,7 +45,7 @@ cd notes
 ## 2. Add the system
 
 ```bash
-plural env add office \
+plural app add office \
   --mcp "npx -y @modelcontextprotocol/server-memory" \
   --env 'MEMORY_FILE_PATH=${PLURAL_APP_DIR}/memory.jsonl'
 ```
@@ -54,6 +54,9 @@ plural env add office \
 Created environment office:
   environments/office/environment.yaml
   environments/office/README.md
+  tasks/office-first/task.yaml
+  tasks/office-first/instruction.md
+  verifiers/office-check/verifier.yaml
 
 App memory (mcp, owned) offers:
   create_entities
@@ -69,9 +72,14 @@ App memory (mcp, owned) offers:
 
 **What just happened.** Plural created the `office` Environment with one App, named
 `memory` after the server's package. It started the server, listed its tools, and
-wrote them down as the App's actions. Pass `--app NAME` to choose the App's name. `[read-only]` marks tools that say they change nothing. The
-`--env` setting stores the server's graph in `${PLURAL_APP_DIR}`, a new empty folder
-Plural gives the server for every episode, so no Trial sees what another stored.
+wrote them down as the App's actions. Pass `--app NAME` to choose the App's name.
+`[read-only]` marks tools that say they change nothing. The `--env` setting stores the
+server's graph in `${PLURAL_APP_DIR}`, a new empty folder Plural gives the server for
+every episode, so no Trial sees what another stored.
+
+It also drafted a starter Task, `office-first`, that only reads and is scored by a
+model judge, so `plural run --task office-first --model openai/gpt-5.6-luna` works
+now. The steps below build a real Task, and a Verifier that checks the system itself.
 
 ## 3. Give the Agent its credentials
 
@@ -81,7 +89,7 @@ its own scopes. The App names the credential; the Agent carries it. With your ow
 address in place of the example one:
 
 ```bash
-plural env add sales \
+plural app add sales \
   --mcp https://mcp.example.com/v1 --app crm \
   --header 'Authorization=Bearer ${CRM_TOKEN}'
 plural agent init sales-bot
@@ -134,6 +142,7 @@ used:
 | `owned` | Plural starts it fresh for every Trial. | Yes | Yes |
 | `sandboxed` | A shared system with a `reset` hook that restores it each Trial. | Yes | Yes |
 | `live` | A shared system Plural can't reset. | Only if every action is read-only, and then marked not reproducible | No |
+| `replayed` | The App answers from recordings. Nothing real is called. | Yes | Yes |
 
 A server started with `command` or `server` is `owned`. A remote server is `live` until
 you point it at a sandbox and give it `reset` and `snapshot` commands; see
@@ -163,7 +172,7 @@ plural verifier init remembered
 Replace `verifiers/remembered/verify.py` with:
 
 ```python
-"""Reward storing Ada Lovelace as a mathematician in the memory server."""
+"""Score whether Ada Lovelace is stored as a mathematician in the memory server."""
 
 import json
 from typing import Any
@@ -260,7 +269,7 @@ server what it held. The evidence is the server's answer, not the model's. To se
 step rewards:
 
 ```bash
-plural rewards show trl_25307cebd405ee1f5018590a
+plural reward show trl_25307cebd405ee1f5018590a
 ```
 
 ```text
@@ -269,13 +278,13 @@ step  e3     +0.500  step:remembered@0.1.0
 
 ## Several systems in one Environment
 
-When the work spans systems, add each to the same Environment. Every `plural env add`
+When the work spans systems, add each to the same Environment. Every `plural app add`
 appends an App and keeps everything already there:
 
 ```bash
-plural env add support --mcp https://mcp.example.com/v1 --app crm \
+plural app add support --mcp https://mcp.example.com/v1 --app crm \
   --header 'Authorization=Bearer ${CRM_TOKEN}'
-plural env add support --openapi billing.yaml \
+plural app add support --openapi billing.yaml \
   --header 'Authorization=Bearer ${BILLING_TOKEN}'
 ```
 
@@ -328,7 +337,7 @@ You have a Benchmark, `memory`, that you can rerun on any model with
 Next:
 
 - Add Tasks for the work you care about, each with its own starting state.
-- Add the other systems the work touches with `plural env add`, as in
+- Add the other systems the work touches with `plural app add`, as in
   [Several systems in one Environment](#several-systems-in-one-environment).
 - The [MCP guide](../guides/connect-mcp-server.md) covers tool filters, Python hooks,
   and troubleshooting.

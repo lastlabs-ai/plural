@@ -1,8 +1,8 @@
 """Canonical Trace schema shared by production traffic and environments.
 
 Examples:
-    >>> from plural.tracing.schema import Trace, Outcome
-    >>> t = Trace(trace_id="abc", outcome=Outcome(reward=1.0))
+    >>> from plural.tracing.schema import Trace, TraceOutcome
+    >>> t = Trace(trace_id="abc", outcome=TraceOutcome(reward=1.0))
     >>> t.outcome.reward
     1.0
 """
@@ -15,6 +15,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from plural._deprecation import module_getattr
 from plural.types import ChatRequest, ChatResponse, Usage
 
 TraceKind = Literal["production", "episode", "llm_call"]
@@ -201,7 +202,7 @@ Step = Annotated[
 ]
 
 
-class Outcome(BaseModel):
+class TraceOutcome(BaseModel):
     """Labeled outcome attached to a trace.
 
     Attributes:
@@ -295,7 +296,7 @@ class Trace(BaseModel):
     initial_state: dict[str, Any] | None = None
     steps: list[Step] = Field(default_factory=list)
     final_state: dict[str, Any] | None = None
-    outcome: Outcome | None = None
+    outcome: TraceOutcome | None = None
     verifier_results: list[TraceVerifierResult] = Field(default_factory=list)
     artifacts: list[TraceArtifactReference] = Field(default_factory=list)
     tito_artifact: TraceArtifactReference | None = None
@@ -433,7 +434,7 @@ class Trace(BaseModel):
         name: str = "late",
         reason: str | None = None,
         turn_index: int | None = None,
-    ) -> RewardEvent | Outcome:
+    ) -> RewardEvent | TraceOutcome:
         """Inject reward after the fact — episode-wide or onto one turn.
 
         Use this when the signal arrives late (likes, a human review, a
@@ -449,13 +450,13 @@ class Trace(BaseModel):
                 indices count from the end.
 
         Returns:
-            The new :class:`RewardEvent` or the updated :class:`Outcome`.
+            The new :class:`RewardEvent` or the updated :class:`TraceOutcome`.
 
         Raises:
             IndexError: If ``turn_index`` is out of range.
         """
         if turn_index is None:
-            current = self.outcome or Outcome()
+            current = self.outcome or TraceOutcome()
             current.scores[name] = current.scores.get(name, 0.0) + float(value)
             current.reward = (current.reward or 0.0) + float(value)
             self.outcome = current
@@ -512,7 +513,7 @@ class Trace(BaseModel):
             One return per turn, same order as :meth:`turns`.
 
         Examples:
-            >>> t = Trace(outcome=Outcome(reward=1.0))
+            >>> t = Trace(outcome=TraceOutcome(reward=1.0))
             >>> t.add_turn(parsed_action=[ParsedAction(name="search")])
             >>> t.add_turn(parsed_action=[ParsedAction(name="answer")])
             >>> t.returns(gamma=0.9)
@@ -613,7 +614,7 @@ class Trace(BaseModel):
         reward: float | None = None,
         labels: dict[str, Any] | None = None,
         feedback: str | None = None,
-    ) -> Outcome:
+    ) -> TraceOutcome:
         """Attach or update the outcome.
 
         Args:
@@ -623,9 +624,9 @@ class Trace(BaseModel):
             feedback: Free-form feedback.
 
         Returns:
-            The updated :class:`Outcome`.
+            The updated :class:`TraceOutcome`.
         """
-        current = self.outcome or Outcome()
+        current = self.outcome or TraceOutcome()
         if scores:
             current.scores.update(scores)
         if reward is not None:
@@ -636,3 +637,12 @@ class Trace(BaseModel):
             current.feedback = feedback
         self.outcome = current
         return current
+
+
+_renamed = module_getattr(
+    "plural.tracing.schema", {"Outcome": ("TraceOutcome", lambda: TraceOutcome)}
+)
+
+
+def __getattr__(name: str) -> Any:
+    return _renamed(name)

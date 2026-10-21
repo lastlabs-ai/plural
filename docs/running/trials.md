@@ -48,7 +48,7 @@ plural trial show TRIAL_ID --follow
 prints one Trial's result, each Verifier's score and feedback, and the paths of
 its artifacts and logs. Both look for a local record first and then ask the
 hosted project. `--follow` streams progress until the Trial finishes. For a
-tracked or hosted Job, you can see the same Trials in the web app under Jobs.
+recorded or hosted Job, you can see the same Trials in the web app under Jobs.
 
 A Trial moves through these states: planned, queued, provisioning, running,
 scoring, awaiting_review, and then a terminal state. It waits in
@@ -175,7 +175,7 @@ clock time. Each Verifier result also carries its own `started_at` and
 
 ## Publish a local run to a hosted Job
 
-`plural job push` and `plural run --track` do this for you. From Python,
+`plural job record` and `plural run --record` do this for you. From Python,
 `plural.execution.report.publish_job` reports each execution of a local Job to
 a hosted Job planned from the same pushed resources. It matches Trials by Task,
 Agent name, and attempt, and replays each execution through the hosted worker

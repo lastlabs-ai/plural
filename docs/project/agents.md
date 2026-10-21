@@ -44,7 +44,7 @@ rewards, the hidden State, or anything the grader knows. That keeps the test fai
 Start by listing the model IDs you may run:
 
 ```bash
-plural models list
+plural model list
 ```
 
 What you see depends on who you are:
@@ -56,7 +56,7 @@ What you see depends on who you are:
   an admin has explicitly allowed. If the organization has configured none of these,
   you see the whole catalog.
 
-Run `plural models list --all` to see every catalog model. Models your organization
+Run `plural model list --all` to see every catalog model. Models your organization
 does not permit are marked `not permitted`; the service refuses them for runs,
 reruns, and model calls through the gateway.
 
@@ -74,7 +74,7 @@ for model in client.catalog.models():
 ```
 
 Calling a model requires credentials and an endpoint that supports it. See
-[Getting started](../getting-started.md) for authentication.
+[Quickstart](../getting-started.md) for authentication.
 
 ## Create your Agent
 
@@ -139,8 +139,8 @@ The fields, for reference:
   `title` sets the display name.
 - `harness` is optional. It names a Harness in the project's `harnesses/` folder, or a
   built-in (`hermes`, `claude-code`, or `codex`).
-- `harness_kwargs` sets a built-in Harness's options.
-- `auth_mode: none` marks an Agent whose Harness never calls a model, so it runs
+- `harness_config` sets a built-in Harness's options.
+- `auth: none` marks an Agent whose Harness never calls a model, so it runs
   without credentials.
 - `endpoint` and `endpoint_key` point the Agent at its own model server; see
   [Use your own endpoint](#use-your-own-endpoint).
@@ -159,7 +159,7 @@ claude = Agent(
     model="anthropic/claude-sonnet-5",
     instructions="Follow the support policy and finish the ticket using the available tools.",
     harness="claude-code",
-    harness_kwargs={"reasoning_effort": "high"},
+    harness_config={"reasoning_effort": "high"},
 )
 
 custom = Agent(
@@ -176,7 +176,7 @@ tool there. A custom Harness still needs its dependencies in that Runtime.
 
 Model authentication comes from the Job's Client, not from the Agent. A custom
 Harness declares the environment variable names it reads, and the Agent's
-`secret_names` grants a subset of those names. If one of those names is missing when
+`secrets` grants a subset of those names. If one of those names is missing when
 the run starts, the error lists it and does not include the value. See
 [Harnesses](harnesses.md).
 
@@ -214,8 +214,8 @@ instructions: Follow the support policy and finish the ticket using the availabl
   `plural secret set NAME`, before `plural run`. It is sent only as the request's
   bearer token, and a missing value stops the run before it starts.
 - An endpoint Agent uses the native Harness, and can't set `harness`, `provider`,
-  `fallback_models`, or `secret_names`.
-- A Job whose Agents all use their own endpoints, or `auth_mode: none`, needs no
+  `fallback_models`, or `secrets`.
+- A Job whose Agents all use their own endpoints, or `auth: none`, needs no
   Plural API key. The endpoint must be reachable from the Runtime.
 
 This is the usual way to check a trained model against the same Benchmark you used
@@ -269,7 +269,7 @@ Job(task, [agent], credentials={"sales-bot": {"CRM_TOKEN": token}}).run()
 ```
 
 `plural credential list` shows the names you have saved, never the values, and
-`plural credential unset NAME` removes one.
+`plural credential delete NAME` deletes one.
 :::
 
 :::details What each Trial records
@@ -295,8 +295,8 @@ calling a model.
 
 A few things to know:
 
-- A local run is recorded under `.plural/jobs/`. A run with `--hosted` is recorded in
-  the hosted project, where you can also see it in the web app under Jobs.
+- A run is recorded under `.plural/jobs/`. A run with `--record` is also recorded in
+  the hosted project, where you can see it in the web app under Jobs.
 - A live local run sends every model call through the Plural gateway, so it needs a
   Plural API key, such as the one `plural auth login` stores. An Agent with its own
   `endpoint` is the exception.

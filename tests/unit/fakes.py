@@ -10,13 +10,13 @@ from typing import Any
 
 from plural.apps import daemon
 from plural.sandbox import (
-    Capability,
     DownloadedFile,
     ExecRequest,
     ExecResult,
     FileUpload,
     ProviderCapabilities,
     ProviderDoctor,
+    SandboxCapability,
     SandboxHandle,
     SandboxProvider,
     SandboxRequirements,
@@ -73,7 +73,7 @@ class FakeProvider(SandboxProvider):
         return ProviderCapabilities(
             provider=self.name,
             available=True,
-            capabilities=frozenset(Capability),
+            capabilities=frozenset(SandboxCapability),
         )
 
     async def doctor(self) -> ProviderDoctor:
@@ -81,7 +81,7 @@ class FakeProvider(SandboxProvider):
             name=self.name,
             available=True,
             healthy=True,
-            capabilities=tuple(item.value for item in Capability),
+            capabilities=tuple(item.value for item in SandboxCapability),
         )
 
     async def create(self, requirements: SandboxRequirements) -> SandboxHandle:

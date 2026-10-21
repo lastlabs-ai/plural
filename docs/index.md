@@ -91,18 +91,16 @@ with one subfolder per Environment, Task, Verifier, Agent, and so on. In the web
 at [pluralintel.com](https://pluralintel.com), the same project shows up in the
 project switcher at the top of the sidebar.
 
-Runs happen on your own machine by default, which costs nothing but the model calls.
-When you want Plural to run things for you, you push the project to a private hosted
-project. Nothing you push is ever public unless you choose to publish it.
+Every run starts from your own machine. Add `--record` and the run is also recorded in
+a private hosted project, where your team sees it in the web app. To run Trials in
+cloud sandboxes instead of on your machine, give an Environment a cloud Runtime.
+Nothing is ever public unless you choose to publish it to the Hub.
 
 ## Where to go next
 
-- New here? Read [Core concepts](getting-started/concepts.md). It takes about five
-  minutes and explains every word above.
-- Ready to try it? [Getting started](getting-started.md) walks you from sign-up to
-  your first scored run.
-- Know what you have? [Start here](start/index.md) has a path for each starting point:
-  traces from an agent you already run, a system your work happens in, or nothing yet.
-- Want to see a finished project first? The
-  [support queue tutorial](tutorials/support-queue.md) runs completely offline, with
-  no account or key.
+- **[Quickstart](getting-started.md)** takes you from sign-up to a scored Benchmark in
+  the web app, in about twenty minutes.
+- **[Core concepts](getting-started/concepts.md)** explains every word above in five
+  minutes.
+- **[Bring your own work](start/index.md)** starts from traces or a system you already
+  have.

@@ -930,49 +930,6 @@
       "title": "Message",
       "type": "object"
     },
-    "Outcome": {
-      "description": "Labeled outcome attached to a trace.\n\nAttributes:\n    scores: Named Verifier outputs.\n    reward: Scalar reward used for RL / ranking.\n    labels: Discrete labels (e.g. intent, success/fail).\n    feedback: Free-form human or automated feedback.",
-      "properties": {
-        "feedback": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Feedback"
-        },
-        "labels": {
-          "additionalProperties": true,
-          "title": "Labels",
-          "type": "object"
-        },
-        "reward": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reward"
-        },
-        "scores": {
-          "additionalProperties": {
-            "type": "number"
-          },
-          "title": "Scores",
-          "type": "object"
-        }
-      },
-      "title": "Outcome",
-      "type": "object"
-    },
     "ParsedAction": {
       "description": "A structured action the policy chose this turn.",
       "properties": {
@@ -1335,6 +1292,49 @@
         "size_bytes"
       ],
       "title": "TraceArtifactReference",
+      "type": "object"
+    },
+    "TraceOutcome": {
+      "description": "Labeled outcome attached to a trace.\n\nAttributes:\n    scores: Named Verifier outputs.\n    reward: Scalar reward used for RL / ranking.\n    labels: Discrete labels (e.g. intent, success/fail).\n    feedback: Free-form human or automated feedback.",
+      "properties": {
+        "feedback": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Feedback"
+        },
+        "labels": {
+          "additionalProperties": true,
+          "title": "Labels",
+          "type": "object"
+        },
+        "reward": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reward"
+        },
+        "scores": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Scores",
+          "type": "object"
+        }
+      },
+      "title": "TraceOutcome",
       "type": "object"
     },
     "TraceVerifierResult": {
@@ -1814,7 +1814,7 @@
     "outcome": {
       "anyOf": [
         {
-          "$ref": "#/$defs/Outcome"
+          "$ref": "#/$defs/TraceOutcome"
         },
         {
           "type": "null"

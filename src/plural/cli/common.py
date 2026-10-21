@@ -25,6 +25,11 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 JSON_OPTION = typer.Option(False, "--json", help="Print machine-readable JSON.")
+REF_HELP = (
+    "NAME\\[@REF], where REF is a revision number (@3), a release version (@1.0.0), "
+    "or a content hash"
+)
+"""How help text describes a pinned resource. ``\\[`` keeps Rich from reading a markup tag."""
 
 
 def fail(message: str, problems: Iterable[str] = (), *, code: int = 1) -> NoReturn:
@@ -33,6 +38,38 @@ def fail(message: str, problems: Iterable[str] = (), *, code: int = 1) -> NoRetu
     for problem in problems:
         typer.echo(f"  - {problem}", err=True)
     raise typer.Exit(code)
+
+
+def deprecated(old: str, new: str) -> None:
+    """Note on stderr that ``old`` is a deprecated spelling of ``new``."""
+    typer.echo(
+        f"Note: `{old}` is deprecated and goes away in the next release; use `{new}`.",
+        err=True,
+    )
+
+
+def alias(function: Callable[P, R], old: str, new: str) -> Callable[P, R]:
+    """``function`` under a deprecated name: same options, plus a note naming ``new``.
+
+    Returns:
+        A command to register with ``hidden=True``.
+    """
+
+    @functools.wraps(function)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        deprecated(old, new)
+        return function(*args, **kwargs)
+
+    return wrapper
+
+
+def counted(count: int, noun: str, plural: str | None = None) -> str:
+    """``count`` and ``noun``, made plural when ``count`` is not one.
+
+    Returns:
+        Such as ``1 Trial`` or ``3 Trials``.
+    """
+    return f"{count} {noun if count == 1 else plural or noun + 's'}"
 
 
 def handled(function: Callable[P, R]) -> Callable[P, R]:
@@ -161,7 +198,8 @@ def project_studio(space: Workspace, current: Session) -> tuple[Studio, ProjectB
         raise ProjectError(
             f"Your scope selects project {selected!r}, but this directory is bound to "
             f"{binding.project_slug!r}. Run `plural auth scope --project "
-            f"{binding.project_slug}` (or `plural auth scope .` for account scope), then retry."
+            f"{binding.project_slug}` (or `plural auth scope --account` for account scope), "
+            "then retry."
         )
     studio = current.studio(project=binding.project_id)
     studio.account = binding.account_id or studio.account
@@ -178,6 +216,10 @@ def relative(path: Path, root: Path) -> str:
 
 __all__ = [
     "JSON_OPTION",
+    "REF_HELP",
+    "alias",
+    "counted",
+    "deprecated",
     "details",
     "emit",
     "fail",

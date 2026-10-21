@@ -71,7 +71,12 @@ from plural.project.manifests import (
     ProjectBinding,
     TaskManifest,
 )
-from plural.project.resources import LocalResource, Workspace
+from plural.project.resources import (
+    SCAFFOLD_MARKER,
+    LocalResource,
+    Workspace,
+    scaffold_problems,
+)
 from plural.studio import RevisionResourceAPI, Studio, slugify
 
 # Concurrent requests per push or plan; each hosted call is one round trip.
@@ -781,46 +786,6 @@ def select_revision(
     return found
 
 
-def resolve_hosted(
-    workspace: Workspace, studio: Studio, refs: list[ResourceRef]
-) -> dict[ResourceRef, HostedRevision]:
-    """Find the hosted revision matching each local resource exactly.
-
-    Used to run on hosted infrastructure without uploading: every resource in
-    the graph must already be pushed with identical content.
-
-    Returns:
-        The matching revision for every resource in the dependency graph.
-
-    Raises:
-        ProjectError: Naming each resource that must be pushed first.
-    """
-    order = workspace.dependency_order(refs)
-    problems = []
-    resolved: dict[ResourceRef, HostedRevision] = {}
-    for item in order:
-        resource = workspace.load(item)
-        parent, revisions = _hosted_state(studio, item)
-        match = _match(resource.content_hash, parent, revisions)
-        if match is not None:
-            resolved[item] = match
-        else:
-            current = _current(parent, revisions)
-            problems.append(
-                f"{item} is changed locally since {current.label} was pushed"
-                if current
-                else f"{item} is not pushed yet"
-            )
-    if problems:
-        targets = " ".join(f"`plural {ref.info.cli} push {ref.name} --with-deps`" for ref in refs)
-        raise ProjectError(
-            "Hosted runs use pushed revisions only, and some local files differ from them. "
-            f"Push first with {targets}.",
-            problems,
-        )
-    return resolved
-
-
 def resolve_pinned(
     studio: Studio, pins: Mapping[str, Mapping[str, str]]
 ) -> dict[ResourceRef, HostedRevision]:
@@ -959,7 +924,11 @@ def hosted_list(studio: Studio, kind: ResourceKind) -> list[dict[str, Any]]:
 
 
 def _package_problems(resource: LocalResource, workspace: Workspace) -> list[str]:
-    problems = []
+    problems = [
+        f"{marker}: unfinished. Finish it and delete the {SCAFFOLD_MARKER} line; "
+        "unfinished work runs locally but is never uploaded."
+        for marker in scaffold_problems(resource.directory, workspace.project.root)
+    ]
     for relative, _path in package_files(resource.directory):
         if looks_like_credential(relative):
             location = (resource.directory / relative).relative_to(workspace.project.root)
@@ -1253,9 +1222,9 @@ def _files_from_definition(
             "fallback_models",
             "temperature",
             "max_tokens",
-            "harness_kwargs",
-            "auth_mode",
-            "secret_names",
+            "harness_config",
+            "auth",
+            "secrets",
             "endpoint",
             "endpoint_key",
             "credentials",
@@ -1352,7 +1321,6 @@ __all__ = [
     "pull",
     "push",
     "release",
-    "resolve_hosted",
     "resolve_pinned",
     "revision_label",
     "select_revision",

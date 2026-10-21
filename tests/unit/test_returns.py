@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from plural.tracing.schema import Outcome, ParsedAction, Trace
+from plural.tracing.schema import ParsedAction, Trace, TraceOutcome
 
 
 def _episode(*actions: str, reward: float | None = 1.0) -> Trace:
-    trace = Trace(outcome=Outcome(reward=reward) if reward is not None else None)
+    trace = Trace(outcome=TraceOutcome(reward=reward) if reward is not None else None)
     for name in actions:
         trace.add_turn(parsed_action=[ParsedAction(name=name)])
     return trace

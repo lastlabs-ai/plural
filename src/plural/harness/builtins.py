@@ -206,21 +206,21 @@ def normalize_config(value: Any, *, root: Path | None = None) -> dict[str, Any] 
     if isinstance(value, dict):
         return dict(value)
     if not isinstance(value, str):
-        raise ValueError("harness_kwargs.config must be a mapping, JSON object, or file path")
+        raise ValueError("harness_config.config must be a mapping, JSON object, or file path")
     text = value.strip()
     if not text:
         return None
     if text[0] in "{[":
         loaded = json.loads(text)
         if not isinstance(loaded, dict):
-            raise ValueError("harness_kwargs.config JSON must be an object")
+            raise ValueError("harness_config.config JSON must be an object")
         return loaded
     path = Path(text).expanduser()
     if not path.is_absolute():
         path = (root or Path.cwd()) / path
     path = path.resolve()
     if not path.is_file():
-        raise ValueError(f"harness_kwargs.config file not found: {path}")
+        raise ValueError(f"harness_config.config file not found: {path}")
     raw = path.read_text(encoding="utf-8")
     if path.suffix.lower() in {".json"} or raw.lstrip().startswith("{"):
         loaded = json.loads(raw)
@@ -229,7 +229,7 @@ def normalize_config(value: Any, *, root: Path | None = None) -> dict[str, Any] 
 
         loaded = yaml.safe_load(raw)
     if not isinstance(loaded, dict):
-        raise ValueError(f"harness_kwargs.config file must contain a mapping: {path}")
+        raise ValueError(f"harness_config.config file must contain a mapping: {path}")
     return loaded
 
 
@@ -251,7 +251,7 @@ def normalize_kwargs(
     try:
         options = spec.options_model.model_validate(payload)
     except ValidationError as exc:
-        raise ValueError(f"Invalid harness_kwargs for {name!r}: {exc}") from exc
+        raise ValueError(f"Invalid harness_config for {name!r}: {exc}") from exc
     normalized = options.model_dump(mode="json", exclude_none=True)
     normalized["version"] = options.version or spec.pinned_version
     return normalized

@@ -17,7 +17,7 @@ from plural.execution.apps import (
     host_inputs,
     missing_app_secrets,
 )
-from plural.execution.engine import Trial
+from plural.execution.engine import TrialRunner
 from plural.execution.inputs import resource_uploads, runtime_values
 from plural.harness.native_runner import _action_environment
 
@@ -187,7 +187,7 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
         verifiers=(SimpleNamespace(verifier=DeterministicVerifier(name="gentle", reward=gentle)),),
     )
     asyncio.run(
-        Trial._stage_environment(
+        TrialRunner._stage_environment(
             SimpleNamespace(task=task, resource_resolvers={}), Provider(), None
         )
     )

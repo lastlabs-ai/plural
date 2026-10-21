@@ -15,14 +15,14 @@ This guide connects a server, then makes it safe to benchmark.
 
 ## 1. Add the server to an Environment
 
-From inside a project, run `plural env add` with the command that starts the server:
+From inside a project, run `plural app add` with the command that starts the server:
 
 ```bash
-plural env add memory --mcp "npx -y @modelcontextprotocol/server-memory"
+plural app add memory --mcp "npx -y @modelcontextprotocol/server-memory"
 ```
 
 ```text
-Created environment memory:
+Created Environment memory:
   environments/memory/environment.yaml
   environments/memory/README.md
 
@@ -80,12 +80,12 @@ choose. For a server reached over HTTP, pass its URL instead, with any headers i
 needs:
 
 ```bash
-plural env add crm \
+plural app add crm \
   --mcp https://mcp.example.com/v1 --app crm \
   --header 'Authorization=Bearer ${CRM_TOKEN}'
 ```
 
-Run `plural env add` again with another Environment's name to add the same way to it,
+Run `plural app add` again with another Environment's name to add the same way to it,
 or with this one's name to add a second system beside the first.
 
 Quote the header in single quotes so your shell leaves `${CRM_TOKEN}` alone; Plural

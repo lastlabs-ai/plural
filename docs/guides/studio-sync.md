@@ -1,20 +1,22 @@
 ---
 route: /docs/guides/studio-sync
-title: "Push and pull resources"
-order: 300
+title: "Push and pull"
+order: 107
 description: "Share your project with your team by pushing it to a private hosted project as saved revisions, pull revisions back, and keep plural.lock in step."
 audience: all
-nav: false
+nav: true
+nav_group: Platform
 ---
-# Push and pull resources
+# Push and pull
 
 Your project lives on your computer. **Pushing** a resource, such as a Task or an
 Agent, saves an unchangeable snapshot of it, called a **revision**, in your private
 hosted project, where your team can see it and run it. **Pulling** brings a
 revision's editable files back into a checkout.
 
-You never need to push anything to run locally. Push when you want Plural to run
-Jobs for you, or when you want your team to see your work in the web app.
+You never need to push anything to run. Push when you want your team to see your work
+in the web app, or to record runs there; `plural run --record` pushes what a run needs
+for you.
 
 > **Good to know:** Pushing never makes anything public. Sharing a Benchmark on the
 > public Hub is a separate, explicit step.
@@ -38,7 +40,7 @@ checkout goes to the bound project.
 
 Before any push, the CLI compares your scope with the binding. If your scope
 selects a different project or account, the push is refused before anything is
-uploaded. Run `plural auth scope -p support-eval`, or `plural auth scope .` for
+uploaded. Run `plural auth scope -p support-eval`, or `plural auth scope --account` for
 account scope, and retry. Scope only selects a destination; it never grants
 permissions your credential does not already have. An API key limited to one
 project reaches only that project, whatever scope you select.
@@ -73,8 +75,7 @@ A few rules keep revisions trustworthy:
   pointing at one that is missing.
 
 A pushed revision is usable in its private project immediately. Sharing a
-Benchmark on the public Hub is described in
-[Benchmark publications](../architecture/benchmark-publications.md).
+Benchmark on the public Hub is described in [Publish to the Hub](../platform/publish.md).
 
 ### How revisions are identified
 
@@ -133,11 +134,11 @@ project are never used as dependency pins.
 
 ```bash
 plural benchmark pull support-triage
-plural benchmark pull support-triage --revision 1.2.0 --with-deps
+plural benchmark pull support-triage@1.2.0 --with-deps
 ```
 
-A pull restores the current revision, or the one `--revision` names by number,
-release version, or content hash, along
+A pull restores the current revision, or the one NAME@REF names, where REF is a
+revision number (@3), a release version (@1.0.0), or a content hash, along
 with any dependency this project does not have yet. `--with-deps` also replaces
 dependencies you already have with the exact revisions it pins.
 
@@ -165,23 +166,21 @@ a package; push it again from its source directory. See
 ## Run pushed resources
 
 ```bash
-plural run -b support-triage -a careful --track
-plural job push JOB_ID
-plural run -b support-triage -a careful --hosted --follow
+plural run -b support-triage -a careful --record
+plural job record JOB_ID
 ```
 
-- `--track` runs here and records the Job in the hosted project as it runs.
-- `job push` records a local Job that already finished.
-- `--hosted` submits the Job for hosted infrastructure to run.
+- `--record` runs here and records the Job in the hosted project as it runs.
+- `job record` records a local Job that already finished.
 
-A hosted Job pins exact revisions, so `--track` and `--hosted` first push
-whatever the run needs that the hosted project does not hold: its source, its
-Agent or Harness, and their dependencies. A resource whose files changed becomes
+A hosted Job pins exact revisions, so `--record` first pushes whatever the run
+needs that the hosted project does not hold: its source, its Agent or Harness,
+and their dependencies. A resource whose files changed becomes
 its next numbered revision, and the command prints each one. If someone changed a
 resource in the hosted project since this checkout last synced it, the run stops
 before uploading anything; pull it first.
 
-`job push` uploads nothing new: the revisions a finished Job ran must already be
+`job record` uploads nothing new: the revisions a finished Job ran must already be
 hosted, so restore those files and push them if they are not. See
-[Jobs](../running/jobs.md) for execution and the
+[Record runs and run in the cloud](../platform/runs.md) for recording runs and the
 [Python SDK](../sdk/evaluation.md) for programmatic use.

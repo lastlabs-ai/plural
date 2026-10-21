@@ -17,10 +17,11 @@ from plural.agents import AgentBinding, AgentDefinition
 from plural.apps.definition import AppAction, AppDefinition
 from plural.apps.host import AppHost, RewardHook
 from plural.apps.mcp import protect_values, subprocess_environ
-from plural.common import ErrorCode, PackageSource
+from plural.common import PackageSource
 from plural.environments.definition import EnvironmentDefinition, EnvironmentRuntime
 from plural.environments.env import Environment
 from plural.execution import JobRunner, JobStore
+from plural.execution.engine import ExecutionFailure
 from plural.execution.steps import merge_host_steps
 from plural.jobs import JobSpec, TaskJobSource
 from plural.rewards import HindsightTrial, RewardTarget
@@ -257,13 +258,10 @@ async def test_a_file_holding_both_an_app_and_a_verifier_is_refused(tmp_path: Pa
     )
     provider = FakeProvider("docker")
 
-    result = await JobRunner(
-        _spec(task), provider=provider, store=JobStore(tmp_path / "jobs")
-    ).run()
+    runner = JobRunner(_spec(task), provider=provider, store=JobStore(tmp_path / "jobs"))
 
-    trial = result.trials[0]
-    assert trial.error_code is ErrorCode.CONFIGURATION
-    assert "move the Verifier into a file of its own" in (trial.error_message or "")
+    with pytest.raises(ExecutionFailure, match="move the Verifier into a file of its own"):
+        await runner.run()
     assert "game.py" not in provider.uploads
 
 

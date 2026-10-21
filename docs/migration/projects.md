@@ -54,11 +54,11 @@ refer to one another by name, for example `environment: support-queue` in a
 | `plural run job.yaml` | `plural run -b <benchmark> -a <agent>` |
 | `plural run <file> --agent <file:attr>` | `plural run -t <task> -m <model>` or `-a <agent>` |
 | `plural <kind> publish` | removed; `push` makes a revision available |
-| `plural job submit`, `plural job watch` | `plural run --hosted --follow` |
+| `plural job submit`, `plural job watch` | `plural run --record`; every Job runs from your machine |
 | `plural trial list`, `plural trial watch` | `plural job show <job>`, `plural trial show <trial> --follow` |
 | `plural benchmarks show\|export` | `plural benchmark show [--json]`; `benchmarks diff` is removed |
 | `plural review hosted-list\|hosted-submit` | `plural review list\|submit` |
-| `plural models show` | `plural models list [--provider]` |
+| `plural models show` | `plural model list [--provider]` |
 | `plural schemas`, `plural harness schema` | `plural.project.manifest_schemas()` in Python, or download [project-schemas.json](../assets/project-schemas.json) |
 | `plural login`, `plural logout`, `plural status` | `plural auth login`, `plural auth logout`, `plural auth status` |
 
@@ -77,9 +77,9 @@ Removed `plural run` options: `--mode`, `--per-runtime-concurrency`, `--watch` a
 `plural run` always creates a Job. A local Job is recorded under
 `.plural/jobs/<job-id>/` with the version and content hash of every input it used.
 `plural job rerun` and `plural trial rerun` run those pinned inputs again as a new Job
-linked to the original, even if the files on disk have changed since. Runs are local
-unless you pass `--hosted`, which first pushes any input the hosted project does
-not hold yet, as the resource's next numbered revision.
+linked to the original, even if the files on disk have changed since. `--record` also
+records the Job in the hosted project, and first pushes any input the hosted project
+does not hold yet, as the resource's next numbered revision.
 
 ### Revisions are no longer published
 
@@ -123,7 +123,7 @@ under `.plural/backups/`.
 
 ### Models
 
-`plural models list` shows the models your organization allows. Organization admins
+`plural model list` shows the models your organization allows. Organization admins
 can restrict that list; runs, reruns, and gateway calls enforce it on the server.
 
 ### Python API
@@ -149,6 +149,32 @@ benchmark = workspace.get("benchmark", "support-triage")
 agent = workspace.get("agent", "careful")
 result = Job(benchmark, agents=[agent]).run()
 ```
+
+### Renamed fields and classes
+
+These names changed so that one word means one thing across the SDK. The old names
+still work for one release: an old key in a YAML file or a saved revision loads,
+and an old import or attribute returns the same object, each with a
+`DeprecationWarning` naming the new one. Everything is saved under the new name.
+
+| Before | Now |
+| --- | --- |
+| Agent `harness_kwargs` | `harness_config` |
+| Agent `auth_mode` | `auth` |
+| Agent `secret_names` | `secrets` |
+| Harness and `HarnessDefinition` `environment` (variable names) | `env_vars` |
+| Runtime `network_allowlist` | `allowed_hosts` |
+| Runtime `build_timeout_sec` | `build_timeout_seconds` |
+| Runtime and `VerifierRuntime` `resources` (CPU and memory) | `compute` |
+| `plural.Plural` | `plural.Client` |
+| `plural.TimeoutError` | `plural.PluralTimeoutError` |
+| `plural.Capability` | `plural.SandboxCapability` |
+| `plural.Outcome` | `plural.TraceOutcome` |
+| `plural.Trial`, `plural.execution.Trial` | `plural.execution.TrialRunner`, internal to `Job` |
+
+Renaming a field changes no content hash, so saved Agents, Environments, and
+Verifiers keep their identities. `TrialResult` now also reports the episode's
+`stop_reason`, `step_reward_total`, and `turns`.
 
 ## Migrate a project
 

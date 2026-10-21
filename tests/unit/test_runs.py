@@ -261,13 +261,6 @@ def test_reruns_use_the_pinned_inputs_and_link_to_the_original(project: Project)
     assert sorted(item["score"] for item in fresh["trials"]) == [0.5, 0.5]
 
 
-def test_rescore_and_agent_serve_are_reserved(project: Project) -> None:
-    code, output, _ = cli("trial", "rescore", "anything")
-    assert code == 2 and "not available yet" in output
-    code, output, _ = cli("agent", "serve", "baseline")
-    assert code == 2 and "not available yet" in output
-
-
 def test_live_model_runs_need_a_model_credential(project: Project) -> None:
     code, output, _ = cli("run", "-t", "refund", "-m", "openai/gpt-5.6-luna")
     assert code == 1
@@ -359,7 +352,7 @@ def test_a_verifier_tries_and_applies_its_rewards_on_a_stored_trial(
         "    for step in trial.steps('submit'):\n"
         "        yield trial.credit(RewardTarget.step(step['event_id']), trial.score or 0)\n"
     )
-    ledger_before = cli("rewards", "show", trial["trial_id"], "--json")[2]
+    ledger_before = cli("reward", "show", trial["trial_id"], "--json")[2]
 
     code, output, tried = cli("verifier", "try", "resolved", "--trial", trial["trial_id"], "--json")
     assert code == 0, output
@@ -368,7 +361,7 @@ def test_a_verifier_tries_and_applies_its_rewards_on_a_stored_trial(
     assert result["score"] == 1.0
     assert result["step_total"] == 0.5
     assert result["hindsight_total"] == 1.0
-    assert cli("rewards", "show", trial["trial_id"], "--json")[2] == ledger_before
+    assert cli("reward", "show", trial["trial_id"], "--json")[2] == ledger_before
 
     code, output, applied = cli(
         "verifier", "apply", "resolved", "--trial", trial["trial_id"], "--json"
@@ -376,7 +369,7 @@ def test_a_verifier_tries_and_applies_its_rewards_on_a_stored_trial(
     assert code == 0, output
     assert applied["version"] == "0.2.0"
     assert applied["trials"][0]["new_records"] == 2
-    code, output, ledger = cli("rewards", "show", trial["trial_id"], "--json")
+    code, output, ledger = cli("reward", "show", trial["trial_id"], "--json")
     assert [(item["source"], item["version"], item["value"]) for item in ledger] == [
         ("step", "0.1.0", 1.0),
         ("step", "0.2.0", 0.5),
@@ -393,7 +386,7 @@ def test_a_verifier_tries_and_applies_its_rewards_on_a_stored_trial(
 
     out = project.root / "train.jsonl"
     code, output, _ = cli(
-        "rewards",
+        "reward",
         "export",
         "--job",
         job["job_id"],

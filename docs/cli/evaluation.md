@@ -55,7 +55,7 @@ plural project init support-eval
 cd support-eval
 plural env init support-queue --python
 plural verifier init correct-category
-plural task init ticket-1 -e support-queue -v correct-category
+plural task init ticket-1 -e support-queue --verifier correct-category
 plural benchmark init support-triage
 plural benchmark add ticket-1 -b support-triage
 plural agent init careful -m openai/gpt-5.6-luna
@@ -68,8 +68,9 @@ contestant (the Agent).
 `plural project init` works offline. Each resource `init` command writes a template
 with places marked `PLURAL-TODO` for you to fill in. A new Environment and Verifier
 need real behavior before a run means anything; the
-[support queue tutorial](../tutorials/support-queue.md) provides both. Without `-m`,
-`agent init` leaves the model for you to choose from `plural models list`.
+[support queue tutorial](../tutorials/support-queue.md) provides both. `agent init`
+needs a model: pass `-m`, or pick one when it asks. `plural model list` shows the
+models you may use.
 
 > **Good to know:** A new Environment uses the `docker` runtime, so Docker must be
 > running when you run it. The `local` runtime avoids Docker, but it is a trusted
@@ -78,8 +79,8 @@ need real behavior before a run means anything; the
 To check your work, use `validate` and `show`. `validate` checks a resource and
 everything it depends on without uploading anything, and reports every `PLURAL-TODO`
 that is still unfinished. `show` prints the local copy of a resource, or the hosted
-one when there is no local copy. A local copy that is not valid yet is reported as an
-error instead:
+one when there is no local copy. A local copy that is not valid yet is shown with its
+problems listed under it, so you can see what is left right after `init`:
 
 ```bash
 plural benchmark validate support-triage
@@ -98,7 +99,7 @@ one of each:
 ```bash
 plural run -t ticket-1 -m openai/gpt-5.6-luna
 plural run -b support-triage -a careful
-plural run -b support-triage -m openai/gpt-5.6-luna -h codex
+plural run -b support-triage -m openai/gpt-5.6-luna --harness codex
 ```
 
 Every run is a new Job. A local run executes on this machine and records the Job
@@ -107,7 +108,7 @@ under `.plural/jobs/<job-id>/` in the project.
 A run that calls a live model sends every call through the Plural gateway, so it
 needs a Plural API key: the one `plural auth login` stores,
 `plural auth login --api-key-stdin`, or `PLURAL_API_KEY`. `--dry-run` needs no key,
-and neither does an Agent with `auth_mode: none`.
+and neither does an Agent with `auth: none`.
 
 ### Run options
 
@@ -126,8 +127,9 @@ These options change what a run does. Most people only reach for `--dry-run` and
 - **`--plural-version`** selects the Plural installed in Docker and remote sandboxes:
   a version, or `latest`. By default it is this CLI's own code; see
   [Plural inside Docker and remote sandboxes](../guides/jobs.md#plural-inside-docker-and-remote-sandboxes).
-- **`--hosted`**, **`--follow`**, and **`--track`** decide where the run happens and
-  where it is recorded; see [Hosted projects](#hosted-projects).
+- **`--record`** also records the run in your hosted project. **`--evaluation-track ID`**
+  runs a Benchmark under one of its evaluation tracks so the results can be
+  published, and implies `--record`; see [Hosted projects](#hosted-projects).
 
 Add `@` and a revision to a Task, Benchmark, or Agent to run that exact pushed
 revision, such as `plural run -b support-triage@1.0.0 -a careful` or
@@ -158,7 +160,7 @@ plural review submit TRIAL_ID --verifier policy-review --score 2 \
   Add `--follow` to either to stream progress until it finishes.
 - `job rerun` runs a Job again with the exact pinned inputs it used and creates a new
   Job linked to the original. `trial rerun` runs one Trial again as a new one-Trial
-  Job. Add `--track` to either to record a local rerun in the hosted project as it
+  Job. Add `--record` to either to record a local rerun in the hosted project as it
   runs.
 - `review list` shows Trials waiting for a HumanVerifier score, and `review submit`
   records one. Use one `--score criterion=value` per rubric criterion, or a bare value
@@ -172,15 +174,15 @@ See [Jobs](../running/jobs.md) and [Reviews](../running/reviews.md).
 To see which models you can run, list them:
 
 ```bash
-plural models list
-plural models list --provider openai
-plural models list --all
+plural model list
+plural model list --provider openai
+plural model list --all
 ```
 
 Outside an organization, and when you are signed out, it shows the whole catalog.
 `--provider` narrows the list to one provider.
 
-Signed in to an organization, `plural models list` shows the models your organization
+Signed in to an organization, `plural model list` shows the models your organization
 offers: its own endpoints and private models, and any an admin has explicitly
 allowed. `--all` shows the whole catalog and marks models your organization does not
 permit, which the hosted service refuses on runs and gateway calls. The same list,
@@ -189,15 +191,16 @@ with prices, is in the model Catalog in the web app.
 ## Hosted projects
 
 Local runs need no hosted project. A hosted project is a private copy of your project
-on Plural, which lets your team share resources and lets Plural's infrastructure run
-Jobs for you. To use one, sign in and push:
+on Plural, which lets your team share resources and see every run in the web app.
+Plural never runs a Job itself; every Job runs from the machine that starts it. To use
+one, sign in and push:
 
 ```bash
 plural auth login
 plural project init support-eval --push
 plural benchmark push support-triage --with-deps
 plural agent push careful
-plural run -b support-triage -a careful --hosted --follow
+plural run -b support-triage -a careful --record
 ```
 
 > **Good to know:** Pushing never makes anything public. The hosted project is
@@ -213,29 +216,26 @@ immediately. A push validates first, uploads nothing unless the whole push can
 succeed, and refuses files that look like credentials, such as `.env` or private
 keys. Changed content becomes the resource's next numbered revision, and
 `plural <kind> release NAME VERSION` names one with a version people can cite. See
-[Push and pull resources](../guides/studio-sync.md).
+[Push and pull](../guides/studio-sync.md).
 
-`--hosted` runs the Job on hosted infrastructure, and `--follow` streams hosted
-progress until the Job finishes. Before submitting, `--hosted` pushes any input of
-the run that the hosted project does not hold yet, as a new numbered revision of any
-input whose files changed, and an input someone else changed in the hosted project since you last synced
-stops the push before anything is uploaded.
-
-A run on this machine can be recorded in the hosted project too, without hosted
-infrastructure running it:
+A run on this machine is recorded in the hosted project with `--record`, or after it
+finishes with `job record`:
 
 ```bash
-plural run -b support-triage -a careful --track
-plural job push JOB_ID
+plural run -b support-triage -a careful --record
+plural job record JOB_ID
 ```
 
-`--track` records the Job while it runs, and pushes missing inputs first the same way
-`--hosted` does. `job push` records a local Job that already finished; it pins the
+`--record` records the Job while it runs. Before it starts, it pushes any input of the
+run that the hosted project does not hold yet, as a new numbered revision of any input
+whose files changed; an input someone else changed in the hosted project since you
+last synced stops the push before anything is uploaded. `job record` records a local Job
+that already finished; it pins the
 revisions that Job ran, so push those first. Both produce the same hosted Job, so
-pushing a tracked Job again uploads only what the hosted Job does not hold yet. The
-Environment's Runtime still decides where Trials execute, so a tracked run against a
+recording a Job again uploads only what the hosted Job does not hold yet. The
+Environment's Runtime still decides where Trials execute, so a recorded run against a
 Daytona Environment runs remotely. See
-[Jobs](../running/jobs.md#local-tracked-and-hosted).
+[Record runs and run in the cloud](../platform/runs.md).
 
 ### Sign-in and scope
 
@@ -261,11 +261,11 @@ login or an API key, and the current scope.
 ```bash
 plural auth scope
 plural auth scope -p support-eval
-plural auth scope .
+plural auth scope --account
 plural auth scope --org acme
 ```
 
-`-p` selects an existing hosted project, `.` or `--account` selects account scope, and
+`-p` selects an existing hosted project, `--account` selects account scope, and
 `--org` switches between organization accounts (`personal` selects your own). A new
 scope is checked with the service before it is saved; if the check fails, the
 previous scope stays in place.
@@ -277,16 +277,22 @@ keyring or a private file in your user config directory, never in the project.
 ## Portable sessions
 
 `plural session export` bundles an Agent's session, from a hosted Trial
-(`--trial TRIAL_ID`) or from local files (`--agent`, `--environment`, `--state`), into a
+(`--trial TRIAL_ID`) or from local files (`--agent-file`, `--environment-file`,
+`--state`), into a
 directory you can move elsewhere. `plural session import BUNDLE` redeploys that bundle
 as a separate instance directory. The reference below lists every option.
 
 ## Command reference
 
 The rest of this page is for power users and scripts: the full help text of every
-command and option, exactly as the CLI prints it. Two commands are listed but
-reserved for later, and print that they are not available yet: `plural agent serve`
-and `plural trial rescore`.
+command and option, exactly as the CLI prints it. Renamed commands and options keep
+their old names for one release, print a note naming the new form, and are left out
+of this reference: `plural env add` and `env eject-files` (now `plural app add`),
+`job push` (`job record`), `credential unset` (`credential delete`), `plural models`
+and `plural rewards` (`model` and `reward`), `pull --revision` (`NAME@REF`),
+`auth scope .` (`--account`), `app add --env` (`--server-env`), and `session export
+--agent`/`--environment` and `session import --dest` (`--agent-file`,
+`--environment-file`, and `--out`).
 
 <!-- generated-cli-reference -->
 This section is generated from the Typer application. Run `uv run python scripts/generate_cli_reference.py` after changing the CLI.
@@ -303,6 +309,19 @@ This section is generated from the Typer application. Run `uv run python scripts
  <env|task|verifier|harness|agent|benchmark> init <name>`, and run them with `plural run --task
  <name> --model <model>`.
 
+ Objects:
+
+   Environment  `plural env init`: Apps, where they run, and limits.
+   App          `plural app add ENV`: one system the Agent works with.
+   Task         `plural task init`: instructions, an Environment, Verifiers.
+   Verifier     `plural verifier init`: decides what counts as good work.
+   Harness      `plural harness init`: the loop that drives the model.
+   Agent        `plural agent init --model`: model, instructions, Harness.
+   Benchmark    `plural benchmark init`: Tasks to rank Agents on.
+   Runtime      `plural runtime create`: where Environments run.
+   secret       `plural secret set`: a project value for Apps and Verifiers.
+   credential   `plural credential set`: your own value, carried by an Agent.
+
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --install-completion          Install completion for the current shell.                          │
 │ --show-completion             Show completion for the current shell, to copy it or customize the │
@@ -313,7 +332,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ run         Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.     │
 │ auth        Sign in, sign out, and choose the hosted account or project commands use.            │
 │ project     Create, register, and inspect projects.                                              │
-│ credential  Save your values for the credentials Agents carry, such as your CRM token.           │
+│ credential  Save your own values for the credentials Agents carry, such as your CRM token.       │
+│ app         Add, list, and remove the Apps in an Environment.                                    │
 │ env         Create, validate, push, pull, and inspect Environments.                              │
 │ verifier    Create, validate, push, pull, and inspect Verifiers.                                 │
 │ harness     Create, validate, push, pull, and inspect Harnesses.                                 │
@@ -323,11 +343,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ job         List, inspect, and rerun Jobs.                                                       │
 │ trial       Inspect and rerun Trials.                                                            │
 │ review      List and submit human reviews.                                                       │
-│ rewards     Show a Trial's rewards and export training data. Add rewards with `plural verifier   │
+│ reward      Show a Trial's rewards and export training data. Add rewards with `plural verifier   │
 │             apply`.                                                                              │
-│ models      List the models you may run.                                                         │
+│ model       List the models you may run.                                                         │
 │ runtime     Choose where Environments run.                                                       │
-│ secret      Set the secrets your Apps need in the hosted project.                                │
+│ secret      Set the project's setup values, stored encrypted in the hosted project.              │
 │ session     Export and redeploy portable agent sessions.                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -351,7 +371,30 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
-│ serve     Reserved: serve an Agent as an endpoint (not available yet).                           │
+│ delete    Delete a resource's local folder, refusing while other local resources use it.         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent delete`
+
+```text
+
+ Usage: plural agent delete [OPTIONS] {name}
+
+ Delete a resource's local folder, refusing while other local resources use it.
+
+ Without --hosted this is a local edit: the hosted project keeps the
+ resource until you add --hosted.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Agent to delete. [required]                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --hosted            Also delete it from the hosted project. Jobs and Trials that pinned its      │
+│                     revisions can still read them.                                               │
+│ --yes     -y        Delete without asking.                                                       │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -367,7 +410,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ *    name      <str>  Agent name. [required]                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --model    -m      <str>  Catalog model id.                                                      │
+│ --model    -m      <str>  Catalog model id, from `plural model list`. Asked for when omitted in  │
+│                           a terminal.                                                            │
 │ --harness          <str>  Harness name.                                                          │
 │ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -397,21 +441,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained revision as name@REVISION or with --revision.
+ Name a retained revision as NAME@REF.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
-│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
-│                             it pins. Missing dependencies are always restored.                   │
-│ --force                     Replace local files that differ. The old copy is kept under          │
-│                             .plural/backups.                                                     │
-│ --json                      Print machine-readable JSON.                                         │
-│ --help                      Show this message and exit.                                          │
+│ --with-deps          Also replace dependencies you already have with the exact revisions it      │
+│                      pins. Missing dependencies are always restored.                             │
+│ --force              Replace local files that differ. The old copy is kept under                 │
+│                      .plural/backups.                                                            │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -451,28 +494,11 @@ This section is generated from the Typer application. Run `uv run python scripts
  refer to it as name@VERSION.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
-│                          [required]                                                              │
+│ *    name         <str>  Resource to release. [required]                                         │
 │ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural agent serve`
-
-```text
-
- Usage: plural agent serve [OPTIONS] [name]
-
- Reserved: serve an Agent as an endpoint (not available yet).
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Agent to serve.                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -485,14 +511,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
- An invalid local copy is an error, not a reason to show the hosted one.
- name@REVISION shows that revision: the working copy when it holds
+ An invalid local copy is shown with its problems, never swapped for the
+ hosted one.
+ NAME@REF shows that revision: the working copy when it holds
  exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │
@@ -512,6 +539,131 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural app`
+
+```text
+
+ Usage: plural app [OPTIONS] COMMAND [ARGS]...
+
+ Add, list, and remove the Apps in an Environment.
+
+ An App is one system the Agent works with: an MCP server, an HTTP API, recorded traces, Plural's
+ files server, or a Python App class.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ add     Add a system to an Environment as an App, creating the Environment if it is new.         │
+│ list    List the Apps an Environment's environment.yaml declares.                                │
+│ remove  Remove an App from an Environment (a local edit until you push).                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural app add`
+
+```text
+
+ Usage: plural app add [OPTIONS] {name}
+
+ Add a system to an Environment as an App, creating the Environment if it is new.
+
+ Give one source per call: --mcp, --openapi, --traces, or --files-server.
+ Run it again to add another system. With --traces it also drafts Tasks and
+ a Benchmark, and running it again with newer traces adds their calls,
+ tools, systems, and Tasks; existing Tasks are kept.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  Environment to add to; created if it does not exist. [required]            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --mcp                 <str>               An MCP server: its Streamable HTTP URL, or the command │
+│                                           that starts it over stdio, such as 'npx -y             │
+│                                           @modelcontextprotocol/server-memory'.                  │
+│ --openapi             <str>               An HTTP API's OpenAPI document: a file or a URL.       │
+│ --traces              <str>               Recorded conversations: JSON or JSONL of {"messages":  │
+│                                           [...]}, or Plural Traces. Each system they call        │
+│                                           becomes a replay App, and Tasks and a Benchmark are    │
+│                                           drafted from them.                                     │
+│ --files-server                            Plural's ready-made files server: the Environment's    │
+│                                           and the Task's files, read-only, with search and       │
+│                                           read-only SQL over CSV, JSON, JSONL, and SQLite.       │
+│ --copy                                    With --files-server: copy the server into the          │
+│                                           Environment as APP_server.py, to change what it        │
+│                                           offers.                                                │
+│ --app                 <str>               The App's name. It prefixes an action only when        │
+│                                           another App offers the same name. Default: from the    │
+│                                           source, such as linear for https://mcp.linear.app/mcp. │
+│                                           With --traces, the App for tool calls whose names      │
+│                                           carry no app__ prefix (default: tools).                │
+│ --header              <str>               An HTTP header, KEY=VALUE. Repeatable. Use ${NAME}.    │
+│ --server-env          <str>               An environment variable for the MCP server, KEY=VALUE. │
+│                                           Repeatable. Use ${NAME}.                               │
+│ --tool                <str>               Only offer this MCP tool. Repeatable. Default: every   │
+│                                           tool.                                                  │
+│ --base-url            <str>               Where to send API requests. Default: the document's    │
+│                                           servers.                                               │
+│ --operation           <str>               Only offer this API operationId. Repeatable.           │
+│ --secret              <str>               A setup secret the project supplies, for reset and     │
+│                                           snapshot hooks. Repeatable. Without it, ${NAME} in a   │
+│                                           header or variable is a credential the Agent supplies. │
+│ --credential          <str>               A credential the running Agent supplies, such as its   │
+│                                           own API token. Repeatable. ${NAME} in a header or      │
+│                                           variable is added for you.                             │
+│ --judge-model         <str>               Model for the drafted judge Verifier.                  │
+│                                           [default: openai/gpt-5.6-luna]                         │
+│ --max-tasks           <int range> [x>=1]  With --traces: draft at most this many Tasks,          │
+│                                           preferring traces that call different tools.           │
+│                                           [default: 50]                                          │
+│ --runtime             <str>               Where a new Environment runs: local (a trusted         │
+│                                           subprocess), docker, or daytona. Default: local.       │
+│ --json                                    Print machine-readable JSON.                           │
+│ --help                                    Show this message and exit.                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural app list`
+
+```text
+
+ Usage: plural app list [OPTIONS] {environment}
+
+ List the Apps an Environment's environment.yaml declares.
+
+ This reads the file only. `plural env validate ENV` loads each App and lists
+ the actions the Agent is offered.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    environment      <str>  The Environment. [required]                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural app remove`
+
+```text
+
+ Usage: plural app remove [OPTIONS] {environment} {app}
+
+ Remove an App from an Environment (a local edit until you push).
+
+ Only the App's entry under apps: in environment.yaml is removed. Files it
+ used, such as a server, an OpenAPI document, or recordings, stay in place.
+ A Python App class is yours to remove by hand.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    environment      <str>  The Environment. [required]                                         │
+│ *    app              <str>  The App to remove, by its name in environment.yaml. [required]      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │
@@ -580,17 +732,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural auth scope [OPTIONS] [.]
+ Usage: plural auth scope [OPTIONS] [target]
 
  Show or change where hosted commands go by default.
 
- Scope selects a destination; it never changes what your credential may
- do. The new scope is checked with the service before it is saved, and a
- failed check leaves the previous scope in place.
+ With no options, show the current scope. Scope selects a destination; it
+ never changes what your credential may do. The new scope is checked with
+ the service before it is saved, and a failed check leaves the previous
+ scope in place.
 
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   [.]      <str>  `.` selects account scope. Omit to show the current scope.                     │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --account                 Select account scope.                                                  │
 │ --project  -p      <str>  Select an existing hosted project by name.                             │
@@ -633,6 +783,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
+│ delete    Delete a resource's local folder, refusing while other local resources use it.         │
 │ add       Add a Task to a Benchmark (a local edit until you push).                               │
 │ remove    Remove a Task from a Benchmark (a local edit until you push).                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -653,6 +804,29 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --benchmark  -b      <str>  Benchmark to edit. Defaults to the one you are in.                   │
 │ --push                      Push the Benchmark afterwards.                                       │
 │ --help                      Show this message and exit.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark delete`
+
+```text
+
+ Usage: plural benchmark delete [OPTIONS] {name}
+
+ Delete a resource's local folder, refusing while other local resources use it.
+
+ Without --hosted this is a local edit: the hosted project keeps the
+ resource until you add --hosted.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Benchmark to delete. [required]                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --hosted            Also delete it from the hosted project. Jobs and Trials that pinned its      │
+│                     revisions can still read them.                                               │
+│ --yes     -y        Delete without asking.                                                       │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -696,21 +870,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained revision as name@REVISION or with --revision.
+ Name a retained revision as NAME@REF.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
-│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
-│                             it pins. Missing dependencies are always restored.                   │
-│ --force                     Replace local files that differ. The old copy is kept under          │
-│                             .plural/backups.                                                     │
-│ --json                      Print machine-readable JSON.                                         │
-│ --help                      Show this message and exit.                                          │
+│ --with-deps          Also replace dependencies you already have with the exact revisions it      │
+│                      pins. Missing dependencies are always restored.                             │
+│ --force              Replace local files that differ. The old copy is kept under                 │
+│                      .plural/backups.                                                            │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -750,8 +923,7 @@ This section is generated from the Typer application. Run `uv run python scripts
  refer to it as name@VERSION.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
-│                          [required]                                                              │
+│ *    name         <str>  Resource to release. [required]                                         │
 │ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -786,14 +958,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
- An invalid local copy is an error, not a reason to show the hosted one.
- name@REVISION shows that revision: the working copy when it holds
+ An invalid local copy is shown with its problems, never swapped for the
+ hosted one.
+ NAME@REF shows that revision: the working copy when it holds
  exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │
@@ -826,19 +999,37 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural credential [OPTIONS] COMMAND [ARGS]...
 
- Save your values for the credentials Agents carry, such as your CRM token.
+ Save your own values for the credentials Agents carry, such as your CRM token.
 
- An Agent lists each credential under credentials: in its agent.yaml, with its scopes. Save your
- value once with `plural credential set NAME`; every Agent you run that carries NAME uses it. Your
- coworkers save their own.
+ Credentials are yours, not the project's. An App declares the credentials it needs; the Agent that
+ runs supplies them, with the scopes it lists under credentials: in its agent.yaml. Save your value
+ once with `plural credential set NAME`; every Agent you run that carries NAME uses it, and your
+ coworkers save their own. For project setup values, use `plural secret`.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list   List the credentials you saved, never their values.                                       │
-│ set    Save your value for a credential. Prompts without echoing.                                │
-│ unset  Remove one of your saved credentials.                                                     │
+│ list    List the credentials you saved, never their values.                                      │
+│ set     Save your value for a credential. Prompts without echoing.                               │
+│ delete  Delete one of your saved credentials.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural credential delete`
+
+```text
+
+ Usage: plural credential delete [OPTIONS] {name}
+
+ Delete one of your saved credentials.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The credential to delete. [required]                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -874,23 +1065,6 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural credential unset`
-
-```text
-
- Usage: plural credential unset [OPTIONS] {name}
-
- Remove one of your saved credentials.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name      <str>  The credential to remove. [required]                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --json          Print machine-readable JSON.                                                     │
-│ --help          Show this message and exit.                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
 ### `plural env`
 
 ```text
@@ -903,91 +1077,38 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ init         Create an Environment whose App is a FastMCP server you write.                      │
-│ eject-files  Copy Plural's ready-made files server into an Environment, to change what it        │
-│              offers.                                                                             │
-│ serve        Serve an App's FastMCP server over HTTP, to try its tools in any MCP client.        │
-│ add          Add a system to an Environment as an App, creating the Environment if it is new.    │
-│ validate     Check a resource and everything it depends on, without uploading.                   │
-│ push         Validate and push an immutable, private revision to the bound project.              │
-│ release      Label the revision matching your files with a release version, pushing it first.    │
-│ pull         Restore a hosted revision's editable files into this project.                       │
-│ show         Show a resource: the local copy if there is one, otherwise the hosted one.          │
-│ list         List resources of this kind, labeled local or hosted.                               │
+│ init      Create an Environment whose App is a FastMCP server you write.                         │
+│ serve     Serve an App's FastMCP server over HTTP, to try its tools in any MCP client.           │
+│ validate  Check a resource and everything it depends on, without uploading.                      │
+│ push      Validate and push an immutable, private revision to the bound project.                 │
+│ release   Label the revision matching your files with a release version, pushing it first.       │
+│ pull      Restore a hosted revision's editable files into this project.                          │
+│ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
+│ list      List resources of this kind, labeled local or hosted.                                  │
+│ delete    Delete a resource's local folder, refusing while other local resources use it.         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural env add`
+### `plural env delete`
 
 ```text
 
- Usage: plural env add [OPTIONS] {name}
+ Usage: plural env delete [OPTIONS] {name}
 
- Add a system to an Environment as an App, creating the Environment if it is new.
+ Delete a resource's local folder, refusing while other local resources use it.
 
- Give one source per call: --mcp, --openapi, or --traces. Run it again to
- add another system. With --traces it also drafts Tasks and a Benchmark,
- and running it again with newer traces adds their calls, tools, systems,
- and Tasks; existing Tasks are kept.
+ Without --hosted this is a local edit: the hosted project keeps the
+ resource until you add --hosted.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name      <str>  Environment to add to; created if it does not exist. [required]            │
+│ *    name      <str>  The Environment to delete. [required]                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --mcp                <str>               An MCP server: its Streamable HTTP URL, or the command  │
-│                                          that starts it over stdio, such as 'npx -y              │
-│                                          @modelcontextprotocol/server-memory'.                   │
-│ --openapi            <str>               An HTTP API's OpenAPI document: a file or a URL.        │
-│ --traces             <str>               Recorded conversations: JSON or JSONL of {"messages":   │
-│                                          [...]}, or Plural Traces. Each system they call becomes │
-│                                          a replay App, and Tasks and a Benchmark are drafted     │
-│                                          from them.                                              │
-│ --app                <str>               The App's name. It prefixes an action only when another │
-│                                          App offers the same name. Default: from the source,     │
-│                                          such as linear for https://mcp.linear.app/mcp. With     │
-│                                          --traces, the App for tool calls whose names carry no   │
-│                                          app__ prefix (default: tools).                          │
-│ --header             <str>               An HTTP header, KEY=VALUE. Repeatable. Use ${NAME}.     │
-│ --env                <str>               An MCP server variable, KEY=VALUE. Repeatable. Use      │
-│                                          ${NAME}.                                                │
-│ --tool               <str>               Only offer this MCP tool. Repeatable. Default: every    │
-│                                          tool.                                                   │
-│ --base-url           <str>               Where to send API requests. Default: the document's     │
-│                                          servers.                                                │
-│ --operation          <str>               Only offer this API operationId. Repeatable.            │
-│ --secret             <str>               A setup secret the project supplies, for reset and      │
-│                                          snapshot hooks. Repeatable. Without it, ${NAME} in a    │
-│                                          header or variable is a credential the Agent supplies.  │
-│ --credential         <str>               A credential the running Agent supplies, such as its    │
-│                                          own API token. Repeatable. ${NAME} in a header or       │
-│                                          variable is added for you.                              │
-│ --judge-model        <str>               With --traces: model for the drafted judge.             │
-│                                          [default: openai/gpt-5.6-luna]                          │
-│ --max-tasks          <int range> [x>=1]  With --traces: draft at most this many Tasks,           │
-│                                          preferring traces that call different tools.            │
-│                                          [default: 50]                                           │
-│ --runtime            <str>               Where a new Environment runs: local (a trusted          │
-│                                          subprocess), docker, or daytona. Default: local.        │
-│ --json                                   Print machine-readable JSON.                            │
-│ --help                                   Show this message and exit.                             │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural env eject-files`
-
-```text
-
- Usage: plural env eject-files [OPTIONS] {name}
-
- Copy Plural's ready-made files server into an Environment, to change what it offers.
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name      <str>  Environment to copy the files server into. [required]                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --as          <str>  File to write, in the Environment folder. [default: files_server.py]        │
-│ --json               Print machine-readable JSON.                                                │
-│ --help               Show this message and exit.                                                 │
+│ --hosted            Also delete it from the hosted project. Jobs and Trials that pinned its      │
+│                     revisions can still read them.                                               │
+│ --yes     -y        Delete without asking.                                                       │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -999,11 +1120,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Create an Environment whose App is a FastMCP server you write.
 
+ A starter Task and Verifier come with it, so the example runs and
+ scores at once: `plural run --task NAME-first --model MODEL`.
+
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    name      <str>  Environment name. [required]                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --python          Start from a Python App class instead of a FastMCP server.                     │
+│ --bare            Create only the Environment, without the starter Task and Verifier.            │
 │ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -1032,21 +1157,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained revision as name@REVISION or with --revision.
+ Name a retained revision as NAME@REF.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
-│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
-│                             it pins. Missing dependencies are always restored.                   │
-│ --force                     Replace local files that differ. The old copy is kept under          │
-│                             .plural/backups.                                                     │
-│ --json                      Print machine-readable JSON.                                         │
-│ --help                      Show this message and exit.                                          │
+│ --with-deps          Also replace dependencies you already have with the exact revisions it      │
+│                      pins. Missing dependencies are always restored.                             │
+│ --force              Replace local files that differ. The old copy is kept under                 │
+│                      .plural/backups.                                                            │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1086,8 +1210,7 @@ This section is generated from the Typer application. Run `uv run python scripts
  refer to it as name@VERSION.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
-│                          [required]                                                              │
+│ *    name         <str>  Resource to release. [required]                                         │
 │ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -1124,14 +1247,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
- An invalid local copy is an error, not a reason to show the hosted one.
- name@REVISION shows that revision: the working copy when it holds
+ An invalid local copy is shown with its problems, never swapped for the
+ hosted one.
+ NAME@REF shows that revision: the working copy when it holds
  exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │
@@ -1177,6 +1301,30 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
+│ delete    Delete a resource's local folder, refusing while other local resources use it.         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural harness delete`
+
+```text
+
+ Usage: plural harness delete [OPTIONS] {name}
+
+ Delete a resource's local folder, refusing while other local resources use it.
+
+ Without --hosted this is a local edit: the hosted project keeps the
+ resource until you add --hosted.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Harness to delete. [required]                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --hosted            Also delete it from the hosted project. Jobs and Trials that pinned its      │
+│                     revisions can still read them.                                               │
+│ --yes     -y        Delete without asking.                                                       │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1220,21 +1368,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained revision as name@REVISION or with --revision.
+ Name a retained revision as NAME@REF.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
-│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
-│                             it pins. Missing dependencies are always restored.                   │
-│ --force                     Replace local files that differ. The old copy is kept under          │
-│                             .plural/backups.                                                     │
-│ --json                      Print machine-readable JSON.                                         │
-│ --help                      Show this message and exit.                                          │
+│ --with-deps          Also replace dependencies you already have with the exact revisions it      │
+│                      pins. Missing dependencies are always restored.                             │
+│ --force              Replace local files that differ. The old copy is kept under                 │
+│                      .plural/backups.                                                            │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1274,8 +1421,7 @@ This section is generated from the Typer application. Run `uv run python scripts
  refer to it as name@VERSION.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
-│                          [required]                                                              │
+│ *    name         <str>  Resource to release. [required]                                         │
 │ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -1292,14 +1438,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
- An invalid local copy is an error, not a reason to show the hosted one.
- name@REVISION shows that revision: the working copy when it holds
+ An invalid local copy is shown with its problems, never swapped for the
+ hosted one.
+ NAME@REF shows that revision: the working copy when it holds
  exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │
@@ -1338,10 +1485,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list   List Jobs, newest first, labeled local or hosted.                                         │
-│ show   Show a Job and its Trials (local first, then hosted).                                     │
-│ push   Record a finished local Job in the hosted project, with every Trial execution.            │
-│ rerun  Run a Job again with the exact inputs it used. Creates a new, linked Job.                 │
+│ list    List Jobs, newest first, labeled local or hosted.                                        │
+│ show    Show a Job and its Trials (local first, then hosted).                                    │
+│ record  Record a finished local Job in the hosted project, with every Trial execution.           │
+│ rerun   Run a Job again with the exact inputs it used. Creates a new, linked Job.                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1361,17 +1508,17 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural job push`
+### `plural job record`
 
 ```text
 
- Usage: plural job push [OPTIONS] {job_id}
+ Usage: plural job record [OPTIONS] {job_id}
 
  Record a finished local Job in the hosted project, with every Trial execution.
 
  The hosted Job pins the pushed revisions the local Job ran, so push those
- first. Pushing again, or pushing a Job that was tracked, uploads only what
- the hosted Job does not hold yet.
+ first. Recording again, or recording a Job that ran with --record, uploads
+ only what the hosted Job does not hold yet.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    job_id      <str>  Finished local Job to record in the hosted project. [required]           │
@@ -1394,9 +1541,9 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ *    job_id      <str>  Job to run again with its original pinned inputs. [required]             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --track          Record a local rerun in the hosted project as it runs.                          │
-│ --json           Print machine-readable JSON.                                                    │
-│ --help           Show this message and exit.                                                     │
+│ --record          Record the rerun in the hosted project as it runs.                             │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1418,11 +1565,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural models`
+### `plural model`
 
 ```text
 
- Usage: plural models [OPTIONS] COMMAND [ARGS]...
+ Usage: plural model [OPTIONS] COMMAND [ARGS]...
 
  List the models you may run.
 
@@ -1434,11 +1581,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural models list`
+### `plural model list`
 
 ```text
 
- Usage: plural models list [OPTIONS]
+ Usage: plural model list [OPTIONS]
 
  List models your account may use.
 
@@ -1592,11 +1739,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural rewards`
+### `plural reward`
 
 ```text
 
- Usage: plural rewards [OPTIONS] COMMAND [ARGS]...
+ Usage: plural reward [OPTIONS] COMMAND [ARGS]...
 
  Show a Trial's rewards and export training data. Add rewards with `plural verifier apply`.
 
@@ -1609,11 +1756,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural rewards export`
+### `plural reward export`
 
 ```text
 
- Usage: plural rewards export [OPTIONS]
+ Usage: plural reward export [OPTIONS]
 
  Write one training record per Trial: model turns with TITO tokens and their rewards.
 
@@ -1636,11 +1783,11 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-### `plural rewards show`
+### `plural reward show`
 
 ```text
 
- Usage: plural rewards show [OPTIONS] {trial_id}
+ Usage: plural reward show [OPTIONS] {trial_id}
 
  List a Trial's reward ledger.
 
@@ -1661,40 +1808,44 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
 
- Runs execute on this machine, in the Runtime each Environment declares
- (local, docker, or a remote provider such as daytona), and stay local
- unless you pass --track. --hosted submits to hosted workers instead.
+ The Job runs from this machine. Its Trials execute in the Runtime each
+ Environment declares: local, docker, or a cloud sandbox such as daytona.
+ It stays local unless you pass --record.
 
- name@version runs that exact pushed version even after your files have
+ NAME@REF runs that exact pushed revision even after your files have
  moved on. It is restored under .plural/versions without touching them.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --task            -t      <str>               Task to run: a name, or name@version for a         │
-│                                               retained version.                                  │
-│ --benchmark       -b      <str>               Benchmark to run: a name, or name@version for a    │
-│                                               retained version.                                  │
-│ --model           -m      <str>               Catalog model id.                                  │
-│ --harness         -h      <str>               Harness for --model. Default: native (Plural's     │
-│                                               built-in tool loop).                               │
-│ --agent           -a      <str>               Saved Agent to run: a name, or name@version.       │
-│ --hosted                                      Run on hosted infrastructure. Inputs the hosted    │
-│                                               project lacks are pushed first.                    │
-│ --track                                       Run here, and record the Job in the hosted project │
-│                                               as it runs. Inputs the hosted project lacks are    │
-│                                               pushed first.                                      │
-│ --attempts                <int range> [x>=1]  Advanced: Trials per Task (default 1).             │
-│ --concurrency     -n      <str>               Trials to run at once: a number, or auto to size   │
-│                                               it from this machine, the runtime, and where the   │
-│                                               model runs.                                        │
-│                                               [default: auto]                                    │
-│ --plural-version          <str>               Plural to install in Docker and remote sandboxes:  │
-│                                               a version, or latest. Default: this CLI's own      │
-│                                               code.                                              │
-│ --dry-run                                     Advanced: validate and show the plan without       │
-│                                               running.                                           │
-│ --follow                                      With --hosted, stream progress.                    │
-│ --json                                        Print machine-readable JSON.                       │
-│ --help                                        Show this message and exit.                        │
+│ --task              -t      <str>               Task to run: NAME[@REF], where REF is a revision │
+│                                                 number (@3), a release version (@1.0.0), or a    │
+│                                                 content hash.                                    │
+│ --benchmark         -b      <str>               Benchmark to run: NAME[@REF], where REF is a     │
+│                                                 revision number (@3), a release version          │
+│                                                 (@1.0.0), or a content hash.                     │
+│ --model             -m      <str>               Catalog model id.                                │
+│ --harness                   <str>               Harness for --model. Default: native (Plural's   │
+│                                                 built-in tool loop).                             │
+│ --agent             -a      <str>               Saved Agent to run: NAME[@REF], where REF is a   │
+│                                                 revision number (@3), a release version          │
+│                                                 (@1.0.0), or a content hash.                     │
+│ --record                                        Run here, and record the Job in the hosted       │
+│                                                 project as it runs. Inputs the hosted project    │
+│                                                 lacks are pushed first.                          │
+│ --evaluation-track          <str>               Run a Benchmark under one of its evaluation      │
+│                                                 tracks, by id, so the results can be published.  │
+│                                                 Implies --record, and uses the track's attempts. │
+│ --attempts                  <int range> [x>=1]  Advanced: Trials per Task (default 1).           │
+│ --concurrency       -n      <str>               Trials to run at once: a number, or auto to size │
+│                                                 it from this machine, the runtime, and where the │
+│                                                 model runs.                                      │
+│                                                 [default: auto]                                  │
+│ --plural-version            <str>               Plural to install in Docker and remote           │
+│                                                 sandboxes: a version, or latest. Default: this   │
+│                                                 CLI's own code.                                  │
+│ --dry-run                                       Advanced: validate and show the plan without     │
+│                                                 running.                                         │
+│ --json                                          Print machine-readable JSON.                     │
+│ --help                                          Show this message and exit.                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1742,36 +1893,35 @@ This section is generated from the Typer application. Run `uv run python scripts
 │   name      <str>  Runtime name, such as 'GPU sandbox'.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --template              -t                       <str>  Start from this Runtime template (slug   │
-│                                                         or id).                                  │
-│ --provider              -p                       <str>  Configure a provider directly instead of │
-│                                                         a template.                              │
-│ --set                                            <str>  A setting as key=value, such as --set    │
-│                                                         cpus=2. Repeat for more; repeat a list   │
-│                                                         setting to add items, such as --set      │
-│                                                         python_packages=duckdb --set             │
-│                                                         python_packages=polars. See `plural      │
-│                                                         runtime provider <id>` for every key.    │
-│ --credential                                     <str>  A credential name, such as               │
-│                                                         DAYTONA_API_KEY, to be prompted for      │
-│                                                         without echoing; KEY=VALUE also works    │
-│                                                         but leaves the value in your shell       │
-│                                                         history.                                 │
-│ --credentials-from-env                                  Read every credential the provider needs │
-│                                                         from environment variables of the same   │
-│                                                         name.                                    │
-│ --plural-credentials        --own-credentials           Start sandboxes on Plural's account,     │
-│                                                         billed to your credits as compute usage, │
-│                                                         or with your own provider credentials.   │
-│                                                         Defaults to Plural's account where the   │
-│                                                         provider offers it, unless you pass      │
-│                                                         credentials.                             │
-│ --description                                    <str>  What this Runtime is for.                │
-│ --advanced                                              Also prompt for advanced settings.       │
-│ --no-input                                              Never prompt; fail when something        │
-│                                                         required is missing.                     │
-│ --json                                                  Print machine-readable JSON.             │
-│ --help                                                  Show this message and exit.              │
+│ --template                                     <str>  Start from this Runtime template (slug or  │
+│                                                       id).                                       │
+│ --provider                                     <str>  Configure a provider directly instead of a │
+│                                                       template.                                  │
+│ --set                                          <str>  A setting as key=value, such as --set      │
+│                                                       cpus=2. Repeat for more; repeat a list     │
+│                                                       setting to add items, such as --set        │
+│                                                       python_packages=duckdb --set               │
+│                                                       python_packages=polars. See `plural        │
+│                                                       runtime provider <id>` for every key.      │
+│ --credential                                   <str>  A credential name, such as                 │
+│                                                       DAYTONA_API_KEY, to be prompted for        │
+│                                                       without echoing; KEY=VALUE also works but  │
+│                                                       leaves the value in your shell history.    │
+│ --credentials-from-env                                Read every credential the provider needs   │
+│                                                       from environment variables of the same     │
+│                                                       name.                                      │
+│ --plural-credentials      --own-credentials           Start sandboxes on Plural's account,       │
+│                                                       billed to your credits as compute usage,   │
+│                                                       or with your own provider credentials.     │
+│                                                       Defaults to Plural's account where the     │
+│                                                       provider offers it, unless you pass        │
+│                                                       credentials.                               │
+│ --description                                  <str>  What this Runtime is for.                  │
+│ --advanced                                            Also prompt for advanced settings.         │
+│ --no-input                                            Never prompt; fail when something required │
+│                                                       is missing.                                │
+│ --json                                                Print machine-readable JSON.               │
+│ --help                                                Show this message and exit.                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1968,41 +2118,38 @@ This section is generated from the Typer application. Run `uv run python scripts
 │   name      <str>  Template name, such as 'Daytona US'.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --provider              -p                            <str>  Provider id.                        │
-│ --set                                                 <str>  A setting as key=value, such as     │
-│                                                              --set cpus=2. Repeat for more;      │
-│                                                              repeat a list setting to add items, │
-│                                                              such as --set                       │
-│                                                              python_packages=duckdb --set        │
-│                                                              python_packages=polars. See `plural │
-│                                                              runtime provider <id>` for every    │
-│                                                              key.                                │
-│ --credential                                          <str>  A credential name, such as          │
-│                                                              DAYTONA_API_KEY, to be prompted for │
-│                                                              without echoing; KEY=VALUE also     │
-│                                                              works but leaves the value in your  │
-│                                                              shell history.                      │
-│ --credentials-from-env                                       Read every credential the provider  │
-│                                                              needs from environment variables of │
-│                                                              the same name.                      │
-│ --lock                                                <str>  A setting project Runtimes may not  │
-│                                                              change. Repeat for more.            │
-│ --share-credentials         --no-share-credentials           Let members' local runs use this    │
-│                                                              template's credentials.             │
-│                                                              [default: no-share-credentials]     │
-│ --plural-credentials        --own-credentials                Start sandboxes on Plural's         │
-│                                                              account, billed to your credits as  │
-│                                                              compute usage, or with your own     │
-│                                                              provider credentials. Defaults to   │
-│                                                              Plural's account where the provider │
-│                                                              offers it, unless you pass          │
-│                                                              credentials.                        │
-│ --description                                         <str>  What this template is for.          │
-│ --advanced                                                   Also prompt for advanced settings.  │
-│ --no-input                                                   Never prompt; fail when something   │
-│                                                              required is missing.                │
-│ --json                                                       Print machine-readable JSON.        │
-│ --help                                                       Show this message and exit.         │
+│ --provider                                          <str>  Provider id.                          │
+│ --set                                               <str>  A setting as key=value, such as --set │
+│                                                            cpus=2. Repeat for more; repeat a     │
+│                                                            list setting to add items, such as    │
+│                                                            --set python_packages=duckdb --set    │
+│                                                            python_packages=polars. See `plural   │
+│                                                            runtime provider <id>` for every key. │
+│ --credential                                        <str>  A credential name, such as            │
+│                                                            DAYTONA_API_KEY, to be prompted for   │
+│                                                            without echoing; KEY=VALUE also works │
+│                                                            but leaves the value in your shell    │
+│                                                            history.                              │
+│ --credentials-from-env                                     Read every credential the provider    │
+│                                                            needs from environment variables of   │
+│                                                            the same name.                        │
+│ --lock                                              <str>  A setting project Runtimes may not    │
+│                                                            change. Repeat for more.              │
+│ --share-credentials       --no-share-credentials           Let members' local runs use this      │
+│                                                            template's credentials.               │
+│                                                            [default: no-share-credentials]       │
+│ --plural-credentials      --own-credentials                Start sandboxes on Plural's account,  │
+│                                                            billed to your credits as compute     │
+│                                                            usage, or with your own provider      │
+│                                                            credentials. Defaults to Plural's     │
+│                                                            account where the provider offers it, │
+│                                                            unless you pass credentials.          │
+│ --description                                       <str>  What this template is for.            │
+│ --advanced                                                 Also prompt for advanced settings.    │
+│ --no-input                                                 Never prompt; fail when something     │
+│                                                            required is missing.                  │
+│ --json                                                     Print machine-readable JSON.          │
+│ --help                                                     Show this message and exit.           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2157,10 +2304,12 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural secret [OPTIONS] COMMAND [ARGS]...
 
- Set the secrets your Apps need in the hosted project.
+ Set the project's setup values, stored encrypted in the hosted project.
 
- `plural env validate` lists the secrets each App needs. Set one with `plural secret set NAME`;
- `plural run` then supplies it to the App.
+ Apps' reset and snapshot commands and Verifiers use secrets; the model never sees them. `plural
+ env validate` lists the secrets each App needs. Set one with `plural secret set NAME`; `plural
+ run` then supplies it to the App. For your own values, such as your API token, use `plural
+ credential`.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
@@ -2233,7 +2382,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ export  Export a session bundle from a hosted trial or local files.                              │
+│ export  Export a session bundle from a hosted Trial or local files.                              │
 │ import  Redeploy a bundle as a separate instance directory.                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -2244,18 +2393,18 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural session export [OPTIONS]
 
- Export a session bundle from a hosted trial or local files.
+ Export a session bundle from a hosted Trial or local files.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --trial              <str>   Hosted trial id.                                                    │
-│ --agent              <path>  Agent YAML or JSON file.                                            │
-│ --environment        <path>  Environment YAML or JSON file.                                      │
-│ --state              <path>  State JSON file.                                                    │
-│ --data               <str>   Data reference to record.                                           │
-│ --data-dir           <path>  Directory bundled into data/.                                       │
-│ --name               <str>   Snapshot name.                                                      │
-│ --out                <path>  Bundle directory. [default: sessions]                               │
-│ --help                       Show this message and exit.                                         │
+│ --trial                   <str>   Hosted Trial id.                                               │
+│ --agent-file              <path>  Agent YAML or JSON file.                                       │
+│ --environment-file        <path>  Environment YAML or JSON file.                                 │
+│ --state                   <path>  State JSON file.                                               │
+│ --data                    <str>   Data reference to record.                                      │
+│ --data-dir                <path>  Directory bundled into data/.                                  │
+│ --name                    <str>   Snapshot name.                                                 │
+│ --out                     <path>  Bundle directory. [default: sessions]                          │
+│ --help                            Show this message and exit.                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2271,7 +2420,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ *    bundle      <path>  Session bundle directory. [required]                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --dest        <path>  Parent directory for the new instance.                                     │
+│ --out         <path>  Parent directory for the new instance.                                     │
 │ --help                Show this message and exit.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -2295,6 +2444,30 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
+│ delete    Delete a resource's local folder, refusing while other local resources use it.         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task delete`
+
+```text
+
+ Usage: plural task delete [OPTIONS] {name}
+
+ Delete a resource's local folder, refusing while other local resources use it.
+
+ Without --hosted this is a local edit: the hosted project keeps the
+ resource until you add --hosted.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Task to delete. [required]                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --hosted            Also delete it from the hosted project. Jobs and Trials that pinned its      │
+│                     revisions can still read them.                                               │
+│ --yes     -y        Delete without asking.                                                       │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2311,7 +2484,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --environment  -e      <str>  Environment the Task runs in.                                      │
-│ --verifier     -v      <str>  Verifier that scores it. Repeat for more.                          │
+│ --verifier             <str>  Verifier that scores it. Repeat for more.                          │
 │ --help                        Show this message and exit.                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -2340,21 +2513,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained revision as name@REVISION or with --revision.
+ Name a retained revision as NAME@REF.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
-│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
-│                             it pins. Missing dependencies are always restored.                   │
-│ --force                     Replace local files that differ. The old copy is kept under          │
-│                             .plural/backups.                                                     │
-│ --json                      Print machine-readable JSON.                                         │
-│ --help                      Show this message and exit.                                          │
+│ --with-deps          Also replace dependencies you already have with the exact revisions it      │
+│                      pins. Missing dependencies are always restored.                             │
+│ --force              Replace local files that differ. The old copy is kept under                 │
+│                      .plural/backups.                                                            │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2394,8 +2566,7 @@ This section is generated from the Typer application. Run `uv run python scripts
  refer to it as name@VERSION.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
-│                          [required]                                                              │
+│ *    name         <str>  Resource to release. [required]                                         │
 │ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -2412,14 +2583,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
- An invalid local copy is an error, not a reason to show the hosted one.
- name@REVISION shows that revision: the working copy when it holds
+ An invalid local copy is shown with its problems, never swapped for the
+ hosted one.
+ NAME@REF shows that revision: the working copy when it holds
  exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │
@@ -2458,9 +2630,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ show     Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted).     │
-│ rerun    Run one Trial again with its pinned inputs, as a new one-Trial Job.                     │
-│ rescore  Reserved: score a finished Trial again (not available yet).                             │
+│ show   Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted).       │
+│ rerun  Run one Trial again with its pinned inputs, as a new one-Trial Job.                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2476,25 +2647,9 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ *    trial_id      <str>  Trial to run again. [required]                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --track          Record a local rerun in the hosted project as it runs.                          │
-│ --json           Print machine-readable JSON.                                                    │
-│ --help           Show this message and exit.                                                     │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-### `plural trial rescore`
-
-```text
-
- Usage: plural trial rescore [OPTIONS] {trial_id}
-
- Reserved: score a finished Trial again (not available yet).
-
-╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    trial_id      <str>  Trial id. [required]                                                   │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --record          Record the rerun in the hosted project as it runs.                             │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2535,6 +2690,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ pull      Restore a hosted revision's editable files into this project.                          │
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
+│ delete    Delete a resource's local folder, refusing while other local resources use it.         │
 │ try       Run a Verifier on stored Trials and print what it gives, without saving anything.      │
 │ apply     Run a Verifier on stored Trials and add its rewards to their ledgers.                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -2561,6 +2717,29 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --job          <str>  Every Trial of this local Job.                                             │
 │ --json                Print machine-readable JSON.                                               │
 │ --help                Show this message and exit.                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural verifier delete`
+
+```text
+
+ Usage: plural verifier delete [OPTIONS] {name}
+
+ Delete a resource's local folder, refusing while other local resources use it.
+
+ Without --hosted this is a local edit: the hosted project keeps the
+ resource until you add --hosted.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Verifier to delete. [required]                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --hosted            Also delete it from the hosted project. Jobs and Trials that pinned its      │
+│                     revisions can still read them.                                               │
+│ --yes     -y        Delete without asking.                                                       │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2604,21 +2783,20 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Restore a hosted revision's editable files into this project.
 
- Name a retained revision as name@REVISION or with --revision.
+ Name a retained revision as NAME@REF.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --revision   -r      <str>  Revision to restore: a number, version, or hash.                     │
-│ --with-deps                 Also replace dependencies you already have with the exact revisions  │
-│                             it pins. Missing dependencies are always restored.                   │
-│ --force                     Replace local files that differ. The old copy is kept under          │
-│                             .plural/backups.                                                     │
-│ --json                      Print machine-readable JSON.                                         │
-│ --help                      Show this message and exit.                                          │
+│ --with-deps          Also replace dependencies you already have with the exact revisions it      │
+│                      pins. Missing dependencies are always restored.                             │
+│ --force              Replace local files that differ. The old copy is kept under                 │
+│                      .plural/backups.                                                            │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2658,8 +2836,7 @@ This section is generated from the Typer application. Run `uv run python scripts
  refer to it as name@VERSION.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    name         <str>  Resource name. Defaults to the resource directory you are in.           │
-│                          [required]                                                              │
+│ *    name         <str>  Resource to release. [required]                                         │
 │ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -2676,14 +2853,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Show a resource: the local copy if there is one, otherwise the hosted one.
 
- An invalid local copy is an error, not a reason to show the hosted one.
- name@REVISION shows that revision: the working copy when it holds
+ An invalid local copy is shown with its problems, never swapped for the
+ hosted one.
+ NAME@REF shows that revision: the working copy when it holds
  exactly that content, otherwise the retained hosted revision.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│   name      <str>  Resource name, or name@REVISION for a retained revision: a number (@3), a     │
-│                    release version (@1.0.0), or a content hash (@sha256:...). Defaults to the    │
-│                    resource directory you are in.                                                │
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --local           Only read local files.                                                         │

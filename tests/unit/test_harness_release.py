@@ -249,7 +249,7 @@ def test_native_actions_executes_only_declared_actions(
             },
         )
     )
-    monkeypatch.setattr(native_runner, "_model_call", lambda **_kwargs: next(responses))
+    monkeypatch.setattr(native_runner, "_model_call", lambda **_kwargs: (next(responses), 0.0))
     request = _request().model_dump(mode="json")
     request["environment"]["actions"] = [
         {
@@ -282,9 +282,9 @@ def test_native_runner_calls_the_gateway_with_the_catalog_model(
     expected = "catalog/model"
     seen: list[str] = []
 
-    def model_call(**kwargs: object) -> dict[str, object]:
+    def model_call(**kwargs: object) -> tuple[dict[str, object], float]:
         seen.append(str(kwargs["model"]))
-        return {"choices": [{"message": {"role": "assistant", "content": "complete"}}]}
+        return {"choices": [{"message": {"role": "assistant", "content": "complete"}}]}, 0.0
 
     monkeypatch.setattr(native_runner, "_model_call", model_call)
     request = _request().model_copy(

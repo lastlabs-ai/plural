@@ -1,16 +1,18 @@
 """``plural run`` and the Job, Trial, and review commands that follow it.
 
-Runs are local unless ``--hosted`` is given; the selected scope never moves
-a run. Local records live in ``.plural/jobs``; hosted ones in the bound
-project. ``--track`` also records a local run in the hosted project as it
-happens, and ``plural job push`` records a finished one. Show and rerun
-commands look locally first and label the result.
+Every Job runs from this machine, in the Runtime each Environment declares;
+the selected scope never moves a run. Local records live in ``.plural/jobs``.
+``--record`` also records a run in the hosted project as it happens, and
+``plural job record`` records a finished one. Show commands look locally first
+and label the result.
 """
 
 from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Mapping
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Literal
 
 import typer
@@ -19,6 +21,10 @@ from plural.apps.mcp import use_credential_source
 from plural.auth import Session
 from plural.cli.common import (
     JSON_OPTION,
+    REF_HELP,
+    alias,
+    counted,
+    deprecated,
     emit,
     handled,
     project_studio,
@@ -29,6 +35,7 @@ from plural.cli.common import (
     workspace,
 )
 from plural.cli.credential_commands import account_credential_source, stored_credentials
+from plural.cli.credits import CreditWatch
 from plural.cli.runtime_commands import _project_studio
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
@@ -61,7 +68,7 @@ from plural.project.runs import (
     rerun_local_job,
     rerun_local_trial,
     run_local,
-    submit_hosted,
+    run_roots,
 )
 from plural.project.sync import REBUILT_NOTE, PullStep, PushStep, pull_missing
 from plural.project.versions import holds_version, version_workspace, versioned
@@ -74,39 +81,59 @@ job_app = typer.Typer(help="List, inspect, and rerun Jobs.", no_args_is_help=Tru
 trial_app = typer.Typer(help="Inspect and rerun Trials.", no_args_is_help=True)
 review_app = typer.Typer(help="List and submit human reviews.", no_args_is_help=True)
 
+HOSTED_RUNS = (
+    "Plural runs every Job from your machine; it does not run Jobs on its servers. Add "
+    "--record to record the Job in your hosted project as it runs, and set an "
+    "Environment's runtime to a cloud provider such as daytona to run its Trials in "
+    "remote sandboxes."
+)
+
+
+def _not_here(kind: str, item_id: str) -> str:
+    return (
+        f"{kind} {item_id} did not run from this checkout, so it cannot be rerun here. "
+        "Rerun it from the checkout that ran it, or start a new Job with "
+        "`plural run ... --record`; NAME@REF pins the exact pushed revisions."
+    )
+
+
+TRACK_OPTION = typer.Option(False, "--track", hidden=True)
+
 
 @handled
 def run(
-    task: str | None = typer.Option(
-        None, "--task", "-t", help="Task to run: a name, or name@version for a retained version."
-    ),
+    task: str | None = typer.Option(None, "--task", "-t", help=f"Task to run: {REF_HELP}."),
     benchmark: str | None = typer.Option(
         None,
         "--benchmark",
         "-b",
-        help="Benchmark to run: a name, or name@version for a retained version.",
+        help=f"Benchmark to run: {REF_HELP}.",
     ),
     model: str | None = typer.Option(None, "--model", "-m", help="Catalog model id."),
     harness: str | None = typer.Option(
         None,
         "--harness",
-        "-h",
         help=f"Harness for --model. Default: {DEFAULT_HARNESS} (Plural's built-in tool loop).",
     ),
     agent: str | None = typer.Option(
-        None, "--agent", "-a", help="Saved Agent to run: a name, or name@version."
+        None, "--agent", "-a", help=f"Saved Agent to run: {REF_HELP}."
     ),
-    hosted: bool = typer.Option(
+    hosted: bool = typer.Option(False, "--hosted", hidden=True),
+    record: bool = typer.Option(
         False,
-        "--hosted",
-        help="Run on hosted infrastructure. Inputs the hosted project lacks are pushed first.",
-    ),
-    track: bool = typer.Option(
-        False,
-        "--track",
+        "--record",
         help=(
             "Run here, and record the Job in the hosted project as it runs. Inputs the "
             "hosted project lacks are pushed first."
+        ),
+    ),
+    track: bool = TRACK_OPTION,
+    evaluation_track: str | None = typer.Option(
+        None,
+        "--evaluation-track",
+        help=(
+            "Run a Benchmark under one of its evaluation tracks, by id, so the results "
+            "can be published. Implies --record, and uses the track's attempts."
         ),
     ),
     attempts: int | None = typer.Option(
@@ -132,23 +159,21 @@ def run(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Advanced: validate and show the plan without running."
     ),
-    follow: bool = typer.Option(False, "--follow", help="With --hosted, stream progress."),
+    follow: bool = typer.Option(False, "--follow", hidden=True),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
 
-    Runs execute on this machine, in the Runtime each Environment declares
-    (local, docker, or a remote provider such as daytona), and stay local
-    unless you pass --track. --hosted submits to hosted workers instead.
+    The Job runs from this machine. Its Trials execute in the Runtime each
+    Environment declares: local, docker, or a cloud sandbox such as daytona.
+    It stays local unless you pass --record.
 
-    name@version runs that exact pushed version even after your files have
+    NAME@REF runs that exact pushed revision even after your files have
     moved on. It is restored under .plural/versions without touching them.
     """
-    if hosted and track:
-        raise ProjectError(
-            "--hosted already records the Job in the hosted project. Use --track to run "
-            "here and record it, or --hosted alone."
-        )
+    if hosted or follow:
+        raise ProjectError(HOSTED_RUNS)
+    record = _recording(record, track) or bool(evaluation_track and not dry_run)
     space = workspace()
     current = session()
     environ = _run_environ(current)
@@ -165,7 +190,7 @@ def run(
         agent=agent,
         attempts=attempts,
         concurrency=_concurrency(concurrency),
-        hosted=hosted,
+        evaluation_track=evaluation_track,
     )
     requested = {
         ResourceRef(kind.name, name): version
@@ -194,50 +219,46 @@ def run(
     use_credential_source(account_credential_source())
     plan = plan_run(space, request, environ=environ)
     if dry_run:
-        payload = _plan_payload(plan, hosted=hosted)
+        payload = _plan_payload(plan)
         emit(payload, as_json=as_json, text=lambda: _print_plan(payload))
         return
+    unfinished = space.unfinished(run_roots(plan))
+    if unfinished and record:
+        raise ProjectError(
+            "--record records this run in the hosted project, and these files are unfinished. "
+            "Finish them and delete each PLURAL-TODO line, or run without --record to try it.",
+            unfinished,
+        )
+    for marker in unfinished:
+        typer.echo(f"Unfinished: {marker}", err=True)
     tracking = None
-    if hosted or track:
+    if record:
         studio, binding = project_studio(space, current)
         pushed = push_run_inputs(space, studio, binding, plan)
         if pushed:
             _print_pushed(pushed, err=as_json)
             space = Workspace(Project.at(root))
             plan = plan_run(space, request, environ=environ)
-        tracking = Tracking(studio) if track else None
-    if hosted:
-        record = submit_hosted(space, studio, plan)
-        job_id = str(record.get("id"))
-        emit(
-            {"location": "hosted", "project": binding.project_slug, **record},
-            as_json=as_json,
-            text=lambda: typer.echo(
-                f"Submitted hosted Job {job_id} to project {binding.project_slug}. "
-                f"Follow it with `plural job show {job_id} --follow`."
-            ),
-        )
-        if follow:
-            _follow_hosted(studio, job_id)
-        return
+        tracking = Tracking(studio)
     total = len(plan.job.plan.trials)
     typer.echo(
         f"Running {plan.source} {plan.pins[str(plan.source)]['revision']} "
         f"with {plan.agent.name} ({plan.agent.model}) locally: "
-        f"{total} trial(s), {_pace(plan)}."
+        f"{counted(total, 'Trial')}, {_pace(plan)}."
         + (" Recording it in the hosted project as it runs." if tracking else ""),
         err=as_json,
     )
     _runtime_credentials(space, plan, err=as_json)
     _project_secrets(space, plan.spec, environ, err=as_json)
-    job_id, result = run_local(
-        space,
-        plan,
-        environ=environ,
-        progress=_progress(as_json, total),
-        tracking=tracking,
-        credential_source=_stored_credentials(as_json),
-    )
+    with _credit_watch(current, environ, err=as_json):
+        job_id, result = run_local(
+            space,
+            plan,
+            environ=environ,
+            progress=_progress(as_json, total),
+            tracking=tracking,
+            credential_source=_stored_credentials(as_json),
+        )
     _finish_local(space, job_id, result, tracking, as_json=as_json)
 
 
@@ -327,8 +348,7 @@ def job_show(
         payload = {"location": "local", **local_job(space, job_id)}
         emit(payload, as_json=as_json, text=lambda: _print_job(payload))
         return
-    studio = _hosted_studio(space, required=True)
-    assert studio is not None
+    studio = _hosted_or_missing(space, "Job", job_id)
     if follow:
         _follow_hosted(studio, job_id)
     record = studio.jobs.get(job_id)
@@ -351,17 +371,17 @@ def job_show(
     emit(payload, as_json=as_json, text=lambda: _print_job(payload))
 
 
-@job_app.command("push")
+@job_app.command("record")
 @handled
-def job_push(
+def job_record(
     job_id: str = typer.Argument(help="Finished local Job to record in the hosted project."),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Record a finished local Job in the hosted project, with every Trial execution.
 
     The hosted Job pins the pushed revisions the local Job ran, so push those
-    first. Pushing again, or pushing a Job that was tracked, uploads only what
-    the hosted Job does not hold yet.
+    first. Recording again, or recording a Job that ran with --record, uploads
+    only what the hosted Job does not hold yet.
     """
     space = workspace()
     finished_local_job(space, job_id)
@@ -380,45 +400,44 @@ def job_push(
         as_json=as_json,
         text=lambda: typer.echo(
             f"Recorded local Job {job_id} as hosted Job {pushed.job.job_id} in project "
-            f"{binding.project_slug}: {pushed.executions} execution(s), {hosted.get('status')}."
+            f"{binding.project_slug}: {counted(pushed.executions, 'execution')}, "
+            f"{hosted.get('status')}."
         ),
     )
+
+
+job_app.command("push", hidden=True)(alias(job_record, "plural job push", "plural job record"))
 
 
 @job_app.command("rerun")
 @handled
 def job_rerun(
     job_id: str = typer.Argument(help="Job to run again with its original pinned inputs."),
-    track: bool = typer.Option(
-        False, "--track", help="Record a local rerun in the hosted project as it runs."
+    record: bool = typer.Option(
+        False, "--record", help="Record the rerun in the hosted project as it runs."
     ),
+    track: bool = TRACK_OPTION,
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run a Job again with the exact inputs it used. Creates a new, linked Job."""
     space = workspace()
     if (space.project.jobs_dir / job_id).is_dir():
-        tracking = _tracking(space, session()) if track else None
+        tracking = _tracking(space, session()) if _recording(record, track) else None
         environ = _project_secrets(
             space, local_job_spec(space, job_id), _run_environ(session()), err=as_json
         )
-        new_id, result = rerun_local_job(
-            space,
-            job_id,
-            environ=environ,
-            progress=_progress(as_json),
-            tracking=tracking,
-            credential_source=_stored_credentials(as_json),
-        )
+        with _credit_watch(session(), environ, err=as_json):
+            new_id, result = rerun_local_job(
+                space,
+                job_id,
+                environ=environ,
+                progress=_progress(as_json),
+                tracking=tracking,
+                credential_source=_stored_credentials(as_json),
+            )
         _finish_local(space, new_id, result, tracking, as_json=as_json)
         return
-    studio = _hosted_studio(space, required=True)
-    assert studio is not None
-    record = studio.jobs.rerun(job_id, idempotency_key=uuid.uuid4().hex)
-    emit(
-        {"location": "hosted", **record},
-        as_json=as_json,
-        text=lambda: typer.echo(f"Submitted hosted Job {record.get('id')} (rerun of {job_id})."),
-    )
+    raise ProjectError(_not_here("Job", job_id))
 
 
 @trial_app.command("show")
@@ -440,8 +459,7 @@ def trial_show(
         payload = local_trial(space, trial_id)
         emit(payload, as_json=as_json, text=lambda: _print_trial(payload))
         return
-    studio = _hosted_studio(space, required=True)
-    assert studio is not None
+    studio = _hosted_or_missing(space, "Trial", trial_id)
     if follow:
         for event in studio.trials.watch(trial_id):
             _print_event(event)
@@ -454,9 +472,10 @@ def trial_show(
 @handled
 def trial_rerun(
     trial_id: str = typer.Argument(help="Trial to run again."),
-    track: bool = typer.Option(
-        False, "--track", help="Record a local rerun in the hosted project as it runs."
+    record: bool = typer.Option(
+        False, "--record", help="Record the rerun in the hosted project as it runs."
     ),
+    track: bool = TRACK_OPTION,
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run one Trial again with its pinned inputs, as a new one-Trial Job."""
@@ -466,41 +485,22 @@ def trial_rerun(
     except ProjectError:
         owner = None
     if owner is not None:
-        tracking = _tracking(space, session()) if track else None
+        tracking = _tracking(space, session()) if _recording(record, track) else None
         environ = _project_secrets(
             space, local_job_spec(space, owner), _run_environ(session()), err=as_json
         )
-        new_id, result = rerun_local_trial(
-            space,
-            trial_id,
-            environ=environ,
-            progress=_progress(as_json),
-            tracking=tracking,
-            credential_source=_stored_credentials(as_json),
-        )
+        with _credit_watch(session(), environ, err=as_json):
+            new_id, result = rerun_local_trial(
+                space,
+                trial_id,
+                environ=environ,
+                progress=_progress(as_json),
+                tracking=tracking,
+                credential_source=_stored_credentials(as_json),
+            )
         _finish_local(space, new_id, result, tracking, as_json=as_json)
         return
-    studio = _hosted_studio(space, required=True)
-    assert studio is not None
-    record = studio.trials.rerun(trial_id, idempotency_key=uuid.uuid4().hex)
-    emit(
-        {"location": "hosted", **record},
-        as_json=as_json,
-        text=lambda: typer.echo(
-            f"Submitted hosted Job {record.get('id')} (rerun of trial {trial_id})."
-        ),
-    )
-
-
-@trial_app.command("rescore")
-def trial_rescore(trial_id: str = typer.Argument(help="Trial id.")) -> None:
-    """Reserved: score a finished Trial again (not available yet)."""
-    typer.echo(
-        "Error: `plural trial rescore` is not available yet. Use `plural trial rerun "
-        f"{trial_id}` to run it again.",
-        err=True,
-    )
-    raise typer.Exit(2)
+    raise ProjectError(_not_here("Trial", trial_id))
 
 
 @review_app.command("list")
@@ -691,6 +691,23 @@ def _hosted_studio(space: Workspace, *, required: bool) -> Studio | None:
     return project_studio(space, current)[0]
 
 
+def _hosted_or_missing(space: Workspace, kind: str, item_id: str) -> Studio:
+    """The hosted project to look in once a local lookup found nothing."""
+    studio = _hosted_studio(space, required=False)
+    if studio is not None:
+        return studio
+    reason = (
+        "you are not signed in"
+        if session().token is None
+        else "this directory is not registered with a hosted project"
+    )
+    jobs = relative(space.project.jobs_dir, space.project.root)
+    raise ProjectError(
+        f"No local {kind} {item_id!r} under {jobs}, and hosted {kind}s were not "
+        f"searched because {reason}."
+    )
+
+
 def _runtime_credentials(space: Workspace, plan: RunPlan, *, err: bool) -> None:
     """Load provider credentials for Environments that use a project Runtime.
 
@@ -812,6 +829,21 @@ def _run_environ(current: Session) -> dict[str, str]:
     return environ
 
 
+def _recording(record: bool, track: bool) -> bool:
+    if track:
+        deprecated("--track", "--record")
+    return record or track
+
+
+def _credit_watch(
+    current: Session, environ: Mapping[str, str], *, err: bool
+) -> AbstractContextManager[object]:
+    """Warn about the balance while a run draws on the account's credits."""
+    if current.token is None or not environ.get("PLURAL_GATEWAY_URL"):
+        return nullcontext()
+    return CreditWatch(current.studio(project=False), err=err)
+
+
 def _print_pushed(steps: list[PushStep], *, err: bool) -> None:
     typer.echo("Pushed to the hosted project first, so the Job can pin them:", err=err)
     for step in steps:
@@ -833,7 +865,8 @@ def _finish_local(
 ) -> None:
     payload = {"location": "local", **local_job(space, job_id)}
     if tracking is not None:
-        payload["tracking_errors"] = tracking.errors
+        payload["hosted_job_id"] = tracking.hosted_job_id
+        payload["recording_errors"] = tracking.errors
 
     def text() -> None:
         _print_result(job_id, result)
@@ -844,7 +877,7 @@ def _finish_local(
             typer.echo("Some of it could not be reported:", err=True)
             for error in tracking.errors:
                 typer.echo(f"  {error}", err=True)
-            typer.echo(f"Upload the rest with `plural job push {job_id}`.", err=True)
+            typer.echo(f"Upload the rest with `plural job record {job_id}`.", err=True)
 
     emit(payload, as_json=as_json, text=text)
 
@@ -895,9 +928,9 @@ def _progress(quiet: bool, total: int | None = None) -> Any:
     return report
 
 
-def _plan_payload(plan: RunPlan, *, hosted: bool) -> dict[str, Any]:
+def _plan_payload(plan: RunPlan) -> dict[str, Any]:
     return {
-        "location": "hosted" if hosted else "local",
+        "location": "local",
         "source": str(plan.source),
         "agent": str(plan.agent_ref) if plan.agent_ref else plan.agent.name,
         "model": plan.agent.model,
@@ -916,7 +949,7 @@ def _print_plan(payload: dict[str, Any]) -> None:
     typer.echo(
         f"Would run {payload['source']} with {payload['agent']} "
         f"({payload['model']}, harness {payload['harness']}) "
-        f"{payload['location']}ly: {len(payload['trials'])} trial(s), "
+        f"{payload['location']}ly: {counted(len(payload['trials']), 'Trial')}, "
         f"{payload['concurrency']} at a time"
         + (f" (auto: {payload['concurrency_reason']})." if payload["concurrency_reason"] else ".")
     )
@@ -934,7 +967,8 @@ def _print_result(job_id: str, result: JobResult) -> None:
     for aggregate in result.aggregates:
         mean = "-" if aggregate.mean_score is None else f"{aggregate.mean_score:.3f}"
         typer.echo(
-            f"  {aggregate.agent_name}: mean score {mean} over {aggregate.count} trial(s), "
+            f"  {aggregate.agent_name}: mean score {mean} over "
+            f"{counted(aggregate.count, 'Trial')}, "
             f"{aggregate.successes} succeeded"
         )
     typer.echo(f"Details: plural job show {job_id}")
@@ -967,7 +1001,8 @@ def _print_job(payload: dict[str, Any]) -> None:
         mean = aggregate.get("mean_score")
         typer.echo(
             f"  {aggregate['agent_name']}: mean score "
-            f"{'-' if mean is None else f'{mean:.3f}'} over {aggregate['count']} trial(s), "
+            f"{'-' if mean is None else f'{mean:.3f}'} over "
+            f"{counted(aggregate['count'], 'Trial')}, "
             f"coverage {aggregate.get('coverage', 0):.0%}"
         )
     trials = payload.get("trials") or []

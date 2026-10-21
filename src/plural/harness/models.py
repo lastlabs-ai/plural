@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -19,6 +20,7 @@ from pydantic import (
     model_validator,
 )
 
+from plural._deprecation import renamed_attribute, renamed_keys, warn_renamed
 from plural.common import (
     FileDeclaration,
     FrozenModel,
@@ -57,7 +59,11 @@ class HarnessDefinition(FrozenModel):
     models: tuple[str, ...] = ("*",)
     auth: tuple[Literal["environment", "api_key", "oauth", "none"], ...] = ("environment",)
     secrets: tuple[str, ...] = ()
-    environment: tuple[str, ...] = ()
+    env_vars: tuple[str, ...] = Field(
+        default=(),
+        validation_alias=AliasChoices("env_vars", "environment"),
+        description="Names of environment variables passed through to the Harness process.",
+    )
     healthcheck: tuple[str, ...] | None = None
     outputs: tuple[FileDeclaration, ...] = ()
     artifacts: tuple[FileDeclaration, ...] = ()
@@ -69,7 +75,7 @@ class HarnessDefinition(FrozenModel):
     def _ergonomic_values(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
-        payload = dict(value)
+        payload = dict(renamed_keys(value, {"environment": "env_vars"}, "HarnessDefinition"))
         command = payload.get("command")
         if isinstance(command, str):
             payload["command"] = tuple(shlex.split(command))
@@ -86,7 +92,7 @@ class HarnessDefinition(FrozenModel):
         "requirements",
         "models",
         "secrets",
-        "environment",
+        "env_vars",
         "healthcheck",
     )
     @classmethod
@@ -121,6 +127,8 @@ class HarnessDefinition(FrozenModel):
                 raise ValueError(f"{label} paths must be unique")
         return self
 
+    environment = renamed_attribute("environment", "env_vars")
+
     @property
     def content_hash(self) -> str:
         """Return the locked executable content hash."""
@@ -141,7 +149,7 @@ class HarnessDefinition(FrozenModel):
             supported_models=self.models,
             auth_modes=self.auth,
             secret_names=self.secrets,
-            environment_names=self.environment,
+            environment_names=self.env_vars,
             healthcheck=self.healthcheck,
             outputs=self.outputs,
             artifacts=self.artifacts,
@@ -177,7 +185,7 @@ class HarnessDefinition(FrozenModel):
             models=protocol.supported_models,
             auth=protocol.auth_modes,
             secrets=protocol.secret_names,
-            environment=protocol.environment_names,
+            env_vars=protocol.environment_names,
             healthcheck=protocol.healthcheck,
             outputs=protocol.outputs,
             artifacts=protocol.artifacts,
@@ -222,7 +230,9 @@ class Harness(BaseModel, ABC):
         "environment",
     )
     secrets: ClassVar[tuple[str, ...]] = ()
+    env_vars: ClassVar[tuple[str, ...]] = ()
     environment: ClassVar[tuple[str, ...]] = ()
+    """Deprecated: use ``env_vars``."""
     supports_tito: ClassVar[bool] = False
     _bound_python_source: ClassVar[Path | None] = None
     _bound_python_object: ClassVar[str | None] = None
@@ -233,6 +243,15 @@ class Harness(BaseModel, ABC):
     _python_source: Path | None = PrivateAttr(default=None)
     _python_object: str | None = PrivateAttr(default=None)
     _runner_ref: str | None = PrivateAttr(default=None)
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Carry a subclass's deprecated ``environment`` over to ``env_vars``."""
+        super().__pydantic_init_subclass__(**kwargs)
+        if "environment" in cls.__dict__:
+            warn_renamed(f"{cls.__name__}.environment", f"{cls.__name__}.env_vars")
+            if "env_vars" not in cls.__dict__:
+                cls.env_vars = tuple(cls.environment)
 
     def model_post_init(self, context: Any, /) -> None:
         """Bind the subclass source immediately after validation."""
@@ -344,7 +363,7 @@ class Harness(BaseModel, ABC):
             supported_models=tuple(type(self).models),
             auth_modes=tuple(type(self).auth),
             secret_names=tuple(type(self).secrets),
-            environment_names=tuple(type(self).environment),
+            environment_names=tuple(type(self).env_vars),
             outputs=(FileDeclaration(path="result.json", media_type="application/json"),),
             artifacts=tuple(artifacts),
             trajectory_path="trajectory.jsonl",

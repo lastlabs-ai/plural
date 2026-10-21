@@ -840,13 +840,25 @@ class TrialResult(FrozenModel):
     """How seats were kept from one another: ``os_user`` when each seat's
     Harness ran as its own OS user, unable to read another's files or
     process. ``None`` without seats."""
+    stop_reason: str = ""
+    """How the episode ended, one of :data:`plural.STOP_REASONS`; ``error``
+    for a failed Trial whose Harness reported none, empty when unreported."""
+    step_reward_total: float = 0.0
+    """The episode total of per-step rewards in the reward ledger, each
+    times its weight. Only ``check: total_reward`` turns it into a score."""
+    turns: int = Field(default=0, ge=0)
+    """Model turns the Harness reported taking."""
 
     @model_validator(mode="after")
     def _shape(self) -> TrialResult:
+        from plural.verifiers import STOP_REASONS
+
         if self.status == "failed" and self.error_code is None:
             raise ValueError("failed trials require a stable error_code")
         if self.status != "failed" and self.error_code is not None:
             raise ValueError("only failed trials may carry error_code")
+        if self.stop_reason and self.stop_reason not in STOP_REASONS:
+            raise ValueError(f"unknown stop_reason {self.stop_reason!r}")
         return self
 
 
@@ -1022,7 +1034,7 @@ class Job:
             for task in getattr(self.spec, "tasks", ())
             for binding in task.verifiers
         )
-        if agents and not judged and all(binding.auth_mode == "none" for binding in agents):
+        if agents and not judged and all(binding.auth == "none" for binding in agents):
             # Credential-free Jobs never call a live model endpoint, so no
             # Plural or provider key is required to run them.
             return current
@@ -1049,8 +1061,7 @@ class Job:
             agents
             and not judged
             and all(
-                binding.auth_mode == "none" or binding.agent.endpoint is not None
-                for binding in agents
+                binding.auth == "none" or binding.agent.endpoint is not None for binding in agents
             )
         ):
             # Agents with their own endpoint call it directly, not the gateway.

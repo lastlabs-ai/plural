@@ -135,6 +135,9 @@ class OpenAICompatible:
         default_headers: Extra headers.
         organization: Optional OpenAI organization header.
         strip_model_prefix: Whether to strip ``author/`` from model ids.
+        http_transport: Transport for synchronous requests, such as one that
+            refuses private addresses. ``None`` uses httpx's default.
+        async_http_transport: Transport for asynchronous requests.
     """
 
     name: str = "openai"
@@ -152,6 +155,8 @@ class OpenAICompatible:
         default_headers: dict[str, str] | None = None,
         organization: str | None = None,
         strip_model_prefix: bool | None = None,
+        http_transport: httpx.BaseTransport | None = None,
+        async_http_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.name = name or self.name
         if strip_model_prefix is not None:
@@ -169,11 +174,13 @@ class OpenAICompatible:
             base_url=self.config.base_url,
             headers=headers,
             timeout=self.config.timeout_s,
+            transport=http_transport,
         )
         self._aclient = httpx.AsyncClient(
             base_url=self.config.base_url,
             headers=headers,
             timeout=self.config.timeout_s,
+            transport=async_http_transport,
         )
 
     def _build_headers(self) -> dict[str, str]:

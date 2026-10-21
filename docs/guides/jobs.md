@@ -13,8 +13,8 @@ starts, choosing where its Trials run (on your machine, in Docker, or in a remot
 sandbox), how many run at once, and how to record, rerun, and review Jobs.
 
 If you haven't run anything yet, start with the
-[complete CLI walkthrough](../tutorials/cli-walkthrough.md). It creates the files
-used here, configures model credentials, and grants the Harness its secret. Add a
+[complete CLI walkthrough](../tutorials/cli-walkthrough.md). It downloads the
+support-queue project used here and runs it with a scripted Agent. Add a
 [Verifier](../project/verifiers.md) before treating a Job as a scored evaluation.
 
 ## Validate and preview
@@ -191,7 +191,7 @@ hosted project lets your team see it in the web app under Jobs. First bind the
 checkout and push its resources:
 
 ```bash
-plural project init support-eval --push
+plural project init support-queue --push
 plural project push
 ```
 
@@ -199,20 +199,20 @@ Then either push a Job after it finishes, or track it while it runs:
 
 ```bash
 plural run -b support-triage -a careful
-plural job push JOB_ID
+plural job record JOB_ID
 
-plural run -b support-triage -a careful --track
+plural run -b support-triage -a careful --record
 ```
 
 Both record the same hosted Job, marked as run by a client, with every
-execution's trajectory, usage, phases, and Verifier results. `--track` opens
+execution's trajectory, usage, phases, and Verifier results. `--record` opens
 each execution as it starts, so the hosted project shows the Job running. A
 reporting failure never fails the local run; the command prints what could not
-be recorded, and `plural job push JOB_ID` fills it in. `plural job rerun` and
-`plural trial rerun` accept `--track` too.
+be recorded, and `plural job record JOB_ID` fills it in. `plural job rerun` and
+`plural trial rerun` accept `--record` too.
 
 Where the Trials execute is set by each Environment's `runtime.provider`, not by
-these flags. A tracked Job against a `daytona` Environment runs its Trials in
+these flags. A recorded Job against a `daytona` Environment runs its Trials in
 remote sandboxes while this machine orchestrates and records them.
 
 ## Hosted execution
@@ -222,7 +222,7 @@ plural run -b support-triage -a careful --hosted --follow
 ```
 
 `--hosted` submits the Job for hosted infrastructure to run, using pushed
-revisions. It first pushes any input the hosted project lacks, as `--track` does,
+revisions. It first pushes any input the hosted project lacks, as `--record` does,
 and stops before uploading anything if someone changed a resource in the hosted
 project since this checkout last synced it. `--follow` streams progress until the
 Job finishes; without it, the command returns once the Job is submitted, and

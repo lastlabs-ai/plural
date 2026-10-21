@@ -143,7 +143,7 @@ FILES = {
         model: openai/gpt-5.6-luna
         instructions: Follow the refund policy.
         harness: scripted
-        auth_mode: none
+        auth: none
     """,
     "benchmarks/basics/benchmark.yaml": """
         # Basics benchmark.

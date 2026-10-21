@@ -1,7 +1,7 @@
 ---
 route: /docs/tutorials/support-queue
 title: Support queue
-order: 150
+order: 114
 description: Walk through a complete support-triage project, run its Benchmark offline and with a model, read the results, and push it to a private hosted project.
 audience: all
 nav: true
@@ -28,7 +28,7 @@ system. Every action only changes the pretend desk inside the run.
 
 ## Before you start
 
-You need Plural installed; see [Install](../getting-started.md#install). No account or
+You need Plural installed; see [Install](../getting-started.md#1-create-an-account-and-install). No account or
 key is needed until [Run it with a model](#run-it-with-a-model).
 
 [Download the project](../assets/first-project.zip) and unzip it, or copy
@@ -279,14 +279,14 @@ compare the two.
 
 `agents/scripted/agent.yaml` runs the `scripted-triage` Harness, which sorts tickets by
 keyword instead of calling a model. The `model` is recorded but never called, and
-`auth_mode: none` tells Plural the Agent needs no credential:
+`auth: none` tells Plural the Agent needs no credential:
 
 ```yaml
 name: scripted
 version: 0.1.0
 model: openai/gpt-5.6-luna
 harness: scripted-triage
-auth_mode: none
+auth: none
 ```
 
 That is the whole project. Time to run it.
@@ -311,7 +311,7 @@ plural run --benchmark support-triage --agent scripted --dry-run
 ```
 
 ```text
-Would run benchmark/support-triage with agent/scripted (openai/gpt-5.6-luna, harness scripted-triage) locally: 3 trial(s), 3 at a time (auto: every Trial at once).
+Would run benchmark/support-triage with agent/scripted (openai/gpt-5.6-luna, harness scripted-triage) locally: 3 Trials, 3 at a time (auto: every Trial at once).
 input                      version  content hash
 environment/support-queue  1.0.0    sha256:e8f5b9574267
 verifier/correct-category  0.1.0    sha256:0a3f50cac523
@@ -337,12 +337,12 @@ differ, and because attempts run at the same time, the tickets may finish in a
 different order:
 
 ```text
-Running benchmark/support-triage@1.0.0 with scripted (openai/gpt-5.6-luna) locally: 3 trial(s), 3 at a time (auto: every Trial at once).
+Running benchmark/support-triage@1.0.0 with scripted (openai/gpt-5.6-luna) locally: 3 Trials, 3 at a time (auto: every Trial at once).
   [1/3] trl_d16f384431533c57de0022ee  ticket-3  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
   [2/3] trl_ea0e25de78e3905c0f791c67  ticket-2  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
   [3/3] trl_c23042ff033379be000ab471  ticket-1  succeeded  score=1.000  | 3 succeeded, 0 failed, mean 1.000
 Job job_9550337c63403bb187d212d1 succeeded.
-  scripted: mean score 1.000 over 3 trial(s), 3 succeeded
+  scripted: mean score 1.000 over 3 Trials, 3 succeeded
 Details: plural job show job_9550337c63403bb187d212d1
 ```
 
@@ -372,7 +372,7 @@ plural run --benchmark support-triage --agent concise
 ```
 
 `--model` without `--harness` uses `native`, the same loop the `careful` and `concise`
-Agents use. To see which models you can run, use `plural models list`. Signed in to an
+Agents use. To see which models you can run, use `plural model list`. Signed in to an
 organization, it lists the models that organization offers; `--all` shows the whole
 catalog.
 
@@ -395,7 +395,7 @@ summary and each Trial with its Task, status, and score:
 Job job_9550337c63403bb187d212d1 (local) succeeded
   Source: benchmark/support-triage
   Model:  openai/gpt-5.6-luna via scripted-triage
-  scripted: mean score 1.000 over 3 trial(s), coverage 100%
+  scripted: mean score 1.000 over 3 Trials, coverage 100%
 trial                         task      status     score
 trl_c23042ff033379be000ab471  ticket-1  succeeded  1.000
 trl_ea0e25de78e3905c0f791c67  ticket-2  succeeded  1.000
@@ -511,18 +511,19 @@ To judge how *good* the reply is, not only whether there is one, add an
 Trial until a person scores it: `plural review list` shows waiting Trials, and
 `plural review submit <trial-id> --verifier <name> --score <value>` records the score.
 
-## Push it and run hosted
+## Push it and record runs
 
-So far everything ran on your machine. Pushing copies the project to a private hosted
-project, so Plural can run it for you and your team can see the results in the web app
-under Jobs. This needs a Plural account. From inside the project:
+So far everything ran on your machine and was recorded only there. Pushing copies the
+project to a private hosted project, so your team can see the resources and every
+recorded run in the web app under Jobs. This needs a Plural account. From inside the
+project:
 
 ```bash
 plural auth login
 plural project init support-queue --push
 plural benchmark push support-triage --with-deps
 plural agent push scripted --with-deps
-plural run --benchmark support-triage --agent scripted --hosted --follow
+plural run --benchmark support-triage --agent scripted --record
 ```
 
 Here is what each line does:
@@ -538,10 +539,11 @@ Here is what each line does:
 3. `benchmark push --with-deps` pushes the Benchmark and everything it depends on: the
    Tasks, Verifier, and Environment.
 4. `agent push --with-deps` pushes the `scripted` Agent and its Harness.
-5. `run --hosted` runs the pushed versions on hosted workers, and `--follow` streams
-   progress until the Job finishes.
+5. `run --record` runs the Benchmark here, as before, and records the Job in the hosted
+   project as each Trial runs.
 
-Afterwards `plural job list` shows the hosted Job beside your local ones.
+Afterwards the Job appears in the web app under **Jobs**, and `plural job list` labels
+it as recorded in the hosted project.
 
 > **Good to know:** Pushing never makes anything public. Listing a project on the Hub
 > or publishing a Benchmark is a separate, explicit step in the Plural web app.
@@ -555,9 +557,9 @@ For readers who want the precise rules:
   available in the private project immediately.
 - Push refuses files that look like credentials, such as `.env` or `id_rsa`, and
   manifest paths that point outside the resource directory.
-- `plural run --hosted` runs pushed revisions. Before it submits, it pushes any input
-  the hosted project does not hold yet, as each changed resource's next numbered
-  revision. If someone else changed that
+- `plural run --record` records the run against pushed revisions. Before it starts, it
+  pushes any input the hosted project does not hold yet, as each changed resource's
+  next numbered revision. If someone else changed that
   resource in the hosted project since your checkout last synced, it stops rather than
   write over their work.
 

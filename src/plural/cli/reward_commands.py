@@ -1,4 +1,4 @@
-"""Rewards on stored Trials: ``plural verifier try|apply`` and ``plural rewards show|export``.
+"""Rewards on stored Trials: ``plural verifier try|apply`` and ``plural reward show|export``.
 
 Rewards live in each Trial's ``rewards.jsonl`` ledger, beside the trajectory.
 ``plural verifier try`` runs a Verifier's hooks on stored Trials and prints what
@@ -17,6 +17,7 @@ import typer
 
 from plural.cli.common import (
     JSON_OPTION,
+    counted,
     emit,
     handled,
     note,
@@ -66,8 +67,17 @@ def _score(trial_dir: Path) -> float | None:
 
 
 def _trial_dirs(space: Workspace, trials: list[str], job: str | None) -> list[Path]:
-    if bool(trials) == bool(job):
-        raise ProjectError("Pass --trial (any number of times) or --job, not both.")
+    if trials and job:
+        raise ProjectError("Pass --trial or --job, not both.")
+    if not trials and not job:
+        jobs = sorted(
+            (item for item in space.project.jobs_dir.glob("*") if item.is_dir()),
+            key=lambda item: item.stat().st_mtime,
+        )
+        latest = f" Your latest local Job is {jobs[-1].name}." if jobs else ""
+        raise ProjectError(
+            f"Choose the Trials to score: --trial ID (repeatable) or --job ID.{latest}"
+        )
     if job:
         root = space.project.jobs_dir / job / "trials"
         if not root.is_dir():
@@ -202,7 +212,7 @@ def verifier_try(
             summary = _summary(replay)
             score = "" if summary["score"] is None else f"score {summary['score']:g}, "
             typer.echo(
-                f"{trial_dir.name}: {score}{summary['step_rewards']} step reward(s) "
+                f"{trial_dir.name}: {score}{counted(summary['step_rewards'], 'step reward')} "
                 f"totalling {summary['step_total']:+g}"
                 + (
                     f", {summary['hindsight_rewards']} hindsight totalling "
@@ -271,13 +281,15 @@ def verifier_apply(
                 if item["skipped"]
                 else ""
             )
-            typer.echo(f"{item['trial_id']}: added {item['new_records']} reward(s){skipped}")
+            typer.echo(
+                f"{item['trial_id']}: added {counted(item['new_records'], 'reward')}{skipped}"
+            )
             for message in item["problems"]:
                 note(message)
         if any(item["skipped"] for item in applied):
             note("Bump the Verifier's version to record new labels beside the old ones.")
         if hosted:
-            typer.echo(f"Recorded {hosted} new reward(s) in the hosted project.")
+            typer.echo(f"Recorded {counted(hosted, 'new reward')} in the hosted project.")
         if problem:
             note(problem)
 
@@ -356,7 +368,7 @@ def rewards_export(
             )
         )
     out.write_text("".join(line + "\n" for line in lines), encoding="utf-8")
-    typer.echo(f"Wrote {len(lines)} Trial(s) to {out}.")
+    typer.echo(f"Wrote {counted(len(lines), 'Trial')} to {out}.")
 
 
 __all__ = ["rewards_app"]

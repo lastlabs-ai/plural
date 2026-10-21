@@ -21,12 +21,12 @@ from plural.environments.definition import (
     HarnessPolicy,
 )
 from plural.sandbox.models import (
-    Capability,
     CapabilityError,
     EffectiveSandboxPolicy,
     NetworkMode,
     ProviderCapabilities,
     ResourceRequirements,
+    SandboxCapability,
     SandboxRequirements,
     environment_required_capabilities,
 )
@@ -178,9 +178,9 @@ def sandbox_requirements_for(
             execution_identity=f"{identity}:verifier",
             build_context=None,
             dockerfile=None,
-            resources=verifier_runtime.resources,
+            resources=verifier_runtime.compute,
             network=verifier_runtime.network,
-            network_allowlist=verifier_runtime.network_allowlist,
+            network_allowlist=verifier_runtime.allowed_hosts,
             timeout_seconds=verifier_runtime.timeout_seconds,
             persistent=False,
             compose=False,
@@ -193,9 +193,9 @@ def sandbox_requirements_for(
         execution_identity=identity,
         build_context=runtime.build_context,
         dockerfile=runtime.dockerfile,
-        resources=resources or runtime.resources,
+        resources=resources or runtime.compute,
         network=network if network is not None else runtime.network,
-        network_allowlist=() if network is NetworkMode.NONE else runtime.network_allowlist,
+        network_allowlist=() if network is NetworkMode.NONE else runtime.allowed_hosts,
         timeout_seconds=runtime.timeout_seconds,
         persistent=runtime.persistent,
         compose=runtime.compose,
@@ -262,7 +262,7 @@ def resolve_effective_policy(
             )
         )
 
-    resources = _cap_resources(environment.runtime.resources, project, denials)
+    resources = _cap_resources(environment.runtime.compute, project, denials)
     requirements = sandbox_requirements_for(
         environment,
         network=effective_network,
@@ -273,7 +273,7 @@ def resolve_effective_policy(
         environment.runtime
     )
     if effective_network is NetworkMode.NONE:
-        required = required | {Capability.NETWORK_NONE}
+        required = required | {SandboxCapability.NETWORK_NONE}
     missing = required - provider.capabilities
     if missing:
         capability = sorted(item.value for item in missing)[0]

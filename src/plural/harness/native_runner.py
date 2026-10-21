@@ -41,6 +41,12 @@ _BUDGET_STOPS = {"max_turns", "max_seconds", "max_cost"}
 
 # Keep in sync with plural.apps.daemon.SEAT_TOKEN.
 SEAT_TOKEN = "PLURAL_SEAT_TOKEN"
+
+# How long a model call waits for credits once the account runs out. The time
+# spent waiting does not count against the episode's max_seconds.
+CREDIT_PAUSE_VARIABLE = "PLURAL_CREDIT_PAUSE_SECONDS"
+DEFAULT_CREDIT_PAUSE_SECONDS = 3600.0
+_CREDIT_POLL_SECONDS = 30.0
 _TURN_POLL_SECONDS = (0.1, 0.25, 0.5, 1.0)
 
 _FINISH = "finish"
@@ -353,13 +359,14 @@ def _run(
             break
         offered = tools if profile in _ACTION_PROFILES else []
         started = _started()
-        response = _model_call(
+        response, paused = _model_call(
             model=execution_model,
             routing=_mapping(agent.get("routing") or {}, "agent.routing"),
             messages=messages,
             tools=offered,
             timeout=remaining,
         )
+        deadline += paused
         message = _response_message(response)
         episode.model_call(
             started,
@@ -509,7 +516,12 @@ def _model_call(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
     timeout: float,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], float]:
+    """Call the model, waiting while the account is out of credits.
+
+    Returns:
+        The response, and the seconds spent waiting for credits.
+    """
     if not model:
         raise ValueError("Agent model is required")
     endpoint = (os.environ.get("PLURAL_AGENT_ENDPOINT") or "").rstrip("/")
@@ -546,15 +558,38 @@ def _model_call(
         headers=headers,
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=max(0.1, timeout)) as response:  # noqa: S310
-            payload = json.loads(response.read())
-    except urllib.error.HTTPError as exc:
-        detail = exc.read(2048).decode(errors="replace")
-        raise RuntimeError(f"model gateway returned HTTP {exc.code}: {detail}") from exc
+    budget = float(os.environ.get(CREDIT_PAUSE_VARIABLE) or DEFAULT_CREDIT_PAUSE_SECONDS)
+    paused = 0.0
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=max(0.1, timeout)) as response:  # noqa: S310
+                payload = json.loads(response.read())
+            break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(2048).decode(errors="replace")
+            if exc.code != 402 or not _out_of_credits(detail):
+                raise RuntimeError(f"model gateway returned HTTP {exc.code}: {detail}") from exc
+            if paused >= budget:
+                raise RuntimeError(
+                    f"Out of credits: this Trial waited {round(paused / 60)} minutes for "
+                    "credits. Add credits, then run it again with `plural trial rerun`."
+                ) from exc
+            if not paused:
+                print("Out of credits: waiting for credits to resume.", file=sys.stderr)
+            wait = min(_CREDIT_POLL_SECONDS, budget - paused)
+            time.sleep(wait)
+            paused += wait
     if not isinstance(payload, dict):
         raise ValueError("model gateway response must be an object")
-    return payload
+    return payload, paused
+
+
+def _out_of_credits(detail: str) -> bool:
+    try:
+        error = json.loads(detail).get("error")
+    except (ValueError, AttributeError):
+        return False
+    return isinstance(error, dict) and error.get("type") == "insufficient_credits"
 
 
 def _denials(request: dict[str, Any]) -> list[dict[str, str]]:

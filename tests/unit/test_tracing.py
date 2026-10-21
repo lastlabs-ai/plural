@@ -9,7 +9,7 @@ from plural.tracing import (
     Trace,
     TraceWriter,
 )
-from plural.tracing.schema import Outcome
+from plural.tracing.schema import TraceOutcome
 
 
 def test_jsonl_sink(tmp_path: Path) -> None:
@@ -61,7 +61,7 @@ def test_sampler_always_tags() -> None:
 def test_trace_label_helper() -> None:
     t = Trace(trace_id="t")
     t.label(scores={"a": 1.0}, reward=1.0)
-    assert t.outcome == Outcome(scores={"a": 1.0}, reward=1.0, labels={}, feedback=None)
+    assert t.outcome == TraceOutcome(scores={"a": 1.0}, reward=1.0, labels={}, feedback=None)
 
 
 def test_drop_content_redacts_task_and_state_without_dropping_keys() -> None:

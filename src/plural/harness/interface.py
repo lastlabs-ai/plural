@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from plural._deprecation import renamed_attribute
 from plural.common import FrozenModel
 from plural.harness.episode import EpisodeRecorder
 from plural.usage import normalize_usage
@@ -67,12 +68,11 @@ class HarnessAgent:
         self.model = str(payload.get("model") or "")
         self.instructions = str(payload.get("instructions") or "")
         self.routing = dict(payload["routing"]) if isinstance(payload.get("routing"), dict) else {}
-        self.harness_kwargs = (
-            dict(payload["harness_kwargs"])
-            if isinstance(payload.get("harness_kwargs"), dict)
-            else {}
-        )
+        config = payload.get("harness_config", payload.get("harness_kwargs"))
+        self.harness_config = dict(config) if isinstance(config, dict) else {}
         self.model_resolution = dict(model_resolution or {})
+
+    harness_kwargs = renamed_attribute("harness_kwargs", "harness_config")
 
     def complete(
         self,

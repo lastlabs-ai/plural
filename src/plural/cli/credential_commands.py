@@ -21,6 +21,7 @@ import typer
 from plural.apps.definition import SecretReference
 from plural.cli.common import (
     JSON_OPTION,
+    alias,
     emit,
     fail,
     handled,
@@ -37,10 +38,12 @@ from plural.studio import Studio
 
 credential_app = typer.Typer(
     help=(
-        "Save your values for the credentials Agents carry, such as your CRM token.\n\n"
-        "An Agent lists each credential under credentials: in its agent.yaml, with its "
-        "scopes. Save your value once with `plural credential set NAME`; every Agent "
-        "you run that carries NAME uses it. Your coworkers save their own."
+        "Save your own values for the credentials Agents carry, such as your CRM token.\n\n"
+        "Credentials are yours, not the project's. An App declares the credentials it "
+        "needs; the Agent that runs supplies them, with the scopes it lists under "
+        "credentials: in its agent.yaml. Save your value once with "
+        "`plural credential set NAME`; every Agent you run that carries NAME uses it, "
+        "and your coworkers save their own. For project setup values, use `plural secret`."
     ),
     no_args_is_help=True,
 )
@@ -109,19 +112,24 @@ def credential_set(
     )
 
 
-@credential_app.command("unset")
+@credential_app.command("delete")
 @handled
-def credential_unset(
-    name: str = typer.Argument(help="The credential to remove."),
+def credential_delete(
+    name: str = typer.Argument(help="The credential to delete."),
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Remove one of your saved credentials."""
+    """Delete one of your saved credentials."""
     _studio().credentials.delete(_name(name))
     emit(
         {"name": name, "deleted": True},
         as_json=as_json,
-        text=lambda: success(f"Removed {name} from your account."),
+        text=lambda: success(f"Deleted {name} from your account."),
     )
+
+
+credential_app.command("unset", hidden=True)(
+    alias(credential_delete, "plural credential unset", "plural credential delete")
+)
 
 
 def stored_credentials(

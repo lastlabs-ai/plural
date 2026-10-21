@@ -8,6 +8,9 @@ Examples:
 
 from __future__ import annotations
 
+from typing import Any
+
+from plural._deprecation import module_getattr
 from plural.tracing.redaction import Redactor, Sampler
 from plural.tracing.resources import trace_json_schema
 from plural.tracing.schema import (
@@ -15,7 +18,6 @@ from plural.tracing.schema import (
     CapabilityDenial,
     Event,
     LLMCall,
-    Outcome,
     ParsedAction,
     ReasoningBlock,
     RewardEvent,
@@ -24,6 +26,7 @@ from plural.tracing.schema import (
     TraceArtifactReference,
     TraceContext,
     TraceKind,
+    TraceOutcome,
     TraceVerifierResult,
     Transition,
     Turn,
@@ -39,7 +42,7 @@ __all__ = [
     "LLMCall",
     "MultiSink",
     "OTelSink",
-    "Outcome",
+    "TraceOutcome",
     "ParsedAction",
     "ReasoningBlock",
     "Redactor",
@@ -58,3 +61,9 @@ __all__ = [
     "Turn",
     "trace_json_schema",
 ]
+
+_renamed = module_getattr("plural.tracing", {"Outcome": ("TraceOutcome", lambda: TraceOutcome)})
+
+
+def __getattr__(name: str) -> Any:
+    return _renamed(name)

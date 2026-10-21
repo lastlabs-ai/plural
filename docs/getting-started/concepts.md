@@ -1,7 +1,7 @@
 ---
 route: /docs/getting-started/concepts
 title: Core concepts
-order: 10
+order: 21
 description: "The handful of ideas behind Plural, in plain words: the world, the assignment, the grader, the contestant, and the runs that tie them together."
 audience: all
 nav: true
@@ -76,9 +76,9 @@ where they run. Wordle has one App. A help desk might have three.
 One Environment can host many Tasks. The Wordle game hosts one Task per secret word.
 
 :::details What else an Environment holds
-- **Runtime**: where the world runs. Usually `docker`, a sealed container on your
-  machine. `local` runs directly on your computer, so only use it for code you trust.
-  Hosted Runtimes run on Plural's servers.
+- **Runtime**: where the world runs. `local` runs directly on your computer, so only
+  use it for code you trust. `docker` is a sealed container on your machine, and a
+  cloud Runtime such as `daytona` runs each attempt in a remote sandbox.
 - **Resources**: files already in the world, like a word list or a policy document,
   shared by every Task.
 - **Limits**: how many turns and how long one attempt may take.
@@ -219,4 +219,4 @@ one subfolder per resource, such as `environments/wordle/` or `tasks/crane/`. Th
 Runs happen on your machine by default. To have Plural run them for you, you **push**
 the project to a private hosted project. Pushing never makes anything public.
 
-Ready? Head to [Getting started](../getting-started.md).
+Ready? Head to the [Quickstart](../getting-started.md).

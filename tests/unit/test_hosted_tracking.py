@@ -182,12 +182,39 @@ def test_an_interrupted_run_cancels_its_hosted_job(tmp_path: Path) -> None:
     assert hosted.cancelled == ["hosted-job"]
 
 
-def test_track_and_hosted_are_different_ways_to_record_a_job() -> None:
-    result = CliRunner().invoke(
-        app, ["run", "--benchmark", "b", "--agent", "a", "--hosted", "--track"]
-    )
+@pytest.mark.parametrize("flag", ["--hosted", "--follow"])
+def test_plural_never_runs_a_job_on_its_servers(flag: str) -> None:
+    result = CliRunner().invoke(app, ["run", "--benchmark", "b", "--agent", "a", flag])
     assert result.exit_code == 1
-    assert "Use --track to run here and record it" in result.output
+    assert "does not run Jobs on its servers" in result.output
+    assert "--record" in result.output
+
+
+def test_an_evaluation_track_sets_and_checks_the_attempts() -> None:
+    from plural import Benchmark, EvaluationTrack
+    from plural.project import ProjectError
+    from plural.project.runs import RunRequest, _track_attempts
+
+    benchmark = Benchmark.model_construct(
+        name="wordle",
+        tracks=(
+            EvaluationTrack(
+                id="controlled", name="Controlled", kind="models", instructions="none", attempts=3
+            ),
+        ),
+    )
+    on_track = RunRequest(benchmark="wordle", evaluation_track="controlled")
+    assert _track_attempts(benchmark, on_track) == 3
+    assert _track_attempts(benchmark, RunRequest(benchmark="wordle")) is None
+    with pytest.raises(ProjectError, match="no evaluation track 'open'"):
+        _track_attempts(benchmark, RunRequest(benchmark="wordle", evaluation_track="open"))
+    with pytest.raises(ProjectError, match="requires 3 attempt"):
+        _track_attempts(
+            benchmark,
+            RunRequest(benchmark="wordle", evaluation_track="controlled", attempts=2),
+        )
+    with pytest.raises(ProjectError, match="needs --benchmark"):
+        _track_attempts(object(), on_track)
 
 
 def test_only_a_finished_local_job_can_be_pushed(

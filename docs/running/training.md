@@ -142,7 +142,7 @@ plural verifier try solved --job JOB_ID
 ```
 
 ```text
-TRIAL_ID: score 1, 5 step reward(s) totalling +1, 1 hindsight totalling +0.7
+TRIAL_ID: score 1, 5 step rewards totalling +1, 1 hindsight totalling +0.7
   step  e2     +0.000  step
   step  e3     +0.000  step
   step  e4     +0.000  step
@@ -156,7 +156,7 @@ the Verifier's `version` and record them:
 
 ```bash
 plural verifier apply solved --job JOB_ID
-plural rewards show TRIAL_ID
+plural reward show TRIAL_ID
 ```
 
 ```text
@@ -169,7 +169,7 @@ Each version's records sit beside the others, so an export can pick which labels
 use. A Trial that already has records from the Verifier's current version is left as
 it is.
 
-If you pushed the Job with `plural job push`, `apply` adds the new records to the
+If you recorded the Job with `plural job record` or `--record`, `apply` adds the new records to the
 hosted Trials' ledgers too, where the Trial page shows each reward on the step it
 credits. Each record is stored once, so applying again never duplicates one.
 
@@ -179,11 +179,11 @@ evaluation metric stable as you experiment with rewards.
 
 ## 5. Export training data
 
-`plural rewards export` writes one JSON line per Trial, joining its trajectory with its
+`plural reward export` writes one JSON line per Trial, joining its trajectory with its
 reward ledger:
 
 ```bash
-plural rewards export --job JOB_ID --out training.jsonl
+plural reward export --job JOB_ID --out training.jsonl
 ```
 
 Each line has the Trial's `score`, and `turns`: one entry per model call, with the

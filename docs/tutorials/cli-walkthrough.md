@@ -17,7 +17,7 @@ where an AI sorts tickets into categories. Its `scripted` Agent follows keyword 
 instead of calling a model, so every command here until
 [Run it hosted](#run-it-hosted) works offline, costs nothing, and needs no account.
 
-You need Plural installed; see [Install](../getting-started.md#install).
+You need Plural installed; see [Install](../getting-started.md#1-create-an-account-and-install).
 
 ## Validate and run
 
@@ -90,9 +90,9 @@ plural agent push scripted --with-deps
 plural run --benchmark support-triage --agent scripted --hosted --follow
 ```
 
-`plural auth login` opens your browser to sign in, which is enough for hosted commands
-like these. Model calls from your own computer need an API key instead; see
-[Sign in](../getting-started.md#sign-in).
+`plural auth login` opens your browser to sign in and stores a 30-day API key, which
+covers both hosted commands like these and model calls from your own computer; see
+[Sign in](../getting-started.md#1-create-an-account-and-install).
 
 The credential is stored in your user config folder, never in the project. The hosted
 project is private, and pushing never makes anything public. You can also follow the

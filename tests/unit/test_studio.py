@@ -191,9 +191,11 @@ def test_submit_job_and_transition_cancel(tmp_path: Path) -> None:
         source_revision_id="benchmark_rev_1",
         agent_revision_ids=["agent_rev_1"],
         idempotency_key="submit-1",
+        client_job_id="local_job_1",
     )
     client.jobs.cancel("job_1")
     payload = json.loads(create.calls.last.request.content)
+    assert (payload["executor"], payload["client_job_id"]) == ("client", "local_job_1")
     assert payload["source"] == {
         "type": "benchmark",
         "revision_id": "benchmark_rev_1",

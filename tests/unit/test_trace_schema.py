@@ -11,10 +11,10 @@ from pydantic import ValidationError
 from plural.tracing import (
     ActionStep,
     Event,
-    Outcome,
     ParsedAction,
     RewardEvent,
     Trace,
+    TraceOutcome,
     trace_json_schema,
 )
 
@@ -76,7 +76,7 @@ def test_production_and_episode_dumps_validate_against_trace_schema() -> None:
         environment="test",
         initial_state={"turn": 0},
         final_state={"turn": 1},
-        outcome=Outcome(reward=1.0),
+        outcome=TraceOutcome(reward=1.0),
         terminated=True,
     )
     episode.add_turn(

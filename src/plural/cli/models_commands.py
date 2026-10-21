@@ -1,4 +1,4 @@
-"""``plural models``: the models you may run."""
+"""``plural model``: the models you may run."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ models_app = typer.Typer(help="List the models you may run.", no_args_is_help=Tr
 _SCOPE_NOTES = {
     "organization": (
         "Showing the models your organization offers. "
-        "Run `plural models list --all` for the whole catalog."
+        "Run `plural model list --all` for the whole catalog."
     ),
     "catalog": "Your organization has not configured models yet; showing the whole catalog.",
 }

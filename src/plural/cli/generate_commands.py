@@ -1,4 +1,4 @@
-"""``plural env add|eject-files|serve``: add your systems to an Environment and try them.
+"""``plural app add`` and ``plural env serve``: add your systems to an Environment and try them.
 
 ``add`` writes ordinary project files, then loads the Environment the way
 ``plural env validate`` does, which is when an MCP server's tools and an API's
@@ -13,12 +13,13 @@ from typing import Any
 
 import typer
 
-from plural.cli.common import JSON_OPTION, emit, handled, relative, workspace
+from plural.cli.common import JSON_OPTION, alias, deprecated, emit, handled, relative, workspace
 from plural.cli.secret_commands import secret_status
 from plural.mcp import PORT
 from plural.project import ProjectError, ResourceRef, Workspace, check_name
 from plural.project.generators import (
     DEFAULT_JUDGE_MODEL,
+    AppDraft,
     Generated,
     add_app,
     add_traces,
@@ -27,6 +28,7 @@ from plural.project.generators import (
     openapi_app,
 )
 from plural.project.layout import ENVIRONMENT
+from plural.project.templates import STARTER_MODEL
 
 APP_HELP = (
     "The App's name. It prefixes an action only when another App offers the same name. "
@@ -41,6 +43,7 @@ SECRET_HELP = (
     "A setup secret the project supplies, for reset and snapshot hooks. Repeatable. "
     "Without it, ${NAME} in a header or variable is a credential the Agent supplies."
 )
+FILES_SERVER = "plural.mcp.files:server"
 CREDENTIAL_HELP = (
     "A credential the running Agent supplies, such as its own API token. Repeatable. "
     "${NAME} in a header or variable is added for you."
@@ -92,11 +95,11 @@ def _write(generated: Generated, *, as_json: bool) -> None:
 
     def text() -> None:
         if not generated.updated:
-            typer.echo(f"Created environment {generated.environment}:")
+            typer.echo(f"Created Environment {generated.environment}:")
         elif files:
-            typer.echo(f"Updated environment {generated.environment}:")
+            typer.echo(f"Updated Environment {generated.environment}:")
         else:
-            typer.echo(f"Nothing changed in environment {generated.environment}:")
+            typer.echo(f"Nothing changed in Environment {generated.environment}:")
         for note in generated.notes:
             typer.echo(f"  {note}")
         for path in files:
@@ -127,6 +130,18 @@ def _write(generated: Generated, *, as_json: bool) -> None:
                 f"\nReview the drafted Tasks' instructions, then run Agents on them with "
                 f"`plural run --benchmark {generated.benchmark} --model <model>`."
             )
+        elif generated.tasks:
+            task = generated.tasks[0]
+            run = (
+                f"plural run --task {task} --agent <agent>"
+                if generated.credentials
+                else f"plural run --task {task} --model {STARTER_MODEL}"
+            )
+            typer.echo(
+                f"\nStarter Task {task} is a read-only smoke test, scored by a judge. Try it:\n"
+                f"  {run}\n"
+                f"Then replace tasks/{task}/instruction.md with the work you want to measure."
+            )
 
     emit(payload, as_json=as_json, text=text)
 
@@ -142,8 +157,34 @@ def _file(path: str, *, root: Path) -> tuple[str, bytes]:
     return source.name, source.read_bytes()
 
 
+def _files_app(app: str, *, copy: bool) -> AppDraft:
+    """Plural's files server as an App, or a copy of it in the Environment to edit.
+
+    Returns:
+        The App.
+    """
+    import plural.mcp.files
+
+    filename = f"{app}_server.py"
+    files: dict[str, str | bytes] = {}
+    if copy:
+        files[filename] = Path(plural.mcp.files.__file__).read_text(encoding="utf-8")
+    return AppDraft(
+        entry={"name": app, "mcp": {"server": f"{filename}:server" if copy else FILES_SERVER}},
+        description="Work done over the Environment's and the Task's files.",
+        connection=(
+            f"`{app}` is Plural's files server"
+            + (f", copied into `{filename}` to edit" if copy else "")
+            + ". It offers the Environment's and the Task's resources, read-only: "
+            "list_files, read_file, search_files, and read-only SQL over CSV, JSON, "
+            "JSONL, and SQLite files with list_tables and query."
+        ),
+        files=files,
+    )
+
+
 def add_generators(app: typer.Typer) -> None:
-    """Register ``add``, ``eject-files``, and ``serve`` on the ``plural env`` group."""
+    """Register ``serve``, and the deprecated ``add`` and ``eject-files``, on ``plural env``."""
 
     @app.command("eject-files")
     @handled
@@ -237,121 +278,155 @@ def add_generators(app: typer.Typer) -> None:
         )
         serve_http(server, port)
 
-    @app.command("add")
-    @handled
-    def env_add(
-        name: str = typer.Argument(help="Environment to add to; created if it does not exist."),
-        mcp: str | None = typer.Option(
-            None,
-            "--mcp",
-            help="An MCP server: its Streamable HTTP URL, or the command that starts it over "
-            "stdio, such as 'npx -y @modelcontextprotocol/server-memory'.",
-        ),
-        openapi: str | None = typer.Option(
-            None, "--openapi", help="An HTTP API's OpenAPI document: a file or a URL."
-        ),
-        traces: str | None = typer.Option(
-            None,
-            "--traces",
-            help='Recorded conversations: JSON or JSONL of {"messages": [...]}, or Plural '
-            "Traces. Each system they call becomes a replay App, and Tasks and a Benchmark "
-            "are drafted from them.",
-        ),
-        app_name_option: str | None = typer.Option(None, "--app", help=APP_HELP),
-        header: list[str] = typer.Option(
-            [], "--header", help="An HTTP header, KEY=VALUE. Repeatable. Use ${NAME}."
-        ),
-        env: list[str] = typer.Option(
-            [], "--env", help="An MCP server variable, KEY=VALUE. Repeatable. Use ${NAME}."
-        ),
-        tool: list[str] = typer.Option(
-            [], "--tool", help="Only offer this MCP tool. Repeatable. Default: every tool."
-        ),
-        base_url: str | None = typer.Option(
-            None, "--base-url", help="Where to send API requests. Default: the document's servers."
-        ),
-        operation: list[str] = typer.Option(
-            [], "--operation", help="Only offer this API operationId. Repeatable."
-        ),
-        secret: list[str] = typer.Option([], "--secret", help=SECRET_HELP),
-        credential: list[str] = typer.Option([], "--credential", help=CREDENTIAL_HELP),
-        judge_model: str = typer.Option(
-            DEFAULT_JUDGE_MODEL, "--judge-model", help="With --traces: model for the drafted judge."
-        ),
-        max_tasks: int = typer.Option(
-            50,
-            "--max-tasks",
-            min=1,
-            help="With --traces: draft at most this many Tasks, preferring traces that call "
-            "different tools.",
-        ),
-        runtime: str | None = typer.Option(None, "--runtime", help=RUNTIME_HELP),
-        as_json: bool = JSON_OPTION,
-    ) -> None:
-        """Add a system to an Environment as an App, creating the Environment if it is new.
+    app.command("add", hidden=True)(alias(app_add, "plural env add", "plural app add"))
+    app.command("eject-files", hidden=True)(
+        alias(env_eject_files, "plural env eject-files", "plural app add ENV --files-server --copy")
+    )
 
-        Give one source per call: --mcp, --openapi, or --traces. Run it again to
-        add another system. With --traces it also drafts Tasks and a Benchmark,
-        and running it again with newer traces adds their calls, tools, systems,
-        and Tasks; existing Tasks are kept.
-        """
-        sources = [
-            flag
-            for flag, value in (("--mcp", mcp), ("--openapi", openapi), ("--traces", traces))
-            if value
-        ]
-        if len(sources) != 1:
-            raise ProjectError(
-                "Give one system to add: --mcp URL_OR_COMMAND, --openapi SPEC, or --traces FILE."
+
+@handled
+def app_add(
+    name: str = typer.Argument(help="Environment to add to; created if it does not exist."),
+    mcp: str | None = typer.Option(
+        None,
+        "--mcp",
+        help="An MCP server: its Streamable HTTP URL, or the command that starts it over "
+        "stdio, such as 'npx -y @modelcontextprotocol/server-memory'.",
+    ),
+    openapi: str | None = typer.Option(
+        None, "--openapi", help="An HTTP API's OpenAPI document: a file or a URL."
+    ),
+    traces: str | None = typer.Option(
+        None,
+        "--traces",
+        help='Recorded conversations: JSON or JSONL of {"messages": [...]}, or Plural '
+        "Traces. Each system they call becomes a replay App, and Tasks and a Benchmark "
+        "are drafted from them.",
+    ),
+    files_server: bool = typer.Option(
+        False,
+        "--files-server",
+        help="Plural's ready-made files server: the Environment's and the Task's files, "
+        "read-only, with search and read-only SQL over CSV, JSON, JSONL, and SQLite.",
+    ),
+    copy: bool = typer.Option(
+        False,
+        "--copy",
+        help="With --files-server: copy the server into the Environment as APP_server.py, "
+        "to change what it offers.",
+    ),
+    app_name_option: str | None = typer.Option(None, "--app", help=APP_HELP),
+    header: list[str] = typer.Option(
+        [], "--header", help="An HTTP header, KEY=VALUE. Repeatable. Use ${NAME}."
+    ),
+    server_env: list[str] = typer.Option(
+        [],
+        "--server-env",
+        help="An environment variable for the MCP server, KEY=VALUE. Repeatable. Use ${NAME}.",
+    ),
+    env: list[str] = typer.Option([], "--env", hidden=True),
+    tool: list[str] = typer.Option(
+        [], "--tool", help="Only offer this MCP tool. Repeatable. Default: every tool."
+    ),
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Where to send API requests. Default: the document's servers."
+    ),
+    operation: list[str] = typer.Option(
+        [], "--operation", help="Only offer this API operationId. Repeatable."
+    ),
+    secret: list[str] = typer.Option([], "--secret", help=SECRET_HELP),
+    credential: list[str] = typer.Option([], "--credential", help=CREDENTIAL_HELP),
+    judge_model: str = typer.Option(
+        DEFAULT_JUDGE_MODEL, "--judge-model", help="Model for the drafted judge Verifier."
+    ),
+    max_tasks: int = typer.Option(
+        50,
+        "--max-tasks",
+        min=1,
+        help="With --traces: draft at most this many Tasks, preferring traces that call "
+        "different tools.",
+    ),
+    runtime: str | None = typer.Option(None, "--runtime", help=RUNTIME_HELP),
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Add a system to an Environment as an App, creating the Environment if it is new.
+
+    Give one source per call: --mcp, --openapi, --traces, or --files-server.
+    Run it again to add another system. With --traces it also drafts Tasks and
+    a Benchmark, and running it again with newer traces adds their calls,
+    tools, systems, and Tasks; existing Tasks are kept.
+    """
+    if env:
+        deprecated("--env", "--server-env")
+    server_env = [*server_env, *env]
+    sources = [
+        flag
+        for flag, value in (
+            ("--mcp", mcp),
+            ("--openapi", openapi),
+            ("--traces", traces),
+            ("--files-server", files_server),
+        )
+        if value
+    ]
+    if len(sources) != 1:
+        raise ProjectError(
+            "Give one system to add: --mcp URL_OR_COMMAND, --openapi SPEC, --traces FILE, "
+            "or --files-server."
+        )
+    if copy and not files_server:
+        raise ProjectError("--copy goes with --files-server.")
+    check_name(name, ENVIRONMENT.label)
+    root = workspace().project.root
+    try:
+        if traces:
+            from plural.recorded import read_traces
+
+            path = Path(traces) if Path(traces).is_file() else root / traces
+            if not path.is_file():
+                raise ProjectError(f"No traces file at {traces}.")
+            generated = add_traces(
+                name,
+                read_traces(path),
+                default_app=app_name_option or "tools",
+                judge_model=judge_model,
+                max_tasks=max_tasks,
+                runtime=runtime or "local",
+                root=root,
             )
-        check_name(name, ENVIRONMENT.label)
-        root = workspace().project.root
-        try:
-            if traces:
-                from plural.recorded import read_traces
-
-                path = Path(traces) if Path(traces).is_file() else root / traces
-                if not path.is_file():
-                    raise ProjectError(f"No traces file at {traces}.")
-                generated = add_traces(
-                    name,
-                    read_traces(path),
-                    default_app=app_name_option or "tools",
-                    judge_model=judge_model,
-                    max_tasks=max_tasks,
-                    runtime=runtime or "local",
-                    root=root,
-                )
-            elif mcp:
-                remote = mcp.startswith(("http://", "https://"))
-                draft = mcp_app(
-                    app_name_option or app_name(mcp, fallback=name),
-                    command=() if remote else shlex.split(mcp),
-                    url=mcp if remote else None,
-                    headers=_pairs(header, "--header"),
-                    env=_pairs(env, "--env"),
-                    tools=tool,
-                    secrets=secret,
-                    credentials=credential,
-                )
-                generated = add_app(root, name, draft, runtime=runtime)
-            else:
-                assert openapi is not None
-                remote = openapi.startswith(("http://", "https://"))
-                draft = openapi_app(
-                    app_name_option or app_name(openapi, fallback=name),
-                    spec=openapi,
-                    spec_file=None if remote else _file(openapi, root=root),
-                    base_url=base_url,
-                    headers=_pairs(header, "--header"),
-                    operations=operation,
-                    secrets=secret,
-                    credentials=credential,
-                )
-                generated = add_app(root, name, draft, runtime=runtime)
-        except ValueError as exc:
-            raise ProjectError(str(exc)) from exc
-        _write(generated, as_json=as_json)
+        elif mcp:
+            remote = mcp.startswith(("http://", "https://"))
+            draft = mcp_app(
+                app_name_option or app_name(mcp, fallback=name),
+                command=() if remote else shlex.split(mcp),
+                url=mcp if remote else None,
+                headers=_pairs(header, "--header"),
+                env=_pairs(server_env, "--server-env"),
+                tools=tool,
+                secrets=secret,
+                credentials=credential,
+            )
+            generated = add_app(root, name, draft, runtime=runtime, judge_model=judge_model)
+        elif files_server:
+            draft = _files_app(app_name_option or "files", copy=copy)
+            generated = add_app(root, name, draft, runtime=runtime, judge_model=judge_model)
+        else:
+            assert openapi is not None
+            remote = openapi.startswith(("http://", "https://"))
+            draft = openapi_app(
+                app_name_option or app_name(openapi, fallback=name),
+                spec=openapi,
+                spec_file=None if remote else _file(openapi, root=root),
+                base_url=base_url,
+                headers=_pairs(header, "--header"),
+                operations=operation,
+                secrets=secret,
+                credentials=credential,
+            )
+            generated = add_app(root, name, draft, runtime=runtime, judge_model=judge_model)
+    except ValueError as exc:
+        raise ProjectError(str(exc)) from exc
+    _write(generated, as_json=as_json)
 
 
-__all__ = ["add_generators"]
+__all__ = ["add_generators", "app_add"]

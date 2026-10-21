@@ -1,4 +1,4 @@
-"""`plural env add|eject-files`, through the CLI."""
+"""`plural app add|list|remove` and the deprecated `plural env add|eject-files`."""
 
 from __future__ import annotations
 
@@ -40,12 +40,12 @@ def test_add_mcp_creates_the_environment_and_discovers_the_servers_tools(
 ) -> None:
     monkeypatch.setenv("RECORDS_TOKEN", "records-secret")
     code, output, drafted = cli(
-        "env",
+        "app",
         "add",
         "records-desk",
         "--mcp",
         f"{sys.executable} {SERVER}",
-        "--env",
+        "--server-env",
         "RECORDS_TOKEN=${RECORDS_TOKEN}",
         "--tool",
         "get_record",
@@ -73,7 +73,7 @@ def test_add_mcp_creates_the_environment_and_discovers_the_servers_tools(
     assert "RECORDS_TOKEN" in readme
     assert "plural credential set" in readme
 
-    code, output, _ = cli("env", "add", "records-desk", "--mcp", "https://records.dev/mcp")
+    code, output, _ = cli("app", "add", "records-desk", "--mcp", "https://records.dev/mcp")
     assert code != 0
     assert "already has an App named records" in output
 
@@ -81,7 +81,7 @@ def test_add_mcp_creates_the_environment_and_discovers_the_servers_tools(
 def test_add_extends_an_environment_and_keeps_what_is_there(project: Project) -> None:
     manifest_path = project.root / "environments/queue/environment.yaml"
     code, output, added = cli(
-        "env",
+        "app",
         "add",
         "queue",
         "--mcp",
@@ -112,15 +112,15 @@ def test_add_extends_an_environment_and_keeps_what_is_there(project: Project) ->
     assert "`linear` is an MCP server reached at https://mcp.linear.app/mcp" in readme
 
     code, output, _ = cli(
-        "env", "add", "queue", "--mcp", "https://x.dev/mcp", "--runtime", "docker"
+        "app", "add", "queue", "--mcp", "https://x.dev/mcp", "--runtime", "docker"
     )
     assert code != 0 and "runs on local" in output
 
 
 def test_add_takes_exactly_one_source(project: Project) -> None:
-    code, output, _ = cli("env", "add", "desk")
+    code, output, _ = cli("app", "add", "desk")
     assert code != 0 and "Give one system to add" in output
-    code, output, _ = cli("env", "add", "desk", "--mcp", "x", "--openapi", "y.json")
+    code, output, _ = cli("app", "add", "desk", "--mcp", "x", "--openapi", "y.json")
     assert code != 0 and "Give one system to add" in output
 
 
@@ -140,8 +140,29 @@ def test_app_names_come_from_the_source(source: str, name: str) -> None:
     assert app_name(source, fallback="desk") == name
 
 
+def test_a_new_environment_from_a_system_gets_a_read_only_starter_task(
+    project: Project,
+) -> None:
+    code, output, drafted = cli("app", "add", "broken", "--mcp", "plural-no-such-server", "--json")
+
+    assert code == 0, output
+    assert drafted["tasks"] == ["broken-first"]
+    task = yaml.safe_load((project.root / "tasks/broken-first/task.yaml").read_text())
+    assert task["environment"] == "broken" and task["verifiers"] == ["broken-check"]
+    instruction = (project.root / "tasks/broken-first/instruction.md").read_text()
+    assert "PLURAL-TODO" in instruction and "change nothing" in instruction
+    judge = yaml.safe_load((project.root / "verifiers/broken-check/verifier.yaml").read_text())
+    assert judge["kind"] == "agent"
+
+    code, output, drafted = cli(
+        "app", "add", "broken", "--mcp", "plural-other-server", "--app", "other", "--json"
+    )
+    assert code == 0, output
+    assert drafted["tasks"] == []
+
+
 def test_add_mcp_keeps_the_files_when_the_server_cannot_start(project: Project) -> None:
-    code, output, drafted = cli("env", "add", "broken", "--mcp", "plural-no-such-server", "--json")
+    code, output, drafted = cli("app", "add", "broken", "--mcp", "plural-no-such-server", "--json")
 
     assert code == 0, output
     assert drafted["apps"] == []
@@ -157,7 +178,7 @@ def test_add_openapi_copies_the_document_and_lists_operations(
     spec.write_text(json.dumps({**SPEC, "servers": [{"url": api}]}))
 
     code, output, drafted = cli(
-        "env",
+        "app",
         "add",
         "orders",
         "--openapi",
@@ -174,6 +195,58 @@ def test_add_openapi_copies_the_document_and_lists_operations(
     assert {"name": "getOrder", "mutates_state": False} in orders["actions"]
     assert {"name": "createOrder", "mutates_state": True} in orders["actions"]
     assert (project.root / "environments/orders/orders.json").is_file()
+
+
+def test_files_server_adds_the_ready_made_server_or_a_copy_to_edit(project: Project) -> None:
+    code, output, added = cli("app", "add", "queue", "--files-server", "--json")
+    assert code == 0, output
+    manifest = yaml.safe_load((project.root / "environments/queue/environment.yaml").read_text())
+    assert manifest["apps"][-1] == {"name": "files", "mcp": {"server": "plural.mcp.files:server"}}
+    assert {app["name"] for app in added["apps"]} >= {"files"}
+
+    code, output, _ = cli("app", "add", "queue", "--files-server", "--copy", "--app", "docs")
+    assert code == 0, output
+    source = (project.root / "environments/queue/docs_server.py").read_text()
+    assert "def list_files" in source
+    manifest = yaml.safe_load((project.root / "environments/queue/environment.yaml").read_text())
+    assert manifest["apps"][-1] == {"name": "docs", "mcp": {"server": "docs_server.py:server"}}
+
+    code, output, _ = cli("app", "add", "queue", "--copy", "--mcp", "x")
+    assert code != 0 and "--copy goes with --files-server" in output
+
+
+def test_app_list_and_remove_edit_only_the_apps_entry(project: Project) -> None:
+    path = project.root / "environments/queue/environment.yaml"
+    assert cli("app", "add", "queue", "--files-server")[0] == 0
+    text = path.read_text().replace("apps:\n", "# The systems.\napps:\n", 1)
+    text += "# Kept as written.\n"
+    path.write_text(text)
+
+    code, output, listed = cli("app", "list", "queue", "--json")
+    assert code == 0, output
+    assert [item["name"] for item in listed][-1] == "files"
+    assert listed[-1]["source"] == "plural.mcp.files:server"
+
+    code, output, removed = cli("app", "remove", "queue", "files", "--json")
+    assert code == 0, output
+    assert removed["app"] == "files"
+    after = path.read_text()
+    assert "plural.mcp.files:server" not in after
+    assert "# The systems." in after and after.endswith("# Kept as written.\n")
+    assert [item["name"] for item in cli("app", "list", "queue", "--json")[2]][-1] != "files"
+
+    code, output, _ = cli("app", "remove", "queue", "nope")
+    assert code != 0 and "no App named 'nope'" in output
+
+
+def test_deprecated_env_option_still_sets_a_server_variable(project: Project) -> None:
+    result = CliRunner().invoke(
+        app,
+        ["app", "add", "vars", "--mcp", "plural-no-such-server", "--env", "A=1", "--json"],
+    )
+    assert "use `--server-env`" in result.stderr
+    manifest = yaml.safe_load((project.root / "environments/vars/environment.yaml").read_text())
+    assert manifest["apps"][0]["mcp"]["env"] == {"A": "1"}
 
 
 def test_eject_files_copies_the_ready_made_server_to_edit(project: Project) -> None:
@@ -224,7 +297,7 @@ def test_add_traces_drafts_replay_apps_tasks_and_a_benchmark_the_traces_score_on
     traces = project.root / "traces.jsonl"
     traces.write_text(json.dumps(trace("T-1", "A")) + "\n" + json.dumps(trace("T-2", "B")) + "\n")
 
-    code, output, drafted = cli("env", "add", "support", "--traces", "traces.jsonl", "--json")
+    code, output, drafted = cli("app", "add", "support", "--traces", "traces.jsonl", "--json")
 
     assert code == 0, output
     assert drafted["problem"] is None
@@ -280,7 +353,7 @@ def test_add_traces_offers_the_agents_own_tools_with_their_descriptions(
         json.dumps(_ticket("T-1", ["crm__lookup"], tools)) + "\n"
     )
 
-    code, output, drafted = cli("env", "add", "desk", "--traces", "traces.jsonl", "--json")
+    code, output, drafted = cli("app", "add", "desk", "--traces", "traces.jsonl", "--json")
 
     assert code == 0, output
     [crm] = drafted["apps"]
@@ -300,7 +373,7 @@ def test_add_traces_again_adds_new_tools_systems_and_tasks(project: Project) -> 
         _ticket("T-2", ["crm__lookup", "crm__note"], old_tools),
     ]
     (project.root / "first.jsonl").write_text("".join(json.dumps(t) + "\n" for t in first))
-    code, output, _ = cli("env", "add", "desk", "--traces", "first.jsonl", "--json")
+    code, output, _ = cli("app", "add", "desk", "--traces", "first.jsonl", "--json")
     assert code == 0, output
 
     new_tools = [
@@ -316,17 +389,17 @@ def test_add_traces_again_adds_new_tools_systems_and_tasks(project: Project) -> 
         _ticket("T-4", ["crm__escalate"], new_tools),
     ]
     (project.root / "second.jsonl").write_text("".join(json.dumps(t) + "\n" for t in second))
-    code, output, updated = cli("env", "add", "desk", "--traces", "second.jsonl", "--json")
+    code, output, updated = cli("app", "add", "desk", "--traces", "second.jsonl", "--json")
 
     assert code == 0, output
     assert updated["updated"] is True
     assert updated["problem"] is None
     assert updated["tasks"] == ["desk-t-3", "desk-t-4"]
     notes = "\n".join(updated["notes"])
-    assert "Skipped 1 trace(s) already imported." in notes
-    assert "App crm: 2 new action(s): escalate, refund" in notes
+    assert "Skipped 1 trace already imported." in notes
+    assert "App crm: 2 new actions: escalate, refund" in notes
     assert "updated description or schema: lookup" in notes
-    assert "New App billing: 1 action(s), 1 recorded call(s)." in notes
+    assert "New App billing: 1 action, 1 recorded call." in notes
     actions = {app["name"]: [a["name"] for a in app["actions"]] for app in updated["apps"]}
     assert actions == {
         "billing": ["invoice"],
@@ -341,11 +414,11 @@ def test_add_traces_again_adds_new_tools_systems_and_tasks(project: Project) -> 
         "desk-t-4",
     ]
     manifest = (project.root / "environments/desk/environment.yaml").read_text()
-    assert manifest.startswith("# Drafted by `plural env add`")
+    assert manifest.startswith("# Drafted by `plural app add`")
     recordings = (project.root / "environments/desk/apps/crm/recordings.jsonl").read_text()
     assert len(recordings.splitlines()) == 6
 
-    code, output, again = cli("env", "add", "desk", "--traces", "second.jsonl", "--json")
+    code, output, again = cli("app", "add", "desk", "--traces", "second.jsonl", "--json")
     assert code == 0, output
     assert again["tasks"] == []
     assert "Nothing new to add." in again["notes"]
@@ -357,7 +430,7 @@ def test_add_traces_drafts_tasks_that_cover_every_tool_first(project: Project) -
     (project.root / "traces.jsonl").write_text("".join(json.dumps(t) + "\n" for t in traces))
 
     code, output, drafted = cli(
-        "env", "add", "desk", "--traces", "traces.jsonl", "--max-tasks", "2", "--json"
+        "app", "add", "desk", "--traces", "traces.jsonl", "--max-tasks", "2", "--json"
     )
 
     assert code == 0, output

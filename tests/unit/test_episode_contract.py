@@ -100,9 +100,9 @@ def _responses(monkeypatch: pytest.MonkeyPatch, *responses: dict[str, object]) -
     calls = iter(responses)
     consumed: list[int] = []
 
-    def model_call(**_kwargs: object) -> dict[str, object]:
+    def model_call(**_kwargs: object) -> tuple[dict[str, object], float]:
         consumed.append(1)
-        return next(calls)
+        return next(calls), 0.0
 
     monkeypatch.setattr(native_runner, "_model_call", model_call)
     return consumed
@@ -497,3 +497,41 @@ def test_native_loop_records_model_calls_and_steps(
     # Reward is episode bookkeeping and never part of what the Agent saw.
     assert "0.75" not in json.dumps(trajectory["steps"])
     assert "reward" not in json.dumps(trajectory["steps"])
+
+
+def test_trial_result_carries_how_the_episode_ended() -> None:
+    from plural.execution.engine import _episode_totals
+    from plural.jobs import TrialReceipt, TrialResult
+    from plural.rewards import LEDGER_FILE, RewardRecord, RewardTarget, dump_ledger
+    from plural.sandbox import DownloadedFile
+
+    target = RewardTarget(kind="step", event_id="step-1")
+    ledger = dump_ledger(
+        [
+            RewardRecord(target=target, value=0.5, weight=2.0, source="step", verifier="v"),
+            RewardRecord(target=target, value=1.0, source="step", verifier="v"),
+            RewardRecord(target=target, value=9.0, source="hindsight", verifier="v"),
+        ]
+    )
+    artifacts = (
+        DownloadedFile(
+            path="result.json",
+            data=json.dumps({"stop_reason": "max_turns", "turns": 3}).encode(),
+        ),
+        DownloadedFile(path=LEDGER_FILE, data=ledger),
+    )
+    assert _episode_totals(artifacts, failed=False) == {
+        "stop_reason": "max_turns",
+        "step_reward_total": 2.0,
+        "turns": 3,
+    }
+    assert _episode_totals((), failed=True)["stop_reason"] == "error"
+    assert _episode_totals((), failed=False) == {
+        "stop_reason": "",
+        "step_reward_total": 0.0,
+        "turns": 0,
+    }
+    with pytest.raises(ValueError, match="unknown stop_reason"):
+        TrialResult.model_validate(
+            {"status": "succeeded", "receipt": TrialReceipt.model_construct(), "stop_reason": "x"}
+        )

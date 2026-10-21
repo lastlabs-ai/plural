@@ -12,7 +12,7 @@ import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import ExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 from urllib.parse import quote
 
 import httpx
@@ -628,7 +628,7 @@ class TracesAPI:
 
 
 class JobsAPI:
-    """Hosted Job submission, reruns, transitions, and live events."""
+    """Hosted Job records, transitions, and live events."""
 
     def __init__(self, studio: Studio) -> None:
         self._studio = studio
@@ -640,24 +640,22 @@ class JobsAPI:
         source_revision_id: str,
         agent_revision_ids: Sequence[str],
         idempotency_key: str,
+        client_job_id: str,
         name: str = "Job",
         description: str = "",
-        executor: Literal["hosted", "client"] = "hosted",
-        client_job_id: str | None = None,
+        evaluation_track: str | None = None,
     ) -> JsonObject:
-        """Create a hosted Job from pushed revisions.
+        """Record, from pushed revisions, a Job this client runs and reports.
 
-        ``executor="client"`` records a Job that this client runs and reports,
-        as ``plural run --track`` does; hosted workers never claim its Trials.
-        ``client_job_id`` names the client's own record of it.
+        This is what ``plural run --record`` does. Plural never runs the Job
+        itself. ``client_job_id`` names the client's own record of it, and
+        ``evaluation_track`` the Benchmark evaluation track its results publish on.
         """
         if len(agent_revision_ids) != len(spec.agents):
             raise InvalidRequestError("agent_revision_ids must align with Job agents")
-        extra: dict[str, Any] = {}
-        if executor != "hosted":
-            extra["executor"] = executor
-        if client_job_id is not None:
-            extra["client_job_id"] = client_job_id
+        extra: dict[str, Any] = {"executor": "client", "client_job_id": client_job_id}
+        if evaluation_track is not None:
+            extra["track"] = evaluation_track
         return cast(
             JsonObject,
             self._studio.request(
@@ -680,17 +678,6 @@ class JobsAPI:
                     "idempotency_key": idempotency_key,
                     **extra,
                 },
-            ),
-        )
-
-    def rerun(self, job_id: str, *, idempotency_key: str) -> JsonObject:
-        """Create a new Job from the exact revisions and settings of ``job_id``."""
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/jobs/{quote(job_id)}/rerun",
-                json={"idempotency_key": idempotency_key},
             ),
         )
 
@@ -727,17 +714,6 @@ class TrialsAPI:
 
     def get(self, trial_id: str) -> JsonObject:
         return cast(JsonObject, self._studio.request("GET", f"/trials/{quote(trial_id)}"))
-
-    def rerun(self, trial_id: str, *, idempotency_key: str) -> JsonObject:
-        """Create a new one-Trial Job pinned to this Trial's Task, Agent, and settings."""
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/trials/{quote(trial_id)}/rerun",
-                json={"idempotency_key": idempotency_key},
-            ),
-        )
 
     def transition(self, trial_id: str, status: str, **fields: Any) -> JsonObject:
         return cast(

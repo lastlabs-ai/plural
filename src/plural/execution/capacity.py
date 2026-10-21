@@ -66,8 +66,8 @@ def recommend_concurrency(
             _lower(limits, "local cpu", by_cpu)
             _lower(limits, "local memory", by_memory)
         elif provider == "docker":
-            cpu = runtime.resources.cpu or 1.0
-            ram = runtime.resources.memory_mb or DOCKER_TRIAL_MEMORY_MB
+            cpu = runtime.compute.cpu or 1.0
+            ram = runtime.compute.memory_mb or DOCKER_TRIAL_MEMORY_MB
             _lower(limits, "docker cpu", max(int(cpus * 2 / cpu), 1))
             _lower(limits, "docker memory", _share(memory, ram))
         else:
@@ -119,7 +119,7 @@ def _int(value: str | None) -> int | None:
 
 
 def _uses_model(spec: JobSpec) -> bool:
-    return any(binding.auth_mode != "none" for binding in spec.agents)
+    return any(binding.auth != "none" for binding in spec.agents)
 
 
 def _local_model(env: Mapping[str, str]) -> bool:

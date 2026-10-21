@@ -6,13 +6,14 @@ exact version and content hash of every resource it used.
 
 Local runs snapshot the Environment, Verifier, and Harness sources they
 execute into the Job directory, so a rerun uses the original files even after
-the project has changed. Hosted runs use pushed revisions only.
+the project has changed.
 
-A local run can also be recorded in the hosted project. With tracking, the
-hosted Job is created before the run starts and each execution is reported as
-it happens; ``push_local_job`` records a finished local Job afterwards. Either
-way the hosted Job has executor ``client``: this machine ran it, in whatever
-Runtime each Environment declares, and hosted workers never pick it up.
+A run can also be recorded in the hosted project, from pushed revisions. With
+tracking, the hosted Job is created before the run starts and each execution
+is reported as it happens; ``push_local_job`` records a finished local Job
+afterwards. Either way the hosted Job has executor ``client``: this machine
+ran it, in whatever Runtime each Environment declares. Plural never runs a
+Job itself.
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+
+from pydantic import ValidationError
 
 from plural.agents import Agent
 from plural.agents.models import AgentDefinition
@@ -61,12 +64,11 @@ from plural.project.sync import (
     PushStep,
     apply_project_push,
     plan_project_push,
-    resolve_hosted,
     resolve_pinned,
     revision_label,
 )
 from plural.studio import Studio, slugify
-from plural.tasks import TaskDefinition
+from plural.tasks import Benchmark, TaskDefinition
 from plural.verifiers import DeterministicVerifier, WeightedVerifier
 
 DEFAULT_HARNESS = "native"
@@ -92,6 +94,8 @@ class RunRequest:
     attempts: int | None = None
     concurrency: int | Literal["auto"] = 1
     hosted: bool = False
+    evaluation_track: str | None = None
+    """The Benchmark evaluation track the hosted Job is bound to, by id."""
 
 
 @dataclass
@@ -106,6 +110,7 @@ class RunPlan:
     pins: dict[str, dict[str, str]] = field(default_factory=dict)
     concurrency_reason: str | None = None
     """Why ``auto`` chose the Job's concurrency; ``None`` when a number was given."""
+    evaluation_track: str | None = None
 
     @property
     def spec(self) -> JobSpec:
@@ -139,6 +144,8 @@ class RunRecord:
     hosted_job_id: str | None = None
     """The hosted client Job this local Job is recorded as, once tracked or pushed."""
     hosted_project_id: str | None = None
+    evaluation_track: str | None = None
+    """The Benchmark evaluation track the hosted Job is bound to, by id."""
 
     def dump(self) -> dict[str, Any]:
         """JSON form.
@@ -155,7 +162,7 @@ class Tracking:
 
     Pass one to ``run_local`` or a rerun. Afterwards ``hosted_job_id`` names
     the hosted Job, and ``errors`` lists what could not be reported; ``plural
-    job push`` uploads the rest.
+    job record`` uploads the rest.
     """
 
     studio: Studio
@@ -233,7 +240,7 @@ def plan_run(
             "Agents, and plural run runs one. Run it from Python with "
             "Job(task, agents=[...]), or create a hosted Job that names the party."
         )
-    attempts = request.attempts or 1
+    attempts = _track_attempts(loaded.value, request) or request.attempts or 1
     auto = request.concurrency == "auto"
     job = Job(
         loaded.value,
@@ -278,7 +285,37 @@ def plan_run(
         job=job,
         pins=pins,
         concurrency_reason=reason,
+        evaluation_track=request.evaluation_track,
     )
+
+
+def _track_attempts(source: object, request: RunRequest) -> int | None:
+    """The attempts an evaluation track requires, checked against the request.
+
+    Returns:
+        The track's attempts per Task, or ``None`` when no track is named.
+
+    Raises:
+        ProjectError: When the source is not a Benchmark, has no such track,
+            or the request asks for a different number of attempts.
+    """
+    if request.evaluation_track is None:
+        return None
+    if not isinstance(source, Benchmark):
+        raise ProjectError("--evaluation-track needs --benchmark: only Benchmarks have tracks.")
+    track = next((item for item in source.tracks if item.id == request.evaluation_track), None)
+    if track is None:
+        known = ", ".join(item.id for item in source.tracks) or "none"
+        raise ProjectError(
+            f"Benchmark {source.name!r} has no evaluation track "
+            f"{request.evaluation_track!r}. Its tracks: {known}."
+        )
+    if request.attempts is not None and request.attempts != track.attempts:
+        raise ProjectError(
+            f"Track {track.id!r} requires {track.attempts} attempt(s) per Task; leave out "
+            "--attempts to use it."
+        )
+    return track.attempts
 
 
 def run_local(
@@ -306,6 +343,7 @@ def run_local(
         model=plan.agent.model,
         harness=plan.harness,
         inputs=plan.pins,
+        evaluation_track=plan.evaluation_track,
     )
     return _execute(
         workspace,
@@ -393,6 +431,7 @@ def rerun_local_trial(
             "rerun_of_trial_id": trial_id,
             "hosted_job_id": None,
             "hosted_project_id": None,
+            "evaluation_track": None,
         }
     )
     return _execute(
@@ -441,39 +480,6 @@ def push_run_inputs(
     return [step for step in steps if step.status == "pushed"]
 
 
-def submit_hosted(
-    workspace: Workspace,
-    studio: Studio,
-    plan: RunPlan,
-    *,
-    idempotency_key: str | None = None,
-) -> dict[str, Any]:
-    """Submit a plan to the hosted project using already-pushed revisions.
-
-    A ``--model`` run has no saved Agent, so it records one named after the
-    model (and Harness, when one is named) in the hosted project.
-
-    Returns:
-        The hosted Job record.
-
-    Raises:
-        ProjectError: When any input is not pushed with identical content.
-    """
-    roots = run_roots(plan)
-    harness_ref = _harness_ref(plan.agent) if plan.agent_ref is None else None
-    resolved = resolve_hosted(workspace, studio, roots)
-    return _submit(
-        studio,
-        plan.spec,
-        agent=plan.agent,
-        source=plan.source,
-        agent_ref=plan.agent_ref,
-        harness_ref=harness_ref,
-        resolved=resolved,
-        idempotency_key=idempotency_key or uuid.uuid4().hex,
-    ).record
-
-
 def submit_client_job(
     workspace: Workspace,
     studio: Studio,
@@ -518,6 +524,7 @@ def submit_client_job(
         resolved=resolved,
         idempotency_key=idempotency_key or f"local:{record.job_id}",
         client_job_id=record.job_id,
+        evaluation_track=record.evaluation_track,
     )
 
 
@@ -570,7 +577,7 @@ def finished_local_job(workspace: Workspace, job_id: str) -> RunRecord:
     if not (directory / "result.json").is_file():
         raise ProjectError(
             f"Job {job_id} has not finished, so it cannot be pushed yet. To record a run "
-            "while it happens, start it with `plural run --track`."
+            "while it happens, start it with `plural run --record`."
         )
     return RunRecord(**json.loads(record_path.read_text("utf-8")))
 
@@ -612,11 +619,14 @@ def _agent_value(workspace: Workspace, definition: AgentDefinition) -> Agent:
             "version": definition.revision,
             "model": definition.model,
             "instructions": definition.instructions,
-            "routing": definition.routing,
+            **definition.routing.model_dump(),
             "harness": harness,
-            "harness_kwargs": definition.harness_kwargs,
-            "auth_mode": definition.auth_mode,
-            "secret_names": definition.secret_names,
+            "harness_config": definition.harness_config,
+            "auth": definition.auth,
+            "secrets": definition.secrets,
+            "endpoint": definition.endpoint,
+            "endpoint_key": definition.endpoint_key,
+            "credentials": definition.credentials,
             "metadata": definition.metadata,
         },
         context={"catalog": workspace.catalog, "root": workspace.project.root},
@@ -636,7 +646,8 @@ def _submit(
     harness_ref: ResourceRef | None,
     resolved: Mapping[ResourceRef, HostedRevision],
     idempotency_key: str,
-    client_job_id: str | None = None,
+    client_job_id: str,
+    evaluation_track: str | None = None,
 ) -> ClientJob:
     binding = spec.agents[0]
     if agent_ref is not None:
@@ -662,8 +673,8 @@ def _submit(
         agent_revision_ids=[agent_revision_id],
         idempotency_key=idempotency_key,
         name=f"{source.name} · {binding.name}",
-        executor="client" if client_job_id else "hosted",
         client_job_id=client_job_id,
+        evaluation_track=evaluation_track,
     )
     return ClientJob(record=record, agents={binding.content_hash: hosted})
 
@@ -829,8 +840,9 @@ def _agent(
         agent = Agent.model_validate(
             fields, context={"catalog": workspace.catalog, "root": workspace.project.root}
         )
-    except ValueError as exc:
-        raise ProjectError(str(exc).splitlines()[-1] if str(exc) else "invalid model") from None
+    except ValidationError as exc:
+        messages = [str(error["msg"]).removeprefix("Value error, ") for error in exc.errors()]
+        raise ProjectError(" ".join(messages)) from None
     return agent, None, harness_ref
 
 
@@ -931,7 +943,7 @@ def _execute(
                 f"store it in the hosted project with `plural secret set {key}`."
             )
     needs_model = any(
-        binding.auth_mode != "none" and binding.agent.endpoint is None for binding in spec.agents
+        binding.auth != "none" and binding.agent.endpoint is None for binding in spec.agents
     )
     if needs_model and not environ.get("PLURAL_API_KEY"):
         raise ProjectError(
@@ -1217,5 +1229,4 @@ __all__ = [
     "rerun_local_trial",
     "run_local",
     "submit_client_job",
-    "submit_hosted",
 ]

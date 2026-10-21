@@ -10,10 +10,14 @@ and slots into :class:`~plural.sandbox.daytona.DaytonaProvider` unchanged.
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote
 
+from plural.errors import PluralError
+from plural.harness.native_runner import CREDIT_PAUSE_VARIABLE, DEFAULT_CREDIT_PAUSE_SECONDS
 from plural.sandbox.models import SandboxRequirements
 
 if TYPE_CHECKING:
@@ -23,6 +27,7 @@ if TYPE_CHECKING:
 CREATE_TIMEOUT_SECONDS = 600.0
 EXEC_GRACE_SECONDS = 60.0
 DEFAULT_EXEC_TIMEOUT_SECONDS = 3600.0
+CREDIT_POLL_SECONDS = 30.0
 
 
 class _HostedSandbox:
@@ -103,16 +108,30 @@ class HostedDaytonaAdapter:
         self._runtime = runtime
 
     async def create(self, requirements: SandboxRequirements) -> DaytonaSandboxAdapter:
-        record = await asyncio.to_thread(
-            self._studio.request,
-            "POST",
-            "/compute/sandboxes",
-            json={
-                "runtime": self._runtime,
-                "requirements": requirements.model_dump(mode="json"),
-            },
-            timeout=CREATE_TIMEOUT_SECONDS,
-        )
+        """Start a sandbox, waiting while the account has no credits for one."""
+        budget = float(os.environ.get(CREDIT_PAUSE_VARIABLE) or DEFAULT_CREDIT_PAUSE_SECONDS)
+        waited = 0.0
+        while True:
+            try:
+                record = await asyncio.to_thread(
+                    self._studio.request,
+                    "POST",
+                    "/compute/sandboxes",
+                    json={
+                        "runtime": self._runtime,
+                        "requirements": requirements.model_dump(mode="json"),
+                    },
+                    timeout=CREATE_TIMEOUT_SECONDS,
+                )
+                break
+            except PluralError as exc:
+                if exc.status_code != 402 or waited >= budget:
+                    raise
+                if not waited:
+                    print(f"{exc} Waiting for credits to start it.", file=sys.stderr)
+                wait = min(CREDIT_POLL_SECONDS, budget - waited)
+                await asyncio.sleep(wait)
+                waited += wait
         return cast("DaytonaSandboxAdapter", _HostedSandbox(self._studio, record))
 
     async def delete(self, sandbox: DaytonaSandboxAdapter) -> None:

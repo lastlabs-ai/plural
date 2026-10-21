@@ -1,12 +1,14 @@
 """Resource commands: the same verbs for every kind of project resource.
 
-``plural <kind> init|validate|push|release|pull|show|list`` for ``env``,
+``plural <kind> init|validate|push|release|pull|show|list|delete`` for ``env``,
 ``task``, ``verifier``, ``harness``, ``agent``, and ``benchmark``. Resources
 are named by their directory; revisions by number, release version, or hash.
 """
 
 from __future__ import annotations
 
+import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -14,12 +16,16 @@ import typer
 
 from plural.cli.common import (
     JSON_OPTION,
+    REF_HELP,
+    counted,
+    deprecated,
     emit,
     handled,
     project_studio,
     relative,
     rows,
     session,
+    success,
     workspace,
 )
 from plural.cli.secret_commands import secret_status
@@ -46,15 +52,12 @@ from plural.project.sync import (
     revision_label,
     select_revision,
 )
-from plural.project.templates import resource_scaffold
+from plural.project.templates import STARTER_MODEL, resource_scaffold, starter_scaffolds
 from plural.project.versions import holds_version
+from plural.studio import slugify
 
 NAME_HELP = "Resource name. Defaults to the resource directory you are in."
-VERSIONED_NAME_HELP = (
-    "Resource name, or name@REVISION for a retained revision: a number (@3), a release "
-    "version (@1.0.0), or a content hash (@sha256:...). Defaults to the resource directory "
-    "you are in."
-)
+VERSIONED_NAME_HELP = f"The resource: {REF_HELP}. Defaults to the resource directory you are in."
 
 
 def _app_summary(environment: Any) -> list[dict[str, Any]]:
@@ -200,9 +203,18 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         live = _live_apps(resource.value) if kind is BENCHMARK else []
         if kind is BENCHMARK:
             payload = {**payload, "reproducible": not live, "live_apps": live}
+        unfinished = space.unfinished([ref])
+        payload = {**payload, "unfinished": unfinished}
 
         def text() -> None:
             typer.echo(f"{ref} is valid: {resource.content_hash}")
+            if unfinished:
+                typer.echo(
+                    "\nIt runs locally, but these places are unfinished. Finish each one and "
+                    "delete its PLURAL-TODO line before you push it or run it with --record:"
+                )
+                for marker in unfinished:
+                    typer.echo(f"  {marker}")
             for app in apps or ():
                 typer.echo(f"\nApp {app['name']} ({app['kind']}, {app['control']})")
                 for action in app["actions"]:
@@ -278,7 +290,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
     @app.command("release")
     @handled
     def release_command(
-        name: str = typer.Argument(help=NAME_HELP),
+        name: str = typer.Argument(help="Resource to release."),
         version: str = typer.Argument(help="Release version, MAJOR.MINOR.PATCH."),
         as_json: bool = JSON_OPTION,
     ) -> None:
@@ -297,9 +309,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
     @handled
     def pull_command(
         name: str | None = typer.Argument(None, help=VERSIONED_NAME_HELP),
-        revision: str | None = typer.Option(
-            None, "--revision", "-r", help="Revision to restore: a number, version, or hash."
-        ),
+        revision: str | None = typer.Option(None, "--revision", "-r", hidden=True),
         version: str | None = typer.Option(None, "--version", hidden=True),
         with_deps: bool = typer.Option(
             False,
@@ -318,8 +328,10 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
     ) -> None:
         """Restore a hosted revision's editable files into this project.
 
-        Name a retained revision as name@REVISION or with --revision.
+        Name a retained revision as NAME@REF.
         """
+        if revision or version:
+            deprecated("--revision" if revision else "--version", f"{name or 'NAME'}@REF")
         space = workspace()
         ref, selector = _versioned_ref(space, kind, name, revision or version)
         studio, binding = project_studio(space, session())
@@ -378,8 +390,9 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
     ) -> None:
         """Show a resource: the local copy if there is one, otherwise the hosted one.
 
-        An invalid local copy is an error, not a reason to show the hosted one.
-        name@REVISION shows that revision: the working copy when it holds
+        An invalid local copy is shown with its problems, never swapped for the
+        hosted one.
+        NAME@REF shows that revision: the working copy when it holds
         exactly that content, otherwise the retained hosted revision.
         """
         if local and hosted:
@@ -403,13 +416,17 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                 "location": "built-in",
                 "resource": str(ref),
                 "pinned_version": spec.pinned_version,
-                "harness_kwargs": builtin_schema(ref.name),
+                "harness_config": builtin_schema(ref.name),
             }
             emit(payload, as_json=as_json, text=lambda: _print_builtin(payload))
             return
         if not hosted and space.project.has(ref):
-            resource = space.load(ref)
-            payload = _local_payload(space, resource)
+            try:
+                payload = _local_payload(space, space.load(ref))
+            except ProjectError as exc:
+                payload = _invalid_payload(space, ref, exc)
+                emit(payload, as_json=as_json, text=lambda: _print_invalid(payload))
+                return
             emit(payload, as_json=as_json, text=lambda: _print_local(payload))
             return
         if local:
@@ -487,7 +504,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                             "location": "local",
                             "name": resource_name,
                             "revision": None,
-                            "status": f"invalid ({len(exc.problems) or 1} problem(s))",
+                            "status": f"invalid ({counted(len(exc.problems) or 1, 'problem')})",
                         }
                     )
         if kind is HARNESS and not (local or hosted):
@@ -541,23 +558,107 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
 
         emit(items, as_json=as_json, text=text)
 
+    @app.command("delete")
+    @handled
+    def delete_command(
+        name: str = typer.Argument(help=f"The {kind.label} to delete."),
+        hosted: bool = typer.Option(
+            False,
+            "--hosted",
+            help="Also delete it from the hosted project. Jobs and Trials that pinned its "
+            "revisions can still read them.",
+        ),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Delete without asking."),
+        as_json: bool = JSON_OPTION,
+    ) -> None:
+        """Delete a resource's local folder, refusing while other local resources use it.
+
+        Without --hosted this is a local edit: the hosted project keeps the
+        resource until you add --hosted.
+        """
+        space = workspace()
+        ref = _ref(space, kind, name, must_exist=False)
+        local = space.project.has(ref)
+        if not local and not hosted:
+            if kind is HARNESS and ref.name in BUILTIN_HARNESS_NAMES:
+                raise ProjectError(f"{ref.name} is a built-in Harness; there is nothing to delete.")
+            raise ProjectError(
+                f"No local {kind.label} named {ref.name!r} in this project. Add --hosted to "
+                "delete it from the hosted project."
+            )
+        users = _dependents(space, ref)
+        if users:
+            raise ProjectError(
+                f"{kind.label} {ref.name} is used by other resources in this project. Change "
+                "or delete them first:",
+                [str(item) for item in users],
+            )
+        directory = space.project.resource_dir(ref)
+        shown = relative(directory, space.project.root)
+        where = " and ".join(
+            item for item, wanted in ((shown, local), ("the hosted project", hosted)) if wanted
+        )
+        if not yes:
+            if not sys.stdin.isatty():
+                raise ProjectError(f"Deleting {kind.label} {ref.name} needs --yes here.")
+            typer.confirm(f"Delete {kind.label} {ref.name} from {where}?", abort=True)
+        hosted_status = None
+        if hosted:
+            studio, binding = project_studio(space, session())
+            api = getattr(studio, kind.collection)
+            parent = api.find(slugify(ref.name))
+            if parent is None:
+                hosted_status = f"not in hosted project {binding.project_slug}"
+            else:
+                api.delete(str(parent["id"]))
+                hosted_status = f"deleted from hosted project {binding.project_slug}"
+        if local:
+            shutil.rmtree(directory)
+            lock = space.project.read_lock()
+            if lock.resources.pop(str(ref), None) is not None:
+                space.project.write_lock(lock)
+        payload = {
+            "resource": str(ref),
+            "local": shown if local else None,
+            "hosted": hosted_status,
+        }
+
+        def text() -> None:
+            if local:
+                success(f"Deleted {kind.label} {ref.name} ({shown}).")
+            if hosted_status:
+                typer.echo(f"{kind.label} {ref.name}: {hosted_status}.")
+            if local and not hosted:
+                typer.echo(
+                    "The hosted project still has it, if you pushed it. Delete it there with "
+                    f"`plural {kind.cli} delete {ref.name} --hosted`."
+                )
+
+        emit(payload, as_json=as_json, text=text)
+
     if kind is BENCHMARK:
         _benchmark_membership(app)
-    if kind is AGENT:
-
-        @app.command("serve")
-        def serve(
-            name: str | None = typer.Argument(None, help="Agent to serve."),
-        ) -> None:
-            """Reserved: serve an Agent as an endpoint (not available yet)."""
-            typer.echo(
-                "Error: `plural agent serve` is not available yet. Run an Agent with "
-                "`plural run --agent <name> --task <name>`.",
-                err=True,
-            )
-            raise typer.Exit(2)
-
     return app
+
+
+def _dependents(space: Workspace, ref: ResourceRef) -> list[ResourceRef]:
+    """Local resources whose manifests name ``ref``.
+
+    Returns:
+        Each one, by kind then name.
+    """
+    found = []
+    for other_kind in KINDS:
+        for other in space.project.names(other_kind):
+            candidate = ResourceRef(other_kind.name, other)
+            if candidate == ref:
+                continue
+            try:
+                if ref in space.dependencies(candidate):
+                    found.append(candidate)
+            except ProjectError:
+                continue
+    return found
 
 
 def _init_command(app: typer.Typer, kind: ResourceKind) -> None:
@@ -578,6 +679,42 @@ def _init_command(app: typer.Typer, kind: ResourceKind) -> None:
             f"Fill in the places marked PLURAL-TODO, then run `plural {kind.cli} validate {name}`."
         )
 
+    def create_environment(name: str, *, python: bool, bare: bool) -> None:
+        space = workspace()
+        check_name(name, kind.label)
+        root = space.project.root
+        directory = space.project.resource_dir(ResourceRef(kind.name, name))
+        if directory.exists():
+            raise ProjectError(f"{relative(directory, root)} already exists. Choose another name.")
+        typer.echo(f"Created {kind.label} {name}:")
+        for path in resource_scaffold(kind, name, python=python).write(directory):
+            typer.echo(f"  {relative(path, root)}")
+        task = None
+        if not bare:
+            for starter_kind, starter, scaffold in starter_scaffolds(name):
+                folder = space.project.resource_dir(ResourceRef(starter_kind.name, starter))
+                if folder.exists():
+                    typer.echo(f"Kept the existing {starter_kind.label} {starter}.")
+                    continue
+                typer.echo(f"Created starter {starter_kind.label} {starter}:")
+                for path in scaffold.write(folder):
+                    typer.echo(f"  {relative(path, root)}")
+                if starter_kind is TASK:
+                    task = starter
+        if task:
+            typer.echo(
+                f"\nIt runs as it is. Try it:\n"
+                f"  plural run --task {task} --model {STARTER_MODEL}\n"
+                "Then make it yours: each PLURAL-TODO marks an example to replace, and "
+                f"`plural task validate {task}` lists the ones left. Nothing is pushed or "
+                "recorded until they are gone."
+            )
+        else:
+            typer.echo(
+                "Fill in the places marked PLURAL-TODO, then run "
+                f"`plural {kind.cli} validate {name}`."
+            )
+
     if kind is TASK:
 
         @app.command("init")
@@ -588,7 +725,7 @@ def _init_command(app: typer.Typer, kind: ResourceKind) -> None:
                 None, "--environment", "-e", help="Environment the Task runs in."
             ),
             verifier: list[str] = typer.Option(
-                [], "--verifier", "-v", help="Verifier that scores it. Repeat for more."
+                [], "--verifier", help="Verifier that scores it. Repeat for more."
             ),
         ) -> None:
             """Create a Task with instructions, one Environment, and its Verifiers."""
@@ -600,10 +737,26 @@ def _init_command(app: typer.Typer, kind: ResourceKind) -> None:
         @handled
         def init_agent(
             name: str = typer.Argument(help="Agent name."),
-            model: str | None = typer.Option(None, "--model", "-m", help="Catalog model id."),
+            model: str | None = typer.Option(
+                None,
+                "--model",
+                "-m",
+                help="Catalog model id, from `plural model list`. Asked for when omitted "
+                "in a terminal.",
+            ),
             harness: str | None = typer.Option(None, "--harness", help="Harness name."),
         ) -> None:
             """Create a saved Agent: a model, instructions, and an optional Harness."""
+            if not model and sys.stdin.isatty():
+                model = typer.prompt(
+                    "Model (a catalog id; `plural model list` shows them)", default=STARTER_MODEL
+                ).strip()
+            if not model:
+                raise ProjectError(
+                    f"An Agent needs a model. Run `plural agent init {name} --model MODEL`, "
+                    f"such as --model {STARTER_MODEL}; `plural model list` shows the models "
+                    "you may use."
+                )
             create(name, model=model, harness=harness)
 
     elif kind is ENVIRONMENT:
@@ -617,9 +770,18 @@ def _init_command(app: typer.Typer, kind: ResourceKind) -> None:
                 "--python",
                 help="Start from a Python App class instead of a FastMCP server.",
             ),
+            bare: bool = typer.Option(
+                False,
+                "--bare",
+                help="Create only the Environment, without the starter Task and Verifier.",
+            ),
         ) -> None:
-            """Create an Environment whose App is a FastMCP server you write."""
-            create(name, python=python)
+            """Create an Environment whose App is a FastMCP server you write.
+
+            A starter Task and Verifier come with it, so the example runs and
+            scores at once: `plural run --task NAME-first --model MODEL`.
+            """
+            create_environment(name, python=python, bare=bare)
 
     else:
 
@@ -650,11 +812,11 @@ def _benchmark_membership(app: typer.Typer) -> None:
         ref = _ref(space, BENCHMARK, benchmark)
         changed = add_task(space.project, ref.name, task)
         typer.echo(
-            f"Added task {task} to benchmark {ref.name}."
+            f"Added Task {task} to Benchmark {ref.name}."
             if changed
-            else f"Benchmark {ref.name} already includes task {task}."
+            else f"Benchmark {ref.name} already includes Task {task}."
         )
-        _maybe_push(space, ref, push_after)
+        _maybe_push(space, ref, push_after, changed=changed)
 
     @app.command("remove")
     @handled
@@ -666,14 +828,15 @@ def _benchmark_membership(app: typer.Typer) -> None:
         """Remove a Task from a Benchmark (a local edit until you push)."""
         space = workspace()
         ref = _ref(space, BENCHMARK, benchmark)
-        remove_task(space.project, ref.name, task)
-        typer.echo(f"Removed task {task} from benchmark {ref.name}.")
-        _maybe_push(space, ref, push_after)
+        changed = remove_task(space.project, ref.name, task)
+        typer.echo(f"Removed Task {task} from Benchmark {ref.name}.")
+        _maybe_push(space, ref, push_after, changed=changed)
 
 
-def _maybe_push(space: Workspace, ref: ResourceRef, enabled: bool) -> None:
+def _maybe_push(space: Workspace, ref: ResourceRef, enabled: bool, *, changed: bool) -> None:
     if not enabled:
-        typer.echo(f"Push it with `plural benchmark push {ref.name}`.")
+        if changed:
+            typer.echo(f"Push the change with `plural benchmark push {ref.name}`.")
         return
     studio, binding = project_studio(space, session())
     result = push(space, studio, binding, ref)
@@ -719,7 +882,7 @@ def _ref(
 def _versioned_ref(
     space: Workspace, kind: ResourceKind, name: str | None, version: str | None
 ) -> tuple[ResourceRef, str | None]:
-    """Resolve ``name`` or ``name@REVISION``; ``--revision`` must agree with ``@``.
+    """Resolve ``name`` or ``name@REF``; a deprecated ``--revision`` must agree with ``@``.
 
     Raises:
         ProjectError: When ``@`` and ``--revision`` name different revisions.
@@ -793,13 +956,39 @@ def _local_payload(space: Workspace, resource: LocalResource) -> dict[str, Any]:
     }
 
 
+def _invalid_payload(space: Workspace, ref: ResourceRef, exc: ProjectError) -> dict[str, Any]:
+    try:
+        depends_on = [str(item) for item in space.dependencies(ref)]
+    except ProjectError:
+        depends_on = []
+    return {
+        "location": "local",
+        "resource": str(ref),
+        "path": relative(space.project.resource_dir(ref), space.project.root),
+        "valid": False,
+        "problems": list(exc.problems) or [exc.message],
+        "depends_on": depends_on,
+    }
+
+
+def _print_invalid(payload: dict[str, Any]) -> None:
+    kind, _, name = str(payload["resource"]).partition("/")
+    info = next(item for item in KINDS if item.name == kind)
+    typer.echo(f"{info.label} {name} (local, {payload['path']}): not valid yet")
+    typer.echo(f"  Depends on:   {', '.join(payload['depends_on']) or '-'}")
+    typer.echo("  Problems:")
+    for problem in payload["problems"]:
+        typer.echo(f"    - {problem}")
+    typer.echo(f"Fix them, then check with `plural {info.cli} validate {name}`.")
+
+
 def _print_builtin(payload: dict[str, Any]) -> None:
     name = str(payload["resource"]).partition("/")[2]
     typer.echo(f"Harness {name} (built-in, version {payload['pinned_version']})")
     typer.echo(f"  Use it with `harness: {name}` in agent.yaml or `plural run --harness {name}`.")
-    properties = payload["harness_kwargs"].get("properties", {})
+    properties = payload["harness_config"].get("properties", {})
     if properties:
-        typer.echo("  harness_kwargs:")
+        typer.echo("  harness_config:")
         for key, value in properties.items():
             typer.echo(f"    {key}: {value.get('description') or value.get('type') or ''}")
 

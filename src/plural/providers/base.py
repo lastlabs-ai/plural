@@ -23,9 +23,9 @@ from plural.errors import (
     ContextLengthError,
     InvalidRequestError,
     PluralError,
+    PluralTimeoutError,
     ProviderUnavailable,
     RateLimitError,
-    TimeoutError,
 )
 from plural.types import ChatRequest, ChatResponse, StreamChunk
 
@@ -256,7 +256,7 @@ def map_transport_error(exc: Exception, *, provider: str, model: str | None = No
         A classified :class:`PluralError`.
     """
     if isinstance(exc, httpx.TimeoutException):
-        return TimeoutError(str(exc) or "request timed out", provider=provider, model=model)
+        return PluralTimeoutError(str(exc) or "request timed out", provider=provider, model=model)
     if isinstance(exc, httpx.TransportError):
         return ProviderUnavailable(str(exc) or "transport error", provider=provider, model=model)
     return PluralError(str(exc), provider=provider, model=model)

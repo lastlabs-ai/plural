@@ -1,10 +1,10 @@
-from plural.errors import AuthenticationError, RateLimitError, TimeoutError, is_retryable
+from plural.errors import AuthenticationError, PluralTimeoutError, RateLimitError, is_retryable
 from plural.providers.base import classify_http_error
 
 
 def test_is_retryable() -> None:
     assert is_retryable(RateLimitError("x"))
-    assert is_retryable(TimeoutError("x"))
+    assert is_retryable(PluralTimeoutError("x"))
     assert not is_retryable(AuthenticationError("x"))
 
 

@@ -24,9 +24,11 @@ from plural.project import ProjectError
 
 secret_app = typer.Typer(
     help=(
-        "Set the secrets your Apps need in the hosted project.\n\n"
-        "`plural env validate` lists the secrets each App needs. Set one with "
-        "`plural secret set NAME`; `plural run` then supplies it to the App."
+        "Set the project's setup values, stored encrypted in the hosted project.\n\n"
+        "Apps' reset and snapshot commands and Verifiers use secrets; the model never "
+        "sees them. `plural env validate` lists the secrets each App needs. Set one with "
+        "`plural secret set NAME`; `plural run` then supplies it to the App. For your own "
+        "values, such as your API token, use `plural credential`."
     ),
     no_args_is_help=True,
 )

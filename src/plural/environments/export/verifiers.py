@@ -1,9 +1,9 @@
 """Export plural traces to a verifiers-style structure.
 
 Examples:
-    >>> from plural.tracing.schema import Trace, Outcome
+    >>> from plural.tracing.schema import Trace, TraceOutcome
     >>> from plural.environments.export.verifiers import to_verifiers_trace
-    >>> out = to_verifiers_trace(Trace(trace_id="t", outcome=Outcome(reward=1.0)))
+    >>> out = to_verifiers_trace(Trace(trace_id="t", outcome=TraceOutcome(reward=1.0)))
     >>> out["reward"]
     1.0
 """

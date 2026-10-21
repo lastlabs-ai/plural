@@ -1,7 +1,7 @@
 ---
 route: /docs/start/from-traces
 title: Start from traces
-order: 22
+order: 23
 description: "Turn conversations your agent already had into an Environment, Tasks, and a Benchmark, then run models on the same Tasks to compare."
 audience: all
 nav: true
@@ -289,11 +289,11 @@ Save these two conversations as `conversations.json`:
 ## 2. Draft the Environment, Tasks, and a Benchmark
 
 ```bash
-plural env add support --traces conversations.json
+plural app add support --traces conversations.json
 ```
 
 ```text
-Created environment support:
+Created Environment support:
   environments/support/apps/tools/recordings.jsonl
   environments/support/environment.yaml
   environments/support/README.md
@@ -348,7 +348,7 @@ plural run --benchmark support --model openai/gpt-5.6-luna
   [1/2] trl_444c014d7bfe1dfe3399aa6e  support-t-1  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
   [2/2] trl_fecbf00bd3679d2eebad499d  support-t-2  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
 Job job_3a3b71e85e95e020a05801b5 succeeded.
-  gpt-5.6-luna: mean score 1.000 over 2 trial(s), 2 succeeded
+  gpt-5.6-luna: mean score 1.000 over 2 Trials, 2 succeeded
 ```
 
 **What just happened.** The model worked both Tasks, calling the recorded tools, and the
@@ -368,13 +368,13 @@ When your agent changes, such as gaining new tools, run the same command with th
 traces:
 
 ```bash
-plural env add support --traces newer.json
+plural app add support --traces newer.json
 ```
 
 ```text
-Updated environment support:
-  App tools: 1 new action(s): reship_order; 1 new recorded call(s).
-  Drafted 1 new Task(s) and added them to benchmark support.
+Updated Environment support:
+  App tools: 1 new action: reship_order; 1 new recorded call.
+  Drafted 1 new Task and added it to Benchmark support.
   environments/support/apps/tools/recordings.jsonl
   environments/support/apps/tools/tools.json
   environments/support/environment.yaml

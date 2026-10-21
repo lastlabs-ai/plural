@@ -12,13 +12,13 @@ from plural.harness.protocol import HarnessRunRequest
 from plural.harness.runner import HarnessExecutionError, HarnessRunner
 from plural.sandbox.base import SandboxProvider
 from plural.sandbox.models import (
-    Capability,
     DownloadedFile,
     ExecRequest,
     ExecResult,
     FileUpload,
     ProviderCapabilities,
     ProviderDoctor,
+    SandboxCapability,
     SandboxHandle,
     SandboxRequirements,
 )
@@ -37,13 +37,13 @@ class RecordingProvider(SandboxProvider):
             available=True,
             capabilities=frozenset(
                 {
-                    Capability.UPLOAD,
-                    Capability.DOWNLOAD,
-                    Capability.TIMEOUT,
-                    Capability.CANCEL,
-                    Capability.WORKING_DIRECTORY,
-                    Capability.ENVIRONMENT,
-                    Capability.LOG_CAPTURE,
+                    SandboxCapability.UPLOAD,
+                    SandboxCapability.DOWNLOAD,
+                    SandboxCapability.TIMEOUT,
+                    SandboxCapability.CANCEL,
+                    SandboxCapability.WORKING_DIRECTORY,
+                    SandboxCapability.ENVIRONMENT,
+                    SandboxCapability.LOG_CAPTURE,
                 }
             ),
         )

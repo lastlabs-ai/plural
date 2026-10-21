@@ -33,27 +33,30 @@ plugins:
       sections:
         Start:
           - index.md
-          - getting-started/concepts.md
           - getting-started.md
+          - getting-started/concepts.md
           - start/index.md
           - start/from-traces.md
           - start/from-a-system.md
-          - start/from-scratch.md
         Build:
           - project/environments.md
           - project/runtimes.md
           - project/tasks.md
-          - project/multi-agent.md
           - project/verifiers.md
           - project/harnesses.md
           - project/agents.md
           - project/benchmarks.md
+          - project/multi-agent.md
         Run:
           - running/jobs.md
           - running/trials.md
           - running/artifacts.md
           - running/reviews.md
           - running/training.md
+        Platform:
+          - platform/runs.md
+          - guides/studio-sync.md
+          - platform/publish.md
         Interfaces:
           - sdk/evaluation.md
           - cli/evaluation.md
@@ -92,13 +95,12 @@ markdown_extensions:
 nav:
   - Start:
       - Overview: index.md
+      - Quickstart: getting-started.md
       - Core concepts: getting-started/concepts.md
-      - Getting started: getting-started.md
-      - Start here:
+      - Create an Environment:
           - start/index.md
           - From traces: start/from-traces.md
           - From a system: start/from-a-system.md
-          - From scratch: start/from-scratch.md
   - Build:
       - Apps: concepts/apps.md
       - Environments: project/environments.md
@@ -106,11 +108,11 @@ nav:
       - Connect an MCP server: guides/connect-mcp-server.md
       - Runtimes: project/runtimes.md
       - Tasks: project/tasks.md
-      - Several Agents in one Task: project/multi-agent.md
       - Verifiers: project/verifiers.md
       - Harnesses: project/harnesses.md
       - Agents: project/agents.md
       - Benchmarks: project/benchmarks.md
+      - Several Agents in one Task: project/multi-agent.md
   - Run:
       - Jobs: running/jobs.md
       - Trials and trajectories: running/trials.md
@@ -118,6 +120,10 @@ nav:
       - Artifacts and evidence: running/artifacts.md
       - Reviews: running/reviews.md
       - Training and RL: running/training.md
+  - Platform:
+      - Record runs and run in the cloud: platform/runs.md
+      - Push and pull: guides/studio-sync.md
+      - Publish to the Hub: platform/publish.md
   - Interfaces:
       - Python SDK: sdk/evaluation.md
       - CLI: cli/evaluation.md

@@ -17,7 +17,7 @@ def _request(**overrides: object) -> dict[str, object]:
             "name": "agent",
             "model": "openai/gpt-5.6-luna",
             "harness": "codex",
-            "harness_kwargs": {"version": "0.153.2"},
+            "harness_config": {"version": "0.153.2"},
         },
         "environment": {
             "name": "world",

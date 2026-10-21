@@ -23,7 +23,17 @@ from plural.auth import (
     resolve_session,
     save_config,
 )
-from plural.cli.common import JSON_OPTION, details, emit, handled, note, session, signed_in, success
+from plural.cli.common import (
+    JSON_OPTION,
+    deprecated,
+    details,
+    emit,
+    handled,
+    note,
+    session,
+    signed_in,
+    success,
+)
 from plural.project import Project, ProjectError, find_project_root
 
 auth_app = typer.Typer(
@@ -144,9 +154,7 @@ def status(as_json: bool = JSON_OPTION) -> None:
 @auth_app.command("scope")
 @handled
 def scope(
-    target: str | None = typer.Argument(
-        None, help="`.` selects account scope. Omit to show the current scope.", metavar="[.]"
-    ),
+    target: str | None = typer.Argument(None, hidden=True),
     account: bool = typer.Option(False, "--account", help="Select account scope."),
     project: str | None = typer.Option(
         None, "--project", "-p", help="Select an existing hosted project by name."
@@ -160,15 +168,18 @@ def scope(
 ) -> None:
     """Show or change where hosted commands go by default.
 
-    Scope selects a destination; it never changes what your credential may
-    do. The new scope is checked with the service before it is saved, and a
-    failed check leaves the previous scope in place.
+    With no options, show the current scope. Scope selects a destination; it
+    never changes what your credential may do. The new scope is checked with
+    the service before it is saved, and a failed check leaves the previous
+    scope in place.
     """
     if target not in {None, "."}:
         raise ProjectError(
-            f"Unexpected argument {target!r}. Use `plural auth scope .` for account scope or "
-            "`plural auth scope --project <name>`."
+            f"Unexpected argument {target!r}. Use `plural auth scope --account` for account "
+            "scope or `plural auth scope --project <name>`."
         )
+    if target == ".":
+        deprecated("plural auth scope .", "plural auth scope --account")
     to_account = target == "." or account
     if to_account and project:
         raise ProjectError("Choose account scope or --project, not both.")

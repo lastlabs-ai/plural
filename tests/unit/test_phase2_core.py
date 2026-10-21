@@ -68,7 +68,7 @@ def test_agent_catalog_provider_fallback_and_single_harness(tmp_path) -> None:
     assert agent.name == "gpt-5.6-luna"
     assert agent.routing.provider == "openai"
 
-    with pytest.raises(ValidationError, match="effective ModelCatalog"):
+    with pytest.raises(ValidationError, match="(?i)unknown model"):
         Agent(model="not-registered/model")
     with pytest.raises(ValidationError, match="not a catalog endpoint"):
         Agent(model="openai/gpt-5.6-luna", provider="not-a-provider")
@@ -109,7 +109,7 @@ def test_verifier_contract_uses_final_criteria_and_catalog_models() -> None:
     human = HumanVerifier(name="human", criteria=(criterion,))
     assert judge.rubric == judge.criteria
     assert human.rubric == human.criteria
-    with pytest.raises(ValidationError, match="effective ModelCatalog"):
+    with pytest.raises(ValidationError, match="(?i)unknown model"):
         AgentVerifier(
             name="judge",
             model="not-registered/model",
@@ -141,18 +141,20 @@ def test_benchmark_requires_semver_and_exports_structured_diff() -> None:
         name="suite",
         version="1.0.0",
         tasks=(first, second),
-        primary_metric="reward",
+        description="Two Tasks.",
     )
     changed = Benchmark(
         name="suite",
         version="1.1.0",
         tasks=(second, task("first", version="0.2.0")),
-        primary_metric="accuracy",
+        description="Two Tasks, reordered.",
     )
     diff = original.diff(changed)
     assert [item.before.name for item in diff.updated] == ["first"]
     assert diff.reordered is True
-    assert diff.configuration_changes["primary_metric"] == ("reward", "accuracy")
+    assert diff.configuration_changes["description"] == ("Two Tasks.", "Two Tasks, reordered.")
+    with pytest.raises(ValidationError, match="primary_metric"):
+        Benchmark(name="suite", version="1.0.0", tasks=(first,), primary_metric="reward")
     assert original.export() == original.dependency_graph()
     assert original.export()["benchmark"]["task_pins"][0]["name"] == "first"
     planned = Job(original, agents=(Agent(model="openai/gpt-5.6-luna"),)).plan

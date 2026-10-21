@@ -12,7 +12,7 @@ This page is a map. Find what you want to do, then follow the link to the page t
 explains it.
 
 If you are new, don't start here. Read [Core concepts](../getting-started/concepts.md),
-then follow [Getting started](../getting-started.md) or a tutorial such as the
+then follow the [Quickstart](../getting-started.md) or a tutorial such as the
 [support queue](../tutorials/support-queue.md) in order. Come back here when you need a
 specific feature.
 
@@ -22,7 +22,7 @@ linked page lists every supported parameter.
 ## Getting started and authentication
 
 - Installing Plural, creating a project, signing in, and choosing a scope:
-  [Getting started](../getting-started.md).
+  [Quickstart](../getting-started.md).
 - `plural auth login`, `logout`, `status`, and `scope`, configuration
   locations, output, and exit codes: [Command-line interface](../cli/index.md).
 - Local versus hosted resources, and the CLI versus the Python SDK:
@@ -32,7 +32,7 @@ linked page lists every supported parameter.
 
 - Calling a model from Python with `Client` / `Plural`, `chat`, `achat`, `stream`,
   `astream`, errors, retries, and the model catalog: [Model calls](../sdk/client.md).
-- `plural models list` and the models your organization permits:
+- `plural model list` and the models your organization permits:
   [Agents](../project/agents.md#find-a-model).
 - Model endpoints, OpenAI-compatible hosts, bring-your-own keys, and routing
   after evaluation: [Providers and integrations](integrations.md).
@@ -92,13 +92,13 @@ contestants.
 
 ## Hosted projects
 
-Pushing saves a private copy of your work so Plural can run it for you. Nothing you
-push is public.
+Pushing saves a private copy of your work, so your team can see it and every recorded
+run in the web app. Nothing you push is public.
 
 - `plural project init --push`, `plural project push`, `plural <kind> push` and `pull`, `--with-deps`,
   `.pluralignore`, and `plural.lock`:
-  [Push and pull resources](../guides/studio-sync.md).
-- `plural job push`, which records a finished local Job in the hosted project:
+  [Push and pull](../guides/studio-sync.md).
+- `plural job record`, which records a finished local Job in the hosted project:
   [Jobs](../running/jobs.md).
 - Publishing a Benchmark release to the public Hub, a separate step in the web
   app: [Benchmark publications](../architecture/benchmark-publications.md).
@@ -109,14 +109,14 @@ The [CLI guide](../cli/evaluation.md#command-reference) lists every command and
 option, generated from the command tree. Each resource kind uses the same verbs:
 
 ```bash
-plural <env|task|verifier|harness|agent|benchmark> init|validate|push|pull|show|list
+plural <env|task|verifier|harness|agent|benchmark> init|validate|push|pull|show|list|delete
 ```
 
-`plural benchmark add` and `remove` edit a Benchmark's Task list. The other
-groups are `plural run`, `plural job`, `plural trial`, `plural review`,
-`plural models`, `plural session`, `plural project`, and `plural auth`.
-`plural agent serve` and `plural trial rescore` are reserved names that are not
-available yet.
+`plural benchmark add` and `remove` edit a Benchmark's Task list, and
+`plural app add|list|remove` edits an Environment's Apps. The other groups are
+`plural run`, `plural job`, `plural trial`, `plural review`, `plural reward`,
+`plural model`, `plural runtime`, `plural secret`, `plural credential`,
+`plural session`, `plural project`, and `plural auth`.
 
 ## Reference and operations
 

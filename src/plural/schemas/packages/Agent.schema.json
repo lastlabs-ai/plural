@@ -139,12 +139,13 @@
           "default": null,
           "title": "Digest"
         },
-        "environment": {
+        "env_vars": {
           "default": [],
+          "description": "Names of environment variables passed through to the Harness process.",
           "items": {
             "type": "string"
           },
-          "title": "Environment",
+          "title": "Env Vars",
           "type": "array"
         },
         "healthcheck": {
@@ -247,15 +248,16 @@
   "additionalProperties": false,
   "description": "A catalog-backed model and its optional execution harness.\n\nTo evaluate your own agent or model server instead, give ``endpoint``: the\nbase URL of an OpenAI-compatible API (one that serves\n``/chat/completions``). ``model`` is then sent to it as is and need not be\nin the catalog, and ``endpoint_key`` names the secret holding its API key.\nPlural's native Harness calls it with the Environment's actions as tools.",
   "properties": {
-    "auth_mode": {
+    "auth": {
       "default": "environment",
+      "description": "How the Harness authenticates to the model; none when it calls no model.",
       "enum": [
         "environment",
         "api_key",
         "oauth",
         "none"
       ],
-      "title": "Auth Mode",
+      "title": "Auth",
       "type": "string"
     },
     "credentials": {
@@ -315,9 +317,10 @@
       "default": null,
       "title": "Harness"
     },
-    "harness_kwargs": {
+    "harness_config": {
       "additionalProperties": true,
-      "title": "Harness Kwargs",
+      "description": "Options for a built-in Harness, such as reasoning_effort.",
+      "title": "Harness Config",
       "type": "object"
     },
     "instructions": {
@@ -365,12 +368,13 @@
       "default": null,
       "title": "Provider"
     },
-    "secret_names": {
+    "secrets": {
       "default": [],
+      "description": "Names of the Harness's declared secrets this Agent grants it.",
       "items": {
         "type": "string"
       },
-      "title": "Secret Names",
+      "title": "Secrets",
       "type": "array"
     },
     "temperature": {

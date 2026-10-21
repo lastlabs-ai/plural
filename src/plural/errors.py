@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from plural._deprecation import module_getattr
+
 
 class PluralError(Exception):
     """Base class for all plural errors.
@@ -78,8 +80,11 @@ class InvalidRequestError(PluralError):
     """Raised when the request is malformed or uses unsupported parameters."""
 
 
-class TimeoutError(PluralError):
-    """Raised when a provider call exceeds the configured timeout."""
+class PluralTimeoutError(PluralError):
+    """Raised when a provider call exceeds the configured timeout.
+
+    Formerly ``plural.TimeoutError``, which shadowed Python's built-in.
+    """
 
 
 class BudgetExceededError(PluralError):
@@ -101,7 +106,7 @@ class ConflictError(PluralError):
 RETRYABLE_ERRORS: tuple[type[PluralError], ...] = (
     RateLimitError,
     ProviderUnavailable,
-    TimeoutError,
+    PluralTimeoutError,
 )
 
 
@@ -115,9 +120,18 @@ def is_retryable(error: BaseException) -> bool:
         ``True`` if the error is a known retryable plural error.
 
     Examples:
-        >>> is_retryable(TimeoutError("timed out"))
+        >>> is_retryable(PluralTimeoutError("timed out"))
         True
         >>> is_retryable(AuthenticationError("bad key"))
         False
     """
     return isinstance(error, RETRYABLE_ERRORS)
+
+
+_renamed = module_getattr(
+    "plural.errors", {"TimeoutError": ("PluralTimeoutError", lambda: PluralTimeoutError)}
+)
+
+
+def __getattr__(name: str) -> Any:
+    return _renamed(name)

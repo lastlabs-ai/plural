@@ -67,13 +67,13 @@ from plural import Agent
 claude = Agent(
     model="anthropic/claude-sonnet-5",
     harness="claude-code",
-    harness_kwargs={"reasoning_effort": "high"},
+    harness_config={"reasoning_effort": "high"},
 )
 
 codex = Agent(
     model="openai/gpt-5.6-luna",
     harness="codex",
-    harness_kwargs={"sandbox": "workspace-write"},
+    harness_config={"sandbox": "workspace-write"},
 )
 
 hermes = Agent(
@@ -88,7 +88,7 @@ The same fields work in a project's `agents/support-claude/agent.yaml`:
 name: support-claude
 model: anthropic/claude-sonnet-5
 harness: claude-code
-harness_kwargs:
+harness_config:
   reasoning_effort: high
 ```
 
@@ -127,7 +127,7 @@ Runtime. Setup happens in the fresh Runtime, not on your laptop.
    through the Plural gateway. A vendor tool such as Codex or Claude Code is pointed
    at the gateway too, even when a provider key is in the environment. If a required
    name is missing, the run stops and the error names it. The error does not include
-   the value. You do not put model keys on `Agent.secret_names` for a built-in
+   the value. You do not put model keys on `Agent.secrets` for a built-in
    Harness. A custom Harness lists the names it reads in `secrets`, and the Agent
    requires that subset.
 4. Environment actions are offered to the tool as tools.
@@ -291,7 +291,7 @@ class ResearchHarness(Harness):
         ...
 ```
 
-Grant application secrets through the Agent's `secret_names`. Model authentication
+Grant application secrets through the Agent's `secrets`. Model authentication
 still comes from `Job(client=...)` or `Job(api_key=...)`. Custom Python dependencies
 must already be available in the Environment Runtime.
 
@@ -339,7 +339,7 @@ dependencies, its outputs, and the scoring work together. The second command pas
 the Harness inline, without a saved Agent.
 
 A run started with `--model` always expects a model credential. To run a Harness that
-never calls a model, save an Agent with `auth_mode: none`, as the `scripted` Agent in
+never calls a model, save an Agent with `auth: none`, as the `scripted` Agent in
 the [first project](../tutorials/first-project.md) does.
 
 ## Tools, permissions, and training

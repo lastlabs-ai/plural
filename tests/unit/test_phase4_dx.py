@@ -122,7 +122,7 @@ def test_custom_catalog_context_is_explicit_and_validates_provider() -> None:
     try:
         Agent(model="project/model")
     except ValueError as exc:
-        assert "effective ModelCatalog" in str(exc)
+        assert "Unknown model" in str(exc)
     else:
         raise AssertionError("custom model leaked into the bundled catalog")
 
@@ -144,7 +144,7 @@ def test_cli_validate_reports_the_same_hash_as_the_workspace(
 def test_models_list_offline_uses_the_bundled_catalog(
     monkeypatch: pytest.MonkeyPatch, home: Path
 ) -> None:
-    result = CliRunner().invoke(app, ["models", "list", "--provider", "openai", "--json"])
+    result = CliRunner().invoke(app, ["model", "list", "--provider", "openai", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["source"] == "catalog"

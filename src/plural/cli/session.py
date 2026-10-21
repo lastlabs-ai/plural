@@ -9,8 +9,8 @@ from typing import Any
 import typer
 import yaml
 
+from plural.cli.common import deprecated, handled, session, signed_in
 from plural.cli.common import fail as _error
-from plural.cli.common import handled, session, signed_in
 from plural.sessions import (
     SessionSnapshot,
     export_from_parts,
@@ -39,18 +39,26 @@ def _load_mapping(path: Path) -> dict[str, Any]:
 @session_app.command("export")
 @handled
 def session_export(
-    trial: str | None = typer.Option(None, "--trial", help="Hosted trial id."),
-    agent: Path | None = typer.Option(None, "--agent", help="Agent YAML or JSON file."),
+    trial: str | None = typer.Option(None, "--trial", help="Hosted Trial id."),
+    agent: Path | None = typer.Option(None, "--agent-file", help="Agent YAML or JSON file."),
     environment: Path | None = typer.Option(
-        None, "--environment", help="Environment YAML or JSON file."
+        None, "--environment-file", help="Environment YAML or JSON file."
     ),
+    agent_alias: Path | None = typer.Option(None, "--agent", hidden=True),
+    environment_alias: Path | None = typer.Option(None, "--environment", hidden=True),
     state: Path | None = typer.Option(None, "--state", help="State JSON file."),
     data: list[str] = typer.Option([], "--data", help="Data reference to record."),
     data_dir: Path | None = typer.Option(None, "--data-dir", help="Directory bundled into data/."),
     name: str | None = typer.Option(None, "--name", help="Snapshot name."),
     out: Path = typer.Option(Path("sessions"), "--out", help="Bundle directory."),
 ) -> None:
-    """Export a session bundle from a hosted trial or local files."""
+    """Export a session bundle from a hosted Trial or local files."""
+    if agent_alias is not None:
+        deprecated("--agent", "--agent-file")
+        agent = agent or agent_alias
+    if environment_alias is not None:
+        deprecated("--environment", "--environment-file")
+        environment = environment or environment_alias
     if trial:
         current = signed_in(session())
         if current.project is None:
@@ -62,7 +70,7 @@ def session_export(
         _emit({"bundle": str(path), "trial_id": trial, "name": snapshot.name})
         return
     if agent is None or environment is None:
-        _error("pass --trial or both --agent and --environment")
+        _error("pass --trial, or both --agent-file and --environment-file")
     snapshot = export_from_parts(
         name or agent.stem,
         agent=_load_mapping(agent),
@@ -78,11 +86,15 @@ def session_export(
 @handled
 def session_import(
     bundle: Path = typer.Argument(help="Session bundle directory."),
-    dest: Path | None = typer.Option(None, "--dest", help="Parent directory for the new instance."),
+    out: Path | None = typer.Option(None, "--out", help="Parent directory for the new instance."),
+    dest: Path | None = typer.Option(None, "--dest", hidden=True),
 ) -> None:
     """Redeploy a bundle as a separate instance directory."""
+    if dest is not None:
+        deprecated("--dest", "--out")
+        out = out or dest
     try:
-        path = import_bundle(bundle, dest)
+        path = import_bundle(bundle, out)
     except (OSError, ValueError) as exc:
         _error(str(exc))
     snapshot = SessionSnapshot.load(path)

@@ -19,13 +19,15 @@ you need to bring your own piece.
 
 These apply when you push, pull, or run in a hosted project.
 
-- Hosted commands (`push`, `pull`, `run --hosted`, and hosted `show`, `list`,
+- Hosted commands (`push`, `pull`, `run --record`, and hosted `show`, `list`,
   `job`, `trial`, and `review` commands) need `plural auth login` and a project
   registered with `plural project init <name> --push`. Local commands need
   neither.
-- `plural run --hosted` and `--track` push what the run needs first, as a new
-  numbered revision of any resource whose files changed. `plural job push` pushes
-  nothing: the revisions a finished Job ran must already be hosted.
+- Plural never runs a Job on its own servers: every Job runs from the machine
+  that starts it, and cloud sandboxes come from an Environment's Runtime.
+- `plural run --record` pushes what the run needs first, as a new
+  numbered revision of any resource whose files changed. `plural job record` pushes
+  no resources: the revisions a finished Job ran must already be hosted.
 - Revisions saved in the web app, or pushed before 0.15, have no source package.
   Tasks, Agents, and Benchmarks are rebuilt from their stored definition on pull;
   Environments, Verifiers, and Harnesses cannot be pulled. See
@@ -34,8 +36,6 @@ These apply when you push, pull, or run in a hosted project.
   directory entries.
 - Package digests verify integrity only. Signatures, attestations, publisher
   identity, transparency logs, and keyless verification are unsupported.
-- `plural agent serve` and `plural trial rescore` are reserved and not available
-  yet.
 
 ## Execution
 

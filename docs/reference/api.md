@@ -76,7 +76,7 @@ Returns:
     HTTP client to probe.
 
 Raises:
-    TimeoutError: If a provider cannot be reached.
+    PluralTimeoutError: If a provider cannot be reached.
     PluralError: If a transport error occurs while probing.
 ```
 
@@ -733,7 +733,7 @@ Return turn steps in order.
 ### plural.Trace.credit
 
 ```python
-credit(self, value: 'float', *, name: 'str' = 'late', reason: 'str | None' = None, turn_index: 'int | None' = None) -> 'RewardEvent | Outcome'
+credit(self, value: 'float', *, name: 'str' = 'late', reason: 'str | None' = None, turn_index: 'int | None' = None) -> 'RewardEvent | TraceOutcome'
 ```
 
 Inject reward after the fact — episode-wide or onto one turn.
@@ -752,7 +752,7 @@ Args:
         indices count from the end.
 
 Returns:
-    The new :class:`RewardEvent` or the updated :class:`Outcome`.
+    The new :class:`RewardEvent` or the updated :class:`TraceOutcome`.
 
 Raises:
     IndexError: If ``turn_index`` is out of range.
@@ -787,7 +787,7 @@ Returns:
     One return per turn, same order as :meth:`turns`.
 
 Examples:
-    >>> t = Trace(outcome=Outcome(reward=1.0))
+    >>> t = Trace(outcome=TraceOutcome(reward=1.0))
     >>> t.add_turn(parsed_action=[ParsedAction(name="search")])
     >>> t.add_turn(parsed_action=[ParsedAction(name="answer")])
     >>> t.returns(gamma=0.9)
@@ -797,7 +797,7 @@ Examples:
 ### plural.Trace.label
 
 ```python
-label(self, *, scores: 'dict[str, float] | None' = None, reward: 'float | None' = None, labels: 'dict[str, Any] | None' = None, feedback: 'str | None' = None) -> 'Outcome'
+label(self, *, scores: 'dict[str, float] | None' = None, reward: 'float | None' = None, labels: 'dict[str, Any] | None' = None, feedback: 'str | None' = None) -> 'TraceOutcome'
 ```
 
 Attach or update the outcome.
@@ -810,7 +810,7 @@ Args:
     feedback: Free-form feedback.
 
 Returns:
-    The updated :class:`Outcome`.
+    The updated :class:`TraceOutcome`.
 ```
 
 ## plural.TraceContext
@@ -1189,6 +1189,22 @@ Examples:
     >>> from plural.project import Project, Workspace
     >>> workspace = Workspace(Project.find())  # doctest: +SKIP
     >>> benchmark = workspace.get("benchmark", "support-triage")  # doctest: +SKIP
+```
+
+### plural.project.resources.Workspace.unfinished
+
+```python
+unfinished(self, roots: 'Iterable[ResourceRef]') -> 'list[str]'
+```
+
+Every ``PLURAL-TODO`` marker left in ``roots`` and what they depend on.
+
+```text
+A resource with markers still loads and runs locally; it cannot be
+pushed, released, or recorded until they are gone.
+
+Returns:
+    One ``path:line: note`` entry per marker, dependencies first.
 ```
 
 ### plural.project.resources.Workspace.dependencies
@@ -1974,7 +1990,7 @@ Controls required for one sandbox before it may launch.
 ### plural.SandboxRequirements.required_capabilities
 
 ```python
-required_capabilities(self) -> 'frozenset[Capability]'
+required_capabilities(self) -> 'frozenset[SandboxCapability]'
 ```
 
 Return the controls that must be enforceable.
@@ -4032,6 +4048,8 @@ Args:
     name: Provider slug.
     timeout_s: Request timeout in seconds.
     default_headers: Extra headers.
+    http_transport: Transport for synchronous requests.
+    async_http_transport: Transport for asynchronous requests.
 
 Raises:
     ConfigurationError: If neither ``endpoint`` nor ``base_url`` is given.
@@ -4048,7 +4066,7 @@ Examples:
 ```
 
 ```python
-plural.providers.azure.AzureOpenAIProvider(api_key: 'str', *, endpoint: 'str | None' = None, deployments: 'dict[str, str] | None' = None, api_version: 'str | None' = None, use_bearer_auth: 'bool' = False, base_url: 'str | None' = None, region: 'str' = 'us', name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None) -> 'None'
+plural.providers.azure.AzureOpenAIProvider(api_key: 'str', *, endpoint: 'str | None' = None, deployments: 'dict[str, str] | None' = None, api_version: 'str | None' = None, use_bearer_auth: 'bool' = False, base_url: 'str | None' = None, region: 'str' = 'us', name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.providers.openai_compatible.BasetenProvider
@@ -4056,7 +4074,7 @@ plural.providers.azure.AzureOpenAIProvider(api_key: 'str', *, endpoint: 'str | N
 Baseten Model APIs (OpenAI-compatible).
 
 ```python
-plural.providers.openai_compatible.BasetenProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.BasetenProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.providers.bedrock.BedrockProvider
@@ -4177,7 +4195,7 @@ Close the async HTTP client.
 DeepSeek OpenAI-compatible API.
 
 ```python
-plural.providers.openai_compatible.DeepSeekProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.DeepSeekProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.providers.openai_compatible.FireworksProvider
@@ -4185,7 +4203,7 @@ plural.providers.openai_compatible.DeepSeekProvider(api_key: 'str', *, base_url:
 Fireworks AI OpenAI-compatible API.
 
 ```python
-plural.providers.openai_compatible.FireworksProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.FireworksProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.providers.google.GoogleProvider
@@ -4292,7 +4310,7 @@ Close the async HTTP client.
 Groq OpenAI-compatible API.
 
 ```python
-plural.providers.openai_compatible.GroqProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.GroqProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.providers.openai_compatible.MetaProvider
@@ -4300,7 +4318,7 @@ plural.providers.openai_compatible.GroqProvider(api_key: 'str', *, base_url: 'st
 Meta Model API (OpenAI-compatible).
 
 ```python
-plural.providers.openai_compatible.MetaProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.MetaProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.providers.openai_compatible.MistralProvider
@@ -4308,7 +4326,7 @@ plural.providers.openai_compatible.MetaProvider(api_key: 'str', *, base_url: 'st
 Mistral OpenAI-compatible API.
 
 ```python
-plural.providers.openai_compatible.MistralProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.MistralProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.providers.openai_compatible.MoonshotProvider
@@ -4316,7 +4334,7 @@ plural.providers.openai_compatible.MistralProvider(api_key: 'str', *, base_url: 
 Moonshot / Kimi lab API.
 
 ```python
-plural.providers.openai_compatible.MoonshotProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.MoonshotProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.providers.openai_compatible.OpenAICompatible
@@ -4332,10 +4350,13 @@ Args:
     default_headers: Extra headers.
     organization: Optional OpenAI organization header.
     strip_model_prefix: Whether to strip ``author/`` from model ids.
+    http_transport: Transport for synchronous requests, such as one that
+        refuses private addresses. ``None`` uses httpx's default.
+    async_http_transport: Transport for asynchronous requests.
 ```
 
 ```python
-plural.providers.openai_compatible.OpenAICompatible(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.OpenAICompatible(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ### plural.providers.openai_compatible.OpenAICompatible.chat
@@ -4664,7 +4685,7 @@ Attributes:
 Qwen via DashScope compatible-mode.
 
 ```python
-plural.providers.openai_compatible.QwenProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.QwenProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.providers.openai_compatible.TogetherProvider
@@ -4672,7 +4693,7 @@ plural.providers.openai_compatible.QwenProvider(api_key: 'str', *, base_url: 'st
 Together AI OpenAI-compatible API.
 
 ```python
-plural.providers.openai_compatible.TogetherProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.TogetherProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.providers.openai_compatible.XAIProvider
@@ -4680,7 +4701,7 @@ plural.providers.openai_compatible.TogetherProvider(api_key: 'str', *, base_url:
 xAI OpenAI-compatible API.
 
 ```python
-plural.providers.openai_compatible.XAIProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.XAIProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.providers.openai_compatible.ZhipuProvider
@@ -4688,7 +4709,7 @@ plural.providers.openai_compatible.XAIProvider(api_key: 'str', *, base_url: 'str
 Zhipu / Z.ai lab API.
 
 ```python
-plural.providers.openai_compatible.ZhipuProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None) -> 'None'
+plural.providers.openai_compatible.ZhipuProvider(api_key: 'str', *, base_url: 'str | None' = None, name: 'str | None' = None, timeout_s: 'float | None' = None, default_headers: 'dict[str, str] | None' = None, organization: 'str | None' = None, strip_model_prefix: 'bool | None' = None, http_transport: 'httpx.BaseTransport | None' = None, async_http_transport: 'httpx.AsyncBaseTransport | None' = None) -> 'None'
 ```
 
 ## plural.errors.AuthenticationError
@@ -4772,6 +4793,18 @@ Args:
 plural.errors.PluralError(message: 'str', *, provider: 'str | None' = None, status_code: 'int | None' = None, body: 'Any' = None, model: 'str | None' = None) -> 'None'
 ```
 
+## plural.errors.PluralTimeoutError
+
+Raised when a provider call exceeds the configured timeout.
+
+```text
+Formerly ``plural.TimeoutError``, which shadowed Python's built-in.
+```
+
+```python
+plural.errors.PluralTimeoutError(message: 'str', *, provider: 'str | None' = None, status_code: 'int | None' = None, body: 'Any' = None, model: 'str | None' = None) -> 'None'
+```
+
 ## plural.errors.ProviderUnavailable
 
 Raised when a provider is down or returns a transient 5xx error.
@@ -4788,14 +4821,6 @@ Raised when a provider rate-limits the request (typically HTTP 429).
 plural.errors.RateLimitError(message: 'str', *, provider: 'str | None' = None, status_code: 'int | None' = None, body: 'Any' = None, model: 'str | None' = None) -> 'None'
 ```
 
-## plural.errors.TimeoutError
-
-Raised when a provider call exceeds the configured timeout.
-
-```python
-plural.errors.TimeoutError(message: 'str', *, provider: 'str | None' = None, status_code: 'int | None' = None, body: 'Any' = None, model: 'str | None' = None) -> 'None'
-```
-
 ## plural.errors.is_retryable
 
 Return whether ``error`` should be retried by the router.
@@ -4808,7 +4833,7 @@ Returns:
     ``True`` if the error is a known retryable plural error.
 
 Examples:
-    >>> is_retryable(TimeoutError("timed out"))
+    >>> is_retryable(PluralTimeoutError("timed out"))
     True
     >>> is_retryable(AuthenticationError("bad key"))
     False

@@ -19,6 +19,7 @@ import typer
 from plural.auth import Session
 from plural.cli.common import (
     JSON_OPTION,
+    counted,
     details,
     emit,
     fail,
@@ -118,8 +119,16 @@ def _project_studio() -> tuple[Studio, str]:
     if space is not None and space.project.read_binding() is not None:
         studio, binding = project_studio(space, current)
         return studio, binding.project_slug
-    if current.project:
-        return current.studio(), current.project_slug or current.project
+    selected = current.project_slug or current.project
+    if space is not None and selected and selected != space.project.name:
+        name = space.project.name
+        raise ProjectError(
+            f"This directory is project {name!r}, which is not registered, and your "
+            f"scope selects project {selected!r}. Run `plural project init {name} --push` "
+            f"to register it, or run this outside the directory to use {selected!r}."
+        )
+    if selected:
+        return current.studio(), selected
     raise ProjectError(
         "No project selected. Run this inside a project directory bound to a hosted "
         "project, or select one with `plural auth scope --project <slug>`."
@@ -553,10 +562,10 @@ def show_command(
 def create_command(
     name: str | None = typer.Argument(None, help="Runtime name, such as 'GPU sandbox'."),
     template: str | None = typer.Option(
-        None, "--template", "-t", help="Start from this Runtime template (slug or id)."
+        None, "--template", help="Start from this Runtime template (slug or id)."
     ),
     provider: str | None = typer.Option(
-        None, "--provider", "-p", help="Configure a provider directly instead of a template."
+        None, "--provider", help="Configure a provider directly instead of a template."
     ),
     settings: list[str] | None = SET_OPTION,
     credential: list[str] | None = CREDENTIAL_OPTION,
@@ -725,8 +734,9 @@ def edit_command(
         success(f"Updated Runtime {updated['slug']}.")
         if updated["environment_count"]:
             typer.echo(
-                f"{updated['environment_count']} Environment(s) use it. Copy the change into "
-                f"each with `plural runtime use {updated['slug']} <environment>`, then push."
+                f"{counted(updated['environment_count'], 'Environment')} "
+                f"{'uses' if updated['environment_count'] == 1 else 'use'} it. Copy the change "
+                f"into each with `plural runtime use {updated['slug']} <environment>`, then push."
             )
 
     emit(updated, as_json=as_json, text=text)
@@ -743,7 +753,9 @@ def delete_command(
     item = studio.runtimes.get(runtime)
     if not yes:
         usage = (
-            f" {item['environment_count']} Environment(s) use it and will need another Runtime."
+            f" {counted(item['environment_count'], 'Environment')} "
+            f"{'uses' if item['environment_count'] == 1 else 'use'} it and will need another "
+            "Runtime."
             if item["environment_count"]
             else ""
         )
@@ -867,7 +879,7 @@ def template_show(
 @handled
 def template_create(
     name: str | None = typer.Argument(None, help="Template name, such as 'Daytona US'."),
-    provider: str | None = typer.Option(None, "--provider", "-p", help="Provider id."),
+    provider: str | None = typer.Option(None, "--provider", help="Provider id."),
     settings: list[str] | None = SET_OPTION,
     credential: list[str] | None = CREDENTIAL_OPTION,
     credentials_from_env: bool = FROM_ENV_OPTION,

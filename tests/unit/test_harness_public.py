@@ -106,7 +106,7 @@ def test_public_agent_rejects_secret_not_declared_by_harness(tmp_path: Path) -> 
         Agent(
             model="openai/gpt-5.6-luna",
             harness=harness,
-            secret_names=("ANTHROPIC_API_KEY",),
+            secrets=("ANTHROPIC_API_KEY",),
         )
 
 
@@ -127,9 +127,9 @@ def test_harness_cli_scaffold_is_plain_and_unfinished_until_filled(
     assert "command=" not in implementation
     assert "source=" not in implementation
     validated = runner.invoke(app, ["harness", "validate", "custom"])
-    assert validated.exit_code == 1
+    assert validated.exit_code == 0, validated.output
     assert "harnesses/custom/harness.py:" in validated.output
-    assert "unfinished scaffold" in validated.output
+    assert "unfinished" in validated.output
 
 
 def test_current_harness_docs_and_examples_hide_internal_tokens() -> None:

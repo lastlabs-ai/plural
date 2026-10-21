@@ -41,7 +41,7 @@ OpenAI, Anthropic, Google, Azure, Bedrock, and OpenAI-compatible services.
 Actual access depends on credentials, endpoint configuration, region, account
 entitlements, and current provider availability.
 
-The CLI uses the bundled catalog; `plural models list` shows it, filtered by your
+The CLI uses the bundled catalog; `plural model list` shows it, filtered by your
 organization's model policy when you are signed in (see the
 [Agents guide](../project/agents.md#find-a-model)). Signed in, the service enforces
 that policy for runs, reruns, and gateway calls, whatever the local catalog says.
@@ -140,19 +140,19 @@ forms, network policy, compute controls, stdin, persistence, compose, or
 filesystem behavior it cannot enforce. Never silently broaden network,
 filesystem, or credential access.
 
-The provider must also support the Environment's execution target and fit any
-hosted project policy. Registering a provider does not make it available to
-hosted runs.
+The provider must also support the Environment's execution target and fit the
+organization's Runtime policy. Registering a provider locally does not add it to
+the Runtimes a hosted project offers.
 
 ## Plural Intel, CI, and OpenTelemetry
 
-`plural run` is local. `plural run ... --hosted` submits to Plural Intel using
-pushed revisions. It first pushes any input the hosted project does not hold yet,
-as a new numbered revision of any resource whose files changed, and stops before
-uploading anything if someone else changed that resource in the hosted project
-since your checkout synced it. Hosted runs also need Runtime providers configured
-for the project. See
-[Push and pull resources](../guides/studio-sync.md).
+`plural run` always runs from the machine that starts it. `plural run ... --record`
+also records the Job in Plural Intel against pushed revisions. It first pushes any
+input the hosted project does not hold yet, as a new numbered revision of any
+resource whose files changed, and stops before uploading anything if someone else
+changed that resource in the hosted project since your checkout synced it. In CI,
+set `PLURAL_API_KEY` and add `--record` so every evaluation appears in the web app.
+See [Record runs and run in the cloud](../platform/runs.md).
 
 In CI (automated checks that run on every change):
 

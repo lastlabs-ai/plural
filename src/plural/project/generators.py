@@ -1,7 +1,7 @@
 """Add the systems you already have to an Environment, as Apps.
 
 Each generator returns the files to write; nothing here touches the network.
-``plural env add`` writes them and then loads the result, which is when tools
+``plural app add`` writes them and then loads the result, which is when tools
 and operations are discovered. Adding to an Environment that exists keeps
 everything already in it.
 """
@@ -21,7 +21,7 @@ import yaml
 
 from plural.apps.mcp import referenced_variables
 from plural.apps.openapi import load_document
-from plural.project.templates import title
+from plural.project.templates import starter_names, title
 from plural.recorded import RecordedTrace, app_action, recordings_by_app, tools_by_app
 
 DEFAULT_JUDGE_MODEL = "openai/gpt-5.6-luna"
@@ -77,7 +77,7 @@ def _yaml(header: str, payload: Mapping[str, Any]) -> str:
 
 def _header(command: str) -> str:
     return (
-        f"# Drafted by `plural env {command}`. It is an ordinary environment.yaml now:\n"
+        f"# Drafted by `plural app {command}`. It is an ordinary environment.yaml now:\n"
         "# edit it freely, then check it with `plural env validate`.\n"
     )
 
@@ -323,11 +323,20 @@ def openapi_app(
     )
 
 
-def add_app(root: Path, name: str, draft: AppDraft, *, runtime: str | None = None) -> Generated:
+def add_app(
+    root: Path,
+    name: str,
+    draft: AppDraft,
+    *,
+    runtime: str | None = None,
+    judge_model: str = DEFAULT_JUDGE_MODEL,
+) -> Generated:
     """Add one App to Environment ``name``, creating the Environment if it is new.
 
-    An existing ``environment.yaml`` keeps its comments, settings, and other
-    Apps; the App is appended to ``apps:`` and described in the README.
+    A new Environment comes with a starter Task, a read-only smoke test of the
+    App, and a judge Verifier, so it runs at once. An existing
+    ``environment.yaml`` keeps its comments, settings, and other Apps; the
+    App is appended to ``apps:`` and described in the README.
 
     Returns:
         The files to write or replace.
@@ -350,9 +359,11 @@ def add_app(root: Path, name: str, draft: AppDraft, *, runtime: str | None = Non
             credentials=draft.credentials,
             connection=draft.connection,
         )
+        starter, tasks = _starter(root, name, app, judge_model=judge_model)
         return Generated(
-            files={**created, **extra},
+            files={**created, **extra, **starter},
             environment=name,
+            tasks=tasks,
             secrets=draft.secrets,
             credentials=draft.credentials,
         )
@@ -410,13 +421,22 @@ def _jsonl(rows: Sequence[Mapping[str, Any]]) -> str:
 
 
 _TRACES_BENCHMARK_HEADER = (
-    "# Drafted by `plural env add --traces`. Run Agents on these Tasks and compare them:\n"
+    "# Drafted by `plural app add --traces`. Run Agents on these Tasks and compare them:\n"
     "#   plural run --benchmark {name} --model <model>\n"
 )
 _JUDGE_HEADER = (
-    "# Drafted by `plural env add --traces`. A model judges each episode against the\n"
+    "# Drafted by `plural app add --traces`. A model judges each episode against the\n"
     "# Task's instructions. Sharpen the criteria, or replace it with a deterministic\n"
     "# Verifier that checks the Apps' final state.\n"
+)
+_STARTER_TASK_HEADER = (
+    "# Drafted by `plural app add`: a smoke test that the Agent can use the App.\n"
+    "# Replace instruction.md with the work you want to measure.\n"
+)
+_STARTER_JUDGE_HEADER = (
+    "# Drafted by `plural app add`. A model judges each episode against the Task's\n"
+    "# instructions. Sharpen the criteria, or replace it with a deterministic Verifier\n"
+    "# that checks the Apps' final state.\n"
 )
 _TASK_HEADER = (
     "# Drafted from one recorded trace. Check the instructions say what the user\n"
@@ -474,8 +494,9 @@ def add_traces(
         if app in offered:
             files[f"environments/{name}/apps/{app}/tools.json"] = _tools_json(offered[app].values())
     listing = "\n".join(
-        f"- `{app}`: {len(_actions(grouped.get(app, []), offered.get(app, {})))} action(s), "
-        f"{len(grouped.get(app, []))} recorded call(s)"
+        f"- `{app}`: "
+        f"{_count(len(_actions(grouped.get(app, []), offered.get(app, {}))), 'action')}, "
+        f"{_count(len(grouped.get(app, [])), 'recorded call')}"
         for app in names
     )
     files.update(
@@ -491,7 +512,7 @@ def add_traces(
                 "recorded agent made the closest matching call, so no real system is "
                 "touched and runs are reproducible. A call no recording matches is marked "
                 "`off_recording`; replace an App with its real connection when you need "
-                "live answers. Run `plural env add --traces` again with newer traces to "
+                "live answers. Run `plural app add --traces` again with newer traces to "
                 "add their calls and tools.\n\n" + (listing or "The traces made no tool calls.")
             ),
         )
@@ -554,7 +575,7 @@ def _add_traces(
             fresh.append(trace)
     notes: list[str] = []
     if len(fresh) < len(traces):
-        notes.append(f"Skipped {len(traces) - len(fresh)} trace(s) already imported.")
+        notes.append(f"Skipped {_count(len(traces) - len(fresh), 'trace')} already imported.")
     grouped = recordings_by_app(fresh, default_app=default_app)
     offered = tools_by_app(traces, default_app=default_app)
     files: dict[str, str | bytes] = {}
@@ -569,8 +590,8 @@ def _add_traces(
             if tools:
                 files[f"environments/{name}/apps/{app}/tools.json"] = _tools_json(tools.values())
             notes.append(
-                f"New App {app}: {len(_actions(rows, tools))} action(s), "
-                f"{len(rows)} recorded call(s)."
+                f"New App {app}: {_count(len(_actions(rows, tools)), 'action')}, "
+                f"{_count(len(rows), 'recorded call')}."
             )
             continue
         replay = by_name[app].get("replay")
@@ -578,7 +599,7 @@ def _add_traces(
             if rows or tools:
                 notes.append(
                     f"App {app} is no longer a replay App reading a .jsonl file, so its "
-                    f"{len(rows)} new recorded call(s) and tool definitions were left out."
+                    f"{_count(len(rows), 'new recorded call')} and tool definitions were left out."
                 )
             continue
         before = _actions(recorded[app], {})
@@ -611,11 +632,11 @@ def _add_traces(
         added = sorted(_actions(rows, tools) - before)
         parts = []
         if added:
-            parts.append(f"{len(added)} new action(s): {', '.join(added)}")
+            parts.append(f"{_count(len(added), 'new action')}: {', '.join(added)}")
         if changed:
             parts.append(f"updated description or schema: {', '.join(changed)}")
         if rows:
-            parts.append(f"{len(rows)} new recorded call(s)")
+            parts.append(f"{_count(len(rows), 'new recorded call')}")
         if parts:
             notes.append(f"App {app}: " + "; ".join(parts) + ".")
         if added and replay.get("actions"):
@@ -649,7 +670,9 @@ def _add_traces(
             files[f"benchmarks/{name}/benchmark.yaml"] = _yaml(
                 _TRACES_BENCHMARK_HEADER.format(name=name), _traces_benchmark(name, tasks)
             )
-        notes.append(f"Drafted {len(tasks)} new Task(s) and added them to benchmark {name}.")
+        notes.append(
+            f"Drafted {_count(len(tasks), 'new Task')} and added them to Benchmark {name}."
+        )
     if not fresh:
         notes.append("Nothing new to add.")
     return Generated(
@@ -678,9 +701,44 @@ def _tools_json(tools: Iterable[Mapping[str, Any]]) -> str:
     return json.dumps(list(tools), indent=2, ensure_ascii=False) + "\n"
 
 
-def _judge(verifier: str, judge_model: str) -> str:
+def _starter(
+    root: Path, environment: str, app: str, *, judge_model: str
+) -> tuple[dict[str, str | bytes], list[str]]:
+    """A smoke-test Task and its judge for a new Environment, unless those names are taken.
+
+    The Task only reads, so it is safe to run against a live system.
+
+    Returns:
+        The files, and the starter Task's name if it was drafted.
+    """
+    task, verifier = starter_names(environment)
+    if (root / "tasks" / task).exists() or (root / "verifiers" / verifier).exists():
+        return {}, []
+    manifest = {
+        "name": task,
+        "instructions": "instruction.md",
+        "environment": environment,
+        "verifiers": [verifier],
+    }
+    instruction = (
+        f"# {title(task)}\n\n"
+        "<!-- PLURAL-TODO: replace this smoke test with the work you want to measure. "
+        "Only this text and the Environment's observations reach the Agent. -->\n\n"
+        f"Find out what you can look up with the {app} tools you have. Call one tool that "
+        "only reads, change nothing, and report what it returned.\n"
+    )
+    return {
+        f"tasks/{task}/task.yaml": _yaml(_STARTER_TASK_HEADER, manifest),
+        f"tasks/{task}/instruction.md": instruction,
+        f"verifiers/{verifier}/verifier.yaml": _judge(
+            verifier, judge_model, header=_STARTER_JUDGE_HEADER
+        ),
+    }, [task]
+
+
+def _judge(verifier: str, judge_model: str, *, header: str = _JUDGE_HEADER) -> str:
     return _yaml(
-        _JUDGE_HEADER,
+        header,
         {
             "name": verifier,
             "version": "0.1.0",
@@ -850,3 +908,7 @@ __all__ = [
     "mcp_app",
     "openapi_app",
 ]
+
+
+def _count(count: int, noun: str) -> str:
+    return f"{count} {noun if count == 1 else noun + 's'}"

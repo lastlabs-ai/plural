@@ -170,14 +170,18 @@ plural env init ticket-triage
 environments/ticket-triage/
 ├── environment.yaml
 ├── server.py
-└── README.md
+├── README.md
+└── resources/policy.md
 ```
 
 The App is the FastMCP server in `server.py`; see
 [Build an MCP server](../guides/build-mcp-server.md). With `--python`, the template
 is a Python App class in `environment.py` instead. Either way the folder is the
-Environment's source package. Add a `resources/` folder beside them when the
-Environment needs data files. `environment.yaml` holds everything else: its name,
+Environment's source package, and `resources/` holds its data files. The template
+also writes a starter Task, `ticket-triage-first`, and its Verifier, so
+`plural run --task ticket-triage-first --model MODEL` works at once; `--bare` leaves
+them out. [Create an Environment](../start/index.md) walks through replacing the
+example, and every other way to start. `environment.yaml` holds everything else: its name,
 Apps, resources, Runtime, and settings. This is the manifest from the
 [first project](../tutorials/first-project.md), which uses a Python App:
 
@@ -200,10 +204,11 @@ limits:
 ```
 
 To connect an existing system instead of writing one, add it:
-`plural env add NAME --mcp URL_OR_COMMAND`, `--openapi SPEC`, or `--traces FILE`
-creates the folder, or adds an App to an Environment you already have. Run it once per
-system. For files, add Plural's files server as an App. See
-[Start from a system](../start/from-a-system.md).
+`plural app add NAME --mcp URL_OR_COMMAND`, `--openapi SPEC`, `--traces FILE`, or
+`--files-server` creates the folder, or adds an App to an Environment you already have.
+Run it once per system. `plural app list NAME` lists an Environment's Apps, and
+`plural app remove NAME APP` takes one App's entry out of `environment.yaml`, leaving
+its files in place. See [Start from a system](../start/from-a-system.md).
 
 What each field means:
 
@@ -220,8 +225,8 @@ What each field means:
   [short form](#the-short-form); a mapping takes the same fields as `Resource`.
 - `runtime` picks a provider with `provider`, such as `docker`, `local`, or
   `daytona`. The other keys are that provider's settings, such as `image` or `cpus`;
-  `plural runtime provider <provider>` lists them. The template uses `docker` with the
-  `python:3.12-slim` image. To reuse a project [Runtime](runtimes.md), run
+  `plural runtime provider <provider>` lists them. The template uses `local`, which
+  runs on your machine and is not a sandbox. To reuse a project [Runtime](runtimes.md), run
   `plural runtime use <runtime> <environment>`, which fills this block in for you.
 - `harness_policy`, `limits`, `guardrails`, and `metadata` take the same values as the
   Environment arguments of those names.
@@ -471,9 +476,10 @@ Runtime's `timeout_seconds` defaults to 300 seconds for execution and upload
 operations. Environment limits separately bound the episode:
 
 ```python
-from plural import ExecutionLimits
+from plural import Environment, ExecutionLimits, Runtime
 
-environment = TicketTriage(
+environment = Environment(
+    apps=[TicketTriage()],
     runtime=Runtime.local(),
     limits=ExecutionLimits(max_turns=4, max_seconds=60),
 )

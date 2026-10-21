@@ -25,15 +25,16 @@ In everyday terms first, then the fields each one holds:
 | A system the AI works with | `App` | actions, State, credentials and secrets, snapshot and reset hooks, and rendering |
 | The world | `Environment` | Apps, Runtime, resources, Harness policy, limits, and the `on_step` hook |
 | One assignment | `Task` | instructions, one Environment, Verifiers, task resources, initial state |
-| What counts as good work | `Verifier` | information, criteria, evidence, runtime, weight, `check` (the score) and `reward` (per-step rewards) |
+| What counts as good work | `Verifier` | information, criteria, evidence, runtime, weight, `check` (the score), `reward` (per-step rewards), and `hindsight` (rewards given once the episode is over) |
 | The contestant | `Agent` | model, provider, instructions, optional Harness, metadata |
 | How the contestant plays | `Harness` | interaction loop and extra tools for one Agent, bounded by the Environment's policy |
 | The exam | `Benchmark` | name, version, ordered Tasks, scoring rules, and metadata |
 | One run you start | `Job` | source, Agents, mode, attempts, concurrency, retry policy |
 | One attempt | `Trial` | one Agent × one Task × one planned attempt; Job output |
 
-Apps, Runtime, and Resources are part of the Environment, and Verifiers are part of an
-App. They are not run or versioned on their own.
+Apps, Runtime, and Resources are part of the Environment; they are not run or
+versioned on their own. Verifiers attach to Tasks, and are versioned and pushed on
+their own.
 
 A few rules that matter:
 

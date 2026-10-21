@@ -914,6 +914,17 @@
       "additionalProperties": false,
       "description": "Machine for a verifier that needs its own sandbox.\n\nThe default runs in the Task Environment. Set a provider, image, network,\nresource limit, or timeout to use a different machine.",
       "properties": {
+        "allowed_hosts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Hosts",
+          "type": "array"
+        },
+        "compute": {
+          "$ref": "#/$defs/ResourceRequirements"
+        },
         "image": {
           "anyOf": [
             {
@@ -930,22 +941,11 @@
           "$ref": "#/$defs/NetworkMode",
           "default": "public"
         },
-        "network_allowlist": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Network Allowlist",
-          "type": "array"
-        },
         "provider": {
           "default": "docker",
           "minLength": 1,
           "title": "Provider",
           "type": "string"
-        },
-        "resources": {
-          "$ref": "#/$defs/ResourceRequirements"
         },
         "timeout_seconds": {
           "default": 60,
@@ -1019,6 +1019,7 @@
       "type": "string"
     },
     "primary_metric": {
+      "const": "score",
       "default": "score",
       "title": "Primary Metric",
       "type": "string"

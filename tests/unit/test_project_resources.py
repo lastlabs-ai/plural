@@ -239,10 +239,10 @@ def test_agent_requires_a_catalog_model_and_resolves_harnesses(project: Project)
 
     path = project.root / "agents/baseline/agent.yaml"
     edit(
-        path, "harness: scripted", "harness: claude-code\nharness_kwargs:\n  reasoning_effort: high"
+        path, "harness: scripted", "harness: claude-code\nharness_config:\n  reasoning_effort: high"
     )
     edit(path, "model: openai/gpt-5.6-luna", "model: anthropic/claude-sonnet-5")
-    edit(path, "auth_mode: none\n", "")
+    edit(path, "auth: none\n", "")
     builtin = load(project, "agent", "baseline")
     assert builtin.value.harness == "claude-code"
     assert builtin.dependencies == ()
@@ -252,7 +252,7 @@ def test_agent_requires_a_catalog_model_and_resolves_harnesses(project: Project)
         model="anthropic/claude-sonnet-5",
         instructions="Follow the refund policy.",
         harness="claude-code",
-        harness_kwargs={"reasoning_effort": "high"},
+        harness_config={"reasoning_effort": "high"},
     )
     assert builtin.content_hash == python_authored.content_hash
 
@@ -261,7 +261,7 @@ def test_agent_requires_a_catalog_model_and_resolves_harnesses(project: Project)
 
     edit(path, "harness: nowhere", "harness: claude-code")
     edit(path, "model: anthropic/claude-sonnet-5", "model: nobody/unknown")
-    assert "ModelCatalog" in problems(project, "agent", "baseline")
+    assert "Unknown model" in problems(project, "agent", "baseline")
 
 
 def test_local_harness_cannot_shadow_a_builtin(project: Project) -> None:
@@ -271,15 +271,66 @@ def test_local_harness_cannot_shadow_a_builtin(project: Project) -> None:
     assert "built-in Harness" in problems(project, "harness", "codex")
 
 
-def test_invalid_local_resource_is_an_error_not_a_hosted_fallback(
+def test_invalid_local_resource_shows_its_problems_not_a_hosted_fallback(
     project: Project, monkeypatch: pytest.MonkeyPatch, home: Path
 ) -> None:
     (project.root / "tasks/refund/instruction.md").write_text("")
     monkeypatch.chdir(project.root)
     result = runner.invoke(app, ["task", "show", "refund"])
-    assert result.exit_code == 1
+    assert result.exit_code == 0, result.output
+    assert "not valid yet" in result.output
     assert "instruction.md is empty" in result.output
     assert "hosted" not in result.output.lower()
+    shown = json.loads(runner.invoke(app, ["task", "show", "refund", "--json"]).stdout)
+    assert shown["valid"] is False
+    assert shown["depends_on"] == ["environment/queue", "verifier/resolved"]
+
+
+def test_a_new_benchmark_shows_what_it_still_needs(
+    project: Project, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    monkeypatch.chdir(project.root)
+    assert runner.invoke(app, ["benchmark", "init", "b1"]).exit_code == 0
+    result = runner.invoke(app, ["benchmark", "show", "b1"])
+    assert result.exit_code == 0, result.output
+    assert "Benchmark b1 (local, benchmarks/b1): not valid yet" in result.output
+    assert "Problems:" in result.output
+
+
+def test_delete_refuses_while_other_resources_use_it_then_deletes(
+    project: Project, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    monkeypatch.chdir(project.root)
+    refused = runner.invoke(app, ["verifier", "delete", "resolved", "-y"])
+    assert refused.exit_code == 1
+    assert "task/refund" in refused.output
+    assert (project.root / "verifiers/resolved").is_dir()
+
+    asked = runner.invoke(app, ["benchmark", "delete", "basics"])
+    assert asked.exit_code == 1 and "--yes" in asked.output
+
+    deleted = runner.invoke(app, ["benchmark", "delete", "basics", "--yes", "--json"])
+    assert deleted.exit_code == 0, deleted.output
+    assert json.loads(deleted.stdout) == {
+        "resource": "benchmark/basics",
+        "local": "benchmarks/basics",
+        "hosted": None,
+    }
+    assert not (project.root / "benchmarks/basics").exists()
+    missing = runner.invoke(app, ["benchmark", "delete", "basics", "-y"])
+    assert missing.exit_code == 1 and "--hosted" in missing.output
+
+
+def test_agent_init_needs_a_model(
+    project: Project, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    monkeypatch.chdir(project.root)
+    result = runner.invoke(app, ["agent", "init", "helper"])
+    assert result.exit_code == 1
+    assert "--model" in result.output
+    assert not (project.root / "agents/helper").exists()
+    made = runner.invoke(app, ["agent", "init", "helper", "--model", "openai/gpt-5.6-luna"])
+    assert made.exit_code == 0, made.output
 
 
 def test_show_and_list_label_local_resources(
@@ -302,9 +353,3 @@ def test_show_and_list_label_local_resources(
     builtin = runner.invoke(app, ["harness", "show", "codex", "--json"])
     assert builtin.exit_code == 0, builtin.output
     assert json.loads(builtin.output)["location"] == "built-in"
-
-
-def test_agent_serve_is_reserved(home: Path) -> None:
-    result = runner.invoke(app, ["agent", "serve"])
-    assert result.exit_code != 0
-    assert "not available yet" in result.output

@@ -82,7 +82,7 @@ def build_job(
         name="offline-agent",
         model="offline/deterministic",
         harness=harness,
-        auth_mode="none",
+        auth="none",
     )
     return Job(
         benchmark,

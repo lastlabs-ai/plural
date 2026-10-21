@@ -27,7 +27,7 @@ By the end you will have:
 
 ## Before you start
 
-You need Plural installed; see [Install](../getting-started.md#install). The project is
+You need Plural installed; see [Install](../getting-started.md#1-create-an-account-and-install). The project is
 `examples/wordle` in the [Plural repository](https://github.com/lastlabs-ai/plural).
 Copy it anywhere and run the commands from inside it:
 
@@ -323,14 +323,14 @@ You should see one line per game as it finishes. Your ids will differ, the games
 finish in a different order, and a model may not play the same way twice:
 
 ```text
-Running benchmark/wordle local with luna (openai/gpt-5.6-luna) locally: 5 trial(s), 5 at a time (auto: every Trial at once).
+Running benchmark/wordle local with luna (openai/gpt-5.6-luna) locally: 5 Trials, 5 at a time (auto: every Trial at once).
   [1/5] trl_49f1abde184c29875cccba31  crane  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
   [2/5] trl_506e8fe955a473c5392b07d8  slate  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
   [3/5] trl_1e9c501ec2ba6f578be6d8fe  nymph  succeeded  score=1.000  | 3 succeeded, 0 failed, mean 1.000
   [4/5] trl_1f2adcdea70605ea8f835b89  storm  succeeded  score=1.000  | 4 succeeded, 0 failed, mean 1.000
   [5/5] trl_10723e07ab67be6e92f42fe1  point  succeeded  score=1.000  | 5 succeeded, 0 failed, mean 1.000
 Job job_d9dbdde2f7b0e81cad12f704 succeeded.
-  luna: mean score 1.000 over 5 trial(s), 5 succeeded
+  luna: mean score 1.000 over 5 Trials, 5 succeeded
 Details: plural job show job_d9dbdde2f7b0e81cad12f704
 ```
 
@@ -436,27 +436,26 @@ pinned.
 
 ## Push it and run hosted
 
-To have Plural run the games for you, push the project to a private hosted project.
-This needs a Plural account:
+To see the games in the web app, connect the project to a private hosted project and
+record the run with `--record`. This needs a Plural account:
 
 ```bash
 plural auth login
 plural project init wordle --push
-plural benchmark push wordle --with-deps
-plural agent push luna --with-deps
-plural run --benchmark wordle --agent luna --hosted --follow
+plural run --benchmark wordle --agent luna --record
 ```
 
 `project init --push` registers the project with a new private hosted project.
-`--with-deps` also pushes the Tasks, Verifier, and Environment the Benchmark uses, and
-`--follow` streams progress until the Job finishes.
+`--record` still plays every game here. It first pushes the Benchmark, its Tasks,
+Verifier, and Environment, and the Agent, then records each game in the web app under
+**Jobs** as it is played.
 
 > **Good to know:** Pushing never makes anything public. Sharing is a separate action
 > in the Plural web app.
 
 ## Where to go next
 
-- Build your own project with [Getting started](../getting-started.md#add-resources).
+- Start an Environment of your own with [Create an Environment](../start/index.md).
 - Read [Environments](../project/environments.md) to design a world of your own.
 - Read [Several Agents in one Task](../project/multi-agent.md) to have several Agents
   share one game.

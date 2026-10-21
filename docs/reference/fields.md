@@ -32,7 +32,6 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [AppDefinition](#appdefinition)
 - [BenchmarkCategory](#benchmarkcategory)
 - [BenchmarkScoring](#benchmarkscoring)
-- [Capability](#capability)
 - [DeclarativeImage](#declarativeimage)
 - [Resource](#resource)
 - [Runtime](#runtime)
@@ -50,6 +49,7 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [RubricCriterion](#rubriccriterion)
 - [RuntimePackages](#runtimepackages)
 - [RuntimeVariable](#runtimevariable)
+- [SandboxCapability](#sandboxcapability)
 - [Secret](#secret)
 - [VerifierRuntime](#verifierruntime)
 
@@ -159,9 +159,9 @@ A catalog-backed model and its optional execution harness.
 - **`temperature`** — `number | null`; optional. Default: `null`.
 - **`max_tokens`** — `integer | null`; optional. Default: `null`.
 - **`harness`** — `HarnessDefinition | Harness | string | null`; optional. Default: `null`.
-- **`harness_kwargs`** — `object`; optional.
-- **`auth_mode`** — `"environment" | "api_key" | "oauth" | "none"`; optional. Default: `"environment"`.
-- **`secret_names`** — `array of string`; optional. Default: `[]`.
+- **`harness_config`** — `object`; optional. Options for a built-in Harness, such as reasoning_effort.
+- **`auth`** — `"environment" | "api_key" | "oauth" | "none"`; optional. Default: `"environment"`. How the Harness authenticates to the model; none when it calls no model.
+- **`secrets`** — `array of string`; optional. Default: `[]`. Names of the Harness's declared secrets this Agent grants it.
 - **`endpoint`** — `string | null`; optional. Default: `null`.
 - **`endpoint_key`** — `string | null`; optional. Default: `null`.
 - **`credentials`** — `object`; optional.
@@ -183,7 +183,7 @@ A semantic version that pins an ordered set of Tasks.
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`version`** — `string`; required.
 - **`tasks`** — `array of Task`; required. Constraints: `{"minItems": 1}`.
-- **`primary_metric`** — `string`; optional. Default: `"score"`.
+- **`primary_metric`** — `"score"`; optional. Default: `"score"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`metadata`** — `object`; optional.
 
@@ -247,13 +247,6 @@ How a release turns attempts into one score per configuration.
 - **`infrastructure_error`** — `"exclude"`; optional. Default: `"exclude"`.
 - **`min_tasks_for_interval`** — `integer`; optional. Default: `5`. Constraints: `{"minimum": 2}`.
 
-## Capability
-
-Individual controls a provider can enforce.
-
-Allowed values: `"image" | "build" | "resources" | "network_none" | "network_allowlist" | "upload" | "download" | "timeout" | "cancel" | "persistence" | "compose" | "read_only_root" | "working_directory" | "environment" | "log_capture"`.
-
-
 ## DeclarativeImage
 
 Portable subset of Daytona's declarative image builder.
@@ -293,16 +286,16 @@ Where an Environment runs: Docker, a trusted local process, or a remote sandbox.
 - **`build_context`** — `string | null`; optional. Default: `null`.
 - **`dockerfile`** — `string | null`; optional. Default: `null`.
 - **`network`** — `NetworkMode`; optional. Default: `"public"`.
-- **`network_allowlist`** — `array of string`; optional. Default: `[]`.
-- **`resources`** — `ResourceRequirements`; optional.
+- **`allowed_hosts`** — `array of string`; optional. Default: `[]`. Hosts the Runtime may reach when network is 'allowlist'.
+- **`compute`** — `ResourceRequirements`; optional. CPU, memory, storage, and process limits for the Runtime.
 - **`packages`** — `RuntimePackages`; optional. Packages installed in the Runtime before an episode. In environment.yaml, list Python ones under python_packages. On the local Runtime they must already be installed.
 - **`read_only_root`** — `boolean`; optional. Default: `false`.
 - **`targets`** — `array of ExecutionTarget`; optional. Constraints: `{"uniqueItems": true}`.
 - **`persistent`** — `boolean`; optional. Default: `false`.
 - **`compose`** — `boolean`; optional. Default: `false`.
-- **`extra_capabilities`** — `array of Capability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
+- **`extra_capabilities`** — `array of SandboxCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
 - **`timeout_seconds`** — `number`; optional. Default: `300`. Constraints: `{"exclusiveMinimum": 0}`.
-- **`build_timeout_sec`** — `number`; optional. Default: `600`. Constraints: `{"exclusiveMinimum": 0}`.
+- **`build_timeout_seconds`** — `number`; optional. Default: `600`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`allow_unsafe_local`** — `boolean`; optional. Default: `false`.
 
 ## EvaluationTrack
@@ -377,7 +370,7 @@ A declared executable Agent interaction strategy.
 - **`models`** — `array of string`; optional. Default: `["*"]`.
 - **`auth`** — `array of "environment" | "api_key" | "oauth" | "none"`; optional. Default: `["environment"]`.
 - **`secrets`** — `array of string`; optional. Default: `[]`.
-- **`environment`** — `array of string`; optional. Default: `[]`.
+- **`env_vars`** — `array of string`; optional. Default: `[]`. Names of environment variables passed through to the Harness process.
 - **`healthcheck`** — `array of string | null`; optional. Default: `null`.
 - **`outputs`** — `array of FileDeclaration`; optional. Default: `[]`.
 - **`artifacts`** — `array of FileDeclaration`; optional. Default: `[]`.
@@ -444,6 +437,13 @@ A launch-time variable declaration. Values are supplied to Job, never saved here
 - **`secret`** — `boolean`; optional. Default: `false`.
 - **`format`** — `"text" | "url" | "integer" | "json"`; optional. Default: `"text"`.
 
+## SandboxCapability
+
+Individual controls a provider can enforce.
+
+Allowed values: `"image" | "build" | "resources" | "network_none" | "network_allowlist" | "upload" | "download" | "timeout" | "cancel" | "persistence" | "compose" | "read_only_root" | "working_directory" | "environment" | "log_capture"`.
+
+
 ## Secret
 
 A named value an App needs, which it never stores itself.
@@ -460,6 +460,6 @@ Machine for a verifier that needs its own sandbox.
 - **`provider`** — `string`; optional. Default: `"docker"`. Constraints: `{"minLength": 1}`.
 - **`image`** — `string | null`; optional. Default: `null`.
 - **`network`** — `NetworkMode`; optional. Default: `"public"`.
-- **`network_allowlist`** — `array of string`; optional. Default: `[]`.
-- **`resources`** — `ResourceRequirements`; optional.
+- **`allowed_hosts`** — `array of string`; optional. Default: `[]`.
+- **`compute`** — `ResourceRequirements`; optional.
 - **`timeout_seconds`** — `number`; optional. Default: `60`. Constraints: `{"exclusiveMinimum": 0}`.

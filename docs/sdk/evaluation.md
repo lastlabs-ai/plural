@@ -14,7 +14,7 @@ for people who write Python: to script a batch of runs, fit Plural into a notebo
 a pipeline, or build resources that are easier to write as code than as files.
 
 You can use it two ways. Build the pieces directly in Python, or load the ones already
-saved in a [project](../getting-started.md#create-a-project) and run them the way
+saved in a [project](../getting-started.md#2-create-a-project) and run them the way
 `plural run` does. Either way you end up with a **Job**: one run that sends one or
 more Agents at a Task or Benchmark and records every attempt. If the words are new,
 read [Core concepts](../getting-started/concepts.md) first.
@@ -30,14 +30,25 @@ it, a contestant, and the Job that runs them.
 - The **Benchmark** is the exam, a fixed set of Tasks.
 - The **Agent** is the contestant: a model plus its instructions.
 
-The example assumes you have created the support queue `environment` from the
-[tutorial](../tutorials/support-queue.md). Save this code in a Python file so Plural
-can load the Verifier function. A live run needs an API key: store a Plural API key
-with `plural auth login --api-key-stdin`, or export `PLURAL_API_KEY`.
+The example imports the support queue `environment` from the
+[tutorial](../tutorials/support-queue.md), defined in its own module. Save this code
+in a separate Python file: Plural loads a Verifier's code on its own, apart from the
+Apps, and refuses a file that holds both. A live run needs an API key: store a Plural
+API key with `plural auth login --api-key-stdin`, or export `PLURAL_API_KEY`.
 
 ```python
-from plural import Agent, Benchmark, Client, Episode, Job, Task, VerifierOutput
-from plural.verifiers import DeterministicVerifier
+from plural import (
+    Agent,
+    Benchmark,
+    Client,
+    DeterministicVerifier,
+    Episode,
+    Job,
+    Task,
+    VerifierOutput,
+)
+
+from support_queue import environment
 
 def resolved(episode: Episode) -> VerifierOutput:
     return VerifierOutput(score=float(bool(episode.state.get("done"))))
@@ -71,7 +82,7 @@ A few defaults to know:
 
 ## Load project resources
 
-In a [project](../getting-started.md#create-a-project), you can load resources by kind
+In a [project](../getting-started.md#2-create-a-project), you can load resources by kind
 and name instead of building them:
 
 ```python

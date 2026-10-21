@@ -1,5 +1,8 @@
 """Sandbox lifecycle providers."""
 
+from typing import Any
+
+from plural._deprecation import module_getattr
 from plural.sandbox.base import SandboxProvider
 from plural.sandbox.daytona import (
     DaytonaClientAdapter,
@@ -11,7 +14,6 @@ from plural.sandbox.docker import DockerProvider
 from plural.sandbox.local import LocalProvider
 from plural.sandbox.models import (
     AppIsolation,
-    Capability,
     CapabilityError,
     DeclarativeImage,
     DownloadedFile,
@@ -24,6 +26,7 @@ from plural.sandbox.models import (
     ProviderDoctor,
     ProviderUnavailableError,
     ResourceRequirements,
+    SandboxCapability,
     SandboxError,
     SandboxHandle,
     SandboxRequirements,
@@ -33,9 +36,18 @@ from plural.sandbox.models import (
 )
 from plural.sandbox.registry import ProviderRegistry, default_registry
 
+_renamed = module_getattr(
+    "plural.sandbox", {"Capability": ("SandboxCapability", lambda: SandboxCapability)}
+)
+
+
+def __getattr__(name: str) -> Any:
+    return _renamed(name)
+
+
 __all__ = [
     "AppIsolation",
-    "Capability",
+    "SandboxCapability",
     "CapabilityError",
     "DeclarativeImage",
     "DaytonaClientAdapter",

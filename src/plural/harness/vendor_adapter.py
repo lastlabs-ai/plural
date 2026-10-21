@@ -76,7 +76,7 @@ def run_vendor(
     """Run a built-in CLI through the same interface as a custom Harness."""
     limits = environment.raw.get("limits") or {}
     timeout = float(limits.get("max_seconds", 120))
-    kwargs = agent.harness_kwargs
+    kwargs = agent.harness_config
     model = agent.model
     if model:
         os.environ.setdefault("PLURAL_MODEL", model)

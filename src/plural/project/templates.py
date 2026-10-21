@@ -2,7 +2,8 @@
 
 Every place a person must fill in carries a ``PLURAL-TODO`` marker, and
 validation reports each remaining marker with its file and line. A fresh
-scaffold is therefore never mistaken for a finished resource.
+scaffold runs locally, so it can be tried at once, but it is never pushed,
+released, or recorded as finished work.
 """
 
 from __future__ import annotations
@@ -157,8 +158,8 @@ def resource_scaffold(
                 ENVIRONMENT.manifest: _MCP_ENVIRONMENT_YAML.format(name=name, app=app),
                 "server.py": _MCP_SERVER_PY.format(title=title(name), app=app),
                 "README.md": _MCP_ENVIRONMENT_README.format(title=title(name)),
-            },
-            directories=("resources",),
+                "resources/policy.md": _EXAMPLE_POLICY,
+            }
         )
     if kind is ENVIRONMENT:
         return Scaffold(
@@ -209,7 +210,7 @@ def resource_scaffold(
         model_line = (
             f"model: {model}\n"
             if model
-            else "# PLURAL-TODO: choose a model from `plural models list`.\n# model: <model-id>\n"
+            else "# PLURAL-TODO: choose a model from `plural model list`.\n# model: <model-id>\n"
         )
         harness_line = (
             f"harness: {harness}\n"
@@ -232,6 +233,57 @@ def resource_scaffold(
             }
         )
     raise ValueError(f"no scaffold for {kind.name}")
+
+
+STARTER_MODEL = "openai/gpt-5.6-luna"
+"""The model the starter's "try it" command suggests."""
+
+
+def starter_names(environment: str) -> tuple[str, str]:
+    """The starter Task and Verifier created beside a new Environment.
+
+    Returns:
+        ``(task, verifier)``.
+    """
+    return f"{environment}-first", f"{environment}-check"
+
+
+def starter_scaffolds(environment: str) -> list[tuple[ResourceKind, str, Scaffold]]:
+    """A Task and Verifier that run and score against a fresh ``plural env init``.
+
+    The Task asks a question the example policy answers, its ``initial_state``
+    holds the expected answer, and the Verifier compares the Agent's
+    submission with it. Each file still carries a ``PLURAL-TODO``, so the
+    example runs locally but is never pushed as finished work.
+
+    Returns:
+        ``(kind, name, scaffold)`` for the Verifier, then the Task.
+    """
+    task, verifier = starter_names(environment)
+    return [
+        (
+            VERIFIER,
+            verifier,
+            Scaffold(
+                files={
+                    VERIFIER.manifest: _VERIFIER_YAML.format(name=verifier),
+                    "verify.py": _STARTER_VERIFIER_PY,
+                }
+            ),
+        ),
+        (
+            TASK,
+            task,
+            Scaffold(
+                files={
+                    TASK.manifest: _STARTER_TASK_YAML.format(
+                        name=task, environment=environment, verifier=verifier
+                    ),
+                    "instruction.md": _STARTER_INSTRUCTION.format(title=title(task)),
+                }
+            ),
+        ),
+    ]
 
 
 _MCP_ENVIRONMENT_YAML = """\
@@ -262,21 +314,28 @@ apps:
 # Files every Task can read, relative to this directory. In a Trial they are in
 # environment-resources/, read-only; a Task's own files are beside them in
 # task-resources/. server.py reads them with plural.mcp.environment_resources().
-resources: []
-#  - resources/policy.md
+resources:
+  - resources/policy.md
 
 # Where the Environment and Agent run. provider selects a Runtime preset:
-# docker (sandboxed), local (a trusted subprocess, not a sandbox), or daytona.
+# local (a subprocess on this machine, not a sandbox), docker (an isolated
+# container: add image: python:3.12-slim), or daytona (a remote sandbox).
 runtime:
-  provider: docker
-  image: python:3.12-slim
+  provider: local
 
 # Settings: which Agent harnesses may run here, and per-Trial limits.
 harness_policy:
   mode: allow_all
 limits:
-  max_turns: 8
-  max_seconds: 120
+  max_turns: 20
+  max_seconds: 600
+"""
+
+_EXAMPLE_POLICY = """\
+# Refund policy
+
+An order can be refunded within 30 days of delivery. After 30 days, offer store
+credit for the full amount instead.
 """
 
 _MCP_SERVER_PY = '''\
@@ -297,18 +356,18 @@ import plural.mcp
 
 mcp = FastMCP("{app}")
 
-# PLURAL-TODO: replace this with the state your tools read and change.
-STATE: dict = {{"goal": "", "answer": "", "done": False}}
+# PLURAL-TODO: replace this example state with the state your tools read and change.
+STATE: dict = {{"expected": "", "answer": "", "done": False}}
 
 
 @plural.mcp.reset(mcp)
 def start(initial_state: dict) -> str:
     """Start an episode from the Task's initial_state. Return what the Agent sees first."""
-    STATE.update(goal=initial_state.get("goal", ""), answer="", done=False)
-    return f"Goal: {{STATE['goal']}}"
+    STATE.update(expected=initial_state.get("expected", ""), answer="", done=False)
+    return "You can read resources/policy.md, then submit your answer."
 
 
-# PLURAL-TODO: replace these tools with the moves your Agent needs.
+# PLURAL-TODO: replace these example tools with the moves your Agent needs.
 @mcp.tool(annotations={{"readOnlyHint": True}})
 def read_resource(path: str) -> str:
     """Read a file this Environment provides, such as resources/policy.md."""
@@ -321,8 +380,8 @@ def read_resource(path: str) -> str:
 
 @mcp.tool
 def submit(answer: str) -> str:
-    """Submit a final answer."""
-    STATE.update(answer=answer, done=True)
+    """Submit your final answer."""
+    STATE.update(answer=answer.strip(), done=True)
     return "Submitted."
 
 
@@ -405,17 +464,17 @@ resources: []
 #  - resources/policy.md
 
 # Where the Environment and Agent run. provider selects a Runtime preset:
-# docker (sandboxed), local (a trusted subprocess, not a sandbox), or daytona.
+# local (a subprocess on this machine, not a sandbox), docker (an isolated
+# container: add image: python:3.12-slim), or daytona (a remote sandbox).
 runtime:
-  provider: docker
-  image: python:3.12-slim
+  provider: local
 
 # Settings: which Agent harnesses may run here, and per-Trial limits.
 harness_policy:
   mode: allow_all
 limits:
-  max_turns: 8
-  max_seconds: 120
+  max_turns: 20
+  max_seconds: 600
 """
 
 _ENVIRONMENT_PY = '''\
@@ -427,12 +486,15 @@ Agent sees next. State is private: Verifiers read it and the Agent never does.
 
 from plural import App, State, action, initial
 
+POLICY = """An order can be refunded within 30 days of delivery. After 30 days,
+offer store credit for the full amount instead."""
+
 
 class {cls}State(State):
     """Private state for one episode."""
 
-    # PLURAL-TODO: declare the fields a Task starts from (with initial()) and the fields actions change.
-    goal: str = initial("", description="What this Task asks the Agent to achieve.")
+    # PLURAL-TODO: replace this example with the fields a Task starts from (with initial()) and the fields actions change.
+    expected: str = initial("", description="The answer a Verifier expects.")
     answer: str = ""
     done: bool = False
 
@@ -443,13 +505,18 @@ class {cls}(App[{cls}State]):
     def reset(self, initial_state):
         """Start an episode from the Task's initial state. Return what the Agent sees first."""
         super().reset(initial_state)
-        return f"Goal: {{self.state.goal}}"
+        return "You can read the refund policy, then submit your answer."
 
-    # PLURAL-TODO: replace this action with the moves your Agent needs. Its docstring is the Agent's description.
+    # PLURAL-TODO: replace these example actions with the moves your Agent needs. A docstring is the Agent's description.
+    @action(read_only=True)
+    def read_policy(self) -> str:
+        """Read the refund policy."""
+        return POLICY
+
     @action
     def submit(self, answer: str) -> str:
-        """Submit a final answer and end the episode."""
-        self.state.answer = answer
+        """Submit your final answer and end the episode."""
+        self.state.answer = answer.strip()
         self.state.done = True
         return "Submitted."
 
@@ -542,10 +609,60 @@ def check(episode: Episode) -> VerifierOutput:
 
 
 def reward(step: Step) -> float | None:
-    """Reward one action, or return None to give none. Turn it on in verifier.yaml."""
-    # PLURAL-TODO: read step.observation, step.current_state, or step.apps["name"].
+    """Reward one action, or return None to give none. Turn it on in verifier.yaml.
+
+    It can read step.observation, step.current_state, or step.apps["name"].
+    """
     return -0.1 if step.error else None
 '''
+
+_STARTER_VERIFIER_PY = '''\
+"""Verify an episode: score the finished episode with check, and reward each action with reward."""
+
+from plural import Episode, VerifierOutput, Step
+
+
+def check(episode: Episode) -> VerifierOutput:
+    """Return a score from 0 to 1 with evidence a reviewer can check."""
+    # PLURAL-TODO: replace this example: compare episode.state with what the Task asked for.
+    answer = str(episode.state.get("answer", "")).strip().lower()
+    expected = str(episode.state.get("expected", "")).strip().lower()
+    correct = bool(answer) and answer == expected
+    return VerifierOutput(
+        score=float(correct), evidence=[f"answer={answer!r}", f"expected={expected!r}"]
+    )
+
+
+def reward(step: Step) -> float | None:
+    """Reward one action, or return None to give none. Turn it on in verifier.yaml.
+
+    It can read step.observation, step.current_state, or step.apps["name"].
+    """
+    return -0.1 if step.error else None
+'''
+
+_STARTER_TASK_YAML = """\
+# Task: instructions for the Agent, the one Environment it runs in, and the
+# Verifiers that score it. Files under resources/ are given to the Agent.
+name: {name}
+instructions: instruction.md
+environment: {environment}
+verifiers:
+  - {verifier}
+# Where each episode starts: the values the Environment's reset receives, or its
+# App State fields marked initial(). The Agent never sees them; Verifiers do.
+initial_state:
+  expected: store credit
+"""
+
+_STARTER_INSTRUCTION = """\
+# {title}
+
+<!-- PLURAL-TODO: replace this example with the work you want to measure. Only this text and the Environment's observations reach the Agent. -->
+
+A customer asks for a refund on an order delivered 45 days ago. Read the refund
+policy, then submit what they are offered: `refund` or `store credit`.
+"""
 
 _HARNESS_YAML = """\
 # Harness: the loop that connects an Agent's model to an Environment.
@@ -604,4 +721,13 @@ _BENCHMARK_README = """\
 """
 
 
-__all__ = ["Scaffold", "class_name", "project_scaffold", "resource_scaffold", "title"]
+__all__ = [
+    "STARTER_MODEL",
+    "Scaffold",
+    "class_name",
+    "project_scaffold",
+    "resource_scaffold",
+    "starter_names",
+    "starter_scaffolds",
+    "title",
+]

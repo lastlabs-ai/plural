@@ -60,7 +60,7 @@ def _task(
             runtime=EnvironmentRuntime(
                 provider=provider,
                 targets=frozenset({target}),
-                resources=resources or ResourceRequirements(),
+                compute=resources or ResourceRequirements(),
                 **local,
             ),
             apps=apps,
@@ -77,10 +77,8 @@ def _task(
     )
 
 
-def _spec(
-    tasks: Sequence[TaskDefinition], *, auth_mode: str = "environment", **kwargs: int
-) -> JobSpec:
-    agent = AgentDefinition(name="agent", model="test/model", auth_mode=auth_mode)
+def _spec(tasks: Sequence[TaskDefinition], *, auth: str = "environment", **kwargs: int) -> JobSpec:
+    agent = AgentDefinition(name="agent", model="test/model", auth=auth)
     return JobSpec(
         source=BenchmarkJobSource(benchmark=BenchmarkDefinition(name="suite", tasks=tuple(tasks))),
         agents=(AgentBinding(agent=agent),),
@@ -142,7 +140,7 @@ def test_auto_uses_the_remote_sandbox_quota_and_ignores_this_machine_when_hosted
 
 
 def test_a_credential_free_agent_is_not_limited_by_a_local_model_url() -> None:
-    spec = _spec([_task("one", "local"), _task("two", "local")], auth_mode="none")
+    spec = _spec([_task("one", "local"), _task("two", "local")], auth="none")
 
     advice = recommend_concurrency(
         spec, trial_count=2, environ={"OPENAI_BASE_URL": "http://localhost:8000"}, cpu_count=4

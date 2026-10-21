@@ -16,7 +16,7 @@ your work with it at any point.
 Prefer to start from the finished project? [Download it](../assets/first-project.zip)
 and follow the [support queue tutorial](support-queue.md) instead.
 
-You need Plural installed; see [Install](../getting-started.md#install).
+You need Plural installed; see [Install](../getting-started.md#1-create-an-account-and-install).
 
 ## Create the project
 
@@ -43,7 +43,7 @@ Each building block gets its own template. You will create five:
 - an **Agent** called `careful`: the contestant, a model plus its instructions.
 
 ```bash
-plural env init support-queue --python
+plural env init support-queue --python --bare
 plural verifier init correct-category
 plural task init ticket-1 --environment support-queue --verifier correct-category
 plural benchmark init support-triage
@@ -72,10 +72,10 @@ Also write the Agent's `instructions` in `agents/careful/agent.yaml`. The Agent 
 The finished files in the [support queue tutorial](support-queue.md) show one way to
 fill in each of these.
 
-> **Good to know:** The new Environment uses the `docker` runtime, a sealed box that
-> keeps the AI's world separate from your computer, so Docker must be running when you
-> run it. The finished project uses `runtime.provider: local` instead, which runs the
-> Environment as a trusted subprocess on your machine; it is not a sandbox.
+> **Good to know:** The new Environment uses the `local` runtime, which runs it as a
+> subprocess on your machine. That needs no setup, and it is not a sandbox. To keep the
+> AI's world in a sealed container, set `runtime.provider: docker`; see
+> [Runtimes](../project/runtimes.md).
 
 ## Validate and run
 
@@ -89,21 +89,21 @@ plural job show <job-id>
 ```
 
 - `validate` checks a resource and everything it depends on, and lists every
-  `PLURAL-TODO` you left unfinished.
+  `PLURAL-TODO` you left unfinished. Unfinished places don't stop a local run, but
+  `push` and `--record` refuse them.
 - `--dry-run` shows the plan without running anything.
 - The real run calls the model through the Plural gateway, so it needs a Plural API key
   (`plural auth login`, `plural auth login --api-key-stdin`, or `PLURAL_API_KEY`). The
   run prints the Job id to pass to `plural job show`.
 
 To run without any credential, add a Harness that calls no model and an Agent with
-`auth_mode: none`, like the `scripted` Agent in the finished project.
+`auth: none`, like the `scripted` Agent in the finished project.
 
 ## Next steps
 
 To add more tickets, repeat `plural task init` and `plural benchmark add`.
 
-When you want Plural to run it for you, register the project with
-`plural project init support-queue --push` and push the Benchmark with
-`plural benchmark push support-triage --with-deps`. The
-[support queue tutorial](support-queue.md#push-it-and-run-hosted) covers both. Pushing
+When you want to see runs in the web app, register the project with
+`plural project init support-queue --push` and add `--record` to `plural run`. The
+[support queue tutorial](support-queue.md#push-it-and-record-runs) covers both. Pushing
 never makes anything public.

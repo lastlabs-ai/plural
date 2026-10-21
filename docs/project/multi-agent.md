@@ -1,7 +1,7 @@
 ---
 route: /docs/project/multi-agent
 title: Several Agents in one Task
-order: 45
+order: 72
 description: "Give an Environment a party so several Agents share one episode, taking turns or moving at once, to cooperate or compete. Each seat sees only its own view and gets its own score."
 audience: all
 nav: true

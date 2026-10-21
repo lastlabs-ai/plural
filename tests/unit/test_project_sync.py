@@ -284,7 +284,7 @@ def test_a_title_is_the_hosted_name_and_the_directory_is_the_slug(hosted: Hosted
 def test_a_run_pulls_a_task_that_only_the_hosted_project_has(hosted: Hosted) -> None:
     assert hosted.cli("task", "push", "refund", "--with-deps")[0] == 0
     _web_app_task(hosted, "web-task")
-    code, output = hosted.cli("run", "--task", "web-task", "--agent", "baseline", "--hosted")
+    code, output = hosted.cli("run", "--task", "web-task", "--agent", "baseline", "--record")
     assert code == 0, output
     assert "Pulled from the hosted project" in output
     assert "task/web-task 0.1.0" in output
@@ -342,7 +342,7 @@ def test_push_is_refused_when_the_scope_selects_another_project(hosted: Hosted, 
 
 
 def test_a_hosted_run_pushes_the_revisions_it_needs_first(hosted: Hosted) -> None:
-    code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")
+    code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--record")
     assert code == 0, output
     assert "Pushed to the hosted project first" in output
     assert "task/refund #1 (0.1.0)" in output
@@ -357,7 +357,7 @@ def test_a_hosted_run_pushes_the_revisions_it_needs_first(hosted: Hosted) -> Non
 
     instruction = hosted.project.root / "tasks/refund/instruction.md"
     instruction.write_text("Review order A-1 carefully.\n")
-    code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")
+    code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--record")
     assert code == 0, output
     assert "task/refund #2 (version 0.1.0 already names #1 (0.1.0))" in output
     assert "version: 0.1.0" in (hosted.project.root / "tasks/refund/task.yaml").read_text()
@@ -365,21 +365,21 @@ def test_a_hosted_run_pushes_the_revisions_it_needs_first(hosted: Hosted) -> Non
     assert (newest["number"], newest["version"]) == (2, None)
     assert hosted.fake.jobs[-1]["source"]["revision_id"] == newest["id"]
 
-    code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")
+    code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--record")
     assert code == 0, output
     assert "Pushed to the hosted project first" not in output
 
 
 def test_a_retained_version_is_callable_by_name(hosted: Hosted) -> None:
     root = hosted.project.root
-    assert hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")[0] == 0
+    assert hosted.cli("run", "--task", "refund", "--agent", "baseline", "--record")[0] == 0
     instruction = root / "tasks/refund/instruction.md"
     instruction.write_text("Review order A-1 carefully.\n")
-    assert hosted.cli("run", "--task", "refund", "--agent", "baseline", "--hosted")[0] == 0
+    assert hosted.cli("run", "--task", "refund", "--agent", "baseline", "--record")[0] == 0
     task_parent = hosted.fake.parents[(hosted.project_id, "tasks", "refund")]
     first, second = hosted.fake.revisions[task_parent["id"]]
 
-    code, output = hosted.cli("run", "--task", "refund@1", "--agent", "baseline", "--hosted")
+    code, output = hosted.cli("run", "--task", "refund@1", "--agent", "baseline", "--record")
     assert code == 0, output
     assert "task/refund@1" in output
     assert "working copy is unchanged" in output
@@ -390,12 +390,12 @@ def test_a_retained_version_is_callable_by_name(hosted: Hosted) -> None:
 
     for selector in ("0.1.0", first["content_hash"]):
         code, output = hosted.cli(
-            "run", "--task", f"refund@{selector}", "--agent", "baseline", "--hosted"
+            "run", "--task", f"refund@{selector}", "--agent", "baseline", "--record"
         )
         assert code == 0, output
         assert hosted.fake.jobs[-1]["source"]["revision_id"] == first["id"]
 
-    code, output = hosted.cli("run", "--task", "refund@2", "--agent", "baseline", "--hosted")
+    code, output = hosted.cli("run", "--task", "refund@2", "--agent", "baseline", "--record")
     assert code == 0, output
     assert "retained" not in output
     assert hosted.fake.jobs[-1]["source"]["revision_id"] == second["id"]
@@ -428,13 +428,13 @@ def test_a_retained_version_is_callable_by_name(hosted: Hosted) -> None:
     assert "no valid revision" in output
 
 
-def test_hosted_model_run_records_an_agent_named_after_the_model(hosted: Hosted) -> None:
+def test_tracked_model_run_records_an_agent_named_after_the_model(
+    hosted: Hosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PLURAL_API_KEY", "token")
     assert hosted.cli("task", "push", "refund", "--with-deps")[0] == 0
-    code, output = hosted.cli(
-        "run", "-t", "refund", "-m", "openai/gpt-5.6-luna", "--hosted", "--json"
-    )
-    assert code == 0, output
-    assert (hosted.project_id, "agents", "openai-gpt-5-6-luna") in hosted.fake.parents
+    _, output = hosted.cli("run", "-t", "refund", "-m", "openai/gpt-5.6-luna", "--record", "--json")
+    assert (hosted.project_id, "agents", "openai-gpt-5-6-luna") in hosted.fake.parents, output
 
 
 def test_project_push_uploads_every_resource_and_repeats_as_unchanged(hosted: Hosted) -> None:
@@ -521,7 +521,7 @@ def test_a_failed_push_keeps_the_revisions_pushed_alongside_it(hosted: Hosted) -
 
 
 def test_models_list_comes_from_the_hosted_policy(hosted: Hosted) -> None:
-    code, output = hosted.cli("models", "list", "--provider", "anthropic", "--json")
+    code, output = hosted.cli("model", "list", "--provider", "anthropic", "--json")
     assert code == 0, output
     payload = json.loads(output)
     assert payload["source"] == "hosted"

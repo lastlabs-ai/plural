@@ -49,33 +49,32 @@ plural job show <job-id>
 ```bash
 plural project init my-eval
 cd my-eval
-plural env init support-desk --python
-plural verifier init resolved
-plural task init refund --environment support-desk --verifier resolved
-```
-
-Each `init` writes a template. Fill in the places marked `PLURAL-TODO`, then:
-
-```bash
-plural task validate refund
+plural env init support-desk
 plural auth login --api-key-stdin
-plural run --task refund --model openai/gpt-5.6-luna
+plural run --task support-desk-first --model openai/gpt-5.6-luna
 ```
+
+`plural env init` writes an Environment with a working example Task and Verifier, so
+the first run scores straight away. Replace each place marked `PLURAL-TODO` with your
+own work; `plural task validate support-desk-first` lists the ones left. To start from
+an MCP server, an API, or traces instead, use `plural app add`; see
+[Create an Environment](docs/start/index.md).
 
 Every model call goes through the Plural gateway, billed at the provider's price, so a
 real run needs a Plural API key from [pluralintel.com](https://pluralintel.com). Every
 run is a Job, recorded under `.plural/jobs/` with each input pinned by version and
 content hash, so `plural job rerun` repeats it exactly.
 
-To run on Plural's servers instead, connect the folder to a private hosted project and
-add `--hosted`:
+Every Job runs from your machine. To see it in the web app as well, connect the folder
+to a private hosted project and add `--record`:
 
 ```bash
 plural project init my-eval --push
-plural run --task refund --model openai/gpt-5.6-luna --hosted --follow
+plural run --task refund --model openai/gpt-5.6-luna --record
 ```
 
-Pushing never makes anything public.
+To run Trials in cloud sandboxes, set the Environment's `runtime` to a provider such as
+`daytona`. Pushing never makes anything public.
 
 ## Python
 
@@ -93,7 +92,7 @@ result = Job(benchmark, agents=[agent]).run()
 
 ## Learn more
 
-Start with [Getting started](docs/getting-started.md), or read
+Start with the [Quickstart](docs/getting-started.md), or read
 [Core concepts](docs/getting-started/concepts.md) first. Coming from 0.20? The
 [changelog](CHANGELOG.md) lists every breaking change and what to write instead.
 

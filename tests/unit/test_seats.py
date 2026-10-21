@@ -457,6 +457,7 @@ async def test_each_seat_runs_its_own_harness_apart_and_is_scored_alone(tmp_path
     assert by_seat["seat_1"].agent_name == "alice" and by_seat["seat_1"].score == 1.5
     assert by_seat["seat_2"].agent_name == "bob" and by_seat["seat_2"].score == -1.0
     assert by_seat["seat_1"].step_reward_total == 1.5
+    assert trial.step_reward_total == 0.5
     assert by_seat["seat_1"].trace_id == "trace-seat_1"
 
     # Each seat has its own token, user, folder, and directions; none sees another's.

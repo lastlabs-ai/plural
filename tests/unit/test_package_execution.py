@@ -447,7 +447,7 @@ async def test_agent_secret_grants_must_be_declared_by_selected_harness(
     agent = AgentDefinition(
         name="agent",
         model="test/model",
-        secret_names=("UNDECLARED_API_KEY",),
+        secrets=("UNDECLARED_API_KEY",),
         harness=HarnessBinding.from_package(package),
         harness_package=package,
     )

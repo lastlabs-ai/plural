@@ -29,7 +29,7 @@ were used. The **manifest** lists every captured file and its fingerprint (hash)
 so you can tell if anything changed afterwards.
 
 `plural trial show TRIAL_ID` prints the paths of a Trial's artifacts and logs. For
-a tracked or hosted Job, you can open the same evidence in the web app under Jobs.
+a recorded or hosted Job, you can open the same evidence in the web app under Jobs.
 
 ## Local layout
 

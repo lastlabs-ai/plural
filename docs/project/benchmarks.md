@@ -42,7 +42,9 @@ different exam.
 Tasks count more than others, what counts as a pass, and what happens when an attempt
 crashes. It can also declare *tracks*, the rules that make two results fair to
 compare, such as "same loop, no extra instructions, two attempts each". Only the
-Verifier score counts. Rewards (small per-step credit used for training) never do.
+Verifier score counts. Rewards (small per-step credit used for training) count only
+when a Verifier turns them into its score with
+[`check: total_reward`](verifiers.md#make-the-reward-the-score).
 
 **Publishing.** Everything you build and run stays private to your project. If you
 want others to see a release and its leaderboard, you publish it to the Hub in the
@@ -149,7 +151,8 @@ plural benchmark push support-triage --with-deps
 `validate` checks the Benchmark and every Task, Environment, and Verifier it depends
 on. `push` saves an immutable, private revision; `--with-deps` also pushes
 dependencies that are not hosted yet. Pushing unchanged content reuses the existing
-revision, and a changed file under an unchanged `version` is refused. To use the saved
+revision, and changed content gets the next revision number; you never bump
+`version` by hand. To use the saved
 Benchmark from Python, load it with `Workspace(Project.find()).get("benchmark",
 "support-triage")` from `plural.project`.
 
@@ -178,8 +181,9 @@ plural run --benchmark support-triage --agent concise --attempts 2 --concurrency
 - Live runs send every model call through the Plural gateway, so they need a Plural
   API key, such as the one `plural auth login` stores. Calls are billed at the exact
   provider cost.
-- Runs are local by default and recorded under `.plural/jobs/`. `--hosted` runs the
-  pushed revisions on hosted infrastructure instead.
+- Every run is recorded under `.plural/jobs/`. `--record` also records it in the hosted
+  project, and `--evaluation-track ID` records it under one of the Benchmark's tracks
+  so its results can be ranked and published.
 
 A Python `Job` can compare several Agents in one Job. `job.run()` returns the results
 directly:
@@ -289,8 +293,8 @@ They do not reveal every internal reason a model made its decision.
 
 Local Jobs stay on your machine. `plural job rerun JOB_ID` runs the exact inputs a Job
 pinned again, as a new linked Job, even if your files have changed since. A Job run
-with `--hosted` is recorded in the hosted project, where Plural Intel can show it as a
-leaderboard.
+with `--record` is recorded in the hosted project, where Plural Intel shows it on the
+Benchmark's leaderboard.
 
 ## Use the findings
 
@@ -317,7 +321,8 @@ see the leaderboard. Pushing a Benchmark keeps it private to its project; publis
 to the Hub is a separate, explicit step on Plural Intel:
 
 1. Pick which results to publish. Each is frozen from exactly the Jobs it ran in, on
-   one track; untracked runs are never published.
+   one track. Bind a run to a track with `plural run ... --evaluation-track ID`;
+   runs on no track are never published.
 2. Choose whether Task instructions and Verifier findings on example attempts are
    public. Both are private by default because they can reveal answers. Traces,
    Verifier setups, hidden state, resources, and secrets are never published.
@@ -331,7 +336,8 @@ Others can submit results against an exact release and track. Every result is la
 Plural-executed, independently reproduced, or self-reported. That label says how a
 result was produced. It does not say whether the Benchmark is a good one.
 
-The public manifest is described in
+[Publish to the Hub](../platform/publish.md) walks through it step by step, and the
+public manifest is described in
 [Benchmark publications](../architecture/benchmark-publications.md).
 
 ## Going deeper
@@ -420,4 +426,4 @@ is reported only when at least `min_tasks_for_interval` Tasks (five by default) 
 results, and it does not include attempt-to-attempt variation. Cost is USD per attempt
 and latency is seconds per attempt, each averaged over the attempts that reported
 them; the count of measured attempts is always shown. Per-step rewards are
-never part of a score.
+part of a score only through a Verifier whose `check` is `total_reward`.

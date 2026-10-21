@@ -353,7 +353,7 @@ reply_quality = AgentVerifier(
 )
 ```
 
-Choose the judge model from `plural models list`, the same way you would when creating an
+Choose the judge model from `plural model list`, the same way you would when creating an
 Agent. You can also browse models and prices in the web app's model Catalog. An
 AgentVerifier brings its own judging instructions and rubric, so you don't need to
 create a separate Agent for it.

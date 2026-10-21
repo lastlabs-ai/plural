@@ -4,4 +4,4 @@ name: scripted
 version: 0.1.0
 model: openai/gpt-5.6-luna
 harness: scripted-triage
-auth_mode: none
+auth: none

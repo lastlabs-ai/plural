@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import (
+    AliasChoices,
     ConfigDict,
     Field,
     PrivateAttr,
@@ -21,12 +22,18 @@ from pydantic import (
     model_validator,
 )
 
+from plural._deprecation import renamed_attribute, renamed_keys
 from plural.apps.definition import SecretReference
 from plural.catalog import ModelCatalog
 from plural.common import FrozenModel, RoutingSpec
 from plural.identity import revision_hash
 from plural.rewards import HindsightVerifier
-from plural.sandbox.models import NetworkMode, ResourceRequirements
+from plural.sandbox.models import (
+    RUNTIME_RENAMES,
+    NetworkMode,
+    ResourceRequirements,
+    runtime_hash_payload,
+)
 
 
 class VerifierRuntime(FrozenModel):
@@ -39,19 +46,39 @@ class VerifierRuntime(FrozenModel):
     provider: str = Field(default="docker", min_length=1)
     image: str | None = None
     network: NetworkMode = NetworkMode.PUBLIC
-    network_allowlist: tuple[str, ...] = ()
-    resources: ResourceRequirements = Field(default_factory=ResourceRequirements)
+    allowed_hosts: tuple[str, ...] = Field(
+        default=(), validation_alias=AliasChoices("allowed_hosts", "network_allowlist")
+    )
+    compute: ResourceRequirements = Field(
+        default_factory=ResourceRequirements,
+        validation_alias=AliasChoices("compute", "resources"),
+    )
     timeout_seconds: float = Field(default=60, gt=0)
+
+    network_allowlist = renamed_attribute("network_allowlist", "allowed_hosts")
+    resources = renamed_attribute("resources", "compute")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _renamed_fields(cls, value: Any) -> Any:
+        return renamed_keys(value, RUNTIME_RENAMES, "VerifierRuntime")
 
     @model_validator(mode="after")
     def _network(self) -> VerifierRuntime:
-        if self.network_allowlist and self.network is not NetworkMode.ALLOWLIST:
+        if self.allowed_hosts and self.network is not NetworkMode.ALLOWLIST:
             raise ValueError(
                 "Cannot create VerifierRuntime.\n"
                 f"allowed_hosts is set but network={self.network.value!r}.\n"
                 "Set network='allowlist' or remove allowed_hosts."
             )
         return self
+
+
+def _legacy_runtime_keys(payload: dict[str, Any]) -> dict[str, Any]:
+    runtime = payload.get("runtime")
+    if isinstance(runtime, dict):
+        payload["runtime"] = runtime_hash_payload(runtime)
+    return payload
 
 
 def runtime_is_custom(runtime: VerifierRuntime) -> bool:
@@ -66,8 +93,8 @@ def runtime_is_custom(runtime: VerifierRuntime) -> bool:
     return bool(
         runtime.image
         or runtime.network is not NetworkMode.PUBLIC
-        or runtime.network_allowlist
-        or runtime.resources.configured
+        or runtime.allowed_hosts
+        or runtime.compute.configured
         or runtime.provider != "docker"
         or runtime.timeout_seconds != 60
     )
@@ -406,7 +433,7 @@ class Verifier(FrozenModel):
         return self.criteria
 
     def _hash_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json")
+        return _legacy_runtime_keys(self.model_dump(mode="json"))
 
     @property
     def content_hash(self) -> str:
@@ -556,7 +583,7 @@ class DeterministicVerifier(Verifier):
         return hook
 
     def _hash_payload(self) -> dict[str, Any]:
-        payload = self.model_dump(mode="json")
+        payload = _legacy_runtime_keys(self.model_dump(mode="json"))
         # A Verifier without a hook hashes as it did before that hook existed.
         for hook in ("reward", "hindsight"):
             if payload.get(hook) is None:
@@ -744,14 +771,10 @@ class AgentVerifier(Verifier):
         selected = catalog.get(self.model)
         if selected is None:
             nearby = catalog.suggest(self.model) if hasattr(catalog, "suggest") else []
-            hint = (
-                f" Nearby catalog IDs: {', '.join(nearby)}."
-                if nearby
-                else " Call ModelCatalog().ids() or plural models list to see registered IDs."
-            )
+            hint = f" Did you mean {', '.join(nearby)}?" if nearby else ""
             raise ValueError(
-                f"Cannot create AgentVerifier {self.name!r}.\n"
-                f"model {self.model!r} is not registered in the effective ModelCatalog.{hint}"
+                f"Verifier {self.name!r}: unknown model {self.model!r}.{hint} "
+                "`plural model list` shows every model id."
             )
         if self.provider is not None and self.provider not in selected.host_providers():
             raise ValueError(
@@ -762,8 +785,7 @@ class AgentVerifier(Verifier):
         if unknown:
             raise ValueError(
                 f"Cannot create AgentVerifier {self.name!r}.\n"
-                "fallback models are not registered in the effective ModelCatalog: "
-                + ", ".join(repr(model) for model in unknown)
+                "unknown fallback models: " + ", ".join(repr(model) for model in unknown)
             )
         return self
 

@@ -2,7 +2,7 @@
 
 A recorded trace is an OpenAI-style message list: the conversation an agent
 had, with its tool calls and their results, and optionally the tools it was
-offered. ``plural env add --traces`` turns the tool calls into replay Apps and
+offered. ``plural app add --traces`` turns the tool calls into replay Apps and
 each conversation into a draft Task.
 """
 

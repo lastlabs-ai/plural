@@ -319,7 +319,7 @@ def test_login_hides_a_key_typed_at_a_terminal(
 
 def test_models_list_shows_the_whole_catalog_outside_an_organization(fake: FakeHosted) -> None:
     login()
-    code, output = cli("models", "list", "--json")
+    code, output = cli("model", "list", "--json")
     assert code == 0, output
     payload = json.loads(output)
     assert payload["scope"] == "account"
@@ -330,13 +330,13 @@ def test_models_list_defaults_to_the_organization_models(fake: FakeHosted) -> No
     fake.organization_models = ["anthropic/claude-sonnet-5"]
     login()
 
-    code, output = cli("models", "list")
+    code, output = cli("model", "list")
     assert code == 0, output
     assert "anthropic/claude-sonnet-5" in output
     assert "openai/gpt-5.6-luna" not in output
     assert "--all" in output
 
-    code, output = cli("models", "list", "--all", "--json")
+    code, output = cli("model", "list", "--all", "--json")
     assert code == 0, output
     payload = json.loads(output)
     assert payload["scope"] == "all"

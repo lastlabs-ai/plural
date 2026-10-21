@@ -7,6 +7,7 @@ then runs, then hosting and advanced machinery.
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
+from typing import Any
 
 from plural.agents import Agent
 from plural.apps import App, AppDefinition
@@ -14,7 +15,7 @@ from plural.benchmarks import BenchmarkCategory, BenchmarkScoring, EvaluationTra
 
 # Hosting and models.
 from plural.catalog import CatalogContext, ModelCatalog, ModelSpec, estimate_cost
-from plural.client import Client, Plural
+from plural.client import Client
 
 # Advanced: harness protocol, sandbox providers, tracing, errors, utilities.
 from plural.common import (
@@ -54,14 +55,14 @@ from plural.errors import (
     InvalidRequestError,
     NotFoundError,
     PluralError,
+    PluralTimeoutError,
     ProviderUnavailable,
     RateLimitError,
-    TimeoutError,
     is_retryable,
 )
 
 # Running: jobs, trials, and their results.
-from plural.execution import JobStore, Trial
+from plural.execution import JobStore
 from plural.harness import (
     Harness,
     HarnessAgent,
@@ -101,13 +102,13 @@ from plural.rewards import (
     RewardTarget,
 )
 from plural.sandbox import (
-    Capability,
     DaytonaProvider,
     DeclarativeImage,
     DockerProvider,
     LocalProvider,
     NetworkMode,
     ProviderRegistry,
+    SandboxCapability,
     SandboxProvider,
     SandboxRequirements,
 )
@@ -116,13 +117,13 @@ from plural.studio import Studio
 from plural.tasks import Benchmark, BenchmarkDiff, Task, TaskPin
 from plural.tracing import (
     JSONLSink,
-    Outcome,
     Redactor,
     Sampler,
     SQLiteSink,
     Trace,
     TraceContext,
     TraceKind,
+    TraceOutcome,
     TraceWriter,
 )
 from plural.trajectory import Trajectory, TrajectoryEvent, normalize_trajectory
@@ -142,6 +143,28 @@ from plural.verifiers import (
     VerifierRuntime,
     total_reward,
 )
+
+_DEPRECATED: dict[str, tuple[str, str]] = {
+    "Capability": ("SandboxCapability", "plural.sandbox.models"),
+    "Outcome": ("TraceOutcome", "plural.tracing.schema"),
+    "Plural": ("Client", "plural.client"),
+    "TimeoutError": ("PluralTimeoutError", "plural.errors"),
+    "Trial": ("TrialRunner", "plural.execution.engine"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    renamed = _DEPRECATED.get(name)
+    if renamed is None:
+        raise AttributeError(f"module 'plural' has no attribute {name!r}")
+    import importlib
+
+    from plural._deprecation import warn_renamed
+
+    new, module = renamed
+    warn_renamed(f"plural.{name}", f"{module}.{new}" if name == "Trial" else f"plural.{new}")
+    return getattr(importlib.import_module(module), new)
+
 
 try:
     __version__ = version("plural")
@@ -200,13 +223,11 @@ __all__ = [
     "JobStore",
     "RetryPolicy",
     "SessionSnapshot",
-    "Trial",
     "TrialResult",
     # Hosting and models.
     "Client",
     "ModelCatalog",
     "ModelSpec",
-    "Plural",
     "Studio",
     "estimate_cost",
     # Advanced.
@@ -217,7 +238,7 @@ __all__ = [
     "AuthenticationError",
     "BenchmarkDiff",
     "BudgetExceededError",
-    "Capability",
+    "SandboxCapability",
     "ChatRequest",
     "ChatResponse",
     "ConfigurationError",
@@ -246,9 +267,10 @@ __all__ = [
     "Message",
     "NetworkMode",
     "NotFoundError",
-    "Outcome",
+    "TraceOutcome",
     "STOP_REASONS",
     "PluralError",
+    "PluralTimeoutError",
     "ProgressEvent",
     "ProviderRegistry",
     "ProviderUnavailable",
@@ -261,7 +283,6 @@ __all__ = [
     "SeatTurn",
     "TITORecord",
     "TaskPin",
-    "TimeoutError",
     "Tool",
     "Trace",
     "TraceContext",

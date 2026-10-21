@@ -9,6 +9,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from plural._deprecation import module_getattr
+
 
 class SandboxModel(BaseModel):
     """Strict immutable base for sandbox values."""
@@ -44,7 +46,7 @@ class NetworkMode(str, Enum):
         return aliases.get(value.strip().lower())
 
 
-class Capability(str, Enum):
+class SandboxCapability(str, Enum):
     """Individual controls a provider can enforce."""
 
     IMAGE = "image"
@@ -69,10 +71,10 @@ class ProviderCapabilities(SandboxModel):
 
     provider: str
     available: bool
-    capabilities: frozenset[Capability]
+    capabilities: frozenset[SandboxCapability]
     reason: str | None = None
 
-    def supports(self, capability: Capability) -> bool:
+    def supports(self, capability: SandboxCapability) -> bool:
         """Return whether a control is available."""
         return capability in self.capabilities
 
@@ -142,70 +144,94 @@ class SandboxRequirements(SandboxModel):
             raise ValueError("image, snapshot, and declarative_image are mutually exclusive")
         return self
 
-    def required_capabilities(self) -> frozenset[Capability]:
+    def required_capabilities(self) -> frozenset[SandboxCapability]:
         """Return the controls that must be enforceable."""
         required = {
-            Capability.UPLOAD,
-            Capability.DOWNLOAD,
-            Capability.TIMEOUT,
-            Capability.CANCEL,
-            Capability.WORKING_DIRECTORY,
-            Capability.ENVIRONMENT,
-            Capability.LOG_CAPTURE,
+            SandboxCapability.UPLOAD,
+            SandboxCapability.DOWNLOAD,
+            SandboxCapability.TIMEOUT,
+            SandboxCapability.CANCEL,
+            SandboxCapability.WORKING_DIRECTORY,
+            SandboxCapability.ENVIRONMENT,
+            SandboxCapability.LOG_CAPTURE,
         }
         if self.image or self.snapshot or self.declarative_image:
-            required.add(Capability.IMAGE)
+            required.add(SandboxCapability.IMAGE)
         if self.build_context:
-            required.add(Capability.BUILD)
+            required.add(SandboxCapability.BUILD)
         if self.resources.configured:
-            required.add(Capability.RESOURCES)
+            required.add(SandboxCapability.RESOURCES)
         if self.network is NetworkMode.NONE:
-            required.add(Capability.NETWORK_NONE)
+            required.add(SandboxCapability.NETWORK_NONE)
         elif self.network is NetworkMode.RESTRICTED:
-            required.add(Capability.NETWORK_ALLOWLIST)
+            required.add(SandboxCapability.NETWORK_ALLOWLIST)
         if self.persistent:
-            required.add(Capability.PERSISTENCE)
+            required.add(SandboxCapability.PERSISTENCE)
         if self.compose:
-            required.add(Capability.COMPOSE)
+            required.add(SandboxCapability.COMPOSE)
         if self.read_only_root:
-            required.add(Capability.READ_ONLY_ROOT)
+            required.add(SandboxCapability.READ_ONLY_ROOT)
         return frozenset(required)
 
 
-def environment_required_capabilities(runtime: Any) -> frozenset[Capability]:
+RUNTIME_RENAMES = {
+    "network_allowlist": "allowed_hosts",
+    "build_timeout_sec": "build_timeout_seconds",
+    "resources": "compute",
+}
+"""Old Runtime field names, accepted on input for one release, and their new names."""
+
+
+def runtime_hash_payload(runtime: dict[str, Any]) -> dict[str, Any]:
+    """A dumped Runtime keyed by its original field names, for content hashing.
+
+    Renaming a field must not change the identity of every Environment and
+    Verifier that declares a Runtime.
+
+    Returns:
+        A copy with each renamed field under its old name.
+    """
+    payload = dict(runtime)
+    for old, new in RUNTIME_RENAMES.items():
+        if new in payload:
+            payload[old] = payload.pop(new)
+    return payload
+
+
+def environment_required_capabilities(runtime: Any) -> frozenset[SandboxCapability]:
     """Derive sandbox controls required by an environment runtime declaration."""
     required = {
-        Capability.UPLOAD,
-        Capability.DOWNLOAD,
-        Capability.TIMEOUT,
-        Capability.CANCEL,
-        Capability.WORKING_DIRECTORY,
-        Capability.ENVIRONMENT,
-        Capability.LOG_CAPTURE,
+        SandboxCapability.UPLOAD,
+        SandboxCapability.DOWNLOAD,
+        SandboxCapability.TIMEOUT,
+        SandboxCapability.CANCEL,
+        SandboxCapability.WORKING_DIRECTORY,
+        SandboxCapability.ENVIRONMENT,
+        SandboxCapability.LOG_CAPTURE,
     }
     if (
         getattr(runtime, "image", None)
         or getattr(runtime, "snapshot", None)
         or getattr(runtime, "declarative_image", None)
     ):
-        required.add(Capability.IMAGE)
+        required.add(SandboxCapability.IMAGE)
     if getattr(runtime, "build_context", None):
-        required.add(Capability.BUILD)
-    resources = getattr(runtime, "resources", None)
-    if resources is not None and getattr(resources, "configured", False):
-        required.add(Capability.RESOURCES)
+        required.add(SandboxCapability.BUILD)
+    compute = getattr(runtime, "compute", None)
+    if compute is not None and getattr(compute, "configured", False):
+        required.add(SandboxCapability.RESOURCES)
     network = getattr(runtime, "network", NetworkMode.NONE)
     if network is NetworkMode.NONE:
-        required.add(Capability.NETWORK_NONE)
+        required.add(SandboxCapability.NETWORK_NONE)
     elif network is NetworkMode.RESTRICTED:
-        required.add(Capability.NETWORK_ALLOWLIST)
+        required.add(SandboxCapability.NETWORK_ALLOWLIST)
     if getattr(runtime, "persistent", False):
-        required.add(Capability.PERSISTENCE)
+        required.add(SandboxCapability.PERSISTENCE)
     if getattr(runtime, "compose", False):
-        required.add(Capability.COMPOSE)
+        required.add(SandboxCapability.COMPOSE)
     if getattr(runtime, "read_only_root", False):
-        required.add(Capability.READ_ONLY_ROOT)
-    extra: frozenset[Capability] = (
+        required.add(SandboxCapability.READ_ONLY_ROOT)
+    extra: frozenset[SandboxCapability] = (
         getattr(runtime, "extra_capabilities", frozenset()) or frozenset()
     )
     return frozenset(required) | frozenset(extra)
@@ -216,7 +242,7 @@ class EffectiveSandboxPolicy(SandboxModel):
 
     provider: str
     requirements: SandboxRequirements
-    enforced: frozenset[Capability]
+    enforced: frozenset[SandboxCapability]
 
 
 class SandboxHandle(SandboxModel):
@@ -337,9 +363,17 @@ def safe_relative_path(value: str) -> str:
     return str(path)
 
 
+_renamed = module_getattr(
+    "plural.sandbox.models", {"Capability": ("SandboxCapability", lambda: SandboxCapability)}
+)
+
+
+def __getattr__(name: str) -> Any:
+    return _renamed(name)
+
+
 __all__ = [
     "AppIsolation",
-    "Capability",
     "CapabilityError",
     "DeclarativeImage",
     "DownloadedFile",
@@ -353,6 +387,8 @@ __all__ = [
     "ProviderDoctor",
     "ProviderUnavailableError",
     "ResourceRequirements",
+    "RUNTIME_RENAMES",
+    "SandboxCapability",
     "SandboxError",
     "SandboxHandle",
     "SandboxRequirements",

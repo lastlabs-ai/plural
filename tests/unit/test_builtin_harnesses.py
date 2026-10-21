@@ -39,11 +39,11 @@ def test_agent_accepts_builtin_name_and_kwargs() -> None:
     agent = Agent(
         model="anthropic/claude-sonnet-5",
         harness="claude-code",
-        harness_kwargs={"reasoning_effort": "high"},
+        harness_config={"reasoning_effort": "high"},
     )
     assert agent.harness == "claude-code"
-    assert agent.harness_kwargs["reasoning_effort"] == "high"
-    assert agent.harness_kwargs["version"] == get_builtin("claude-code").pinned_version
+    assert agent.harness_config["reasoning_effort"] == "high"
+    assert agent.harness_config["version"] == get_builtin("claude-code").pinned_version
     package = agent._resolved_package()
     assert package is not None
     assert package.definition.implementation == "runnable"
@@ -68,11 +68,11 @@ def test_builtins_use_the_standard_harness_run_interface() -> None:
 def test_agent_rejects_unknown_name_and_invalid_kwargs() -> None:
     with pytest.raises(ValueError, match="Unknown built-in Harness"):
         Agent(model="openai/gpt-5.6-luna", harness="cursor")
-    with pytest.raises(ValueError, match="Invalid harness_kwargs"):
+    with pytest.raises(ValueError, match="Invalid harness_config"):
         Agent(
             model="anthropic/claude-sonnet-5",
             harness="claude-code",
-            harness_kwargs={"reasoning_effort": "ludicrous"},
+            harness_config={"reasoning_effort": "ludicrous"},
         )
     with pytest.raises(ValueError, match="accepts"):
         Agent(model="openai/gpt-5.6-luna", harness="claude-code")
@@ -84,19 +84,19 @@ def test_config_file_is_normalized_into_agent_hash(tmp_path: Path) -> None:
     first = Agent(
         model="openai/gpt-5.6-luna",
         harness="codex",
-        harness_kwargs={"config": str(config)},
+        harness_config={"config": str(config)},
     )
     second = Agent(
         model="openai/gpt-5.6-luna",
         harness="codex",
-        harness_kwargs={"config": {"model_context_window": 200000}},
+        harness_config={"config": {"model_context_window": 200000}},
     )
-    assert first.harness_kwargs["config"] == {"model_context_window": 200000}
+    assert first.harness_config["config"] == {"model_context_window": 200000}
     assert first.content_hash == second.content_hash
     changed = Agent(
         model="openai/gpt-5.6-luna",
         harness="codex",
-        harness_kwargs={"config": {"model_context_window": 1000}},
+        harness_config={"config": {"model_context_window": 1000}},
     )
     assert changed.content_hash != first.content_hash
 
@@ -121,7 +121,7 @@ def test_agent_yaml_keeps_compact_builtin_and_matches_python(tmp_path: Path) -> 
         model="anthropic/claude-sonnet-5",
         name="baseline",
         harness="claude-code",
-        harness_kwargs={"permission_mode": "acceptEdits"},
+        harness_config={"permission_mode": "acceptEdits"},
     )
     space = _agent_project(
         tmp_path / "support-desk",
@@ -129,14 +129,14 @@ def test_agent_yaml_keeps_compact_builtin_and_matches_python(tmp_path: Path) -> 
         "version: 0.1.0\n"
         "model: anthropic/claude-sonnet-5\n"
         "harness: claude-code\n"
-        "harness_kwargs:\n"
+        "harness_config:\n"
         "  permission_mode: acceptEdits\n",
     )
     loaded = space.load(ResourceRef("agent", "baseline"))
     restored = loaded.value
     assert isinstance(restored, Agent)
     assert restored.harness == "claude-code"
-    assert restored.harness_kwargs["permission_mode"] == "acceptEdits"
+    assert restored.harness_config["permission_mode"] == "acceptEdits"
     assert restored.content_hash == agent.content_hash
     assert loaded.dependencies == ()
     job = Job(_task(), agents=(agent,))
@@ -190,13 +190,13 @@ def test_cli_lists_builtins_and_shows_their_schema(
     body = json.loads(shown.stdout)
     assert body["location"] == "built-in"
     assert body["pinned_version"] == get_builtin("claude-code").pinned_version
-    assert body["harness_kwargs"]["title"] == "claude-code"
-    assert "reasoning_effort" in body["harness_kwargs"]["properties"]
+    assert body["harness_config"]["title"] == "claude-code"
+    assert "reasoning_effort" in body["harness_config"]["properties"]
     unknown = runner.invoke(app, ["harness", "show", "cursor"])
     assert unknown.exit_code == 1
     assert builtin_schema("codex")["x-pinned-version"] == get_builtin("codex").pinned_version
 
 
 def test_normalize_kwargs_rejects_unknown_fields() -> None:
-    with pytest.raises(ValueError, match="Invalid harness_kwargs"):
+    with pytest.raises(ValueError, match="Invalid harness_config"):
         normalize_kwargs("hermes", {"unknown": True})

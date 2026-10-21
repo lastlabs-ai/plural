@@ -27,7 +27,7 @@ import threading
 from typing import Any
 
 from plural.tracing.redaction import Redactor, Sampler
-from plural.tracing.schema import Outcome, Trace
+from plural.tracing.schema import Trace, TraceOutcome
 from plural.tracing.sinks import Sink
 
 
@@ -53,7 +53,7 @@ class TraceWriter:
         self.redactor = redactor
         self.sampler = sampler or Sampler(rate=1.0)
         self._queue: queue.Queue[Trace | None] = queue.Queue(maxsize=maxsize)
-        self._labels: dict[str, Outcome] = {}
+        self._labels: dict[str, TraceOutcome] = {}
         self._lock = threading.Lock()
         self._thread = threading.Thread(target=self._run, name="plural-trace-writer", daemon=True)
         self._closed = False
@@ -71,7 +71,7 @@ class TraceWriter:
         with self._lock:
             pending = self._labels.pop(trace.trace_id, None)
         if pending is not None:
-            current = trace.outcome or Outcome()
+            current = trace.outcome or TraceOutcome()
             current.scores.update(pending.scores)
             if pending.reward is not None:
                 current.reward = pending.reward
@@ -106,7 +106,7 @@ class TraceWriter:
             labels: Discrete labels.
             feedback: Free-form feedback.
         """
-        outcome = Outcome(
+        outcome = TraceOutcome(
             scores=scores or {},
             reward=reward,
             labels=labels or {},

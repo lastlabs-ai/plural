@@ -75,7 +75,7 @@ def test_an_endpoint_agent_needs_no_catalog_model() -> None:
     definition = agent._definition()
     assert definition.endpoint == "https://agents.acme.dev/v1"
     assert definition.endpoint_key == "ACME_AGENT_KEY"
-    with pytest.raises(ValidationError, match="not registered"):
+    with pytest.raises(ValidationError, match="Unknown model"):
         Agent(model="acme/support-agent")
 
 
@@ -123,7 +123,7 @@ def test_the_native_runner_calls_the_endpoint_instead_of_the_gateway(
     monkeypatch.setenv("PLURAL_AGENT_ENDPOINT", agent_server)
     monkeypatch.setenv("PLURAL_AGENT_ENDPOINT_KEY", "sk-acme")
 
-    reply = native_runner._model_call(
+    reply, _ = native_runner._model_call(
         model="acme/agent",
         routing={"temperature": 0.2},
         messages=[{"role": "user", "content": "hi"}],

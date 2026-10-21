@@ -78,7 +78,7 @@ instance folder, such as
 distinct instance you can start, stop, and compare independently.
 
 ```bash
-plural session import sessions/support --dest sessions/instances
+plural session import sessions/support --out sessions/instances
 ```
 
 ## Python API

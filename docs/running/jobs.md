@@ -118,7 +118,7 @@ at 0.25 seconds and doubles each time, up to 10 seconds.
 > **Tip:** Do not use retries to hide configuration, evidence, or policy errors.
 > Fix those instead.
 
-## Local, tracked, and hosted
+## Local and recorded
 
 By default, `plural run` runs the Job from this machine and records it only under
 `.plural/jobs`. Each Environment's `runtime.provider` decides where its Trials
@@ -131,26 +131,22 @@ the web app under Jobs:
 
 | Command | What it does |
 | --- | --- |
-| `plural job push JOB_ID` | Records a finished local Job in the hosted project. |
-| `plural run ... --track` | Records the Job in the hosted project while it runs here. |
-| `plural run ... --hosted` | Submits the Job for hosted infrastructure to run. |
+| `plural job record JOB_ID` | Records a finished local Job in the hosted project. |
+| `plural run ... --record` | Records the Job in the hosted project while it runs here. |
 
-`job push` and `--track` create the same hosted Job, marked as run by a client,
-so pushing a tracked Job again records nothing twice. A tracked run opens each
+Plural never runs a Job on its own servers.
+
+`job record` and `--record` create the same hosted Job, marked as run by a client,
+so recording a Job again records nothing twice. A recorded run opens each
 hosted execution as it starts, reports liveness while it runs, and publishes the
 trajectory, usage, and Verifier results when it ends. If the hosted service
-cannot be reached mid-run, the local Job still finishes and `plural job push`
+cannot be reached mid-run, the local Job still finishes and `plural job record`
 fills in what was missed.
 
-A hosted Job pins pushed revisions. `plural job push` needs the revisions the
-local Job ran to be pushed already. `--track` and `--hosted` push whatever the
-hosted project lacks first, as a new numbered revision of any resource whose files
-changed. `--follow` streams hosted progress for `--hosted`
-Jobs. See [Push and pull resources](../guides/studio-sync.md).
-
-Hosted execution also needs credentials and Runtime providers that fit the
-project's policy. A successful local run does not imply the same inputs can run
-hosted.
+A hosted Job pins pushed revisions. `plural job record` needs the revisions the
+local Job ran to be pushed already. `--record` pushes whatever the hosted project
+lacks first, as a new numbered revision of any resource whose files changed. See
+[Record runs and run in the cloud](../platform/runs.md).
 
 ## Evaluate before routing or training
 

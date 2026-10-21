@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 
+from plural._deprecation import renamed_attribute, renamed_keys
 from plural.apps.definition import (
     AppDefinition,
     ExposedAction,
@@ -35,11 +36,13 @@ from plural.common import (
 from plural.identity import revision_hash
 from plural.sandbox.catalog import runtime_provider
 from plural.sandbox.models import (
-    Capability,
+    RUNTIME_RENAMES,
     DeclarativeImage,
     NetworkMode,
     ResourceRequirements,
+    SandboxCapability,
     environment_required_capabilities,
+    runtime_hash_payload,
 )
 
 
@@ -220,11 +223,16 @@ class EnvironmentRuntime(FrozenModel):
     build_context: str | None = None
     dockerfile: str | None = None
     network: NetworkMode = NetworkMode.PUBLIC
-    network_allowlist: tuple[str, ...] = Field(
+    allowed_hosts: tuple[str, ...] = Field(
         default=(),
-        validation_alias=AliasChoices("network_allowlist", "allowed_hosts"),
+        validation_alias=AliasChoices("allowed_hosts", "network_allowlist"),
+        description="Hosts the Runtime may reach when network is 'allowlist'.",
     )
-    resources: ResourceRequirements = Field(default_factory=ResourceRequirements)
+    compute: ResourceRequirements = Field(
+        default_factory=ResourceRequirements,
+        validation_alias=AliasChoices("compute", "resources"),
+        description="CPU, memory, storage, and process limits for the Runtime.",
+    )
     packages: RuntimePackages = Field(
         default_factory=RuntimePackages,
         description="Packages installed in the Runtime before an episode. In "
@@ -237,31 +245,37 @@ class EnvironmentRuntime(FrozenModel):
     )
     persistent: bool = False
     compose: bool = False
-    extra_capabilities: frozenset[Capability] = frozenset()
+    extra_capabilities: frozenset[SandboxCapability] = frozenset()
     timeout_seconds: float = Field(default=300, gt=0)
-    build_timeout_sec: float = Field(default=600, gt=0)
+    build_timeout_seconds: float = Field(
+        default=600,
+        gt=0,
+        validation_alias=AliasChoices("build_timeout_seconds", "build_timeout_sec"),
+    )
     allow_unsafe_local: bool = False
+
+    network_allowlist = renamed_attribute("network_allowlist", "allowed_hosts")
+    build_timeout_sec = renamed_attribute("build_timeout_sec", "build_timeout_seconds")
+    resources = renamed_attribute("resources", "compute")
 
     @model_validator(mode="before")
     @classmethod
     def _convenience_resources(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
-        payload = dict(value)
-        resources = dict(payload.get("resources") or {})
+        payload = dict(renamed_keys(value, RUNTIME_RENAMES, "Runtime"))
+        compute = dict(payload.get("compute") or {})
         for source, target in (
             ("cpus", "cpu"),
             ("memory_mb", "memory_mb"),
             ("storage_mb", "storage_mb"),
         ):
-            if source in payload and target not in resources:
-                resources[target] = payload.pop(source)
-        if "allowed_hosts" in payload and "network_allowlist" not in payload:
-            payload["network_allowlist"] = payload.pop("allowed_hosts")
+            if source in payload and target not in compute:
+                compute[target] = payload.pop(source)
         if "python_packages" in payload and "packages" not in payload:
             payload["packages"] = {"python": payload.pop("python_packages") or ()}
-        if resources:
-            payload["resources"] = resources
+        if compute:
+            payload["compute"] = compute
         return payload
 
     @model_validator(mode="after")
@@ -269,15 +283,15 @@ class EnvironmentRuntime(FrozenModel):
         names = [item.name for item in self.variables]
         if len(names) != len(set(names)):
             raise ValueError("Runtime variable names must be unique")
-        if self.network_allowlist and self.network is not NetworkMode.ALLOWLIST:
+        if self.allowed_hosts and self.network is not NetworkMode.ALLOWLIST:
             raise ValueError(
                 "Cannot create Runtime.\n"
-                f"allowed_hosts is set ({list(self.network_allowlist)!r}) but "
+                f"allowed_hosts is set ({list(self.allowed_hosts)!r}) but "
                 f"network={self.network.value!r}.\n"
                 "Set network='allowlist' (Harbor name) or network='restricted' "
                 "(legacy alias), or remove allowed_hosts."
             )
-        if self.network is NetworkMode.ALLOWLIST and not self.network_allowlist:
+        if self.network is NetworkMode.ALLOWLIST and not self.allowed_hosts:
             raise ValueError(
                 "Cannot create Runtime.\n"
                 "network='allowlist' requires at least one host in allowed_hosts.\n"
@@ -340,9 +354,9 @@ class EnvironmentRuntime(FrozenModel):
             fields.setdefault("build_context", build_context or ".")
             fields["dockerfile"] = dockerfile
         if allowed_hosts:
-            fields["network_allowlist"] = allowed_hosts
+            fields["allowed_hosts"] = allowed_hosts
         if any(item is not None for item in (cpus, memory_mb, storage_mb)):
-            fields["resources"] = ResourceRequirements(
+            fields["compute"] = ResourceRequirements(
                 cpu=cpus,
                 memory_mb=memory_mb,
                 storage_mb=storage_mb,
@@ -391,7 +405,7 @@ class EnvironmentRuntime(FrozenModel):
             A Daytona Runtime.
         """
         if allowed_hosts:
-            fields["network_allowlist"] = allowed_hosts
+            fields["allowed_hosts"] = allowed_hosts
         return cls(
             provider="daytona",
             image=image,
@@ -399,11 +413,6 @@ class EnvironmentRuntime(FrozenModel):
             targets=frozenset({ExecutionTarget.REMOTE}),
             **fields,
         )
-
-    @property
-    def allowed_hosts(self) -> tuple[str, ...]:
-        """Harbor name for the network allowlist."""
-        return self.network_allowlist
 
     @property
     def requested_target(self) -> ExecutionTarget:
@@ -415,7 +424,7 @@ class EnvironmentRuntime(FrozenModel):
             return ExecutionTarget.REMOTE
         return ExecutionTarget.DOCKER
 
-    def required_capabilities(self) -> frozenset[Capability]:
+    def required_capabilities(self) -> frozenset[SandboxCapability]:
         """Provider capabilities needed by this runtime.
 
         Returns:
@@ -438,8 +447,8 @@ class EnvironmentRuntime(FrozenModel):
             reasons.setdefault(ExecutionTarget.LOCAL, "cannot enforce persistence")
         if self.compose:
             reasons.setdefault(ExecutionTarget.LOCAL, "cannot enforce compose")
-        if self.resources.configured:
-            reasons.setdefault(ExecutionTarget.LOCAL, "cannot enforce resource limits")
+        if self.compute.configured:
+            reasons.setdefault(ExecutionTarget.LOCAL, "cannot enforce compute limits")
         if self.build_context or self.dockerfile:
             reasons[ExecutionTarget.REMOTE] = "remote provider cannot consume a local build context"
         return reasons
@@ -777,6 +786,7 @@ class EnvironmentDefinition(FrozenModel):
         if not self.runtime.packages:
             # Runtimes that install nothing keep the identity they had before packages.
             del payload["runtime"]["packages"]
+        payload["runtime"] = runtime_hash_payload(payload["runtime"])
         for app in payload["apps"]:
             # Apps that need no credentials keep the identity they had before credentials.
             if not app["credentials"]:

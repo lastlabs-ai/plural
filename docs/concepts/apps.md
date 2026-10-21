@@ -31,10 +31,10 @@ Most Apps are MCP servers. Pick the row that matches what you have:
 | You have | Kind | Start with |
 | --- | --- | --- |
 | Nothing yet; you want to write the system | `mcp`, a server you write with FastMCP | `plural env init` |
-| A hosted MCP server, such as your CRM's | `mcp`, reached by URL | `plural env add ENV --mcp URL`, or **Add system** on the Environment's Apps tab |
-| Files: documents, CSV, JSON, or SQLite | `mcp`, Plural's files server | `server: plural.mcp.files:server` |
-| An HTTP API with an OpenAPI document | `openapi` | `plural env add ENV --openapi SPEC` |
-| Recorded traces of an agent at work | `replay` | `plural env add ENV --traces FILE` |
+| A hosted MCP server, such as your CRM's | `mcp`, reached by URL | `plural app add ENV --mcp URL`, or **Add system** on the Environment's Apps tab |
+| Files: documents, CSV, JSON, or SQLite | `mcp`, Plural's files server | `plural app add ENV --files-server` |
+| An HTTP API with an OpenAPI document | `openapi` | `plural app add ENV --openapi SPEC` |
+| Recorded traces of an agent at work | `replay` | `plural app add ENV --traces FILE` |
 | A simulation you'd rather write as a class, such as a game | Python, a subclass of `App` | `plural env init --python` |
 
 A server you write is an ordinary [FastMCP](https://gofastmcp.com) server. Every tool is

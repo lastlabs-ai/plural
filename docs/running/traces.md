@@ -98,7 +98,7 @@ Benchmark.
 
 ## Read hosted records
 
-For a tracked or hosted Job, open it in the web app under Jobs, choose a Trial,
+For a recorded or hosted Job, open it in the web app under Jobs, choose a Trial,
 and follow its trace and artifact references. Hosted records depend on evidence
 being uploaded or ingested; a local file path cannot be opened by another user's
 browser.
@@ -128,7 +128,7 @@ If an agent is already running somewhere, such as in production or another
 framework, its recorded conversations can become an Environment and Tasks:
 
 ```bash
-plural env add support --traces conversations.json
+plural app add support --traces conversations.json
 ```
 
 This writes an Environment with one replay App per system the traces used, whose

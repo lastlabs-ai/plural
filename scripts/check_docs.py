@@ -24,32 +24,36 @@ HEADING = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 ANY_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE)
 REQUIRED_FIELDS = frozenset({"route", "title", "order", "description", "audience", "nav"})
 AUDIENCES = frozenset({"all", "developers", "operators", "maintainers", "internal"})
-NAV_GROUPS = frozenset({"Start", "Build", "Run", "Interfaces", "Tutorials", "Operations"})
+NAV_GROUPS = frozenset(
+    {"Start", "Build", "Run", "Platform", "Interfaces", "Tutorials", "Operations"}
+)
 PACKAGE_NAV = [
     ("Start", "/docs", "index.md"),
-    ("Start", "/docs/getting-started/concepts", "getting-started/concepts.md"),
     ("Start", "/docs/getting-started", "getting-started.md"),
+    ("Start", "/docs/getting-started/concepts", "getting-started/concepts.md"),
     ("Start", "/docs/start", "start/index.md"),
     ("Start", "/docs/start/from-traces", "start/from-traces.md"),
     ("Start", "/docs/start/from-a-system", "start/from-a-system.md"),
-    ("Start", "/docs/start/from-scratch", "start/from-scratch.md"),
     ("Build", "/docs/concepts/apps", "concepts/apps.md"),
     ("Build", "/docs/project/environments", "project/environments.md"),
     ("Build", "/docs/guides/build-mcp-server", "guides/build-mcp-server.md"),
     ("Build", "/docs/guides/connect-mcp-server", "guides/connect-mcp-server.md"),
     ("Build", "/docs/project/runtimes", "project/runtimes.md"),
     ("Build", "/docs/project/tasks", "project/tasks.md"),
-    ("Build", "/docs/project/multi-agent", "project/multi-agent.md"),
     ("Build", "/docs/project/verifiers", "project/verifiers.md"),
     ("Build", "/docs/project/harnesses", "project/harnesses.md"),
     ("Build", "/docs/project/agents", "project/agents.md"),
     ("Build", "/docs/project/benchmarks", "project/benchmarks.md"),
+    ("Build", "/docs/project/multi-agent", "project/multi-agent.md"),
     ("Run", "/docs/running/jobs", "running/jobs.md"),
     ("Run", "/docs/running/trials", "running/trials.md"),
     ("Run", "/docs/running/sessions", "running/sessions.md"),
     ("Run", "/docs/running/artifacts", "running/artifacts.md"),
     ("Run", "/docs/running/reviews", "running/reviews.md"),
     ("Run", "/docs/running/training", "running/training.md"),
+    ("Platform", "/docs/platform/runs", "platform/runs.md"),
+    ("Platform", "/docs/guides/studio-sync", "guides/studio-sync.md"),
+    ("Platform", "/docs/platform/publish", "platform/publish.md"),
     ("Interfaces", "/docs/sdk/evaluation", "sdk/evaluation.md"),
     ("Interfaces", "/docs/cli/evaluation", "cli/evaluation.md"),
     ("Interfaces", "/docs/interfaces/yaml", "interfaces/yaml.md"),

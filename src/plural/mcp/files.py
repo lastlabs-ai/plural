@@ -19,7 +19,8 @@ ends; its snapshot is every file written there, for Verifiers. The resource
 folders are never changed.
 
 To change what it offers, copy it into your Environment with
-``plural mcp eject files ENVIRONMENT`` and edit it like any FastMCP server.
+``plural app add ENVIRONMENT --files-server --copy`` and edit it like any FastMCP
+server.
 """
 
 from __future__ import annotations

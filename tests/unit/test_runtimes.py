@@ -118,7 +118,7 @@ def test_runtime_from_settings_maps_fields_and_placement() -> None:
     assert runtime.provider == "daytona"
     assert runtime.ref == "big-box"
     assert runtime.placement == {"target": "eu"}
-    assert runtime.resources.cpu == 4 and runtime.resources.memory_mb == 8192
+    assert runtime.compute.cpu == 4 and runtime.compute.memory_mb == 8192
     assert runtime.requested_target is ExecutionTarget.REMOTE
     assert settings_from_runtime(runtime)["target"] == "eu"
     assert runtime_environ("daytona", {"target": "eu"}) == {"DAYTONA_TARGET": "eu"}
@@ -184,11 +184,15 @@ def test_an_unset_ref_leaves_environment_hashes_unchanged(tmp_path: Path) -> Non
     del payload["runtime"]["ref"]
     del payload["runtime"]["packages"]
     from plural.identity import revision_hash
+    from plural.sandbox.models import runtime_hash_payload
 
     for item in payload["apps"]:
         if not item["credentials"]:
             del item["credentials"]
     payload["source_digest"] = definition.source.digest if definition.source else None
+    # Renamed Runtime fields hash under their original names.
+    payload["runtime"] = runtime_hash_payload(payload["runtime"])
+    assert "network_allowlist" in payload["runtime"] and "allowed_hosts" not in payload["runtime"]
     assert revision_hash("environment", payload) == definition.content_hash
 
 
@@ -469,3 +473,21 @@ def test_plural_account_runtimes_start_sandboxes_through_plural(
     assert sandbox["requirements"]["image"] == "python:3.12-slim"
     assert sandbox["files"] == {"/workspace/a.txt": b"hello"}
     assert sandbox["status"] == "ended"
+
+
+def test_an_unregistered_directory_never_acts_on_a_different_scoped_project(
+    hosted: Hosted, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    other = write_project(tmp_path / "other-desk")
+    manifest = other.root / "project.yaml"
+    manifest.write_text(
+        manifest.read_text().replace("name: support-desk", "name: other-desk"), encoding="utf-8"
+    )
+    monkeypatch.setenv("PLURAL_PROJECT", "support-desk")
+    monkeypatch.chdir(other.root)
+
+    code, output = hosted.cli("runtime", "list")
+
+    assert code != 0
+    assert "'other-desk', which is not registered" in output
+    assert "plural project init other-desk --push" in output

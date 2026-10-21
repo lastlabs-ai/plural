@@ -143,10 +143,10 @@ Supply other secrets when the Job runs:
   settings into the Runtime. The Harness shares the Runtime and can read them,
   so keep credentials on Apps instead.
 - **Harness secrets.** A custom Harness lists the names it reads in `secrets`,
-  and an Agent grants a subset with `secret_names`. Granting a name the Harness
+  and an Agent grants a subset with `secrets`. Granting a name the Harness
   did not declare fails before any value is forwarded.
 - **Model keys.** A Job passes model credentials to the Harness and to Agent
-  Verifiers itself; you do not list them in `secret_names`.
+  Verifiers itself; you do not list them in `secrets`.
 
 Never store values in YAML, Task info, State, action results, resources, logs, or
 artifacts.

@@ -157,6 +157,21 @@ class Workspace:
             raise ProjectError(str(exc)) from None
         return self.load(ResourceRef(info.name, name)).value
 
+    def unfinished(self, roots: Iterable[ResourceRef]) -> list[str]:
+        """Every ``PLURAL-TODO`` marker left in ``roots`` and what they depend on.
+
+        A resource with markers still loads and runs locally; it cannot be
+        pushed, released, or recorded until they are gone.
+
+        Returns:
+            One ``path:line: note`` entry per marker, dependencies first.
+        """
+        return [
+            problem
+            for ref in self.dependency_order(roots)
+            for problem in scaffold_problems(self.project.resource_dir(ref), self.project.root)
+        ]
+
     def dependencies(self, ref: ResourceRef) -> tuple[ResourceRef, ...]:
         """Direct dependencies declared in a manifest, without loading code.
 
@@ -279,10 +294,7 @@ def scaffold_problems(directory: Path, project_root: Path) -> list[str]:
             if SCAFFOLD_MARKER in line:
                 note = line.split(SCAFFOLD_MARKER, 1)[1].lstrip(":- ").strip(" #->")
                 location = f"{_display(path, project_root)}:{number}"
-                problems.append(
-                    f"{location}: unfinished scaffold: {note or 'replace this'} "
-                    f"Delete this {SCAFFOLD_MARKER} line once it is done."
-                )
+                problems.append(f"{location}: {note or 'replace this'}")
     return problems
 
 
@@ -763,7 +775,7 @@ def _score_compatibility(manifest: BenchmarkManifest, tasks: list[LocalResource]
 def _begin(
     workspace: Workspace, ref: ResourceRef, directory: Path
 ) -> tuple[list[str], dict[str, Any]]:
-    problems = scaffold_problems(directory, workspace.project.root)
+    problems: list[str] = []
     try:
         payload = read_yaml_mapping(directory / ref.info.manifest)
     except ValueError as exc:
@@ -799,8 +811,9 @@ def _dependency(workspace: Workspace, ref: ResourceRef) -> LocalResource | str:
                 f"`plural {ref.info.cli} init {ref.name}` or restore it with "
                 f"`plural {ref.info.cli} pull {ref.name}`."
             )
-        details = "; ".join(exc.problems) or exc.message
-        return f"depends on {ref.kind} {ref.name!r}, which is not valid: {details}"
+        problems = exc.problems or [exc.message]
+        details = "".join("\n    - " + item.replace("\n", "\n    ") for item in problems)
+        return f"depends on {ref.kind} {ref.name!r}, which is not valid:{details}"
 
 
 def _parse(

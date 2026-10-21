@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from plural._deprecation import module_getattr
 from plural.agents import AgentBinding
 from plural.apps.daemon import MANAGED
 from plural.apps.host import STATES_FILE
@@ -26,7 +27,7 @@ from plural.atif import ATIF_FILE, episode_to_atif
 from plural.benchmarks.results import AttemptEvidence, aggregate_configuration
 from plural.benchmarks.rules import BenchmarkScoring
 from plural.catalog import ModelCatalog
-from plural.common import ErrorCode, HarnessPackage, content_hash
+from plural.common import ErrorCode, HarnessPackage, HarnessProtocol, content_hash
 from plural.credentials import CredentialError, CredentialUse, CredentialValue
 from plural.credentials import resolve as resolve_credentials
 from plural.environments.definition import party_seats
@@ -79,6 +80,7 @@ from plural.execution.seats import (
 from plural.execution.steps import STEPS_FILE, dump_jsonl, episode_terminated, merge_host_steps
 from plural.execution.store import JobStore
 from plural.harness.episode import EPISODE_FILE
+from plural.harness.native_runner import CREDIT_PAUSE_VARIABLE, DEFAULT_CREDIT_PAUSE_SECONDS
 from plural.harness.packages import BUILTIN_PROFILES, native_actions_v1, native_chat_v1
 from plural.harness.protocol import HarnessProtocolError, HarnessRunRequest
 from plural.harness.retrieval import materialize_package, retrieve_archive, source_digest
@@ -199,18 +201,18 @@ def _harness_environment(
         )
         if environ.get(name)
     }
-    names = {*agent.secret_names, *orchestrated}
-    undeclared = sorted(set(agent.secret_names) - set(package.definition.secret_names))
+    names = {*agent.secrets, *orchestrated}
+    undeclared = sorted(set(agent.secrets) - set(package.definition.secret_names))
     if undeclared:
         raise ExecutionFailure(
             ErrorCode.CONFIGURATION,
             f"Agent {agent.name!r} grants secrets not declared by Harness "
             f"{package.definition.name!r}: {undeclared!r}.\n"
-            "List extra app secrets on the Harness, or omit them from Agent.secret_names.\n"
+            "List extra app secrets on the Harness, or omit them from Agent.secrets.\n"
             "Model authentication is supplied by Job(client=...) or Job(api_key=...), "
-            "not Agent.secret_names.",
+            "not Agent.secrets.",
         )
-    missing = [name for name in agent.secret_names if not environ.get(name)]
+    missing = [name for name in agent.secrets if not environ.get(name)]
     if missing:
         listed = ", ".join(missing)
         raise ExecutionFailure(
@@ -514,6 +516,24 @@ def _episode_outcome(artifacts: Sequence[DownloadedFile]) -> EpisodeOutcome:
     )
 
 
+def _episode_totals(artifacts: Sequence[DownloadedFile], *, failed: bool) -> dict[str, Any]:
+    """How the episode ended, its per-step reward total, and its turns, for the TrialResult.
+
+    Returns:
+        ``stop_reason``, ``step_reward_total``, and ``turns``.
+    """
+    outcome = _episode_outcome(artifacts)
+    ledger = next((item for item in artifacts if item.path == LEDGER_FILE), None)
+    records = parse_ledger(ledger.data) if ledger is not None else []
+    return {
+        "stop_reason": outcome.stop_reason or ("error" if failed else ""),
+        "step_reward_total": math.fsum(
+            record.value * record.weight for record in records if record.source == "step"
+        ),
+        "turns": max(outcome.turns, 0),
+    }
+
+
 def _trajectory_cost(artifacts: Sequence[DownloadedFile]) -> float | None:
     source = _trajectory_source(artifacts)
     if source is None:
@@ -599,8 +619,11 @@ def _joined(players: Sequence[_Player], stream: Literal["stdout", "stderr"]) -> 
     )
 
 
-class Trial:
-    """One immutable Trial with append-only TrialExecutions."""
+class TrialRunner:
+    """Runs one immutable Trial, recording append-only TrialExecutions.
+
+    Internal to the engine: :class:`plural.Job` plans and runs Trials. Formerly ``Trial``.
+    """
 
     def __init__(
         self,
@@ -884,7 +907,8 @@ class Trial:
                                 timeout_seconds=min(
                                     task.environment.runtime.timeout_seconds,
                                     task.environment.limits.max_seconds,
-                                ),
+                                )
+                                + _credit_pause(player.package.definition, player.env),
                                 user=player.user,
                                 setup=False,
                                 private=player.seat is not None and self._seats_isolated(task),
@@ -1090,6 +1114,7 @@ class Trial:
                 app_isolation=app_isolation,
                 seats=seats_out,
                 seat_isolation=seat_isolation,
+                **_episode_totals(artifacts, failed=False),
             )
         except BaseException as exc:
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
@@ -1124,6 +1149,7 @@ class Trial:
                 if self.seat_names and host_report.steps
                 else (),
                 seat_isolation=seat_isolation,
+                **_episode_totals(artifacts, failed=code is not ErrorCode.CANCELLED),
                 error_code=None if code is ErrorCode.CANCELLED else code,
                 error_message=_redact_bytes(str(exc).encode(), secrets).decode(errors="replace")[
                     :1000
@@ -1238,7 +1264,7 @@ class Trial:
                 "instructions": binding.agent.instructions,
                 "routing": binding.routing.model_dump(mode="json", exclude_none=True),
                 "harness": player.package.definition.name,
-                "harness_kwargs": binding.harness_kwargs,
+                "harness_config": binding.harness_config,
             },
             model_resolution=model.model_dump(mode="json"),
             environment=environment_payload(task),
@@ -1438,19 +1464,7 @@ class Trial:
         """
         root = root.resolve()
         hidden = [path for path in verifier_sources(self.task) if path.is_relative_to(root)]
-        needed = {
-            (root / app.python.split(":", 1)[0]).resolve()
-            for app in self.task.environment.apps
-            if app.python
-        }
-        for path in hidden:
-            if any(item == path or item.is_relative_to(path) for item in needed):
-                raise ExecutionFailure(
-                    ErrorCode.CONFIGURATION,
-                    f"{path.relative_to(root)} holds both an App and Verifier code. The Agent "
-                    "can read the Environment's files, so move the Verifier into a file of "
-                    "its own.",
-                )
+        _refuse_shared_files(self.task, root)
         uploads: list[FileUpload] = []
         for path in sorted(root.rglob("*")):
             if path.is_symlink():
@@ -2145,6 +2159,45 @@ def job_progress(store: JobStore, job_id: str) -> JobProgress:
     )
 
 
+def _credit_pause(definition: HarnessProtocol, env: Mapping[str, str]) -> float:
+    """Extra time for a Harness that waits for credits without spending its own.
+
+    The native runner leaves time spent waiting for credits out of the
+    episode's max_seconds, so the Runtime's limit must allow for it. Other
+    Harnesses keep their limit, and fail when the account runs out.
+    """
+    if tuple(definition.command[1:2]) != ("native_runner.py",):
+        return 0.0
+    if not env.get("PLURAL_GATEWAY_URL") or env.get("PLURAL_AGENT_ENDPOINT"):
+        return 0.0
+    return float(env.get(CREDIT_PAUSE_VARIABLE) or DEFAULT_CREDIT_PAUSE_SECONDS)
+
+
+def _refuse_shared_files(task: TaskDefinition, root: Path) -> None:
+    """Refuse a file that holds both an App and a Verifier.
+
+    The Agent can read the Environment's files, so a Verifier there is left
+    out, and an App in the same file would be left out with it.
+
+    Raises:
+        ExecutionFailure: When an App's own file is also a Verifier's.
+    """
+    hidden = [path for path in verifier_sources(task) if path.is_relative_to(root)]
+    needed = {
+        (root / app.python.split(":", 1)[0]).resolve()
+        for app in task.environment.apps
+        if app.python
+    }
+    for path in hidden:
+        if any(item == path or item.is_relative_to(path) for item in needed):
+            raise ExecutionFailure(
+                ErrorCode.CONFIGURATION,
+                f"{path.relative_to(root)} holds both an App and Verifier code. The Agent "
+                "can read the Environment's files, so move the Verifier into a file of "
+                "its own.",
+            )
+
+
 class JobRunner:
     """Bounded async Job scheduler across Environment-owned runtimes."""
 
@@ -2178,7 +2231,7 @@ class JobRunner:
         self.project_policy = project_policy or ProjectPolicy.permissive(
             allow_unsafe_local=allow_local
         )
-        self._trials: set[Trial] = set()
+        self._trials: set[TrialRunner] = set()
 
     def _agent_credentials(self, trial: TrialSpec) -> Mapping[str, CredentialValue | str]:
         agent = next(item for item in self.spec.agents if item.agent_id == trial.agent_id)
@@ -2202,6 +2255,10 @@ class JobRunner:
         Raises:
             ExecutionFailure: When any Environment's Apps are missing secrets.
         """
+        for task in self.spec.tasks:
+            source = task.environment.source
+            if source is not None and source.kind == "local":
+                _refuse_shared_files(task, Path(source.uri).expanduser().resolve())
         missing: dict[str, list[str]] = {}
         for task in self.spec.tasks:
             for app, names in missing_app_secrets(task.environment, self.environ).items():
@@ -2237,7 +2294,7 @@ class JobRunner:
                     for item in self.plan.trials
                     if item.task_digest == task.content_hash and agent.agent_id in item.agent_ids
                 )
-                runtime = Trial(
+                runtime = TrialRunner(
                     trial,
                     job_spec=self.spec,
                     provider_for=self._provider_for,
@@ -2301,7 +2358,7 @@ class JobRunner:
                 if self.store.cancel_requested(self.plan.job_id):
                     result = self._cancelled_result(trial_spec)
                 else:
-                    trial = Trial(
+                    trial = TrialRunner(
                         trial_spec,
                         job_spec=self.spec,
                         provider_for=self._provider_for,
@@ -2506,7 +2563,7 @@ class JobRunner:
                     },
                 )
 
-    async def _run_with_retries(self, trial: Trial) -> TrialResult:
+    async def _run_with_retries(self, trial: TrialRunner) -> TrialResult:
         result: TrialResult | None = None
         for retry in range(self.spec.retry.max_retries + 1):
             execution_id = self.store.next_execution_id(trial.spec)
@@ -2658,7 +2715,15 @@ __all__ = [
     "ExecutionFailure",
     "JobProgress",
     "JobRunner",
-    "Trial",
+    "TrialRunner",
     "VerifierOutput",
     "job_progress",
 ]
+
+_renamed = module_getattr(
+    "plural.execution.engine", {"Trial": ("TrialRunner", lambda: TrialRunner)}
+)
+
+
+def __getattr__(name: str) -> Any:
+    return _renamed(name)

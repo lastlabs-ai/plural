@@ -15,7 +15,6 @@ from uuid import uuid4
 from plural.sandbox.base import KILL_USER_PROCESSES, SandboxProvider
 from plural.sandbox.models import (
     AppIsolation,
-    Capability,
     CapabilityError,
     DownloadedFile,
     EffectiveSandboxPolicy,
@@ -26,6 +25,7 @@ from plural.sandbox.models import (
     ProviderCapabilities,
     ProviderDoctor,
     ProviderUnavailableError,
+    SandboxCapability,
     SandboxHandle,
     SandboxRequirements,
     safe_relative_path,
@@ -109,18 +109,18 @@ class DockerProvider(SandboxProvider):
         doctor = await self.doctor()
         supported = frozenset(
             {
-                Capability.IMAGE,
-                Capability.BUILD,
-                Capability.RESOURCES,
-                Capability.NETWORK_NONE,
-                Capability.UPLOAD,
-                Capability.DOWNLOAD,
-                Capability.TIMEOUT,
-                Capability.CANCEL,
-                Capability.READ_ONLY_ROOT,
-                Capability.WORKING_DIRECTORY,
-                Capability.ENVIRONMENT,
-                Capability.LOG_CAPTURE,
+                SandboxCapability.IMAGE,
+                SandboxCapability.BUILD,
+                SandboxCapability.RESOURCES,
+                SandboxCapability.NETWORK_NONE,
+                SandboxCapability.UPLOAD,
+                SandboxCapability.DOWNLOAD,
+                SandboxCapability.TIMEOUT,
+                SandboxCapability.CANCEL,
+                SandboxCapability.READ_ONLY_ROOT,
+                SandboxCapability.WORKING_DIRECTORY,
+                SandboxCapability.ENVIRONMENT,
+                SandboxCapability.LOG_CAPTURE,
             }
         )
         return ProviderCapabilities(
@@ -146,18 +146,18 @@ class DockerProvider(SandboxProvider):
     async def doctor(self) -> ProviderDoctor:
         """Detect the Docker CLI and daemon."""
         capabilities = (
-            Capability.IMAGE,
-            Capability.BUILD,
-            Capability.RESOURCES,
-            Capability.NETWORK_NONE,
-            Capability.UPLOAD,
-            Capability.DOWNLOAD,
-            Capability.TIMEOUT,
-            Capability.CANCEL,
-            Capability.READ_ONLY_ROOT,
-            Capability.WORKING_DIRECTORY,
-            Capability.ENVIRONMENT,
-            Capability.LOG_CAPTURE,
+            SandboxCapability.IMAGE,
+            SandboxCapability.BUILD,
+            SandboxCapability.RESOURCES,
+            SandboxCapability.NETWORK_NONE,
+            SandboxCapability.UPLOAD,
+            SandboxCapability.DOWNLOAD,
+            SandboxCapability.TIMEOUT,
+            SandboxCapability.CANCEL,
+            SandboxCapability.READ_ONLY_ROOT,
+            SandboxCapability.WORKING_DIRECTORY,
+            SandboxCapability.ENVIRONMENT,
+            SandboxCapability.LOG_CAPTURE,
         )
         if shutil.which(self.executable) is None:
             return ProviderDoctor(

@@ -45,7 +45,8 @@ benchmarks/<name>/            benchmark.yaml, README.md
 
 You rarely start from a blank file. `plural <kind> init <name>` writes each folder from
 a template, with a comment on every field and a `PLURAL-TODO` marker wherever you must
-fill something in. Validation reports every marker that is left.
+fill something in. Validation reports every marker that is left, and `push` and
+`run --record` refuse until none are.
 
 Every manifest follows the same rules:
 
@@ -76,7 +77,7 @@ Harness, name it and set its options:
 name: support-claude
 model: anthropic/claude-sonnet-5
 harness: claude-code
-harness_kwargs:
+harness_config:
   reasoning_effort: high
 ```
 
@@ -151,7 +152,7 @@ runtime:
 ```
 
 With several, or with an App that connects an existing system, list them under
-`apps`. Each entry is a Python App or a named `mcp`, `openapi`, `data`, or `replay`
+`apps`. Each entry is a Python App or a named `mcp`, `openapi`, or `replay`
 App with that kind's settings:
 
 ```yaml

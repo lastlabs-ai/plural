@@ -1,5 +1,6 @@
 # Benchmark: a fixed set of Tasks and the rules for ranking results.
-# It ranks on the Verifier's score only; rewards never change it.
+# It ranks on the Verifier's score only. A Task for several Agents, like duel, cannot
+# be in a Benchmark yet.
 name: wordle
 version: 1.0.0
 description: Five Wordle games against the full Wordle word list.

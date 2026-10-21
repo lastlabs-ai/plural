@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 
+from plural._deprecation import module_getattr
 from plural.catalog.models import ModelCatalog
 from plural.config import DEFAULT_SETTINGS, resolve_gateway_url
 from plural.errors import ConfigurationError
@@ -306,7 +307,7 @@ class Client:
             HTTP client to probe.
 
         Raises:
-            TimeoutError: If a provider cannot be reached.
+            PluralTimeoutError: If a provider cannot be reached.
             PluralError: If a transport error occurs while probing.
         """
         return all(_provider_is_authenticated(provider) for provider in self._providers.values())
@@ -734,7 +735,11 @@ class Client:
         return trace.trace_id
 
 
-Plural = Client
+_renamed = module_getattr("plural.client", {"Plural": ("Client", lambda: Client)})
+
+
+def __getattr__(name: str) -> Any:
+    return _renamed(name)
 
 
 def _provider_is_authenticated(provider: Provider) -> bool:

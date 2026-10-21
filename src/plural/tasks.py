@@ -291,6 +291,14 @@ def _task_bind_errors(task: Task) -> list[str]:
         if isinstance(environment, EnvironmentDefinition)
         else None
     )
+    names = [verifier.name for verifier in task.verifiers]
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        errors.append(
+            f"{header}\nMore than one Verifier is named "
+            f"{', '.join(map(repr, repeated))}. Give each a name of its own; rewards are "
+            "recorded under the Verifier's name."
+        )
     if not any(verifier.scores for verifier in task.verifiers):
         errors.append(
             f"{header}\nA Task needs at least one Verifier with a check, to score the finished "
@@ -758,7 +766,7 @@ class Benchmark(BenchmarkRelease):
     name: str = Field(min_length=1)
     version: str
     tasks: tuple[Task, ...] = Field(min_length=1)
-    primary_metric: str = "score"
+    primary_metric: Literal["score"] = "score"
     description: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 

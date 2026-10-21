@@ -74,25 +74,115 @@ def test_project_init_creates_the_standard_structure_without_credentials(
     assert not (home / "credentials.json").exists()
 
 
-def test_every_scaffold_fails_validation_with_a_useful_message(
+def test_a_new_environment_runs_at_once_with_a_starter_task_and_verifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    invoke("project", "init", "desk")
+    root = tmp_path / "desk"
+    monkeypatch.chdir(root)
+
+    code, output = invoke("env", "init", "queue")
+
+    assert code == 0, output
+    assert "plural run --task queue-first --model" in output
+    for relative in (
+        "environments/queue/resources/policy.md",
+        "tasks/queue-first/instruction.md",
+        "verifiers/queue-check/verify.py",
+    ):
+        assert (root / relative).is_file(), relative
+    environment = (root / "environments/queue/environment.yaml").read_text()
+    assert "provider: local" in environment and "resources/policy.md" in environment
+
+    code, output = invoke("task", "validate", "queue-first")
+    assert code == 0, output
+    assert "unfinished" in output
+    assert "environments/queue/server.py:" in output
+    assert "tasks/queue-first/instruction.md:" in output
+    workspace = Workspace(Project.at(root))
+    task = workspace.load(ResourceRef("task", "queue-first")).value
+    assert task.initial_state == {"expected": "store credit"}
+
+    code, output = invoke("env", "init", "bare", "--bare")
+    assert code == 0, output
+    assert not (root / "tasks/bare-first").exists()
+
+
+def test_unfinished_work_runs_locally_but_is_never_pushed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    from plural.project.sync import plan_project_push
+
+    monkeypatch.chdir(tmp_path)
+    invoke("project", "init", "desk")
+    root = tmp_path / "desk"
+    monkeypatch.chdir(root)
+    invoke("env", "init", "queue")
+    workspace = Workspace(Project.at(root))
+
+    with pytest.raises(ProjectError) as raised:
+        plan_project_push(workspace, None, None, roots=[ResourceRef("task", "queue-first")])
+    assert any("server.py:" in item and "unfinished" in item for item in raised.value.problems)
+
+    for directory in ("environments/queue", "tasks/queue-first", "verifiers/queue-check"):
+        for path in (root / directory).rglob("*"):
+            if path.suffix in {".py", ".md", ".yaml"}:
+                lines = path.read_text().splitlines(keepends=True)
+                path.write_text("".join(line for line in lines if "PLURAL-TODO" not in line))
+    plan = plan_project_push(
+        Workspace(Project.at(root)), None, None, roots=[ResourceRef("task", "queue-first")]
+    )
+    assert {step.action for step in plan.steps} == {"new"}
+
+
+def test_a_tracked_run_refuses_unfinished_work_before_it_starts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
     invoke("project", "init", "desk")
     monkeypatch.chdir(tmp_path / "desk")
     invoke("env", "init", "queue")
-    invoke("verifier", "init", "resolved")
-    invoke("task", "init", "refund")
+
+    code, output = invoke(
+        "run", "--task", "queue-first", "--model", "openai/gpt-5.6-luna", "--track"
+    )
+
+    assert code != 0
+    assert "--track" in output and "unfinished" in output
+    assert "server.py:" in output
+    assert not (tmp_path / "desk/.plural/jobs").exists()
+
+
+def test_a_broken_dependency_lists_its_problems_beneath_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    invoke("project", "init", "desk")
+    root = tmp_path / "desk"
+    monkeypatch.chdir(root)
+    invoke("env", "init", "queue")
     invoke("benchmark", "init", "basics")
+    invoke("benchmark", "add", "queue-first", "--benchmark", "basics")
+    (root / "environments/queue/environment.yaml").write_text("name: queue\napps: 3\n")
 
-    code, output = invoke("env", "validate", "queue")
-    assert code == 1
-    assert "README.md" in output and "unfinished scaffold" in output
+    code, output = invoke("benchmark", "validate", "basics")
 
-    code, output = invoke("task", "validate", "refund")
     assert code == 1
-    assert "instruction.md" in output
-    assert "--environment" in output or "environment" in output
+    assert (
+        "  - depends on task 'queue-first', which is not valid:\n"
+        "    - depends on environment 'queue', which is not valid:\n"
+        "        - apps:"
+    ) in output
+
+
+def test_an_unfinished_benchmark_still_explains_what_it_needs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    invoke("project", "init", "desk")
+    monkeypatch.chdir(tmp_path / "desk")
+    invoke("benchmark", "init", "basics")
 
     code, output = invoke("benchmark", "validate", "basics")
     assert code == 1

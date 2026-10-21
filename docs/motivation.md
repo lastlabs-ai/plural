@@ -85,4 +85,4 @@ and trust.
 ## Where to go next
 
 Read [Core concepts](getting-started/concepts.md) for each part in detail, then
-[Getting started](getting-started.md) to install Plural and run a Task.
+[Quickstart](getting-started.md) to install Plural and run a Task.

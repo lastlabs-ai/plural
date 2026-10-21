@@ -142,28 +142,6 @@
         "title": "AppDefinition",
         "type": "object"
       },
-      "Capability": {
-        "description": "Individual controls a provider can enforce.",
-        "enum": [
-          "image",
-          "build",
-          "resources",
-          "network_none",
-          "network_allowlist",
-          "upload",
-          "download",
-          "timeout",
-          "cancel",
-          "persistence",
-          "compose",
-          "read_only_root",
-          "working_directory",
-          "environment",
-          "log_capture"
-        ],
-        "title": "Capability",
-        "type": "string"
-      },
       "DeclarativeImage": {
         "additionalProperties": false,
         "description": "Portable subset of Daytona's declarative image builder.",
@@ -422,16 +400,18 @@
             "$ref": "#/$defs/NetworkMode",
             "default": "public"
           },
-          "network_allowlist": {
+          "allowed_hosts": {
             "default": [],
+            "description": "Hosts the Runtime may reach when network is 'allowlist'.",
             "items": {
               "type": "string"
             },
-            "title": "Network Allowlist",
+            "title": "Allowed Hosts",
             "type": "array"
           },
-          "resources": {
-            "$ref": "#/$defs/ResourceRequirements"
+          "compute": {
+            "$ref": "#/$defs/ResourceRequirements",
+            "description": "CPU, memory, storage, and process limits for the Runtime."
           },
           "packages": {
             "$ref": "#/$defs/RuntimePackages",
@@ -463,7 +443,7 @@
           "extra_capabilities": {
             "default": [],
             "items": {
-              "$ref": "#/$defs/Capability"
+              "$ref": "#/$defs/SandboxCapability"
             },
             "title": "Extra Capabilities",
             "type": "array",
@@ -475,10 +455,10 @@
             "title": "Timeout Seconds",
             "type": "number"
           },
-          "build_timeout_sec": {
+          "build_timeout_seconds": {
             "default": 600,
             "exclusiveMinimum": 0,
-            "title": "Build Timeout Sec",
+            "title": "Build Timeout Seconds",
             "type": "number"
           },
           "allow_unsafe_local": {
@@ -797,6 +777,28 @@
         ],
         "title": "RuntimeVariable",
         "type": "object"
+      },
+      "SandboxCapability": {
+        "description": "Individual controls a provider can enforce.",
+        "enum": [
+          "image",
+          "build",
+          "resources",
+          "network_none",
+          "network_allowlist",
+          "upload",
+          "download",
+          "timeout",
+          "cancel",
+          "persistence",
+          "compose",
+          "read_only_root",
+          "working_directory",
+          "environment",
+          "log_capture"
+        ],
+        "title": "SandboxCapability",
+        "type": "string"
       },
       "SecretReference": {
         "additionalProperties": false,
@@ -1505,15 +1507,15 @@
             "$ref": "#/$defs/NetworkMode",
             "default": "public"
           },
-          "network_allowlist": {
+          "allowed_hosts": {
             "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Network Allowlist",
+            "title": "Allowed Hosts",
             "type": "array"
           },
-          "resources": {
+          "compute": {
             "$ref": "#/$defs/ResourceRequirements"
           },
           "timeout_seconds": {
@@ -1812,15 +1814,15 @@
             "$ref": "#/$defs/NetworkMode",
             "default": "public"
           },
-          "network_allowlist": {
+          "allowed_hosts": {
             "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Network Allowlist",
+            "title": "Allowed Hosts",
             "type": "array"
           },
-          "resources": {
+          "compute": {
             "$ref": "#/$defs/ResourceRequirements"
           },
           "timeout_seconds": {
@@ -2124,15 +2126,15 @@
             "$ref": "#/$defs/NetworkMode",
             "default": "public"
           },
-          "network_allowlist": {
+          "allowed_hosts": {
             "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Network Allowlist",
+            "title": "Allowed Hosts",
             "type": "array"
           },
-          "resources": {
+          "compute": {
             "$ref": "#/$defs/ResourceRequirements"
           },
           "timeout_seconds": {
@@ -2551,12 +2553,13 @@
             "title": "Secrets",
             "type": "array"
           },
-          "environment": {
+          "env_vars": {
             "default": [],
+            "description": "Names of environment variables passed through to the Harness process.",
             "items": {
               "type": "string"
             },
-            "title": "Environment",
+            "title": "Env Vars",
             "type": "array"
           },
           "healthcheck": {
@@ -2709,28 +2712,31 @@
         "default": null,
         "title": "Harness"
       },
-      "harness_kwargs": {
+      "harness_config": {
         "additionalProperties": true,
-        "title": "Harness Kwargs",
+        "description": "Options for a built-in Harness, such as reasoning_effort.",
+        "title": "Harness Config",
         "type": "object"
       },
-      "auth_mode": {
+      "auth": {
         "default": "environment",
+        "description": "How the Harness authenticates to the model; none when it calls no model.",
         "enum": [
           "environment",
           "api_key",
           "oauth",
           "none"
         ],
-        "title": "Auth Mode",
+        "title": "Auth",
         "type": "string"
       },
-      "secret_names": {
+      "secrets": {
         "default": [],
+        "description": "Names of the Harness's declared secrets this Agent grants it.",
         "items": {
           "type": "string"
         },
-        "title": "Secret Names",
+        "title": "Secrets",
         "type": "array"
       },
       "endpoint": {
@@ -3714,15 +3720,15 @@
             "$ref": "#/$defs/NetworkMode",
             "default": "public"
           },
-          "network_allowlist": {
+          "allowed_hosts": {
             "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Network Allowlist",
+            "title": "Allowed Hosts",
             "type": "array"
           },
-          "resources": {
+          "compute": {
             "$ref": "#/$defs/ResourceRequirements"
           },
           "timeout_seconds": {
@@ -3820,6 +3826,7 @@
         "type": "array"
       },
       "primary_metric": {
+        "const": "score",
         "default": "score",
         "title": "Primary Metric",
         "type": "string"

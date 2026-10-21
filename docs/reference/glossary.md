@@ -20,7 +20,7 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   resource, such as `tasks/ticket-1/`.
 - **App:** one system the AI works with, such as the Wordle game, a CRM behind an MCP
   server, or an HTTP API. *Precisely:* a named bundle of actions and private State,
-  written in Python or connected as an `mcp`, `openapi`, `data`, or `replay` App, with
+  written in Python or connected as an `mcp`, `openapi`, or `replay` App, with
   the names of the secrets it needs.
 - **Environment:** the world the AI works in, such as the Wordle game or a support
   desk. *Precisely:* one or more Apps, plus the Runtime, resources, Harness policy, and
@@ -105,7 +105,8 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   Verifier's `reward` function. It counts toward the score only when that Verifier's
   `check` is `total_reward`, and the AI never sees it. *Precisely:* credit on one target of a
   trajectory (a step, a model call, or a span within one), recorded in the Trial's
-  reward ledger and never part of a score. `Trial.step_reward_total` is the episode's
+  reward ledger. It reaches a score only through `check: total_reward`, which scores
+  by that Verifier's own rewards. `Trial.step_reward_total` is the episode's
   total of per-step rewards.
 - **Step reward:** a reward for one action, given while the attempt runs.
   *Precisely:* what a Verifier's `reward` function returns after each action, recorded

@@ -48,11 +48,11 @@ Plural 0.15 removed these commands and files:
   publish step.
 - `plural run FILE` and `job.yaml`: use `plural run -t|-b NAME -m MODEL|-a AGENT`.
 - `plural job submit`, `plural job watch`, `plural trial list`, and
-  `plural trial watch`: use `plural run --hosted --follow`, `plural job show`,
+  `plural trial watch`: use `plural run --record`, `plural job show`,
   and `plural trial show --follow`.
 - `plural benchmarks`, `plural models show`, `plural schemas`, and
   `plural login|logout|status`: use `plural benchmark show`,
-  `plural models list`, the downloadable
+  `plural model list`, the downloadable
   [project-schemas.json](../assets/project-schemas.json), and
   `plural auth login|logout|status`.
 
@@ -67,7 +67,7 @@ its parents. Run them inside the project, or create one with
 Hosted commands such as `push` also need the folder bound to a hosted project;
 `plural project init NAME --push` creates or connects it. If a push says your scope
 selects a different project, run `plural auth scope -p NAME` for the bound project,
-or `plural auth scope .` for account scope.
+or `plural auth scope --account` for account scope.
 
 ## A push, pull, or hosted run is refused
 
@@ -84,12 +84,12 @@ error names the cause:
   back to that version.
 - **A package over 100 MiB compressed** needs large files listed in `.pluralignore`.
 
-`plural run ... --hosted` pushes any input the hosted project does not hold yet,
+`plural run ... --record` pushes any input the hosted project does not hold yet,
 as the resource's next numbered revision. It stops, before uploading
 anything, when someone else changed that resource in the hosted project since your
 checkout synced it; pull their revision first. A pull refuses to overwrite local files that differ from the
 revision; pass `--force` to replace them, keeping the old copy under
-`.plural/backups/`. See [Push and pull resources](../guides/studio-sync.md).
+`.plural/backups/`. See [Push and pull](../guides/studio-sync.md).
 
 ## A YAML field is rejected
 
@@ -103,11 +103,13 @@ validation names the field. Two common mix-ups:
 See the [field catalog](../reference/fields.md) and
 [YAML and serialization](../interfaces/yaml.md).
 
-## Validation says a template is unfinished
+## A push or recorded run says work is unfinished
 
-`plural <kind> init` leaves `PLURAL-TODO` placeholders, including in each
-Environment's and Benchmark's `README.md`. Validation, `push`, and `run` refuse a
-resource until every placeholder is replaced. The error names the file and line.
+`plural <kind> init` leaves `PLURAL-TODO` markers wherever an example or placeholder
+needs your own work, including in each Environment's and Benchmark's `README.md`.
+`validate` lists each one by file and line, and a local run still works. `push`,
+`release`, and `run --record` refuse until every marker is gone: finish the work there,
+then delete the marker's line.
 
 ## A file or resource cannot be found
 
@@ -165,11 +167,11 @@ so a run can also fail once it expires. You can create a key in the web app unde
 Keys.
 
 - In Python, pass `Job(..., client=Client())` or `api_key=`.
-- An Agent whose Harness never calls a model can set `auth_mode: none` and needs no
+- An Agent whose Harness never calls a model can set `auth: none` and needs no
   key.
 - Check the selected model ID and endpoint: a direct provider may accept a different
   ID from a multi-provider gateway.
-- If a model you expect is missing from `plural models list`, your organization's
+- If a model you expect is missing from `plural model list`, your organization's
   model policy may not permit it; the service enforces the same policy when a run
   starts.
 
@@ -177,6 +179,37 @@ Keys.
 provider key or `OPENAI_BASE_URL` in the environment is not used for Agent or
 Verifier model calls. Model connectivity is separate from the hosted project API
 endpoint. A local run does not block network requests.
+
+## Signing up sends me to a waitlist
+
+While Plural Intel is in early access, signup may be limited to approved emails and to
+people invited to an organization or project. Join the waitlist, or ask someone in
+your organization to invite you; the invitation lets you create an account right away.
+
+## A run pauses, or a model call fails, with "Out of credits"
+
+Model calls through Plural's gateway, and hosted sandboxes, draw on your account's
+credits. Running sandboxes count against the balance as they run, so the balance a
+new call sees already includes them. When it reaches zero, the gateway answers model
+calls with HTTP `402` and `insufficient_credits`, along with your balance and the
+page to add credits on.
+
+A run doesn't fail when that happens. Trials that use Plural's built-in Harness
+wait where they are, retrying every 30 seconds, and resume within a minute of your
+adding credits; the time spent waiting does not count against their time limits.
+They wait up to an hour. Set `PLURAL_CREDIT_PAUSE_SECONDS` to change that, or to `0`
+to fail at once. A Harness of your own, or a vendor Harness such as Claude Code,
+sees the `402` itself, and its Trial usually fails.
+
+Hosted sandboxes keep running, with their state, while the balance is below zero.
+Once it is $5 below zero they are stopped, and their Trials need to be run again
+with `plural trial rerun`.
+
+You hear about it before then. `plural run` says when credits are low and when they
+run out, the web app shows a banner, and the account's owners get one email each
+time the balance runs low and each time it runs out. Add credits under **Credits** in
+the web app, or turn on automatic reload there so a long run never pauses. Calls to
+your organization's own model endpoints never draw on credits.
 
 ## The Agent stops at its turn limit
 
@@ -226,12 +259,13 @@ A local Job and a hosted Job are separate, and a local run is not uploaded on it
 own. A trace ID alone does not upload the trace or artifacts.
 
 - To run on your machine and record the Job in the hosted project as it runs, use
-  `plural run ... --track`.
-- To record a Job that already finished locally, use `plural job push`. The
+  `plural run ... --record`.
+- To record a Job that already finished locally, use `plural job record`. The
   revisions it ran must already be hosted.
-- To run in Plural Intel instead, use `plural run ... --hosted`.
+- Plural never runs a Job on its own servers. To run Trials in cloud sandboxes, give
+  the Environment a cloud Runtime such as `daytona`.
 
-See [Push and pull resources](../guides/studio-sync.md).
+See [Push and pull](../guides/studio-sync.md).
 
 ## A rerun gives different answers
 

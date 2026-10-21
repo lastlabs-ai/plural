@@ -21,11 +21,13 @@ pip install 'plural[mcp]'
 ## 1. Create the Environment
 
 ```bash
-plural env init support-desk
+plural env init support-desk --bare
 ```
 
 This writes `environments/support-desk/` with a `server.py` and an `environment.yaml`
-that names it as the Environment's one App:
+that names it as the Environment's one App. Without `--bare` it also writes a starter
+Task and Verifier for the example tools; this guide replaces those tools, so it leaves
+them out:
 
 ```yaml
 apps:
@@ -92,8 +94,9 @@ The Agent sees 2 tools:
   close_ticket  Close one ticket, saying how it was resolved.
 ```
 
-The last lines are the tools exactly as the model will see them. Then write a Task and
-run it like any other:
+The last lines are the tools exactly as the model will see them. `validate` also lists
+each `PLURAL-TODO` left in the template; they don't stop a local run, but they stop a
+push. Then [write a Task](../project/tasks.md) and run it like any other:
 
 ```bash
 plural run --task refund-t7 --model openai/gpt-5.6-luna
@@ -211,9 +214,9 @@ apps:
   file's tables are `<file>.<table>`. When the Environment and the Task both have a file
   with the same name, the tables are `environment_resources_<name>` and
   `task_resources_<name>`.
-- **Your own copy.** `plural env eject-files support-desk` copies the server into your
-  Environment as `files_server.py`, to edit like your own. Point the App at
-  `server: files_server.py:server`.
+- **Your own copy.** `plural app add support-desk --files-server --copy` copies the server into
+  your Environment as `files_server.py`, to edit like your own, and points the App
+  at `server: files_server.py:server`.
 :::
 
 ## Work in a data lake or warehouse
@@ -293,7 +296,7 @@ write, give the server a `plural.mcp.reset` hook that restores a sandbox schema;
 is then `sandboxed` and usable in Benchmarks and training.
 
 To limit where the Runtime may connect, set `network: allowlist` and list the lake's
-host in `network_allowlist` in the Environment's `runtime`; see
+host in `allowed_hosts` in the Environment's `runtime`; see
 [Runtimes](../project/runtimes.md).
 :::
 

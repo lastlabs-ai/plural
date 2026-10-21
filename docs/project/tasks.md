@@ -67,7 +67,7 @@ case.
 
 ## Save a Task in a project
 
-In a [project](../getting-started.md#create-a-project), each Task is a folder under
+In a [project](../getting-started.md#2-create-a-project), each Task is a folder under
 `tasks/`, named after the Task. Create one from inside the project:
 
 ```bash
@@ -218,7 +218,7 @@ files. Create it with:
 ```bash
 plural project init support-eval
 cd support-eval
-plural env init ticket-triage --python
+plural env init ticket-triage --python --bare
 plural verifier init correct-team
 plural task init duplicate-charge --environment ticket-triage --verifier correct-team
 ```
