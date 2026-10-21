@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-21
+
+### Added
+
+- Runs pause instead of failing when credits run out. A Trial on Plural's built-in Harness waits where it is, retrying every 30 seconds, and resumes within a minute of credits being added; the wait does not count against its time limits. It waits up to an hour, set by `PLURAL_CREDIT_PAUSE_SECONDS` (`0` fails at once). Starting a hosted sandbox waits the same way.
+- `plural run`, `plural job rerun`, and `plural trial rerun` say when the account's credits are low, when they run out, and when they are added again, with the page to add them on.
+- `TrialResult` has `stop_reason`, `step_reward_total`, and `turns`, read from the App host's episode outcome and reward ledger.
+- `OpenAICompatible` and `AzureOpenAIProvider` accept `http_transport` and `async_http_transport`.
+- `plural app add|list|remove ENV` manages an Environment's Apps. `add` takes what `plural env add` took, plus `--files-server` for Plural's files server (`--copy` copies it into the Environment to edit). `remove` takes one App's entry out of `environment.yaml`, leaves its files, and refuses a Python App, naming the file to edit.
+- `plural <env|task|verifier|harness|agent|benchmark> delete NAME [--hosted] [-y]` deletes a resource's folder, and with `--hosted` the hosted resource, refusing while another local resource uses it.
+- `plural --help` lists each kind of object, what it is, and the command that creates it.
+
+### Changed
+
+- `--track` is now `--record`, on `plural run`, `plural job rerun`, and `plural trial rerun`: it records a local run in the hosted project. "Track" now means only a Benchmark's evaluation tracks, and `--evaluation-track` implies `--record`. `--track` still works for one release and prints a note.
+- Renamed, with the old name accepted for one release and a `DeprecationWarning`: Agent `harness_kwargs`, `auth_mode`, and `secret_names` to `harness_config`, `auth`, and `secrets`; Harness `environment` to `env_vars`; Runtime `network_allowlist`, `build_timeout_sec`, and `resources` to `allowed_hosts`, `build_timeout_seconds`, and `compute`; `Plural` to `Client`, `TimeoutError` to `PluralTimeoutError`, `Capability` to `SandboxCapability`, `Outcome` to `TraceOutcome`, and the engine's `Trial` to `TrialRunner`. Files and schemas are written with the new names, and content hashes are unchanged.
+- An unknown model names the closest model ids and `plural model list`, instead of a validation link.
+- A Task whose files cannot be shared with its Runtime is refused before any Trial runs.
+- Inside an unregistered project whose name differs from the selected scope's project, hosted commands refuse and say how to register it.
+- Renamed, with the old name kept for one release as a hidden alias that prints a note: `plural env add` and `plural env eject-files` to `plural app add` (`--files-server --copy`), `app add --env` to `--server-env`, `plural job push` to `plural job record`, `plural credential unset` to `plural credential delete`, `plural models` and `plural rewards` to `plural model` and `plural reward`, `pull --revision`/`-r` to `NAME@REF`, `plural auth scope .` to `--account`, `session export --agent`/`--environment` to `--agent-file`/`--environment-file`, and `session import --dest` to `--out`.
+- Short flags mean one thing: `task init` drops `-v`, `runtime create` drops `-t` and `-p`, and `runtime template create` drops `-p`; `-p` is `--project` only.
+- `plural agent init` needs `--model`, and asks for one in a terminal.
+- `plural <kind> show` on a local resource that is not valid yet shows it with its problems instead of failing.
+- Counts in CLI output read `1 Trial` and `2 Trials` instead of `trial(s)`, and messages capitalize object names.
+
+### Removed
+
+- `plural trial rescore` and `plural agent serve`, which did nothing, and `-h` as a short flag for `--harness`.
+
 ## [0.21.0] - 2026-10-13
 
 ### Added
