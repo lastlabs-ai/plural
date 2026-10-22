@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-22
+
 ### Added
 
+- External Agents: `Agent.external` evaluates an agent that runs as its own service. The Job runner POSTs it one signed `plural-episode-v1` request per episode and serves that episode's actions and files over a per-episode token; actions still run through the App host. `plural agent init --external`, `plural agent key`, and `plural agent test` set one up. Its code is never hashed; its identity is its `url` and `version`.
+- `plural[external]`, the agent's side: `plural-agent.yaml`, a `Tracer` with flush policies, capture, and redaction, adapters for OpenTelemetry, LangChain and LangGraph, and the OpenAI Agents SDK, and `plural.external.serve.app`, an ASGI endpoint that verifies each episode. `plural external init`, `register`, and `check` manage it. Episode traces go to the Job, and Plural shows them beside the observed trace. Production traces go to `POST /traces`, and may be written while the run is going.
+- `Task.expected`, an answer key that only Verifiers read, as `episode.expected` and `step.task.expected`. It is never shown to the agent, never in the Task's public payload, and left out of the hash when unset.
+- A Verifier reads the agent's final answer as `episode.answer`, so an Environment needs no Apps. The guide *Connect an External Agent* walks through one end to end.
 - Every Trial has a seed, derived from the Task and the attempt, so every Agent on one attempt faces the same world and a rerun faces it again. Apps read it as `self.seed` and draw from `self.rng`; a State with a `seed` field gets it too. The Trial records it as `TrialResult.seed`. Until now a Job always reset Apps without a seed.
 - `plural task cases TASK FILE` writes one Task per case, each a copy of TASK with the case's `instructions`, `initial_state`, `info`, `metadata`, or `goals`, and `--benchmark` adds them all. Cases are a `.jsonl` file or a `.json` or `.yaml` list.
 - `plural benchmark add` and `remove` take several Tasks, by name or by a pattern such as `'refund-*'`.
@@ -822,7 +828,8 @@ command and API and how to move a project.
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/lastlabs-ai/plural/compare/v0.22.1...v0.23.0
 [0.14.1]: https://github.com/lastlabs-ai/plural/compare/v0.14.0...HEAD
 [0.14.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.14.0
 [0.13.3]: https://github.com/lastlabs-ai/plural/releases/tag/v0.13.3
