@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Every Trial has a seed, derived from the Task and the attempt, so every Agent on one attempt faces the same world and a rerun faces it again. Apps read it as `self.seed` and draw from `self.rng`; a State with a `seed` field gets it too. The Trial records it as `TrialResult.seed`. Until now a Job always reset Apps without a seed.
+- `plural task cases TASK FILE` writes one Task per case, each a copy of TASK with the case's `instructions`, `initial_state`, `info`, `metadata`, or `goals`, and `--benchmark` adds them all. Cases are a `.jsonl` file or a `.json` or `.yaml` list.
+- `plural benchmark add` and `remove` take several Tasks, by name or by a pattern such as `'refund-*'`.
 
 ### Removed
 

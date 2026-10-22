@@ -125,6 +125,25 @@ Here is what each field in `task.yaml` means, for when you need the exact rules:
   `resources/` folder is not an error. Task files must be UTF-8 text; a binary file
   fails validation. Paths must stay inside the Task folder.
 
+### Write many Tasks from a list of cases
+
+When Tasks differ only in their data, write one by hand, then list the rest as cases.
+Each line of a `.jsonl` file, or each item of a `.json` or `.yaml` list, names a Task and
+sets any of `instructions`, `initial_state`, `info`, `metadata`, and `goals`:
+
+```json
+{"name": "refund-late", "initial_state": {"order": "C-3", "days_since_delivery": 45}}
+{"name": "refund-damaged", "instructions": "The customer sent a photo of a cracked mug.", "initial_state": {"order": "D-4"}}
+```
+
+```bash
+plural task cases ticket-1 cases.jsonl --benchmark support-triage
+```
+
+Every case becomes its own Task folder: a copy of `ticket-1` with the case's fields, so
+it is validated, pushed, and versioned like any other Task. Every case is checked before
+any folder is written. Run the command again with `--replace` after you edit the cases.
+
 ### Push the Task
 
 Pushing saves the Task as an unchangeable, private revision in the hosted project this

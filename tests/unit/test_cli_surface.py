@@ -58,6 +58,7 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
     extras = {
         "benchmark": {"add", "remove"},
         "env": {"serve"},
+        "task": {"cases"},
         "verifier": {"try", "apply"},
     }
     for name in RESOURCE_GROUPS:

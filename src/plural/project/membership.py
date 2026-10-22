@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
+from collections.abc import Sequence
 
 from plural.project.layout import BENCHMARK, TASK, Project, ProjectError, ResourceRef
 from plural.project.manifests import read_yaml_mapping
@@ -31,40 +33,65 @@ def benchmark_tasks(project: Project, benchmark: str) -> list[str]:
     return list(tasks)
 
 
-def add_task(project: Project, benchmark: str, task: str) -> bool:
-    """Add a local Task to a Benchmark.
+def add_tasks(project: Project, benchmark: str, patterns: Sequence[str]) -> list[str]:
+    """Add local Tasks to a Benchmark, each named or matched by a pattern such as ``refund-*``.
 
     Returns:
-        Whether the file changed.
+        The Tasks added, in order. Ones the Benchmark already lists are skipped.
 
     Raises:
-        ProjectError: When the Task does not exist in this project.
+        ProjectError: When a name or pattern matches no Task in this project.
     """
-    if not project.has(ResourceRef(TASK.name, task)):
-        raise ProjectError(
-            f"No Task named {task!r} in this project. Create it with `plural task init {task}`."
-        )
+    wanted = _matching(project.names(TASK), patterns, "in this project", suggest_init=True)
     tasks = benchmark_tasks(project, benchmark)
-    if task in tasks:
-        return False
-    _write_tasks(project, benchmark, [*tasks, task])
-    return True
+    added = [name for name in wanted if name not in tasks]
+    if added:
+        _write_tasks(project, benchmark, [*tasks, *added])
+    return added
 
 
-def remove_task(project: Project, benchmark: str, task: str) -> bool:
-    """Remove a Task from a Benchmark.
+def remove_tasks(project: Project, benchmark: str, patterns: Sequence[str]) -> list[str]:
+    """Remove Tasks from a Benchmark, each named or matched by a pattern.
 
     Returns:
-        Whether the file changed.
+        The Tasks removed, in the Benchmark's order.
 
     Raises:
-        ProjectError: When the Benchmark does not list the Task.
+        ProjectError: When a name or pattern matches no Task the Benchmark lists.
     """
     tasks = benchmark_tasks(project, benchmark)
-    if task not in tasks:
-        raise ProjectError(f"Benchmark {benchmark!r} does not include Task {task!r}.")
-    _write_tasks(project, benchmark, [item for item in tasks if item != task])
-    return True
+    removed = _matching(tasks, patterns, f"in Benchmark {benchmark!r}", suggest_init=False)
+    _write_tasks(project, benchmark, [name for name in tasks if name not in removed])
+    return [name for name in tasks if name in removed]
+
+
+def _matching(
+    names: Sequence[str], patterns: Sequence[str], where: str, *, suggest_init: bool
+) -> list[str]:
+    """The names each pattern matches, in pattern order and without repeats.
+
+    Returns:
+        The matched names.
+
+    Raises:
+        ProjectError: When a pattern matches nothing.
+    """
+    matched: list[str] = []
+    for pattern in patterns:
+        found = fnmatch.filter(names, pattern)
+        if not found:
+            hint = (
+                f" Create it with `plural task init {pattern}`."
+                if suggest_init and not _is_pattern(pattern)
+                else ""
+            )
+            raise ProjectError(f"No Task {pattern!r} {where}.{hint}")
+        matched.extend(name for name in found if name not in matched)
+    return matched
+
+
+def _is_pattern(value: str) -> bool:
+    return any(character in value for character in "*?[")
 
 
 def _write_tasks(project: Project, benchmark: str, tasks: list[str]) -> None:
@@ -89,4 +116,4 @@ def _write_tasks(project: Project, benchmark: str, tasks: list[str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-__all__ = ["add_task", "benchmark_tasks", "remove_task"]
+__all__ = ["add_tasks", "benchmark_tasks", "remove_tasks"]

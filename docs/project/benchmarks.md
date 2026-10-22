@@ -101,13 +101,12 @@ measures. Create one and add Tasks by name:
 
 ```bash
 plural benchmark init support-triage
-plural benchmark add ticket-1 --benchmark support-triage
-plural benchmark add ticket-2 --benchmark support-triage
-plural benchmark add ticket-3 --benchmark support-triage
+plural benchmark add ticket-1 ticket-2 ticket-3 --benchmark support-triage
 ```
 
-`plural benchmark add` and `plural benchmark remove` edit the `tasks` list in
-`benchmark.yaml` and keep its comments. Both are local edits until you push. This is
+`plural benchmark add` and `plural benchmark remove` take several Tasks, by name or by a
+pattern such as `'ticket-*'`. They edit the `tasks` list in `benchmark.yaml` and keep its
+comments. Both are local edits until you push. This is
 `benchmarks/support-triage/benchmark.yaml` from the
 [first project](../tutorials/first-project.md):
 

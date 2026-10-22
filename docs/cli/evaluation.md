@@ -785,8 +785,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
-│ add       Add a Task to a Benchmark (a local edit until you push).                               │
-│ remove    Remove a Task from a Benchmark (a local edit until you push).                          │
+│ add       Add Tasks to a Benchmark (a local edit until you push).                                │
+│ remove    Remove Tasks from a Benchmark (a local edit until you push).                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -794,12 +794,12 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural benchmark add [OPTIONS] {task}
+ Usage: plural benchmark add [OPTIONS] {tasks}...
 
- Add a Task to a Benchmark (a local edit until you push).
+ Add Tasks to a Benchmark (a local edit until you push).
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    task      <str>  Task to add. [required]                                                    │
+│ *    tasks      <str>  Tasks to add, by name or a pattern such as 'refund-*'. [required]         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --benchmark  -b      <str>  Benchmark to edit. Defaults to the one you are in.                   │
@@ -937,12 +937,12 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural benchmark remove [OPTIONS] {task}
+ Usage: plural benchmark remove [OPTIONS] {tasks}...
 
- Remove a Task from a Benchmark (a local edit until you push).
+ Remove Tasks from a Benchmark (a local edit until you push).
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    task      <str>  Task to remove. [required]                                                 │
+│ *    tasks      <str>  Tasks to remove, by name or a pattern such as 'refund-*'. [required]      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --benchmark  -b      <str>  Benchmark to edit. Defaults to the one you are in.                   │
@@ -2446,6 +2446,28 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
+│ cases     Write one Task per case, each a copy of TASK with the case's fields.                   │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task cases`
+
+```text
+
+ Usage: plural task cases [OPTIONS] {task} {path}
+
+ Write one Task per case, each a copy of TASK with the case's fields.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    task      <str>   Task to copy for each case. [required]                                    │
+│ *    path      <path>  Cases, as a .jsonl file or a .json or .yaml list. Each names its Task and │
+│                        may set instructions, initial_state, info, metadata, and goals.           │
+│                        [required]                                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --replace                   Write over Tasks that already exist, such as on a rerun.             │
+│ --benchmark  -b      <str>  Also add the Tasks to this Benchmark.                                │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

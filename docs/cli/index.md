@@ -44,12 +44,13 @@ plural project show NAME
 plural project push
 plural env init NAME [--python] [--bare]
 plural task init NAME [--environment ENV] [--verifier NAME]
+plural task cases TASK CASES_FILE [--benchmark NAME] [--replace]
 plural agent init NAME --model MODEL [--harness HARNESS]
 plural verifier|harness|benchmark init NAME
 plural env|task|verifier|harness|agent|benchmark validate|show|push|pull [NAME]
 plural env|task|verifier|harness|agent|benchmark list
 plural env|task|verifier|harness|agent|benchmark delete NAME [--hosted] [-y]
-plural benchmark add|remove TASK [--benchmark NAME]
+plural benchmark add|remove TASK... [--benchmark NAME]
 plural app add ENV (--mcp URL_OR_COMMAND | --openapi SPEC | --traces FILE | --files-server)
            [--app APP] [--header K=V] [--server-env K=V] [--tool NAME] [--operation ID]
            [--credential NAME] [--copy]

@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 from plural import Agent, Harness
 from plural.cli.main import app
 from plural.project import Project, ProjectError, ResourceRef, Workspace
-from plural.project.membership import add_task, remove_task
+from plural.project.membership import add_tasks, remove_tasks
 
 runner = CliRunner()
 
@@ -207,24 +207,77 @@ def test_benchmark_rejects_verifiers_that_score_outside_its_range(project: Proje
 
 def test_benchmark_membership_edits_keep_comments(project: Project) -> None:
     path = project.root / "benchmarks/basics/benchmark.yaml"
-    remove_task(project, "basics", "deny")
+    assert remove_tasks(project, "basics", ["deny"]) == ["deny"]
     text = path.read_text()
     assert "  - deny" not in text
     assert "# Basics benchmark." in text and "# Ranking rules." in text
-    assert add_task(project, "basics", "deny") is True
-    assert add_task(project, "basics", "deny") is False
+    assert add_tasks(project, "basics", ["deny"]) == ["deny"]
+    assert add_tasks(project, "basics", ["deny"]) == []
     assert path.read_text().count("  - deny") == 1
     with pytest.raises(ProjectError, match="plural task init"):
-        add_task(project, "basics", "unknown")
-    with pytest.raises(ProjectError, match="does not include"):
-        remove_task(project, "basics", "unknown")
+        add_tasks(project, "basics", ["unknown"])
+    with pytest.raises(ProjectError, match="No Task 'unknown' in Benchmark 'basics'"):
+        remove_tasks(project, "basics", ["unknown"])
     load(project, "benchmark", "basics")
+
+
+def test_benchmark_membership_takes_several_tasks_and_patterns(project: Project) -> None:
+    remove_tasks(project, "basics", ["*"])
+    assert add_tasks(project, "basics", ["re*", "deny", "refund"]) == ["refund", "deny"]
+    assert remove_tasks(project, "basics", ["d?ny"]) == ["deny"]
+    with pytest.raises(ProjectError, match="No Task 'zz-\\*' in this project.$"):
+        add_tasks(project, "basics", ["zz-*"])
+
+
+def test_cases_write_one_task_each_that_loads_and_joins_a_benchmark(
+    project: Project, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    cases = project.root / "refunds.jsonl"
+    cases.write_text(
+        json.dumps({"name": "refund-c3", "initial_state": {"order": "C-3", "refundable": True}})
+        + "\n"
+        + json.dumps(
+            {
+                "name": "refund-d4",
+                "instructions": "Review order D-4.",
+                "initial_state": {"order": "D-4", "refundable": False},
+            }
+        )
+        + "\n"
+    )
+    monkeypatch.chdir(project.root)
+    result = runner.invoke(app, ["task", "cases", "refund", str(cases), "-b", "basics"])
+    assert result.exit_code == 0, result.output
+    assert "refund-c3, refund-d4" in result.output
+    task = load(project, "task", "refund-d4").value
+    assert task.name == "refund-d4"
+    assert task.initial_state == {"order": "D-4", "refundable": False}
+    assert task.instructions == "Review order D-4.\n"
+    assert load(project, "task", "refund-c3").value.instructions.startswith("Review order A-1")
+    text = (project.root / "benchmarks/basics/benchmark.yaml").read_text()
+    assert "  - refund-c3" in text and "  - refund-d4" in text
+
+    again = runner.invoke(app, ["task", "cases", "refund", str(cases)])
+    assert again.exit_code != 0 and "--replace" in again.output
+    assert runner.invoke(app, ["task", "cases", "refund", str(cases), "--replace"]).exit_code == 0
+
+
+def test_cases_are_checked_before_any_task_is_written(project: Project) -> None:
+    from plural.project.cases import write_cases
+
+    with pytest.raises(ProjectError, match="sets verifiers"):
+        write_cases(project, "refund", [{"name": "ok-1"}, {"name": "bad", "verifiers": []}])
+    with pytest.raises(ProjectError, match="More than one case is named 'twice'"):
+        write_cases(project, "refund", [{"name": "twice"}, {"name": "twice"}])
+    with pytest.raises(ProjectError, match="Case 1 has no name"):
+        write_cases(project, "refund", [{"info": {}}])
+    assert not (project.root / "tasks/ok-1").exists()
 
 
 def test_benchmark_add_cli_infers_the_benchmark_and_stays_local(
     project: Project, monkeypatch: pytest.MonkeyPatch, home: Path
 ) -> None:
-    remove_task(project, "basics", "deny")
+    remove_tasks(project, "basics", ["deny"])
     monkeypatch.chdir(project.root / "benchmarks/basics")
     result = runner.invoke(app, ["benchmark", "add", "deny"])
     assert result.exit_code == 0, result.output

@@ -39,8 +39,9 @@ from plural.project import (
     Workspace,
     check_name,
 )
+from plural.project.cases import read_cases, write_cases
 from plural.project.layout import AGENT, BENCHMARK, ENVIRONMENT, HARNESS, TASK, split_version
-from plural.project.membership import add_task, remove_task
+from plural.project.membership import add_tasks, remove_tasks
 from plural.project.sync import (
     REBUILT_NOTE,
     PushStep,
@@ -638,6 +639,8 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
 
     if kind is BENCHMARK:
         _benchmark_membership(app)
+    if kind is TASK:
+        _task_cases(app)
     return app
 
 
@@ -803,34 +806,69 @@ def _benchmark_membership(app: typer.Typer) -> None:
     @app.command("add")
     @handled
     def add(
-        task: str = typer.Argument(help="Task to add."),
+        tasks: list[str] = typer.Argument(
+            help="Tasks to add, by name or a pattern such as 'refund-*'."
+        ),
         benchmark: str | None = benchmark_option,
         push_after: bool = push_option,
     ) -> None:
-        """Add a Task to a Benchmark (a local edit until you push)."""
+        """Add Tasks to a Benchmark (a local edit until you push)."""
         space = workspace()
         ref = _ref(space, BENCHMARK, benchmark)
-        changed = add_task(space.project, ref.name, task)
+        added = add_tasks(space.project, ref.name, tasks)
         typer.echo(
-            f"Added Task {task} to Benchmark {ref.name}."
-            if changed
-            else f"Benchmark {ref.name} already includes Task {task}."
+            f"Added {_task_list(added)} to Benchmark {ref.name}."
+            if added
+            else f"Benchmark {ref.name} already includes {_task_list(tasks)}."
         )
-        _maybe_push(space, ref, push_after, changed=changed)
+        _maybe_push(space, ref, push_after, changed=bool(added))
 
     @app.command("remove")
     @handled
     def remove(
-        task: str = typer.Argument(help="Task to remove."),
+        tasks: list[str] = typer.Argument(
+            help="Tasks to remove, by name or a pattern such as 'refund-*'."
+        ),
         benchmark: str | None = benchmark_option,
         push_after: bool = push_option,
     ) -> None:
-        """Remove a Task from a Benchmark (a local edit until you push)."""
+        """Remove Tasks from a Benchmark (a local edit until you push)."""
         space = workspace()
         ref = _ref(space, BENCHMARK, benchmark)
-        changed = remove_task(space.project, ref.name, task)
-        typer.echo(f"Removed Task {task} from Benchmark {ref.name}.")
-        _maybe_push(space, ref, push_after, changed=changed)
+        removed = remove_tasks(space.project, ref.name, tasks)
+        typer.echo(f"Removed {_task_list(removed)} from Benchmark {ref.name}.")
+        _maybe_push(space, ref, push_after, changed=True)
+
+
+def _task_list(names: list[str]) -> str:
+    return f"Task {names[0]}" if len(names) == 1 else f"{len(names)} Tasks: {', '.join(names)}"
+
+
+def _task_cases(app: typer.Typer) -> None:
+    @app.command("cases")
+    @handled
+    def cases(
+        task: str = typer.Argument(help="Task to copy for each case."),
+        path: Path = typer.Argument(
+            help="Cases, as a .jsonl file or a .json or .yaml list. Each names its Task and "
+            "may set instructions, initial_state, info, metadata, and goals."
+        ),
+        replace: bool = typer.Option(
+            False, "--replace", help="Write over Tasks that already exist, such as on a rerun."
+        ),
+        benchmark: str | None = typer.Option(
+            None, "--benchmark", "-b", help="Also add the Tasks to this Benchmark."
+        ),
+    ) -> None:
+        """Write one Task per case, each a copy of TASK with the case's fields."""
+        space = workspace()
+        names = write_cases(space.project, task, read_cases(path), replace=replace)
+        success(f"Wrote {_task_list(names)}.")
+        if benchmark is not None:
+            ref = _ref(space, BENCHMARK, benchmark)
+            add_tasks(space.project, ref.name, names)
+            typer.echo(f"Added them to Benchmark {ref.name}.")
+        typer.echo("Check them with `plural task show NAME`, then push them.")
 
 
 def _maybe_push(space: Workspace, ref: ResourceRef, enabled: bool, *, changed: bool) -> None:
