@@ -262,7 +262,11 @@ class _Stdio:
             self._buffer.extend(chunk)
 
     def _exit_detail(self) -> str:
-        code = self.process.poll()
+        # A crashing server closes its output a moment before it can be reaped.
+        try:
+            code: int | None = self.process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            code = None
         detail = f"exit code {code}" if code is not None else "closed its output"
         if self._log is None or self._log_path is None:
             return detail
