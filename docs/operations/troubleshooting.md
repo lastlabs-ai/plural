@@ -166,7 +166,7 @@ accept; run `plural auth login` again. The key a browser login stores lasts 30 d
 so a run can also fail once it expires. You can create a key in the web app under
 Keys.
 
-- In Python, pass `Job(..., client=Client())` or `api_key=`.
+- In Python, a Job reads the same stored key; pass `api_key=` to use another.
 - An Agent whose Harness never calls a model can set `auth: none` and needs no
   key.
 - Check the selected model ID and endpoint: a direct provider may accept a different

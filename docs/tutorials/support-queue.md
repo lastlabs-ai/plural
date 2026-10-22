@@ -28,7 +28,7 @@ system. Every action only changes the pretend desk inside the run.
 
 ## Before you start
 
-You need Plural installed; see [Install](../getting-started.md#1-create-an-account-and-install). No account or
+You need Plural installed; see [Install](../getting-started.md#1-install). No account or
 key is needed until [Run it with a model](#run-it-with-a-model).
 
 [Download the project](../assets/first-project.zip) and unzip it, or copy

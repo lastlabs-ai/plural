@@ -22,7 +22,7 @@ creates an Environment you can run at once:
 | Traces from an agent you already run | `plural app add NAME --traces FILE` | A replay App, one Task per trace, a judge, and a Benchmark |
 
 This page assumes you have installed Plural, signed in, and created a project with
-`plural project init`; [the Quickstart](../getting-started.md#1-create-an-account-and-install)
+`plural project init`; [the Quickstart](../getting-started.md)
 covers all three. If App, Task, and Verifier are new words, read
 [Core concepts](../getting-started/concepts.md) first.
 

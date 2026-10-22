@@ -11,22 +11,15 @@ nav_group: Start
 
 By the end of this page you'll have built a small Wordle game, scored a model on two
 puzzles, and opened the results in the web app. It takes about twenty minutes, and
-every block can be pasted as it is. You don't need Docker.
+every block can be pasted as it is. You don't need Docker, and you only need an account at step 8.
 
 New to words like Environment, Task, and Verifier? [Core concepts](getting-started/concepts.md)
 explains them in five minutes. Already have an agent, traces, or a system to test?
 [Bring your own work](start/index.md) starts from there instead.
 
-## 1. Create an account and install
+## 1. Install
 
-1. Sign up at [pluralintel.com](https://pluralintel.com) with email, Google, or GitHub.
-   During early access you may be asked to join a waitlist; an invitation from someone
-   in your organization lets you in right away.
-2. Take the short tour. It ends by creating an **API key**, the secret that lets the
-   `plural` command act for you and call models. It is shown once, so keep it in a
-   password manager.
-
-Install Plural. You need Python 3.10 or newer:
+You need Python 3.10 or newer:
 
 :::tabs
 :::tab pip
@@ -46,27 +39,6 @@ uv tool install "plural[mcp]>=0.22.1"
 
 To use the Python SDK from a uv project, run `uv add "plural[mcp]>=0.22.1"` inside it.
 :::
-
-Then sign in with the key. It is read without being shown, and stored in your user
-config folder, never in a project:
-
-```bash
-plural auth login --api-key-stdin
-```
-
-:::details Other ways to sign in
-- **Browser login.** `plural auth login` opens pluralintel.com; approve it there, and
-  Plural stores a 30-day key for the account you picked. `plural auth status` checks it.
-- **Environment variable.** `export PLURAL_API_KEY=plural_...` works anywhere, which is
-  handy in CI.
-- **Project keys.** A project key is an API key limited to one project. It can reach
-  only that project and can't create new ones.
-- **Organizations.** A login acts for one account. To work in another organization,
-  select it in the web app and run `plural auth login` again.
-:::
-
-Model calls go through Plural's gateway and are billed to your account's credits at the
-provider's price. Check your balance under **Credits** in the web app.
 
 ## 2. Create a project
 
@@ -256,7 +228,37 @@ echo "Two Wordle puzzles. A score is the share solved in six guesses." > benchma
 plural benchmark validate wordle
 ```
 
-## 8. Run it
+## 8. Sign in and run it
+
+Everything so far ran offline. Calling a model needs an account:
+
+1. Sign up at [pluralintel.com](https://pluralintel.com) with email, Google, or GitHub.
+   During early access you may be asked to join a waitlist; an invitation from someone
+   in your organization lets you in right away.
+2. Take the short tour. It ends by creating an **API key**, the secret that lets the
+   `plural` command act for you and call models. It is shown once, so keep it in a
+   password manager.
+
+Sign in with the key. It is read without being shown, and stored in your user
+config folder, never in a project:
+
+```bash
+plural auth login --api-key-stdin
+```
+
+:::details Other ways to sign in
+- **Browser login.** `plural auth login` opens pluralintel.com; approve it there, and
+  Plural stores a 30-day key for the account you picked. `plural auth status` checks it.
+- **Environment variable.** `export PLURAL_API_KEY=plural_...` works anywhere, which is
+  handy in CI.
+- **Project keys.** A project key is an API key limited to one project. It can reach
+  only that project and can't create new ones.
+- **Organizations.** A login acts for one account. To work in another organization,
+  select it in the web app and run `plural auth login` again.
+:::
+
+Model calls go through Plural's gateway and are billed to your account's credits at the
+provider's price. Check your balance under **Credits** in the web app.
 
 A **Job** runs a Benchmark with one model; each attempt at one Task is a **Trial**.
 Every Job runs from your machine:

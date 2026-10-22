@@ -77,8 +77,9 @@ A few defaults to know:
 - Environment, Agent, Harness, Verifier, and Task versions default to `0.1.0`. A
   Benchmark `version` is required.
 - A Job defaults to eval mode, one attempt, and concurrency one.
-- `client=Client()` authenticates the Job's model calls with your Plural API key. The
-  Job still runs on this machine.
+- A Job authenticates its model calls with the key `plural auth login` stored, or
+  `PLURAL_API_KEY`. Pass `client=Client(api_key=...)` to use another. The Job still runs
+  on this machine.
 
 ## Load project resources
 

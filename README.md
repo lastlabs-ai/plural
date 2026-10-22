@@ -116,7 +116,7 @@ read it, scores the result:
 
 ```python
 # run.py
-from plural import Agent, Client, DeterministicVerifier, Episode, Job, Task, VerifierOutput
+from plural import Agent, DeterministicVerifier, Episode, Job, Task, VerifierOutput
 from wordle import environment
 
 def solved(episode: Episode) -> VerifierOutput:
@@ -129,7 +129,7 @@ task = Task(
     initial_state={"secret": "crane"},
     verifiers=[DeterministicVerifier(name="solved", check=solved)],
 )
-result = Job(task, agents=[Agent(model="openai/gpt-5.6-luna")], client=Client()).run()
+result = Job(task, agents=[Agent(model="openai/gpt-5.6-luna")]).run()  # after plural auth login
 print(result.aggregates[0].mean_score)
 ```
 

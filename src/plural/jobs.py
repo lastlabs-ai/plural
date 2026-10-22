@@ -818,6 +818,20 @@ class SeatResult(FrozenModel):
     error_message: str | None = None
 
 
+def _stored_api_key() -> str | None:
+    """The API key ``plural auth login`` stored, read as :class:`plural.Client` reads it.
+
+    Returns:
+        The key, or ``None`` when no login holds one.
+    """
+    from plural.auth import resolve_session
+
+    try:
+        return resolve_session().api_key
+    except (OSError, ValueError):
+        return None
+
+
 class TrialResult(FrozenModel):
     """Typed Trial outcome."""
 
@@ -1073,13 +1087,17 @@ class Job:
         ):
             # Agents with their own endpoint call it directly, not the gateway.
             return current
+        stored = _stored_api_key()
+        if stored:
+            current.setdefault("PLURAL_API_KEY", stored)
+            current.setdefault("PLURAL_GATEWAY_URL", resolve_gateway_url(None, current))
+            return current
         raise ValueError(
             "Cannot run Job.\n"
             "A live model call, by an Agent or a model-judge Verifier, goes through the "
             "Plural gateway and needs a Plural API key.\n"
-            "SDK:  Job(task, agents=[agent], client=Client())\n"
-            "SDK:  Job(task, agents=[agent], api_key='...')\n"
-            "CLI:  plural auth login && plural run --task <name> --model <model>"
+            "Sign in:  plural auth login\n"
+            "Or pass:  Job(task, agents=[agent], api_key='...')"
         )
 
     @property

@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import (
     AliasChoices,
@@ -110,7 +110,7 @@ class EpisodeUsage(FrozenModel):
     cost_usd: float | None = None
 
 
-STOP_REASONS: tuple[str, ...] = (
+StopReason = Literal[
     # The Environment ended the episode.
     "environment_terminated",
     "environment_truncated",
@@ -125,7 +125,8 @@ STOP_REASONS: tuple[str, ...] = (
     "error",
     # The Harness ran past its time and was killed.
     "harness_timeout",
-)
+]
+STOP_REASONS: tuple[str, ...] = get_args(StopReason)
 
 
 class EpisodeOutcome(FrozenModel):
@@ -137,18 +138,7 @@ class EpisodeOutcome(FrozenModel):
     chose to stop, so read ``stop_reason`` to tell those cases apart.
     """
 
-    stop_reason: Literal[
-        "",
-        "environment_terminated",
-        "environment_truncated",
-        "agent_finished",
-        "agent_response",
-        "max_turns",
-        "max_seconds",
-        "max_cost",
-        "error",
-        "harness_timeout",
-    ] = ""
+    stop_reason: Literal["", StopReason] = ""
     terminated: bool = False
     truncated: bool = False
     turns: int = 0
@@ -835,6 +825,7 @@ __all__ = [
     "RubricCriterion",
     "Step",
     "StepTask",
+    "StopReason",
     "Verifier",
     "VerifierDefinition",
     "VerifierOutput",

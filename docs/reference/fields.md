@@ -322,7 +322,7 @@ Versioned rules that make results on one track comparable.
 
 Environment execution limits.
 
-- **`max_turns`** — `integer`; optional. Default: `8`. Constraints: `{"maximum": 128, "minimum": 1}`.
+- **`max_turns`** — `integer`; optional. Default: `8`. Constraints: `{"maximum": 1000, "minimum": 1}`.
 - **`max_seconds`** — `number`; optional. Default: `120`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`max_cost_usd`** — `number | null`; optional. Default: `null`.
 

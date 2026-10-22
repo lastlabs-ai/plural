@@ -476,7 +476,7 @@
         "properties": {
           "max_turns": {
             "default": 8,
-            "maximum": 128,
+            "maximum": 1000,
             "minimum": 1,
             "title": "Max Turns",
             "type": "integer"

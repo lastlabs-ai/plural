@@ -16,7 +16,7 @@ your work with it at any point.
 Prefer to start from the finished project? [Download it](../assets/first-project.zip)
 and follow the [support queue tutorial](support-queue.md) instead.
 
-You need Plural installed; see [Install](../getting-started.md#1-create-an-account-and-install).
+You need Plural installed; see [Install](../getting-started.md#1-install).
 
 ## Create the project
 

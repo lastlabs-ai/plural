@@ -511,10 +511,13 @@ class HarnessGrant(FrozenModel):
         )
 
 
+MAX_TURNS = 1000
+
+
 class ExecutionLimits(FrozenModel):
     """Environment execution limits."""
 
-    max_turns: int = Field(default=8, ge=1, le=128)
+    max_turns: int = Field(default=8, ge=1, le=MAX_TURNS)
     max_seconds: float = Field(default=120, gt=0)
     max_cost_usd: float | None = Field(default=None, gt=0)
 

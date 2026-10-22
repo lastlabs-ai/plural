@@ -17,9 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `plural` itself now exports the 49 names a project needs: Environments, Apps, Tasks, Verifiers, Agents, Harnesses, Benchmarks, Jobs, and the Client. The other 79, such as `JobStore`, the sandbox providers, tracing, and most error classes, import from their submodules, such as `plural.execution` and `plural.sandbox`. Importing one from `plural` still works for this release, with a `DeprecationWarning` naming its new home.
+- A `Job` signs in the way `Client` does: with no `api_key`, `client`, or `PLURAL_API_KEY`, it uses the key from `plural auth login`.
+- An Environment's `limits.max_turns` may be up to 1000, up from 128; `max_seconds` and `max_cost_usd` still bound every episode.
+- The Quickstart builds and validates offline, and asks for an account only when it first calls a model.
 
 ### Removed
 
+- The `ENROUTE_API_KEY` fallback in `Client`. Use `PLURAL_API_KEY` or `plural auth login`.
 - `reset_options` on a Task, which Plural stored but never passed to `reset`. A Task or `task.yaml` that sets them is refused with a pointer to `initial_state` and `info`; an empty one is still accepted, stored revisions still load, and no Task's hash changes.
 
 ### Fixed
