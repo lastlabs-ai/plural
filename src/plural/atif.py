@@ -21,6 +21,8 @@ from plural.usage import TokenUsage
 
 ATIF_VERSION = "ATIF-v1.7"
 ATIF_FILE = "atif-trajectory.json"
+AGENT_TRACE_FILE = "agent-trace.json"
+"""An external Agent's ATIF trace of itself, kept beside what Plural observed."""
 
 
 def _text(value: Any) -> str:
@@ -334,6 +336,7 @@ def validate_atif(document: Any) -> list[str]:
 
 
 __all__ = [
+    "AGENT_TRACE_FILE",
     "ATIF_FILE",
     "ATIF_VERSION",
     "episode_to_atif",

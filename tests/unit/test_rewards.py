@@ -8,15 +8,7 @@ import pytest
 from fakes import FakeProvider
 from pydantic import ValidationError
 
-from plural import (
-    Credit,
-    DeterministicVerifier,
-    Episode,
-    HindsightTrial,
-    RewardTarget,
-    Step,
-    total_reward,
-)
+from plural import Credit, DeterministicVerifier, Episode, HindsightTrial, Step, total_reward
 from plural.agents import AgentBinding, AgentDefinition
 from plural.execution import JobRunner, JobStore
 from plural.execution.replay import replay_verifier
@@ -25,10 +17,12 @@ from plural.rewards import (
     LEDGER_FILE,
     HindsightVerifier,
     RewardRecord,
+    RewardTarget,
     align_tito,
     append_ledger,
     online_records,
     read_ledger,
+    reward_failures,
     training_export,
 )
 from plural.sandbox import ExecRequest, ExecResult, SandboxHandle
@@ -70,6 +64,12 @@ EPISODE: list[dict[str, Any]] = [
         "info": {"off_recording": True},
     },
 ]
+
+
+def test_a_reward_that_raised_is_reported_not_recorded() -> None:
+    assert [item.verifier for item in online_records(EPISODE)] == ["progress", "careful"]
+    [failure] = reward_failures([*EPISODE, EPISODE[2]])
+    assert (failure.verifier, failure.steps, failure.error) == ("broken", 2, "boom")
 
 
 def test_targets_name_one_thing_and_spans_need_exactly_one_range() -> None:

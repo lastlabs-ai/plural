@@ -27,7 +27,7 @@ from plural.environments.definition import (
     HarnessPolicy,
     Party,
 )
-from plural.tasks import BenchmarkRelease
+from plural.tasks import BenchmarkRelease, without_reset_options
 
 PROJECT_SCHEMA_VERSION: Literal[1] = 1
 LOCK_VERSION: Literal[1] = 1
@@ -136,12 +136,6 @@ class EnvironmentManifest(ManifestModel):
                 )
         return value
 
-    @model_validator(mode="after")
-    def _has_apps(self) -> EnvironmentManifest:
-        if not self.python and not self.apps:
-            raise ValueError("an Environment needs Apps: set python to an App class, or list apps")
-        return self
-
 
 class TaskManifest(ManifestModel):
     """``task.yaml``: instructions, one Environment, and its Verifiers."""
@@ -161,7 +155,11 @@ class TaskManifest(ManifestModel):
     info: Any = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     initial_state: dict[str, Any] = Field(default_factory=dict)
-    reset_options: dict[str, Any] = Field(default_factory=dict)
+    expected: Any = Field(
+        default=None,
+        description="The answer key Verifiers read as episode.expected. Never shown to the "
+        "Agent, unlike info and metadata.",
+    )
     seat_instructions: dict[str, str] = Field(
         default_factory=dict,
         description=(
@@ -169,6 +167,13 @@ class TaskManifest(ManifestModel):
             "instructions, keyed seat_1, seat_2, and so on."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _removed_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        return without_reset_options(dict(value), value.get("name"))
 
 
 class HarnessManifest(ManifestModel):

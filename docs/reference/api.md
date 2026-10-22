@@ -635,7 +635,7 @@ Returns:
 plural.types.text_content(message: 'Message') -> 'str'
 ```
 
-## plural.Trace
+## plural.tracing.Trace
 
 A complete record of an LLM interaction or environment rollout.
 
@@ -668,7 +668,7 @@ Examples:
     '3.0.0'
 ```
 
-### plural.Trace.add_llm
+### plural.tracing.Trace.add_llm
 
 ```python
 add_llm(self, *, request: 'ChatRequest | dict[str, Any] | None', response: 'ChatResponse | None', attempts: 'list[Attempt] | None' = None, error: 'str | None' = None) -> 'LLMCall'
@@ -687,7 +687,7 @@ Returns:
     The appended :class:`LLMCall`.
 ```
 
-### plural.Trace.add_action
+### plural.tracing.Trace.add_action
 
 ```python
 add_action(self, name: 'str', arguments: 'dict[str, Any]', *, action_id: 'str | None' = None, tool_call_id: 'str | None' = None, source: 'ActionSource' = 'environment_native', observation: 'Any' = None, result: 'Any' = None, error: 'str | None' = None, latency_ms: 'float | None' = None) -> 'ActionStep'
@@ -695,7 +695,7 @@ add_action(self, name: 'str', arguments: 'dict[str, Any]', *, action_id: 'str | 
 
 Append an action step.
 
-### plural.Trace.add_turn
+### plural.tracing.Trace.add_turn
 
 ```python
 add_turn(self, *, observation: 'Any' = None, model_context: 'ChatRequest | dict[str, Any] | None' = None, model_output: 'ChatResponse | None' = None, parsed_action: 'list[ParsedAction] | None' = None, actions: 'list[ActionStep] | None' = None, reward_events: 'list[RewardEvent] | None' = None, reasoning: 'list[ReasoningBlock] | None' = None, turn: 'int | None' = None) -> 'Turn'
@@ -703,7 +703,7 @@ add_turn(self, *, observation: 'Any' = None, model_context: 'ChatRequest | dict[
 
 Append a turn step for one model turn.
 
-### plural.Trace.transitions
+### plural.tracing.Trace.transitions
 
 ```python
 transitions(self, *, source: "Literal['outcome', 'events', 'both']" = 'outcome') -> 'list[Transition]'
@@ -722,7 +722,7 @@ Returns:
     One :class:`Transition` per turn.
 ```
 
-### plural.Trace.turns
+### plural.tracing.Trace.turns
 
 ```python
 turns(self) -> 'list[Turn]'
@@ -730,7 +730,7 @@ turns(self) -> 'list[Turn]'
 
 Return turn steps in order.
 
-### plural.Trace.credit
+### plural.tracing.Trace.credit
 
 ```python
 credit(self, value: 'float', *, name: 'str' = 'late', reason: 'str | None' = None, turn_index: 'int | None' = None) -> 'RewardEvent | TraceOutcome'
@@ -758,7 +758,7 @@ Raises:
     IndexError: If ``turn_index`` is out of range.
 ```
 
-### plural.Trace.turn_rewards
+### plural.tracing.Trace.turn_rewards
 
 ```python
 turn_rewards(self, *, source: "Literal['outcome', 'events', 'both']" = 'outcome') -> 'list[float]'
@@ -766,7 +766,7 @@ turn_rewards(self, *, source: "Literal['outcome', 'events', 'both']" = 'outcome'
 
 Per-turn reward used as ``r_t`` before discounting.
 
-### plural.Trace.returns
+### plural.tracing.Trace.returns
 
 ```python
 returns(self, gamma: 'float' = 1.0, *, source: "Literal['outcome', 'events', 'both']" = 'outcome') -> 'list[float]'
@@ -794,7 +794,7 @@ Examples:
     [0.9, 1.0]
 ```
 
-### plural.Trace.label
+### plural.tracing.Trace.label
 
 ```python
 label(self, *, scores: 'dict[str, float] | None' = None, reward: 'float | None' = None, labels: 'dict[str, Any] | None' = None, feedback: 'str | None' = None) -> 'TraceOutcome'
@@ -813,7 +813,7 @@ Returns:
     The updated :class:`TraceOutcome`.
 ```
 
-## plural.TraceContext
+## plural.tracing.TraceContext
 
 Lineage supplied by a caller when creating a child trace.
 
@@ -846,10 +846,13 @@ same name.
 For a Task whose Environment has a party, ``party`` lists the Agents that
 share each episode, in seat order; list one Agent more than once for
 self-play. Left out, every Agent in ``agents`` plays, once each.
+
+``episode_server`` says where the Job serves an external Agent's episodes;
+by default it listens on a free loopback port.
 ```
 
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None, episode_server: 'Any' = None) -> 'None'
 ```
 
 ### plural.Job.run_async
@@ -1305,15 +1308,15 @@ Raises:
 plural.project.layout.resource_kind(name: 'str') -> 'ResourceKind'
 ```
 
-## plural.JobStore
+## plural.execution.JobStore
 
 Crash-safe filesystem persistence for local execution.
 
 ```python
-plural.JobStore(root: 'Path' = PosixPath('<default>'), *, on_event: 'Callable[[ProgressEvent], None] | None' = None) -> 'None'
+plural.execution.JobStore(root: 'Path' = PosixPath('<default>'), *, on_event: 'Callable[[ProgressEvent], None] | None' = None) -> 'None'
 ```
 
-### plural.JobStore.job_path
+### plural.execution.JobStore.job_path
 
 ```python
 job_path(self, job_id: 'str') -> 'Path'
@@ -1321,7 +1324,7 @@ job_path(self, job_id: 'str') -> 'Path'
 
 Return a validated job directory.
 
-### plural.JobStore.initialize
+### plural.execution.JobStore.initialize
 
 ```python
 initialize(self, spec: 'JobSpec', plan: 'JobPlan') -> 'Path'
@@ -1329,7 +1332,7 @@ initialize(self, spec: 'JobSpec', plan: 'JobPlan') -> 'Path'
 
 Create or validate a locked job directory.
 
-### plural.JobStore.load_spec
+### plural.execution.JobStore.load_spec
 
 ```python
 load_spec(self, job_id: 'str') -> 'JobSpec'
@@ -1337,7 +1340,7 @@ load_spec(self, job_id: 'str') -> 'JobSpec'
 
 Load a persisted job config.
 
-### plural.JobStore.load_lock
+### plural.execution.JobStore.load_lock
 
 ```python
 load_lock(self, job_id: 'str') -> 'JobLock'
@@ -1345,7 +1348,7 @@ load_lock(self, job_id: 'str') -> 'JobLock'
 
 Load a persisted reproducibility lock.
 
-### plural.JobStore.list_jobs
+### plural.execution.JobStore.list_jobs
 
 ```python
 list_jobs(self) -> 'tuple[dict[str, Any], ...]'
@@ -1353,7 +1356,7 @@ list_jobs(self) -> 'tuple[dict[str, Any], ...]'
 
 List stored jobs without accepting partial files as results.
 
-### plural.JobStore.emit
+### plural.execution.JobStore.emit
 
 ```python
 emit(self, job_id: 'str', event_type: 'str', status: 'str', *, trial_id: 'str | None' = None, execution_id: 'int | None' = None, message: 'str' = '', data: 'Mapping[str, Any] | None' = None, secret_values: 'Iterable[str]' = ()) -> 'ProgressEvent'
@@ -1361,7 +1364,7 @@ emit(self, job_id: 'str', event_type: 'str', status: 'str', *, trial_id: 'str | 
 
 Append one monotonic, sanitized progress event.
 
-### plural.JobStore.events
+### plural.execution.JobStore.events
 
 ```python
 events(self, job_id: 'str', *, after: 'int' = 0, follow: 'bool' = False, poll_interval: 'float' = 0.1) -> 'Iterable[ProgressEvent]'
@@ -1369,7 +1372,7 @@ events(self, job_id: 'str', *, after: 'int' = 0, follow: 'bool' = False, poll_in
 
 Yield events after a sequence cursor, optionally following updates.
 
-### plural.JobStore.request_cancel
+### plural.execution.JobStore.request_cancel
 
 ```python
 request_cancel(self, job_id: 'str') -> 'None'
@@ -1377,7 +1380,7 @@ request_cancel(self, job_id: 'str') -> 'None'
 
 Atomically create a cancellation marker.
 
-### plural.JobStore.clear_cancel
+### plural.execution.JobStore.clear_cancel
 
 ```python
 clear_cancel(self, job_id: 'str') -> 'None'
@@ -1385,7 +1388,7 @@ clear_cancel(self, job_id: 'str') -> 'None'
 
 Clear a prior cancellation marker before explicit resume.
 
-### plural.JobStore.cancel_requested
+### plural.execution.JobStore.cancel_requested
 
 ```python
 cancel_requested(self, job_id: 'str') -> 'bool'
@@ -1393,7 +1396,7 @@ cancel_requested(self, job_id: 'str') -> 'bool'
 
 Return whether cancellation was requested.
 
-### plural.JobStore.trial_path
+### plural.execution.JobStore.trial_path
 
 ```python
 trial_path(self, trial: 'TrialSpec | str', job_id: 'str | None' = None) -> 'Path'
@@ -1401,7 +1404,7 @@ trial_path(self, trial: 'TrialSpec | str', job_id: 'str | None' = None) -> 'Path
 
 Return a validated trial directory.
 
-### plural.JobStore.successful_result
+### plural.execution.JobStore.successful_result
 
 ```python
 successful_result(self, trial: 'TrialSpec') -> 'TrialResult | None'
@@ -1409,7 +1412,7 @@ successful_result(self, trial: 'TrialSpec') -> 'TrialResult | None'
 
 Return a successful persisted trial result, if present.
 
-### plural.JobStore.next_execution_id
+### plural.execution.JobStore.next_execution_id
 
 ```python
 next_execution_id(self, trial: 'TrialSpec') -> 'int'
@@ -1417,7 +1420,7 @@ next_execution_id(self, trial: 'TrialSpec') -> 'int'
 
 Return the next monotonic execution ID for a trial.
 
-### plural.JobStore.trial_results
+### plural.execution.JobStore.trial_results
 
 ```python
 trial_results(self, job_id: 'str') -> 'tuple[TrialResult, ...]'
@@ -1425,7 +1428,7 @@ trial_results(self, job_id: 'str') -> 'tuple[TrialResult, ...]'
 
 Load all complete trial results in lexical order.
 
-### plural.JobStore.write_trial_execution
+### plural.execution.JobStore.write_trial_execution
 
 ```python
 write_trial_execution(self, trial: 'TrialSpec', execution_id: 'int', result: 'TrialResult', *, stdout: 'bytes' = b'', stderr: 'bytes' = b'', artifacts: 'Iterable[DownloadedFile]' = (), verifier_stdout: 'bytes' = b'', verifier_stderr: 'bytes' = b'') -> 'Path'
@@ -1433,7 +1436,7 @@ write_trial_execution(self, trial: 'TrialSpec', execution_id: 'int', result: 'Tr
 
 Append one immutable execution and update the selected result.
 
-### plural.JobStore.write_job_result
+### plural.execution.JobStore.write_job_result
 
 ```python
 write_job_result(self, result: 'JobResult') -> 'Path'
@@ -1441,7 +1444,7 @@ write_job_result(self, result: 'JobResult') -> 'Path'
 
 Atomically publish the aggregate result.
 
-### plural.JobStore.write_review
+### plural.execution.JobStore.write_review
 
 ```python
 write_review(self, trial: 'TrialSpec', verifier_name: 'str', submission: 'Mapping[str, Any]', result: 'TrialResult') -> 'Path'
@@ -1449,7 +1452,7 @@ write_review(self, trial: 'TrialSpec', verifier_name: 'str', submission: 'Mappin
 
 Append one immutable human review and publish its resolved Trial result.
 
-### plural.JobStore.read_job_result
+### plural.execution.JobStore.read_job_result
 
 ```python
 read_job_result(self, job_id: 'str') -> 'JobResult | None'
@@ -1457,7 +1460,7 @@ read_job_result(self, job_id: 'str') -> 'JobResult | None'
 
 Load the aggregate result when complete.
 
-### plural.JobStore.write_sync_state
+### plural.execution.JobStore.write_sync_state
 
 ```python
 write_sync_state(self, job_id: 'str', state: 'Mapping[str, Any]') -> 'Path'
@@ -1465,7 +1468,7 @@ write_sync_state(self, job_id: 'str', state: 'Mapping[str, Any]') -> 'Path'
 
 Persist replay-safe hosted upload metadata without credentials.
 
-### plural.JobStore.read_sync_state
+### plural.execution.JobStore.read_sync_state
 
 ```python
 read_sync_state(self, job_id: 'str') -> 'dict[str, Any] | None'
@@ -1834,15 +1837,590 @@ run(self, task: 'HarnessTask', agent: 'HarnessAgent', environment: 'HarnessEnvir
 
 Run one Agent against one Task and Environment.
 
-## plural.SandboxProvider
+## plural.external.config.AgentConfig
+
+The whole of ``plural-agent.yaml``.
+
+### plural.external.config.AgentConfig.load
+
+```python
+load(path: 'str | Path | None' = None, *, environ: 'Mapping[str, str] | None' = None) -> 'AgentConfig'
+```
+
+Read the config, then apply ``PLURAL_TRACE_*`` overrides.
+
+```text
+Args:
+    path: The file. Defaults to ``PLURAL_AGENT_CONFIG``, then
+        ``plural-agent.yaml`` in the working directory.
+    environ: Environment to read; defaults to ``os.environ``.
+
+Returns:
+    The config.
+
+Raises:
+    ConfigurationError: When the file is missing or invalid.
+```
+
+### plural.external.config.AgentConfig.with_environment
+
+```python
+with_environment(self, environ: 'Mapping[str, str]') -> 'AgentConfig'
+```
+
+Apply ``PLURAL_TRACE_*`` and ``PLURAL_AGENT_VERSION`` overrides.
+
+```text
+Returns:
+    A copy with the overrides applied.
+
+Raises:
+    ConfigurationError: When an override has the wrong form.
+```
+
+### plural.external.config.AgentConfig.studio
+
+```python
+studio(self, environ: 'Mapping[str, str] | None' = None) -> 'Studio'
+```
+
+The Plural API, with the key in ``plural.api_key``.
+
+```text
+Returns:
+    The client.
+
+Raises:
+    ConfigurationError: When that environment variable is not set.
+```
+
+## plural.external.config.Capture
+
+Which optional fields a trace holds. Turn off what must never leave the service.
+
+## plural.external.client.Episode
+
+One episode, as the agent works it.
+
+```text
+Every call goes to the Job that started it, with the episode's own token.
+Pass ``verify`` (a CA bundle path, or ``False`` for a self-signed test
+certificate) when the Job serves HTTPS with a private certificate.
+```
+
+```python
+plural.external.client.Episode(start: 'EpisodeStart', *, verify: 'str | bool' = True, timeout: 'float' = 120.0) -> 'None'
+```
+
+### plural.external.client.Episode.tools
+
+```python
+tools(self) -> 'list[dict[str, Any]]'
+```
+
+Describe the actions for a model.
+
+```text
+Returns:
+    The actions as OpenAI-compatible tools.
+```
+
+### plural.external.client.Episode.act
+
+```python
+act(self, action: 'str', /, **arguments: 'Any') -> 'Any'
+```
+
+Take one action.
+
+```text
+Returns:
+    Its observation.
+```
+
+### plural.external.client.Episode.read
+
+```python
+read(self, path: 'str') -> 'bytes'
+```
+
+Read one of :attr:`files`.
+
+```text
+Returns:
+    Its bytes.
+```
+
+### plural.external.client.Episode.trace
+
+```python
+trace(self, trajectory: 'Mapping[str, Any]') -> 'None'
+```
+
+Report the agent's own trace, as an ATIF document.
+
+```text
+The Trial keeps it as self-reported, next to the actions the Job saw.
+```
+
+### plural.external.client.Episode.finish
+
+```python
+finish(self, response: 'Any') -> 'None'
+```
+
+End the episode with the agent's final answer. It can be sent once.
+
+## plural.external.protocol.EpisodeAction
+
+One action the agent may take, as a tool.
+
+## plural.external.client.EpisodeError
+
+The Job refused a request, such as an action after the episode ended.
+
+```python
+plural.external.client.EpisodeError
+```
+
+## plural.external.protocol.EpisodeStart
+
+The signed request that starts one episode.
+
+## plural.external.protocol.EpisodeTask
+
+What the agent is asked to do.
+
+## plural.external.config.FlushPolicy
+
+When a run's trace is written.
+
+```text
+``end`` writes it once, when the run finishes. ``interval`` also writes it
+every ``interval_seconds`` while the run is going, and ``steps`` every
+``every_steps`` steps, so a long run can be watched live. Each write
+replaces the last until the run finishes.
+```
+
+### plural.external.config.FlushPolicy.parse
+
+```python
+parse(value: 'FlushPolicy | str | Mapping[str, Any]') -> 'FlushPolicy'
+```
+
+Read a policy from ``end``, ``interval:5``, ``steps:10``, or a mapping.
+
+```text
+Returns:
+    The policy.
+
+Raises:
+    ConfigurationError: When the value names no policy.
+```
+
+## plural.external.client.Ping
+
+A signed check, from ``plural agent test``, that the agent is reachable.
+
+## plural.external.tracing.Run
+
+One traced run of the agent. Use it as a context manager.
+
+```text
+Record what happens with :meth:`user`, :meth:`llm`, :meth:`tool`, and
+:meth:`message`, then :meth:`finish` with the answer. Leaving the ``with``
+block finishes the run if you did not, as failed when it raised.
+```
+
+```python
+plural.external.tracing.Run(tracer: 'Tracer', sink: '_Sink | None', *, trace_id: 'str', kind: "Literal['episode', 'production']", flush: 'FlushPolicy', capture: 'Capture', tags: 'Mapping[str, str] | None' = None, metadata: 'Mapping[str, Any] | None' = None, episode: 'Episode | None' = None) -> 'None'
+```
+
+### plural.external.tracing.Run.system
+
+```python
+system(self, text: 'str') -> 'None'
+```
+
+Record the system prompt.
+
+### plural.external.tracing.Run.user
+
+```python
+user(self, text: 'str') -> 'None'
+```
+
+Record a message to the agent, such as the request it is working on.
+
+### plural.external.tracing.Run.message
+
+```python
+message(self, text: 'str') -> 'None'
+```
+
+Record something the agent said without a model call.
+
+### plural.external.tracing.Run.llm
+
+```python
+llm(self, *, model: 'str | None' = None, messages: 'Sequence[Mapping[str, Any]]' = (), output: 'str | None' = None, tool_calls: 'Sequence[ToolCall | Mapping[str, Any]]' = (), reasoning: 'str | None' = None, usage: 'Mapping[str, Any] | None' = None, latency_ms: 'float | None' = None, error: 'str | None' = None, started_at: 'datetime | None' = None) -> 'None'
+```
+
+Record one model call.
+
+```text
+Args:
+    model: The model that answered.
+    messages: What it was sent, in the OpenAI chat format.
+    output: The text it returned.
+    tool_calls: The tool calls it asked for.
+    reasoning: Its reasoning, when it reported any.
+    usage: ``prompt_tokens``, ``completion_tokens``, ``cached_tokens``,
+        and ``cost_usd``, any of which may be missing.
+    latency_ms: How long the call took.
+    error: Why it failed, when it did.
+    started_at: When it started; defaults to now.
+```
+
+### plural.external.tracing.Run.tool
+
+```python
+tool(self, name: 'str', arguments: 'Mapping[str, Any] | None' = None, result: 'Any' = None, *, call_id: 'str | None' = None, error: 'str | None' = None, latency_ms: 'float | None' = None, started_at: 'datetime | None' = None) -> 'None'
+```
+
+Record one tool call and what it returned.
+
+```text
+``call_id`` ties it to the model call that asked for it; without one it
+is matched to the latest unanswered call of the same tool.
+```
+
+### plural.external.tracing.Run.metadata
+
+```python
+metadata(self, **values: 'Any') -> 'None'
+```
+
+Attach values to the trace, such as a customer or request id.
+
+### plural.external.tracing.Run.finish
+
+```python
+finish(self, answer: 'Any' = None) -> 'None'
+```
+
+End the run with the agent's answer, and write its trace.
+
+```text
+In a Job this also ends the episode, so call it once, last.
+```
+
+### plural.external.tracing.Run.fail
+
+```python
+fail(self, error: 'str') -> 'None'
+```
+
+End the run as failed. In a Job the episode ends with no answer.
+
+### plural.external.tracing.Run.snapshot
+
+```python
+snapshot(self) -> 'tuple[list[_Record], dict[str, Any]]'
+```
+
+Read the run so far.
+
+```text
+Returns:
+    Its records in time order, and its metadata.
+```
+
+### plural.external.tracing.Run.atif
+
+```python
+atif(self) -> 'dict[str, Any]'
+```
+
+Render the trace as a Job keeps it.
+
+```text
+Returns:
+    The ATIF document.
+```
+
+### plural.external.tracing.Run.trace
+
+```python
+trace(self) -> 'dict[str, Any]'
+```
+
+Render the trace as the Traces page keeps it.
+
+```text
+Returns:
+    The Plural ``Trace`` payload.
+```
+
+## plural.external.protocol.SignatureError
+
+A request whose signature, timestamp, or id does not check out.
+
+```python
+plural.external.protocol.SignatureError
+```
+
+## plural.external.tracing.ToolCall
+
+A tool call a model asked for.
+
+```python
+plural.external.tracing.ToolCall(id: 'str', name: 'str', arguments: 'Mapping[str, Any]' = <factory>) -> None
+```
+
+## plural.external.tracing.Tracer
+
+Traces an agent's runs, as ``plural-agent.yaml`` says.
+
+```text
+Args:
+    config: The agent and tracing config.
+    environ: Where the API key and overrides are read; defaults to
+        ``os.environ``.
+    studio: The Plural API client, for tests. Built from the API key when
+        omitted.
+
+Raises:
+    ConfigurationError: When production tracing is on and the API key's
+        environment variable is not set.
+```
+
+```python
+plural.external.tracing.Tracer(config: 'AgentConfig', *, environ: 'Mapping[str, str] | None' = None, studio: 'Any' = None) -> 'None'
+```
+
+### plural.external.tracing.Tracer.from_config
+
+```python
+from_config(path: 'str | None' = None, *, environ: 'Mapping[str, str] | None' = None) -> 'Tracer'
+```
+
+A tracer for ``plural-agent.yaml``, or the file ``PLURAL_AGENT_CONFIG`` names.
+
+```text
+Returns:
+    The tracer.
+```
+
+### plural.external.tracing.Tracer.for_agent
+
+```python
+for_agent(name: 'str', version: 'str', *, model: 'str' = '', environ: 'Mapping[str, str] | None' = None) -> 'Tracer'
+```
+
+A tracer with default settings and no config file.
+
+```text
+Returns:
+    The tracer.
+```
+
+### plural.external.tracing.Tracer.run
+
+```python
+run(self, *, input: 'str | None' = None, trace_id: 'str | None' = None, flush: 'FlushPolicy | str | Mapping[str, Any] | None' = None, capture: 'Capture | Mapping[str, bool] | None' = None, tags: 'Mapping[str, str] | None' = None, metadata: 'Mapping[str, Any] | None' = None) -> 'Run'
+```
+
+Start a run. Inside a traced episode it is that episode's run.
+
+```text
+Args:
+    input: The request the agent is working on, recorded as a user message.
+    trace_id: The trace's id; a new one when omitted.
+    flush: When to write the trace, overriding the config for this run.
+    capture: Which optional fields to keep, overriding the config.
+    tags: Labels for this run, added to the config's.
+    metadata: Values to attach to the trace.
+
+Returns:
+    The run; use it as a context manager.
+```
+
+### plural.external.tracing.Tracer.episode
+
+```python
+episode(self, episode: 'Episode', *, flush: 'FlushPolicy | str | Mapping[str, Any] | None' = None, capture: 'Capture | Mapping[str, bool] | None' = None) -> 'Run'
+```
+
+The run for one episode of a Plural Job. Its trace goes to that Job.
+
+```text
+The Task's instructions are recorded as the first user message, and
+:meth:`Run.finish` also finishes the episode.
+
+Returns:
+    The run; use it as a context manager.
+```
+
+### plural.external.tracing.Tracer.flush
+
+```python
+flush(self, timeout: 'float' = 10.0) -> 'bool'
+```
+
+Wait until every pending trace is written.
+
+```text
+Returns:
+    Whether everything was written within ``timeout`` seconds.
+```
+
+## plural.external.tracing.current_run
+
+The run being traced in this context.
+
+```text
+Returns:
+    The run, or ``None`` outside one.
+```
+
+```python
+plural.external.tracing.current_run() -> 'Run | None'
+```
+
+## plural.external.protocol.new_signing_key
+
+Make a fresh signing key.
+
+```text
+Returns:
+    32 random bytes, as ``whsec_`` and base64.
+```
+
+```python
+plural.external.protocol.new_signing_key() -> 'str'
+```
+
+## plural.external.client.ping
+
+Send an agent service a signed ping, as a Job checks it before an episode.
+
+```text
+Args:
+    url: The service's episode URL.
+    key: The signing key.
+    ca_bundle: A PEM CA file for a private certificate.
+    timeout: Seconds to wait.
+
+Returns:
+    The status the service answered with.
+
+Raises:
+    httpx.HTTPError: When the service could not be reached.
+```
+
+```python
+plural.external.client.ping(url: 'str', key: 'str', *, ca_bundle: 'str | None' = None, timeout: 'float' = 15) -> 'int'
+```
+
+## plural.external.tracing.set_tracer
+
+Use ``value`` wherever no tracer is passed, such as in adapters.
+
+```python
+plural.external.tracing.set_tracer(value: 'Tracer | None') -> 'None'
+```
+
+## plural.external.protocol.sign
+
+Standard Webhooks headers for ``body``.
+
+```text
+Returns:
+    ``webhook-id``, ``webhook-timestamp``, and ``webhook-signature``.
+```
+
+```python
+plural.external.protocol.sign(key: 'bytes', body: 'bytes', *, message_id: 'str', timestamp: 'int | None' = None) -> 'dict[str, str]'
+```
+
+## plural.external.protocol.signing_key
+
+The key bytes of a ``whsec_``-prefixed base64 secret, or of a raw one.
+
+```text
+Returns:
+    The bytes to sign with.
+
+Raises:
+    ValueError: When the key is shorter than 32 bytes.
+```
+
+```python
+plural.external.protocol.signing_key(value: 'str') -> 'bytes'
+```
+
+## plural.external.tracing.tracer
+
+The process's tracer: the one :func:`set_tracer` gave, or one for ``plural-agent.yaml``.
+
+```text
+Returns:
+    The tracer.
+```
+
+```python
+plural.external.tracing.tracer() -> 'Tracer'
+```
+
+## plural.external.protocol.verify
+
+Check a signed request and remember its id.
+
+```text
+Returns:
+    The request's ``webhook-id``.
+
+Raises:
+    SignatureError: When a header is missing, the timestamp is more than
+        five minutes off, the id was already seen, or no signature matches.
+```
+
+```python
+plural.external.protocol.verify(key: 'bytes', body: 'bytes', headers: 'Mapping[str, str]', *, now: 'float | None' = None, seen: '_Seen | None' = <configured default>) -> 'str'
+```
+
+## plural.external.client.verify_request
+
+Check that a request came from your Plural Job, and parse it.
+
+```text
+Args:
+    body: The request's raw bytes, before any JSON parsing.
+    headers: Its headers.
+    key: The shared signing key. Defaults to ``PLURAL_SIGNING_KEY``.
+
+Returns:
+    The episode to start, or a ping to answer with any 2xx.
+
+Raises:
+    SignatureError: When the request is not signed with the key, is more
+        than five minutes old, was received before, or is not one Plural sends.
+```
+
+```python
+plural.external.client.verify_request(body: 'bytes', headers: 'Mapping[str, str]', *, key: 'str | None' = None) -> 'EpisodeStart | Ping'
+```
+
+## plural.sandbox.SandboxProvider
 
 Async lifecycle provider, separate from environment tool runtimes.
 
 ```python
-plural.SandboxProvider()
+plural.sandbox.SandboxProvider()
 ```
 
-### plural.SandboxProvider.capabilities
+### plural.sandbox.SandboxProvider.capabilities
 
 ```python
 capabilities(self) -> 'ProviderCapabilities'
@@ -1850,7 +2428,7 @@ capabilities(self) -> 'ProviderCapabilities'
 
 Declare controls available in the current installation.
 
-### plural.SandboxProvider.preflight
+### plural.sandbox.SandboxProvider.preflight
 
 ```python
 preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
@@ -1858,7 +2436,7 @@ preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
 
 Fail before launch if any requested control is unavailable.
 
-### plural.SandboxProvider.doctor
+### plural.sandbox.SandboxProvider.doctor
 
 ```python
 doctor(self) -> 'ProviderDoctor'
@@ -1866,7 +2444,7 @@ doctor(self) -> 'ProviderDoctor'
 
 Return dependency, daemon, or credential health.
 
-### plural.SandboxProvider.create
+### plural.sandbox.SandboxProvider.create
 
 ```python
 create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
@@ -1874,7 +2452,7 @@ create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
 
 Create a fresh sandbox after successful preflight.
 
-### plural.SandboxProvider.upload_files
+### plural.sandbox.SandboxProvider.upload_files
 
 ```python
 upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, root: 'str' = '/workspace') -> 'None'
@@ -1882,7 +2460,7 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Upload validated files beneath a scoped workspace.
 
-### plural.SandboxProvider.upload_bundle
+### plural.sandbox.SandboxProvider.upload_bundle
 
 ```python
 upload_bundle(self, handle: 'SandboxHandle', bundle: 'Path', *, root: 'str' = '/workspace') -> 'None'
@@ -1890,7 +2468,7 @@ upload_bundle(self, handle: 'SandboxHandle', bundle: 'Path', *, root: 'str' = '/
 
 Upload a local directory without following symlinks.
 
-### plural.SandboxProvider.exec
+### plural.sandbox.SandboxProvider.exec
 
 ```python
 exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
@@ -1898,7 +2476,7 @@ exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
 
 Execute argv with cwd, env, timeout, stdin, and captured logs.
 
-### plural.SandboxProvider.download_files
+### plural.sandbox.SandboxProvider.download_files
 
 ```python
 download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace') -> 'tuple[DownloadedFile, ...]'
@@ -1906,7 +2484,7 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 
 Download exact declared files.
 
-### plural.SandboxProvider.download_artifacts
+### plural.sandbox.SandboxProvider.download_artifacts
 
 ```python
 download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace', user: 'str | None' = None) -> 'tuple[DownloadedFile, ...]'
@@ -1914,7 +2492,7 @@ download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, roo
 
 Download files a Harness declared, which ``user`` wrote, as regular files only.
 
-### plural.SandboxProvider.stop_user_processes
+### plural.sandbox.SandboxProvider.stop_user_processes
 
 ```python
 stop_user_processes(self, handle: 'SandboxHandle', users: 'Sequence[str | None]') -> 'None'
@@ -1928,7 +2506,7 @@ this safely does nothing; the App host refuses actions after the Job's
 ``finish`` either way.
 ```
 
-### plural.SandboxProvider.isolate_apps
+### plural.sandbox.SandboxProvider.isolate_apps
 
 ```python
 isolate_apps(self, handle: 'SandboxHandle') -> 'AppIsolation'
@@ -1942,7 +2520,7 @@ Returns:
     when the sandbox cannot separate them.
 ```
 
-### plural.SandboxProvider.open_workspace
+### plural.sandbox.SandboxProvider.open_workspace
 
 ```python
 open_workspace(self, handle: 'SandboxHandle', isolation: 'AppIsolation', paths: 'Sequence[str]') -> 'None'
@@ -1950,7 +2528,7 @@ open_workspace(self, handle: 'SandboxHandle', isolation: 'AppIsolation', paths: 
 
 Let ``isolation.agent_user`` write the Harness's folders, once staging is done.
 
-### plural.SandboxProvider.isolate_seats
+### plural.sandbox.SandboxProvider.isolate_seats
 
 ```python
 isolate_seats(self, handle: 'SandboxHandle', seats: 'Sequence[str]') -> 'dict[str, str]'
@@ -1967,7 +2545,7 @@ Returns:
     Seat to user, or empty when the sandbox cannot separate them.
 ```
 
-### plural.SandboxProvider.cancel
+### plural.sandbox.SandboxProvider.cancel
 
 ```python
 cancel(self, handle: 'SandboxHandle') -> 'None'
@@ -1975,7 +2553,7 @@ cancel(self, handle: 'SandboxHandle') -> 'None'
 
 Force cancellation of active work.
 
-### plural.SandboxProvider.destroy
+### plural.sandbox.SandboxProvider.destroy
 
 ```python
 destroy(self, handle: 'SandboxHandle') -> 'None'
@@ -1983,11 +2561,11 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 
 Idempotently delete the sandbox and scoped data.
 
-## plural.SandboxRequirements
+## plural.sandbox.SandboxRequirements
 
 Controls required for one sandbox before it may launch.
 
-### plural.SandboxRequirements.required_capabilities
+### plural.sandbox.SandboxRequirements.required_capabilities
 
 ```python
 required_capabilities(self) -> 'frozenset[SandboxCapability]'
@@ -1995,15 +2573,15 @@ required_capabilities(self) -> 'frozenset[SandboxCapability]'
 
 Return the controls that must be enforceable.
 
-## plural.ProviderRegistry
+## plural.sandbox.ProviderRegistry
 
 Resolve built-ins and installed provider plugins lazily.
 
 ```python
-plural.ProviderRegistry() -> 'None'
+plural.sandbox.ProviderRegistry() -> 'None'
 ```
 
-### plural.ProviderRegistry.register
+### plural.sandbox.ProviderRegistry.register
 
 ```python
 register(self, provider: 'SandboxProvider', *, replace: 'bool' = False) -> 'None'
@@ -2011,7 +2589,7 @@ register(self, provider: 'SandboxProvider', *, replace: 'bool' = False) -> 'None
 
 Register one concrete provider.
 
-### plural.ProviderRegistry.get
+### plural.sandbox.ProviderRegistry.get
 
 ```python
 get(self, name: 'str') -> 'SandboxProvider'
@@ -2019,7 +2597,7 @@ get(self, name: 'str') -> 'SandboxProvider'
 
 Return a registered provider, loading plugins first.
 
-### plural.ProviderRegistry.doctors
+### plural.sandbox.ProviderRegistry.doctors
 
 ```python
 doctors(self, *, include_unavailable: 'bool' = False) -> 'tuple[ProviderDoctor, ...]'
@@ -2027,7 +2605,7 @@ doctors(self, *, include_unavailable: 'bool' = False) -> 'tuple[ProviderDoctor, 
 
 Return dynamic provider reports in stable name order.
 
-## plural.LocalProvider
+## plural.sandbox.LocalProvider
 
 Run commands in temporary directories without isolation.
 
@@ -2038,10 +2616,10 @@ development workloads.
 ```
 
 ```python
-plural.LocalProvider(*, base_dir: 'Path | None' = None) -> 'None'
+plural.sandbox.LocalProvider(*, base_dir: 'Path | None' = None) -> 'None'
 ```
 
-### plural.LocalProvider.capabilities
+### plural.sandbox.LocalProvider.capabilities
 
 ```python
 capabilities(self) -> 'ProviderCapabilities'
@@ -2049,7 +2627,7 @@ capabilities(self) -> 'ProviderCapabilities'
 
 Declare local subprocess controls.
 
-### plural.LocalProvider.doctor
+### plural.sandbox.LocalProvider.doctor
 
 ```python
 doctor(self) -> 'ProviderDoctor'
@@ -2057,7 +2635,7 @@ doctor(self) -> 'ProviderDoctor'
 
 Report local execution availability without implying isolation.
 
-### plural.LocalProvider.create
+### plural.sandbox.LocalProvider.create
 
 ```python
 create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
@@ -2065,7 +2643,7 @@ create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
 
 Create a scoped temporary workspace.
 
-### plural.LocalProvider.upload_files
+### plural.sandbox.LocalProvider.upload_files
 
 ```python
 upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, root: 'str' = '/workspace') -> 'None'
@@ -2073,7 +2651,7 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Copy files into the temporary workspace.
 
-### plural.LocalProvider.exec
+### plural.sandbox.LocalProvider.exec
 
 ```python
 exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
@@ -2081,7 +2659,7 @@ exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
 
 Run an argv-only subprocess and kill it at timeout.
 
-### plural.LocalProvider.download_files
+### plural.sandbox.LocalProvider.download_files
 
 ```python
 download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace') -> 'tuple[DownloadedFile, ...]'
@@ -2089,7 +2667,7 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 
 Read exact declared regular files.
 
-### plural.LocalProvider.cancel
+### plural.sandbox.LocalProvider.cancel
 
 ```python
 cancel(self, handle: 'SandboxHandle') -> 'None'
@@ -2097,7 +2675,7 @@ cancel(self, handle: 'SandboxHandle') -> 'None'
 
 Kill the active subprocess, if any.
 
-### plural.LocalProvider.destroy
+### plural.sandbox.LocalProvider.destroy
 
 ```python
 destroy(self, handle: 'SandboxHandle') -> 'None'
@@ -2105,15 +2683,15 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 
 Kill active work and remove all scoped files.
 
-## plural.DockerProvider
+## plural.sandbox.DockerProvider
 
 Create one locked-down Docker container per execution phase.
 
 ```python
-plural.DockerProvider(*, executable: 'str' = 'docker', default_image: 'str' = 'python:3.12-slim') -> 'None'
+plural.sandbox.DockerProvider(*, executable: 'str' = 'docker', default_image: 'str' = 'python:3.12-slim') -> 'None'
 ```
 
-### plural.DockerProvider.capabilities
+### plural.sandbox.DockerProvider.capabilities
 
 ```python
 capabilities(self) -> 'ProviderCapabilities'
@@ -2121,7 +2699,7 @@ capabilities(self) -> 'ProviderCapabilities'
 
 Declare Docker controls only when the daemon is reachable.
 
-### plural.DockerProvider.preflight
+### plural.sandbox.DockerProvider.preflight
 
 ```python
 preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
@@ -2129,7 +2707,7 @@ preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
 
 Reject provider-specific image forms before launch.
 
-### plural.DockerProvider.doctor
+### plural.sandbox.DockerProvider.doctor
 
 ```python
 doctor(self) -> 'ProviderDoctor'
@@ -2137,7 +2715,7 @@ doctor(self) -> 'ProviderDoctor'
 
 Detect the Docker CLI and daemon.
 
-### plural.DockerProvider.extend_image
+### plural.sandbox.DockerProvider.extend_image
 
 ```python
 extend_image(self, requirements: 'SandboxRequirements', context: 'Path', key: 'str') -> 'SandboxRequirements'
@@ -2154,7 +2732,7 @@ Returns:
     The requirements, pointing at the extended image.
 ```
 
-### plural.DockerProvider.create
+### plural.sandbox.DockerProvider.create
 
 ```python
 create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
@@ -2162,7 +2740,7 @@ create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
 
 Create and start a hardened, scoped container.
 
-### plural.DockerProvider.upload_files
+### plural.sandbox.DockerProvider.upload_files
 
 ```python
 upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, root: 'str' = '/workspace') -> 'None'
@@ -2170,7 +2748,7 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Stream exact files into the writable workspace mount.
 
-### plural.DockerProvider.isolate_apps
+### plural.sandbox.DockerProvider.isolate_apps
 
 ```python
 isolate_apps(self, handle: 'SandboxHandle') -> 'AppIsolation'
@@ -2187,7 +2765,7 @@ Returns:
     The App host's user, and the default user for the Harness.
 ```
 
-### plural.DockerProvider.isolate_seats
+### plural.sandbox.DockerProvider.isolate_seats
 
 ```python
 isolate_seats(self, handle: 'SandboxHandle', seats: 'Sequence[str]') -> 'dict[str, str]'
@@ -2203,7 +2781,7 @@ Returns:
     Seat to a numeric user, ``65400`` for the first.
 ```
 
-### plural.DockerProvider.exec
+### plural.sandbox.DockerProvider.exec
 
 ```python
 exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
@@ -2211,7 +2789,7 @@ exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
 
 Execute argv and capture logs, enforcing a host-side timeout.
 
-### plural.DockerProvider.download_files
+### plural.sandbox.DockerProvider.download_files
 
 ```python
 download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace') -> 'tuple[DownloadedFile, ...]'
@@ -2219,7 +2797,7 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 
 Stream exact declared paths out and reject non-regular files.
 
-### plural.DockerProvider.download_artifacts
+### plural.sandbox.DockerProvider.download_artifacts
 
 ```python
 download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace', user: 'str | None' = None) -> 'tuple[DownloadedFile, ...]'
@@ -2231,7 +2809,7 @@ Read a Harness's files as the user that wrote them, which owns its folder.
 No capability is kept, so only a seat's own user can enter its ``0700`` folder.
 ```
 
-### plural.DockerProvider.stop_user_processes
+### plural.sandbox.DockerProvider.stop_user_processes
 
 ```python
 stop_user_processes(self, handle: 'SandboxHandle', users: 'Sequence[str | None]') -> 'None'
@@ -2244,7 +2822,7 @@ Kill what each Harness user left running, as that user, since no capability is k
 as PID 1 and is spared.
 ```
 
-### plural.DockerProvider.cancel
+### plural.sandbox.DockerProvider.cancel
 
 ```python
 cancel(self, handle: 'SandboxHandle') -> 'None'
@@ -2252,7 +2830,7 @@ cancel(self, handle: 'SandboxHandle') -> 'None'
 
 Kill the container to force all active processes to stop.
 
-### plural.DockerProvider.destroy
+### plural.sandbox.DockerProvider.destroy
 
 ```python
 destroy(self, handle: 'SandboxHandle') -> 'None'
@@ -2260,15 +2838,15 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 
 Force-remove the container idempotently.
 
-## plural.DaytonaProvider
+## plural.sandbox.DaytonaProvider
 
 Execute in Daytona while keeping its SDK an optional import.
 
 ```python
-plural.DaytonaProvider(*, adapter: 'DaytonaClientAdapter | None' = None, environ: 'Mapping[str, str] | None' = None) -> 'None'
+plural.sandbox.DaytonaProvider(*, adapter: 'DaytonaClientAdapter | None' = None, environ: 'Mapping[str, str] | None' = None) -> 'None'
 ```
 
-### plural.DaytonaProvider.capabilities
+### plural.sandbox.DaytonaProvider.capabilities
 
 ```python
 capabilities(self) -> 'ProviderCapabilities'
@@ -2276,7 +2854,7 @@ capabilities(self) -> 'ProviderCapabilities'
 
 Declare controls implemented by the current Daytona SDK.
 
-### plural.DaytonaProvider.preflight
+### plural.sandbox.DaytonaProvider.preflight
 
 ```python
 preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
@@ -2284,7 +2862,7 @@ preflight(self, requirements: 'SandboxRequirements') -> 'EffectiveSandboxPolicy'
 
 Reject Daytona controls whose SDK mapping is not enforceable.
 
-### plural.DaytonaProvider.doctor
+### plural.sandbox.DaytonaProvider.doctor
 
 ```python
 doctor(self) -> 'ProviderDoctor'
@@ -2292,7 +2870,7 @@ doctor(self) -> 'ProviderDoctor'
 
 Detect SDK and credential presence without exposing values.
 
-### plural.DaytonaProvider.create
+### plural.sandbox.DaytonaProvider.create
 
 ```python
 create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
@@ -2300,7 +2878,7 @@ create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
 
 Create a Daytona sandbox from image, snapshot, or defaults.
 
-### plural.DaytonaProvider.upload_files
+### plural.sandbox.DaytonaProvider.upload_files
 
 ```python
 upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, root: 'str' = '/workspace') -> 'None'
@@ -2308,7 +2886,7 @@ upload_files(self, handle: 'SandboxHandle', files: 'Sequence[FileUpload]', *, ro
 
 Upload exact in-memory files.
 
-### plural.DaytonaProvider.isolate_apps
+### plural.sandbox.DaytonaProvider.isolate_apps
 
 ```python
 isolate_apps(self, handle: 'SandboxHandle') -> 'AppIsolation'
@@ -2326,7 +2904,7 @@ Returns:
     ``sudo`` or ``useradd``.
 ```
 
-### plural.DaytonaProvider.isolate_seats
+### plural.sandbox.DaytonaProvider.isolate_seats
 
 ```python
 isolate_seats(self, handle: 'SandboxHandle', seats: 'Sequence[str]') -> 'dict[str, str]'
@@ -2340,7 +2918,7 @@ Returns:
     or ``useradd``.
 ```
 
-### plural.DaytonaProvider.open_workspace
+### plural.sandbox.DaytonaProvider.open_workspace
 
 ```python
 open_workspace(self, handle: 'SandboxHandle', isolation: 'AppIsolation', paths: 'Sequence[str]') -> 'None'
@@ -2353,7 +2931,7 @@ Raises:
     SandboxError: When the folders cannot be opened to it.
 ```
 
-### plural.DaytonaProvider.exec
+### plural.sandbox.DaytonaProvider.exec
 
 ```python
 exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
@@ -2366,7 +2944,7 @@ A ``user`` other than ``root`` runs through ``sudo -n -E -u``, which
 fails rather than falling back to the default user.
 ```
 
-### plural.DaytonaProvider.download_files
+### plural.sandbox.DaytonaProvider.download_files
 
 ```python
 download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace') -> 'tuple[DownloadedFile, ...]'
@@ -2374,7 +2952,7 @@ download_files(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: '
 
 Download exact declared files.
 
-### plural.DaytonaProvider.download_artifacts
+### plural.sandbox.DaytonaProvider.download_artifacts
 
 ```python
 download_artifacts(self, handle: 'SandboxHandle', paths: 'Sequence[str]', *, root: 'str' = '/workspace', user: 'str | None' = None) -> 'tuple[DownloadedFile, ...]'
@@ -2392,7 +2970,7 @@ Raises:
     FileNotFoundError: When a declared path is not a regular file inside ``root``.
 ```
 
-### plural.DaytonaProvider.stop_user_processes
+### plural.sandbox.DaytonaProvider.stop_user_processes
 
 ```python
 stop_user_processes(self, handle: 'SandboxHandle', users: 'Sequence[str | None]') -> 'None'
@@ -2404,7 +2982,7 @@ Kill, as root, what the Harnesses' own users left running.
 The default user is skipped: it is the one Daytona runs its own tools as.
 ```
 
-### plural.DaytonaProvider.cancel
+### plural.sandbox.DaytonaProvider.cancel
 
 ```python
 cancel(self, handle: 'SandboxHandle') -> 'None'
@@ -2412,7 +2990,7 @@ cancel(self, handle: 'SandboxHandle') -> 'None'
 
 Delete the sandbox to force cancellation.
 
-### plural.DaytonaProvider.destroy
+### plural.sandbox.DaytonaProvider.destroy
 
 ```python
 destroy(self, handle: 'SandboxHandle') -> 'None'
@@ -2812,7 +3390,7 @@ Args:
     path: Destination path.
 ```
 
-## plural.ModelSpec
+## plural.catalog.ModelSpec
 
 A catalog entry for a model.
 
@@ -2835,7 +3413,7 @@ Attributes:
     provider: Derived provider slug (author segment of ``id``).
 ```
 
-### plural.ModelSpec.ordered_endpoints
+### plural.catalog.ModelSpec.ordered_endpoints
 
 ```python
 ordered_endpoints(self) -> 'list[ModelEndpoint]'
@@ -2848,7 +3426,7 @@ Returns:
     Ordered endpoints, or a single implicit author host when none are listed.
 ```
 
-### plural.ModelSpec.host_providers
+### plural.catalog.ModelSpec.host_providers
 
 ```python
 host_providers(self) -> 'list[str]'
@@ -2856,7 +3434,7 @@ host_providers(self) -> 'list[str]'
 
 Return host slugs that can serve this model.
 
-### plural.ModelSpec.pricing_for
+### plural.catalog.ModelSpec.pricing_for
 
 ```python
 pricing_for(self, provider: 'str | None' = None, region: 'str | None' = None) -> 'ModelPricing | None'
@@ -2878,7 +3456,7 @@ Returns:
     Per-token pricing, or ``None``.
 ```
 
-## plural.estimate_cost
+## plural.catalog.estimate_cost
 
 Estimate USD cost for a usage record against a model spec.
 
@@ -2903,7 +3481,7 @@ Examples:
 ```
 
 ```python
-plural.estimate_cost(usage: 'Usage', spec: 'ModelSpec | None', *, provider: 'str | None' = None, region: 'str | None' = None) -> 'float | None'
+plural.catalog.estimate_cost(usage: 'Usage', spec: 'ModelSpec | None', *, provider: 'str | None' = None, region: 'str | None' = None) -> 'float | None'
 ```
 
 ## plural.catalog.sync.CatalogDiff
@@ -3607,7 +4185,7 @@ Returns:
 plural.catalog.edit.validate_entry(card: 'ModelCardDocument') -> 'list[Issue]'
 ```
 
-## plural.TraceWriter
+## plural.tracing.TraceWriter
 
 Background writer that applies redaction/sampling then sinks traces.
 
@@ -3620,10 +4198,10 @@ Args:
 ```
 
 ```python
-plural.TraceWriter(sink: 'Sink', *, redactor: 'Redactor | None' = None, sampler: 'Sampler | None' = None, maxsize: 'int' = 1000) -> 'None'
+plural.tracing.TraceWriter(sink: 'Sink', *, redactor: 'Redactor | None' = None, sampler: 'Sampler | None' = None, maxsize: 'int' = 1000) -> 'None'
 ```
 
-### plural.TraceWriter.record
+### plural.tracing.TraceWriter.record
 
 ```python
 record(self, trace: 'Trace') -> 'None'
@@ -3636,7 +4214,7 @@ Args:
     trace: Trace to record.
 ```
 
-### plural.TraceWriter.label
+### plural.tracing.TraceWriter.label
 
 ```python
 label(self, trace_id: 'str', *, scores: 'dict[str, float] | None' = None, reward: 'float | None' = None, labels: 'dict[str, Any] | None' = None, feedback: 'str | None' = None) -> 'None'
@@ -3656,7 +4234,7 @@ Args:
     feedback: Free-form feedback.
 ```
 
-### plural.TraceWriter.flush
+### plural.tracing.TraceWriter.flush
 
 ```python
 flush(self) -> 'None'
@@ -3664,7 +4242,7 @@ flush(self) -> 'None'
 
 Block until the queue is empty.
 
-### plural.TraceWriter.close
+### plural.tracing.TraceWriter.close
 
 ```python
 close(self) -> 'None'
@@ -3901,7 +4479,7 @@ Returns:
 plural.tracing.sinks.traces_from_jsonl(path: 'str | Path') -> 'list[Trace]'
 ```
 
-## plural.Redactor
+## plural.tracing.Redactor
 
 Redact sensitive fields and patterns from traces.
 
@@ -3915,10 +4493,10 @@ Args:
 ```
 
 ```python
-plural.Redactor(*, fields: 'set[str] | None' = None, patterns: 'list[str] | None' = None, replacement: 'str' = '[REDACTED]', callables: 'list[Callable[[Trace], Trace]] | None' = None, drop_content: 'bool' = False) -> 'None'
+plural.tracing.Redactor(*, fields: 'set[str] | None' = None, patterns: 'list[str] | None' = None, replacement: 'str' = '[REDACTED]', callables: 'list[Callable[[Trace], Trace]] | None' = None, drop_content: 'bool' = False) -> 'None'
 ```
 
-### plural.Redactor.apply
+### plural.tracing.Redactor.apply
 
 ```python
 apply(self, trace: 'Trace') -> 'Trace'

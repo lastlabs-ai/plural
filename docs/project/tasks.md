@@ -29,6 +29,7 @@ Agent sees exactly what it should, and nothing more.
 | `instructions` and `goals` | What the Agent should accomplish | "Resolve the ticket" |
 | `info` | Public case information, such as an identifier | `ticket_id: ticket-1` |
 | `initial_state` | Hidden starting values for each App's State, keyed by App name | The expected category |
+| `expected` | The answer key, which only Verifiers read, as `episode.expected` | `billing` |
 | `resources` | Files the case uses, which Environment code can read | The customer's invoice |
 | `metadata` | Labels for you, such as an owner or a training or evaluation split | `owner: support-team` |
 | `verifiers` | The graders that score the attempt | `correct-category` |
@@ -36,9 +37,6 @@ Agent sees exactly what it should, and nothing more.
 > **Good to know:** Keep expected answers out of `info`, the instructions, and what
 > actions return. Those are visible to the Agent. The answer belongs in `initial_state`,
 > which becomes part of the hidden State that a Verifier can check.
-
-Plural stores a Task's `reset_options` but does not yet pass them to `reset`. Use
-`initial_state`, or load the case in Environment code, instead.
 
 A Task whose Environment has a party, such as a game of poker, is played by several
 Agents, and `seat_instructions` gives one seat instructions of its own: see
@@ -121,12 +119,38 @@ Here is what each field in `task.yaml` means, for when you need the exact rules:
 - `environment` is the name of one Environment in `environments/`, and `verifiers`
   lists at least one Verifier in `verifiers/`, each once. Resources always refer to
   each other by name within the project.
-- `initial_state`, `info`, `goals`, `metadata`, and `reset_options` mean the same as
-  the `Task` fields described on this page.
+- `initial_state`, `expected`, `info`, `goals`, and `metadata` mean the same as the
+  `Task` fields described on this page.
+- `expected` is the Task's answer key. Verifiers read it as `episode.expected`, and it
+  is never sent to the Agent, so put answers here, never in `info` or `metadata`,
+  which the Agent sees. It is the place for the answer in an Environment with no
+  Apps; with Apps, hidden values can also go in `initial_state`.
 - `resources` lists files and folders to give the Task, relative to its folder. It
   defaults to `resources`, so every file below `resources/` is included, and a missing
-  `resources/` folder is not an error. Task files must be UTF-8 text; a binary file
-  fails validation. Paths must stay inside the Task folder.
+  `resources/` folder is not an error. Files may be of any type, up to 16 MiB each and
+  256 MiB per Task; see [Supply data for a single Task](#supply-data-for-a-single-task).
+  Paths must stay inside the Task folder.
+
+### Write many Tasks from a list of cases
+
+When Tasks differ only in their data, write one by hand, then list the rest as cases.
+Each line of a `.jsonl` file, or each item of a `.json` or `.yaml` list, names a Task and
+sets any of `instructions`, `initial_state`, `expected`, `info`, `metadata`, and
+`goals`:
+
+```json
+{"name": "refund-late", "initial_state": {"order": "C-3", "days_since_delivery": 45}}
+{"name": "refund-damaged", "instructions": "The customer sent a photo of a cracked mug.", "initial_state": {"order": "D-4"}}
+{"name": "triage-lost-parcel", "instructions": "A parcel never arrived. Which team owns it?", "expected": "shipping"}
+```
+
+```bash
+plural task cases ticket-1 cases.jsonl --benchmark support-triage
+```
+
+Every case becomes its own Task folder: a copy of `ticket-1` with the case's fields, so
+it is validated, pushed, and versioned like any other Task. Every case is checked before
+any folder is written. Run the command again with `--replace` after you edit the cases.
 
 ### Push the Task
 
@@ -387,9 +411,24 @@ access may read other staged files.
 
 ### Supply data for a single Task
 
-Files in a Task's `resources/` folder reach that Task's Trials only. Task files are
-UTF-8 text, such as CSV, JSON, or Markdown. They sit in `task-resources/`, apart from the
-Environment's files, so the two never collide.
+Files in a Task's `resources/` folder reach that Task's Trials only. They sit in
+`task-resources/`, apart from the Environment's files, so the two never collide.
+
+A Task file can be of any type: a PDF, a Word or Excel document, a drawing such as DWG
+or DXF, an image, code, or text. Each may be up to 16 MiB, and a Task's files up to
+256 MiB together.
+
+- **Text** (UTF-8, up to 1 MiB) is saved inside the Task, as it always was.
+- **Any other file** is saved once by the SHA-256 of its bytes, and the Task records
+  that digest and the file's type. Changing a file changes the Task's hash. `plural
+  task push` uploads each file the hosted project lacks, and `plural pull` downloads
+  them again. In the web app, only PNG, JPEG, GIF, and WebP images preview inline; every
+  other file downloads.
+
+The files MCP server (`server: plural.mcp.files:server`) lists each file's type and
+size. Its `read_file` returns text by lines, an image as an image a multimodal model can
+see, and any other file as its bytes with its type. A custom Harness can also open the
+file directly under `PLURAL_RESOURCES_DIR`.
 
 A `Task` built in Python takes the same file as an inline resource:
 
@@ -402,6 +441,9 @@ invoice = Resource(
     content_type="text/csv",
 )
 ```
+
+For a file on disk of any type, `Resource.from_file("drawings/A-201.pdf")` reads it,
+keeping text inline and anything else by digest.
 
 Pass `resources=[invoice]` to the Task. It becomes
 `/workspace/resources/task-resources/invoice.csv` for this Task's Trials only. Read it

@@ -73,8 +73,8 @@ result = job.run()
 ```
 
 With three Tasks, two Agents, and two attempts, this Job creates twelve Trials.
-`client=Client()` sends model calls through the Plural gateway with your Plural
-API key.
+Model calls go through the Plural gateway with the key `plural auth login` stored, or
+`PLURAL_API_KEY`; `client=` picks another Client.
 
 To use the resources in your project folder, load them with a `Workspace`:
 
@@ -88,9 +88,8 @@ agent = workspace.get("agent", "luna")
 result = Job(benchmark, agents=[agent]).run()
 ```
 
-That Job runs locally and is not recorded under `.plural/jobs`. Pass
-`client=Client()` to send model calls through the Plural gateway with your API
-key. Use `await job.run_async()` inside an existing event loop.
+That Job runs locally and is not recorded under `.plural/jobs`. Use
+`await job.run_async()` inside an existing event loop.
 
 ## Attempts, concurrency, and retries
 

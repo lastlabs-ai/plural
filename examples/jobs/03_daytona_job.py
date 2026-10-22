@@ -8,7 +8,7 @@ from pathlib import Path
 
 from _foundation import build_job
 
-from plural import JobStore
+from plural.execution import JobStore
 
 with tempfile.TemporaryDirectory(prefix="plural-daytona-job-") as temporary:
     job = build_job(provider="daytona", store=JobStore(Path(temporary)))

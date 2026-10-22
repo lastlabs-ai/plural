@@ -56,13 +56,18 @@ daytona = [
 mcp = [
   "fastmcp>=4.1,<5",
 ]
+external = [
+  "opentelemetry-api>=1.27,<2",
+  "opentelemetry-sdk>=1.27,<2",
+  "starlette>=0.40,<2",
+]
 all = [
-  "plural[daytona,keyring,mcp,otel]",
+  "plural[daytona,external,keyring,mcp,otel]",
 ]
 
 [project.urls]
 Homepage = "https://github.com/lastlabs-ai/plural"
-Documentation = "https://lastlabs-ai.github.io/plural/"
+Documentation = "https://pluralintel.com/docs"
 Repository = "https://github.com/lastlabs-ai/plural"
 Issues = "https://github.com/lastlabs-ai/plural/issues"
 Changelog = "https://github.com/lastlabs-ai/plural/blob/main/CHANGELOG.md"
@@ -78,6 +83,9 @@ dev = [
   "tomli>=2.0,<3",
   "types-PyYAML>=6.0",
   "fastmcp>=4.1,<5",
+  "opentelemetry-sdk>=1.27,<2",
+  "langchain-core>=0.3,<2",
+  "openai-agents>=0.2,<1",
 ]
 docs = [
   "mkdocs-material>=9.5",

@@ -488,7 +488,8 @@ def tool_text(result: Mapping[str, Any]) -> str:
             parts.append(str(item.get("text") or ""))
         elif kind == "resource":
             resource = item.get("resource") or {}
-            parts.append(str(resource.get("text") or f"[resource {resource.get('uri')}]"))
+            kind_label = resource.get("mimeType") or "resource"
+            parts.append(str(resource.get("text") or f"[{kind_label} {resource.get('uri')}]"))
         elif kind == "resource_link":
             parts.append(f"[resource {item.get('uri')}]")
         else:

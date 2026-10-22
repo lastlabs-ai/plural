@@ -253,6 +253,38 @@ def online_records(episode: Sequence[Mapping[str, Any]]) -> list[RewardRecord]:
     return records
 
 
+class RewardFailure(FrozenModel):
+    """A Verifier whose ``reward`` function raised during the episode."""
+
+    verifier: str
+    steps: int = Field(ge=1)
+    """How many steps it raised on. They earned it no reward."""
+    error: str
+    """The first error, such as ``KeyError: 'done' (at verifier.py:14)``."""
+
+
+def reward_failures(episode: Sequence[Mapping[str, Any]]) -> tuple[RewardFailure, ...]:
+    """Each Verifier whose ``reward`` raised on a step of an ``episode.jsonl``.
+
+    Returns:
+        One entry per Verifier, in the order they first failed.
+    """
+    steps: dict[str, int] = {}
+    first: dict[str, str] = {}
+    for record in episode:
+        if record.get("kind") != "environment.step":
+            continue
+        for signal in record.get("rewards") or ():
+            if isinstance(signal, Mapping) and signal.get("error"):
+                name = str(signal.get("name") or "reward")
+                steps[name] = steps.get(name, 0) + 1
+                first.setdefault(name, str(signal["error"]))
+    return tuple(
+        RewardFailure(verifier=name, steps=count, error=first[name])
+        for name, count in steps.items()
+    )
+
+
 # Hindsight credit.
 
 
@@ -602,6 +634,7 @@ __all__ = [
     "Credit",
     "HindsightVerifier",
     "HindsightTrial",
+    "RewardFailure",
     "RewardRecord",
     "RewardSource",
     "RewardTarget",
@@ -612,6 +645,7 @@ __all__ = [
     "online_records",
     "parse_ledger",
     "read_ledger",
+    "reward_failures",
     "training_export",
     "trial_from_artifacts",
 ]

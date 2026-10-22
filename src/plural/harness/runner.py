@@ -63,9 +63,22 @@ def is_native_runner(definition: HarnessProtocol) -> bool:
     return tuple(definition.command[1:2]) == ("native_runner.py",)
 
 
+def _exit_failure_code(definition: HarnessProtocol, stdout: bytes) -> str | None:
+    """The code a Harness that exited non-zero may claim, from its error event."""
+    try:
+        events = parse_events(stdout)
+    except HarnessProtocolError:
+        return None
+    return failure_code(definition, events[-1]) if events else None
+
+
 def failure_code(definition: HarnessProtocol, terminal: HarnessEvent) -> str | None:
     """The error code a failed Harness may claim, or ``None`` to blame the Harness."""
-    if is_native_runner(definition) and terminal.kind in GATEWAY_FAILURE_KINDS:
+    if (
+        terminal.type == "error"
+        and is_native_runner(definition)
+        and terminal.kind in GATEWAY_FAILURE_KINDS
+    ):
         return terminal.kind
     return None
 
@@ -219,6 +232,7 @@ class HarnessRunner:
                 f"harness exited with code {result.exit_code}: {message[:2000]}",
                 stdout=result.stdout,
                 stderr=result.stderr,
+                code=_exit_failure_code(definition, result.stdout),
             )
         try:
             events = parse_events(result.stdout)

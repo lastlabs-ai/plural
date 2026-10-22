@@ -140,7 +140,9 @@ def _step_task(space: Workspace, trial_dir: Path) -> StepTask:
     task = next((item for item in spec.tasks if item.task_id == name), None)
     if task is None:
         return StepTask(name=name)
-    return StepTask(name=task.task_id, info=task.info, metadata=dict(task.metadata))
+    return StepTask(
+        name=task.task_id, info=task.info, metadata=dict(task.metadata), expected=task.expected
+    )
 
 
 def _replays(

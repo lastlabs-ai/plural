@@ -19,6 +19,7 @@ import copy
 import importlib.util
 import json
 import math
+import random
 import sys
 import time
 import traceback
@@ -29,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from plural.apps.base import App, observation_payload
+from plural.common import described
 from plural.verifiers import Step, StepTask
 
 if TYPE_CHECKING:
@@ -354,6 +356,8 @@ class AppHost:
             app_state = dict(state.get(name) or {})
             if seed is not None and "seed" not in app_state and _accepts_seed(app):
                 app_state["seed"] = seed
+            app.seed = seed
+            app.rng = random.Random(None if seed is None else f"{seed}:{name}")
             app.task_info = info
             opening = app.reset(app_state)
             payload, rendered = observation_payload(opening)
@@ -714,7 +718,7 @@ class AppHost:
                     continue
                 credited = self._credited(value, seat)
             except Exception as exc:  # noqa: BLE001 - a reward never fails the action
-                signals.append({**entry, "value": 0.0, "error": f"{type(exc).__name__}: {exc}"})
+                signals.append({**entry, "value": 0.0, "error": described(exc)})
                 continue
             for credited_seat, number in credited:
                 signal = dict(entry)

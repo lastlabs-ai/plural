@@ -120,7 +120,7 @@ Subclass `SandboxProvider` and implement:
 Register in-process:
 
 ```python
-from plural import ProviderRegistry
+from plural.sandbox import ProviderRegistry
 from my_partner import PartnerProvider
 
 registry = ProviderRegistry()

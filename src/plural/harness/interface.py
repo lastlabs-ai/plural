@@ -81,7 +81,7 @@ class HarnessAgent:
         tools: list[dict[str, Any]] | None = None,
         **options: Any,
     ) -> HarnessCompletion:
-        """Call the Job's OpenAI-compatible model gateway."""
+        """Call the Job's model gateway, or the Agent's own endpoint when it has one."""
         model = (
             self.model_resolution.get("catalog_model_id")
             or self.model_resolution.get("model")
@@ -418,14 +418,20 @@ def _request_id(response: dict[str, Any]) -> str | None:
 
 
 def _gateway_request(payload: dict[str, Any]) -> dict[str, Any]:
-    base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
-    if not base:
-        raise RuntimeError(
-            "HarnessAgent.complete requires the Plural model gateway; "
-            "Job(client=...) and `plural run` configure it"
-        )
-    key = os.environ.get("PLURAL_API_KEY") or ""
-    project = os.environ.get("PLURAL_PROJECT_ID")
+    endpoint = (os.environ.get("PLURAL_AGENT_ENDPOINT") or "").rstrip("/")
+    if endpoint:
+        base = endpoint
+        key = os.environ.get("PLURAL_AGENT_ENDPOINT_KEY") or ""
+        project = None
+    else:
+        base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
+        if not base:
+            raise RuntimeError(
+                "HarnessAgent.complete requires the Plural model gateway; "
+                "Job(client=...) and `plural run` configure it"
+            )
+        key = os.environ.get("PLURAL_API_KEY") or ""
+        project = os.environ.get("PLURAL_PROJECT_ID")
     request = urllib.request.Request(
         f"{base}/chat/completions",
         data=json.dumps(payload).encode(),

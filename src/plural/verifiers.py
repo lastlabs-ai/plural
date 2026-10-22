@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import (
     AliasChoices,
@@ -25,7 +25,7 @@ from pydantic import (
 from plural._deprecation import renamed_attribute, renamed_keys
 from plural.apps.definition import SecretReference
 from plural.catalog import ModelCatalog
-from plural.common import FrozenModel, RoutingSpec
+from plural.common import FrozenModel, RoutingSpec, described
 from plural.identity import revision_hash
 from plural.rewards import HindsightVerifier
 from plural.sandbox.models import (
@@ -110,7 +110,7 @@ class EpisodeUsage(FrozenModel):
     cost_usd: float | None = None
 
 
-STOP_REASONS: tuple[str, ...] = (
+StopReason = Literal[
     # The Environment ended the episode.
     "environment_terminated",
     "environment_truncated",
@@ -125,7 +125,8 @@ STOP_REASONS: tuple[str, ...] = (
     "error",
     # The Harness ran past its time and was killed.
     "harness_timeout",
-)
+]
+STOP_REASONS: tuple[str, ...] = get_args(StopReason)
 
 
 class EpisodeOutcome(FrozenModel):
@@ -137,18 +138,7 @@ class EpisodeOutcome(FrozenModel):
     chose to stop, so read ``stop_reason`` to tell those cases apart.
     """
 
-    stop_reason: Literal[
-        "",
-        "environment_terminated",
-        "environment_truncated",
-        "agent_finished",
-        "agent_response",
-        "max_turns",
-        "max_seconds",
-        "max_cost",
-        "error",
-        "harness_timeout",
-    ] = ""
+    stop_reason: Literal["", StopReason] = ""
     terminated: bool = False
     truncated: bool = False
     turns: int = 0
@@ -202,8 +192,11 @@ class Episode(FrozenModel):
     Verifiers, read-only ``query`` access. ``state`` is a shortcut: the one
     App's final snapshot when the Environment has one App, otherwise a mapping
     of App name to final snapshot. Neither is ever shown to the Agent.
-    ``observation`` is what the Agent last saw. ``rewards`` are the values this
-    Verifier's ``reward`` gave each step, in order; :func:`total_reward` sums them.
+    ``observation`` is what the Agent last saw, and ``answer`` is the final
+    answer it gave, which is all there is to check in an Environment with no
+    Apps. ``expected`` is the Task's answer key, which the Agent never sees.
+    ``rewards`` are the values this Verifier's ``reward`` gave each step, in
+    order; :func:`total_reward` sums them.
 
     When several Agents share the episode, ``seats`` names them, each step in
     ``trajectory`` carries the ``seat`` that took it, and ``seat_rewards`` holds
@@ -212,6 +205,8 @@ class Episode(FrozenModel):
     """
 
     observation: dict[str, Any] = Field(default_factory=dict)
+    answer: Any = None
+    expected: Any = None
     state: dict[str, Any] = Field(default_factory=dict)
     apps: dict[str, AppSnapshot] = Field(default_factory=dict)
     trajectory: list[Any] = Field(default_factory=list)
@@ -244,11 +239,15 @@ class Episode(FrozenModel):
 
 @dataclass(frozen=True)
 class StepTask:
-    """The Task an episode is working on, as a ``reward`` hook sees it."""
+    """The Task an episode is working on, as a ``reward`` hook sees it.
+
+    ``expected`` is the Task's answer key, which the Agent never sees.
+    """
 
     name: str = ""
     info: Any = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    expected: Any = None
 
 
 @dataclass(frozen=True)
@@ -681,13 +680,10 @@ class DeterministicVerifier(Verifier):
                 "Its check is a command or Python reference that has not been resolved."
             )
         try:
-            return coerce_verifier_output(fn(episode), verifier_name=self.name)
-        except TypeError as exc:
-            raise ValueError(
-                f"Verifier {self.name!r} check failed to accept the Episode.\n"
-                "The function must accept one argument: the finished Episode.\n"
-                f"Cause: {exc}"
-            ) from exc
+            output = fn(episode)
+        except Exception as exc:
+            raise ValueError(f"Verifier {self.name!r} check raised {described(exc)}") from exc
+        return coerce_verifier_output(output, verifier_name=self.name)
 
 
 def hindsight_hooks(verifiers: Iterable[Any]) -> list[HindsightVerifier]:
@@ -838,6 +834,7 @@ __all__ = [
     "RubricCriterion",
     "Step",
     "StepTask",
+    "StopReason",
     "Verifier",
     "VerifierDefinition",
     "VerifierOutput",

@@ -58,6 +58,7 @@ class FakeHosted:
     parents: dict[tuple[str, str, str], dict[str, Any]] = field(default_factory=dict)
     revisions: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     packages: dict[str, bytes] = field(default_factory=dict)
+    blobs: dict[str, bytes] = field(default_factory=dict)
     jobs: list[dict[str, Any]] = field(default_factory=list)
     requests: list[tuple[str, str]] = field(default_factory=list)
     models: list[dict[str, Any]] = field(
@@ -150,6 +151,8 @@ class FakeHosted:
             return self._projects(request, parts[1:], body, key, account)
         if parts and parts[0] == "packages":
             return self._packages(request, parts[1])
+        if parts and parts[0] == "blobs":
+            return self._blobs(request, parts[1])
         project_id = key.project_id or request.headers.get("x-project-id")
         if project_id not in self.projects:
             return _error(400, "Project is required")
@@ -314,6 +317,18 @@ class FakeHosted:
         if request.method == "DELETE":
             sandbox["status"] = "ended"
         return _ok({key: value for key, value in sandbox.items() if key != "files"})
+
+    def _blobs(self, request: httpx.Request, digest: str) -> httpx.Response:
+        if request.method == "PUT":
+            if "sha256:" + hashlib.sha256(request.content).hexdigest() != digest:
+                return _error(422, "digest mismatch")
+            self.blobs[digest] = request.content
+            return _ok({"digest": digest, "size_bytes": len(request.content)})
+        if digest not in self.blobs:
+            return _error(404, "File not found")
+        if request.method == "HEAD":
+            return httpx.Response(200)
+        return httpx.Response(200, content=self.blobs[digest])
 
     def _packages(self, request: httpx.Request, digest: str) -> httpx.Response:
         if request.method == "PUT":

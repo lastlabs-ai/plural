@@ -77,8 +77,9 @@ A few defaults to know:
 - Environment, Agent, Harness, Verifier, and Task versions default to `0.1.0`. A
   Benchmark `version` is required.
 - A Job defaults to eval mode, one attempt, and concurrency one.
-- `client=Client()` authenticates the Job's model calls with your Plural API key. The
-  Job still runs on this machine.
+- A Job authenticates its model calls with the key `plural auth login` stored, or
+  `PLURAL_API_KEY`. Pass `client=Client(api_key=...)` to use another. The Job still runs
+  on this machine.
 
 ## Load project resources
 
@@ -110,7 +111,8 @@ If your project uses a model that is not in the public catalog, such as your own
 endpoint, add it with `CatalogContext`:
 
 ```python
-from plural import CatalogContext, ModelCatalog, ModelSpec
+from plural import CatalogContext, ModelCatalog
+from plural.catalog import ModelSpec
 from plural.catalog import ModelEndpoint
 from plural.project import Project, Workspace
 
@@ -170,7 +172,7 @@ For power users:
 `JobStore` reads the records of past local Jobs:
 
 ```python
-from plural import JobStore
+from plural.execution import JobStore
 
 store = JobStore()
 for row in store.list_jobs():

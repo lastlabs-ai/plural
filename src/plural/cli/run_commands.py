@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from contextlib import AbstractContextManager, nullcontext
+from pathlib import Path
 from typing import Any, Literal
 
 import typer
+from pydantic import ValidationError
 
 from plural.apps.mcp import use_credential_source
 from plural.auth import Session
@@ -39,6 +41,7 @@ from plural.cli.credits import CreditWatch
 from plural.cli.runtime_commands import _project_studio
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
+from plural.execution.episode_server import EpisodeServerOptions
 from plural.jobs import JobResult, JobSpec, TrialResult, TrialSpec
 from plural.project import ProjectError, Workspace
 from plural.project.layout import (
@@ -160,6 +163,23 @@ def run(
         False, "--dry-run", help="Advanced: validate and show the plan without running."
     ),
     follow: bool = typer.Option(False, "--follow", hidden=True),
+    listen: str = typer.Option(
+        "127.0.0.1:0",
+        "--listen",
+        help="For an external Agent: HOST:PORT where this run serves its episodes.",
+    ),
+    public_url: str | None = typer.Option(
+        None,
+        "--public-url",
+        help="For an external Agent: the https base URL it reaches this run at, when that "
+        "differs from --listen, such as behind a proxy.",
+    ),
+    tls_cert: Path | None = typer.Option(
+        None, "--tls-cert", help="For an external Agent: the certificate to serve https with."
+    ),
+    tls_key: Path | None = typer.Option(
+        None, "--tls-key", help="For an external Agent: the key of --tls-cert."
+    ),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
@@ -174,6 +194,12 @@ def run(
     if hosted or follow:
         raise ProjectError(HOSTED_RUNS)
     model, agent = _one(models, "--model"), _one(agents, "--agent")
+    try:
+        episode_server = EpisodeServerOptions(
+            listen=listen, public_url=public_url, tls_cert=tls_cert, tls_key=tls_key
+        )
+    except ValidationError as exc:
+        raise ProjectError(exc.errors()[0]["msg"].removeprefix("Value error, ")) from None
     record = _recording(record, track) or bool(evaluation_track and not dry_run)
     space = workspace()
     current = session()
@@ -260,6 +286,7 @@ def run(
             progress=_progress(as_json, total),
             tracking=tracking,
             credential_source=_stored_credentials(as_json),
+            episode_server=episode_server,
         )
     _finish_local(space, job_id, result, tracking, as_json=as_json)
 
@@ -774,7 +801,7 @@ def _stored_credentials(err: bool) -> CredentialSource:
 
 
 def _needed_secrets(spec: JobSpec) -> list[str]:
-    """Secret names the Job's Apps, Verifiers, and endpoint Agents need."""
+    """Secret names the Job's Apps, Verifiers, and endpoint and external Agents need."""
     names: set[str] = set()
     for task in spec.tasks:
         names.update(item.name for item in task.environment.secrets)
@@ -783,6 +810,8 @@ def _needed_secrets(spec: JobSpec) -> list[str]:
     for agent in spec.agents:
         if agent.agent.endpoint_key:
             names.add(agent.agent.endpoint_key)
+        if agent.external is not None:
+            names.add(agent.external.signing_key)
     return sorted(names)
 
 
@@ -985,7 +1014,31 @@ def _print_result(job_id: str, result: JobResult) -> None:
             f"{counted(aggregate.count, 'Trial')}, "
             f"{aggregate.successes} succeeded, coverage {aggregate.coverage:.0%}"
         )
+    for line in _reward_warnings(result.trials):
+        typer.echo(f"! {line}", err=True)
     typer.echo(f"Details: plural job show {job_id}")
+
+
+def _reward_warnings(trials: Iterable[TrialResult]) -> list[str]:
+    """One line per Verifier whose ``reward`` raised, across every Trial.
+
+    Returns:
+        The lines, in the order the Verifiers first failed.
+    """
+    steps: dict[str, int] = {}
+    failed_trials: dict[str, int] = {}
+    first: dict[str, str] = {}
+    for trial in trials:
+        for failure in trial.reward_failures:
+            steps[failure.verifier] = steps.get(failure.verifier, 0) + failure.steps
+            failed_trials[failure.verifier] = failed_trials.get(failure.verifier, 0) + 1
+            first.setdefault(failure.verifier, failure.error)
+    return [
+        f"Verifier {name}'s reward raised on {counted(count, 'step')} in "
+        f"{counted(failed_trials[name], 'Trial')}, which earned it no reward there: "
+        f"{first[name]}"
+        for name, count in steps.items()
+    ]
 
 
 def _print_job(payload: dict[str, Any]) -> None:
@@ -1048,6 +1101,7 @@ def _print_trial(payload: dict[str, Any]) -> None:
         ("Task", "task"),
         ("Score", "score"),
         ("Stopped", "stop_reason"),
+        ("Seed", "seed"),
         ("Turns", "turns"),
         ("Cost (USD)", "cost_usd"),
         ("Error", "error"),
@@ -1064,6 +1118,13 @@ def _print_trial(payload: dict[str, Any]) -> None:
         )
         for line in verifier.get("evidence") or []:
             typer.echo(f"    - {line}")
+    for failure in payload.get("reward_failures") or []:
+        typer.echo(
+            f"  Verifier {failure['verifier']}: reward raised on "
+            f"{counted(failure['steps'], 'step')}: {failure['error']}"
+        )
+    for finding in payload.get("integrity") or []:
+        typer.echo(f"  Integrity ({finding.get('code')}, not scored): {finding.get('message')}")
     for credential in payload.get("credentials") or []:
         scopes = ", ".join(credential.get("scopes") or []) or "no scopes listed"
         typer.echo(

@@ -9,6 +9,7 @@ from plural.cli.app_commands import app_app
 from plural.cli.auth_commands import auth_app
 from plural.cli.common import deprecated
 from plural.cli.credential_commands import credential_app
+from plural.cli.external_commands import external_app
 from plural.cli.models_commands import models_app
 from plural.cli.project_commands import project_app
 from plural.cli.resource_commands import resource_app
@@ -36,7 +37,8 @@ app = typer.Typer(
         "  Benchmark    `plural benchmark init`: Tasks to rank Agents on.\n"
         "  Runtime      `plural runtime create`: where Environments run.\n"
         "  secret       `plural secret set`: a project value for Apps and Verifiers.\n"
-        "  credential   `plural credential set`: your own value, carried by an Agent."
+        "  credential   `plural credential set`: your own value, carried by an Agent.\n"
+        "  external     `plural external init`: an agent that runs elsewhere, traced."
     ),
     no_args_is_help=True,
     pretty_exceptions_enable=False,
@@ -83,6 +85,7 @@ app.add_typer(models_app, name="model")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(secret_app, name="secret")
 app.add_typer(session_app, name="session")
+app.add_typer(external_app, name="external")
 
 
 def _deprecated_rewards() -> None:

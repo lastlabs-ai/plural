@@ -329,8 +329,6 @@ A few rules decide what a Task can pass in:
   Task cannot set them.
 - Task `info` is public, so it can hold a ticket ID but should not hold the answer key.
   An App reads it in `reset` as `self.task_info`.
-- Plural stores a Task's `reset_options` but does not yet pass them to `reset`, so
-  load case data through `initial_state` instead.
 
 The [support queue tutorial](../tutorials/support-queue.md) shows how an App loads the
 Task's ticket and how Verifiers score the finished workflow.

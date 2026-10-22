@@ -49,6 +49,7 @@ def test_top_level_commands_are_the_documented_set() -> None:
         "runtime",
         "secret",
         "session",
+        "external",
     }
     assert _hidden(root) == {"rewards", "models"}
 
@@ -56,8 +57,10 @@ def test_top_level_commands_are_the_documented_set() -> None:
 def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
     root = _root()
     extras = {
+        "agent": {"key", "test"},
         "benchmark": {"add", "remove"},
         "env": {"serve"},
+        "task": {"cases"},
         "verifier": {"try", "apply"},
     }
     for name in RESOURCE_GROUPS:

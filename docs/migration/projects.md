@@ -167,9 +167,9 @@ and an old import or attribute returns the same object, each with a
 | Runtime `build_timeout_sec` | `build_timeout_seconds` |
 | Runtime and `VerifierRuntime` `resources` (CPU and memory) | `compute` |
 | `plural.Plural` | `plural.Client` |
-| `plural.TimeoutError` | `plural.PluralTimeoutError` |
-| `plural.Capability` | `plural.SandboxCapability` |
-| `plural.Outcome` | `plural.TraceOutcome` |
+| `plural.TimeoutError` | `plural.errors.PluralTimeoutError` |
+| `plural.Capability` | `plural.sandbox.SandboxCapability` |
+| `plural.Outcome` | `plural.tracing.TraceOutcome` |
 | `plural.Trial`, `plural.execution.Trial` | `plural.execution.TrialRunner`, internal to `Job` |
 
 Renaming a field changes no content hash, so saved Agents, Environments, and

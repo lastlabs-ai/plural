@@ -321,6 +321,7 @@ This section is generated from the Typer application. Run `uv run python scripts
    Runtime      `plural runtime create`: where Environments run.
    secret       `plural secret set`: a project value for Apps and Verifiers.
    credential   `plural credential set`: your own value, carried by an Agent.
+   external     `plural external init`: an agent that runs elsewhere, traced.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version                     Show the installed Plural version and exit.                        │
@@ -350,6 +351,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ runtime     Choose where Environments run.                                                       │
 │ secret      Set the project's setup values, stored encrypted in the hosted project.              │
 │ session     Export and redeploy portable agent sessions.                                         │
+│ external    Register an agent that runs as its own service, and trace its runs to Plural.        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -373,6 +375,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
+│ key       Print a new signing key for an external Agent.                                         │
+│ test      Send an external Agent a signed ping, and report how it answered.                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -407,14 +411,35 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Create a saved Agent: a model, instructions, and an optional Harness.
 
+ With --external, the Agent is a service you run elsewhere; --model is
+ then the label it reports, such as acme/takeoff-v3.
+
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    name      <str>  Agent name. [required]                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --model    -m      <str>  Catalog model id, from `plural model list`. Asked for when omitted in  │
-│                           a terminal.                                                            │
-│ --harness          <str>  Harness name.                                                          │
-│ --help                    Show this message and exit.                                            │
+│ --model     -m      <str>  Catalog model id, from `plural model list`. Asked for when omitted in │
+│                            a terminal.                                                           │
+│ --harness           <str>  Harness name.                                                         │
+│ --external          <str>  The https URL of an agent service of your own, which the Job calls    │
+│                            for each episode instead of running a Harness.                        │
+│ --help                     Show this message and exit.                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent key`
+
+```text
+
+ Usage: plural agent key [OPTIONS]
+
+ Print a new signing key for an external Agent.
+
+ Store it as the Agent's signing_key secret here, and as
+ PLURAL_SIGNING_KEY in the agent's service. Plural never keeps it.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -527,6 +552,23 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --hosted          Only read the hosted project.                                                  │
 │ --json            Print machine-readable JSON.                                                   │
 │ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent test`
+
+```text
+
+ Usage: plural agent test [OPTIONS] [name]
+
+ Send an external Agent a signed ping, and report how it answered.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -785,8 +827,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
-│ add       Add a Task to a Benchmark (a local edit until you push).                               │
-│ remove    Remove a Task from a Benchmark (a local edit until you push).                          │
+│ add       Add Tasks to a Benchmark (a local edit until you push).                                │
+│ remove    Remove Tasks from a Benchmark (a local edit until you push).                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -794,12 +836,12 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural benchmark add [OPTIONS] {task}
+ Usage: plural benchmark add [OPTIONS] {tasks}...
 
- Add a Task to a Benchmark (a local edit until you push).
+ Add Tasks to a Benchmark (a local edit until you push).
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    task      <str>  Task to add. [required]                                                    │
+│ *    tasks      <str>  Tasks to add, by name or a pattern such as 'refund-*'. [required]         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --benchmark  -b      <str>  Benchmark to edit. Defaults to the one you are in.                   │
@@ -937,12 +979,12 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ```text
 
- Usage: plural benchmark remove [OPTIONS] {task}
+ Usage: plural benchmark remove [OPTIONS] {tasks}...
 
- Remove a Task from a Benchmark (a local edit until you push).
+ Remove Tasks from a Benchmark (a local edit until you push).
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    task      <str>  Task to remove. [required]                                                 │
+│ *    tasks      <str>  Tasks to remove, by name or a pattern such as 'refund-*'. [required]      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --benchmark  -b      <str>  Benchmark to edit. Defaults to the one you are in.                   │
@@ -1280,6 +1322,80 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural external`
+
+```text
+
+ Usage: plural external [OPTIONS] COMMAND [ARGS]...
+
+ Register an agent that runs as its own service, and trace its runs to Plural.
+
+ In the agent's repository, `plural external init` writes plural-agent.yaml. Edit it, then `plural
+ external register` adds the Agent to Plural, and `plural external check` confirms the keys and the
+ service work. In the agent's code, `plural.external.Tracer` and the adapters for OpenTelemetry,
+ LangChain, and the OpenAI Agents SDK trace each run.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init      Write a plural-agent.yaml with every field explained.                                  │
+│ register  Add the Agent to Plural, or a new revision when its url or version changed.            │
+│ check     Check the config, the API key, the Agent's registration, and a signed ping.            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural external check`
+
+```text
+
+ Usage: plural external check [OPTIONS]
+
+ Check the config, the API key, the Agent's registration, and a signed ping.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --config  -c      <path>  The config file. Defaults to ./plural-agent.yaml.                      │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural external init`
+
+```text
+
+ Usage: plural external init [OPTIONS] {name}
+
+ Write a plural-agent.yaml with every field explained.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Agent's name in Plural. [required]                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --version        <str>   Your release label. [default: 0.1.0]                                    │
+│ --model          <str>   The label runs report as their model.                                   │
+│ --url            <str>   Where Plural Jobs send episodes, over https.                            │
+│ --path           <path>  Where to write the file. [default: plural-agent.yaml]                   │
+│ --force                  Replace an existing file.                                               │
+│ --help                   Show this message and exit.                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural external register`
+
+```text
+
+ Usage: plural external register [OPTIONS]
+
+ Add the Agent to Plural, or a new revision when its url or version changed.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --config  -c      <path>  The config file. Defaults to ./plural-agent.yaml.                      │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1845,6 +1961,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 │                                                 CLI's own code.                                  │
 │ --dry-run                                       Advanced: validate and show the plan without     │
 │                                                 running.                                         │
+│ --listen                    <str>               For an external Agent: HOST:PORT where this run  │
+│                                                 serves its episodes.                             │
+│                                                 [default: 127.0.0.1:0]                           │
+│ --public-url                <str>               For an external Agent: the https base URL it     │
+│                                                 reaches this run at, when that differs from      │
+│                                                 --listen, such as behind a proxy.                │
+│ --tls-cert                  <path>              For an external Agent: the certificate to serve  │
+│                                                 https with.                                      │
+│ --tls-key                   <path>              For an external Agent: the key of --tls-cert.    │
 │ --json                                          Print machine-readable JSON.                     │
 │ --help                                          Show this message and exit.                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -2446,6 +2571,28 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
+│ cases     Write one Task per case, each a copy of TASK with the case's fields.                   │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task cases`
+
+```text
+
+ Usage: plural task cases [OPTIONS] {task} {path}
+
+ Write one Task per case, each a copy of TASK with the case's fields.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    task      <str>   Task to copy for each case. [required]                                    │
+│ *    path      <path>  Cases, as a .jsonl file or a .json or .yaml list. Each names its Task and │
+│                        may set instructions, initial_state, expected, info, metadata, and goals. │
+│                        [required]                                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --replace                   Write over Tasks that already exist, such as on a rerun.             │
+│ --benchmark  -b      <str>  Also add the Tasks to this Benchmark.                                │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Iterable, Mapping
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from pydantic import (
@@ -24,6 +24,7 @@ from plural.apps.definition import (
     SecretReference,
     exposed_actions,
 )
+from plural.blobs import MAX_INLINE_CHARACTERS, content_type_for, store_blob
 from plural.common import (
     SHA256_PATTERN,
     ExecutionTarget,
@@ -73,7 +74,9 @@ class EnvironmentResource(FrozenModel):
 
     The short form ``Resource("policies/refunds.md")`` stages one file from
     the Environment's source package. The mapping form keeps its explicit
-    ``delivery``.
+    ``delivery``. ``Resource.from_file(path)`` reads a file of any type: text
+    travels inline, and anything else, such as a PDF or a drawing, as a
+    ``blob`` named by its digest.
     """
 
     kind: Literal["data", "application", "file"]
@@ -84,7 +87,7 @@ class EnvironmentResource(FrozenModel):
     content_type: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
     description: str = ""
-    delivery: Literal["descriptor", "source", "inline", "resolver"] = "descriptor"
+    delivery: Literal["descriptor", "source", "inline", "resolver", "blob"] = "descriptor"
     content: str | None = Field(default=None, max_length=1_048_576)
     resolver: str | None = None
 
@@ -113,6 +116,46 @@ class EnvironmentResource(FrozenModel):
             data = fields
         super().__init__(**data)
 
+    @classmethod
+    def from_file(cls, path: str | Path, *, name: str | None = None) -> EnvironmentResource:
+        """Read a file of any type into a resource.
+
+        UTF-8 text up to 1 MiB is kept inline. Any other file is kept in the
+        local blob cache and referenced by digest, up to 16 MiB.
+
+        Args:
+            path: The file to read.
+            name: Where the Agent finds it, relative to the resource folder.
+                Defaults to the file's name.
+
+        Returns:
+            The resource.
+        """
+        source = Path(path)
+        relative = name or source.name
+        data = source.read_bytes()
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            text = None
+        if text is not None and len(text) <= MAX_INLINE_CHARACTERS:
+            return cls(
+                kind="file",
+                name=relative,
+                path=relative,
+                content_type=content_type_for(relative, text=True),
+                delivery="inline",
+                content=text,
+            )
+        return cls(
+            kind="file",
+            name=relative,
+            path=relative,
+            content_type=content_type_for(relative, text=text is not None),
+            delivery="blob",
+            digest=store_blob(data),
+        )
+
     @model_validator(mode="after")
     def _resource_delivery(self) -> EnvironmentResource:
         if self.delivery == "descriptor":
@@ -137,6 +180,8 @@ class EnvironmentResource(FrozenModel):
             object.__setattr__(self, "digest", digest)
         elif self.content is not None:
             raise ValueError("Only inline resources can contain text")
+        if self.delivery == "blob" and self.digest is None:
+            raise ValueError("Blob resources require the digest of their bytes")
         if self.delivery == "resolver":
             if not self.resolver or not self.uri or not self.digest:
                 raise ValueError("Resolved resources require a resolver, URI, and expected digest")
@@ -511,10 +556,13 @@ class HarnessGrant(FrozenModel):
         )
 
 
+MAX_TURNS = 1000
+
+
 class ExecutionLimits(FrozenModel):
     """Environment execution limits."""
 
-    max_turns: int = Field(default=8, ge=1, le=128)
+    max_turns: int = Field(default=8, ge=1, le=MAX_TURNS)
     max_seconds: float = Field(default=120, gt=0)
     max_cost_usd: float | None = Field(default=None, gt=0)
 

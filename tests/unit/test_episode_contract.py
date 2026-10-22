@@ -523,12 +523,14 @@ def test_trial_result_carries_how_the_episode_ended() -> None:
     assert _episode_totals(artifacts, failed=False) == {
         "stop_reason": "max_turns",
         "step_reward_total": 2.0,
+        "reward_failures": (),
         "turns": 3,
     }
     assert _episode_totals((), failed=True)["stop_reason"] == "error"
     assert _episode_totals((), failed=False) == {
         "stop_reason": "",
         "step_reward_total": 0.0,
+        "reward_failures": (),
         "turns": 0,
     }
     with pytest.raises(ValueError, match="unknown stop_reason"):

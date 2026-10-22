@@ -16,7 +16,7 @@ your work with it at any point.
 Prefer to start from the finished project? [Download it](../assets/first-project.zip)
 and follow the [support queue tutorial](support-queue.md) instead.
 
-You need Plural installed; see [Install](../getting-started.md#1-create-an-account-and-install).
+You need Plural installed; see [Install](../getting-started.md#1-install).
 
 ## Create the project
 
@@ -101,7 +101,9 @@ To run without any credential, add a Harness that calls no model and an Agent wi
 
 ## Next steps
 
-To add more tickets, repeat `plural task init` and `plural benchmark add`.
+To add more tickets, repeat `plural task init` and `plural benchmark add`, or list them
+as cases and write them all with
+[`plural task cases`](../project/tasks.md#write-many-tasks-from-a-list-of-cases).
 
 When you want to see runs in the web app, register the project with
 `plural project init support-queue --push` and add `--record` to `plural run`. The

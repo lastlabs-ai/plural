@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 import plural
 from plural import Agent, Benchmark, Environment, Harness, Job, Runtime, Task
+from plural.tasks import TaskDefinition
 from plural.verifiers import (
     AgentVerifier,
     DeterministicVerifier,
@@ -38,7 +39,6 @@ def task(name: str, *, version: str = "0.1.0") -> Task:
         environment=Environment(name="world", version="1.0.0", runtime=Runtime.docker()),
         verifiers=(solved(weight=2),),
         initial_state={},
-        reset_options={"seed": 7},
     )
 
 
@@ -179,3 +179,21 @@ def test_public_job_plans_and_sync_run_rejects_running_loop() -> None:
     import asyncio
 
     asyncio.run(call_sync_run())
+
+
+def test_reset_options_are_gone_without_changing_a_tasks_hash():
+    with pytest.raises(ValidationError, match="initial_state"):
+        Task(
+            name="case",
+            instructions="Do it.",
+            environment=Environment(name="world", version="1.0.0", runtime=Runtime.docker()),
+            verifiers=(solved(),),
+            reset_options={"level": 2},
+        )
+    definition = task("case").definition()
+    # Tasks still serialize with the empty reset_options they were hashed with.
+    assert definition.model_dump()["reset_options"] == {}
+    stored = definition.model_dump(exclude={"source_hash"}) | {"reset_options": {"level": 2}}
+    assert TaskDefinition.model_validate(stored).content_hash == (
+        TaskDefinition.model_validate(definition.model_dump(exclude={"source_hash"})).content_hash
+    )

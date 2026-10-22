@@ -185,7 +185,8 @@ A failed model call raises a subclass of `PluralError`, such as
 again could help:
 
 ```python
-from plural import AuthenticationError, Client, Message, PluralError, is_retryable
+from plural import Client, Message, PluralError
+from plural.errors import AuthenticationError, is_retryable
 
 try:
     with Client() as client:

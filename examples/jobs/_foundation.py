@@ -4,19 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from plural import (
-    Benchmark,
-    CatalogContext,
-    Environment,
-    Job,
-    JobStore,
-    ModelCatalog,
-    ModelSpec,
-    NetworkMode,
-    Runtime,
-    Task,
-)
+from plural import Benchmark, CatalogContext, Environment, Job, ModelCatalog, Runtime, Task
+from plural.catalog import ModelSpec
+from plural.execution import JobStore
 from plural.project.resources import load_harness_directory
+from plural.sandbox import NetworkMode
 from plural.verifiers import DeterministicVerifier, VerifierRuntime
 
 ROOT = Path(__file__).parent

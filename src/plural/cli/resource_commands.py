@@ -39,8 +39,9 @@ from plural.project import (
     Workspace,
     check_name,
 )
+from plural.project.cases import read_cases, write_cases
 from plural.project.layout import AGENT, BENCHMARK, ENVIRONMENT, HARNESS, TASK, split_version
-from plural.project.membership import add_task, remove_task
+from plural.project.membership import add_tasks, remove_tasks
 from plural.project.sync import (
     REBUILT_NOTE,
     PushStep,
@@ -638,7 +639,88 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
 
     if kind is BENCHMARK:
         _benchmark_membership(app)
+    if kind is TASK:
+        _task_cases(app)
+    if kind is AGENT:
+        _external_commands(app)
     return app
+
+
+def _external_commands(app: typer.Typer) -> None:
+    @app.command("key")
+    @handled
+    def key() -> None:
+        """Print a new signing key for an external Agent.
+
+        Store it as the Agent's signing_key secret here, and as
+        PLURAL_SIGNING_KEY in the agent's service. Plural never keeps it.
+        """
+        from plural.external.protocol import new_signing_key
+
+        typer.echo(new_signing_key())
+
+    @app.command("test")
+    @handled
+    def test(
+        name: str | None = typer.Argument(None, help=NAME_HELP),
+        as_json: bool = JSON_OPTION,
+    ) -> None:
+        """Send an external Agent a signed ping, and report how it answered."""
+        import os
+        import time
+
+        import httpx
+
+        from plural.agents import Agent
+        from plural.external.client import ping
+
+        space = workspace()
+        ref = _ref(space, AGENT, name)
+        agent = space.load(ref).value
+        external = agent.external if isinstance(agent, Agent) else None
+        if external is None:
+            raise ProjectError(f"Agent {ref.name} is not external; it has no service to test.")
+        value = os.environ.get(external.signing_key)
+        if not value:
+            raise ProjectError(
+                f"Export {external.signing_key}, the key Agent {ref.name} signs with, first."
+            )
+        started = time.monotonic()
+        try:
+            status = ping(external.url, value, ca_bundle=external.ca_bundle)
+        except ValueError as exc:
+            raise ProjectError(f"{external.signing_key}: {exc}") from None
+        except httpx.HTTPError as exc:
+            raise ProjectError(
+                f"Could not reach {external.url}: {type(exc).__name__}: {exc}"
+            ) from None
+        elapsed = time.monotonic() - started
+        ok = 200 <= status < 300
+        payload = {
+            "agent": ref.name,
+            "url": external.url,
+            "status": status,
+            "tls": external.url.startswith("https://"),
+            "seconds": round(elapsed, 3),
+            "ok": ok,
+        }
+
+        def text() -> None:
+            if ok:
+                success(
+                    f"{ref.name} answered the signed ping with {status} in "
+                    f"{elapsed:.2f}s over {'TLS' if payload['tls'] else 'plain http'}."
+                )
+            else:
+                typer.echo(
+                    f"{ref.name} answered {status}. A 401 or 403 usually means "
+                    "its PLURAL_SIGNING_KEY differs from "
+                    f"{external.signing_key}, or its clock is more than five minutes off."
+                )
+
+        emit(payload, as_json=as_json, text=text)
+        if not ok:
+            raise typer.Exit(1)
 
 
 def _dependents(space: Workspace, ref: ResourceRef) -> list[ResourceRef]:
@@ -745,8 +827,33 @@ def _init_command(app: typer.Typer, kind: ResourceKind) -> None:
                 "in a terminal.",
             ),
             harness: str | None = typer.Option(None, "--harness", help="Harness name."),
+            external: str | None = typer.Option(
+                None,
+                "--external",
+                help="The https URL of an agent service of your own, which the Job calls "
+                "for each episode instead of running a Harness.",
+            ),
         ) -> None:
-            """Create a saved Agent: a model, instructions, and an optional Harness."""
+            """Create a saved Agent: a model, instructions, and an optional Harness.
+
+            With --external, the Agent is a service you run elsewhere; --model is
+            then the label it reports, such as acme/takeoff-v3.
+            """
+            if external:
+                if harness:
+                    raise ProjectError("An external Agent runs no Harness; drop --harness.")
+                from plural.external.protocol import check_agent_url
+
+                try:
+                    check_agent_url(external)
+                except ValueError as exc:
+                    raise ProjectError(str(exc)) from None
+                create(name, model=model, external=external)
+                typer.echo(
+                    "Make its signing key with `plural agent key`, then check it with "
+                    f"`plural agent test {name}`."
+                )
+                return
             if not model and sys.stdin.isatty():
                 model = typer.prompt(
                     "Model (a catalog id; `plural model list` shows them)", default=STARTER_MODEL
@@ -803,34 +910,69 @@ def _benchmark_membership(app: typer.Typer) -> None:
     @app.command("add")
     @handled
     def add(
-        task: str = typer.Argument(help="Task to add."),
+        tasks: list[str] = typer.Argument(
+            help="Tasks to add, by name or a pattern such as 'refund-*'."
+        ),
         benchmark: str | None = benchmark_option,
         push_after: bool = push_option,
     ) -> None:
-        """Add a Task to a Benchmark (a local edit until you push)."""
+        """Add Tasks to a Benchmark (a local edit until you push)."""
         space = workspace()
         ref = _ref(space, BENCHMARK, benchmark)
-        changed = add_task(space.project, ref.name, task)
+        added = add_tasks(space.project, ref.name, tasks)
         typer.echo(
-            f"Added Task {task} to Benchmark {ref.name}."
-            if changed
-            else f"Benchmark {ref.name} already includes Task {task}."
+            f"Added {_task_list(added)} to Benchmark {ref.name}."
+            if added
+            else f"Benchmark {ref.name} already includes {_task_list(tasks)}."
         )
-        _maybe_push(space, ref, push_after, changed=changed)
+        _maybe_push(space, ref, push_after, changed=bool(added))
 
     @app.command("remove")
     @handled
     def remove(
-        task: str = typer.Argument(help="Task to remove."),
+        tasks: list[str] = typer.Argument(
+            help="Tasks to remove, by name or a pattern such as 'refund-*'."
+        ),
         benchmark: str | None = benchmark_option,
         push_after: bool = push_option,
     ) -> None:
-        """Remove a Task from a Benchmark (a local edit until you push)."""
+        """Remove Tasks from a Benchmark (a local edit until you push)."""
         space = workspace()
         ref = _ref(space, BENCHMARK, benchmark)
-        changed = remove_task(space.project, ref.name, task)
-        typer.echo(f"Removed Task {task} from Benchmark {ref.name}.")
-        _maybe_push(space, ref, push_after, changed=changed)
+        removed = remove_tasks(space.project, ref.name, tasks)
+        typer.echo(f"Removed {_task_list(removed)} from Benchmark {ref.name}.")
+        _maybe_push(space, ref, push_after, changed=True)
+
+
+def _task_list(names: list[str]) -> str:
+    return f"Task {names[0]}" if len(names) == 1 else f"{len(names)} Tasks: {', '.join(names)}"
+
+
+def _task_cases(app: typer.Typer) -> None:
+    @app.command("cases")
+    @handled
+    def cases(
+        task: str = typer.Argument(help="Task to copy for each case."),
+        path: Path = typer.Argument(
+            help="Cases, as a .jsonl file or a .json or .yaml list. Each names its Task and "
+            "may set instructions, initial_state, expected, info, metadata, and goals."
+        ),
+        replace: bool = typer.Option(
+            False, "--replace", help="Write over Tasks that already exist, such as on a rerun."
+        ),
+        benchmark: str | None = typer.Option(
+            None, "--benchmark", "-b", help="Also add the Tasks to this Benchmark."
+        ),
+    ) -> None:
+        """Write one Task per case, each a copy of TASK with the case's fields."""
+        space = workspace()
+        names = write_cases(space.project, task, read_cases(path), replace=replace)
+        success(f"Wrote {_task_list(names)}.")
+        if benchmark is not None:
+            ref = _ref(space, BENCHMARK, benchmark)
+            add_tasks(space.project, ref.name, names)
+            typer.echo(f"Added them to Benchmark {ref.name}.")
+        typer.echo("Check them with `plural task show NAME`, then push them.")
 
 
 def _maybe_push(space: Workspace, ref: ResourceRef, enabled: bool, *, changed: bool) -> None:

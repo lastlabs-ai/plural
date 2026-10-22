@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Every Trial has a seed, derived from the Task and the attempt, so every Agent on one attempt faces the same world and a rerun faces it again. Apps read it as `self.seed` and draw from `self.rng`; a State with a `seed` field gets it too. The Trial records it as `TrialResult.seed`. Until now a Job always reset Apps without a seed.
+- `plural task cases TASK FILE` writes one Task per case, each a copy of TASK with the case's `instructions`, `initial_state`, `info`, `metadata`, or `goals`, and `--benchmark` adds them all. Cases are a `.jsonl` file or a `.json` or `.yaml` list.
+- `plural benchmark add` and `remove` take several Tasks, by name or by a pattern such as `'refund-*'`.
+- A Verifier's `reward` function that raises is no longer silent. `plural run` warns with the Verifier, how many steps it failed on, and the first error with the line that raised it; `plural trial show` and the web app show the same, and the Trial records it as `TrialResult.reward_failures`.
+
+### Changed
+
+- `plural` itself now exports the 49 names a project needs: Environments, Apps, Tasks, Verifiers, Agents, Harnesses, Benchmarks, Jobs, and the Client. The other 79, such as `JobStore`, the sandbox providers, tracing, and most error classes, import from their submodules, such as `plural.execution` and `plural.sandbox`. Importing one from `plural` still works for this release, with a `DeprecationWarning` naming its new home.
+- A `Job` signs in the way `Client` does: with no `api_key`, `client`, or `PLURAL_API_KEY`, it uses the key from `plural auth login`.
+- An Environment's `limits.max_turns` may be up to 1000, up from 128; `max_seconds` and `max_cost_usd` still bound every episode.
+- The Quickstart builds and validates offline, and asks for an account only when it first calls a model.
+
+### Removed
+
+- The `ENROUTE_API_KEY` fallback in `Client`. Use `PLURAL_API_KEY` or `plural auth login`.
+- `reset_options` on a Task, which Plural stored but never passed to `reset`. A Task or `task.yaml` that sets them is refused with a pointer to `initial_state` and `info`; an empty one is still accepted, stored revisions still load, and no Task's hash changes.
+
+### Fixed
+
+- A Verifier's in-process `check` that raises fails the Trial with the Verifier's name, the error, and the line that raised it. An error other than `ValueError` used to surface as bare text, such as `'done'`.
+- A gateway failure the built-in Harness could not recover from is now recorded as the provider's, not as a harness failure scored zero. 0.22.1 lost the failure kind when the runner exited non-zero, which is how it always exits on an error.
+- The README's examples run as shown, and the package's Documentation link points at pluralintel.com/docs.
+
 ## [0.22.1] - 2026-10-21
 
 ### Added

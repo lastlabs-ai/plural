@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from plural.external.config import signing_key_secret
 from plural.project.layout import (
     AGENT,
     BENCHMARK,
@@ -140,6 +141,7 @@ def resource_scaffold(
     verifiers: tuple[str, ...] = (),
     model: str | None = None,
     harness: str | None = None,
+    external: str | None = None,
     python: bool = False,
 ) -> Scaffold:
     """Files for ``plural <kind> init <name>``.
@@ -204,6 +206,17 @@ def resource_scaffold(
             files={
                 HARNESS.manifest: _HARNESS_YAML.format(name=name, cls=cls),
                 "harness.py": _HARNESS_PY.format(cls=cls),
+            }
+        )
+    if kind is AGENT and external:
+        return Scaffold(
+            files={
+                AGENT.manifest: _EXTERNAL_AGENT_YAML.format(
+                    name=name,
+                    model=model or f"{name}/v1",
+                    url=external,
+                    key=signing_key_secret(name),
+                )
             }
         )
     if kind is AGENT:
@@ -573,6 +586,9 @@ instructions: instruction.md
 {environment}{verifiers}# Values for the App State fields marked initial(). With several Apps,
 # key them by App name: {{crm: {{...}}, wordle: {{...}}}}.
 initial_state: {{}}
+# The answer key: what a correct episode produces. Verifiers read it as
+# episode.expected; the Agent never sees it.
+# expected: billing
 """
 
 _TASK_INSTRUCTION = """\
@@ -691,6 +707,21 @@ _AGENT_YAML = """\
 name: {name}
 {model}instructions: ""
 {harness}"""
+
+_EXTERNAL_AGENT_YAML = """\
+# External Agent: a service of your own that a Job calls for each episode.
+name: {name}
+# The label the service reports as its model; results group by it.
+model: {model}
+instructions: ""
+external:
+  url: {url}
+  # The secret holding the key both sides sign with. Make one with `plural agent key`,
+  # then set it here and in the service as PLURAL_SIGNING_KEY.
+  signing_key: {key}
+  # Bump this label with each release of the service.
+  version: 0.1.0
+"""
 
 _BENCHMARK_YAML = """\
 # Benchmark: a named collection of Tasks and the rules for ranking results.

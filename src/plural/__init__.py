@@ -1,7 +1,8 @@
-"""Plural environments, evaluation, routing, and tracing.
+"""Plural: build Environments, write Tasks, and benchmark and train Agents on them.
 
-Import order follows the authoring story: worlds, cases, scores, agents,
-then runs, then hosting and advanced machinery.
+The names here are the ones a project needs. Everything else lives in its
+submodule, such as :mod:`plural.harness` for the Harness protocol and
+:mod:`plural.sandbox` for Runtime providers.
 """
 
 from __future__ import annotations
@@ -10,137 +11,59 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from plural.agents import Agent
-from plural.apps import App, AppDefinition
-from plural.benchmarks import BenchmarkCategory, BenchmarkScoring, EvaluationTrack
-
-# Hosting and models.
-from plural.catalog import CatalogContext, ModelCatalog, ModelSpec, estimate_cost
-from plural.client import Client
-
-# Advanced: harness protocol, sandbox providers, tracing, errors, utilities.
-from plural.common import (
-    ErrorCode,
-    ExecutionTarget,
-    HarnessCapability,
-    content_hash,
-    stable_id,
+from plural.apps import App
+from plural.benchmarks import (
+    BenchmarkCategory,
+    BenchmarkScoring,
+    EvaluationTrack,
 )
-
-# Authoring: worlds (Environment owns Runtime, Resources, Verifiers).
-from plural.environments import (  # noqa: I001 - Environments load before Apps
-    ActionCall,
+from plural.catalog import CatalogContext, ModelCatalog
+from plural.client import Client
+from plural.environments import (
     Environment,
     ExecutionLimits,
     HarnessPolicy,
-    Observation,
     Party,
     Resource,
     Runtime,
-    RuntimePackages,
     RuntimeVariable,
     Secret,
     State,
-    TraceDataset,
-    TraceFilter,
     action,
     initial,
 )
-from plural.errors import (
-    AuthenticationError,
-    BudgetExceededError,
-    ConfigurationError,
-    ConflictError,
-    ContentFilterError,
-    ContextLengthError,
-    InvalidRequestError,
-    NotFoundError,
-    PluralError,
-    PluralTimeoutError,
-    ProviderUnavailable,
-    RateLimitError,
-    is_retryable,
-)
-
-# Running: jobs, trials, and their results.
-from plural.execution import JobStore
+from plural.errors import PluralError
 from plural.harness import (
     Harness,
     HarnessAgent,
-    HarnessCompletion,
-    HarnessDefinition,
     HarnessEnvironment,
     HarnessResult,
-    HarnessStep,
     HarnessTask,
-    SeatTurn,
 )
 from plural.jobs import (
-    AgentAggregate,
-    ArtifactManifest,
-    ArtifactManifestEntry,
-    ArtifactReference,
-    ExecutionStatus,
     Job,
-    JobMode,
-    JobPlan,
     JobResult,
-    ProgressEvent,
     RetryPolicy,
-    TITORecord,
-    TrialExecution,
-    TrialReceipt,
     TrialResult,
-    TrialSpec,
-    TrialStatus,
-    VerifierResult,
 )
-from plural.project import Project, ProjectError, ResourceRef, Workspace
-from plural.rewards import (
-    Credit,
-    HindsightTrial,
-    RewardRecord,
-    RewardTarget,
+from plural.rewards import Credit, HindsightTrial, RewardTarget
+from plural.tasks import Benchmark, Task
+from plural.types import (
+    ChatRequest,
+    ChatResponse,
+    Message,
+    Tool,
 )
-from plural.sandbox import (
-    DaytonaProvider,
-    DeclarativeImage,
-    DockerProvider,
-    LocalProvider,
-    NetworkMode,
-    ProviderRegistry,
-    SandboxCapability,
-    SandboxProvider,
-    SandboxRequirements,
-)
-from plural.sessions import SessionSnapshot
-from plural.studio import Studio
-from plural.tasks import Benchmark, BenchmarkDiff, Task, TaskPin
-from plural.tracing import (
-    JSONLSink,
-    Redactor,
-    Sampler,
-    SQLiteSink,
-    Trace,
-    TraceContext,
-    TraceKind,
-    TraceOutcome,
-    TraceWriter,
-)
-from plural.trajectory import Trajectory, TrajectoryEvent, normalize_trajectory
-from plural.types import ChatRequest, ChatResponse, Message, Tool, Usage
 from plural.verifiers import (
     STOP_REASONS,
     AgentVerifier,
     DeterministicVerifier,
     Episode,
-    EpisodeOutcome,
-    EpisodeUsage,
     HumanVerifier,
     RubricCriterion,
     Step,
     Verifier,
     VerifierOutput,
-    VerifierRuntime,
     total_reward,
 )
 
@@ -152,17 +75,104 @@ _DEPRECATED: dict[str, tuple[str, str]] = {
     "Trial": ("TrialRunner", "plural.execution.engine"),
 }
 
+# Names that left the top level; each still imports from here, with a warning,
+# for one release.
+_MOVED: dict[str, str] = {
+    "ActionCall": "plural.environments",
+    "AgentAggregate": "plural.jobs",
+    "AppDefinition": "plural.apps",
+    "ArtifactManifest": "plural.jobs",
+    "ArtifactManifestEntry": "plural.jobs",
+    "ArtifactReference": "plural.jobs",
+    "AuthenticationError": "plural.errors",
+    "BenchmarkDiff": "plural.tasks",
+    "BudgetExceededError": "plural.errors",
+    "ConfigurationError": "plural.errors",
+    "ConflictError": "plural.errors",
+    "ContentFilterError": "plural.errors",
+    "ContextLengthError": "plural.errors",
+    "DaytonaProvider": "plural.sandbox",
+    "DeclarativeImage": "plural.sandbox",
+    "DockerProvider": "plural.sandbox",
+    "EpisodeOutcome": "plural.verifiers",
+    "EpisodeUsage": "plural.verifiers",
+    "ErrorCode": "plural.common",
+    "ExecutionStatus": "plural.jobs",
+    "ExecutionTarget": "plural.common",
+    "HarnessCapability": "plural.common",
+    "HarnessCompletion": "plural.harness",
+    "HarnessDefinition": "plural.harness",
+    "HarnessStep": "plural.harness",
+    "InvalidRequestError": "plural.errors",
+    "JSONLSink": "plural.tracing",
+    "JobMode": "plural.jobs",
+    "JobPlan": "plural.jobs",
+    "JobStore": "plural.execution",
+    "LocalProvider": "plural.sandbox",
+    "ModelSpec": "plural.catalog",
+    "NetworkMode": "plural.sandbox",
+    "NotFoundError": "plural.errors",
+    "Observation": "plural.environments",
+    "PluralTimeoutError": "plural.errors",
+    "ProgressEvent": "plural.jobs",
+    "Project": "plural.project",
+    "ProjectError": "plural.project",
+    "ProviderRegistry": "plural.sandbox",
+    "ProviderUnavailable": "plural.errors",
+    "RateLimitError": "plural.errors",
+    "Redactor": "plural.tracing",
+    "ResourceRef": "plural.project",
+    "RewardRecord": "plural.rewards",
+    "RuntimePackages": "plural.environments",
+    "SQLiteSink": "plural.tracing",
+    "Sampler": "plural.tracing",
+    "SandboxCapability": "plural.sandbox",
+    "SandboxProvider": "plural.sandbox",
+    "SandboxRequirements": "plural.sandbox",
+    "SeatTurn": "plural.harness",
+    "SessionSnapshot": "plural.sessions",
+    "Studio": "plural.studio",
+    "TITORecord": "plural.jobs",
+    "TaskPin": "plural.tasks",
+    "Trace": "plural.tracing",
+    "TraceContext": "plural.tracing",
+    "TraceDataset": "plural.environments",
+    "TraceFilter": "plural.environments",
+    "TraceKind": "plural.tracing",
+    "TraceOutcome": "plural.tracing",
+    "TraceWriter": "plural.tracing",
+    "Trajectory": "plural.trajectory",
+    "TrajectoryEvent": "plural.trajectory",
+    "TrialExecution": "plural.jobs",
+    "TrialReceipt": "plural.jobs",
+    "TrialSpec": "plural.jobs",
+    "TrialStatus": "plural.jobs",
+    "Usage": "plural.types",
+    "VerifierResult": "plural.jobs",
+    "VerifierRuntime": "plural.verifiers",
+    "Workspace": "plural.project",
+    "content_hash": "plural.common",
+    "estimate_cost": "plural.catalog",
+    "is_retryable": "plural.errors",
+    "normalize_trajectory": "plural.trajectory",
+    "stable_id": "plural.common",
+}
+
 
 def __getattr__(name: str) -> Any:
-    renamed = _DEPRECATED.get(name)
-    if renamed is None:
-        raise AttributeError(f"module 'plural' has no attribute {name!r}")
     import importlib
 
     from plural._deprecation import warn_renamed
 
+    module = _MOVED.get(name)
+    if module is not None:
+        warn_renamed(f"plural.{name}", f"{module}.{name}")
+        return getattr(importlib.import_module(module), name)
+    renamed = _DEPRECATED.get(name)
+    if renamed is None:
+        raise AttributeError(f"module 'plural' has no attribute {name!r}")
     new, module = renamed
-    warn_renamed(f"plural.{name}", f"{module}.{new}" if name == "Trial" else f"plural.{new}")
+    warn_renamed(f"plural.{name}", f"plural.{new}" if new in __all__ else f"{module}.{new}")
     return getattr(importlib.import_module(module), new)
 
 
@@ -172,136 +182,53 @@ except PackageNotFoundError:
     __version__ = "0.0.0"
 
 __all__ = [
-    # Authoring.
-    "ActionCall",
+    "STOP_REASONS",
     "Agent",
-    "App",
-    "AppDefinition",
     "AgentVerifier",
+    "App",
     "Benchmark",
     "BenchmarkCategory",
     "BenchmarkScoring",
     "CatalogContext",
+    "ChatRequest",
+    "ChatResponse",
+    "Client",
+    "Credit",
     "DeterministicVerifier",
     "Environment",
-    "EvaluationTrack",
     "Episode",
+    "EvaluationTrack",
     "ExecutionLimits",
-    "Party",
     "Harness",
+    "HarnessAgent",
+    "HarnessEnvironment",
     "HarnessPolicy",
+    "HarnessResult",
+    "HarnessTask",
+    "HindsightTrial",
     "HumanVerifier",
-    "Observation",
+    "Job",
+    "JobResult",
+    "Message",
+    "ModelCatalog",
+    "Party",
+    "PluralError",
     "Resource",
+    "RewardTarget",
+    "RetryPolicy",
     "RubricCriterion",
-    "Step",
     "Runtime",
-    "RuntimePackages",
     "RuntimeVariable",
     "Secret",
     "State",
+    "Step",
     "Task",
+    "Tool",
+    "TrialResult",
     "Verifier",
     "VerifierOutput",
     "action",
-    "total_reward",
     "initial",
-    "Credit",
-    "HindsightTrial",
-    "RewardRecord",
-    "RewardTarget",
-    # Projects.
-    "Project",
-    "ProjectError",
-    "ResourceRef",
-    "Workspace",
-    # Running.
-    "Job",
-    "JobMode",
-    "JobPlan",
-    "JobResult",
-    "JobStore",
-    "RetryPolicy",
-    "SessionSnapshot",
-    "TrialResult",
-    # Hosting and models.
-    "Client",
-    "ModelCatalog",
-    "ModelSpec",
-    "Studio",
-    "estimate_cost",
-    # Advanced.
-    "AgentAggregate",
-    "ArtifactManifest",
-    "ArtifactManifestEntry",
-    "ArtifactReference",
-    "AuthenticationError",
-    "BenchmarkDiff",
-    "BudgetExceededError",
-    "SandboxCapability",
-    "ChatRequest",
-    "ChatResponse",
-    "ConfigurationError",
-    "ConflictError",
-    "ContentFilterError",
-    "ContextLengthError",
-    "DaytonaProvider",
-    "DeclarativeImage",
-    "DockerProvider",
-    "EpisodeOutcome",
-    "EpisodeUsage",
-    "ErrorCode",
-    "ExecutionStatus",
-    "ExecutionTarget",
-    "HarnessAgent",
-    "HarnessCapability",
-    "HarnessCompletion",
-    "HarnessDefinition",
-    "HarnessEnvironment",
-    "HarnessResult",
-    "HarnessStep",
-    "HarnessTask",
-    "InvalidRequestError",
-    "JSONLSink",
-    "LocalProvider",
-    "Message",
-    "NetworkMode",
-    "NotFoundError",
-    "TraceOutcome",
-    "STOP_REASONS",
-    "PluralError",
-    "PluralTimeoutError",
-    "ProgressEvent",
-    "ProviderRegistry",
-    "ProviderUnavailable",
-    "RateLimitError",
-    "Redactor",
-    "SQLiteSink",
-    "Sampler",
-    "SandboxProvider",
-    "SandboxRequirements",
-    "SeatTurn",
-    "TITORecord",
-    "TaskPin",
-    "Tool",
-    "Trace",
-    "TraceContext",
-    "TraceDataset",
-    "TraceFilter",
-    "TraceKind",
-    "TraceWriter",
-    "Trajectory",
-    "TrajectoryEvent",
-    "TrialExecution",
-    "TrialReceipt",
-    "TrialSpec",
-    "TrialStatus",
-    "Usage",
-    "VerifierResult",
-    "VerifierRuntime",
+    "total_reward",
     "__version__",
-    "content_hash",
-    "is_retryable",
-    "normalize_trajectory",
-    "stable_id",
 ]

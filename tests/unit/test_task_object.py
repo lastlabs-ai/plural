@@ -67,3 +67,19 @@ def test_tasks_are_pushed_from_projects_not_objects() -> None:
     task = _task()
     assert not hasattr(task, "push")
     assert not hasattr(task, "delete")
+
+
+def test_an_answer_key_changes_the_task_but_never_reaches_the_agent() -> None:
+    from plural.execution.apps import host_inputs
+
+    plain = _task()
+    keyed = plain.model_copy(update={"expected": "billing"})
+
+    assert "expected" not in plain.model_dump()
+    assert "expected" not in plain.definition().model_dump()
+    assert keyed.content_hash != plain.content_hash
+    assert keyed.definition().content_hash != plain.definition().content_hash
+    assert keyed.definition().expected == "billing"
+    assert "billing" not in str(keyed.public_payload)
+    assert "billing" not in str(keyed.definition().public_payload)
+    assert host_inputs(keyed.definition(), seed=1)["expected"] == "billing"

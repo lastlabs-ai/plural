@@ -127,6 +127,30 @@ def ticket_closed(episode: Episode) -> VerifierOutput:
 checks. It is available to function Verifiers during a Trial; when a Verifier runs
 later, such as on a Trial pulled from a hosted project, read `final` instead.
 
+### Check the final answer
+
+`episode.answer` is the Agent's final answer: the `response` its Harness returned, or
+what an [External Agent](external-agents.md) finished with. It is `None` when the Agent
+gave no answer. `episode.expected` is the Task's answer key, its
+[`expected`](tasks.md#the-manifest-fields) field, which the Agent never sees. An
+Environment with no Apps has no State to read, so these two are the whole check:
+
+```python
+from plural import Episode, VerifierOutput
+
+
+def right_team(episode: Episode) -> VerifierOutput:
+    answer = str(episode.answer or "").strip().lower()
+    return VerifierOutput(
+        score=float(answer == episode.expected),
+        evidence=[f"answered {answer!r}, expected {episode.expected!r}"],
+    )
+```
+
+One Verifier then scores every Task that lists it, each against its own answer. A
+`reward` hook reads the same answer key as `step.task.expected`, and an
+[AgentVerifier](#agentverifier) is shown it as the reference answer.
+
 The function must live in a Python file. In a project, each Verifier is a folder under
 `verifiers/`, named after it. This command creates
 `verifiers/correct-resolution/verifier.yaml` and `verify.py`:
@@ -207,8 +231,17 @@ def reply_matches_crm(step: Step) -> float | None:
 ```
 
 Return a number, or `None` when this step gives no signal. A `reward` function that
-raises, or returns a value that isn't a finite number, is recorded with its error and a
-value of 0; it never fails the Agent's action.
+raises, or returns a value that isn't a finite number, never fails the Agent's action.
+The step earns that Verifier no reward, and the error, with the line that raised it,
+is shown after `plural run`, in `plural trial show`, and on the Trial in the web app:
+
+```text
+! Verifier progress's reward raised on 12 steps in 3 Trials, which earned it no reward
+  there: KeyError: 'done' (at verifier.py:14)
+```
+
+Fix the function, then replay it on those Trials with
+[`plural verifier apply`](#try-a-verifier-on-stored-trials).
 
 Each reward is written to the Trial's reward ledger, `rewards.jsonl`, with the
 Verifier's name and version and the step it credits. The Agent never sees it: only an

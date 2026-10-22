@@ -98,7 +98,7 @@ def parse_events(payload: bytes, *, max_line_bytes: int = 1_000_000) -> tuple[Ha
             raise HarnessProtocolError(f"invalid JSON on harness line {index}: {exc}") from exc
         if not isinstance(value, dict):
             raise HarnessProtocolError(f"harness line {index} must be an object")
-        forbidden = _find_forbidden(value)
+        forbidden = find_forbidden(value)
         if forbidden is not None:
             raise HarnessProtocolError(f"harness may not emit {forbidden!r}")
         try:
@@ -113,17 +113,22 @@ def parse_events(payload: bytes, *, max_line_bytes: int = 1_000_000) -> tuple[Ha
     return tuple(events)
 
 
-def _find_forbidden(value: Any) -> str | None:
+def find_forbidden(value: Any, keys: frozenset[str] = FORBIDDEN_HARNESS_KEYS) -> str | None:
+    """The first key in ``value``, at any depth, that an agent must not see or send.
+
+    Returns:
+        The key, or ``None``.
+    """
     if isinstance(value, dict):
         for key, item in value.items():
-            if str(key).lower() in FORBIDDEN_HARNESS_KEYS:
+            if str(key).lower() in keys:
                 return str(key)
-            nested = _find_forbidden(item)
+            nested = find_forbidden(item, keys)
             if nested is not None:
                 return nested
     elif isinstance(value, list):
         for item in value:
-            nested = _find_forbidden(item)
+            nested = find_forbidden(item, keys)
             if nested is not None:
                 return nested
     return None
@@ -137,5 +142,6 @@ __all__ = [
     "PROTOCOL_VERSION",
     "encode_request",
     "environment_payload_for_harness",
+    "find_forbidden",
     "parse_events",
 ]

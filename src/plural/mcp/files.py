@@ -37,8 +37,10 @@ from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.utilities.types import File, Image
 
 import plural.mcp
+from plural.blobs import INLINE_IMAGE_TYPES, content_type_for
 
 MAX_READ_BYTES = 5 * 1024 * 1024
 MAX_TABLE_BYTES = 16 * 1024 * 1024
@@ -59,6 +61,20 @@ _READ_ONLY_SQL = {
     sqlite3.SQLITE_FUNCTION,
     getattr(sqlite3, "SQLITE_RECURSIVE", 33),
 }
+
+
+def _describe(path: Path) -> str:
+    return f"{content_type_for(path.name)}, {path.stat().st_size} bytes"
+
+
+def _is_text(data: bytes) -> bool:
+    if b"\0" in data[:8192]:
+        return False
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
 
 
 def _folders(writable: bool) -> dict[str, Path]:
@@ -284,7 +300,7 @@ def build(*, writable: bool = False, name: str = "files") -> FastMCP:
             return "\n".join(f"{item}/" for item in folders)
         name, target = resolved
         if target.is_file():
-            return f"{path} ({target.stat().st_size} bytes)"
+            return f"{path} ({_describe(target)})"
         if not target.is_dir():
             raise ValueError(f"No folder {path}")
         entries = _walk(target) if recursive else sorted(target.iterdir())
@@ -293,17 +309,19 @@ def build(*, writable: bool = False, name: str = "files") -> FastMCP:
             if entry.name.startswith(".") or not _contained(entry, folders[name]):
                 continue
             shown = _display(name, folders[name], entry.resolve())
-            lines.append(
-                f"{shown}/" if entry.is_dir() else f"{shown} ({entry.stat().st_size} bytes)"
-            )
+            lines.append(f"{shown}/" if entry.is_dir() else f"{shown} ({_describe(entry)})")
             if len(lines) >= MAX_LISTED:
                 lines.append(f"… more than {MAX_LISTED} entries; list a subfolder")
                 break
         return "\n".join(lines) or f"{path} is empty"
 
     @mcp.tool(annotations={"readOnlyHint": True})
-    def read_file(path: str, offset: int = 1, limit: int = 400) -> str:
-        """Read a text file, from line `offset` (1 is the first), at most `limit` lines."""
+    def read_file(path: str, offset: int = 1, limit: int = 400) -> str | Image | File:
+        """Read a file: text by lines, an image as an image, anything else as its bytes.
+
+        Text comes back from line `offset` (1 is the first), at most `limit` lines.
+        Any other file, such as a PDF or a drawing, comes back with its type.
+        """
         resolved = _resolve(path, _folders(writable))
         if resolved is None or not resolved[1].is_file():
             raise ValueError(f"No file {path}. Use list_files to see what exists.")
@@ -311,8 +329,11 @@ def build(*, writable: bool = False, name: str = "files") -> FastMCP:
         if target.stat().st_size > MAX_READ_BYTES:
             raise ValueError(f"{path} is too large to read; search it with search_files")
         data = target.read_bytes()
-        if b"\0" in data[:8192]:
-            raise ValueError(f"{path} is not a text file")
+        if not _is_text(data):
+            content_type = content_type_for(target.name)
+            if content_type in INLINE_IMAGE_TYPES:
+                return Image(data=data, format=content_type.removeprefix("image/"))
+            return File(data=data, name=target.name, format=target.suffix.lstrip(".") or None)
         lines = data.decode("utf-8", errors="replace").splitlines()
         start = max(offset, 1) - 1
         chosen = lines[start : start + max(limit, 1)]

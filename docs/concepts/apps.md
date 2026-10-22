@@ -261,6 +261,24 @@ A Verifier's `reward` function reads the same Apps after every action, through
 `step.apps`, to reward each step. See
 [Reward each step](../project/verifiers.md#reward-each-step).
 
+## Randomness and seeds
+
+Draw random numbers from `self.rng` rather than the `random` module, so an episode
+can be repeated. Each Trial has a **seed**, set as `self.seed` before `reset`, and
+`self.rng` is drawn from it:
+
+```python
+def reset(self, initial_state):
+    super().reset(initial_state)
+    self.state.deck = self.rng.sample(CARDS, k=len(CARDS))
+```
+
+In a Job, the seed depends only on the Task and the attempt. Every Agent on attempt 2
+of a Task faces the same shuffled deck, a rerun faces it again, and the Trial records
+its seed. A State that declares a `seed` field also gets it there, unless the Task's
+initial State sets one. Outside a Job, pass it yourself:
+`environment.reset(seed=7)`.
+
 ## Credentials and secrets
 
 An App never holds a credential's value. It declares the names it needs, and

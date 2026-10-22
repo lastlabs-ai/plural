@@ -89,9 +89,21 @@ def test_job_live_run_requires_credentials(monkeypatch: pytest.MonkeyPatch) -> N
     with pytest.raises(ValueError, match="Cannot run Job") as exc:
         job._credential_environ()
     message = str(exc.value)
-    assert "client=Client()" in message
     assert "api_key=" in message
     assert "plural auth login" in message
+
+
+def test_a_job_uses_the_stored_login_like_a_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.delenv("PLURAL_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "plural.auth.resolve_session", lambda: SimpleNamespace(api_key="plural_stored")
+    )
+    job = Job(_task(), agents=[Agent(model="openai/gpt-5.6-luna")])
+    environ = job._credential_environ()
+    assert environ["PLURAL_API_KEY"] == "plural_stored"
+    assert environ["PLURAL_GATEWAY_URL"]
 
 
 def test_job_api_key_selects_the_plural_gateway(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -245,7 +245,7 @@ class Client:
             DEFAULT_SETTINGS.capture_content if capture_content is None else capture_content
         )
         if api_key is None and providers is None:
-            api_key = os.environ.get("PLURAL_API_KEY") or os.environ.get("ENROUTE_API_KEY")
+            api_key = os.environ.get("PLURAL_API_KEY")
             if not api_key:
                 try:
                     from plural.auth import resolve_session

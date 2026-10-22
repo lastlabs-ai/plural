@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from plural.blobs import read_blob
 from plural.environments.definition import EnvironmentDefinition, EnvironmentResource
 from plural.mcp import ENVIRONMENT_RESOURCES, TASK_RESOURCES
 from plural.sandbox.models import FileUpload
@@ -88,6 +89,11 @@ def resource_uploads(
             paths.add(path)
             if item.delivery == "inline":
                 data = (item.content or "").encode()
+            elif item.delivery == "blob":
+                try:
+                    data = read_blob(item.digest or "")
+                except FileNotFoundError as exc:
+                    raise ValueError(f"Resource {item.name}: {exc}") from None
             elif item.delivery == "source":
                 if source is None:
                     raise ValueError(f"Resource {item.name} needs Environment source files")

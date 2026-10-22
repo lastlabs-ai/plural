@@ -187,7 +187,7 @@
       },
       "EnvironmentResource": {
         "additionalProperties": false,
-        "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``.",
+        "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``. ``Resource.from_file(path)`` reads a file of any type: text\ntravels inline, and anything else, such as a PDF or a drawing, as a\n``blob`` named by its digest.",
         "properties": {
           "kind": {
             "enum": [
@@ -260,7 +260,8 @@
               "descriptor",
               "source",
               "inline",
-              "resolver"
+              "resolver",
+              "blob"
             ],
             "title": "Delivery",
             "type": "string"
@@ -476,7 +477,7 @@
         "properties": {
           "max_turns": {
             "default": 8,
-            "maximum": 128,
+            "maximum": 1000,
             "minimum": 1,
             "title": "Max Turns",
             "type": "integer"
@@ -1148,7 +1149,7 @@
       },
       "EnvironmentResource": {
         "additionalProperties": false,
-        "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``.",
+        "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``. ``Resource.from_file(path)`` reads a file of any type: text\ntravels inline, and anything else, such as a PDF or a drawing, as a\n``blob`` named by its digest.",
         "properties": {
           "kind": {
             "enum": [
@@ -1221,7 +1222,8 @@
               "descriptor",
               "source",
               "inline",
-              "resolver"
+              "resolver",
+              "blob"
             ],
             "title": "Delivery",
             "type": "string"
@@ -1530,7 +1532,7 @@
       }
     },
     "additionalProperties": false,
-    "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.",
+    "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.",
     "properties": {
       "name": {
         "minLength": 1,
@@ -1606,17 +1608,16 @@
         "title": "Initial State",
         "type": "object"
       },
-      "reset_options": {
-        "additionalProperties": true,
-        "title": "Reset Options",
-        "type": "object"
-      },
       "seat_instructions": {
         "additionalProperties": {
           "type": "string"
         },
         "title": "Seat Instructions",
         "type": "object"
+      },
+      "expected": {
+        "default": null,
+        "title": "Expected"
       }
     },
     "required": [
@@ -2402,6 +2403,43 @@
         "title": "AgentCredential",
         "type": "object"
       },
+      "ExternalAgent": {
+        "additionalProperties": false,
+        "description": "An agent that already runs as a service of its own.\n\nA Job calls ``url`` with a signed request for each episode. The agent acts\nonly through that episode's actions and files, and its code is not part of\nany content hash: ``version`` is the label you give each release.",
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "signing_key": {
+            "title": "Signing Key",
+            "type": "string"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          },
+          "ca_bundle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ca Bundle"
+          }
+        },
+        "required": [
+          "url",
+          "signing_key"
+        ],
+        "title": "ExternalAgent",
+        "type": "object"
+      },
       "FileDeclaration": {
         "additionalProperties": false,
         "description": "A file emitted or consumed by a package.",
@@ -2627,7 +2665,7 @@
       }
     },
     "additionalProperties": false,
-    "description": "A catalog-backed model and its optional execution harness.\n\nTo evaluate your own agent or model server instead, give ``endpoint``: the\nbase URL of an OpenAI-compatible API (one that serves\n``/chat/completions``). ``model`` is then sent to it as is and need not be\nin the catalog, and ``endpoint_key`` names the secret holding its API key.\nPlural's native Harness calls it with the Environment's actions as tools.",
+    "description": "A catalog-backed model and its optional execution harness.\n\nTo evaluate your own agent or model server instead, give ``endpoint``: the\nbase URL of an OpenAI-compatible API (one that serves\n``/chat/completions``). ``model`` is then sent to it as is and need not be\nin the catalog, and ``endpoint_key`` names the secret holding its API key.\nPlural's native Harness calls it with the Environment's actions as tools,\nand a custom Harness reaches it through ``agent.complete``.\n\nAn agent that already runs elsewhere is an ``external`` Agent instead: the\nJob calls it over signed HTTPS, and ``model`` is the label it reports.",
     "properties": {
       "model": {
         "minLength": 1,
@@ -2762,6 +2800,17 @@
         ],
         "default": null,
         "title": "Endpoint Key"
+      },
+      "external": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ExternalAgent"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       },
       "credentials": {
         "additionalProperties": {
@@ -3130,7 +3179,7 @@
       },
       "EnvironmentResource": {
         "additionalProperties": false,
-        "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``.",
+        "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``. ``Resource.from_file(path)`` reads a file of any type: text\ntravels inline, and anything else, such as a PDF or a drawing, as a\n``blob`` named by its digest.",
         "properties": {
           "kind": {
             "enum": [
@@ -3203,7 +3252,8 @@
               "descriptor",
               "source",
               "inline",
-              "resolver"
+              "resolver",
+              "blob"
             ],
             "title": "Delivery",
             "type": "string"
@@ -3605,7 +3655,7 @@
       },
       "Task": {
         "additionalProperties": false,
-        "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.",
+        "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.",
         "properties": {
           "name": {
             "minLength": 1,
@@ -3681,17 +3731,16 @@
             "title": "Initial State",
             "type": "object"
           },
-          "reset_options": {
-            "additionalProperties": true,
-            "title": "Reset Options",
-            "type": "object"
-          },
           "seat_instructions": {
             "additionalProperties": {
               "type": "string"
             },
             "title": "Seat Instructions",
             "type": "object"
+          },
+          "expected": {
+            "default": null,
+            "title": "Expected"
           }
         },
         "required": [

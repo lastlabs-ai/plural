@@ -246,6 +246,8 @@ def _load_host(
     task = _task_file(root)
     about: dict[str, Any] = task["task"] if isinstance(task.get("task"), dict) else {}
     info = _task_inputs(root, inputs)["info"]
+    # Only the bootstrap carries the answer key; task.json sits where the Harness can read it.
+    expected = inputs.get("expected") if inputs is not None else None
     return AppHost(
         environment,
         workspace=root,
@@ -254,6 +256,7 @@ def _load_host(
             name=str(about.get("name") or ""),
             info=info,
             metadata=dict(about.get("metadata") or {}),
+            expected=expected,
         ),
         private_state=private_state,
         seats=seats,

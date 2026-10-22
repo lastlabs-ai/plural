@@ -27,6 +27,13 @@ from pydantic import TypeAdapter, ValidationError
 
 from plural.agents import Agent
 from plural.apps import App
+from plural.blobs import (
+    MAX_BLOB_BYTES,
+    MAX_INLINE_CHARACTERS,
+    MAX_TASK_FILE_BYTES,
+    content_type_for,
+    store_blob,
+)
 from plural.catalog import ModelCatalog
 from plural.environments import Environment
 from plural.environments.definition import (
@@ -376,7 +383,7 @@ def _build_environment(
             source=directory,
         )
         definition = environment.definition()
-        if not definition.actions:
+        if apps and not definition.actions:
             problems.append(
                 f"{_display(directory / 'environment.yaml', project_root)}: the Environment's "
                 "Apps offer no actions. Add an @action method, or connect a system with tools."
@@ -594,7 +601,7 @@ def _load_task(workspace: Workspace, ref: ResourceRef, directory: Path) -> Local
                         ),
                         "resources": resources,
                         "initial_state": manifest.initial_state,
-                        "reset_options": manifest.reset_options,
+                        "expected": manifest.expected,
                         "seat_instructions": manifest.seat_instructions,
                     },
                     context={"catalog": workspace.catalog},
@@ -639,6 +646,7 @@ def _task_resources(
     directory: Path, entries: list[str], problems: list[str]
 ) -> list[dict[str, Any]]:
     resources: list[dict[str, Any]] = []
+    total = 0
     for index, entry in enumerate(entries):
         target = _inside(directory, entry, f"resources.{index}", problems)
         if target is None:
@@ -650,22 +658,31 @@ def _task_resources(
         files = sorted(_package_files(target)) if target.is_dir() else [target]
         for source in files:
             relative = source.relative_to(directory).as_posix()
-            try:
-                content = source.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                problems.append(f"resources: {relative} must be UTF-8 text")
+            size = source.stat().st_size
+            if size > MAX_BLOB_BYTES:
+                problems.append(f"resources: {relative} is larger than 16 MiB")
                 continue
-            content_type, _ = mimetypes.guess_type(source.name)
-            resources.append(
-                {
-                    "kind": "file",
-                    "name": relative,
-                    "path": relative,
-                    "content_type": content_type or "text/plain",
-                    "delivery": "inline",
-                    "content": content,
-                }
-            )
+            total += size
+            data = source.read_bytes()
+            try:
+                content: str | None = data.decode("utf-8")
+            except UnicodeDecodeError:
+                content = None
+            item: dict[str, Any] = {"kind": "file", "name": relative, "path": relative}
+            if content is not None and len(content) <= MAX_INLINE_CHARACTERS:
+                guessed, _ = mimetypes.guess_type(source.name)
+                item.update(
+                    content_type=guessed or "text/plain", delivery="inline", content=content
+                )
+            else:
+                item.update(
+                    content_type=content_type_for(source.name, text=content is not None),
+                    delivery="blob",
+                    digest=store_blob(data),
+                )
+            resources.append(item)
+    if total > MAX_TASK_FILE_BYTES:
+        problems.append("resources: a Task's files may total at most 256 MiB")
     return resources
 
 

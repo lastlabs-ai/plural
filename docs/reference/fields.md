@@ -38,6 +38,7 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [EvaluationTrack](#evaluationtrack)
 - [ExecutionLimits](#executionlimits)
 - [ExecutionTarget](#executiontarget)
+- [ExternalAgent](#externalagent)
 - [FileDeclaration](#filedeclaration)
 - [Guardrail](#guardrail)
 - [HarnessCapability](#harnesscapability)
@@ -92,8 +93,8 @@ One versioned unit of work in a Python-authored Environment.
 - **`verifiers`** — `array of DeterministicVerifier | AgentVerifier | HumanVerifier`; required. Constraints: `{"minItems": 1}`.
 - **`resources`** — `array of Resource`; optional. Default: `[]`.
 - **`initial_state`** — `object`; optional.
-- **`reset_options`** — `object`; optional.
 - **`seat_instructions`** — `object`; optional.
+- **`expected`** — `JSON value`; optional. Default: `null`.
 
 ## DeterministicVerifier
 
@@ -164,6 +165,7 @@ A catalog-backed model and its optional execution harness.
 - **`secrets`** — `array of string`; optional. Default: `[]`. Names of the Harness's declared secrets this Agent grants it.
 - **`endpoint`** — `string | null`; optional. Default: `null`.
 - **`endpoint_key`** — `string | null`; optional. Default: `null`.
+- **`external`** — `ExternalAgent | null`; optional. Default: `null`.
 - **`credentials`** — `object`; optional.
 - **`metadata`** — `object`; optional.
 
@@ -269,7 +271,7 @@ Data or application supplied by an Environment.
 - **`content_type`** — `string`; optional. Default: `""`.
 - **`config`** — `object`; optional.
 - **`description`** — `string`; optional. Default: `""`.
-- **`delivery`** — `"descriptor" | "source" | "inline" | "resolver"`; optional. Default: `"descriptor"`.
+- **`delivery`** — `"descriptor" | "source" | "inline" | "resolver" | "blob"`; optional. Default: `"descriptor"`.
 - **`content`** — `string | null`; optional. Default: `null`.
 - **`resolver`** — `string | null`; optional. Default: `null`.
 
@@ -323,7 +325,7 @@ Versioned rules that make results on one track comparable.
 
 Environment execution limits.
 
-- **`max_turns`** — `integer`; optional. Default: `8`. Constraints: `{"maximum": 128, "minimum": 1}`.
+- **`max_turns`** — `integer`; optional. Default: `8`. Constraints: `{"maximum": 1000, "minimum": 1}`.
 - **`max_seconds`** — `number`; optional. Default: `120`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`max_cost_usd`** — `number | null`; optional. Default: `null`.
 
@@ -333,6 +335,15 @@ Execution isolation class.
 
 Allowed values: `"local" | "docker" | "remote"`.
 
+
+## ExternalAgent
+
+An agent that already runs as a service of its own.
+
+- **`url`** — `string`; required.
+- **`signing_key`** — `string`; required.
+- **`version`** — `string`; optional. Default: `""`.
+- **`ca_bundle`** — `string | null`; optional. Default: `null`.
 
 ## FileDeclaration
 

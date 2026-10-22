@@ -121,3 +121,34 @@ def test_the_writable_server_writes_only_to_scratch(tmp_path: Path, volumes: Pat
         assert not (volumes / "environment-resources" / "x.md").exists()
     finally:
         app.close()
+
+
+def test_images_and_other_binary_files_come_back_with_their_type(
+    tmp_path: Path, volumes: Path
+) -> None:
+    task = volumes / "task-resources" / "resources"
+    png = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
+    (task / "plan.png").write_bytes(png)
+    (task / "A-201.pdf").write_bytes(b"%PDF-1.7\n\xff\xfe\0binary")
+    app = _app(tmp_path, "plural.mcp.files:server")
+    try:
+        app.reset({})
+        listing = app.call("list_files", {"path": "task-resources/resources"})
+        assert "A-201.pdf (application/pdf, 18 bytes)" in listing
+        client = app.connect()
+        image = client.call_tool(
+            "read_file", {"path": "task-resources/resources/plan.png"}, timeout=10
+        )
+        assert [item["type"] for item in image["content"]] == ["image"]
+        assert image["content"][0]["mimeType"] == "image/png"
+        pdf = client.call_tool(
+            "read_file", {"path": "task-resources/resources/A-201.pdf"}, timeout=10
+        )
+        resource = pdf["content"][0]["resource"]
+        assert resource["mimeType"] == "application/pdf"
+        assert "blob" in resource
+        assert app.call("read_file", {"path": "task-resources/resources/A-201.pdf"}).startswith(
+            "[application/pdf"
+        )
+    finally:
+        app.close()

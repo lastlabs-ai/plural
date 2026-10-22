@@ -503,3 +503,19 @@ def test_only_the_built_in_runner_may_blame_the_gateway() -> None:
     assert failure_code(native, busy.model_copy(update={"kind": "cancelled"})) is None
     assert _classify(HarnessExecutionError("busy", code="rate_limited")) is ErrorCode.RATE_LIMITED
     assert _classify(HarnessExecutionError("crashed")) is ErrorCode.PROTOCOL_FAILED
+
+
+def test_a_gateway_failure_survives_the_runner_exiting_nonzero() -> None:
+    from plural.harness.runner import _exit_failure_code
+
+    native = HarnessProtocol(
+        name="h", revision="1.0.0", command=("python", "native_runner.py", "native.chat.v1")
+    )
+    vendor = HarnessProtocol(name="v", revision="1.0.0", command=("codex", "exec"))
+    error = {"protocol": "plural-harness-v1", "type": "error", "message": "down"}
+    stdout = (json.dumps({**error, "kind": "provider_unavailable"}) + "\n").encode()
+
+    assert _exit_failure_code(native, stdout) == "provider_unavailable"
+    assert _exit_failure_code(vendor, stdout) is None
+    assert _exit_failure_code(native, (json.dumps(error) + "\n").encode()) is None
+    assert _exit_failure_code(native, b"not json\n") is None

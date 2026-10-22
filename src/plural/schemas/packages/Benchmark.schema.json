@@ -346,7 +346,7 @@
     },
     "EnvironmentResource": {
       "additionalProperties": false,
-      "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``.",
+      "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``. ``Resource.from_file(path)`` reads a file of any type: text\ntravels inline, and anything else, such as a PDF or a drawing, as a\n``blob`` named by its digest.",
       "properties": {
         "config": {
           "additionalProperties": true,
@@ -377,7 +377,8 @@
             "descriptor",
             "source",
             "inline",
-            "resolver"
+            "resolver",
+            "blob"
           ],
           "title": "Delivery",
           "type": "string"
@@ -821,10 +822,14 @@
     },
     "Task": {
       "additionalProperties": false,
-      "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.",
+      "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.",
       "properties": {
         "environment": {
           "title": "Environment"
+        },
+        "expected": {
+          "default": null,
+          "title": "Expected"
         },
         "goals": {
           "default": [],
@@ -857,11 +862,6 @@
           "minLength": 1,
           "title": "Name",
           "type": "string"
-        },
-        "reset_options": {
-          "additionalProperties": true,
-          "title": "Reset Options",
-          "type": "object"
         },
         "resources": {
           "default": [],

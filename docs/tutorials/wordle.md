@@ -27,7 +27,7 @@ By the end you will have:
 
 ## Before you start
 
-You need Plural installed; see [Install](../getting-started.md#1-create-an-account-and-install). The project is
+You need Plural installed; see [Install](../getting-started.md#1-install). The project is
 `examples/wordle` in the [Plural repository](https://github.com/lastlabs-ai/plural).
 Copy it anywhere and run the commands from inside it:
 

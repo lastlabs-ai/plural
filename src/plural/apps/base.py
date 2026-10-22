@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import random
 import re
 import sys
 from collections.abc import Iterable, Mapping, Sequence
@@ -79,6 +80,12 @@ class App(Generic[StateT]):
     play. Empty for a Task one Agent works alone. Set before :meth:`reset`."""
     seat: str | None = None
     """The seat taking the current action, while an action runs; ``None`` alone."""
+    seed: int | None = None
+    """The episode's seed. In a Job it is the same for every Agent on one attempt
+    of a Task, so they face the same world. Set before :meth:`reset`."""
+    rng: random.Random
+    """Random numbers drawn from :attr:`seed`, so an episode can be repeated. Use
+    it instead of the ``random`` module. Set before :meth:`reset`."""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -98,6 +105,7 @@ class App(Generic[StateT]):
         instance = super().__new__(cls)
         instance._init_config = dict(kwargs)
         instance.workspace = Path.cwd()
+        instance.rng = random.Random()
         return instance
 
     def __init__(

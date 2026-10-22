@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sysconfig
+import traceback
 from enum import Enum
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -198,7 +201,7 @@ class FileDeclaration(FrozenModel):
 class HarnessProtocol(FrozenModel):
     """Internal versioned executable harness contract.
 
-    Built from the public :class:`plural.HarnessDefinition`. Carries the wire
+    Built from the public :class:`plural.harness.HarnessDefinition`. Carries the wire
     details Plural needs to launch a harness and is never authored by hand.
     """
 
@@ -333,6 +336,35 @@ class RoutingSpec(FrozenModel):
     max_tokens: int | None = Field(default=None, gt=0)
 
 
+def raised_at(exc: BaseException) -> str | None:
+    """Where the code a call ran raised ``exc``, as ``file.py:line``.
+
+    Frames in the standard library and installed packages are skipped, so this
+    names the line in the user's own Verifier or App.
+
+    Returns:
+        The place, or ``None`` when the call itself failed, as on a wrong signature.
+    """
+    frames = traceback.extract_tb(exc.__traceback__)[1:]
+    if not frames:
+        return None
+    paths = sysconfig.get_paths()
+    libraries = tuple({paths["stdlib"], paths["purelib"], paths["platlib"]})
+    own = [frame for frame in frames if not frame.filename.startswith(libraries)]
+    frame = (own or frames)[-1]
+    return f"{Path(frame.filename).name}:{frame.lineno}"
+
+
+def described(exc: BaseException) -> str:
+    """An error from user code, with where it was raised.
+
+    Returns:
+        Such as ``KeyError: 'done' (at verifier.py:14)``.
+    """
+    place = raised_at(exc)
+    return f"{type(exc).__name__}: {exc}" + (f" (at {place})" if place else "")
+
+
 __all__ = [
     "ErrorCode",
     "ExecutionTarget",
@@ -348,6 +380,8 @@ __all__ = [
     "SEMANTIC_VERSION_PATTERN",
     "canonical_json",
     "content_hash",
+    "described",
+    "raised_at",
     "semantic_version",
     "stable_id",
 ]
