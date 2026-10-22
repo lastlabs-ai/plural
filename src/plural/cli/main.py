@@ -41,6 +41,29 @@ app = typer.Typer(
     no_args_is_help=True,
     pretty_exceptions_enable=False,
 )
+
+
+def _print_version(value: bool) -> None:
+    if value:
+        from plural import __version__
+
+        typer.echo(f"plural {__version__}")
+        raise typer.Exit
+
+
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_print_version,
+        is_eager=True,
+        help="Show the installed Plural version and exit.",
+    ),
+) -> None:
+    """Build, push, and run Plural projects."""
+
+
 app.add_typer(auth_app, name="auth")
 app.add_typer(project_app, name="project")
 app.add_typer(credential_app, name="credential")

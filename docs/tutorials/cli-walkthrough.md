@@ -15,7 +15,7 @@ repeat it.
 It uses the [support queue project](../assets/first-project.zip), a small help desk
 where an AI sorts tickets into categories. Its `scripted` Agent follows keyword rules
 instead of calling a model, so every command here until
-[Run it hosted](#run-it-hosted) works offline, costs nothing, and needs no account.
+[Record it in the web app](#record-it-in-the-web-app) works offline, costs nothing, and needs no account.
 
 You need Plural installed; see [Install](../getting-started.md#1-create-an-account-and-install).
 
@@ -39,12 +39,12 @@ plural run --benchmark support-triage --agent scripted
   finishes, and ends with the Agent's mean score:
 
 ```text
-Running benchmark/support-triage@1.0.0 with scripted (openai/gpt-5.6-luna) locally: 3 trial(s), 3 at a time (auto: every Trial at once).
+Running benchmark/support-triage with scripted (openai/gpt-5.6-luna) locally: 3 Trials, 3 at a time (auto: every Trial at once).
   [1/3] trl_53c727d33aeaa097dda21e40  ticket-2  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
   [2/3] trl_5fd546be688383450e6dd8d2  ticket-3  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
   [3/3] trl_d124de45ec874ebc651f51dc  ticket-1  succeeded  score=1.000  | 3 succeeded, 0 failed, mean 1.000
 Job job_7ca838103054ee8c4ae74a51 succeeded.
-  scripted: mean score 1.000 over 3 trial(s), 3 succeeded
+  scripted: mean score 1.000 over 3 Trials, 3 succeeded, coverage 100%
 Details: plural job show job_7ca838103054ee8c4ae74a51
 ```
 
@@ -76,27 +76,28 @@ A rerun uses the exact inputs the original Job pinned, not your current files, a
 creates a new Job linked to the original. That means you can edit the project freely
 and still repeat an old result.
 
-## Run it hosted
+## Record it in the web app
 
-Runs happen on your computer by default. To have Plural run them on its servers, sign
-in, register the project, push what the run uses, and add `--hosted`. This step needs a
-Plural account:
+Every Job runs from your computer. To see it in the web app and share it with your
+team, sign in, register the project, and add `--record`. This step needs a Plural
+account:
 
 ```bash
 plural auth login
 plural project init support-queue --push
-plural benchmark push support-triage --with-deps
-plural agent push scripted --with-deps
-plural run --benchmark support-triage --agent scripted --hosted --follow
+plural run --benchmark support-triage --agent scripted --record
 ```
 
 `plural auth login` opens your browser to sign in and stores a 30-day API key, which
 covers both hosted commands like these and model calls from your own computer; see
-[Sign in](../getting-started.md#1-create-an-account-and-install).
+[Sign in](../getting-started.md#1-create-an-account-and-install). `--record` first
+pushes whatever the run uses that the hosted project lacks, then records each Trial as
+it runs. To run the Trials in cloud sandboxes instead of on your computer, change the
+Environment's Runtime; see [Track runs and run in the cloud](../platform/runs.md).
 
 The credential is stored in your user config folder, never in the project. The hosted
-project is private, and pushing never makes anything public. You can also follow the
-Job in the web app under **Jobs**.
+project is private, and pushing never makes anything public. Follow the Job in the web
+app under **Jobs**.
 
 The [support queue tutorial](support-queue.md) explains each file in the project and
 how to read the results.

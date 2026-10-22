@@ -131,7 +131,10 @@ Runtime. Setup happens in the fresh Runtime, not on your laptop.
    Harness. A custom Harness lists the names it reads in `secrets`, and the Agent
    requires that subset.
 4. Environment actions are offered to the tool as tools.
-5. Claude Code talks to a local compatibility service that forwards its Messages
+5. `PLURAL_STOP_SECONDS` is how many seconds the Harness has before it is killed. A
+   Harness that stops before then and writes its outputs is verified; one that is
+   killed fails with the stop reason `harness_timeout`.
+6. Claude Code talks to a local compatibility service that forwards its Messages
    requests to the Job's OpenAI-compatible model gateway. Codex and Hermes call that
    gateway directly.
 

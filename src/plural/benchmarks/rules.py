@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -82,7 +82,8 @@ class BenchmarkScoring(FrozenModel):
             attempts per Task, then takes the ``task_weights`` mean.
         score_range: Lowest and highest possible Task score.
         success_threshold: A Task attempt at or above this score counts as a
-            success. ``None`` means the Benchmark has no pass/fail notion.
+            success. Left out, it is the top of ``score_range``. ``None`` means
+            the Benchmark has no pass/fail notion.
         task_weights: Weight per Task name. Unlisted Tasks weigh 1.
         coverage_required: Weighted share of Tasks that must have a score
             before a result can be ranked officially.
@@ -90,7 +91,13 @@ class BenchmarkScoring(FrozenModel):
             because of the Agent (for example, a budget ran out) is scored.
             ``"zero"`` scores it at the bottom of the range.
         infrastructure_error: Attempts lost to the runtime or provider are
-            excluded from scores and reported separately.
+            excluded from scores and reported separately. So are attempts whose
+            Verifier score falls outside ``score_range``.
+        harness_timeout: How an attempt whose Harness ran past its time and was
+            killed is scored. ``"infrastructure_error"`` excludes it;
+            ``"agent_failure"`` scores it like a budget that ran out. A Harness
+            is told its deadline in ``PLURAL_STOP_SECONDS``, and the built-in
+            Harness stops itself before it.
         min_tasks_for_interval: Fewest scored Tasks before an uncertainty
             interval is reported. Below this, uncertainty is shown as unknown.
     """
@@ -104,7 +111,17 @@ class BenchmarkScoring(FrozenModel):
     coverage_required: float = Field(default=1.0, gt=0, le=1)
     agent_failure: Literal["zero", "exclude"] = "zero"
     infrastructure_error: Literal["exclude"] = "exclude"
+    harness_timeout: Literal["infrastructure_error", "agent_failure"] = "infrastructure_error"
     min_tasks_for_interval: int = Field(default=5, ge=2)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _threshold_follows_range(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "success_threshold" not in data and "score_range" in data:
+            score_range = data["score_range"]
+            if isinstance(score_range, (list, tuple)) and len(score_range) == 2:
+                return {**data, "success_threshold": score_range[1]}
+        return data
 
     @model_validator(mode="after")
     def _valid(self) -> BenchmarkScoring:

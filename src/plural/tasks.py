@@ -606,6 +606,11 @@ RELEASE_FIELDS = (
 )
 
 
+# Scoring rules added after Benchmarks were first saved. At their default they
+# are left out of the digest, so an older Benchmark keeps its identity.
+_LATER_SCORING_FIELDS = ("harness_timeout",)
+
+
 class BenchmarkRelease(FrozenModel):
     """What a Benchmark version declares beyond its Tasks.
 
@@ -645,7 +650,13 @@ class BenchmarkRelease(FrozenModel):
             Non-default release fields in JSON form.
         """
         payload = self.model_dump(mode="json", include=set(RELEASE_FIELDS))
+        scoring = payload["scoring"]
+        for name in _LATER_SCORING_FIELDS:
+            if scoring[name] == BenchmarkScoring.model_fields[name].default:
+                del scoring[name]
         defaults = BenchmarkRelease().model_dump(mode="json")
+        for name in _LATER_SCORING_FIELDS:
+            del defaults["scoring"][name]
         return {key: value for key, value in payload.items() if value != defaults[key]}
 
     def _validate_release(self, name: str, limits: Sequence[tuple[str, ExecutionLimits]]) -> None:

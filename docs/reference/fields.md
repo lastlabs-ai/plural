@@ -245,6 +245,7 @@ How a release turns attempts into one score per configuration.
 - **`coverage_required`** — `number`; optional. Default: `1.0`. Constraints: `{"exclusiveMinimum": 0, "maximum": 1}`.
 - **`agent_failure`** — `"zero" | "exclude"`; optional. Default: `"zero"`.
 - **`infrastructure_error`** — `"exclude"`; optional. Default: `"exclude"`.
+- **`harness_timeout`** — `"infrastructure_error" | "agent_failure"`; optional. Default: `"infrastructure_error"`.
 - **`min_tasks_for_interval`** — `integer`; optional. Default: `5`. Constraints: `{"minimum": 2}`.
 
 ## DeclarativeImage

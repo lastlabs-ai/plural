@@ -783,6 +783,7 @@ def _traces_benchmark(name: str, tasks: Sequence[str]) -> dict[str, Any]:
             "success_threshold": 1.0,
             "agent_failure": "zero",
             "infrastructure_error": "exclude",
+            "harness_timeout": "agent_failure",
         },
     }
 

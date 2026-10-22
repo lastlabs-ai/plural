@@ -708,11 +708,14 @@ def _load_benchmark(workspace: Workspace, ref: ResourceRef, directory: Path) -> 
     benchmark = None
     if manifest is not None:
         _check_identity(manifest.name, ref, problems)
-        if not (directory / "README.md").is_file():
+        # While PLURAL-TODO markers remain these are the places they point at, and
+        # the markers already keep the Benchmark from being pushed or recorded.
+        drafted = bool(scaffold_problems(directory, workspace.project.root))
+        if not drafted and not (directory / "README.md").is_file():
             problems.append("README.md is missing. Explain what this Benchmark measures.")
-        if not manifest.purpose.strip():
+        if not drafted and not manifest.purpose.strip():
             problems.append("purpose: state the motivation: what this Benchmark measures and why")
-        if not manifest.scoring.description.strip():
+        if not drafted and not manifest.scoring.description.strip():
             problems.append(
                 "scoring.description: describe what a score means, for example "
                 "'Share of tickets resolved according to policy'"

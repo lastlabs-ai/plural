@@ -323,14 +323,14 @@ You should see one line per game as it finishes. Your ids will differ, the games
 finish in a different order, and a model may not play the same way twice:
 
 ```text
-Running benchmark/wordle local with luna (openai/gpt-5.6-luna) locally: 5 Trials, 5 at a time (auto: every Trial at once).
+Running benchmark/wordle with luna (openai/gpt-5.6-luna) locally: 5 Trials, 5 at a time (auto: every Trial at once).
   [1/5] trl_49f1abde184c29875cccba31  crane  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
   [2/5] trl_506e8fe955a473c5392b07d8  slate  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
   [3/5] trl_1e9c501ec2ba6f578be6d8fe  nymph  succeeded  score=1.000  | 3 succeeded, 0 failed, mean 1.000
   [4/5] trl_1f2adcdea70605ea8f835b89  storm  succeeded  score=1.000  | 4 succeeded, 0 failed, mean 1.000
   [5/5] trl_10723e07ab67be6e92f42fe1  point  succeeded  score=1.000  | 5 succeeded, 0 failed, mean 1.000
 Job job_d9dbdde2f7b0e81cad12f704 succeeded.
-  luna: mean score 1.000 over 5 Trials, 5 succeeded
+  luna: mean score 1.000 over 5 Trials, 5 succeeded, coverage 100%
 Details: plural job show job_d9dbdde2f7b0e81cad12f704
 ```
 

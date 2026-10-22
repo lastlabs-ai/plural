@@ -114,7 +114,7 @@ Jobs. Retry policy may add executions to a Trial but does not add Trials.
 number and the reason:
 
 ```text
-Running benchmark/wordle@1.0.0 with luna (openai/gpt-5.6-luna) locally: 5 trial(s), 5 at a time (auto: every Trial at once).
+Running benchmark/wordle with luna (openai/gpt-5.6-luna) locally: 5 Trials, 5 at a time (auto: every Trial at once).
 ```
 
 A Trial spends most of its time waiting on the model, so `auto` takes the lowest
@@ -135,8 +135,7 @@ usually runs every Trial at once, up to the ceiling. When your provider
 rate-limits, set `PLURAL_MODEL_CONCURRENCY` to its concurrent-request allowance.
 A model on your own GPU is the opposite case: raise `PLURAL_MODEL_CONCURRENCY`
 only as far as its server batches requests. A number passed to `--concurrency`
-is used as it is. With `--hosted`, `auto` uses the Trial count and the ceiling,
-because this machine does not run the Trials.
+is used as it is.
 
 Each Trial prints when it finishes, with the Job's standing so far:
 
@@ -149,6 +148,10 @@ far; the final result applies the Benchmark's own scoring to every Trial, in pla
 order. `plural job show JOB_ID` on a Job that is still running shows its
 progress and the Benchmark aggregate over the Trials that have finished, with
 the share of Tasks they cover.
+
+`plural run` exits with status 1 when any Trial failed or the Job was cancelled, so
+a script or CI step can stop on it. A Trial that scored 0 still succeeded; a failed
+Trial is one that could not finish.
 
 The Python `Job` takes `concurrency="auto"` too, and also accepts several Agents
 and a `per_runtime_concurrency` limit for each Environment Runtime; see
@@ -214,20 +217,6 @@ be recorded, and `plural job record JOB_ID` fills it in. `plural job rerun` and
 Where the Trials execute is set by each Environment's `runtime.provider`, not by
 these flags. A recorded Job against a `daytona` Environment runs its Trials in
 remote sandboxes while this machine orchestrates and records them.
-
-## Hosted execution
-
-```bash
-plural run -b support-triage -a careful --hosted --follow
-```
-
-`--hosted` submits the Job for hosted infrastructure to run, using pushed
-revisions. It first pushes any input the hosted project lacks, as `--record` does,
-and stops before uploading anything if someone changed a resource in the hosted
-project since this checkout last synced it. `--follow` streams progress until the
-Job finishes; without it, the command returns once the Job is submitted, and
-`plural job show JOB_ID --follow` reconnects later. See
-[Push and pull resources](studio-sync.md#run-pushed-resources).
 
 ## Inspect, rerun, and review
 

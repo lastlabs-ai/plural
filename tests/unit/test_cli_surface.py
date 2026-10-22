@@ -193,3 +193,41 @@ def test_track_is_a_deprecated_spelling_of_record(capsys: pytest.CaptureFixture[
     assert _recording(True, False) is True
     assert _recording(False, False) is False
     assert capsys.readouterr().err == ""
+
+
+def test_version_prints_the_installed_release() -> None:
+    from plural import __version__
+
+    result = CliRunner().invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip() == f"plural {__version__}"
+
+
+def test_a_second_model_is_refused_rather_than_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    project = write_project(tmp_path / "support-desk")
+    monkeypatch.chdir(project.root)
+    result = CliRunner().invoke(
+        app, ["run", "-b", "basics", "-m", "openai/a", "-m", "openai/b", "--dry-run"]
+    )
+    assert result.exit_code == 1
+    assert "Pass --model once" in result.output
+
+
+@pytest.mark.parametrize(("status", "code"), [("succeeded", 0), ("failed", 1), ("cancelled", 1)])
+def test_a_run_exits_nonzero_when_its_job_did_not_succeed(
+    monkeypatch: pytest.MonkeyPatch, status: str, code: int
+) -> None:
+    import typer
+
+    from plural.cli import run_commands
+
+    monkeypatch.setattr(run_commands, "local_job", lambda space, job_id: {"job_id": job_id})
+    result = type("Result", (), {"status": status, "aggregates": ()})()
+    try:
+        run_commands._finish_local(None, "job_1", result, None, as_json=True)  # type: ignore[arg-type]
+        exit_code = 0
+    except typer.Exit as exc:
+        exit_code = exc.exit_code
+    assert exit_code == code

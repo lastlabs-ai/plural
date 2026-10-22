@@ -225,13 +225,23 @@ class ConfigurationResult(FrozenModel):
     ineligible_reasons: tuple[str, ...] = ()
 
 
-def classify_attempt(attempt: AttemptEvidence) -> AttemptOutcome:
+def classify_attempt(
+    attempt: AttemptEvidence, scoring: BenchmarkScoring | None = None
+) -> AttemptOutcome:
     """Decide which outcome one attempt had.
 
-    A Verifier score always means ``"scored"``. A failure with no score is an
-    Agent failure when the Agent's own system caused it (a budget ran out, or
-    the harness produced no valid answer) and an infrastructure error when the
-    runtime, provider, or Verifier did.
+    A Verifier score means ``"scored"``, unless it falls outside the release's
+    ``score_range``: a Verifier that broke its own range is an infrastructure
+    error. A failure with no score is an Agent failure when the Agent's own
+    system caused it (a budget ran out, or the harness produced no valid
+    answer) and an infrastructure error when the runtime, provider, or
+    Verifier did. A Harness killed for running past its time follows the
+    release's ``harness_timeout`` rule.
+
+    Args:
+        attempt: The attempt to classify.
+        scoring: The release's scoring rules. Without them, any finite score
+            counts and a killed Harness is an infrastructure error.
 
     Returns:
         The attempt's outcome.
@@ -239,10 +249,20 @@ def classify_attempt(attempt: AttemptEvidence) -> AttemptOutcome:
     if attempt.status in _PENDING:
         return "pending"
     if attempt.score is not None and math.isfinite(attempt.score):
+        if scoring is not None:
+            low, high = scoring.score_range
+            if not low <= attempt.score <= high:
+                return "infrastructure_error"
         return "scored"
     if attempt.status == "cancelled" or attempt.error_code == "cancelled":
         return "cancelled"
     if attempt.stop_reason in _BUDGET_STOPS:
+        return "agent_failure"
+    if (
+        attempt.stop_reason == "harness_timeout"
+        and scoring is not None
+        and scoring.harness_timeout == "agent_failure"
+    ):
         return "agent_failure"
     if attempt.error_code in _AGENT_ERRORS:
         return "agent_failure"
@@ -262,12 +282,14 @@ def _task_result(
     attempts: Sequence[AttemptEvidence],
     scoring: BenchmarkScoring,
     required_attempts: int,
+    *,
+    rules: BenchmarkScoring | None,
 ) -> TaskResult:
     low, _ = scoring.score_range
     counts: dict[str, int] = {}
     values: list[float] = []
     for attempt in attempts:
-        outcome = classify_attempt(attempt)
+        outcome = classify_attempt(attempt, rules)
         counts[outcome] = counts.get(outcome, 0) + 1
         if outcome == "scored" and attempt.score is not None:
             values.append(float(attempt.score))
@@ -348,6 +370,7 @@ def aggregate_configuration(
     categories: Sequence[BenchmarkCategory] = (),
     required_attempts: int = 1,
     blocking_issues: Sequence[str] = (),
+    declared: bool = True,
 ) -> ConfigurationResult:
     """Combine one configuration's attempts on one release and track.
 
@@ -364,17 +387,21 @@ def aggregate_configuration(
         required_attempts: Attempts per Task the track requires.
         blocking_issues: Reasons found elsewhere, such as a track conformance
             problem or missing provenance, that prevent official ranking.
+        declared: Whether a Benchmark declared ``scoring``. Default rules
+            neither bound scores nor change how a killed Harness counts.
 
     Returns:
         The combined result, with per-Task and per-category evidence.
     """
+    rules = scoring if declared else None
     tasks = task_specs(task_names, scoring, categories)
     by_task: dict[str, list[AttemptEvidence]] = {spec.name: [] for spec in tasks}
     for attempt in attempts:
         if attempt.task in by_task:
             by_task[attempt.task].append(attempt)
     task_results = tuple(
-        _task_result(spec, by_task[spec.name], scoring, required_attempts) for spec in tasks
+        _task_result(spec, by_task[spec.name], scoring, required_attempts, rules=rules)
+        for spec in tasks
     )
     total_weight = sum(task.weight for task in task_results)
     covered = [task for task in task_results if task.covered]
@@ -389,7 +416,7 @@ def aggregate_configuration(
     outcomes: dict[str, int] = {}
     for attempt in attempts:
         if attempt.task in by_task:
-            outcome = classify_attempt(attempt)
+            outcome = classify_attempt(attempt, rules)
             outcomes[outcome] = outcomes.get(outcome, 0) + 1
     ran = outcomes.get("scored", 0) + outcomes.get("agent_failure", 0)
     finished = ran + outcomes.get("infrastructure_error", 0)
@@ -398,7 +425,8 @@ def aggregate_configuration(
     counted = [
         attempt
         for attempt in attempts
-        if attempt.task in by_task and classify_attempt(attempt) in {"scored", "agent_failure"}
+        if attempt.task in by_task
+        and classify_attempt(attempt, rules) in {"scored", "agent_failure"}
     ]
 
     category_results: list[CategoryResult] = []

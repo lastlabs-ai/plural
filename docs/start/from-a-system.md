@@ -250,7 +250,7 @@ plural run --benchmark memory --model openai/gpt-5.6-luna
 ```text
   [1/1] trl_25307cebd405ee1f5018590a  remember-ada  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
 Job job_0feea5c3744a03eafec701d9 succeeded.
-  gpt-5.6-luna: mean score 1.000 over 1 trial(s), 1 succeeded
+  gpt-5.6-luna: mean score 1.000 over 1 Trial, 1 succeeded, coverage 100%
 ```
 
 ```bash

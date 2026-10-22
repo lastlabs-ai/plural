@@ -51,6 +51,23 @@ STOP_VARIABLE = "PLURAL_STOP_SECONDS"
 DEFAULT_CREDIT_PAUSE_SECONDS = 3600.0
 _CREDIT_POLL_SECONDS = 30.0
 _TURN_POLL_SECONDS = (0.1, 0.25, 0.5, 1.0)
+# Waits before each retry of a rate-limited or unavailable gateway. Like credit
+# waits, they do not count against max_seconds.
+_GATEWAY_RETRY_SECONDS = (2.0, 5.0, 15.0)
+_MAX_RETRY_AFTER_SECONDS = 60.0
+
+
+class GatewayError(RuntimeError):
+    """A model call the gateway, not the Agent, failed.
+
+    ``code`` is an ``ErrorCode`` value the engine records, so the attempt is
+    excluded from scores instead of scored as the Agent's failure.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
 
 _FINISH = "finish"
 _FINISH_TOOL = {
@@ -246,7 +263,10 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001
         # Keep the steps and model calls that happened before the failure.
         episode.write(Path(EPISODE_FILE))
-        _emit({"type": "error", "message": str(exc)})
+        event = {"type": "error", "message": str(exc)}
+        if isinstance(exc, GatewayError):
+            event["kind"] = exc.code
+        _emit(event)
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
     Path("result.json").write_text(
@@ -389,8 +409,9 @@ def _run(
         )
         cost = episode.records[-1]["usage"]["cost_usd"]
         if max_cost is not None and cost is None:
-            raise ValueError(
-                "max_cost_usd requires the gateway to return usage.cost_usd or usage.cost"
+            raise GatewayError(
+                "configuration",
+                "max_cost_usd requires the gateway to return usage.cost_usd or usage.cost",
             )
         if cost is not None:
             total_cost = (total_cost or 0.0) + cost
@@ -542,12 +563,15 @@ def _model_call(
     else:
         base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
         if not base:
-            raise ValueError("native runner requires PLURAL_GATEWAY_URL for its model calls")
+            raise GatewayError(
+                "configuration", "native runner requires PLURAL_GATEWAY_URL for its model calls"
+            )
         key = os.environ.get("PLURAL_API_KEY")
         if not key and os.environ.get("PLURAL_ALLOW_NO_AUTH") != "1":
-            raise ValueError(
+            raise GatewayError(
+                "configuration",
                 "native runner requires PLURAL_API_KEY "
-                "(or PLURAL_ALLOW_NO_AUTH=1 for an explicitly unauthenticated local gateway)"
+                "(or PLURAL_ALLOW_NO_AUTH=1 for an explicitly unauthenticated local gateway)",
             )
     body: dict[str, Any] = {"model": model, "messages": messages}
     if tools:
@@ -571,6 +595,7 @@ def _model_call(
     )
     budget = float(os.environ.get(CREDIT_PAUSE_VARIABLE) or DEFAULT_CREDIT_PAUSE_SECONDS)
     paused = 0.0
+    retries = iter(_GATEWAY_RETRY_SECONDS)
     while True:
         try:
             with urllib.request.urlopen(request, timeout=max(0.1, timeout)) as response:  # noqa: S310
@@ -578,8 +603,21 @@ def _model_call(
             break
         except urllib.error.HTTPError as exc:
             detail = exc.read(2048).decode(errors="replace")
+            failure = f"model gateway returned HTTP {exc.code}: {detail}"
+            if exc.code in {401, 403}:
+                raise GatewayError("authentication", failure) from exc
+            if exc.code == 429 or exc.code >= 500:
+                code = "rate_limited" if exc.code == 429 else "provider_unavailable"
+                wait = next(retries, None)
+                if wait is None:
+                    raise GatewayError(code, failure) from exc
+                wait = max(wait, _retry_after(exc.headers.get("Retry-After")))
+                print(f"{failure.splitlines()[0][:200]}; retrying in {wait:g}s.", file=sys.stderr)
+                time.sleep(wait)
+                paused += wait
+                continue
             if exc.code != 402 or not _out_of_credits(detail):
-                raise RuntimeError(f"model gateway returned HTTP {exc.code}: {detail}") from exc
+                raise RuntimeError(failure) from exc
             if paused >= budget:
                 raise RuntimeError(
                     f"Out of credits: this Trial waited {round(paused / 60)} minutes for "
@@ -590,9 +628,27 @@ def _model_call(
             wait = min(_CREDIT_POLL_SECONDS, budget - paused)
             time.sleep(wait)
             paused += wait
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                raise
+            wait = next(retries, None)
+            if wait is None:
+                raise GatewayError(
+                    "provider_unavailable", f"model gateway unreachable: {exc.reason}"
+                ) from exc
+            time.sleep(wait)
+            paused += wait
     if not isinstance(payload, dict):
-        raise ValueError("model gateway response must be an object")
+        raise GatewayError("provider_unavailable", "model gateway response must be an object")
     return payload, paused
+
+
+def _retry_after(value: str | None) -> float:
+    try:
+        seconds = float(value or 0)
+    except ValueError:
+        return 0.0
+    return min(max(seconds, 0.0), _MAX_RETRY_AFTER_SECONDS)
 
 
 def _out_of_credits(detail: str) -> bool:

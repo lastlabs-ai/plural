@@ -109,13 +109,13 @@ def run(
         "-b",
         help=f"Benchmark to run: {REF_HELP}.",
     ),
-    model: str | None = typer.Option(None, "--model", "-m", help="Catalog model id."),
+    models: list[str] | None = typer.Option(None, "--model", "-m", help="Catalog model id."),
     harness: str | None = typer.Option(
         None,
         "--harness",
         help=f"Harness for --model. Default: {DEFAULT_HARNESS} (Plural's built-in tool loop).",
     ),
-    agent: str | None = typer.Option(
+    agents: list[str] | None = typer.Option(
         None, "--agent", "-a", help=f"Saved Agent to run: {REF_HELP}."
     ),
     hosted: bool = typer.Option(False, "--hosted", hidden=True),
@@ -173,6 +173,7 @@ def run(
     """
     if hosted or follow:
         raise ProjectError(HOSTED_RUNS)
+    model, agent = _one(models, "--model"), _one(agents, "--agent")
     record = _recording(record, track) or bool(evaluation_track and not dry_run)
     space = workspace()
     current = session()
@@ -218,10 +219,6 @@ def run(
             space = Workspace(Project.at(root))
     use_credential_source(account_credential_source())
     plan = plan_run(space, request, environ=environ)
-    if dry_run:
-        payload = _plan_payload(plan)
-        emit(payload, as_json=as_json, text=lambda: _print_plan(payload))
-        return
     unfinished = space.unfinished(run_roots(plan))
     if unfinished and record:
         raise ProjectError(
@@ -231,6 +228,10 @@ def run(
         )
     for marker in unfinished:
         typer.echo(f"Unfinished: {marker}", err=True)
+    if dry_run:
+        payload = _plan_payload(plan)
+        emit(payload, as_json=as_json, text=lambda: _print_plan(payload))
+        return
     tracking = None
     if record:
         studio, binding = project_studio(space, current)
@@ -241,8 +242,9 @@ def run(
             plan = plan_run(space, request, environ=environ)
         tracking = Tracking(studio)
     total = len(plan.job.plan.trials)
+    revision = plan.pins[str(plan.source)]["revision"]
     typer.echo(
-        f"Running {plan.source} {plan.pins[str(plan.source)]['revision']} "
+        f"Running {plan.source}{'' if revision == 'local' else f' {revision}'} "
         f"with {plan.agent.name} ({plan.agent.model}) locally: "
         f"{counted(total, 'Trial')}, {_pace(plan)}."
         + (" Recording it in the hosted project as it runs." if tracking else ""),
@@ -855,6 +857,16 @@ def _tracking(space: Workspace, current: Session) -> Tracking:
     return Tracking(project_studio(space, current)[0])
 
 
+def _one(values: list[str] | None, flag: str) -> str | None:
+    """The one value a repeatable flag was given, refusing several."""
+    if values and len(values) > 1:
+        raise ProjectError(
+            f"Pass {flag} once: a run is one Job with one Agent. To compare, run once per "
+            f"{flag.removeprefix('--')}; `plural job list` shows the Jobs side by side."
+        )
+    return values[0] if values else None
+
+
 def _finish_local(
     space: Workspace,
     job_id: str,
@@ -880,6 +892,8 @@ def _finish_local(
             typer.echo(f"Upload the rest with `plural job record {job_id}`.", err=True)
 
     emit(payload, as_json=as_json, text=text)
+    if result.status in {"failed", "cancelled"}:
+        raise typer.Exit(1)
 
 
 def _concurrency(value: str) -> int | Literal["auto"]:
@@ -969,7 +983,7 @@ def _print_result(job_id: str, result: JobResult) -> None:
         typer.echo(
             f"  {aggregate.agent_name}: mean score {mean} over "
             f"{counted(aggregate.count, 'Trial')}, "
-            f"{aggregate.successes} succeeded"
+            f"{aggregate.successes} succeeded, coverage {aggregate.coverage:.0%}"
         )
     typer.echo(f"Details: plural job show {job_id}")
 
@@ -1033,6 +1047,9 @@ def _print_trial(payload: dict[str, Any]) -> None:
         ("Job", "job_id"),
         ("Task", "task"),
         ("Score", "score"),
+        ("Stopped", "stop_reason"),
+        ("Turns", "turns"),
+        ("Cost (USD)", "cost_usd"),
         ("Error", "error"),
         ("Artifacts", "artifacts"),
         ("Logs", "logs"),

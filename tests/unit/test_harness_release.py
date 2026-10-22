@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import email.message
 import io
 import json
 import tarfile
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -370,7 +372,7 @@ def test_a_model_call_cut_off_by_the_deadline_ends_the_episode_at_max_seconds(
     assert result["stop_reason"] == "max_seconds"
 
 
-def test_the_native_runner_stops_itself_before_the_runtime_kills_it() -> None:
+def test_every_harness_is_told_when_it_will_be_killed() -> None:
     from plural.execution.engine import STOP_GRACE_SECONDS, _harness_timeout, _stop_env
 
     native = HarnessProtocol(
@@ -390,8 +392,114 @@ def test_the_native_runner_stops_itself_before_the_runtime_kills_it() -> None:
     assert _harness_timeout(short, native, {}) == 120 + STOP_GRACE_SECONDS
     assert _stop_env(short, native, {})[native_runner.STOP_VARIABLE] == "120"
     assert _harness_timeout(short, vendor, {}) == 120
-    assert native_runner.STOP_VARIABLE not in _stop_env(short, vendor, {})
+    assert _stop_env(short, vendor, {})[native_runner.STOP_VARIABLE] == "120"
 
     long = task(1800, 300)
     assert _harness_timeout(long, native, {}) == 300
     assert _stop_env(long, native, {})[native_runner.STOP_VARIABLE] == "270"
+    assert _stop_env(long, vendor, {})[native_runner.STOP_VARIABLE] == "300"
+
+
+def _gateway(monkeypatch: pytest.MonkeyPatch, responses: list[object]) -> list[float]:
+    monkeypatch.setenv("PLURAL_GATEWAY_URL", "https://gateway.example/v1")
+    monkeypatch.setenv("PLURAL_ALLOW_NO_AUTH", "1")
+    sleeps: list[float] = []
+    monkeypatch.setattr(native_runner.time, "sleep", sleeps.append)
+
+    def urlopen(request: object, timeout: float) -> object:
+        outcome = responses.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(native_runner.urllib.request, "urlopen", urlopen)
+    return sleeps
+
+
+def _http_error(code: int, retry_after: str | None = None) -> urllib.error.HTTPError:
+    headers = email.message.Message()
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return urllib.error.HTTPError(
+        "https://gateway.example/v1", code, "error", headers, io.BytesIO(b"{}")
+    )
+
+
+class _Response(io.BytesIO):
+    def __enter__(self) -> _Response:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+
+def _call() -> tuple[dict[str, Any], float]:
+    return native_runner._model_call(model="m", routing={}, messages=[], tools=[], timeout=30.0)
+
+
+def test_the_native_runner_retries_a_busy_gateway_without_spending_the_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps = _gateway(
+        monkeypatch,
+        [
+            _http_error(429, retry_after="9"),
+            urllib.error.URLError(ConnectionRefusedError()),
+            _http_error(503),
+            _Response(b'{"choices": []}'),
+        ],
+    )
+
+    payload, paused = _call()
+
+    assert payload == {"choices": []}
+    assert sleeps == [9.0, 5.0, 15.0]
+    assert paused == 29.0
+
+
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        (_http_error(429), "rate_limited"),
+        (_http_error(502), "provider_unavailable"),
+        (urllib.error.URLError(ConnectionRefusedError()), "provider_unavailable"),
+    ],
+)
+def test_a_gateway_that_stays_down_is_reported_as_the_providers_failure(
+    monkeypatch: pytest.MonkeyPatch, failure: BaseException, code: str
+) -> None:
+    _gateway(monkeypatch, [failure] * 4)
+
+    with pytest.raises(native_runner.GatewayError) as raised:
+        _call()
+
+    assert raised.value.code == code
+
+
+def test_a_rejected_key_fails_at_once_as_a_setup_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    sleeps = _gateway(monkeypatch, [_http_error(401)])
+
+    with pytest.raises(native_runner.GatewayError) as raised:
+        _call()
+
+    assert raised.value.code == "authentication"
+    assert sleeps == []
+
+
+def test_only_the_built_in_runner_may_blame_the_gateway() -> None:
+    from plural.common import ErrorCode
+    from plural.execution.engine import _classify
+    from plural.harness.protocol import HarnessEvent
+    from plural.harness.runner import HarnessExecutionError, failure_code
+
+    native = HarnessProtocol(
+        name="h", revision="1.0.0", command=("python", "native_runner.py", "native.chat.v1")
+    )
+    vendor = HarnessProtocol(name="v", revision="1.0.0", command=("codex", "exec"))
+    busy = HarnessEvent(type="error", message="busy", kind="rate_limited")
+
+    assert failure_code(native, busy) == "rate_limited"
+    assert failure_code(vendor, busy) is None
+    assert failure_code(native, busy.model_copy(update={"kind": "cancelled"})) is None
+    assert _classify(HarnessExecutionError("busy", code="rate_limited")) is ErrorCode.RATE_LIMITED
+    assert _classify(HarnessExecutionError("crashed")) is ErrorCode.PROTOCOL_FAILED

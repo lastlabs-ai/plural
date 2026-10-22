@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-10-21
+
+### Added
+
+- `plural --version` prints the installed version.
+- `plural trial show` shows how the episode stopped, its turns, and its cost.
+- `plural run` prints each Agent's coverage, the share of Tasks with a score.
+- `BenchmarkScoring.harness_timeout` decides how an attempt whose Harness was killed for running past its time is scored: `agent_failure` counts it against the Agent, and `infrastructure_error`, the default, leaves it out, so existing Benchmarks keep their digests and results. New Benchmarks from `plural benchmark init` set `agent_failure`. Such a Trial now has the stop reason `harness_timeout`.
+- Every Harness is told the seconds it has before it is killed in `PLURAL_STOP_SECONDS`.
+
+### Changed
+
+- `plural run`, `plural job rerun`, and `plural trial rerun` exit with status 1 when a Trial failed or the Job was cancelled.
+- `plural run` refuses `--model` or `--agent` given twice, instead of running only the last one.
+- `success_threshold` defaults to the top of `score_range`, not to 1.0 whatever the range.
+- `--dry-run --record` reports the unfinished places `--record` would refuse, instead of showing a plan the real run would refuse.
+- A Benchmark whose README, `purpose`, or `scoring.description` still carries the template's `PLURAL-TODO` lines runs locally, as the docs say; pushing and `--record` still refuse it.
+
 ### Fixed
+
+- A model gateway that is rate-limited or unavailable no longer scores the Agent zero. The built-in Harness retries it up to three times, without spending the episode's `max_seconds`, and an attempt it still cannot finish is an infrastructure error, as is a rejected API key. Only the built-in Harness can report a failure as the gateway's; a Harness of your own cannot excuse its own.
+- A Verifier score outside the Benchmark's `score_range` is an infrastructure error instead of counting toward the mean.
+- Job aggregates count a Trial that ran out of budget without a score as an Agent failure, as Benchmark results do.
 
 - Verifiers see the Trial's model cost in `episode.usage.cost_usd`; it was always `None`.
 - Plural's built-in Harness ends an episode itself at `max_seconds`, or 30 seconds before the Runtime's `timeout_seconds` when that comes first, so the Trial is verified with the stop reason `max_seconds` instead of being killed and counted as an infrastructure error. A model call still running at that deadline ends the episode the same way instead of failing the Trial.

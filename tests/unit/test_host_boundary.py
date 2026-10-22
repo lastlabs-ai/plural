@@ -406,6 +406,7 @@ async def test_a_timeout_is_retried_only_when_the_host_ran_no_step(
     ).run()
 
     assert result.trials[0].error_code is ErrorCode.TIMEOUT
+    assert result.trials[0].stop_reason == "harness_timeout"
     assert provider.harness_runs == runs
 
 

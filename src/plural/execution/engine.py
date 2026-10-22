@@ -88,7 +88,7 @@ from plural.harness.native_runner import (
 from plural.harness.packages import BUILTIN_PROFILES, native_actions_v1, native_chat_v1
 from plural.harness.protocol import HarnessProtocolError, HarnessRunRequest
 from plural.harness.retrieval import materialize_package, retrieve_archive, source_digest
-from plural.harness.runner import HarnessExecutionError, HarnessRunner
+from plural.harness.runner import HarnessExecutionError, HarnessRunner, is_native_runner
 from plural.jobs import (
     AgentAggregate,
     ArtifactReference,
@@ -158,10 +158,10 @@ def _classify(exc: BaseException) -> ErrorCode:
         return exc.code
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
         return ErrorCode.TIMEOUT
+    if isinstance(exc, HarnessExecutionError) and exc.code is not None:
+        return ErrorCode(exc.code)
     if isinstance(exc, HarnessProtocolError):
         return ErrorCode.PROTOCOL_FAILED
-    if isinstance(exc, HarnessExecutionError):
-        return ErrorCode.HARNESS_FAILED
     if isinstance(exc, CapabilityError):
         return ErrorCode.RUNTIME_UNAVAILABLE
     if isinstance(exc, SandboxError):
@@ -652,6 +652,8 @@ class TrialRunner:
         self._active: dict[tuple[str, str], SandboxHandle] = {}
         self.episode_recorded = False
         """Whether the last execution's Harness timed out after the App host ran an action."""
+        self.harness_killed = False
+        """Whether the last execution's Harness was killed for running past its time."""
         self._cost_usd: float | None = None
 
     @property
@@ -719,6 +721,7 @@ class TrialRunner:
                 )
 
         self.episode_recorded = False
+        self.harness_killed = False
         self._cost_usd = None
         heartbeat = asyncio.create_task(self._heartbeat(execution_id))
         self.store.emit(
@@ -945,8 +948,10 @@ class TrialRunner:
                 with contextlib.suppress(Exception):
                     await provider.stop_user_processes(handle, [item.user for item in players])
                 if failure is not None:
-                    if host is not None and _classify(failure) is ErrorCode.TIMEOUT:
-                        self.episode_recorded = await _episode_recorded(host)
+                    if _classify(failure) is ErrorCode.TIMEOUT:
+                        self.harness_killed = True
+                        if host is not None:
+                            self.episode_recorded = await _episode_recorded(host)
                     raise failure
                 collection_started = datetime.now(timezone.utc)
                 stdout = _redact_bytes(_joined(players, "stdout"), secrets)
@@ -1143,6 +1148,9 @@ class TrialRunner:
                 phases=phases,
                 cost_usd=cost_usd,
             )
+            totals = _episode_totals(artifacts, failed=code is not ErrorCode.CANCELLED)
+            if self.harness_killed and code is ErrorCode.TIMEOUT:
+                totals["stop_reason"] = "harness_timeout"
             result = TrialResult(
                 status="cancelled" if code is ErrorCode.CANCELLED else "failed",
                 receipt=receipt,
@@ -1154,7 +1162,7 @@ class TrialRunner:
                 if self.seat_names and host_report.steps
                 else (),
                 seat_isolation=seat_isolation,
-                **_episode_totals(artifacts, failed=code is not ErrorCode.CANCELLED),
+                **totals,
                 error_code=None if code is ErrorCode.CANCELLED else code,
                 error_message=_redact_bytes(str(exc).encode(), secrets).decode(errors="replace")[
                     :1000
@@ -2085,6 +2093,7 @@ def _agent_aggregates(
                     status=item.status,
                     score=score,
                     error_code=item.error_code.value if item.error_code else None,
+                    stop_reason=item.stop_reason or None,
                     cost_usd=item.receipt.cost_usd,
                     latency_seconds=item.receipt.timings.get("total_seconds"),
                     trial_id=item.receipt.trial_id,
@@ -2094,6 +2103,7 @@ def _agent_aggregates(
             scoring=scoring,
             categories=categories,
             required_attempts=spec.attempts,
+            declared=release is not None,
         )
         rows.append(
             AgentAggregate(
@@ -2168,10 +2178,6 @@ STOP_GRACE_SECONDS = 30.0
 """How long past its own deadline the native runner has to stop before it is killed."""
 
 
-def _native(definition: HarnessProtocol) -> bool:
-    return tuple(definition.command[1:2]) == ("native_runner.py",)
-
-
 def _harness_timeout(
     task: TaskDefinition, definition: HarnessProtocol, env: Mapping[str, str]
 ) -> float:
@@ -2183,18 +2189,23 @@ def _harness_timeout(
     way is still verified.
     """
     runtime, limits = task.environment.runtime, task.environment.limits
-    allowed = limits.max_seconds + (STOP_GRACE_SECONDS if _native(definition) else 0.0)
+    allowed = limits.max_seconds + (STOP_GRACE_SECONDS if is_native_runner(definition) else 0.0)
     return min(runtime.timeout_seconds, allowed) + _credit_pause(definition, env)
 
 
 def _stop_env(
     task: TaskDefinition, definition: HarnessProtocol, env: Mapping[str, str]
 ) -> dict[str, str]:
-    """The native runner's environment, told when to stop before the Runtime kills it."""
-    if not _native(definition):
-        return dict(env)
+    """A Harness's environment, told how many seconds it has before it is killed.
+
+    The native runner is told to stop a grace period early, so the Runtime's
+    own limit never cuts it off mid-episode.
+    """
     runtime, limits = task.environment.runtime, task.environment.limits
-    stop = max(1.0, min(limits.max_seconds, runtime.timeout_seconds - STOP_GRACE_SECONDS))
+    if is_native_runner(definition):
+        stop = max(1.0, min(limits.max_seconds, runtime.timeout_seconds - STOP_GRACE_SECONDS))
+    else:
+        stop = min(limits.max_seconds, runtime.timeout_seconds)
     return {**env, STOP_VARIABLE: f"{stop:g}"}
 
 
@@ -2205,7 +2216,7 @@ def _credit_pause(definition: HarnessProtocol, env: Mapping[str, str]) -> float:
     episode's max_seconds, so the Runtime's limit must allow for it. Other
     Harnesses keep their limit, and fail when the account runs out.
     """
-    if not _native(definition):
+    if not is_native_runner(definition):
         return 0.0
     if not env.get("PLURAL_GATEWAY_URL") or env.get("PLURAL_AGENT_ENDPOINT"):
         return 0.0

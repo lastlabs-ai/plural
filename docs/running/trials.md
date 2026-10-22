@@ -91,6 +91,7 @@ been cut short.
 | `agent_finished`, `agent_response` | The Agent chose to stop. |
 | `max_turns`, `max_seconds`, `max_cost` | A budget cut the run short. |
 | `error` | The run failed. |
+| `harness_timeout` | The Harness ran past its time and was killed. |
 
 The Trial also records whether the Environment `terminated` or `truncated` the
 run, and the total per-step reward, which a hosted Trial shows as

@@ -348,7 +348,7 @@ plural run --benchmark support --model openai/gpt-5.6-luna
   [1/2] trl_444c014d7bfe1dfe3399aa6e  support-t-1  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
   [2/2] trl_fecbf00bd3679d2eebad499d  support-t-2  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
 Job job_3a3b71e85e95e020a05801b5 succeeded.
-  gpt-5.6-luna: mean score 1.000 over 2 Trials, 2 succeeded
+  gpt-5.6-luna: mean score 1.000 over 2 Trials, 2 succeeded, coverage 100%
 ```
 
 **What just happened.** The model worked both Tasks, calling the recorded tools, and the

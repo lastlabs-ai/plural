@@ -29,7 +29,7 @@ credentials, and secrets never do.
 Plural requires Python 3.10 or newer.
 
 ```bash
-pip install "plural[mcp]>=0.21.0"
+pip install "plural[mcp]>=0.22.1"
 ```
 
 ## Try a finished project

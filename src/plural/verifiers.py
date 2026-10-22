@@ -123,6 +123,8 @@ STOP_REASONS: tuple[str, ...] = (
     "max_cost",
     # The episode did not finish.
     "error",
+    # The Harness ran past its time and was killed.
+    "harness_timeout",
 )
 
 
@@ -145,6 +147,7 @@ class EpisodeOutcome(FrozenModel):
         "max_seconds",
         "max_cost",
         "error",
+        "harness_timeout",
     ] = ""
     terminated: bool = False
     truncated: bool = False

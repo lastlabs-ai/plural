@@ -37,10 +37,37 @@ class HarnessExecution(BaseModel):
 class HarnessExecutionError(HarnessProtocolError):
     """Protocol failure carrying process logs for redacted persistence."""
 
-    def __init__(self, message: str, *, stdout: bytes = b"", stderr: bytes = b"") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        code: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.stdout = stdout
         self.stderr = stderr
+        self.code = code
+
+
+# Failure kinds the built-in runner may report. A Harness is the code under test,
+# so a kind from any other Harness is ignored: it cannot excuse its own failure.
+GATEWAY_FAILURE_KINDS = frozenset(
+    {"authentication", "configuration", "rate_limited", "provider_unavailable"}
+)
+
+
+def is_native_runner(definition: HarnessProtocol) -> bool:
+    """Whether a Harness is Plural's built-in model runner."""
+    return tuple(definition.command[1:2]) == ("native_runner.py",)
+
+
+def failure_code(definition: HarnessProtocol, terminal: HarnessEvent) -> str | None:
+    """The error code a failed Harness may claim, or ``None`` to blame the Harness."""
+    if is_native_runner(definition) and terminal.kind in GATEWAY_FAILURE_KINDS:
+        return terminal.kind
+    return None
 
 
 class HarnessRunner:
@@ -215,6 +242,7 @@ class HarnessRunner:
                 terminal.message or "harness reported failure",
                 stdout=result.stdout,
                 stderr=result.stderr,
+                code=failure_code(definition, terminal),
             )
         declared_outputs = {item.path: item for item in definition.outputs}
         declared_artifacts = {item.path: item for item in definition.artifacts}

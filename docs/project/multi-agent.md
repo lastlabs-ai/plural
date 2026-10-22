@@ -246,8 +246,8 @@ groups, run another Job.
 A Job's Tasks without a party run once for each Agent, as usual. The hosted platform
 records a party's Trial under the Agent in `seat_1`, and lists every seat on it.
 
-`plural run` runs one Agent, so it refuses a Task with a party. Run it from Python, or
-create a hosted Job that names the party.
+`plural run` runs one Agent, so it refuses a Task with a party. Run it from Python
+with `Job(task, agents, party=[...])`.
 
 Each Agent is ranked by the mean of the scores of the seats it played. A Trial result
 lists `seats`: each seat's Agent, score, step reward total, steps, and trace.

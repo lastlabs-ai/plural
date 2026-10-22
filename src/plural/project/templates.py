@@ -712,6 +712,8 @@ scoring:
   agent_failure: zero
   # Attempts lost to infrastructure are excluded and reported separately.
   infrastructure_error: exclude
+  # A Harness killed for running past its time counts as the Agent's failure.
+  harness_timeout: agent_failure
 """
 
 _BENCHMARK_README = """\

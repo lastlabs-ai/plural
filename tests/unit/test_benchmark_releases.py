@@ -218,6 +218,61 @@ def test_failures_are_classified_and_handled_by_declared_rules() -> None:
     assert excluded.tasks[0].score == 1.0
 
 
+def test_a_score_outside_the_declared_range_is_not_counted() -> None:
+    scoring = BenchmarkScoring(score_range=(0.0, 1.0))
+    broken = attempt("a", 7.0)
+
+    assert classify_attempt(broken, scoring) == "infrastructure_error"
+    assert classify_attempt(broken) == "scored"
+    result = aggregate_configuration(SPECS, [attempt("a", 1.0), broken], scoring=scoring)
+    assert result.tasks[0].score == 1.0
+    assert result.tasks[0].infrastructure_errors == 1
+    undeclared = aggregate_configuration(
+        SPECS, [attempt("a", 1.0), broken], scoring=scoring, declared=False
+    )
+    assert undeclared.tasks[0].score == 4.0
+
+
+def test_the_success_threshold_defaults_to_the_top_of_the_range() -> None:
+    assert BenchmarkScoring().success_threshold == 1.0
+    assert BenchmarkScoring(score_range=(0, 10)).success_threshold == 10
+    assert BenchmarkScoring(score_range=(0, 10), success_threshold=7).success_threshold == 7
+    assert BenchmarkScoring(score_range=(0, 10), success_threshold=None).success_threshold is None
+
+
+def test_a_killed_harness_counts_against_the_agent_only_where_the_release_says_so() -> None:
+    killed = attempt("a", None, error_code="timeout", stop_reason="harness_timeout")
+
+    assert classify_attempt(killed) == "infrastructure_error"
+    assert classify_attempt(killed, BenchmarkScoring()) == "infrastructure_error"
+    strict = BenchmarkScoring(harness_timeout="agent_failure")
+    assert classify_attempt(killed, strict) == "agent_failure"
+    lost = attempt("a", None, error_code="timeout", stop_reason="error")
+    assert classify_attempt(lost, strict) == "infrastructure_error"
+
+
+def test_a_scoring_rule_added_later_keeps_older_benchmark_digests() -> None:
+    scoring = BenchmarkScoring(metric="Solved")
+    custom = Benchmark(name="suite", version="1.0.0", tasks=(task("a"),), scoring=scoring)
+    payload = scoring.model_dump(mode="json")
+    del payload["harness_timeout"]
+    expected = revision_hash(
+        "benchmark",
+        {
+            "tasks": [pin.content_hash for pin in custom.task_pins],
+            "primary_metric": "score",
+            "description": "",
+            "metadata": {},
+            "scoring": payload,
+        },
+    )
+    assert custom.content_hash == expected
+    strict = custom.model_copy(
+        update={"scoring": scoring.model_copy(update={"harness_timeout": "agent_failure"})}
+    )
+    assert strict.content_hash != expected
+
+
 def test_official_ranking_needs_declared_coverage_and_no_pending_attempts() -> None:
     scoring = BenchmarkScoring(coverage_required=0.5)
     partial = aggregate_configuration(SPECS, [attempt("a", 1.0)], scoring=scoring)

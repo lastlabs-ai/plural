@@ -337,12 +337,12 @@ differ, and because attempts run at the same time, the tickets may finish in a
 different order:
 
 ```text
-Running benchmark/support-triage@1.0.0 with scripted (openai/gpt-5.6-luna) locally: 3 Trials, 3 at a time (auto: every Trial at once).
+Running benchmark/support-triage with scripted (openai/gpt-5.6-luna) locally: 3 Trials, 3 at a time (auto: every Trial at once).
   [1/3] trl_d16f384431533c57de0022ee  ticket-3  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
   [2/3] trl_ea0e25de78e3905c0f791c67  ticket-2  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
   [3/3] trl_c23042ff033379be000ab471  ticket-1  succeeded  score=1.000  | 3 succeeded, 0 failed, mean 1.000
 Job job_9550337c63403bb187d212d1 succeeded.
-  scripted: mean score 1.000 over 3 Trials, 3 succeeded
+  scripted: mean score 1.000 over 3 Trials, 3 succeeded, coverage 100%
 Details: plural job show job_9550337c63403bb187d212d1
 ```
 

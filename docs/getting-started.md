@@ -31,11 +31,11 @@ Install Plural. You need Python 3.10 or newer:
 :::tabs
 :::tab pip
 ```bash
-python -m pip install "plural[mcp]>=0.21.0"
+python -m pip install "plural[mcp]>=0.22.1"
 ```
 :::tab uv
 ```bash
-uv tool install "plural[mcp]>=0.21.0"
+uv tool install "plural[mcp]>=0.22.1"
 ```
 :::
 
@@ -44,7 +44,7 @@ uv tool install "plural[mcp]>=0.21.0"
 - `plural[daytona]` adds the Daytona Runtime.
 - `plural[keyring]` stores your credentials in your OS keyring.
 
-To use the Python SDK from a uv project, run `uv add "plural[mcp]>=0.21.0"` inside it.
+To use the Python SDK from a uv project, run `uv add "plural[mcp]>=0.22.1"` inside it.
 :::
 
 Then sign in with the key. It is read without being shown, and stored in your user
@@ -75,11 +75,12 @@ A project is a folder that holds everything you build:
 ```bash
 plural project init wordle
 cd wordle
-plural env init wordle --python
+plural env init wordle --python --bare
 ```
 
 `plural env init` wrote a template Environment in `environments/wordle/`. You'll
-replace its files in the next two steps.
+replace its files in the next two steps. `--bare` leaves out the starter Task and
+Verifier it would otherwise add, since you'll write your own.
 
 ## 3. Write the game
 
@@ -265,11 +266,11 @@ plural run --benchmark wordle --model openai/gpt-5.6-luna
 ```
 
 ```text
-Running benchmark/wordle local with gpt-5.6-luna (openai/gpt-5.6-luna) locally: 2 trial(s), 2 at a time (auto: every Trial at once).
+Running benchmark/wordle with gpt-5.6-luna (openai/gpt-5.6-luna) locally: 2 Trials, 2 at a time (auto: every Trial at once).
   [1/2] trl_a3c4c32fe982f553d6eaf682  crane  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
   [2/2] trl_7141ed163cc5f72c17a5c3a4  slate  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
 Job job_a9ecd47fc78ca7293e5bc68a succeeded.
-  gpt-5.6-luna: mean score 1.000 over 2 trial(s), 2 succeeded
+  gpt-5.6-luna: mean score 1.000 over 2 Trials, 2 succeeded, coverage 100%
 ```
 
 The model played both puzzles through the `guess` action, and the Verifier scored each

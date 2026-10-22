@@ -480,8 +480,11 @@ itself at `max_seconds`, with the stop reason `max_seconds`, and its Trial is
 verified like any other; the Runtime allows it 30 seconds past that to finish. When
 `timeout_seconds` is the shorter of the two, it wins: the Harness stops 30 seconds
 before it. So raise `timeout_seconds` along with a `max_seconds` above 270. A
-Harness of your own is stopped at `max_seconds` (or `timeout_seconds`, if shorter),
-and a Trial stopped that way fails.
+Harness of your own is killed at `max_seconds` (or `timeout_seconds`, if shorter),
+and is told that deadline, in seconds, in `PLURAL_STOP_SECONDS`. A Trial killed that
+way fails with the stop reason `harness_timeout`; a Benchmark's
+[`harness_timeout` rule](benchmarks.md#how-failures-are-scored) decides whether it
+counts against the Agent.
 
 Set the episode limits on the Environment:
 

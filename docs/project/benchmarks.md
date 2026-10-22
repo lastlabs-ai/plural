@@ -130,13 +130,16 @@ scoring:
   success_threshold: 1.0
   agent_failure: zero
   infrastructure_error: exclude
+  harness_timeout: agent_failure
 ```
 
 - `name` must match the folder name, which is the hosted slug. An optional `title`
   sets the display name.
 - Each entry in `tasks` names a Task in `tasks/`.
-- Validation requires a `README.md`, a `purpose`, a `scoring.description`, and at
-  least one Task.
+- Validation requires at least one Task. Pushing, releasing, and `--record` also
+  require a `README.md`, a `purpose`, and a `scoring.description`; while the
+  template's `PLURAL-TODO` lines mark them unfinished, the Benchmark still runs
+  locally.
 - The release fields described [further down](#declare-what-a-release-measures), such
   as `categories` and `tracks`, go in `benchmark.yaml` with the same names and nesting
   as the Python arguments.
@@ -158,6 +161,30 @@ Benchmark from Python, load it with `Workspace(Project.find()).get("benchmark",
 
 `primary_metric` is `score`, the correctness score written by each Task's Verifiers,
 and it is the only value it accepts. A Benchmark always ranks on that score.
+
+### How failures are scored
+
+Every attempt has one outcome, and `scoring` decides what each is worth:
+
+| Outcome | When | Scored as |
+| --- | --- | --- |
+| Scored | A Verifier produced a score inside `score_range`. | That score. |
+| Agent failure | A budget ran out with no score, or the Harness produced no valid answer. | The bottom of `score_range` with `agent_failure: zero`; left out with `exclude`. |
+| Infrastructure error | The Runtime, the model provider, or a Verifier failed, or a Verifier scored outside `score_range`. | Left out, and reported separately. |
+
+A Harness killed for running past its time follows `harness_timeout`:
+`agent_failure` counts it against the Agent, and `infrastructure_error`, the default
+so that older Benchmarks keep their results, leaves it out. New Benchmarks set
+`agent_failure`. Plural's built-in Harness stops itself before it can be killed, so
+this applies only to a Harness of your own.
+
+The model gateway failing is never the Agent's fault. The built-in Harness retries a
+rate-limited or unavailable gateway a few times, without spending the episode's
+`max_seconds`, and an attempt it still cannot finish is an infrastructure error.
+
+`success_threshold` is the score at which an attempt counts as a success. Left out,
+it is the top of `score_range`; set it to `null` for a Benchmark with no pass/fail
+notion.
 
 ## Run the Benchmark
 

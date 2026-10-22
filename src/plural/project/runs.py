@@ -948,7 +948,8 @@ def _execute(
     if needs_model and not environ.get("PLURAL_API_KEY"):
         raise ProjectError(
             "This run calls a live model, which goes through the Plural gateway, and no "
-            "Plural API key is available. Export PLURAL_API_KEY or pass --env-file."
+            "Plural API key is available. Sign in with `plural auth login`, export "
+            "PLURAL_API_KEY, or pass --env-file."
         )
     bound = workspace.project.read_binding()
     project_id = tracking.studio.project if tracking is not None else None
@@ -1202,6 +1203,9 @@ def _trial_summary(result: TrialResult) -> dict[str, Any]:
         "attempt": result.receipt.attempt,
         "model": result.receipt.model.catalog_model_id,
         "score": result.score,
+        "stop_reason": result.stop_reason or None,
+        "turns": result.turns,
+        "cost_usd": result.receipt.cost_usd,
         "error": result.error_message,
     }
 
