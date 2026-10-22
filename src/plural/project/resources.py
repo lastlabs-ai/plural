@@ -594,7 +594,6 @@ def _load_task(workspace: Workspace, ref: ResourceRef, directory: Path) -> Local
                         ),
                         "resources": resources,
                         "initial_state": manifest.initial_state,
-                        "reset_options": manifest.reset_options,
                         "seat_instructions": manifest.seat_instructions,
                     },
                     context={"catalog": workspace.catalog},

@@ -858,11 +858,6 @@
           "title": "Name",
           "type": "string"
         },
-        "reset_options": {
-          "additionalProperties": true,
-          "title": "Reset Options",
-          "type": "object"
-        },
         "resources": {
           "default": [],
           "items": {

@@ -341,6 +341,37 @@ def _seat_instruction_errors(
     return errors
 
 
+def without_reset_options(payload: dict[str, Any], name: object) -> dict[str, Any]:
+    """Drop ``reset_options``, which never reached ``reset``, refusing any values set in it.
+
+    Returns:
+        The payload without ``reset_options``.
+    """
+    if payload.pop("reset_options", None):
+        raise ValueError(
+            f"Task {name!r} sets reset_options, which Plural no longer accepts because "
+            "they never reached reset. Put an App's values in initial_state under its "
+            "name, or values every App reads in info."
+        )
+    return payload
+
+
+def _serialized_as_before(data: Any, seat_instructions: Mapping[str, str]) -> Any:
+    """Serialize a Task as it was before seat instructions and after ``reset_options``.
+
+    Every existing Task keeps its hash: one without seat instructions omits them, and
+    every Task carries the empty ``reset_options`` it was hashed with.
+
+    Returns:
+        The serialized Task.
+    """
+    if isinstance(data, dict):
+        if not seat_instructions:
+            data.pop("seat_instructions", None)
+        data["reset_options"] = {}
+    return data
+
+
 class Task(FrozenModel):
     """One versioned unit of work in a Python-authored Environment.
 
@@ -359,16 +390,11 @@ class Task(FrozenModel):
     verifiers: tuple[VerifierDefinition, ...] = Field(min_length=1)
     resources: tuple[EnvironmentResource, ...] = ()
     initial_state: dict[str, Any] = Field(default_factory=dict)
-    reset_options: dict[str, Any] = Field(default_factory=dict)
     seat_instructions: dict[str, str] = Field(default_factory=dict)
 
     @model_serializer(mode="wrap")
-    def _omit_no_seats(self, handler: SerializerFunctionWrapHandler) -> Any:
-        data = handler(self)
-        # A Task without seat instructions serializes, and so hashes, as it did before them.
-        if isinstance(data, dict) and not self.seat_instructions:
-            data.pop("seat_instructions", None)
-        return data
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return _serialized_as_before(handler(self), self.seat_instructions)
 
     @model_validator(mode="before")
     @classmethod
@@ -382,7 +408,7 @@ class Task(FrozenModel):
             payload["version"] = payload.pop("revision")
         if "initial_state" not in payload and "state" in payload:
             payload["initial_state"] = payload.pop("state")
-        return payload
+        return without_reset_options(payload, payload.get("name"))
 
     @model_validator(mode="after")
     def _validate_task(self) -> Task:
@@ -451,7 +477,7 @@ class Task(FrozenModel):
                 "verifiers": [verifier.content_hash for verifier in self.verifiers],
                 "resources": self.resources,
                 "initial_state": self.initial_state,
-                "reset_options": self.reset_options,
+                "reset_options": {},
                 # Only a Task with seat instructions hashes them, so every other Task
                 # keeps its hash.
                 **({"seat_instructions": self.seat_instructions} if self.seat_instructions else {}),
@@ -490,7 +516,6 @@ class Task(FrozenModel):
             metadata=self.metadata,
             resources=self.resources,
             state=self.initial_state,
-            reset_options=self.reset_options,
             seat_instructions=self.seat_instructions,
         )
 
@@ -518,16 +543,20 @@ class TaskDefinition(FrozenModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     resources: tuple[EnvironmentResource, ...] = ()
     state: dict[str, Any] = Field(default_factory=dict)
-    reset_options: dict[str, Any] = Field(default_factory=dict)
     seat_instructions: dict[str, str] = Field(default_factory=dict)
 
     @model_serializer(mode="wrap")
-    def _omit_no_seats(self, handler: SerializerFunctionWrapHandler) -> Any:
-        data = handler(self)
-        # A Task without seat instructions serializes, and so hashes, as it did before them.
-        if isinstance(data, dict) and not self.seat_instructions:
-            data.pop("seat_instructions", None)
-        return data
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return _serialized_as_before(handler(self), self.seat_instructions)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_reset_options(cls, value: Any) -> Any:
+        # A stored revision may hold reset_options from before they were removed;
+        # they never reached reset, so dropping them changes no run.
+        if isinstance(value, dict) and "reset_options" in value:
+            return {key: item for key, item in value.items() if key != "reset_options"}
+        return value
 
     @model_validator(mode="after")
     def _state_fits_environment(self) -> TaskDefinition:

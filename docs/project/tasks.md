@@ -37,9 +37,6 @@ Agent sees exactly what it should, and nothing more.
 > actions return. Those are visible to the Agent. The answer belongs in `initial_state`,
 > which becomes part of the hidden State that a Verifier can check.
 
-Plural stores a Task's `reset_options` but does not yet pass them to `reset`. Use
-`initial_state`, or load the case in Environment code, instead.
-
 A Task whose Environment has a party, such as a game of poker, is played by several
 Agents, and `seat_instructions` gives one seat instructions of its own: see
 [Several Agents in one Task](multi-agent.md).
@@ -121,8 +118,8 @@ Here is what each field in `task.yaml` means, for when you need the exact rules:
 - `environment` is the name of one Environment in `environments/`, and `verifiers`
   lists at least one Verifier in `verifiers/`, each once. Resources always refer to
   each other by name within the project.
-- `initial_state`, `info`, `goals`, `metadata`, and `reset_options` mean the same as
-  the `Task` fields described on this page.
+- `initial_state`, `info`, `goals`, and `metadata` mean the same as the `Task` fields
+  described on this page.
 - `resources` lists files and folders to give the Task, relative to its folder. It
   defaults to `resources`, so every file below `resources/` is included, and a missing
   `resources/` folder is not an error. Task files must be UTF-8 text; a binary file

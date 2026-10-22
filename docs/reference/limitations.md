@@ -58,7 +58,6 @@ These apply to where code runs and what a run can see or measure.
   gateway.
 - A `Resource` descriptor does not fetch, mount, or grant access to its path or
   URI. Use `source`, `inline`, or `resolver` delivery to stage files.
-- Plural stores a Task's `reset_options` but does not yet pass them to `reset`.
 - A Verifier that runs a command receives every captured artifact; isolate
   untrusted scorers with their own `VerifierRuntime`.
 - A Job makes model calls only through OpenAI-compatible `/chat/completions`

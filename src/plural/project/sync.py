@@ -1196,7 +1196,6 @@ def _files_from_definition(
             "info",
             "metadata",
             "initial_state",
-            "reset_options",
             "seat_instructions",
         ):
             if key in definition and not _is_default(TaskManifest, key, definition[key]):

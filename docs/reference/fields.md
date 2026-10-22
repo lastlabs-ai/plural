@@ -92,7 +92,6 @@ One versioned unit of work in a Python-authored Environment.
 - **`verifiers`** — `array of DeterministicVerifier | AgentVerifier | HumanVerifier`; required. Constraints: `{"minItems": 1}`.
 - **`resources`** — `array of Resource`; optional. Default: `[]`.
 - **`initial_state`** — `object`; optional.
-- **`reset_options`** — `object`; optional.
 - **`seat_instructions`** — `object`; optional.
 
 ## DeterministicVerifier

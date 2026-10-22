@@ -1606,11 +1606,6 @@
         "title": "Initial State",
         "type": "object"
       },
-      "reset_options": {
-        "additionalProperties": true,
-        "title": "Reset Options",
-        "type": "object"
-      },
       "seat_instructions": {
         "additionalProperties": {
           "type": "string"
@@ -3679,11 +3674,6 @@
           "initial_state": {
             "additionalProperties": true,
             "title": "Initial State",
-            "type": "object"
-          },
-          "reset_options": {
-            "additionalProperties": true,
-            "title": "Reset Options",
             "type": "object"
           },
           "seat_instructions": {
