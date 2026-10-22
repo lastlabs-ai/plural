@@ -45,6 +45,9 @@ SEAT_TOKEN = "PLURAL_SEAT_TOKEN"
 # How long a model call waits for credits once the account runs out. The time
 # spent waiting does not count against the episode's max_seconds.
 CREDIT_PAUSE_VARIABLE = "PLURAL_CREDIT_PAUSE_SECONDS"
+# Seconds after which the runner ends the episode itself, set by the engine so the
+# Runtime's own timeout never kills it mid-episode.
+STOP_VARIABLE = "PLURAL_STOP_SECONDS"
 DEFAULT_CREDIT_PAUSE_SECONDS = 3600.0
 _CREDIT_POLL_SECONDS = 30.0
 _TURN_POLL_SECONDS = (0.1, 0.25, 0.5, 1.0)
@@ -273,7 +276,8 @@ def _run(
     max_turns = int(limits.get("max_turns", 8))
     max_seconds = float(limits.get("max_seconds", 120))
     max_cost = limits.get("max_cost_usd")
-    deadline = time.monotonic() + max_seconds
+    stop = float(os.environ.get(STOP_VARIABLE) or max_seconds)
+    deadline = time.monotonic() + min(max_seconds, stop)
     declared = {
         str(item["name"]): item
         for item in environment.get("actions", [])
@@ -359,13 +363,20 @@ def _run(
             break
         offered = tools if profile in _ACTION_PROFILES else []
         started = _started()
-        response, paused = _model_call(
-            model=execution_model,
-            routing=_mapping(agent.get("routing") or {}, "agent.routing"),
-            messages=messages,
-            tools=offered,
-            timeout=remaining,
-        )
+        try:
+            response, paused = _model_call(
+                model=execution_model,
+                routing=_mapping(agent.get("routing") or {}, "agent.routing"),
+                messages=messages,
+                tools=offered,
+                timeout=remaining,
+            )
+        except (TimeoutError, urllib.error.URLError) as exc:
+            timed_out = isinstance(exc, TimeoutError) or isinstance(exc.reason, TimeoutError)
+            if not timed_out or time.monotonic() < deadline:
+                raise
+            stop_reason = "max_seconds"
+            break
         deadline += paused
         message = _response_message(response)
         episode.model_call(

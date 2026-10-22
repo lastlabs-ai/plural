@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -125,8 +126,8 @@ def test_deprecated_names_still_work_and_name_the_new_form(
 
 
 def test_hidden_aliases_stay_out_of_help() -> None:
-    runner = CliRunner()
-    root = runner.invoke(app, ["--help"]).stdout
+    runner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "120"})
+    root = re.sub(r"\x1b\[[0-9;]*m", "", runner.invoke(app, ["--help"]).stdout)
     listed = {line.strip("│ ").split(" ")[0] for line in root.splitlines()}
     assert {"model", "reward", "app"} <= listed
     assert not {"models", "rewards"} & listed

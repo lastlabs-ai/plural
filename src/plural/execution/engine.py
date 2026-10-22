@@ -80,7 +80,11 @@ from plural.execution.seats import (
 from plural.execution.steps import STEPS_FILE, dump_jsonl, episode_terminated, merge_host_steps
 from plural.execution.store import JobStore
 from plural.harness.episode import EPISODE_FILE
-from plural.harness.native_runner import CREDIT_PAUSE_VARIABLE, DEFAULT_CREDIT_PAUSE_SECONDS
+from plural.harness.native_runner import (
+    CREDIT_PAUSE_VARIABLE,
+    DEFAULT_CREDIT_PAUSE_SECONDS,
+    STOP_VARIABLE,
+)
 from plural.harness.packages import BUILTIN_PROFILES, native_actions_v1, native_chat_v1
 from plural.harness.protocol import HarnessProtocolError, HarnessRunRequest
 from plural.harness.retrieval import materialize_package, retrieve_archive, source_digest
@@ -648,6 +652,7 @@ class TrialRunner:
         self._active: dict[tuple[str, str], SandboxHandle] = {}
         self.episode_recorded = False
         """Whether the last execution's Harness timed out after the App host ran an action."""
+        self._cost_usd: float | None = None
 
     @property
     def task(self) -> TaskDefinition:
@@ -714,6 +719,7 @@ class TrialRunner:
                 )
 
         self.episode_recorded = False
+        self._cost_usd = None
         heartbeat = asyncio.create_task(self._heartbeat(execution_id))
         self.store.emit(
             self.spec.job_id,
@@ -903,12 +909,10 @@ class TrialRunner:
                                 handle,
                                 player.package.definition,
                                 self._run_request(task, player),
-                                env=player.env,
-                                timeout_seconds=min(
-                                    task.environment.runtime.timeout_seconds,
-                                    task.environment.limits.max_seconds,
-                                )
-                                + _credit_pause(player.package.definition, player.env),
+                                env=_stop_env(task, player.package.definition, player.env),
+                                timeout_seconds=_harness_timeout(
+                                    task, player.package.definition, player.env
+                                ),
                                 user=player.user,
                                 setup=False,
                                 private=player.seat is not None and self._seats_isolated(task),
@@ -1026,6 +1030,7 @@ class TrialRunner:
                     artifacts, cost_usd = self._with_transcripts(
                         artifacts, execution_id, binding=agent, model=self.spec.model
                     )
+                self._cost_usd = cost_usd
                 phases.append(
                     PhaseTiming(
                         name="artifact_collection",
@@ -1774,7 +1779,7 @@ class TrialRunner:
             artifacts={item.path: item.path for item in artifacts},
             usage=EpisodeUsage(
                 turns=outcome.turns,
-                cost_usd=getattr(self, "_last_cost", None),
+                cost_usd=self._cost_usd,
             ),
             outcome=outcome,
             rewards=rewards,
@@ -2159,6 +2164,40 @@ def job_progress(store: JobStore, job_id: str) -> JobProgress:
     )
 
 
+STOP_GRACE_SECONDS = 30.0
+"""How long past its own deadline the native runner has to stop before it is killed."""
+
+
+def _native(definition: HarnessProtocol) -> bool:
+    return tuple(definition.command[1:2]) == ("native_runner.py",)
+
+
+def _harness_timeout(
+    task: TaskDefinition, definition: HarnessProtocol, env: Mapping[str, str]
+) -> float:
+    """Seconds a Harness may run before it is killed.
+
+    Another Harness is killed at the episode's max_seconds. The native runner
+    stops itself at that deadline, timed from when it starts, so it gets a
+    grace period to end the episode and write its files; a Trial it ends that
+    way is still verified.
+    """
+    runtime, limits = task.environment.runtime, task.environment.limits
+    allowed = limits.max_seconds + (STOP_GRACE_SECONDS if _native(definition) else 0.0)
+    return min(runtime.timeout_seconds, allowed) + _credit_pause(definition, env)
+
+
+def _stop_env(
+    task: TaskDefinition, definition: HarnessProtocol, env: Mapping[str, str]
+) -> dict[str, str]:
+    """The native runner's environment, told when to stop before the Runtime kills it."""
+    if not _native(definition):
+        return dict(env)
+    runtime, limits = task.environment.runtime, task.environment.limits
+    stop = max(1.0, min(limits.max_seconds, runtime.timeout_seconds - STOP_GRACE_SECONDS))
+    return {**env, STOP_VARIABLE: f"{stop:g}"}
+
+
 def _credit_pause(definition: HarnessProtocol, env: Mapping[str, str]) -> float:
     """Extra time for a Harness that waits for credits without spending its own.
 
@@ -2166,7 +2205,7 @@ def _credit_pause(definition: HarnessProtocol, env: Mapping[str, str]) -> float:
     episode's max_seconds, so the Runtime's limit must allow for it. Other
     Harnesses keep their limit, and fail when the account runs out.
     """
-    if tuple(definition.command[1:2]) != ("native_runner.py",):
+    if not _native(definition):
         return 0.0
     if not env.get("PLURAL_GATEWAY_URL") or env.get("PLURAL_AGENT_ENDPOINT"):
         return 0.0

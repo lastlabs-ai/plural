@@ -473,7 +473,17 @@ model judges also need to reach their endpoint.
 
 `cpus` and `memory_mb` request compute limits on providers that support them. The
 Runtime's `timeout_seconds` defaults to 300 seconds for execution and upload
-operations. Environment limits separately bound the episode:
+operations. Environment limits separately bound the episode.
+
+The two meet at the end of an episode. Plural's built-in Harness ends the episode
+itself at `max_seconds`, with the stop reason `max_seconds`, and its Trial is
+verified like any other; the Runtime allows it 30 seconds past that to finish. When
+`timeout_seconds` is the shorter of the two, it wins: the Harness stops 30 seconds
+before it. So raise `timeout_seconds` along with a `max_seconds` above 270. A
+Harness of your own is stopped at `max_seconds` (or `timeout_seconds`, if shorter),
+and a Trial stopped that way fails.
+
+Set the episode limits on the Environment:
 
 ```python
 from plural import Environment, ExecutionLimits, Runtime

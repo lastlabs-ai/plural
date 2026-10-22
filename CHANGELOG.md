@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Verifiers see the Trial's model cost in `episode.usage.cost_usd`; it was always `None`.
+- Plural's built-in Harness ends an episode itself at `max_seconds`, or 30 seconds before the Runtime's `timeout_seconds` when that comes first, so the Trial is verified with the stop reason `max_seconds` instead of being killed and counted as an infrastructure error. A model call still running at that deadline ends the episode the same way instead of failing the Trial.
+- The Benchmarks guide no longer suggests `primary_metric` can name another Verifier score; it accepts only `score`.
+
 ## [0.22.0] - 2026-10-21
 
 ### Added

@@ -156,9 +156,8 @@ revision, and changed content gets the next revision number; you never bump
 Benchmark from Python, load it with `Workspace(Project.find()).get("benchmark",
 "support-triage")` from `plural.project`.
 
-`primary_metric` defaults to `score`, the correctness score written by each Task's
-Verifiers. Leave it as `score` unless you have a named Verifier score you want to rank
-on.
+`primary_metric` is `score`, the correctness score written by each Task's Verifiers,
+and it is the only value it accepts. A Benchmark always ranks on that score.
 
 ## Run the Benchmark
 

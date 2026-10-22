@@ -746,3 +746,28 @@ async def test_an_agent_that_declares_a_credential_needs_its_value(tmp_path: Pat
     runner = JobRunner(spec, provider=FakeProvider("docker"), store=JobStore(tmp_path / "jobs"))
     with pytest.raises(ExecutionFailure, match="plural credential set NAME"):
         await runner.run()
+
+
+async def test_verifiers_see_the_cost_the_trial_spent(tmp_path: Path) -> None:
+    seen: dict[str, Any] = {}
+
+    def check(episode: Episode) -> VerifierOutput:
+        seen["cost"] = episode.usage.cost_usd
+        return VerifierOutput(score=1, evidence=("costed",))
+
+    task = make_task("one", "docker").model_copy(
+        update={
+            "verifiers": (WeightedVerifier(verifier=DeterministicVerifier(name="c", check=check)),)
+        }
+    )
+    spec = JobSpec(
+        source=TaskJobSource(task=task),
+        agents=(AgentBinding(agent=AgentDefinition(name="agent", model="test/model")),),
+    )
+    result = await JobRunner(
+        spec, provider=FakeProvider("docker"), store=JobStore(tmp_path / "jobs")
+    ).run()
+
+    assert result.status == "succeeded", result.trials[0].error_message
+    assert seen["cost"] == pytest.approx(result.trials[0].receipt.cost_usd)
+    assert seen["cost"] == pytest.approx(0.01)

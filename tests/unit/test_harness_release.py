@@ -5,6 +5,7 @@ import json
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -340,3 +341,57 @@ def test_vendor_adapter_invokes_installed_cli_and_translates(
     assert json.loads((tmp_path / "result.json").read_text())["response"] == "vendor answer"
     event = json.loads(capsys.readouterr().out)
     assert event["status"] == "succeeded"
+
+
+def test_a_model_call_cut_off_by_the_deadline_ends_the_episode_at_max_seconds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PLURAL_GATEWAY_URL", "https://gateway.example/v1")
+    monkeypatch.setenv(native_runner.STOP_VARIABLE, "5")
+    clock = [1000.0]
+    monkeypatch.setattr(native_runner.time, "monotonic", lambda: clock[0])
+    budgets: list[float] = []
+
+    def model_call(**kwargs: Any) -> tuple[dict[str, object], float]:
+        budgets.append(float(kwargs["timeout"]))
+        clock[0] += 6
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(native_runner, "_model_call", model_call)
+    request = _request().model_copy(
+        update={"environment": {**_request().environment, "workspace": str(tmp_path)}}
+    )
+
+    result, _episode, _trace_id = native_runner._run(
+        "native.chat.v1", request.model_dump(mode="json")
+    )
+
+    assert budgets == [5.0]
+    assert result["stop_reason"] == "max_seconds"
+
+
+def test_the_native_runner_stops_itself_before_the_runtime_kills_it() -> None:
+    from plural.execution.engine import STOP_GRACE_SECONDS, _harness_timeout, _stop_env
+
+    native = HarnessProtocol(
+        name="h", revision="1.0.0", command=("python", "native_runner.py", "native.chat.v1")
+    )
+    vendor = HarnessProtocol(name="v", revision="1.0.0", command=("codex", "exec"))
+
+    def task(max_seconds: float, timeout: float) -> Any:
+        return SimpleNamespace(
+            environment=SimpleNamespace(
+                limits=SimpleNamespace(max_seconds=max_seconds),
+                runtime=SimpleNamespace(timeout_seconds=timeout),
+            )
+        )
+
+    short = task(120, 300)
+    assert _harness_timeout(short, native, {}) == 120 + STOP_GRACE_SECONDS
+    assert _stop_env(short, native, {})[native_runner.STOP_VARIABLE] == "120"
+    assert _harness_timeout(short, vendor, {}) == 120
+    assert native_runner.STOP_VARIABLE not in _stop_env(short, vendor, {})
+
+    long = task(1800, 300)
+    assert _harness_timeout(long, native, {}) == 300
+    assert _stop_env(long, native, {})[native_runner.STOP_VARIABLE] == "270"
