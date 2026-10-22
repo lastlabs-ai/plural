@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every Trial has a seed, derived from the Task and the attempt, so every Agent on one attempt faces the same world and a rerun faces it again. Apps read it as `self.seed` and draw from `self.rng`; a State with a `seed` field gets it too. The Trial records it as `TrialResult.seed`. Until now a Job always reset Apps without a seed.
 - `plural task cases TASK FILE` writes one Task per case, each a copy of TASK with the case's `instructions`, `initial_state`, `info`, `metadata`, or `goals`, and `--benchmark` adds them all. Cases are a `.jsonl` file or a `.json` or `.yaml` list.
 - `plural benchmark add` and `remove` take several Tasks, by name or by a pattern such as `'refund-*'`.
+- A Verifier's `reward` function that raises is no longer silent. `plural run` warns with the Verifier, how many steps it failed on, and the first error with the line that raised it; `plural trial show` and the web app show the same, and the Trial records it as `TrialResult.reward_failures`.
 
 ### Removed
 
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A Verifier's in-process `check` that raises fails the Trial with the Verifier's name, the error, and the line that raised it. An error other than `ValueError` used to surface as bare text, such as `'done'`.
 - A gateway failure the built-in Harness could not recover from is now recorded as the provider's, not as a harness failure scored zero. 0.22.1 lost the failure kind when the runner exited non-zero, which is how it always exits on an error.
 - The README's examples run as shown, and the package's Documentation link points at pluralintel.com/docs.
 

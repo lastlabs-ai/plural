@@ -443,6 +443,10 @@ def publish_execution(
     }
     if result.seed is not None:
         report["seed"] = result.seed
+    if result.reward_failures:
+        report["reward_failures"] = [
+            item.model_dump(mode="json") for item in result.reward_failures
+        ]
     if result.seats:
         report["seats"] = [item.model_dump(mode="json") for item in result.seats]
         report["seat_isolation"] = result.seat_isolation

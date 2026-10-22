@@ -39,6 +39,7 @@ from plural.environments.definition import (
     HarnessGrant,
     party_seats,
 )
+from plural.rewards import RewardFailure
 from plural.sandbox.models import NetworkMode
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
 
@@ -849,6 +850,9 @@ class TrialResult(FrozenModel):
     step_reward_total: float = 0.0
     """The episode total of per-step rewards in the reward ledger, each
     times its weight. Only ``check: total_reward`` turns it into a score."""
+    reward_failures: tuple[RewardFailure, ...] = ()
+    """Each Verifier whose ``reward`` function raised, on how many steps, and
+    the first error. Those steps earned it no reward."""
     turns: int = Field(default=0, ge=0)
     """Model turns the Harness reported taking."""
 

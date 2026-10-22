@@ -195,7 +195,7 @@ def test_a_failing_step_hook_never_fails_the_action() -> None:
     observation, reward, _, _, info = environment.step("guess", word="crane")
     assert observation == {"text": "solved"}
     assert reward == 2.0
-    assert info["rewards"][0]["error"] == "RuntimeError: boom"
+    assert info["rewards"][0]["error"].startswith("RuntimeError: boom (at test_apps.py:")
 
 
 def test_tool_names_just_work_for_every_provider() -> None:

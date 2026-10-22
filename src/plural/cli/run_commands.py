@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Literal
 
@@ -985,7 +985,31 @@ def _print_result(job_id: str, result: JobResult) -> None:
             f"{counted(aggregate.count, 'Trial')}, "
             f"{aggregate.successes} succeeded, coverage {aggregate.coverage:.0%}"
         )
+    for line in _reward_warnings(result.trials):
+        typer.echo(f"! {line}", err=True)
     typer.echo(f"Details: plural job show {job_id}")
+
+
+def _reward_warnings(trials: Iterable[TrialResult]) -> list[str]:
+    """One line per Verifier whose ``reward`` raised, across every Trial.
+
+    Returns:
+        The lines, in the order the Verifiers first failed.
+    """
+    steps: dict[str, int] = {}
+    failed_trials: dict[str, int] = {}
+    first: dict[str, str] = {}
+    for trial in trials:
+        for failure in trial.reward_failures:
+            steps[failure.verifier] = steps.get(failure.verifier, 0) + failure.steps
+            failed_trials[failure.verifier] = failed_trials.get(failure.verifier, 0) + 1
+            first.setdefault(failure.verifier, failure.error)
+    return [
+        f"Verifier {name}'s reward raised on {counted(count, 'step')} in "
+        f"{counted(failed_trials[name], 'Trial')}, which earned it no reward there: "
+        f"{first[name]}"
+        for name, count in steps.items()
+    ]
 
 
 def _print_job(payload: dict[str, Any]) -> None:
@@ -1048,6 +1072,7 @@ def _print_trial(payload: dict[str, Any]) -> None:
         ("Task", "task"),
         ("Score", "score"),
         ("Stopped", "stop_reason"),
+        ("Seed", "seed"),
         ("Turns", "turns"),
         ("Cost (USD)", "cost_usd"),
         ("Error", "error"),
@@ -1064,6 +1089,11 @@ def _print_trial(payload: dict[str, Any]) -> None:
         )
         for line in verifier.get("evidence") or []:
             typer.echo(f"    - {line}")
+    for failure in payload.get("reward_failures") or []:
+        typer.echo(
+            f"  Verifier {failure['verifier']}: reward raised on "
+            f"{counted(failure['steps'], 'step')}: {failure['error']}"
+        )
     for credential in payload.get("credentials") or []:
         scopes = ", ".join(credential.get("scopes") or []) or "no scopes listed"
         typer.echo(

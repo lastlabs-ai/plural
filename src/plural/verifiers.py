@@ -25,7 +25,7 @@ from pydantic import (
 from plural._deprecation import renamed_attribute, renamed_keys
 from plural.apps.definition import SecretReference
 from plural.catalog import ModelCatalog
-from plural.common import FrozenModel, RoutingSpec
+from plural.common import FrozenModel, RoutingSpec, described
 from plural.identity import revision_hash
 from plural.rewards import HindsightVerifier
 from plural.sandbox.models import (
@@ -681,13 +681,10 @@ class DeterministicVerifier(Verifier):
                 "Its check is a command or Python reference that has not been resolved."
             )
         try:
-            return coerce_verifier_output(fn(episode), verifier_name=self.name)
-        except TypeError as exc:
-            raise ValueError(
-                f"Verifier {self.name!r} check failed to accept the Episode.\n"
-                "The function must accept one argument: the finished Episode.\n"
-                f"Cause: {exc}"
-            ) from exc
+            output = fn(episode)
+        except Exception as exc:
+            raise ValueError(f"Verifier {self.name!r} check raised {described(exc)}") from exc
+        return coerce_verifier_output(output, verifier_name=self.name)
 
 
 def hindsight_hooks(verifiers: Iterable[Any]) -> list[HindsightVerifier]:

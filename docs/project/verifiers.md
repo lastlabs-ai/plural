@@ -207,8 +207,17 @@ def reply_matches_crm(step: Step) -> float | None:
 ```
 
 Return a number, or `None` when this step gives no signal. A `reward` function that
-raises, or returns a value that isn't a finite number, is recorded with its error and a
-value of 0; it never fails the Agent's action.
+raises, or returns a value that isn't a finite number, never fails the Agent's action.
+The step earns that Verifier no reward, and the error, with the line that raised it,
+is shown after `plural run`, in `plural trial show`, and on the Trial in the web app:
+
+```text
+! Verifier progress's reward raised on 12 steps in 3 Trials, which earned it no reward
+  there: KeyError: 'done' (at verifier.py:14)
+```
+
+Fix the function, then replay it on those Trials with
+[`plural verifier apply`](#try-a-verifier-on-stored-trials).
 
 Each reward is written to the Trial's reward ledger, `rewards.jsonl`, with the
 Verifier's name and version and the step it credits. The Agent never sees it: only an

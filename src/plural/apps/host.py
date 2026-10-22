@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from plural.apps.base import App, observation_payload
+from plural.common import described
 from plural.verifiers import Step, StepTask
 
 if TYPE_CHECKING:
@@ -717,7 +718,7 @@ class AppHost:
                     continue
                 credited = self._credited(value, seat)
             except Exception as exc:  # noqa: BLE001 - a reward never fails the action
-                signals.append({**entry, "value": 0.0, "error": f"{type(exc).__name__}: {exc}"})
+                signals.append({**entry, "value": 0.0, "error": described(exc)})
                 continue
             for credited_seat, number in credited:
                 signal = dict(entry)

@@ -114,6 +114,7 @@ from plural.rewards import (
     dump_ledger,
     online_records,
     parse_ledger,
+    reward_failures,
     trial_from_artifacts,
 )
 from plural.sandbox import (
@@ -525,7 +526,7 @@ def _episode_totals(artifacts: Sequence[DownloadedFile], *, failed: bool) -> dic
     """How the episode ended, its per-step reward total, and its turns, for the TrialResult.
 
     Returns:
-        ``stop_reason``, ``step_reward_total``, and ``turns``.
+        ``stop_reason``, ``step_reward_total``, ``reward_failures``, and ``turns``.
     """
     outcome = _episode_outcome(artifacts)
     ledger = next((item for item in artifacts if item.path == LEDGER_FILE), None)
@@ -535,6 +536,7 @@ def _episode_totals(artifacts: Sequence[DownloadedFile], *, failed: bool) -> dic
         "step_reward_total": math.fsum(
             record.value * record.weight for record in records if record.source == "step"
         ),
+        "reward_failures": reward_failures(_episode_records(artifacts)),
         "turns": max(outcome.turns, 0),
     }
 

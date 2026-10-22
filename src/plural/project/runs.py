@@ -1204,9 +1204,11 @@ def _trial_summary(result: TrialResult) -> dict[str, Any]:
         "model": result.receipt.model.catalog_model_id,
         "score": result.score,
         "stop_reason": result.stop_reason or None,
+        "seed": result.seed,
         "turns": result.turns,
         "cost_usd": result.receipt.cost_usd,
         "error": result.error_message,
+        "reward_failures": [item.model_dump(mode="json") for item in result.reward_failures],
     }
 
 
