@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from plural.apps.host import STEP_PROTOCOL as PROTOCOL
 from plural.harness import native_runner
 from plural.harness.protocol import HarnessRunRequest
+
+
+def _untimed(document: Any) -> str:
+    return re.sub(r"\d{4}-\d\d-\d\dT[\d:.+-]+", "", json.dumps(document))
 
 
 def _request(tmp_path: Path, **limits: object) -> dict[str, object]:
@@ -381,7 +387,7 @@ def test_trajectory_reads_as_chat_turns(tmp_path: Path, monkeypatch: pytest.Monk
         "content": "closer",
     }
     assert document["messages"][4] == {"role": "assistant", "content": "done"}
-    assert "0.75" not in json.dumps(document)
+    assert "0.75" not in _untimed(document)
 
 
 def test_a_harness_without_a_model_still_reads_as_chat_turns() -> None:
@@ -495,7 +501,7 @@ def test_native_loop_records_model_calls_and_steps(
     assert totals["total_cost_usd"] == pytest.approx(0.0005)
     assert totals["extra"]["calls_missing_cost"] == 0
     # Reward is episode bookkeeping and never part of what the Agent saw.
-    assert "0.75" not in json.dumps(trajectory["steps"])
+    assert "0.75" not in _untimed(trajectory["steps"])
     assert "reward" not in json.dumps(trajectory["steps"])
 
 
