@@ -9,7 +9,7 @@ from pathlib import Path
 
 from _foundation import build_job
 
-from plural import JobStore
+from plural.execution import JobStore
 
 
 async def main() -> None:

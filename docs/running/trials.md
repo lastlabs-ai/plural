@@ -119,7 +119,7 @@ formats into one event list:
 
 ```python
 from pathlib import Path
-from plural import normalize_trajectory
+from plural.trajectory import normalize_trajectory
 
 trajectory = normalize_trajectory(Path("trajectory.jsonl"))
 for event in trajectory.events:

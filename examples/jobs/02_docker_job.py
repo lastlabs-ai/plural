@@ -8,7 +8,7 @@ from pathlib import Path
 
 from _foundation import build_job
 
-from plural import JobStore
+from plural.execution import JobStore
 
 with tempfile.TemporaryDirectory(prefix="plural-docker-job-") as temporary:
     job = build_job(provider="docker", store=JobStore(Path(temporary)))

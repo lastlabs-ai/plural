@@ -8,8 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _shared import ScriptedProvider, ensure_out_dir
-from plural import Client, Message, Redactor
-from plural.tracing import SQLiteSink
+from plural import Client, Message
+from plural.tracing import Redactor, SQLiteSink
 
 
 def main() -> None:

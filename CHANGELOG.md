@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `plural benchmark add` and `remove` take several Tasks, by name or by a pattern such as `'refund-*'`.
 - A Verifier's `reward` function that raises is no longer silent. `plural run` warns with the Verifier, how many steps it failed on, and the first error with the line that raised it; `plural trial show` and the web app show the same, and the Trial records it as `TrialResult.reward_failures`.
 
+### Changed
+
+- `plural` itself now exports the 49 names a project needs: Environments, Apps, Tasks, Verifiers, Agents, Harnesses, Benchmarks, Jobs, and the Client. The other 79, such as `JobStore`, the sandbox providers, tracing, and most error classes, import from their submodules, such as `plural.execution` and `plural.sandbox`. Importing one from `plural` still works for this release, with a `DeprecationWarning` naming its new home.
+
 ### Removed
 
 - `reset_options` on a Task, which Plural stored but never passed to `reset`. A Task or `task.yaml` that sets them is refused with a pointer to `initial_state` and `info`; an empty one is still accepted, stored revisions still load, and no Task's hash changes.

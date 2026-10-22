@@ -10,10 +10,11 @@ from typing import Any
 import pytest
 
 import plural
-from plural import Agent, Harness, HarnessDefinition, Runtime, VerifierRuntime
+from plural import Agent, Harness, Runtime
 from plural.agents import AgentDefinition
-from plural.harness import HarnessAgent
+from plural.harness import HarnessAgent, HarnessDefinition
 from plural.identity import revision_hash
+from plural.verifiers import VerifierRuntime
 
 SCHEMAS = Path(plural.__file__).parent / "schemas" / "packages"
 
@@ -168,11 +169,14 @@ def test_renamed_top_level_names_still_import(module: str, old: str, new: str) -
     loaded = importlib.import_module(module)
     with pytest.warns(DeprecationWarning, match=new):
         value = getattr(loaded, old)
-    replacement = (
-        importlib.import_module("plural.execution").TrialRunner
-        if new == "TrialRunner"
-        else getattr(loaded, new, None) or getattr(plural, new)
-    )
+    home = {
+        "Client": "plural",
+        "PluralTimeoutError": "plural.errors",
+        "SandboxCapability": "plural.sandbox",
+        "TraceOutcome": "plural.tracing",
+        "TrialRunner": "plural.execution",
+    }
+    replacement = getattr(importlib.import_module(home[new]), new)
     assert value is replacement
 
 
@@ -181,3 +185,15 @@ def test_trial_is_not_a_top_level_export() -> None:
     assert "TrialRunner" not in plural.__all__
     with pytest.warns(DeprecationWarning, match="TrialRunner"):
         assert plural.Trial is importlib.import_module("plural.execution").TrialRunner
+
+
+def test_the_top_level_holds_what_a_project_needs_and_moved_names_still_import() -> None:
+    assert len(plural.__all__) < 50
+    assert all(hasattr(plural, name) for name in plural.__all__)
+    with pytest.warns(DeprecationWarning, match=r"plural\.JobStore .* use plural\.execution\."):
+        from plural import JobStore
+    assert JobStore is importlib.import_module("plural.execution").JobStore
+    with pytest.warns(DeprecationWarning, match=r"plural\.Plural .* use plural\.Client"):
+        assert plural.Plural is plural.Client
+    with pytest.raises(AttributeError):
+        plural.NoSuchName  # noqa: B018

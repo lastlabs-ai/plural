@@ -280,7 +280,8 @@ harness = SupportHarness(config={"max_turns": 12})
 When you need them, class attributes describe policy and compatibility:
 
 ```python
-from plural import Harness, HarnessCapability
+from plural import Harness
+from plural.common import HarnessCapability
 
 
 class ResearchHarness(Harness):

@@ -88,7 +88,8 @@ Given a Task and an Agent whose Harness captures TITO, check the plan and then r
 it:
 
 ```python
-from plural import Client, Job, JobMode
+from plural import Client, Job
+from plural.jobs import JobMode
 from plural.project import Project, Workspace
 
 workspace = Workspace(Project.find())

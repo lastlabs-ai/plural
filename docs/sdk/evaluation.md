@@ -110,7 +110,8 @@ If your project uses a model that is not in the public catalog, such as your own
 endpoint, add it with `CatalogContext`:
 
 ```python
-from plural import CatalogContext, ModelCatalog, ModelSpec
+from plural import CatalogContext, ModelCatalog
+from plural.catalog import ModelSpec
 from plural.catalog import ModelEndpoint
 from plural.project import Project, Workspace
 
@@ -170,7 +171,7 @@ For power users:
 `JobStore` reads the records of past local Jobs:
 
 ```python
-from plural import JobStore
+from plural.execution import JobStore
 
 store = JobStore()
 for row in store.list_jobs():

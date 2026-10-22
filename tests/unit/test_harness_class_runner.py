@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from plural import Agent, Harness, HarnessEnvironment
-from plural.harness import class_runner
+from plural import Agent, Harness
+from plural.harness import HarnessEnvironment, class_runner
 from plural.harness.retrieval import build_archive, extract_archive, package_from_archive
 from plural.project.resources import load_harness_directory
 

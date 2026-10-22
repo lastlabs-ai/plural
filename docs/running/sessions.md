@@ -86,7 +86,7 @@ plural session import sessions/support --out sessions/instances
 The same operations are available from Python:
 
 ```python
-from plural import SessionSnapshot
+from plural.sessions import SessionSnapshot
 from plural.sessions import export_from_parts, export_from_trial, import_bundle
 
 snapshot = export_from_parts(

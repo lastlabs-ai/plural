@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from plural import Agent, Environment, Job, JobStore, Party, Runtime, Task
+from plural import Agent, Environment, Job, Party, Runtime, Task
+from plural.execution import JobStore
 from plural.verifiers import DeterministicVerifier, Episode, VerifierOutput
 
 sys.path.insert(0, str(Path(__file__).parent / "party"))

@@ -201,7 +201,7 @@ class FileDeclaration(FrozenModel):
 class HarnessProtocol(FrozenModel):
     """Internal versioned executable harness contract.
 
-    Built from the public :class:`plural.HarnessDefinition`. Carries the wire
+    Built from the public :class:`plural.harness.HarnessDefinition`. Carries the wire
     details Plural needs to launch a harness and is never authored by hand.
     """
 

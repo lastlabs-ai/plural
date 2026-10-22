@@ -8,15 +8,7 @@ import pytest
 from fakes import FakeProvider
 from pydantic import ValidationError
 
-from plural import (
-    Credit,
-    DeterministicVerifier,
-    Episode,
-    HindsightTrial,
-    RewardTarget,
-    Step,
-    total_reward,
-)
+from plural import Credit, DeterministicVerifier, Episode, HindsightTrial, Step, total_reward
 from plural.agents import AgentBinding, AgentDefinition
 from plural.execution import JobRunner, JobStore
 from plural.execution.replay import replay_verifier
@@ -25,6 +17,7 @@ from plural.rewards import (
     LEDGER_FILE,
     HindsightVerifier,
     RewardRecord,
+    RewardTarget,
     align_tito,
     append_ledger,
     online_records,
