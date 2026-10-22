@@ -89,10 +89,15 @@ plural agent test support-bot
 ✓ support-bot answered the signed ping with 200 in 0.03s over plain http.
 ```
 
-`agents/support-bot/agent.yaml` names the variable holding the key, never the key.
+`agents/support-bot/agent.yaml` names the secret holding the key, never the key.
 Store it with `plural secret set SUPPORT_BOT_SIGNING_KEY` to keep it out of your
-shell. The agent's owner can register it in a hosted project instead, from the
-service, with `plural external register`.
+shell. The two names differ on purpose: the service reads `PLURAL_SIGNING_KEY`, and
+the project keeps a secret per Agent.
+
+The agent's owner can register it in a hosted project instead, from the service, with
+`plural external register` (see [External tracing](../project/external-tracing.md#2-register-the-agent)).
+Then bring it into your project with `plural agent pull support-bot` before you run
+it, and store the key as above.
 
 ## 3. Make an Environment with no Apps
 

@@ -68,18 +68,24 @@ def init(
     if path.exists() and not force:
         raise ProjectError(f"{path} exists. Pass --force to replace it.")
     text = render_template(name=name, version=version, model=model, url=url)
-    AgentConfig.model_validate(yaml.safe_load(text))
     path.write_text(text, encoding="utf-8")
     success(f"Wrote {path}.")
-    typer.echo("Next:")
-    typer.echo("  1. Edit it: the capture section decides what leaves this service.")
-    typer.echo("  2. Export PLURAL_API_KEY, a key for the project the traces go to.")
+    config = AgentConfig.model_validate(yaml.safe_load(text))
+    steps = [
+        "Edit it: the capture section decides what leaves this service.",
+        "Export PLURAL_API_KEY, a key for the project the traces go to, or set "
+        "tracing.production to false to trace only Plural Jobs.",
+    ]
     if url:
-        typer.echo(
-            "  3. `plural agent key`, and export the key as PLURAL_SIGNING_KEY here and in "
-            "the project that runs Jobs."
-        )
-    typer.echo("  4. `plural external register`, then `plural external check`.")
+        steps += [
+            "Make a signing key with `plural agent key`. Export it here as "
+            f"PLURAL_SIGNING_KEY; the project that runs Jobs keeps it as "
+            f"{config.agent.signing_key}.",
+            "`plural external register`, then `plural external check`.",
+        ]
+    typer.echo("Next:")
+    for number, step in enumerate(steps, start=1):
+        typer.echo(f"  {number}. {step}")
 
 
 @external_app.command("register")
@@ -127,7 +133,7 @@ def register(config_path: Path | None = CONFIG_OPTION, as_json: bool = JSON_OPTI
 @handled
 def check(config_path: Path | None = CONFIG_OPTION, as_json: bool = JSON_OPTION) -> None:
     """Check the config, the API key, the Agent's registration, and a signed ping."""
-    from plural.external.client import ping
+    from plural.external.client import KEY_VARIABLE, ping
     from plural.studio import slugify
 
     config = _load(config_path)
@@ -153,13 +159,13 @@ def check(config_path: Path | None = CONFIG_OPTION, as_json: bool = JSON_OPTION)
                 }
             )
     if config.agent.url:
-        key = os.environ.get(config.agent.signing_key, "")
+        key = os.environ.get(KEY_VARIABLE) or os.environ.get(config.agent.signing_key, "")
         if not key:
             checks.append(
                 {
                     "check": "signed ping",
                     "ok": False,
-                    "detail": f"export {config.agent.signing_key} first",
+                    "detail": f"export {KEY_VARIABLE} first, the key from `plural agent key`",
                 }
             )
         else:

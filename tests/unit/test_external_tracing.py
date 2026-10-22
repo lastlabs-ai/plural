@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 import uvicorn
 import yaml
+from pydantic import ValidationError
 
 from plural import Agent, DeterministicVerifier, Environment, Job, Runtime, Task, VerifierOutput
 from plural.atif import validate_atif
@@ -452,13 +453,15 @@ def agent_service(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[str, list[E
     from plural.external import serve
 
     monkeypatch.setenv("ACME_SIGNING_KEY", KEY)
+    monkeypatch.setenv("PLURAL_SIGNING_KEY", KEY)
     seen: list[Episode] = []
 
     def work(episode: Episode, run: Run) -> str:
         seen.append(episode)
-        with tracer.run() as inner:
+        with tracer.run(metadata={"thread": "t-1"}) as inner:
             assert inner is run  # a framework's own run joins the episode
             _work(run)
+        assert run.snapshot()[1]["thread"] == "t-1"
         assert not run.finished
         return "12 doors"
 
@@ -552,17 +555,14 @@ def test_the_cli_writes_registers_and_checks_an_external_agent(
     assert yaml.safe_load((tmp_path / "plural-agent.yaml").read_text())["agent"]["url"] == url
     again = runner.invoke(app, ["external", "init", "takeoff"])
     assert again.exit_code != 0 and "--force" in again.output
-    text = (tmp_path / "plural-agent.yaml").read_text()
-    (tmp_path / "plural-agent.yaml").write_text(
-        text.replace("signing_key: PLURAL_SIGNING_KEY", "signing_key: ACME_SIGNING_KEY")
-    )
+    assert "TAKEOFF_SIGNING_KEY" in made.output
 
     registered = runner.invoke(app, ["external", "register", "--json"])
     assert registered.exit_code == 0, registered.output
     assert json.loads(registered.output)["agent_id"] == "ag_takeoff"
     [pushed] = studio.agents.pushed
     assert pushed.external is not None
-    assert (pushed.external.url, pushed.external.signing_key) == (url, "ACME_SIGNING_KEY")
+    assert (pushed.external.url, pushed.external.signing_key) == (url, "TAKEOFF_SIGNING_KEY")
 
     checked = runner.invoke(app, ["external", "check", "--json"])
     assert checked.exit_code == 0, checked.output
@@ -572,3 +572,29 @@ def test_the_cli_writes_registers_and_checks_an_external_agent(
         "registered": True,
         "signed ping": True,
     }
+
+
+def test_the_signing_key_secret_defaults_from_the_name_and_is_never_reserved() -> None:
+    config = AgentConfig.model_validate(
+        {"agent": {"name": "support-bot", "version": "1", "model": "acme/v3"}}
+    )
+    assert config.agent.signing_key == "SUPPORT_BOT_SIGNING_KEY"
+    with pytest.raises(ValidationError, match="PLURAL_SIGNING_KEY"):
+        AgentConfig.model_validate(
+            {
+                "agent": {
+                    "name": "a",
+                    "version": "1",
+                    "model": "m",
+                    "signing_key": "PLURAL_SIGNING_KEY",
+                }
+            }
+        )
+
+
+def test_serving_without_a_signing_key_fails_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from plural.external import serve
+
+    monkeypatch.delenv("PLURAL_SIGNING_KEY", raising=False)
+    with pytest.raises(ConfigurationError, match="plural agent key"):
+        serve.app(lambda episode, run: "", tracer_=Tracer(_config(production=False), environ={}))

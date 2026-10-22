@@ -39,7 +39,7 @@ agent:
   version: 0.1.0
   model: acme/support-v3
   url: https://agents.acme.dev/plural
-  signing_key: PLURAL_SIGNING_KEY
+  signing_key: SUPPORT_BOT_SIGNING_KEY
   ca_bundle: null
 
 plural:
@@ -65,10 +65,12 @@ tracing:
   tags: {}
 ```
 
-The file names environment variables, never values. `plural.api_key` and
-`agent.signing_key` are the names of the variables that hold your Plural API key and
-the Jobs' signing key. The tracer looks for `plural-agent.yaml` in the working
-directory, or at the path in `PLURAL_AGENT_CONFIG`.
+The file names environment variables and secrets, never values. `plural.api_key` is
+the variable that holds your Plural API key. `agent.signing_key` is the secret the
+project that runs Jobs keeps the signing key in. It defaults to the agent's name, as
+`SUPPORT_BOT_SIGNING_KEY`, and can't start with `PLURAL_`. The service itself reads the
+same key from `PLURAL_SIGNING_KEY`. The tracer looks for `plural-agent.yaml` in the
+working directory, or at the path in `PLURAL_AGENT_CONFIG`.
 
 ### Fields every trace carries
 
@@ -124,7 +126,8 @@ one run only.
 ## 2. Register the agent
 
 ```bash
-export PLURAL_API_KEY=...
+plural agent key
+export PLURAL_API_KEY=... PLURAL_SIGNING_KEY=whsec_...
 plural external register
 plural external check
 ```
@@ -133,6 +136,14 @@ plural external check
 the version or URL changed. It needs `agent.url` and `agent.model`. `check` confirms
 the config loads, the API key is set, the Agent is registered, and the service
 answers a signed ping.
+
+Whoever runs Jobs then pulls the Agent into their project and stores the same key
+under the secret the config names:
+
+```bash
+plural agent pull support-bot
+plural secret set SUPPORT_BOT_SIGNING_KEY
+```
 
 Production tracing needs `PLURAL_API_KEY` wherever the agent runs. Without it, the
 tracer refuses to start and names the variable. To trace only the episodes of Plural

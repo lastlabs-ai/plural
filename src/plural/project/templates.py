@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from plural.external.config import signing_key_secret
 from plural.project.layout import (
     AGENT,
     BENCHMARK,
@@ -214,7 +215,7 @@ def resource_scaffold(
                     name=name,
                     model=model or f"{name}/v1",
                     url=external,
-                    key=f"{name.upper().replace('-', '_')}_SIGNING_KEY",
+                    key=signing_key_secret(name),
                 )
             }
         )

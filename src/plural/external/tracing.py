@@ -22,6 +22,7 @@ trace that cannot be written is logged and dropped.
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import contextvars
 import json
@@ -39,7 +40,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
 
 from plural.atif import ATIF_VERSION, final_metrics
-from plural.external.client import Episode
+from plural.external.client import KEY_VARIABLE, Episode
 from plural.external.config import AgentConfig, AgentSection, Capture, FlushPolicy
 
 log = logging.getLogger("plural.external")
@@ -536,6 +537,7 @@ class Tracer:
         tracing = self.config.tracing
         secrets = (
             env.get(self.config.plural.api_key, ""),
+            env.get(KEY_VARIABLE, ""),
             env.get(self.config.agent.signing_key, ""),
         )
         self._secrets = tuple(value for value in secrets if len(value) >= 8)
@@ -544,6 +546,7 @@ class Tracer:
         if tracing.enabled and tracing.production:
             self._production = _PluralSink(self, studio or self.config.studio(env))
         self._episodes = _EpisodeSink(self)
+        _LIVE.add(self)
 
     @classmethod
     def from_config(
@@ -595,6 +598,8 @@ class Tracer:
         if active is not None and active.kind == "episode" and not active.finished:
             if input:
                 active.user(input)
+            if metadata:
+                active.metadata(**metadata)
             return active
         tracing = self.config.tracing
         keep = (
@@ -738,6 +743,15 @@ class Tracer:
 
 _DEFAULT: Tracer | None = None
 _DEFAULT_LOCK = threading.Lock()
+_LIVE: weakref.WeakSet[Tracer] = weakref.WeakSet()
+_EXIT_FLUSH_SECONDS = 5.0
+
+
+@atexit.register
+def _flush_at_exit() -> None:
+    # Traces go out on a daemon thread, which would die with a script that never flushed.
+    for item in list(_LIVE):
+        item.flush(_EXIT_FLUSH_SECONDS)
 
 
 def tracer() -> Tracer:

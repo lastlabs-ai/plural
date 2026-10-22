@@ -21,11 +21,13 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 import threading
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from plural.external.client import Episode, verify_request
+from plural.errors import ConfigurationError
+from plural.external.client import KEY_VARIABLE, Episode, verify_request
 from plural.external.protocol import SignatureError
 from plural.external.tracing import Run, Tracer, tracer
 
@@ -69,9 +71,14 @@ def endpoint(
         The endpoint.
 
     Raises:
-        ConfigurationError: When no tracer is given and ``plural-agent.yaml``
-            cannot be read.
+        ConfigurationError: When there is no signing key, or no tracer is given
+            and ``plural-agent.yaml`` cannot be read.
     """
+    if not (key or os.environ.get(KEY_VARIABLE)):
+        raise ConfigurationError(
+            f"Set {KEY_VARIABLE} to the Agent's signing key before serving episodes. Make "
+            "one with `plural agent key`; the project that runs Jobs keeps the same key."
+        )
     slots = threading.BoundedSemaphore(max_episodes)
     traced = tracer_ or tracer()
 

@@ -9,12 +9,13 @@ with ``PLURAL_TRACE_*`` environment variables.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from plural.errors import ConfigurationError
 
@@ -38,6 +39,15 @@ REQUIRED_FIELDS = (
 """What every trace holds, whatever ``capture`` says."""
 
 
+def signing_key_secret(name: str) -> str:
+    """The secret a project keeps an Agent's signing key in, such as ``SUPPORT_BOT_SIGNING_KEY``.
+
+    Returns:
+        The secret's name.
+    """
+    return f"{re.sub(r'[^A-Za-z0-9]+', '_', name).strip('_').upper()}_SIGNING_KEY"
+
+
 class _Section(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -52,9 +62,31 @@ class AgentSection(_Section):
     url: str | None = None
     """Where Plural Jobs send each signed episode, over https. Needed only to be
     evaluated in Jobs; tracing alone works without it."""
-    signing_key: str = "PLURAL_SIGNING_KEY"
-    """The environment variable holding the key Jobs sign with. Never the key."""
+    signing_key: str = ""
+    """The secret the project that runs Jobs keeps the signing key in, never the key.
+    Defaults to the Agent's name, as ``SUPPORT_BOT_SIGNING_KEY``. The service reads
+    the same key from ``PLURAL_SIGNING_KEY``."""
     ca_bundle: str | None = None
+    """A PEM CA file that Jobs trust for this service's certificate, when it is private."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_secret(cls, value: Any) -> Any:
+        if isinstance(value, dict) and not value.get("signing_key") and value.get("name"):
+            return {**value, "signing_key": signing_key_secret(str(value["name"]))}
+        return value
+
+    @field_validator("signing_key")
+    @classmethod
+    def _not_reserved(cls, value: str) -> str:
+        if value.upper().startswith("PLURAL_"):
+            raise ValueError(
+                "signing_key names the secret the project that runs Jobs keeps the key in, "
+                "and names starting with PLURAL_ are reserved. Use one such as "
+                "SUPPORT_BOT_SIGNING_KEY; this service still reads the key from "
+                "PLURAL_SIGNING_KEY."
+            )
+        return value
 
 
 class PluralSection(_Section):
@@ -281,8 +313,10 @@ agent:
   # Where Plural Jobs send each signed episode, over https. Needed only to be
   # evaluated in Jobs; tracing alone works without it.
   url: {_scalar(url) if url else "null"}
-  signing_key: PLURAL_SIGNING_KEY   # the env var holding the Jobs' signing key, never the key
-  ca_bundle: null                   # a PEM CA file, for a service inside your own network
+  # The secret the project that runs Jobs keeps the signing key in, never the key.
+  # This service reads the same key from PLURAL_SIGNING_KEY.
+  signing_key: {signing_key_secret(name)}
+  ca_bundle: null   # a PEM CA file Jobs trust, for a service with a private certificate
 
 plural:
   api_key: PLURAL_API_KEY   # the env var holding your Plural API key, never the key
@@ -328,4 +362,5 @@ __all__ = [
     "PluralSection",
     "TracingSection",
     "render_template",
+    "signing_key_secret",
 ]
