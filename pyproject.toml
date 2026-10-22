@@ -62,7 +62,7 @@ all = [
 
 [project.urls]
 Homepage = "https://github.com/lastlabs-ai/plural"
-Documentation = "https://lastlabs-ai.github.io/plural/"
+Documentation = "https://pluralintel.com/docs"
 Repository = "https://github.com/lastlabs-ai/plural"
 Issues = "https://github.com/lastlabs-ai/plural/issues"
 Changelog = "https://github.com/lastlabs-ai/plural/blob/main/CHANGELOG.md"

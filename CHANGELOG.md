@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A gateway failure the built-in Harness could not recover from is now recorded as the provider's, not as a harness failure scored zero. 0.22.1 lost the failure kind when the runner exited non-zero, which is how it always exits on an error.
+- The README's examples run as shown, and the package's Documentation link points at pluralintel.com/docs.
+
 ## [0.22.1] - 2026-10-21
 
 ### Added
