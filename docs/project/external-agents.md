@@ -25,7 +25,9 @@ Use one when:
 
 Built the agent with LangGraph, the OpenAI Agents SDK, or OpenTelemetry? See
 [Trace an External Agent](external-tracing.md) to register it, trace its runs, and
-serve episodes with `plural[external]`.
+serve episodes with `plural[external]`. To score an agent that only answers, on Tasks
+with answer keys and no Apps, follow
+[Connect an External Agent](../guides/connect-external-agent.md).
 
 Everything that decides the score stays with you. The Apps, their State, and the
 Verifiers run in the Runtime your Job owns, on your laptop, in CI, or in a sandbox.

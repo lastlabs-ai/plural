@@ -2586,7 +2586,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    task      <str>   Task to copy for each case. [required]                                    │
 │ *    path      <path>  Cases, as a .jsonl file or a .json or .yaml list. Each names its Task and │
-│                        may set instructions, initial_state, info, metadata, and goals.           │
+│                        may set instructions, initial_state, expected, info, metadata, and goals. │
 │                        [required]                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮

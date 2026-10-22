@@ -136,12 +136,6 @@ class EnvironmentManifest(ManifestModel):
                 )
         return value
 
-    @model_validator(mode="after")
-    def _has_apps(self) -> EnvironmentManifest:
-        if not self.python and not self.apps:
-            raise ValueError("an Environment needs Apps: set python to an App class, or list apps")
-        return self
-
 
 class TaskManifest(ManifestModel):
     """``task.yaml``: instructions, one Environment, and its Verifiers."""
@@ -161,6 +155,11 @@ class TaskManifest(ManifestModel):
     info: Any = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     initial_state: dict[str, Any] = Field(default_factory=dict)
+    expected: Any = Field(
+        default=None,
+        description="The answer key Verifiers read as episode.expected. Never shown to the "
+        "Agent, unlike info and metadata.",
+    )
     seat_instructions: dict[str, str] = Field(
         default_factory=dict,
         description=(

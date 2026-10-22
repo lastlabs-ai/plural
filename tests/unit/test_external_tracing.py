@@ -486,14 +486,15 @@ def test_a_served_agent_in_a_bare_environment_is_scored_on_its_answer(
     url, seen = agent_service
     monkeypatch.chdir(tmp_path)
 
-    def says_twelve(episode: Any) -> VerifierOutput:
-        return VerifierOutput(score=float(episode.answer == "12 doors"))
+    def matches(episode: Any) -> VerifierOutput:
+        return VerifierOutput(score=float(episode.answer == episode.expected))
 
     task = Task(
         name="count-doors",
         instructions="Count the doors on A-201.",
         environment=Environment(name="bare", runtime=Runtime.local(), limits={"max_seconds": 20}),
-        verifiers=[DeterministicVerifier(name="doors", check=says_twelve)],
+        verifiers=[DeterministicVerifier(name="doors", check=matches)],
+        expected="12 doors",
     )
     agent = Agent(
         model="acme/takeoff-v3",
@@ -506,6 +507,7 @@ def test_a_served_agent_in_a_bare_environment_is_scored_on_its_answer(
     assert trial.score == 1.0
     assert trial.integrity == ()
     assert len(seen) == 1
+    assert "12 doors" not in seen[0].start.model_dump_json()
     [stored] = (tmp_path / ".plural" / "jobs").rglob("agent-trace.json")
     trace = json.loads(stored.read_text())
     assert validate_atif(trace) == []

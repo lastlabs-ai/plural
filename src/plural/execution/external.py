@@ -152,7 +152,7 @@ class ExternalAgentRunner:
         if leaked is not None:
             raise HarnessExecutionError(
                 f"The Task's info has {leaked!r}, which an agent must never see. Move it to "
-                "the Verifier or the App's State."
+                "the Task's expected, which only Verifiers read, or the App's State."
             )
         actions = tuple(
             EpisodeAction(

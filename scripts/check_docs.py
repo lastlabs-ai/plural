@@ -38,6 +38,7 @@ PACKAGE_NAV = [
     ("Build", "/docs/project/environments", "project/environments.md"),
     ("Build", "/docs/guides/build-mcp-server", "guides/build-mcp-server.md"),
     ("Build", "/docs/guides/connect-mcp-server", "guides/connect-mcp-server.md"),
+    ("Build", "/docs/guides/connect-external-agent", "guides/connect-external-agent.md"),
     ("Build", "/docs/project/runtimes", "project/runtimes.md"),
     ("Build", "/docs/project/tasks", "project/tasks.md"),
     ("Build", "/docs/project/verifiers", "project/verifiers.md"),

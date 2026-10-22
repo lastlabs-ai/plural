@@ -345,12 +345,14 @@ def host_inputs(task: TaskDefinition, *, seed: int) -> dict[str, Any]:
     """The Task's reset inputs, for the host's bootstrap rather than a file.
 
     Returns:
-        The initial State, info, and seed the host resets each App with.
+        The initial State, info, and seed the host resets each App with, and the
+        answer key its ``reward`` hooks read.
     """
     return {
         "initial_state": normalize_initial_state(task.environment, task.state or {}),
         "info": task.info,
         "seed": seed,
+        "expected": task.expected,
     }
 
 

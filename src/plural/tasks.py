@@ -356,11 +356,12 @@ def without_reset_options(payload: dict[str, Any], name: object) -> dict[str, An
     return payload
 
 
-def _serialized_as_before(data: Any, seat_instructions: Mapping[str, str]) -> Any:
-    """Serialize a Task as it was before seat instructions and after ``reset_options``.
+def _serialized_as_before(data: Any, seat_instructions: Mapping[str, str], expected: Any) -> Any:
+    """Serialize a Task as it was before seat instructions and ``expected`` existed.
 
-    Every existing Task keeps its hash: one without seat instructions omits them, and
-    every Task carries the empty ``reset_options`` it was hashed with.
+    Every existing Task keeps its hash: one without seat instructions or an expected
+    answer omits them, and every Task carries the empty ``reset_options`` it was hashed
+    with.
 
     Returns:
         The serialized Task.
@@ -368,6 +369,8 @@ def _serialized_as_before(data: Any, seat_instructions: Mapping[str, str]) -> An
     if isinstance(data, dict):
         if not seat_instructions:
             data.pop("seat_instructions", None)
+        if expected is None:
+            data.pop("expected", None)
         data["reset_options"] = {}
     return data
 
@@ -378,6 +381,10 @@ class Task(FrozenModel):
     In an Environment with a party, several Agents share each episode, one
     per seat. Each gets ``instructions``, and then its seat's entry in
     ``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.
+
+    ``expected`` is the answer key: what a correct episode produces. Verifiers
+    read it as ``episode.expected``; it never reaches the Agent, unlike ``info``
+    and ``metadata``.
     """
 
     name: str = Field(min_length=1)
@@ -391,10 +398,11 @@ class Task(FrozenModel):
     resources: tuple[EnvironmentResource, ...] = ()
     initial_state: dict[str, Any] = Field(default_factory=dict)
     seat_instructions: dict[str, str] = Field(default_factory=dict)
+    expected: Any = None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
-        return _serialized_as_before(handler(self), self.seat_instructions)
+        return _serialized_as_before(handler(self), self.seat_instructions, self.expected)
 
     @model_validator(mode="before")
     @classmethod
@@ -481,6 +489,7 @@ class Task(FrozenModel):
                 # Only a Task with seat instructions hashes them, so every other Task
                 # keeps its hash.
                 **({"seat_instructions": self.seat_instructions} if self.seat_instructions else {}),
+                **({"expected": self.expected} if self.expected is not None else {}),
             },
         )
 
@@ -517,6 +526,7 @@ class Task(FrozenModel):
             resources=self.resources,
             state=self.initial_state,
             seat_instructions=self.seat_instructions,
+            expected=self.expected,
         )
 
     def _definition(self) -> TaskDefinition:
@@ -544,10 +554,12 @@ class TaskDefinition(FrozenModel):
     resources: tuple[EnvironmentResource, ...] = ()
     state: dict[str, Any] = Field(default_factory=dict)
     seat_instructions: dict[str, str] = Field(default_factory=dict)
+    expected: Any = None
+    """The answer key, for Verifiers only; never in :attr:`public_payload`."""
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
-        return _serialized_as_before(handler(self), self.seat_instructions)
+        return _serialized_as_before(handler(self), self.seat_instructions, self.expected)
 
     @model_validator(mode="before")
     @classmethod

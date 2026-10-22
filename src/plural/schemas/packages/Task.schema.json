@@ -584,10 +584,14 @@
     }
   },
   "additionalProperties": false,
-  "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.",
+  "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.",
   "properties": {
     "environment": {
       "title": "Environment"
+    },
+    "expected": {
+      "default": null,
+      "title": "Expected"
     },
     "goals": {
       "default": [],

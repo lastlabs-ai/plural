@@ -94,6 +94,7 @@ One versioned unit of work in a Python-authored Environment.
 - **`resources`** — `array of Resource`; optional. Default: `[]`.
 - **`initial_state`** — `object`; optional.
 - **`seat_instructions`** — `object`; optional.
+- **`expected`** — `JSON value`; optional. Default: `null`.
 
 ## DeterministicVerifier
 

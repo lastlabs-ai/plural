@@ -17,7 +17,7 @@ import yaml
 from plural.project.layout import TASK, Project, ProjectError, ResourceRef, check_name
 from plural.project.manifests import read_yaml_mapping, write_yaml
 
-CASE_FIELDS = ("initial_state", "info", "metadata", "goals")
+CASE_FIELDS = ("initial_state", "expected", "info", "metadata", "goals")
 """What a case may set in its Task's ``task.yaml``, besides ``name`` and ``instructions``."""
 
 

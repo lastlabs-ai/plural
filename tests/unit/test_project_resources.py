@@ -462,3 +462,27 @@ def test_a_missing_file_says_how_to_get_it(tmp_path: Path, monkeypatch: pytest.M
 def _write(path: Path, data: bytes) -> Path:
     path.write_bytes(data)
     return path
+
+
+def test_a_task_in_an_environment_with_no_apps_carries_its_answer_key(
+    project: Project,
+) -> None:
+    root = project.root
+    (root / "environments/answers").mkdir()
+    (root / "environments/answers/environment.yaml").write_text(
+        "name: answers\nreadme: null\nruntime:\n  provider: local\n", encoding="utf-8"
+    )
+    (root / "tasks/triage").mkdir()
+    (root / "tasks/triage/instruction.md").write_text("Which team?\n", encoding="utf-8")
+    (root / "tasks/triage/task.yaml").write_text(
+        "name: triage\ninstructions: instruction.md\nenvironment: answers\n"
+        "verifiers: [resolved]\nexpected: billing\n",
+        encoding="utf-8",
+    )
+    workspace = Workspace(Project.at(root))
+
+    task = workspace.get("task", "triage")
+
+    assert task.expected == "billing"
+    assert task.definition().environment.apps == ()
+    assert "billing" not in str(task.definition().public_payload)

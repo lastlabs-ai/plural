@@ -108,6 +108,7 @@ nav:
       - Environments: project/environments.md
       - Build an MCP server: guides/build-mcp-server.md
       - Connect an MCP server: guides/connect-mcp-server.md
+      - Connect an External Agent: guides/connect-external-agent.md
       - Runtimes: project/runtimes.md
       - Tasks: project/tasks.md
       - Verifiers: project/verifiers.md

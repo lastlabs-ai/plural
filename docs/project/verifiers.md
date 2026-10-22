@@ -130,19 +130,26 @@ later, such as on a Trial pulled from a hosted project, read `final` instead.
 ### Check the final answer
 
 `episode.answer` is the Agent's final answer: the `response` its Harness returned, or
-what an [External Agent](external-agents.md) finished with. An Environment with no
-Apps has no State to read, so the answer is the whole outcome:
+what an [External Agent](external-agents.md) finished with. It is `None` when the Agent
+gave no answer. `episode.expected` is the Task's answer key, its
+[`expected`](tasks.md#the-manifest-fields) field, which the Agent never sees. An
+Environment with no Apps has no State to read, so these two are the whole check:
 
 ```python
 from plural import Episode, VerifierOutput
 
 
-def right_category(episode: Episode) -> VerifierOutput:
+def right_team(episode: Episode) -> VerifierOutput:
     answer = str(episode.answer or "").strip().lower()
-    return VerifierOutput(score=float(answer == "billing"))
+    return VerifierOutput(
+        score=float(answer == episode.expected),
+        evidence=[f"answered {answer!r}, expected {episode.expected!r}"],
+    )
 ```
 
-It is `None` when the Agent gave no answer.
+One Verifier then scores every Task that lists it, each against its own answer. A
+`reward` hook reads the same answer key as `step.task.expected`, and an
+[AgentVerifier](#agentverifier) is shown it as the reference answer.
 
 The function must live in a Python file. In a project, each Verifier is a folder under
 `verifiers/`, named after it. This command creates

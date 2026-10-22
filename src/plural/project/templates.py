@@ -585,6 +585,9 @@ instructions: instruction.md
 {environment}{verifiers}# Values for the App State fields marked initial(). With several Apps,
 # key them by App name: {{crm: {{...}}, wordle: {{...}}}}.
 initial_state: {{}}
+# The answer key: what a correct episode produces. Verifiers read it as
+# episode.expected; the Agent never sees it.
+# expected: billing
 """
 
 _TASK_INSTRUCTION = """\

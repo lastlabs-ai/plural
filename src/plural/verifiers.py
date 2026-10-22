@@ -194,8 +194,9 @@ class Episode(FrozenModel):
     of App name to final snapshot. Neither is ever shown to the Agent.
     ``observation`` is what the Agent last saw, and ``answer`` is the final
     answer it gave, which is all there is to check in an Environment with no
-    Apps. ``rewards`` are the values this Verifier's ``reward`` gave each step,
-    in order; :func:`total_reward` sums them.
+    Apps. ``expected`` is the Task's answer key, which the Agent never sees.
+    ``rewards`` are the values this Verifier's ``reward`` gave each step, in
+    order; :func:`total_reward` sums them.
 
     When several Agents share the episode, ``seats`` names them, each step in
     ``trajectory`` carries the ``seat`` that took it, and ``seat_rewards`` holds
@@ -205,6 +206,7 @@ class Episode(FrozenModel):
 
     observation: dict[str, Any] = Field(default_factory=dict)
     answer: Any = None
+    expected: Any = None
     state: dict[str, Any] = Field(default_factory=dict)
     apps: dict[str, AppSnapshot] = Field(default_factory=dict)
     trajectory: list[Any] = Field(default_factory=list)
@@ -237,11 +239,15 @@ class Episode(FrozenModel):
 
 @dataclass(frozen=True)
 class StepTask:
-    """The Task an episode is working on, as a ``reward`` hook sees it."""
+    """The Task an episode is working on, as a ``reward`` hook sees it.
+
+    ``expected`` is the Task's answer key, which the Agent never sees.
+    """
 
     name: str = ""
     info: Any = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    expected: Any = None
 
 
 @dataclass(frozen=True)

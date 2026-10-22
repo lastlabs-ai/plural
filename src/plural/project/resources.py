@@ -383,7 +383,7 @@ def _build_environment(
             source=directory,
         )
         definition = environment.definition()
-        if not definition.actions:
+        if apps and not definition.actions:
             problems.append(
                 f"{_display(directory / 'environment.yaml', project_root)}: the Environment's "
                 "Apps offer no actions. Add an @action method, or connect a system with tools."
@@ -601,6 +601,7 @@ def _load_task(workspace: Workspace, ref: ResourceRef, directory: Path) -> Local
                         ),
                         "resources": resources,
                         "initial_state": manifest.initial_state,
+                        "expected": manifest.expected,
                         "seat_instructions": manifest.seat_instructions,
                     },
                     context={"catalog": workspace.catalog},

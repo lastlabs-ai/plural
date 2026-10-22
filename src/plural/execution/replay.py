@@ -277,6 +277,7 @@ def replay_verifier(
                 apps,
                 observation=observation if isinstance(observation, dict) else {},
                 answer=outcome.get("response") if isinstance(outcome, dict) else None,
+                expected=task.expected if task is not None else None,
                 trajectory=events,
                 rewards=tuple(r.value for r in result.rewards if r.source == "step"),
             )

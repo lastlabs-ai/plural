@@ -955,7 +955,7 @@ def _task_cases(app: typer.Typer) -> None:
         task: str = typer.Argument(help="Task to copy for each case."),
         path: Path = typer.Argument(
             help="Cases, as a .jsonl file or a .json or .yaml list. Each names its Task and "
-            "may set instructions, initial_state, info, metadata, and goals."
+            "may set instructions, initial_state, expected, info, metadata, and goals."
         ),
         replace: bool = typer.Option(
             False, "--replace", help="Write over Tasks that already exist, such as on a rerun."

@@ -1912,6 +1912,7 @@ class TrialRunner:
             apps or {},
             observation=view_observation,
             answer=first_json_mapping(artifacts, RESULT_FILES).get("response"),
+            expected=self.task.expected,
             trajectory=trajectory,
             artifacts={item.path: item.path for item in artifacts},
             usage=EpisodeUsage(

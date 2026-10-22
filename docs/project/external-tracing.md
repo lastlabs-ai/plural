@@ -227,9 +227,11 @@ background for each episode. What `work` returns is the agent's answer. Inside `
 every adapter records into that episode's run, so the trace reaches the Job with
 nothing more to set up. The Task's instructions are its first message.
 
-Use `episode.act(...)` for Tasks whose Environment has Apps. For a bare Environment,
-with no Apps, the answer is all there is to score: a Verifier reads it as
-[`episode.answer`](verifiers.md).
+Use `episode.act(...)` for Tasks whose Environment has Apps. In an Environment with
+no Apps, the answer is all there is to score: a Verifier compares
+[`episode.answer`](verifiers.md#check-the-final-answer) with the Task's answer key,
+`episode.expected`. [Connect an External Agent](../guides/connect-external-agent.md)
+walks through a whole Benchmark of such Tasks.
 
 ## What the Trial shows
 

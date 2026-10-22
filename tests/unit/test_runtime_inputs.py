@@ -185,6 +185,7 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
         task_id="case",
         info={"hint": "visible"},
         metadata={"tier": "gold"},
+        expected="the answer",
         verifiers=(SimpleNamespace(verifier=DeterministicVerifier(name="gentle", reward=gentle)),),
     )
     asyncio.run(
@@ -195,7 +196,8 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
     assert staged["/workspace/resources"]["task-resources/ticket.txt"] == b"case"
     assert "/workspace/environment" not in staged
     files = {item.path: item.data for item in host_files(task)}
-    # The hidden initial State is not in the shared file; it goes to the host on stdin.
+    # The hidden initial State and answer key are not in the shared file; they go to
+    # the host on stdin.
     assert json.loads(files[".plural/apps/task.json"]) == {
         "task": {"name": "case", "metadata": {"tier": "gold"}},
         "verifiers": [
@@ -211,6 +213,7 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
         "initial_state": {"game": {"seed": 42}},
         "info": {"hint": "visible"},
         "seed": 7,
+        "expected": "the answer",
     }
     assert b"def gentle(step)" in files[".plural/verifiers/0/test_runtime_inputs.py"]
     assert (

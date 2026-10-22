@@ -29,6 +29,7 @@ Agent sees exactly what it should, and nothing more.
 | `instructions` and `goals` | What the Agent should accomplish | "Resolve the ticket" |
 | `info` | Public case information, such as an identifier | `ticket_id: ticket-1` |
 | `initial_state` | Hidden starting values for each App's State, keyed by App name | The expected category |
+| `expected` | The answer key, which only Verifiers read, as `episode.expected` | `billing` |
 | `resources` | Files the case uses, which Environment code can read | The customer's invoice |
 | `metadata` | Labels for you, such as an owner or a training or evaluation split | `owner: support-team` |
 | `verifiers` | The graders that score the attempt | `correct-category` |
@@ -118,8 +119,12 @@ Here is what each field in `task.yaml` means, for when you need the exact rules:
 - `environment` is the name of one Environment in `environments/`, and `verifiers`
   lists at least one Verifier in `verifiers/`, each once. Resources always refer to
   each other by name within the project.
-- `initial_state`, `info`, `goals`, and `metadata` mean the same as the `Task` fields
-  described on this page.
+- `initial_state`, `expected`, `info`, `goals`, and `metadata` mean the same as the
+  `Task` fields described on this page.
+- `expected` is the Task's answer key. Verifiers read it as `episode.expected`, and it
+  is never sent to the Agent, so put answers here, never in `info` or `metadata`,
+  which the Agent sees. It is the place for the answer in an Environment with no
+  Apps; with Apps, hidden values can also go in `initial_state`.
 - `resources` lists files and folders to give the Task, relative to its folder. It
   defaults to `resources`, so every file below `resources/` is included, and a missing
   `resources/` folder is not an error. Files may be of any type, up to 16 MiB each and
@@ -130,11 +135,13 @@ Here is what each field in `task.yaml` means, for when you need the exact rules:
 
 When Tasks differ only in their data, write one by hand, then list the rest as cases.
 Each line of a `.jsonl` file, or each item of a `.json` or `.yaml` list, names a Task and
-sets any of `instructions`, `initial_state`, `info`, `metadata`, and `goals`:
+sets any of `instructions`, `initial_state`, `expected`, `info`, `metadata`, and
+`goals`:
 
 ```json
 {"name": "refund-late", "initial_state": {"order": "C-3", "days_since_delivery": 45}}
 {"name": "refund-damaged", "instructions": "The customer sent a photo of a cracked mug.", "initial_state": {"order": "D-4"}}
+{"name": "triage-lost-parcel", "instructions": "A parcel never arrived. Which team owns it?", "expected": "shipping"}
 ```
 
 ```bash
