@@ -40,7 +40,9 @@ import yaml
 from pydantic import BaseModel
 
 from plural.agents import Agent
+from plural.blobs import read_blob, store_blob
 from plural.common import PackageSource
+from plural.environments.definition import EnvironmentResource
 from plural.errors import NotFoundError
 from plural.harness.models import PLURAL_PACKAGE_PREFIX, HarnessDefinition
 from plural.harness.retrieval import (
@@ -99,7 +101,7 @@ def _parallel(work: Callable[[_T], _R], items: Sequence[_T]) -> list[_R]:
 
 
 class _Uploads:
-    """Uploads each package once, even when resources pushed together share one."""
+    """Uploads each package and file once, even when resources pushed together share one."""
 
     def __init__(self, studio: Studio) -> None:
         self._studio = studio
@@ -115,6 +117,16 @@ class _Uploads:
                 return
             if not self._studio.packages.exists(digest):
                 self._studio.packages.upload(digest, payload)
+            self._done.add(digest)
+
+    def ensure_blob(self, digest: str, content_type: str) -> None:
+        with self._guard:
+            lock = self._locks.setdefault(digest, threading.Lock())
+        with lock:
+            if digest in self._done:
+                return
+            if not self._studio.blobs.exists(digest):
+                self._studio.blobs.upload(digest, read_blob(digest), content_type=content_type)
             self._done.add(digest)
 
 
@@ -978,6 +990,9 @@ def _push_one(
         )
     elif resource.ref.kind == TASK.name:
         references = {"environment_revision_id": ids[0], "verifier_revision_ids": ids[1:]}
+        for item in value.resources:
+            if item.delivery == "blob" and item.digest:
+                uploads.ensure_blob(item.digest, item.content_type)
     elif resource.ref.kind == AGENT.name:
         references = {"harness_revision_id": ids[0] if ids else None}
     elif resource.ref.kind == BENCHMARK.name:
@@ -1026,7 +1041,7 @@ def _restore(
     *,
     force: bool,
 ) -> PullStep:
-    files: dict[str, str] | None = None
+    files: dict[str, str | bytes] | None = None
     payload = b""
     if revision.package_digest:
         payload = studio.packages.download(revision.package_digest)
@@ -1046,8 +1061,13 @@ def _restore(
             extract_archive(payload, staged)
         else:
             staged.mkdir(parents=True)
-            for name, text in files.items():
-                (staged / name).write_text(text, encoding="utf-8")
+            for name, content in files.items():
+                path = staged / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if isinstance(content, bytes):
+                    path.write_bytes(content)
+                else:
+                    path.write_text(content, encoding="utf-8")
         if not (staged / ref.info.manifest).is_file():
             raise ProjectError(f"The package for {ref} has no {ref.info.manifest}.")
         rebuilt = files is not None
@@ -1139,9 +1159,38 @@ def _is_default(model: type[BaseModel], key: str, value: Any) -> bool:
     return bool(value == default)
 
 
+def _resource_files(
+    studio: Studio, ref: ResourceRef, revision: HostedRevision, resources: list[Any]
+) -> dict[str, str | bytes]:
+    """The files a hosted Task's resources hold, keyed by their path.
+
+    Returns:
+        Inline text, or the verified bytes of each blob.
+
+    Raises:
+        ProjectError: When a resource holds neither.
+    """
+    files: dict[str, str | bytes] = {}
+    for item in resources:
+        resource = EnvironmentResource.model_validate(item)
+        path = resource.path or resource.name
+        if resource.delivery == "inline":
+            files[path] = resource.content or ""
+        elif resource.delivery == "blob" and resource.digest:
+            data = studio.blobs.download(resource.digest)
+            store_blob(data)
+            files[path] = data
+        else:
+            raise ProjectError(
+                f"{ref} {revision.label} lists {resource.name} as a {resource.delivery} "
+                "resource, which only its source package holds. Push it again from there."
+            )
+    return files
+
+
 def _files_from_definition(
     studio: Studio, ref: ResourceRef, revision: HostedRevision
-) -> dict[str, str]:
+) -> dict[str, str | bytes]:
     """Rebuild a manifest-only resource from the definition the server stored.
 
     Tasks, Agents, and Benchmarks created in the web app have no source package,
@@ -1173,13 +1222,9 @@ def _files_from_definition(
         manifest["title"] = title
     if revision.version:
         manifest["version"] = revision.version
-    files: dict[str, str] = {}
+    files: dict[str, str | bytes] = {}
     if ref.kind == TASK.name:
-        if definition.get("resources"):
-            raise ProjectError(
-                f"{ref} {revision.label} lists resource files, and their contents were "
-                "never uploaded. Recreate the Task locally and push it."
-            )
+        resources = _resource_files(studio, ref, revision, definition.get("resources") or [])
         environments, verifiers = named(ENVIRONMENT.name), named(VERIFIER.name)
         if not environments or not verifiers:
             raise ProjectError(
@@ -1200,8 +1245,11 @@ def _files_from_definition(
         ):
             if key in definition and not _is_default(TaskManifest, key, definition[key]):
                 manifest[key] = definition[key]
+        if resources:
+            manifest["resources"] = sorted(resources)
         TaskManifest.model_validate(manifest)
         files["instruction.md"] = str(definition.get("instructions") or "")
+        files |= resources
     elif ref.kind == AGENT.name:
         manifest["model"] = definition.get("model")
         harness = definition.get("harness")
@@ -1226,6 +1274,7 @@ def _files_from_definition(
             "secrets",
             "endpoint",
             "endpoint_key",
+            "external",
             "credentials",
             "metadata",
         ):

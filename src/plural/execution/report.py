@@ -27,6 +27,7 @@ import queue
 import threading
 import time
 from collections.abc import Collection, Iterator, Mapping
+from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -78,6 +79,16 @@ AgentPin = tuple[str, str]
 
 _FINISHED = {"succeeded", "failed", "cancelled", "awaiting_review"}
 _ADVANCE = {"queued": 0, "stale": 0, "provisioning": 1, "running": 2}
+_KEY_TIMEOUT_SECONDS = 60.0
+
+
+@dataclass(frozen=True)
+class _KeyRequest:
+    """A Trial execution's request for its own gateway key, answered on the tracker's thread."""
+
+    local: tuple[str, int]
+    ttl_seconds: int
+    reply: Future[str | None]
 
 
 class PublishError(ValueError):
@@ -447,6 +458,8 @@ def publish_execution(
         report["reward_failures"] = [
             item.model_dump(mode="json") for item in result.reward_failures
         ]
+    if result.integrity:
+        report["integrity"] = [item.model_dump(mode="json") for item in result.integrity]
     if result.seats:
         report["seats"] = [item.model_dump(mode="json") for item in result.seats]
         report["seat_isolation"] = result.seat_isolation
@@ -637,7 +650,7 @@ class HostedTracker:
         }
         self._local = {trial.trial_id: trial for trial in plan.trials}
         self._heartbeat_seconds = heartbeat_seconds
-        self._queue: queue.Queue[ProgressEvent | None] = queue.Queue()
+        self._queue: queue.Queue[ProgressEvent | _KeyRequest | None] = queue.Queue()
         self._hosted: dict[_HostedKey, str] | None = None
         self._executions: dict[tuple[str, int], str] = {}
         self._active: set[str] = set()
@@ -667,6 +680,30 @@ class HostedTracker:
                 self._fail(exc)
         return list(self.errors)
 
+    def gateway_key(self, trial_id: str, execution_id: int, ttl_seconds: int) -> str | None:
+        """A gateway key for one local execution's hosted twin, or None if it has none.
+
+        The tracker mints it in turn, after the hosted execution it serves is
+        created. A run that cannot mint one keeps its own key for its Harness and
+        gives an External Agent no gateway at all.
+        """
+        request = _KeyRequest((trial_id, execution_id), ttl_seconds, Future())
+        self._queue.put(request)
+        try:
+            return request.reply.result(timeout=_KEY_TIMEOUT_SECONDS)
+        except TimeoutError:
+            return None
+
+    def _mint(self, request: _KeyRequest) -> str | None:
+        hosted = self._executions.get(request.local)
+        if hosted is None:
+            return None
+        try:
+            return self.studio.trials.gateway_key(hosted, ttl_seconds=request.ttl_seconds)
+        except Exception as exc:  # noqa: BLE001
+            self._fail(exc)
+            return None
+
     def _run(self) -> None:
         while True:
             try:
@@ -676,6 +713,9 @@ class HostedTracker:
                 continue
             if event is None:
                 return
+            if isinstance(event, _KeyRequest):
+                event.reply.set_result(self._mint(event))
+                continue
             try:
                 self._handle(event)
             except Exception as exc:  # noqa: BLE001
@@ -707,7 +747,6 @@ class HostedTracker:
                 worker_id=self.worker_id,
             )
             execution_id = str(record["id"])
-            self._executions[local] = execution_id
             _advance(
                 self.studio,
                 execution_id,
@@ -715,6 +754,7 @@ class HostedTracker:
                 self.worker_id,
                 "provisioning",
             )
+            self._executions[local] = execution_id
             self._active.add(execution_id)
         elif event.type == "environment_ready" and local in self._executions:
             _advance(

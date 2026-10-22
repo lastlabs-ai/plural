@@ -26,6 +26,7 @@ TARGETS = [
     "plural.Step",
     "plural.environments.types",
     "plural.Harness",
+    "plural.external",
     "plural.sandbox.SandboxProvider",
     "plural.sandbox.SandboxRequirements",
     "plural.sandbox.ProviderRegistry",

@@ -538,3 +538,46 @@ def test_a_wanted_version_labels_only_when_free_and_not_a_number() -> None:
     version, note = _label("7", [released])
     assert version is None
     assert note is not None and "#7" in note
+
+
+def test_push_uploads_a_tasks_files_once_and_pull_restores_them(
+    hosted: Hosted, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashlib
+
+    monkeypatch.setenv("PLURAL_BLOB_CACHE", str(tmp_path / "blobs"))
+    drawing = b"%PDF-1.7\n\xff\xfe\0sheet A-201"
+    folder = hosted.project.root / "tasks/refund/resources"
+    folder.mkdir()
+    (folder / "A-201.pdf").write_bytes(drawing)
+    assert hosted.cli("task", "push", "refund", "--with-deps")[0] == 0
+    digest = "sha256:" + hashlib.sha256(drawing).hexdigest()
+    assert hosted.fake.blobs == {digest: drawing}
+
+    _web_app_task(hosted, "web-task")
+    web = hosted.fake.revisions["tas_web-task"][0]["definition"]
+    web["resources"] = [
+        {
+            "kind": "file",
+            "name": "A-201.pdf",
+            "path": "drawings/A-201.pdf",
+            "content_type": "application/pdf",
+            "delivery": "blob",
+            "digest": digest,
+        },
+        {
+            "kind": "file",
+            "name": "notes.md",
+            "path": "notes.md",
+            "content_type": "text/markdown",
+            "delivery": "inline",
+            "content": "# Notes",
+        },
+    ]
+    monkeypatch.setenv("PLURAL_BLOB_CACHE", str(tmp_path / "fresh"))
+    code, output = hosted.cli("task", "pull", "web-task")
+    assert code == 0, output
+    task = hosted.project.root / "tasks/web-task"
+    assert (task / "drawings/A-201.pdf").read_bytes() == drawing
+    assert (task / "notes.md").read_text() == "# Notes"
+    assert hosted.cli("task", "validate", "web-task")[0] == 0

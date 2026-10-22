@@ -846,10 +846,13 @@ same name.
 For a Task whose Environment has a party, ``party`` lists the Agents that
 share each episode, in seat order; list one Agent more than once for
 self-play. Left out, every Agent in ``agents`` plays, once each.
+
+``episode_server`` says where the Job serves an external Agent's episodes;
+by default it listens on a free loopback port.
 ```
 
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None, episode_server: 'Any' = None) -> 'None'
 ```
 
 ### plural.Job.run_async
@@ -1833,6 +1836,192 @@ run(self, task: 'HarnessTask', agent: 'HarnessAgent', environment: 'HarnessEnvir
 ```
 
 Run one Agent against one Task and Environment.
+
+## plural.external.client.Episode
+
+One episode, as the agent works it.
+
+```text
+Every call goes to the Job that started it, with the episode's own token.
+Pass ``verify`` (a CA bundle path, or ``False`` for a self-signed test
+certificate) when the Job serves HTTPS with a private certificate.
+```
+
+```python
+plural.external.client.Episode(start: 'EpisodeStart', *, verify: 'str | bool' = True, timeout: 'float' = 120.0) -> 'None'
+```
+
+### plural.external.client.Episode.tools
+
+```python
+tools(self) -> 'list[dict[str, Any]]'
+```
+
+Describe the actions for a model.
+
+```text
+Returns:
+    The actions as OpenAI-compatible tools.
+```
+
+### plural.external.client.Episode.act
+
+```python
+act(self, action: 'str', /, **arguments: 'Any') -> 'Any'
+```
+
+Take one action.
+
+```text
+Returns:
+    Its observation.
+```
+
+### plural.external.client.Episode.read
+
+```python
+read(self, path: 'str') -> 'bytes'
+```
+
+Read one of :attr:`files`.
+
+```text
+Returns:
+    Its bytes.
+```
+
+### plural.external.client.Episode.trace
+
+```python
+trace(self, trajectory: 'Mapping[str, Any]') -> 'None'
+```
+
+Report the agent's own trace, as an ATIF document.
+
+```text
+The Trial keeps it as self-reported, next to the actions the Job saw.
+```
+
+### plural.external.client.Episode.finish
+
+```python
+finish(self, response: 'Any') -> 'None'
+```
+
+End the episode with the agent's final answer. It can be sent once.
+
+## plural.external.protocol.EpisodeAction
+
+One action the agent may take, as a tool.
+
+## plural.external.client.EpisodeError
+
+The Job refused a request, such as an action after the episode ended.
+
+```python
+plural.external.client.EpisodeError
+```
+
+## plural.external.protocol.EpisodeStart
+
+The signed request that starts one episode.
+
+## plural.external.protocol.EpisodeTask
+
+What the agent is asked to do.
+
+## plural.external.client.Ping
+
+A signed check, from ``plural agent test``, that the agent is reachable.
+
+## plural.external.protocol.SignatureError
+
+A request whose signature, timestamp, or id does not check out.
+
+```python
+plural.external.protocol.SignatureError
+```
+
+## plural.external.protocol.new_signing_key
+
+Make a fresh signing key.
+
+```text
+Returns:
+    32 random bytes, as ``whsec_`` and base64.
+```
+
+```python
+plural.external.protocol.new_signing_key() -> 'str'
+```
+
+## plural.external.protocol.sign
+
+Standard Webhooks headers for ``body``.
+
+```text
+Returns:
+    ``webhook-id``, ``webhook-timestamp``, and ``webhook-signature``.
+```
+
+```python
+plural.external.protocol.sign(key: 'bytes', body: 'bytes', *, message_id: 'str', timestamp: 'int | None' = None) -> 'dict[str, str]'
+```
+
+## plural.external.protocol.signing_key
+
+The key bytes of a ``whsec_``-prefixed base64 secret, or of a raw one.
+
+```text
+Returns:
+    The bytes to sign with.
+
+Raises:
+    ValueError: When the key is shorter than 32 bytes.
+```
+
+```python
+plural.external.protocol.signing_key(value: 'str') -> 'bytes'
+```
+
+## plural.external.protocol.verify
+
+Check a signed request and remember its id.
+
+```text
+Returns:
+    The request's ``webhook-id``.
+
+Raises:
+    SignatureError: When a header is missing, the timestamp is more than
+        five minutes off, the id was already seen, or no signature matches.
+```
+
+```python
+plural.external.protocol.verify(key: 'bytes', body: 'bytes', headers: 'Mapping[str, str]', *, now: 'float | None' = None, seen: '_Seen | None' = <configured default>) -> 'str'
+```
+
+## plural.external.client.verify_request
+
+Check that a request came from your Plural Job, and parse it.
+
+```text
+Args:
+    body: The request's raw bytes, before any JSON parsing.
+    headers: Its headers.
+    key: The shared signing key. Defaults to ``PLURAL_SIGNING_KEY``.
+
+Returns:
+    The episode to start, or a ping to answer with any 2xx.
+
+Raises:
+    SignatureError: When the request is not signed with the key, is more
+        than five minutes old, was received before, or is not one Plural sends.
+```
+
+```python
+plural.external.client.verify_request(body: 'bytes', headers: 'Mapping[str, str]', *, key: 'str | None' = None) -> 'EpisodeStart | Ping'
+```
 
 ## plural.sandbox.SandboxProvider
 

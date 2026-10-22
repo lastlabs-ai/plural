@@ -60,6 +60,7 @@ def test_agent_identity_is_unchanged_by_the_rename() -> None:
     definition = AgentDefinition(name="agent", model="test/model", auth="none")
     payload = definition.model_dump(mode="json", exclude={"harness", "harness_package"})
     del payload["credentials"]
+    del payload["external"]
     payload["harness_kwargs"] = payload.pop("harness_config")
     payload["auth_mode"] = payload.pop("auth")
     payload["secret_names"] = payload.pop("secrets")

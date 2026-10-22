@@ -201,7 +201,7 @@
     },
     "EnvironmentResource": {
       "additionalProperties": false,
-      "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``.",
+      "description": "Data or application supplied by an Environment.\n\nThe short form ``Resource(\"policies/refunds.md\")`` stages one file from\nthe Environment's source package. The mapping form keeps its explicit\n``delivery``. ``Resource.from_file(path)`` reads a file of any type: text\ntravels inline, and anything else, such as a PDF or a drawing, as a\n``blob`` named by its digest.",
       "properties": {
         "config": {
           "additionalProperties": true,
@@ -232,7 +232,8 @@
             "descriptor",
             "source",
             "inline",
-            "resolver"
+            "resolver",
+            "blob"
           ],
           "title": "Delivery",
           "type": "string"

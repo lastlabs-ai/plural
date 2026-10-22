@@ -33,6 +33,9 @@ Most of the time you don't need to choose. There are three options:
   well-known agent tools that Plural installs for you.
 - **Your own Harness**, a small Python class, when you need a loop of your own.
 
+An agent that already runs as its own service needs no Harness at all. Make it an
+[External Agent](external-agents.md), and Plural calls it once per episode instead.
+
 ## Where a Harness runs
 
 An Agent brings the model, the instructions, and the Harness. The Environment brings

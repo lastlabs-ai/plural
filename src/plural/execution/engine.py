@@ -28,6 +28,7 @@ from plural.benchmarks.results import AttemptEvidence, aggregate_configuration
 from plural.benchmarks.rules import BenchmarkScoring
 from plural.catalog import ModelCatalog
 from plural.common import ErrorCode, HarnessPackage, HarnessProtocol, content_hash
+from plural.config import resolve_gateway_url
 from plural.credentials import CredentialError, CredentialUse, CredentialValue
 from plural.credentials import resolve as resolve_credentials
 from plural.environments.definition import party_seats
@@ -57,7 +58,10 @@ from plural.execution.bootstrap import (
     prepare_requirements,
     resolve_distribution,
 )
+from plural.execution.episode_server import EpisodeServer, EpisodeServerOptions
+from plural.execution.external import ExternalAgentRunner, ExternalRun
 from plural.execution.inputs import ResourceResolver, resource_uploads, runtime_values
+from plural.execution.integrity import audit_external
 from plural.execution.policy import (
     ProjectPolicy,
     resolve_effective_policy,
@@ -80,20 +84,32 @@ from plural.execution.seats import (
 )
 from plural.execution.steps import STEPS_FILE, dump_jsonl, episode_terminated, merge_host_steps
 from plural.execution.store import JobStore
+from plural.external.protocol import EpisodeGateway, signing_key
 from plural.harness.episode import EPISODE_FILE
 from plural.harness.native_runner import (
     CREDIT_PAUSE_VARIABLE,
     DEFAULT_CREDIT_PAUSE_SECONDS,
     STOP_VARIABLE,
 )
-from plural.harness.packages import BUILTIN_PROFILES, native_actions_v1, native_chat_v1
+from plural.harness.packages import (
+    BUILTIN_PROFILES,
+    external_v1,
+    native_actions_v1,
+    native_chat_v1,
+)
 from plural.harness.protocol import HarnessProtocolError, HarnessRunRequest
 from plural.harness.retrieval import materialize_package, retrieve_archive, source_digest
-from plural.harness.runner import HarnessExecutionError, HarnessRunner, is_native_runner
+from plural.harness.runner import (
+    HarnessExecution,
+    HarnessExecutionError,
+    HarnessRunner,
+    is_native_runner,
+)
 from plural.jobs import (
     AgentAggregate,
     ArtifactReference,
     BenchmarkJobSource,
+    IntegrityFinding,
     JobMode,
     JobResult,
     JobSpec,
@@ -176,6 +192,8 @@ def _classify(exc: BaseException) -> ErrorCode:
 
 
 def _package_for(agent: AgentBinding, task: TaskDefinition) -> HarnessPackage:
+    if agent.external is not None:
+        return external_v1()
     if agent.harness_package is not None:
         return agent.harness_package
     if agent.harness is None:
@@ -234,11 +252,11 @@ def _harness_environment(
         if environ.get(name) is not None
     }
     if agent.agent.endpoint is not None:
-        if package.definition.name not in {"native.chat.v1", "native.actions.v1"}:
+        if agent.harness is not None and agent.harness_package is None:
             raise ExecutionFailure(
                 ErrorCode.CONFIGURATION,
-                f"Agent {agent.name!r} calls its own endpoint, which only Plural's native "
-                f"Harness supports, not {package.definition.name!r}.",
+                f"Agent {agent.name!r} calls its own endpoint, which built-in Harness "
+                f"{package.definition.name!r} cannot use.",
             )
         configured["PLURAL_AGENT_ENDPOINT"] = agent.agent.endpoint
         key_name = agent.agent.endpoint_key
@@ -328,6 +346,8 @@ def _with_artifact(
 
 
 _JOB_ARTIFACTS = frozenset({LEDGER_FILE, STATES_FILE, STEPS_FILE, "apps.json"})
+GatewayKeys = Callable[[str, int, int], "str | None"]
+"""Mints a gateway key for a local Trial's execution, given its time to live in seconds."""
 _HOST_VIEWS = frozenset(
     {"state.json", "final-state.json", "observation.json", "final-observation.json", "view.json"}
 )
@@ -522,6 +542,18 @@ def _episode_outcome(artifacts: Sequence[DownloadedFile]) -> EpisodeOutcome:
     )
 
 
+def _integrity(
+    player: _Player, artifacts: Sequence[DownloadedFile]
+) -> tuple[IntegrityFinding, ...]:
+    """An External Agent's trace set beside what the App host observed; empty otherwise."""
+    run = player.run
+    if run is None or run.started_at is None or run.finished_at is None:
+        return ()
+    return audit_external(
+        artifacts, actions=run.actions, started_at=run.started_at, finished_at=run.finished_at
+    )
+
+
 def _episode_totals(artifacts: Sequence[DownloadedFile], *, failed: bool) -> dict[str, Any]:
     """How the episode ended, its per-step reward total, and its turns, for the TrialResult.
 
@@ -599,6 +631,9 @@ class _Player:
     env: dict[str, str] = field(default_factory=dict)
     source: Path | None = None
     execution: Any = None
+    files: tuple[DownloadedFile, ...] = ()
+    """What an External Agent's episode left, which no Runtime holds."""
+    run: ExternalRun | None = None
     artifacts: tuple[DownloadedFile, ...] = ()
     stdout: bytes = b""
     stderr: bytes = b""
@@ -643,10 +678,17 @@ class TrialRunner:
         project_policy: ProjectPolicy,
         resource_resolvers: Mapping[str, ResourceResolver] | None = None,
         credentials: Mapping[str, CredentialValue | str] | None = None,
+        episode_server: EpisodeServer | None = None,
+        gateway_keys: GatewayKeys | None = None,
     ) -> None:
         self.spec = spec
         self.job_spec = job_spec
         self.credentials = dict(credentials or {})
+        self.episode_server = episode_server
+        self.gateway_keys = gateway_keys
+        self._gateway_key: str | None = None
+        self._job_environ = environ
+        self._resource_files: dict[str, bytes] = {}
         self.provider_for = provider_for
         self.store = store
         self.environ = environ
@@ -737,6 +779,9 @@ class TrialRunner:
             data={"provider": provider.name, "placement": self.spec.placement},
         )
         try:
+            self.environ = await self._execution_environ(task, execution_id)
+            if self._gateway_key is not None:
+                secrets["PLURAL_TRIAL_GATEWAY_KEY"] = self._gateway_key
             for player in players:
                 player.env, player_secrets = _harness_environment(
                     player.binding, player.package, self.environ
@@ -763,7 +808,8 @@ class TrialRunner:
                 for player in players:
                     if player is players[0] or player.package is not players[0].package:
                         await self._preflight_harness(provider, player.package)
-                    player.source = materialize_package(player.package)
+                    if player.binding.external is None:
+                        player.source = materialize_package(player.package)
                 requirements = _requirements(task, package)
                 if any(_requirements(task, item.package) != requirements for item in players):
                     raise ExecutionFailure(
@@ -792,7 +838,9 @@ class TrialRunner:
                         if player.source is not None:
                             await provider.upload_bundle(handle, player.source, root=player.stage)
                 async with phase("environment_setup"):
-                    await self._stage_environment(provider, handle)
+                    staged_files = await self._stage_environment(provider, handle)
+                    if agent.external is not None:
+                        self._resource_files = {item.path: item.data for item in staged_files}
                     if distribution is not None:
                         plural_env = await install_plural(
                             provider, handle, distribution, network=requirements.network
@@ -912,18 +960,7 @@ class TrialRunner:
                 async with phase("agent_execution"):
                     outcomes = await asyncio.gather(
                         *(
-                            HarnessRunner(provider).run(
-                                handle,
-                                player.package.definition,
-                                self._run_request(task, player),
-                                env=_stop_env(task, player.package.definition, player.env),
-                                timeout_seconds=_harness_timeout(
-                                    task, player.package.definition, player.env
-                                ),
-                                user=player.user,
-                                setup=False,
-                                private=player.seat is not None and self._seats_isolated(task),
-                            )
+                            self._run_player(provider, handle, task, player, secrets)
                             for player in players
                         ),
                         return_exceptions=True,
@@ -967,6 +1004,9 @@ class TrialRunner:
                 job_only = _JOB_ARTIFACTS | (_HOST_VIEWS if task.environment.apps else frozenset())
                 for player in players:
                     if player.execution is None:
+                        continue
+                    if player.binding.external is not None:
+                        player.artifacts = player.files
                         continue
                     paths = tuple(
                         dict.fromkeys(
@@ -1103,6 +1143,7 @@ class TrialRunner:
                     host_report,
                     artifacts,
                 )
+            integrity = _integrity(players[0], artifacts)
             status: Literal["succeeded", "awaiting_review"] = (
                 "awaiting_review" if awaiting else "succeeded"
             )
@@ -1129,6 +1170,7 @@ class TrialRunner:
                 seats=seats_out,
                 seat_isolation=seat_isolation,
                 seed=seed,
+                integrity=integrity,
                 **_episode_totals(artifacts, failed=False),
             )
         except BaseException as exc:
@@ -1220,6 +1262,80 @@ class TrialRunner:
         heartbeat.cancel()
         await asyncio.gather(heartbeat, return_exceptions=True)
         return result
+
+    async def _execution_environ(
+        self, task: TaskDefinition, execution_id: int
+    ) -> Mapping[str, str]:
+        """The Job's environment, with this execution's own gateway key when it has one.
+
+        A recorded run mints a key that calls models for this execution alone, so
+        the key a Harness or an External Agent holds is never the user's own.
+        """
+        self._gateway_key = None
+        needed = self.agent.external is not None or bool(self._job_environ.get("PLURAL_API_KEY"))
+        if self.gateway_keys is None or not needed:
+            return self._job_environ
+        ttl = min(max(int(task.environment.limits.max_seconds) + 900, 600), 86_400)
+        key = await asyncio.to_thread(self.gateway_keys, self.spec.trial_id, execution_id, ttl)
+        if not key:
+            return self._job_environ
+        self._gateway_key = key
+        return {**self._job_environ, "PLURAL_API_KEY": key}
+
+    async def _run_player(
+        self,
+        provider: SandboxProvider,
+        handle: SandboxHandle,
+        task: TaskDefinition,
+        player: _Player,
+        secrets: dict[str, str],
+    ) -> HarnessExecution:
+        """Run one player's part of the episode: its Harness, or its External Agent."""
+        request = self._run_request(task, player)
+        external = player.binding.external
+        if external is None:
+            return await HarnessRunner(provider).run(
+                handle,
+                player.package.definition,
+                request,
+                env=_stop_env(task, player.package.definition, player.env),
+                timeout_seconds=_harness_timeout(task, player.package.definition, player.env),
+                user=player.user,
+                setup=False,
+                private=player.seat is not None and self._seats_isolated(task),
+            )
+        if self.episode_server is None:
+            raise ExecutionFailure(
+                ErrorCode.CONFIGURATION,
+                f"Agent {player.binding.name!r} is external, and this Job serves no episodes.",
+            )
+        value = self.environ.get(external.signing_key, "")
+        secrets[external.signing_key] = value
+        run = await ExternalAgentRunner(provider, self.episode_server).run(
+            handle,
+            player.binding,
+            request,
+            key=signing_key(value),
+            env=player.env,
+            user=player.user,
+            files=self._resource_files,
+            gateway=self._episode_gateway(),
+            timeout_seconds=task.environment.limits.max_seconds,
+            on_token=lambda token: secrets.__setitem__("PLURAL_EPISODE_TOKEN", token),
+        )
+        player.run = run
+        player.files = tuple(
+            DownloadedFile(path=item.path, data=_redact_bytes(item.data, secrets))
+            for item in run.artifacts
+        )
+        return run.execution
+
+    def _episode_gateway(self) -> EpisodeGateway | None:
+        """Where an External Agent may call models: only with this execution's own key."""
+        if self._gateway_key is None:
+            return None
+        url = resolve_gateway_url(None, self._job_environ)
+        return EpisodeGateway(url=url, key=self._gateway_key)
 
     @property
     def seat_names(self) -> tuple[str, ...]:
@@ -1415,6 +1531,8 @@ class TrialRunner:
                     f"{', '.join(missing)}. The local Runtime installs nothing, so install "
                     f"them into {sys.executable}, such as with `pip install {quoted}`.",
                 )
+        if agent.external is not None:
+            return
         source = materialize_package(package)
         if (
             source is not None
@@ -1435,7 +1553,14 @@ class TrialRunner:
             self.environ.get(RUNTIME_VERSION_VARIABLE), needed_extras(self.task), packages
         )
 
-    async def _stage_environment(self, provider: SandboxProvider, handle: SandboxHandle) -> None:
+    async def _stage_environment(
+        self, provider: SandboxProvider, handle: SandboxHandle
+    ) -> Sequence[FileUpload]:
+        """Upload the Environment's source and files, and the Task's.
+
+        Returns:
+            The files under ``/workspace/resources``.
+        """
         source = self.task.environment.source
         root = None
         if source is not None:
@@ -1467,6 +1592,7 @@ class TrialRunner:
                 environment=self.task.environment,
                 state=self.task.state,
             )
+        return uploads
 
     def _environment_uploads(self, root: Path) -> list[FileUpload]:
         """The Environment's source files, without any Verifier's code.
@@ -2229,6 +2355,34 @@ def _credit_pause(definition: HarnessProtocol, env: Mapping[str, str]) -> float:
     return float(env.get(CREDIT_PAUSE_VARIABLE) or DEFAULT_CREDIT_PAUSE_SECONDS)
 
 
+def _check_external(agent: AgentBinding, environ: Mapping[str, str]) -> None:
+    """Refuse an External Agent whose signing key or CA bundle the Job lacks.
+
+    Raises:
+        ExecutionFailure: Naming the key, never its value.
+    """
+    external = agent.external
+    assert external is not None
+    value = environ.get(external.signing_key)
+    if not value:
+        raise ExecutionFailure(
+            ErrorCode.AUTHENTICATION,
+            f"Agent {agent.name!r} signs its episodes with {external.signing_key}. Export it, "
+            f"or store it in the hosted project with `plural secret set {external.signing_key}`.",
+        )
+    try:
+        signing_key(value)
+    except ValueError as exc:
+        raise ExecutionFailure(
+            ErrorCode.CONFIGURATION, f"Agent {agent.name!r}: {external.signing_key}: {exc}"
+        ) from None
+    if external.ca_bundle is not None and not Path(external.ca_bundle).is_file():
+        raise ExecutionFailure(
+            ErrorCode.CONFIGURATION,
+            f"Agent {agent.name!r}: the CA bundle {external.ca_bundle} does not exist.",
+        )
+
+
 def _refuse_shared_files(task: TaskDefinition, root: Path) -> None:
     """Refuse a file that holds both an App and a Verifier.
 
@@ -2271,9 +2425,14 @@ class JobRunner:
         project_policy: ProjectPolicy | None = None,
         catalog: ModelCatalog | None = None,
         credentials: Mapping[str, Mapping[str, CredentialValue | str]] | None = None,
+        episode_server: EpisodeServerOptions | None = None,
+        gateway_keys: GatewayKeys | None = None,
     ) -> None:
         self.spec = spec
         self.credentials = dict(credentials or {})
+        self.gateway_keys = gateway_keys
+        self.episode_server_options = episode_server
+        self._episode_server: EpisodeServer | None = None
         self.catalog = catalog or ModelCatalog()
         self.plan = spec.plan(self.catalog)
         self._provider_override = provider
@@ -2322,6 +2481,9 @@ class JobRunner:
                 missing[app].extend(name for name in names if name not in missing[app])
         if missing:
             raise ExecutionFailure(ErrorCode.AUTHENTICATION, describe_missing(missing))
+        for agent in self.spec.agents:
+            if agent.external is not None:
+                _check_external(agent, self.environ)
         for task in self.spec.tasks:
             for agent in self.spec.agents:
                 try:
@@ -2423,6 +2585,8 @@ class JobRunner:
                         resource_resolvers=self.resource_resolvers,
                         project_policy=self.project_policy,
                         credentials=self._agent_credentials(trial_spec),
+                        episode_server=self._episode_server,
+                        gateway_keys=self.gateway_keys,
                     )
                     self._trials.add(trial)
                     try:
@@ -2433,7 +2597,13 @@ class JobRunner:
                 if self.progress:
                     self.progress(trial_spec, result)
 
-        await drain(self.spec.concurrency, self.plan.trials, execute)
+        async with contextlib.AsyncExitStack() as stack:
+            if any(agent.external is not None for agent in self.spec.agents):
+                self._episode_server = await stack.enter_async_context(
+                    EpisodeServer(self.episode_server_options)
+                )
+            await drain(self.spec.concurrency, self.plan.trials, execute)
+        self._episode_server = None
         ordered = tuple(results[item.trial_id] for item in self.plan.trials)
         status: Literal["succeeded", "failed", "cancelled", "awaiting_review"]
         if any(item.status == "awaiting_review" for item in ordered):

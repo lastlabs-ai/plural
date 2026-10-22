@@ -144,6 +144,8 @@ The fields, for reference:
   without credentials.
 - `endpoint` and `endpoint_key` point the Agent at its own model server; see
   [Use your own endpoint](#use-your-own-endpoint).
+- `external` points the Agent at an agent service you run yourself; see
+  [External Agents](external-agents.md).
 
 Model keys and other credentials are never written in `agent.yaml`.
 
@@ -213,13 +215,29 @@ instructions: Follow the support policy and finish the ticket using the availabl
   the key itself. Export it, or store it in the hosted project with
   `plural secret set NAME`, before `plural run`. It is sent only as the request's
   bearer token, and a missing value stops the run before it starts.
-- An endpoint Agent uses the native Harness, and can't set `harness`, `provider`,
-  `fallback_models`, or `secrets`.
+- An endpoint Agent uses the native Harness unless you give it a custom one. A custom
+  Harness reaches the endpoint through `agent.complete`, with the same key. A built-in
+  Harness such as `codex` calls models through the gateway, so it can't use an
+  endpoint.
+- An endpoint Agent can't set `provider` or `fallback_models`, and takes `secrets` only
+  for a custom Harness that declares them.
 - A Job whose Agents all use their own endpoints, or `auth: none`, needs no
   Plural API key. The endpoint must be reachable from the Runtime.
 
 This is the usual way to check a trained model against the same Benchmark you used
 for the baseline; see [Training and RL](../running/training.md).
+
+An `endpoint` Agent's calls bypass Plural, so the Trial records no gateway usage for
+them. To have them observed instead, an organization admin can add the server under
+**Organization → Providers → Endpoints** in the web app. Calls the gateway routes there
+are recorded on the Trial with `billing="organization"` and a reference cost, and never
+draw on credits.
+
+## Bring an agent that runs elsewhere
+
+An agent you already run as a web service can be evaluated as it is, without moving
+its code into a Harness. Plural calls it once per episode, observes every action it
+takes, and scores its answer. See [External Agents](external-agents.md).
 
 ## Give the Agent credentials
 

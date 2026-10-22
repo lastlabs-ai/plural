@@ -122,8 +122,9 @@ Here is what each field in `task.yaml` means, for when you need the exact rules:
   described on this page.
 - `resources` lists files and folders to give the Task, relative to its folder. It
   defaults to `resources`, so every file below `resources/` is included, and a missing
-  `resources/` folder is not an error. Task files must be UTF-8 text; a binary file
-  fails validation. Paths must stay inside the Task folder.
+  `resources/` folder is not an error. Files may be of any type, up to 16 MiB each and
+  256 MiB per Task; see [Supply data for a single Task](#supply-data-for-a-single-task).
+  Paths must stay inside the Task folder.
 
 ### Write many Tasks from a list of cases
 
@@ -403,9 +404,24 @@ access may read other staged files.
 
 ### Supply data for a single Task
 
-Files in a Task's `resources/` folder reach that Task's Trials only. Task files are
-UTF-8 text, such as CSV, JSON, or Markdown. They sit in `task-resources/`, apart from the
-Environment's files, so the two never collide.
+Files in a Task's `resources/` folder reach that Task's Trials only. They sit in
+`task-resources/`, apart from the Environment's files, so the two never collide.
+
+A Task file can be of any type: a PDF, a Word or Excel document, a drawing such as DWG
+or DXF, an image, code, or text. Each may be up to 16 MiB, and a Task's files up to
+256 MiB together.
+
+- **Text** (UTF-8, up to 1 MiB) is saved inside the Task, as it always was.
+- **Any other file** is saved once by the SHA-256 of its bytes, and the Task records
+  that digest and the file's type. Changing a file changes the Task's hash. `plural
+  task push` uploads each file the hosted project lacks, and `plural pull` downloads
+  them again. In the web app, only PNG, JPEG, GIF, and WebP images preview inline; every
+  other file downloads.
+
+The files MCP server (`server: plural.mcp.files:server`) lists each file's type and
+size. Its `read_file` returns text by lines, an image as an image a multimodal model can
+see, and any other file as its bytes with its type. A custom Harness can also open the
+file directly under `PLURAL_RESOURCES_DIR`.
 
 A `Task` built in Python takes the same file as an inline resource:
 
@@ -418,6 +434,9 @@ invoice = Resource(
     content_type="text/csv",
 )
 ```
+
+For a file on disk of any type, `Resource.from_file("drawings/A-201.pdf")` reads it,
+keeping text inline and anything else by digest.
 
 Pass `resources=[invoice]` to the Task. It becomes
 `/workspace/resources/task-resources/invoice.csv` for this Task's Trials only. Read it

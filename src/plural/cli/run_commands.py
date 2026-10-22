@@ -13,9 +13,11 @@ import os
 import uuid
 from collections.abc import Iterable, Mapping
 from contextlib import AbstractContextManager, nullcontext
+from pathlib import Path
 from typing import Any, Literal
 
 import typer
+from pydantic import ValidationError
 
 from plural.apps.mcp import use_credential_source
 from plural.auth import Session
@@ -39,6 +41,7 @@ from plural.cli.credits import CreditWatch
 from plural.cli.runtime_commands import _project_studio
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
+from plural.execution.episode_server import EpisodeServerOptions
 from plural.jobs import JobResult, JobSpec, TrialResult, TrialSpec
 from plural.project import ProjectError, Workspace
 from plural.project.layout import (
@@ -160,6 +163,23 @@ def run(
         False, "--dry-run", help="Advanced: validate and show the plan without running."
     ),
     follow: bool = typer.Option(False, "--follow", hidden=True),
+    listen: str = typer.Option(
+        "127.0.0.1:0",
+        "--listen",
+        help="For an external Agent: HOST:PORT where this run serves its episodes.",
+    ),
+    public_url: str | None = typer.Option(
+        None,
+        "--public-url",
+        help="For an external Agent: the https base URL it reaches this run at, when that "
+        "differs from --listen, such as behind a proxy.",
+    ),
+    tls_cert: Path | None = typer.Option(
+        None, "--tls-cert", help="For an external Agent: the certificate to serve https with."
+    ),
+    tls_key: Path | None = typer.Option(
+        None, "--tls-key", help="For an external Agent: the key of --tls-cert."
+    ),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
@@ -174,6 +194,12 @@ def run(
     if hosted or follow:
         raise ProjectError(HOSTED_RUNS)
     model, agent = _one(models, "--model"), _one(agents, "--agent")
+    try:
+        episode_server = EpisodeServerOptions(
+            listen=listen, public_url=public_url, tls_cert=tls_cert, tls_key=tls_key
+        )
+    except ValidationError as exc:
+        raise ProjectError(exc.errors()[0]["msg"].removeprefix("Value error, ")) from None
     record = _recording(record, track) or bool(evaluation_track and not dry_run)
     space = workspace()
     current = session()
@@ -260,6 +286,7 @@ def run(
             progress=_progress(as_json, total),
             tracking=tracking,
             credential_source=_stored_credentials(as_json),
+            episode_server=episode_server,
         )
     _finish_local(space, job_id, result, tracking, as_json=as_json)
 
@@ -774,7 +801,7 @@ def _stored_credentials(err: bool) -> CredentialSource:
 
 
 def _needed_secrets(spec: JobSpec) -> list[str]:
-    """Secret names the Job's Apps, Verifiers, and endpoint Agents need."""
+    """Secret names the Job's Apps, Verifiers, and endpoint and external Agents need."""
     names: set[str] = set()
     for task in spec.tasks:
         names.update(item.name for item in task.environment.secrets)
@@ -783,6 +810,8 @@ def _needed_secrets(spec: JobSpec) -> list[str]:
     for agent in spec.agents:
         if agent.agent.endpoint_key:
             names.add(agent.agent.endpoint_key)
+        if agent.external is not None:
+            names.add(agent.external.signing_key)
     return sorted(names)
 
 
@@ -1094,6 +1123,8 @@ def _print_trial(payload: dict[str, Any]) -> None:
             f"  Verifier {failure['verifier']}: reward raised on "
             f"{counted(failure['steps'], 'step')}: {failure['error']}"
         )
+    for finding in payload.get("integrity") or []:
+        typer.echo(f"  Integrity ({finding.get('code')}, not scored): {finding.get('message')}")
     for credential in payload.get("credentials") or []:
         scopes = ", ".join(credential.get("scopes") or []) or "no scopes listed"
         typer.echo(

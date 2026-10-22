@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import (
     AliasChoices,
@@ -108,6 +109,13 @@ def _benchmark_pin(source: JobSource) -> BenchmarkPin | None:
 
 
 def _resolve_model(agent: AgentBinding, catalog: ModelCatalog) -> ModelResolution:
+    if agent.external is not None:
+        return ModelResolution(
+            catalog_model_id=agent.model,
+            provider="external",
+            endpoint=f"external:{urlsplit(agent.external.url).hostname}",
+            upstream_id=agent.model,
+        )
     model = catalog.get(agent.model)
     if model is None:
         provider = agent.routing.provider or agent.model.partition("/")[0]
@@ -139,6 +147,25 @@ def _resolve_model(agent: AgentBinding, catalog: ModelCatalog) -> ModelResolutio
         upstream_id=endpoint.upstream_id,
         catalog_updated_at=catalog.updated_at,
     )
+
+
+def _check_external_agent(mode: JobMode, task: TaskDefinition, agent: AgentBinding) -> None:
+    if mode is JobMode.TRAIN:
+        raise ValueError(
+            f"A train Job cannot use external Agent {agent.name!r}: training needs the "
+            "exact tokens of every model call, which a service of its own does not report."
+        )
+    if task.party is not None:
+        raise ValueError(
+            f"External Agent {agent.name!r} cannot take a seat in Task {task.task_id!r} "
+            "yet; it can work Tasks one Agent works alone."
+        )
+    policy = task.environment.harness_policy
+    if policy.mode == "allowlist" and "external" not in policy.allowed_harnesses:
+        raise ValueError(
+            f"Environment {task.environment.name!r} allows only the Harnesses it lists; add "
+            "'external' to them to let an external Agent work it."
+        )
 
 
 class JobMode(str, Enum):
@@ -491,6 +518,8 @@ class JobSpec(FrozenModel):
                     )
             for agent in self.agents:
                 resolve_trial_harness_grant(task.environment, agent.agent)
+                if agent.external is not None:
+                    _check_external_agent(self.mode, task, agent)
         return self
 
     @property
@@ -832,6 +861,25 @@ def _stored_api_key() -> str | None:
         return None
 
 
+IntegrityCode = Literal[
+    "no_trace",
+    "actions_not_observed",
+    "actions_not_traced",
+    "answer_differs",
+    "trace_outside_episode",
+]
+
+
+class IntegrityFinding(FrozenModel):
+    """One way an External Agent's own trace departs from what Plural observed.
+
+    Evidence for a person to read. It never changes a score.
+    """
+
+    code: IntegrityCode
+    message: str
+
+
 class TrialResult(FrozenModel):
     """Typed Trial outcome."""
 
@@ -869,6 +917,9 @@ class TrialResult(FrozenModel):
     the first error. Those steps earned it no reward."""
     turns: int = Field(default=0, ge=0)
     """Model turns the Harness reported taking."""
+    integrity: tuple[IntegrityFinding, ...] = ()
+    """For an External Agent, where its self-reported trace departs from the
+    actions Plural observed and the answer it submitted. Never a score."""
 
     @model_validator(mode="after")
     def _shape(self) -> TrialResult:
@@ -925,6 +976,9 @@ class Job:
     For a Task whose Environment has a party, ``party`` lists the Agents that
     share each episode, in seat order; list one Agent more than once for
     self-play. Left out, every Agent in ``agents`` plays, once each.
+
+    ``episode_server`` says where the Job serves an external Agent's episodes;
+    by default it listens on a free loopback port.
     """
 
     def __init__(
@@ -951,6 +1005,7 @@ class Job:
         client: Any = None,
         api_key: str | None = None,
         credentials: Mapping[str, Mapping[str, str]] | None = None,
+        episode_server: Any = None,
     ) -> None:
         if not isinstance(source, (Task, Benchmark)):
             raise TypeError(
@@ -1034,6 +1089,7 @@ class Job:
             "progress": progress,
             "project_policy": project_policy,
             "catalog": self.catalog,
+            "episode_server": episode_server,
         }
         if registry is not None:
             self._runner_options["registry"] = registry
@@ -1082,7 +1138,10 @@ class Job:
             agents
             and not judged
             and all(
-                binding.auth == "none" or binding.agent.endpoint is not None for binding in agents
+                binding.auth == "none"
+                or binding.agent.endpoint is not None
+                or binding.external is not None
+                for binding in agents
             )
         ):
             # Agents with their own endpoint call it directly, not the gateway.
@@ -1141,6 +1200,7 @@ __all__ = [
     "BenchmarkPin",
     "BenchmarkJobSource",
     "ExecutionStatus",
+    "IntegrityFinding",
     "Job",
     "JobLock",
     "JobMode",

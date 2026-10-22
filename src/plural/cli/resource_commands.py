@@ -641,7 +641,101 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         _benchmark_membership(app)
     if kind is TASK:
         _task_cases(app)
+    if kind is AGENT:
+        _external_commands(app)
     return app
+
+
+def _external_commands(app: typer.Typer) -> None:
+    @app.command("key")
+    @handled
+    def key() -> None:
+        """Print a new signing key for an external Agent.
+
+        Store it as the Agent's signing_key secret here, and as
+        PLURAL_SIGNING_KEY in the agent's service. Plural never keeps it.
+        """
+        from plural.external.protocol import new_signing_key
+
+        typer.echo(new_signing_key())
+
+    @app.command("test")
+    @handled
+    def test(
+        name: str | None = typer.Argument(None, help=NAME_HELP),
+        as_json: bool = JSON_OPTION,
+    ) -> None:
+        """Send an external Agent a signed ping, and report how it answered."""
+        import os
+        import secrets
+        import ssl
+        import time
+
+        import httpx
+
+        from plural.agents import Agent
+        from plural.external.protocol import sign, signing_key
+
+        space = workspace()
+        ref = _ref(space, AGENT, name)
+        agent = space.load(ref).value
+        external = agent.external if isinstance(agent, Agent) else None
+        if external is None:
+            raise ProjectError(f"Agent {ref.name} is not external; it has no service to test.")
+        value = os.environ.get(external.signing_key)
+        if not value:
+            raise ProjectError(
+                f"Export {external.signing_key}, the key Agent {ref.name} signs with, first."
+            )
+        try:
+            key = signing_key(value)
+        except ValueError as exc:
+            raise ProjectError(f"{external.signing_key}: {exc}") from None
+        body = b'{"protocol":"plural-episode-v1","type":"ping"}'
+        headers = sign(key, body, message_id="ping_" + secrets.token_hex(12))
+        verify: ssl.SSLContext | bool = (
+            ssl.create_default_context(cafile=external.ca_bundle) if external.ca_bundle else True
+        )
+        started = time.monotonic()
+        try:
+            response = httpx.post(
+                external.url,
+                content=body,
+                headers={**headers, "Content-Type": "application/json"},
+                verify=verify,
+                follow_redirects=False,
+                timeout=15,
+            )
+        except httpx.HTTPError as exc:
+            raise ProjectError(
+                f"Could not reach {external.url}: {type(exc).__name__}: {exc}"
+            ) from None
+        elapsed = time.monotonic() - started
+        payload = {
+            "agent": ref.name,
+            "url": external.url,
+            "status": response.status_code,
+            "tls": external.url.startswith("https://"),
+            "seconds": round(elapsed, 3),
+            "ok": response.is_success,
+        }
+
+        def text() -> None:
+            if response.is_success:
+                success(
+                    f"{ref.name} answered the signed ping with {response.status_code} in "
+                    f"{elapsed:.2f}s over {'TLS' if payload['tls'] else 'plain http'}."
+                )
+            else:
+                typer.echo(
+                    f"{ref.name} answered {response.status_code}. A 401 or 403 usually means "
+                    "its PLURAL_SIGNING_KEY differs from "
+                    f"{external.signing_key}, or its clock is more than five minutes off."
+                )
+
+        emit(payload, as_json=as_json, text=text)
+        if not response.is_success:
+            raise typer.Exit(1)
 
 
 def _dependents(space: Workspace, ref: ResourceRef) -> list[ResourceRef]:
@@ -748,8 +842,33 @@ def _init_command(app: typer.Typer, kind: ResourceKind) -> None:
                 "in a terminal.",
             ),
             harness: str | None = typer.Option(None, "--harness", help="Harness name."),
+            external: str | None = typer.Option(
+                None,
+                "--external",
+                help="The https URL of an agent service of your own, which the Job calls "
+                "for each episode instead of running a Harness.",
+            ),
         ) -> None:
-            """Create a saved Agent: a model, instructions, and an optional Harness."""
+            """Create a saved Agent: a model, instructions, and an optional Harness.
+
+            With --external, the Agent is a service you run elsewhere; --model is
+            then the label it reports, such as acme/takeoff-v3.
+            """
+            if external:
+                if harness:
+                    raise ProjectError("An external Agent runs no Harness; drop --harness.")
+                from plural.external.protocol import check_agent_url
+
+                try:
+                    check_agent_url(external)
+                except ValueError as exc:
+                    raise ProjectError(str(exc)) from None
+                create(name, model=model, external=external)
+                typer.echo(
+                    "Make its signing key with `plural agent key`, then check it with "
+                    f"`plural agent test {name}`."
+                )
+                return
             if not model and sys.stdin.isatty():
                 model = typer.prompt(
                     "Model (a catalog id; `plural model list` shows them)", default=STARTER_MODEL

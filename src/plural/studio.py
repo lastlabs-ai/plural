@@ -19,6 +19,7 @@ import httpx
 from pydantic import BaseModel
 
 from plural.agents import Agent
+from plural.blobs import blob_digest
 from plural.environments.definition import EnvironmentDefinition
 from plural.errors import (
     AuthenticationError,
@@ -83,7 +84,7 @@ def _items(response: Any) -> JsonList:
     return cast(JsonList, response)
 
 
-def _dump(value: Any, *, exclude: set[str] | None = None) -> JsonObject:
+def _dump(value: Any, *, exclude: set[str] | dict[str, Any] | None = None) -> JsonObject:
     if not isinstance(value, BaseModel):
         raise InvalidRequestError("canonical SDK object must be a Pydantic model")
     return value.model_dump(mode="json", exclude_none=True, exclude=exclude or set())
@@ -338,7 +339,7 @@ class AgentsAPI(RevisionResourceAPI[Agent]):
         builtin = value.harness if isinstance(value.harness, str) else None
         if value.harness is not None and builtin is None and not harness_revision_id:
             raise InvalidRequestError("An Agent with a custom Harness needs harness_revision_id")
-        payload = _dump(value, exclude={"harness"})
+        payload = _dump(value, exclude={"harness": True, "external": {"ca_bundle": True}})
         payload["harness"] = builtin
         payload["harness_revision_id"] = harness_revision_id
         return payload
@@ -446,6 +447,40 @@ class PackagesAPI:
 
     def download(self, digest: str) -> bytes:
         return self._studio.request_bytes("GET", f"/packages/{quote(digest)}")
+
+
+class BlobsAPI:
+    """Content-addressed files that Tasks hand to an Agent, within the selected project.
+
+    A blob's digest is the SHA-256 of its bytes, so an upload is idempotent and
+    a download is verified before use.
+    """
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def exists(self, digest: str) -> bool:
+        try:
+            self._studio.request("HEAD", f"/blobs/{quote(digest)}")
+        except NotFoundError:
+            return False
+        return True
+
+    def upload(
+        self, digest: str, data: bytes, *, content_type: str = "application/octet-stream"
+    ) -> JsonObject:
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "PUT", f"/blobs/{quote(digest)}", content=data, content_type=content_type
+            ),
+        )
+
+    def download(self, digest: str) -> bytes:
+        data = self._studio.request_bytes("GET", f"/blobs/{quote(digest)}")
+        if blob_digest(data) != digest:
+            raise InvalidRequestError(f"File {digest} failed verification after download")
+        return data
 
 
 MODEL_SCOPE_HEADER = "X-Plural-Model-Scope"
@@ -742,6 +777,15 @@ class TrialsAPI:
             ),
         )
 
+    def gateway_key(self, execution_id: str, *, ttl_seconds: int = 7200) -> str:
+        """A key that calls models for this execution only, revoked when it finishes."""
+        response = self._studio.request(
+            "POST",
+            f"/trial-executions/{quote(execution_id)}/gateway-key",
+            json={"ttl_seconds": ttl_seconds},
+        )
+        return str(cast(JsonObject, response)["key"])
+
     def watch(self, trial_id: str, *, cursor: int = 0) -> Iterator[JsonObject]:
         return self._studio.watch(f"/trials/{quote(trial_id)}/events", cursor=cursor)
 
@@ -928,6 +972,7 @@ class Studio:
         self.projects = ProjectsAPI(self)
         self.accounts = AccountsAPI(self)
         self.packages = PackagesAPI(self)
+        self.blobs = BlobsAPI(self)
         self.models = ModelsAPI(self)
         self.runtimes = RuntimesAPI(self)
         self.secrets = SecretsAPI(self)

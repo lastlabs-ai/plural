@@ -373,6 +373,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ show      Show a resource: the local copy if there is one, otherwise the hosted one.             │
 │ list      List resources of this kind, labeled local or hosted.                                  │
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
+│ key       Print a new signing key for an external Agent.                                         │
+│ test      Send an external Agent a signed ping, and report how it answered.                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -407,14 +409,35 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Create a saved Agent: a model, instructions, and an optional Harness.
 
+ With --external, the Agent is a service you run elsewhere; --model is
+ then the label it reports, such as acme/takeoff-v3.
+
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    name      <str>  Agent name. [required]                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --model    -m      <str>  Catalog model id, from `plural model list`. Asked for when omitted in  │
-│                           a terminal.                                                            │
-│ --harness          <str>  Harness name.                                                          │
-│ --help                    Show this message and exit.                                            │
+│ --model     -m      <str>  Catalog model id, from `plural model list`. Asked for when omitted in │
+│                            a terminal.                                                           │
+│ --harness           <str>  Harness name.                                                         │
+│ --external          <str>  The https URL of an agent service of your own, which the Job calls    │
+│                            for each episode instead of running a Harness.                        │
+│ --help                     Show this message and exit.                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent key`
+
+```text
+
+ Usage: plural agent key [OPTIONS]
+
+ Print a new signing key for an external Agent.
+
+ Store it as the Agent's signing_key secret here, and as
+ PLURAL_SIGNING_KEY in the agent's service. Plural never keeps it.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -527,6 +550,23 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --hosted          Only read the hosted project.                                                  │
 │ --json            Print machine-readable JSON.                                                   │
 │ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent test`
+
+```text
+
+ Usage: plural agent test [OPTIONS] [name]
+
+ Send an external Agent a signed ping, and report how it answered.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1845,6 +1885,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 │                                                 CLI's own code.                                  │
 │ --dry-run                                       Advanced: validate and show the plan without     │
 │                                                 running.                                         │
+│ --listen                    <str>               For an external Agent: HOST:PORT where this run  │
+│                                                 serves its episodes.                             │
+│                                                 [default: 127.0.0.1:0]                           │
+│ --public-url                <str>               For an external Agent: the https base URL it     │
+│                                                 reaches this run at, when that differs from      │
+│                                                 --listen, such as behind a proxy.                │
+│ --tls-cert                  <path>              For an external Agent: the certificate to serve  │
+│                                                 https with.                                      │
+│ --tls-key                   <path>              For an external Agent: the key of --tls-cert.    │
 │ --json                                          Print machine-readable JSON.                     │
 │ --help                                          Show this message and exit.                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

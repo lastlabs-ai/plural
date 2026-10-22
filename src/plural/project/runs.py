@@ -38,6 +38,7 @@ from plural.common import HarnessPackage, PackageSource
 from plural.credentials import CredentialValue
 from plural.environments.definition import EnvironmentDefinition
 from plural.execution.capacity import recommend_concurrency
+from plural.execution.episode_server import EpisodeServerOptions
 from plural.harness.retrieval import source_digest
 from plural.jobs import (
     BenchmarkJobSource,
@@ -326,6 +327,7 @@ def run_local(
     progress: Any = None,
     tracking: Tracking | None = None,
     credential_source: CredentialSource | None = None,
+    episode_server: EpisodeServerOptions | None = None,
 ) -> tuple[str, JobResult]:
     """Execute a plan on this machine and record it under ``.plural/jobs``.
 
@@ -353,6 +355,7 @@ def run_local(
         progress=progress,
         tracking=tracking,
         credential_source=credential_source,
+        episode_server=episode_server,
     )
 
 
@@ -626,6 +629,7 @@ def _agent_value(workspace: Workspace, definition: AgentDefinition) -> Agent:
             "secrets": definition.secrets,
             "endpoint": definition.endpoint,
             "endpoint_key": definition.endpoint_key,
+            "external": definition.external,
             "credentials": definition.credentials,
             "metadata": definition.metadata,
         },
@@ -900,6 +904,7 @@ def _execute(
     progress: Any,
     tracking: Tracking | None = None,
     credential_source: CredentialSource | None = None,
+    episode_server: EpisodeServerOptions | None = None,
 ) -> tuple[str, JobResult]:
     from plural.credentials import CredentialError
     from plural.credentials import resolve as resolve_credentials
@@ -943,7 +948,8 @@ def _execute(
                 f"store it in the hosted project with `plural secret set {key}`."
             )
     needs_model = any(
-        binding.auth != "none" and binding.agent.endpoint is None for binding in spec.agents
+        binding.auth != "none" and binding.agent.endpoint is None and binding.external is None
+        for binding in spec.agents
     )
     if needs_model and not environ.get("PLURAL_API_KEY"):
         raise ProjectError(
@@ -982,7 +988,10 @@ def _execute(
         "catalog": workspace.catalog,
         "environ": environ,
         "credentials": credentials,
+        "episode_server": episode_server,
     }
+    if tracker is not None:
+        options["gateway_keys"] = tracker.gateway_key
     if progress is not None:
         options["progress"] = progress
     try:
@@ -1209,6 +1218,7 @@ def _trial_summary(result: TrialResult) -> dict[str, Any]:
         "cost_usd": result.receipt.cost_usd,
         "error": result.error_message,
         "reward_failures": [item.model_dump(mode="json") for item in result.reward_failures],
+        "integrity": [item.model_dump(mode="json") for item in result.integrity],
     }
 
 

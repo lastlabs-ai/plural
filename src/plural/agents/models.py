@@ -19,6 +19,7 @@ from plural.common import (
     semantic_version,
     stable_id,
 )
+from plural.external.protocol import check_agent_url
 from plural.harness.models import Harness, HarnessDefinition
 from plural.identity import revision_hash
 
@@ -95,6 +96,37 @@ def _credential_names(value: dict[str, AgentCredential]) -> dict[str, AgentCrede
     return dict(sorted(value.items()))
 
 
+class ExternalAgent(FrozenModel):
+    """An agent that already runs as a service of its own.
+
+    A Job calls ``url`` with a signed request for each episode. The agent acts
+    only through that episode's actions and files, and its code is not part of
+    any content hash: ``version`` is the label you give each release.
+    """
+
+    url: str
+    """Where the Job sends each signed episode start, over https."""
+    signing_key: str
+    """The name of the secret holding the key both sides sign with. Never the key."""
+    version: str = ""
+    """A label for the agent's release, such as 2026.10.3."""
+    ca_bundle: str | None = None
+    """A PEM file of the certificate authority that signed the agent's certificate,
+    for a service inside your own network."""
+
+    @field_validator("url")
+    @classmethod
+    def _safe_url(cls, value: str) -> str:
+        return check_agent_url(value)
+
+    @field_validator("signing_key")
+    @classmethod
+    def _secret_name(cls, value: str) -> str:
+        from plural.apps.definition import SecretReference
+
+        return SecretReference(name=value).name
+
+
 class Agent(FrozenModel):
     """A catalog-backed model and its optional execution harness.
 
@@ -102,7 +134,11 @@ class Agent(FrozenModel):
     base URL of an OpenAI-compatible API (one that serves
     ``/chat/completions``). ``model`` is then sent to it as is and need not be
     in the catalog, and ``endpoint_key`` names the secret holding its API key.
-    Plural's native Harness calls it with the Environment's actions as tools.
+    Plural's native Harness calls it with the Environment's actions as tools,
+    and a custom Harness reaches it through ``agent.complete``.
+
+    An agent that already runs elsewhere is an ``external`` Agent instead: the
+    Job calls it over signed HTTPS, and ``model`` is the label it reports.
     """
 
     model: str = Field(min_length=1)
@@ -131,6 +167,7 @@ class Agent(FrozenModel):
     )
     endpoint: str | None = None
     endpoint_key: str | None = None
+    external: ExternalAgent | None = None
     credentials: dict[str, AgentCredential] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -146,14 +183,33 @@ class Agent(FrozenModel):
     def _renamed_fields(cls, value: Any) -> Any:
         return renamed_keys(value, AGENT_RENAMES, "Agent")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _external_ca_bundle(cls, value: Any, info: ValidationInfo) -> Any:
+        context = info.context if isinstance(info.context, dict) else {}
+        root = context.get("root")
+        external = value.get("external") if isinstance(value, dict) else None
+        if not isinstance(external, dict) or not isinstance(root, Path):
+            return value
+        bundle = external.get("ca_bundle")
+        if isinstance(bundle, str) and not Path(bundle).is_absolute():
+            value = {**value, "external": {**external, "ca_bundle": str(root / bundle)}}
+        return value
+
     @model_validator(mode="after")
     def _validate_public_agent(self, info: ValidationInfo) -> Agent:
         context = info.context if isinstance(info.context, dict) else {}
         catalog = context.get("catalog") or _bundled_catalog()
         if not isinstance(catalog, ModelCatalog):
             raise TypeError("catalog validation context must be a ModelCatalog")
+        if self.external is not None:
+            self._validate_external_agent()
+            return self
         if self.endpoint is not None or self.endpoint_key is not None:
-            return self._validate_endpoint_agent()
+            self._validate_endpoint_agent()
+            if self.harness is not None:
+                self._check_custom_harness()
+            return self
         selected = catalog.get(self.model)
         if selected is None:
             nearby = catalog.suggest(self.model)
@@ -202,19 +258,7 @@ class Agent(FrozenModel):
                     f"Agent secrets are not declared by Harness {self.harness!r}: {undeclared!r}"
                 )
         elif self.harness is not None:
-            if self.harness_config:
-                raise ValueError(
-                    "harness_config is only valid with a built-in Harness name such as "
-                    "'claude-code', 'codex', or 'hermes'"
-                )
-            package = self.harness._package()
-            undeclared = sorted(set(self.secrets) - set(package.definition.secret_names))
-            if undeclared:
-                raise ValueError(
-                    "Agent secrets are not declared by Harness "
-                    f"{package.definition.name!r}: "
-                    f"{undeclared!r}"
-                )
+            self._check_custom_harness()
         elif self.harness_config:
             raise ValueError(
                 "harness_config requires harness to be a built-in name such as "
@@ -222,20 +266,33 @@ class Agent(FrozenModel):
             )
         return self
 
-    def _validate_endpoint_agent(self) -> Agent:
-        name = self.name or self.model
-        if not self.endpoint or not self.endpoint.startswith(("http://", "https://")):
+    def _check_custom_harness(self) -> None:
+        assert self.harness is not None and not isinstance(self.harness, str)
+        if self.harness_config:
             raise ValueError(
-                f"Cannot create Agent {name!r}.\n"
-                "endpoint must be the http(s) base URL of an OpenAI-compatible API, "
-                "such as https://agent.example.com/v1."
+                "harness_config is only valid with a built-in Harness name such as "
+                "'claude-code', 'codex', or 'hermes'"
             )
+        package = self.harness._package()
+        undeclared = sorted(set(self.secrets) - set(package.definition.secret_names))
+        if undeclared:
+            raise ValueError(
+                f"Agent secrets are not declared by Harness {package.definition.name!r}: "
+                f"{undeclared!r}"
+            )
+
+    def _validate_external_agent(self) -> None:
+        name = self.name or self.model
         unsupported = [
             label
             for label, given in (
                 ("harness", self.harness is not None),
+                ("harness_config", bool(self.harness_config)),
+                ("endpoint", self.endpoint is not None or self.endpoint_key is not None),
                 ("provider", self.provider is not None),
                 ("fallback_models", bool(self.fallback_models)),
+                ("temperature", self.temperature is not None),
+                ("max_tokens", self.max_tokens is not None),
                 ("secrets", bool(self.secrets)),
             )
             if given
@@ -243,8 +300,41 @@ class Agent(FrozenModel):
         if unsupported:
             raise ValueError(
                 f"Cannot create Agent {name!r}.\n"
-                f"An endpoint Agent runs on Plural's native Harness, so it takes no "
-                f"{', '.join(unsupported)}. Put its API key's name in endpoint_key."
+                "An external Agent runs as its own service, so Plural cannot honor "
+                f"{', '.join(unsupported)}. Remove them; the service decides those itself."
+            )
+        semantic_version(self.version)
+        if not self.name:
+            object.__setattr__(self, "name", self.model.rsplit("/", 1)[-1])
+
+    def _validate_endpoint_agent(self) -> None:
+        name = self.name or self.model
+        if not self.endpoint or not self.endpoint.startswith(("http://", "https://")):
+            raise ValueError(
+                f"Cannot create Agent {name!r}.\n"
+                "endpoint must be the http(s) base URL of an OpenAI-compatible API, "
+                "such as https://agent.example.com/v1."
+            )
+        if isinstance(self.harness, str):
+            raise ValueError(
+                f"Cannot create Agent {name!r}.\n"
+                f"Built-in Harness {self.harness!r} calls models through the Plural gateway, "
+                "so it cannot use an endpoint. Use Plural's native Harness or a custom one."
+            )
+        unsupported = [
+            label
+            for label, given in (
+                ("provider", self.provider is not None),
+                ("fallback_models", bool(self.fallback_models)),
+                ("secrets", bool(self.secrets) and self.harness is None),
+            )
+            if given
+        ]
+        if unsupported:
+            raise ValueError(
+                f"Cannot create Agent {name!r}.\n"
+                f"An endpoint Agent takes no {', '.join(unsupported)}. Put its API key's "
+                "name in endpoint_key."
             )
         if self.endpoint_key is not None:
             from plural.apps.definition import SecretReference
@@ -253,7 +343,6 @@ class Agent(FrozenModel):
         semantic_version(self.version)
         if not self.name:
             object.__setattr__(self, "name", self.model.rsplit("/", 1)[-1])
-        return self
 
     @classmethod
     def from_catalog(cls, catalog: ModelCatalog, **fields: Any) -> Agent:
@@ -318,6 +407,7 @@ class Agent(FrozenModel):
             secrets=self.secrets,
             endpoint=self.endpoint,
             endpoint_key=self.endpoint_key,
+            external=self.external,
             credentials=self.credentials,
             metadata=self.metadata,
         )
@@ -348,6 +438,8 @@ class AgentDefinition(FrozenModel):
     """An OpenAI-compatible base URL the native Harness calls instead of the gateway."""
     endpoint_key: str | None = None
     """The secret holding ``endpoint``'s API key."""
+    external: ExternalAgent | None = None
+    """The service a Job calls for each episode, for an Agent that runs elsewhere."""
     credentials: dict[str, AgentCredential] = Field(default_factory=dict)
     """The credentials this Agent supplies to Apps, by name. Never their values."""
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -368,6 +460,8 @@ class AgentDefinition(FrozenModel):
     def _package_matches_binding(self) -> AgentDefinition:
         if self.harness is None and self.harness_package is not None:
             raise ValueError("harness_package requires a harness binding")
+        if self.external is not None and (self.harness is not None or self.endpoint is not None):
+            raise ValueError("an external Agent has no harness or endpoint")
         if (
             self.harness is not None
             and self.harness_package is not None
@@ -387,6 +481,14 @@ class AgentDefinition(FrozenModel):
         if not self.credentials:
             # Agents with no credentials keep the identity they had before credentials.
             del payload["credentials"]
+        if self.external is None:
+            del payload["external"]
+        else:
+            # Where the key lives, and which CA signed the service, don't change the agent.
+            payload["external"] = {
+                "url": self.external.url,
+                "version": self.external.version,
+            }
         if self.harness_package is not None:
             payload["harness"] = self.harness_package.content_hash
         else:
@@ -459,9 +561,21 @@ class AgentBinding(FrozenModel):
     secret_names = renamed_attribute("secret_names", "secrets")
 
     @property
+    def external(self) -> ExternalAgent | None:
+        """The service this Agent runs as, when it runs elsewhere."""
+        return self.agent.external
+
+    @property
     def content_hash(self) -> str:
         """Stable binding digest."""
         return content_hash(self)
 
 
-__all__ = ["Agent", "AgentBinding", "AgentCredential", "AgentDefinition", "RoutingSpec"]
+__all__ = [
+    "Agent",
+    "AgentBinding",
+    "AgentCredential",
+    "AgentDefinition",
+    "ExternalAgent",
+    "RoutingSpec",
+]

@@ -14,6 +14,8 @@ from plural import (
     DeterministicVerifier,
     Environment,
     Episode,
+    Harness,
+    HarnessResult,
     Job,
     Runtime,
     Task,
@@ -60,6 +62,14 @@ def agent_server() -> Iterator[str]:
         server.shutdown()
 
 
+class AskTheEndpoint(Harness):
+    name = "ask-the-endpoint"
+
+    def run(self, task, agent, environment):
+        reply = agent.complete([{"role": "user", "content": task.instructions}])
+        return HarnessResult(response=reply.text)
+
+
 def answered_paid(episode: Episode) -> VerifierOutput:
     return VerifierOutput(score=1.0 if "PAID" in json.dumps(episode.trajectory) else 0.0)
 
@@ -83,7 +93,8 @@ def test_an_endpoint_agent_needs_no_catalog_model() -> None:
     ("fields", "message"),
     [
         ({"endpoint": "agents.acme.dev"}, "http"),
-        ({"endpoint": "https://a.dev/v1", "harness": "codex"}, "takes no harness"),
+        ({"endpoint": "https://a.dev/v1", "harness": "codex"}, "cannot use an endpoint"),
+        ({"endpoint": "https://a.dev/v1", "secrets": ("X",)}, "takes no secrets"),
         ({"endpoint": "https://a.dev/v1", "fallback_models": ("x/y",)}, "fallback_models"),
         ({"endpoint": "https://a.dev/v1", "endpoint_key": "PLURAL_API_KEY"}, "resource controls"),
     ],
@@ -162,6 +173,44 @@ def test_a_job_runs_an_endpoint_agent_without_a_plural_key(
     trial = result.trials[0]
     assert trial.score == 1.0, trial.error_message
     assert _AgentServer.requests[0][1] == "Bearer sk-acme"
+
+
+def test_a_custom_harness_reaches_the_endpoint_through_complete(
+    agent_server: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    monkeypatch.delenv("PLURAL_API_KEY", raising=False)
+    monkeypatch.delenv("PLURAL_GATEWAY_URL", raising=False)
+    monkeypatch.setenv("ACME_KEY", "sk-acme")
+    monkeypatch.chdir(tmp_path)
+    task = Task(
+        name="refund-01",
+        instructions="Say PAID.",
+        environment=Environment(name="support", runtime=Runtime.local()),
+        verifiers=[DeterministicVerifier(name="paid", check=answered_paid)],
+    )
+    agent = Agent(
+        model="acme/agent",
+        endpoint=agent_server,
+        endpoint_key="ACME_KEY",
+        harness=AskTheEndpoint(),
+    )
+
+    result = Job(task, agents=[agent]).run()
+
+    trial = result.trials[0]
+    assert trial.score == 1.0, trial.error_message
+    path, authorization, body = _AgentServer.requests[0]
+    assert (path, authorization) == ("/v1/chat/completions", "Bearer sk-acme")
+    assert body["model"] == "acme/agent"
+
+
+def test_a_built_in_harness_cannot_use_an_endpoint() -> None:
+    codex = Agent(model="openai/gpt-5.6-luna", harness="codex")._definition().harness
+    endpoint = Agent(model="acme/agent", endpoint="https://a.dev/v1")._definition()
+    binding = AgentBinding(agent=endpoint.model_copy(update={"harness": codex}))
+
+    with pytest.raises(ExecutionFailure, match="cannot use"):
+        _harness_environment(binding, native_chat_v1(), {})
 
 
 def test_a_local_runtime_names_the_packages_it_lacks(

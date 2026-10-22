@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from plural.common import (
@@ -74,6 +75,31 @@ def native_actions_v1() -> HarnessPackage:
     )
 
 
+EXTERNAL_PROFILE = "external.v1"
+
+
+def external_v1() -> HarnessPackage:
+    """Return the profile of an External Agent, which runs nothing in the Runtime."""
+    definition = HarnessProtocol(
+        name=EXTERNAL_PROFILE,
+        revision="1.0.0",
+        description="An agent that runs as its own service and acts over HTTPS.",
+        implementation="runnable",
+        command=("external",),
+        auth_modes=("environment", "none"),
+        outputs=(FileDeclaration(path="result.json"),),
+        artifacts=(FileDeclaration(path="agent-trace.json", media_type="application/json"),),
+    )
+    return HarnessPackage(
+        definition=definition,
+        source=PackageSource(
+            kind="local",
+            uri=EXTERNAL_PROFILE,
+            digest="sha256:" + hashlib.sha256(EXTERNAL_PROFILE.encode()).hexdigest(),
+        ),
+    )
+
+
 BUILTIN_PROFILES = {
     "native.chat.v1": native_chat_v1,
     "native.actions.v1": native_actions_v1,
@@ -84,7 +110,9 @@ __all__ = [
     "BUILTIN_HARNESSES",
     "BUILTIN_HARNESS_NAMES",
     "BUILTIN_PROFILES",
+    "EXTERNAL_PROFILE",
     "builtin_schema",
+    "external_v1",
     "get_builtin",
     "list_builtin_harnesses",
     "native_actions_v1",

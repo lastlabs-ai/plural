@@ -35,6 +35,11 @@ class _Hosted:
         self.transitions: list[tuple[str, str]] = []
         self.heartbeats: list[list[str]] = []
         self.cancelled: list[str] = []
+        self.gateway_keys: list[str] = []
+
+    def gateway_key(self, execution_id: str, *, ttl_seconds: int) -> str:
+        self.gateway_keys.append(execution_id)
+        return f"plural_gateway_{execution_id}"
 
     def get(self, trial_id: str) -> dict[str, Any]:
         trial = self._trials[trial_id]
@@ -97,6 +102,7 @@ def _studio(hosted: _Hosted) -> Any:
     class Trials:
         get = staticmethod(hosted.get)
         create_execution = staticmethod(hosted.create_execution)
+        gateway_key = staticmethod(hosted.gateway_key)
 
     class Studio:
         project = hosted.project
@@ -108,7 +114,7 @@ def _studio(hosted: _Hosted) -> Any:
 
 
 async def _tracked_run(
-    tmp_path: Path, hosted: _Hosted, spec: JobSpec
+    tmp_path: Path, hosted: _Hosted, spec: JobSpec, *, environ: dict[str, str] | None = None
 ) -> tuple[JobStore, list[str]]:
     store = JobStore(tmp_path / "jobs")
     tracker = HostedTracker(
@@ -121,7 +127,13 @@ async def _tracked_run(
         heartbeat_seconds=0.01,
     )
     store.on_event = tracker.observe
-    result = await JobRunner(spec, provider=FakeProvider("docker", delay=0.05), store=store).run()
+    result = await JobRunner(
+        spec,
+        provider=FakeProvider("docker", delay=0.05),
+        store=store,
+        environ=environ or {},
+        gateway_keys=tracker.gateway_key,
+    ).run()
     assert result.status == "succeeded"
     return store, tracker.close()
 
@@ -142,6 +154,18 @@ async def test_each_execution_is_opened_as_it_starts_and_finished_as_it_ends(
         assert steps == ["provisioning", "running", "verifying", "succeeded"]
     # Running executions reported liveness while the Job ran.
     assert any(hosted.heartbeats)
+
+
+async def test_each_recorded_execution_gets_its_own_gateway_key(tmp_path: Path) -> None:
+    spec = _spec([_task("case-0"), _task("case-1")], concurrency=2)
+    hosted = _Hosted(spec)
+
+    _, errors = await _tracked_run(tmp_path, hosted, spec, environ={"PLURAL_API_KEY": "own"})
+
+    assert errors == []
+    assert sorted(hosted.gateway_keys) == sorted(
+        record["id"] for record in hosted.executions.values()
+    )
 
 
 async def test_pushing_a_tracked_job_records_nothing_twice(tmp_path: Path) -> None:

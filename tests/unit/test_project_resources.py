@@ -406,3 +406,59 @@ def test_show_and_list_label_local_resources(
     builtin = runner.invoke(app, ["harness", "show", "codex", "--json"])
     assert builtin.exit_code == 0, builtin.output
     assert json.loads(builtin.output)["location"] == "built-in"
+
+
+def test_a_task_carries_files_of_any_type(
+    project: Project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from plural.execution.inputs import resource_uploads
+
+    monkeypatch.setenv("PLURAL_BLOB_CACHE", str(tmp_path / "blobs"))
+    folder = project.root / "tasks/refund/resources"
+    folder.mkdir()
+    (folder / "notes.md").write_text("# Notes\n")
+    text_only = load(project, "task", "refund").content_hash
+    (folder / "A-201.pdf").write_bytes(b"%PDF-1.7\n\xff\xfe\0sheet")
+    (folder / "spec.docx").write_bytes(b"PK\x03\x04\xff\0word")
+
+    task = load(project, "task", "refund").value
+    by_name = {item.name: item for item in task.resources}
+    assert by_name["resources/notes.md"].delivery == "inline"
+    drawing = by_name["resources/A-201.pdf"]
+    assert (drawing.delivery, drawing.content_type) == ("blob", "application/pdf")
+    assert by_name["resources/spec.docx"].content_type.endswith("wordprocessingml.document")
+    with_files = load(project, "task", "refund").content_hash
+    assert with_files != text_only
+
+    (folder / "A-201.pdf").write_bytes(b"%PDF-1.7\n\xff\xfe\0revised")
+    assert load(project, "task", "refund").content_hash != with_files
+
+    staged = {
+        upload.path: upload.data
+        for upload in resource_uploads(
+            (), load(project, "task", "refund").value.resources, None, {}
+        )
+    }
+    assert staged["task-resources/resources/A-201.pdf"] == b"%PDF-1.7\n\xff\xfe\0revised"
+
+    (folder / "huge.tif").write_bytes(b"\0" * (16 * 1024 * 1024 + 1))
+    assert "huge.tif is larger than 16 MiB" in problems(project, "task", "refund")
+
+
+def test_a_missing_file_says_how_to_get_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from plural import Resource
+    from plural.execution.inputs import resource_uploads
+
+    monkeypatch.setenv("PLURAL_BLOB_CACHE", str(tmp_path / "blobs"))
+    drawing = Resource.from_file(_write(tmp_path / "A-201.pdf", b"\xff\0pdf"))
+    assert drawing.delivery == "blob"
+    note = Resource.from_file(_write(tmp_path / "note.txt", b"plain"))
+    assert (note.delivery, note.content) == ("inline", "plain")
+    monkeypatch.setenv("PLURAL_BLOB_CACHE", str(tmp_path / "elsewhere"))
+    with pytest.raises(ValueError, match="plural pull"):
+        resource_uploads((), (drawing,), None, {})
+
+
+def _write(path: Path, data: bytes) -> Path:
+    path.write_bytes(data)
+    return path

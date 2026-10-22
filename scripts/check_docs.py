@@ -43,6 +43,7 @@ PACKAGE_NAV = [
     ("Build", "/docs/project/verifiers", "project/verifiers.md"),
     ("Build", "/docs/project/harnesses", "project/harnesses.md"),
     ("Build", "/docs/project/agents", "project/agents.md"),
+    ("Build", "/docs/project/external-agents", "project/external-agents.md"),
     ("Build", "/docs/project/benchmarks", "project/benchmarks.md"),
     ("Build", "/docs/project/multi-agent", "project/multi-agent.md"),
     ("Run", "/docs/running/jobs", "running/jobs.md"),
