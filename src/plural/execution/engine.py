@@ -44,6 +44,7 @@ from plural.execution.apps import (
     host_files,
     host_inputs,
     missing_app_secrets,
+    trial_seed,
     verifier_sources,
 )
 from plural.execution.bootstrap import (
@@ -685,6 +686,7 @@ class TrialRunner:
         package = _package_for(agent, task)
         players = self._players(task, agent, package)
         provider = self.provider_for(task.environment.runtime.provider)
+        seed = trial_seed(task.content_hash, self.spec.attempt)
         started = datetime.now(timezone.utc)
         clock = time.monotonic()
         secrets: dict[str, str] = {}
@@ -864,7 +866,7 @@ class TrialRunner:
                         )
                         await host.start(
                             secrets=app_secrets,
-                            inputs=host_inputs(task),
+                            inputs=host_inputs(task, seed=seed),
                             seats={
                                 str(item.seat): str(item.token) for item in players if item.seat
                             },
@@ -1124,6 +1126,7 @@ class TrialRunner:
                 app_isolation=app_isolation,
                 seats=seats_out,
                 seat_isolation=seat_isolation,
+                seed=seed,
                 **_episode_totals(artifacts, failed=False),
             )
         except BaseException as exc:
@@ -1162,6 +1165,7 @@ class TrialRunner:
                 if self.seat_names and host_report.steps
                 else (),
                 seat_isolation=seat_isolation,
+                seed=seed,
                 **totals,
                 error_code=None if code is ErrorCode.CANCELLED else code,
                 error_message=_redact_bytes(str(exc).encode(), secrets).decode(errors="replace")[

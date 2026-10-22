@@ -840,6 +840,9 @@ class TrialResult(FrozenModel):
     """How seats were kept from one another: ``os_user`` when each seat's
     Harness ran as its own OS user, unable to read another's files or
     process. ``None`` without seats."""
+    seed: int | None = None
+    """The seed the Apps started from, the same for every Agent on this attempt
+    of the Task. ``None`` for a Trial run before seeds were recorded."""
     stop_reason: str = ""
     """How the episode ended, one of :data:`plural.STOP_REASONS`; ``error``
     for a failed Trial whose Harness reported none, empty when unreported."""

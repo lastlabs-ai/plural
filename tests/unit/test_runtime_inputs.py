@@ -16,6 +16,7 @@ from plural.execution.apps import (
     host_files,
     host_inputs,
     missing_app_secrets,
+    trial_seed,
 )
 from plural.execution.engine import TrialRunner
 from plural.execution.inputs import resource_uploads, runtime_values
@@ -206,10 +207,10 @@ def test_trial_stages_resources_and_the_app_host_reads_initial_state_by_app():
             }
         ],
     }
-    assert host_inputs(task) == {
+    assert host_inputs(task, seed=7) == {
         "initial_state": {"game": {"seed": 42}},
         "info": {"hint": "visible"},
-        "seed": None,
+        "seed": 7,
     }
     assert b"def gentle(step)" in files[".plural/verifiers/0/test_runtime_inputs.py"]
     assert (
@@ -225,3 +226,29 @@ def test_explicit_empty_job_environment_does_not_inherit_values(monkeypatch):
     job = object.__new__(Job)
     job._runner_options = {"environ": {}, "provider": object()}
     assert job._credential_environ() == {}
+
+
+def test_each_attempt_has_its_own_seed_and_every_agent_shares_it():
+    assert trial_seed("sha256:task", 1) == trial_seed("sha256:task", 1)
+    assert trial_seed("sha256:task", 1) != trial_seed("sha256:task", 2)
+    assert trial_seed("sha256:task", 1) != trial_seed("sha256:other", 1)
+    assert 0 <= trial_seed("sha256:task", 1) < 2**32
+
+
+def test_apps_draw_repeatable_random_numbers_from_the_episode_seed():
+    from plural import App, Environment, Runtime, action
+
+    class Dice(App):
+        def reset(self, initial_state):
+            super().reset(initial_state)
+            return {"seed": self.seed, "roll": self.rng.randint(1, 1_000_000)}
+
+        @action
+        def roll(self) -> int:
+            return self.rng.randint(1, 1_000_000)
+
+    environment = Environment(name="dice", apps=[Dice()], runtime=Runtime.local())
+    first = environment.reset(seed=3)[0]
+    assert first["seed"] == 3
+    assert environment.reset(seed=3)[0] == first
+    assert environment.reset(seed=4)[0] != first

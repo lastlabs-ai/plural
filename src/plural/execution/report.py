@@ -441,6 +441,8 @@ def publish_execution(
             **({"app_isolation": result.app_isolation} if result.app_isolation else {}),
         },
     }
+    if result.seed is not None:
+        report["seed"] = result.seed
     if result.seats:
         report["seats"] = [item.model_dump(mode="json") for item in result.seats]
         report["seat_isolation"] = result.seat_isolation

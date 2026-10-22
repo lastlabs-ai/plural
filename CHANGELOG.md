@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Every Trial has a seed, derived from the Task and the attempt, so every Agent on one attempt faces the same world and a rerun faces it again. Apps read it as `self.seed` and draw from `self.rng`; a State with a `seed` field gets it too. The Trial records it as `TrialResult.seed`. Until now a Job always reset Apps without a seed.
+
 ### Fixed
 
 - A gateway failure the built-in Harness could not recover from is now recorded as the provider's, not as a harness failure scored zero. 0.22.1 lost the failure kind when the runner exited non-zero, which is how it always exits on an error.

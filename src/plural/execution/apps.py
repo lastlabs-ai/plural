@@ -18,6 +18,7 @@ its own OS user, so the Harness cannot read the host's folder or memory.
 from __future__ import annotations
 
 import base64
+import hashlib
 import inspect
 import json
 from collections.abc import Mapping, Sequence
@@ -327,7 +328,20 @@ def host_files(task: TaskDefinition) -> tuple[FileUpload, ...]:
     )
 
 
-def host_inputs(task: TaskDefinition) -> dict[str, Any]:
+def trial_seed(task_digest: str, attempt: int) -> int:
+    """The seed one attempt of a Task starts from.
+
+    It depends only on the Task and the attempt, so every Agent on that attempt
+    faces the same world, and a rerun faces it again.
+
+    Returns:
+        A 32-bit seed.
+    """
+    digest = hashlib.sha256(f"{task_digest}:{attempt}".encode()).digest()
+    return int.from_bytes(digest[:4], "big")
+
+
+def host_inputs(task: TaskDefinition, *, seed: int) -> dict[str, Any]:
     """The Task's reset inputs, for the host's bootstrap rather than a file.
 
     Returns:
@@ -336,7 +350,7 @@ def host_inputs(task: TaskDefinition) -> dict[str, Any]:
     return {
         "initial_state": normalize_initial_state(task.environment, task.state or {}),
         "info": task.info,
-        "seed": None,
+        "seed": seed,
     }
 
 
@@ -610,6 +624,7 @@ __all__ = [
     "environment_payload",
     "host_files",
     "host_inputs",
+    "trial_seed",
     "missing_app_secrets",
     "reward_hook_files",
     "verifier_sources",
