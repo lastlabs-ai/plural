@@ -17,6 +17,7 @@ from plural.external.protocol import (
     EpisodeStart,
     EpisodeTask,
     SignatureError,
+    sign,
     signing_key,
     verify,
 )
@@ -168,6 +169,39 @@ class Episode:
         return body if isinstance(body, dict) else {}
 
 
+def ping(url: str, key: str, *, ca_bundle: str | None = None, timeout: float = 15) -> int:
+    """Send an agent service a signed ping, as a Job checks it before an episode.
+
+    Args:
+        url: The service's episode URL.
+        key: The signing key.
+        ca_bundle: A PEM CA file for a private certificate.
+        timeout: Seconds to wait.
+
+    Returns:
+        The status the service answered with.
+
+    Raises:
+        httpx.HTTPError: When the service could not be reached.
+    """
+    import secrets
+
+    body = b'{"protocol":"plural-episode-v1","type":"ping"}'
+    headers = sign(signing_key(key), body, message_id="ping_" + secrets.token_hex(12))
+    verify_tls: ssl.SSLContext | bool = (
+        ssl.create_default_context(cafile=ca_bundle) if ca_bundle else True
+    )
+    response = httpx.post(
+        url,
+        content=body,
+        headers={**headers, "Content-Type": "application/json"},
+        verify=verify_tls,
+        follow_redirects=False,
+        timeout=timeout,
+    )
+    return response.status_code
+
+
 def _raise_for(response: httpx.Response) -> None:
     if response.is_success:
         return
@@ -178,4 +212,4 @@ def _raise_for(response: httpx.Response) -> None:
     raise EpisodeError(f"{response.status_code}: {detail or response.reason_phrase}")
 
 
-__all__ = ["KEY_VARIABLE", "Episode", "EpisodeError", "Ping", "verify_request"]
+__all__ = ["KEY_VARIABLE", "Episode", "EpisodeError", "Ping", "ping", "verify_request"]

@@ -667,14 +667,12 @@ def _external_commands(app: typer.Typer) -> None:
     ) -> None:
         """Send an external Agent a signed ping, and report how it answered."""
         import os
-        import secrets
-        import ssl
         import time
 
         import httpx
 
         from plural.agents import Agent
-        from plural.external.protocol import sign, signing_key
+        from plural.external.client import ping
 
         space = workspace()
         ref = _ref(space, AGENT, name)
@@ -687,54 +685,41 @@ def _external_commands(app: typer.Typer) -> None:
             raise ProjectError(
                 f"Export {external.signing_key}, the key Agent {ref.name} signs with, first."
             )
-        try:
-            key = signing_key(value)
-        except ValueError as exc:
-            raise ProjectError(f"{external.signing_key}: {exc}") from None
-        body = b'{"protocol":"plural-episode-v1","type":"ping"}'
-        headers = sign(key, body, message_id="ping_" + secrets.token_hex(12))
-        verify: ssl.SSLContext | bool = (
-            ssl.create_default_context(cafile=external.ca_bundle) if external.ca_bundle else True
-        )
         started = time.monotonic()
         try:
-            response = httpx.post(
-                external.url,
-                content=body,
-                headers={**headers, "Content-Type": "application/json"},
-                verify=verify,
-                follow_redirects=False,
-                timeout=15,
-            )
+            status = ping(external.url, value, ca_bundle=external.ca_bundle)
+        except ValueError as exc:
+            raise ProjectError(f"{external.signing_key}: {exc}") from None
         except httpx.HTTPError as exc:
             raise ProjectError(
                 f"Could not reach {external.url}: {type(exc).__name__}: {exc}"
             ) from None
         elapsed = time.monotonic() - started
+        ok = 200 <= status < 300
         payload = {
             "agent": ref.name,
             "url": external.url,
-            "status": response.status_code,
+            "status": status,
             "tls": external.url.startswith("https://"),
             "seconds": round(elapsed, 3),
-            "ok": response.is_success,
+            "ok": ok,
         }
 
         def text() -> None:
-            if response.is_success:
+            if ok:
                 success(
-                    f"{ref.name} answered the signed ping with {response.status_code} in "
+                    f"{ref.name} answered the signed ping with {status} in "
                     f"{elapsed:.2f}s over {'TLS' if payload['tls'] else 'plain http'}."
                 )
             else:
                 typer.echo(
-                    f"{ref.name} answered {response.status_code}. A 401 or 403 usually means "
+                    f"{ref.name} answered {status}. A 401 or 403 usually means "
                     "its PLURAL_SIGNING_KEY differs from "
                     f"{external.signing_key}, or its clock is more than five minutes off."
                 )
 
         emit(payload, as_json=as_json, text=text)
-        if not response.is_success:
+        if not ok:
             raise typer.Exit(1)
 
 

@@ -46,6 +46,7 @@ plugins:
           - project/harnesses.md
           - project/agents.md
           - project/external-agents.md
+          - project/external-tracing.md
           - project/benchmarks.md
           - project/multi-agent.md
         Run:
@@ -113,6 +114,7 @@ nav:
       - Harnesses: project/harnesses.md
       - Agents: project/agents.md
       - External Agents: project/external-agents.md
+      - Trace an External Agent: project/external-tracing.md
       - Benchmarks: project/benchmarks.md
       - Several Agents in one Task: project/multi-agent.md
   - Run:

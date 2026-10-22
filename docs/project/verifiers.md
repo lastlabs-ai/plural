@@ -127,6 +127,23 @@ def ticket_closed(episode: Episode) -> VerifierOutput:
 checks. It is available to function Verifiers during a Trial; when a Verifier runs
 later, such as on a Trial pulled from a hosted project, read `final` instead.
 
+### Check the final answer
+
+`episode.answer` is the Agent's final answer: the `response` its Harness returned, or
+what an [External Agent](external-agents.md) finished with. An Environment with no
+Apps has no State to read, so the answer is the whole outcome:
+
+```python
+from plural import Episode, VerifierOutput
+
+
+def right_category(episode: Episode) -> VerifierOutput:
+    answer = str(episode.answer or "").strip().lower()
+    return VerifierOutput(score=float(answer == "billing"))
+```
+
+It is `None` when the Agent gave no answer.
+
 The function must live in a Python file. In a project, each Verifier is a folder under
 `verifiers/`, named after it. This command creates
 `verifiers/correct-resolution/verifier.yaml` and `verify.py`:

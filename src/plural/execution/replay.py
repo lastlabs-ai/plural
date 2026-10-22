@@ -271,9 +271,12 @@ def replay_verifier(
                 ),
                 {},
             )
+            result_file = artifacts / "result.json"
+            outcome = json.loads(result_file.read_text("utf-8")) if result_file.is_file() else {}
             episode = Episode.from_apps(
                 apps,
                 observation=observation if isinstance(observation, dict) else {},
+                answer=outcome.get("response") if isinstance(outcome, dict) else None,
                 trajectory=events,
                 rewards=tuple(r.value for r in result.rewards if r.source == "step"),
             )

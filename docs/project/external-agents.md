@@ -23,6 +23,10 @@ Use one when:
 - A team built Apps and Tasks, and other teams bring their own agents to them.
 - The agent depends on infrastructure that can't move into a Runtime.
 
+Built the agent with LangGraph, the OpenAI Agents SDK, or OpenTelemetry? See
+[Trace an External Agent](external-tracing.md) to register it, trace its runs, and
+serve episodes with `plural[external]`.
+
 Everything that decides the score stays with you. The Apps, their State, and the
 Verifiers run in the Runtime your Job owns, on your laptop, in CI, or in a sandbox.
 The agent only ever receives the Task, the actions, and the Task's files.
@@ -173,7 +177,9 @@ async def plural(request: Request, background: BackgroundTasks) -> Response:
   After the action that ends the episode, `episode.done` is true.
 - `episode.trace(document)` reports the agent's own trace, as an
   [ATIF](../running/traces.md) document.
-- `episode.finish(answer)` ends the episode. It can be sent once.
+- `episode.finish(answer)` ends the episode. It can be sent once. Verifiers read the
+  answer as [`episode.answer`](verifiers.md#check-the-final-answer), so a Task with
+  a bare Environment, one with no Apps, is scored on the answer alone.
 
 The episode also has an MCP server at `episode.start.urls.mcp`, with each action as a
 tool, for an agent that already speaks MCP. It takes the same token.
@@ -212,7 +218,7 @@ Each Trial records what Plural observed, separately from what the agent reported
   in the episode log. The score is computed from the App's State, never from anything
   the agent says.
 - **Self-reported:** the agent's trace, kept as `agent-trace.json` and shown as
-  *Self-reported trace* in the web app.
+  *Agent's own trace* on the Trial's Trajectory tab, as a conversation.
 
 Plural compares the two and lists each disagreement as an integrity finding:
 

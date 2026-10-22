@@ -16,6 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from plural.atif import AGENT_TRACE_FILE
 from plural.common import ErrorCode, canonical_json
 from plural.jobs import (
     ArtifactManifest,
@@ -480,7 +481,7 @@ def _artifact_role(path: Path) -> str | None:
         return "result"
     if name == "episode.jsonl":
         return "episode"
-    if "trajectory" in name:
+    if "trajectory" in name or name == AGENT_TRACE_FILE:
         return "trajectory"
     if name.startswith("verifier/"):
         return "verifier_evidence"

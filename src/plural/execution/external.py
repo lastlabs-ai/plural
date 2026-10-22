@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from plural.agents import AgentBinding
+from plural.atif import AGENT_TRACE_FILE
 from plural.execution.apps import WORKSPACE
 from plural.execution.episode_server import EpisodeRefused, EpisodeServer, EpisodeSession
 from plural.external.protocol import (
@@ -36,7 +37,6 @@ from plural.harness.protocol import FORBIDDEN_HARNESS_KEYS, HarnessRunRequest, f
 from plural.harness.runner import HarnessExecution, HarnessExecutionError
 from plural.sandbox import DownloadedFile, ExecRequest, SandboxHandle, SandboxProvider
 
-AGENT_TRACE_FILE = "agent-trace.json"
 """The External Agent's own ATIF trace. Self-reported, so nothing scores from it."""
 MAX_START_REPLY_BYTES = 4 * 1024 * 1024
 _SECRET_TASK_KEYS = FORBIDDEN_HARNESS_KEYS - {"actions"}

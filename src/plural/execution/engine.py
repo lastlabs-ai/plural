@@ -346,6 +346,7 @@ def _with_artifact(
 
 
 _JOB_ARTIFACTS = frozenset({LEDGER_FILE, STATES_FILE, STEPS_FILE, "apps.json"})
+RESULT_FILES = ("result.json", "final-result.json", "output.json")
 GatewayKeys = Callable[[str, int, int], "str | None"]
 """Mints a gateway key for a local Trial's execution, given its time to live in seconds."""
 _HOST_VIEWS = frozenset(
@@ -446,12 +447,7 @@ def _bounded_artifact_evidence(
 def _final_evidence(artifacts: Sequence[DownloadedFile]) -> dict[str, Any] | None:
     """Return one bounded final Harness output for a judging Verifier."""
     final = next(
-        (
-            item
-            for name in ("result.json", "final-result.json", "output.json")
-            for item in artifacts
-            if item.path == name
-        ),
+        (item for name in RESULT_FILES for item in artifacts if item.path == name),
         None,
     )
     if final is None:
@@ -527,7 +523,7 @@ def _transcript(artifacts: Sequence[DownloadedFile]) -> dict[str, Any] | None:
 
 def _episode_outcome(artifacts: Sequence[DownloadedFile]) -> EpisodeOutcome:
     """Read how the episode ended from the Harness result."""
-    result = first_json_mapping(artifacts, ("result.json", "final-result.json", "output.json"))
+    result = first_json_mapping(artifacts, RESULT_FILES)
     if not result:
         return EpisodeOutcome()
     reported = str(result.get("stop_reason") or "")
@@ -1915,6 +1911,7 @@ class TrialRunner:
         episode = Episode.from_apps(
             apps or {},
             observation=view_observation,
+            answer=first_json_mapping(artifacts, RESULT_FILES).get("response"),
             trajectory=trajectory,
             artifacts={item.path: item.path for item in artifacts},
             usage=EpisodeUsage(

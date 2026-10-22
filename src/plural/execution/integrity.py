@@ -15,7 +15,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from plural.execution.external import AGENT_TRACE_FILE
+from plural.atif import AGENT_TRACE_FILE
 from plural.execution.steps import STEPS_FILE
 from plural.jobs import IntegrityFinding
 from plural.sandbox import DownloadedFile

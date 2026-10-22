@@ -1837,6 +1837,67 @@ run(self, task: 'HarnessTask', agent: 'HarnessAgent', environment: 'HarnessEnvir
 
 Run one Agent against one Task and Environment.
 
+## plural.external.config.AgentConfig
+
+The whole of ``plural-agent.yaml``.
+
+### plural.external.config.AgentConfig.load
+
+```python
+load(path: 'str | Path | None' = None, *, environ: 'Mapping[str, str] | None' = None) -> 'AgentConfig'
+```
+
+Read the config, then apply ``PLURAL_TRACE_*`` overrides.
+
+```text
+Args:
+    path: The file. Defaults to ``PLURAL_AGENT_CONFIG``, then
+        ``plural-agent.yaml`` in the working directory.
+    environ: Environment to read; defaults to ``os.environ``.
+
+Returns:
+    The config.
+
+Raises:
+    ConfigurationError: When the file is missing or invalid.
+```
+
+### plural.external.config.AgentConfig.with_environment
+
+```python
+with_environment(self, environ: 'Mapping[str, str]') -> 'AgentConfig'
+```
+
+Apply ``PLURAL_TRACE_*`` and ``PLURAL_AGENT_VERSION`` overrides.
+
+```text
+Returns:
+    A copy with the overrides applied.
+
+Raises:
+    ConfigurationError: When an override has the wrong form.
+```
+
+### plural.external.config.AgentConfig.studio
+
+```python
+studio(self, environ: 'Mapping[str, str] | None' = None) -> 'Studio'
+```
+
+The Plural API, with the key in ``plural.api_key``.
+
+```text
+Returns:
+    The client.
+
+Raises:
+    ConfigurationError: When that environment variable is not set.
+```
+
+## plural.external.config.Capture
+
+Which optional fields a trace holds. Turn off what must never leave the service.
+
 ## plural.external.client.Episode
 
 One episode, as the agent works it.
@@ -1930,9 +1991,176 @@ The signed request that starts one episode.
 
 What the agent is asked to do.
 
+## plural.external.config.FlushPolicy
+
+When a run's trace is written.
+
+```text
+``end`` writes it once, when the run finishes. ``interval`` also writes it
+every ``interval_seconds`` while the run is going, and ``steps`` every
+``every_steps`` steps, so a long run can be watched live. Each write
+replaces the last until the run finishes.
+```
+
+### plural.external.config.FlushPolicy.parse
+
+```python
+parse(value: 'FlushPolicy | str | Mapping[str, Any]') -> 'FlushPolicy'
+```
+
+Read a policy from ``end``, ``interval:5``, ``steps:10``, or a mapping.
+
+```text
+Returns:
+    The policy.
+
+Raises:
+    ConfigurationError: When the value names no policy.
+```
+
 ## plural.external.client.Ping
 
 A signed check, from ``plural agent test``, that the agent is reachable.
+
+## plural.external.tracing.Run
+
+One traced run of the agent. Use it as a context manager.
+
+```text
+Record what happens with :meth:`user`, :meth:`llm`, :meth:`tool`, and
+:meth:`message`, then :meth:`finish` with the answer. Leaving the ``with``
+block finishes the run if you did not, as failed when it raised.
+```
+
+```python
+plural.external.tracing.Run(tracer: 'Tracer', sink: '_Sink | None', *, trace_id: 'str', kind: "Literal['episode', 'production']", flush: 'FlushPolicy', capture: 'Capture', tags: 'Mapping[str, str] | None' = None, metadata: 'Mapping[str, Any] | None' = None, episode: 'Episode | None' = None) -> 'None'
+```
+
+### plural.external.tracing.Run.system
+
+```python
+system(self, text: 'str') -> 'None'
+```
+
+Record the system prompt.
+
+### plural.external.tracing.Run.user
+
+```python
+user(self, text: 'str') -> 'None'
+```
+
+Record a message to the agent, such as the request it is working on.
+
+### plural.external.tracing.Run.message
+
+```python
+message(self, text: 'str') -> 'None'
+```
+
+Record something the agent said without a model call.
+
+### plural.external.tracing.Run.llm
+
+```python
+llm(self, *, model: 'str | None' = None, messages: 'Sequence[Mapping[str, Any]]' = (), output: 'str | None' = None, tool_calls: 'Sequence[ToolCall | Mapping[str, Any]]' = (), reasoning: 'str | None' = None, usage: 'Mapping[str, Any] | None' = None, latency_ms: 'float | None' = None, error: 'str | None' = None, started_at: 'datetime | None' = None) -> 'None'
+```
+
+Record one model call.
+
+```text
+Args:
+    model: The model that answered.
+    messages: What it was sent, in the OpenAI chat format.
+    output: The text it returned.
+    tool_calls: The tool calls it asked for.
+    reasoning: Its reasoning, when it reported any.
+    usage: ``prompt_tokens``, ``completion_tokens``, ``cached_tokens``,
+        and ``cost_usd``, any of which may be missing.
+    latency_ms: How long the call took.
+    error: Why it failed, when it did.
+    started_at: When it started; defaults to now.
+```
+
+### plural.external.tracing.Run.tool
+
+```python
+tool(self, name: 'str', arguments: 'Mapping[str, Any] | None' = None, result: 'Any' = None, *, call_id: 'str | None' = None, error: 'str | None' = None, latency_ms: 'float | None' = None, started_at: 'datetime | None' = None) -> 'None'
+```
+
+Record one tool call and what it returned.
+
+```text
+``call_id`` ties it to the model call that asked for it; without one it
+is matched to the latest unanswered call of the same tool.
+```
+
+### plural.external.tracing.Run.metadata
+
+```python
+metadata(self, **values: 'Any') -> 'None'
+```
+
+Attach values to the trace, such as a customer or request id.
+
+### plural.external.tracing.Run.finish
+
+```python
+finish(self, answer: 'Any' = None) -> 'None'
+```
+
+End the run with the agent's answer, and write its trace.
+
+```text
+In a Job this also ends the episode, so call it once, last.
+```
+
+### plural.external.tracing.Run.fail
+
+```python
+fail(self, error: 'str') -> 'None'
+```
+
+End the run as failed. In a Job the episode ends with no answer.
+
+### plural.external.tracing.Run.snapshot
+
+```python
+snapshot(self) -> 'tuple[list[_Record], dict[str, Any]]'
+```
+
+Read the run so far.
+
+```text
+Returns:
+    Its records in time order, and its metadata.
+```
+
+### plural.external.tracing.Run.atif
+
+```python
+atif(self) -> 'dict[str, Any]'
+```
+
+Render the trace as a Job keeps it.
+
+```text
+Returns:
+    The ATIF document.
+```
+
+### plural.external.tracing.Run.trace
+
+```python
+trace(self) -> 'dict[str, Any]'
+```
+
+Render the trace as the Traces page keeps it.
+
+```text
+Returns:
+    The Plural ``Trace`` payload.
+```
 
 ## plural.external.protocol.SignatureError
 
@@ -1940,6 +2168,124 @@ A request whose signature, timestamp, or id does not check out.
 
 ```python
 plural.external.protocol.SignatureError
+```
+
+## plural.external.tracing.ToolCall
+
+A tool call a model asked for.
+
+```python
+plural.external.tracing.ToolCall(id: 'str', name: 'str', arguments: 'Mapping[str, Any]' = <factory>) -> None
+```
+
+## plural.external.tracing.Tracer
+
+Traces an agent's runs, as ``plural-agent.yaml`` says.
+
+```text
+Args:
+    config: The agent and tracing config.
+    environ: Where the API key and overrides are read; defaults to
+        ``os.environ``.
+    studio: The Plural API client, for tests. Built from the API key when
+        omitted.
+
+Raises:
+    ConfigurationError: When production tracing is on and the API key's
+        environment variable is not set.
+```
+
+```python
+plural.external.tracing.Tracer(config: 'AgentConfig', *, environ: 'Mapping[str, str] | None' = None, studio: 'Any' = None) -> 'None'
+```
+
+### plural.external.tracing.Tracer.from_config
+
+```python
+from_config(path: 'str | None' = None, *, environ: 'Mapping[str, str] | None' = None) -> 'Tracer'
+```
+
+A tracer for ``plural-agent.yaml``, or the file ``PLURAL_AGENT_CONFIG`` names.
+
+```text
+Returns:
+    The tracer.
+```
+
+### plural.external.tracing.Tracer.for_agent
+
+```python
+for_agent(name: 'str', version: 'str', *, model: 'str' = '', environ: 'Mapping[str, str] | None' = None) -> 'Tracer'
+```
+
+A tracer with default settings and no config file.
+
+```text
+Returns:
+    The tracer.
+```
+
+### plural.external.tracing.Tracer.run
+
+```python
+run(self, *, input: 'str | None' = None, trace_id: 'str | None' = None, flush: 'FlushPolicy | str | Mapping[str, Any] | None' = None, capture: 'Capture | Mapping[str, bool] | None' = None, tags: 'Mapping[str, str] | None' = None, metadata: 'Mapping[str, Any] | None' = None) -> 'Run'
+```
+
+Start a run. Inside a traced episode it is that episode's run.
+
+```text
+Args:
+    input: The request the agent is working on, recorded as a user message.
+    trace_id: The trace's id; a new one when omitted.
+    flush: When to write the trace, overriding the config for this run.
+    capture: Which optional fields to keep, overriding the config.
+    tags: Labels for this run, added to the config's.
+    metadata: Values to attach to the trace.
+
+Returns:
+    The run; use it as a context manager.
+```
+
+### plural.external.tracing.Tracer.episode
+
+```python
+episode(self, episode: 'Episode', *, flush: 'FlushPolicy | str | Mapping[str, Any] | None' = None, capture: 'Capture | Mapping[str, bool] | None' = None) -> 'Run'
+```
+
+The run for one episode of a Plural Job. Its trace goes to that Job.
+
+```text
+The Task's instructions are recorded as the first user message, and
+:meth:`Run.finish` also finishes the episode.
+
+Returns:
+    The run; use it as a context manager.
+```
+
+### plural.external.tracing.Tracer.flush
+
+```python
+flush(self, timeout: 'float' = 10.0) -> 'bool'
+```
+
+Wait until every pending trace is written.
+
+```text
+Returns:
+    Whether everything was written within ``timeout`` seconds.
+```
+
+## plural.external.tracing.current_run
+
+The run being traced in this context.
+
+```text
+Returns:
+    The run, or ``None`` outside one.
+```
+
+```python
+plural.external.tracing.current_run() -> 'Run | None'
 ```
 
 ## plural.external.protocol.new_signing_key
@@ -1953,6 +2299,36 @@ Returns:
 
 ```python
 plural.external.protocol.new_signing_key() -> 'str'
+```
+
+## plural.external.client.ping
+
+Send an agent service a signed ping, as a Job checks it before an episode.
+
+```text
+Args:
+    url: The service's episode URL.
+    key: The signing key.
+    ca_bundle: A PEM CA file for a private certificate.
+    timeout: Seconds to wait.
+
+Returns:
+    The status the service answered with.
+
+Raises:
+    httpx.HTTPError: When the service could not be reached.
+```
+
+```python
+plural.external.client.ping(url: 'str', key: 'str', *, ca_bundle: 'str | None' = None, timeout: 'float' = 15) -> 'int'
+```
+
+## plural.external.tracing.set_tracer
+
+Use ``value`` wherever no tracer is passed, such as in adapters.
+
+```python
+plural.external.tracing.set_tracer(value: 'Tracer | None') -> 'None'
 ```
 
 ## plural.external.protocol.sign
@@ -1982,6 +2358,19 @@ Raises:
 
 ```python
 plural.external.protocol.signing_key(value: 'str') -> 'bytes'
+```
+
+## plural.external.tracing.tracer
+
+The process's tracer: the one :func:`set_tracer` gave, or one for ``plural-agent.yaml``.
+
+```text
+Returns:
+    The tracer.
+```
+
+```python
+plural.external.tracing.tracer() -> 'Tracer'
 ```
 
 ## plural.external.protocol.verify

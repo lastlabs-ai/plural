@@ -321,6 +321,7 @@ This section is generated from the Typer application. Run `uv run python scripts
    Runtime      `plural runtime create`: where Environments run.
    secret       `plural secret set`: a project value for Apps and Verifiers.
    credential   `plural credential set`: your own value, carried by an Agent.
+   external     `plural external init`: an agent that runs elsewhere, traced.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version                     Show the installed Plural version and exit.                        │
@@ -350,6 +351,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ runtime     Choose where Environments run.                                                       │
 │ secret      Set the project's setup values, stored encrypted in the hosted project.              │
 │ session     Export and redeploy portable agent sessions.                                         │
+│ external    Register an agent that runs as its own service, and trace its runs to Plural.        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1320,6 +1322,80 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural external`
+
+```text
+
+ Usage: plural external [OPTIONS] COMMAND [ARGS]...
+
+ Register an agent that runs as its own service, and trace its runs to Plural.
+
+ In the agent's repository, `plural external init` writes plural-agent.yaml. Edit it, then `plural
+ external register` adds the Agent to Plural, and `plural external check` confirms the keys and the
+ service work. In the agent's code, `plural.external.Tracer` and the adapters for OpenTelemetry,
+ LangChain, and the OpenAI Agents SDK trace each run.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init      Write a plural-agent.yaml with every field explained.                                  │
+│ register  Add the Agent to Plural, or a new revision when its url or version changed.            │
+│ check     Check the config, the API key, the Agent's registration, and a signed ping.            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural external check`
+
+```text
+
+ Usage: plural external check [OPTIONS]
+
+ Check the config, the API key, the Agent's registration, and a signed ping.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --config  -c      <path>  The config file. Defaults to ./plural-agent.yaml.                      │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural external init`
+
+```text
+
+ Usage: plural external init [OPTIONS] {name}
+
+ Write a plural-agent.yaml with every field explained.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Agent's name in Plural. [required]                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --version        <str>   Your release label. [default: 0.1.0]                                    │
+│ --model          <str>   The label runs report as their model.                                   │
+│ --url            <str>   Where Plural Jobs send episodes, over https.                            │
+│ --path           <path>  Where to write the file. [default: plural-agent.yaml]                   │
+│ --force                  Replace an existing file.                                               │
+│ --help                   Show this message and exit.                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural external register`
+
+```text
+
+ Usage: plural external register [OPTIONS]
+
+ Add the Agent to Plural, or a new revision when its url or version changed.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --config  -c      <path>  The config file. Defaults to ./plural-agent.yaml.                      │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

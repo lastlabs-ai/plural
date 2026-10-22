@@ -49,6 +49,7 @@ def test_top_level_commands_are_the_documented_set() -> None:
         "runtime",
         "secret",
         "session",
+        "external",
     }
     assert _hidden(root) == {"rewards", "models"}
 

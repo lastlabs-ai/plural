@@ -192,8 +192,10 @@ class Episode(FrozenModel):
     Verifiers, read-only ``query`` access. ``state`` is a shortcut: the one
     App's final snapshot when the Environment has one App, otherwise a mapping
     of App name to final snapshot. Neither is ever shown to the Agent.
-    ``observation`` is what the Agent last saw. ``rewards`` are the values this
-    Verifier's ``reward`` gave each step, in order; :func:`total_reward` sums them.
+    ``observation`` is what the Agent last saw, and ``answer`` is the final
+    answer it gave, which is all there is to check in an Environment with no
+    Apps. ``rewards`` are the values this Verifier's ``reward`` gave each step,
+    in order; :func:`total_reward` sums them.
 
     When several Agents share the episode, ``seats`` names them, each step in
     ``trajectory`` carries the ``seat`` that took it, and ``seat_rewards`` holds
@@ -202,6 +204,7 @@ class Episode(FrozenModel):
     """
 
     observation: dict[str, Any] = Field(default_factory=dict)
+    answer: Any = None
     state: dict[str, Any] = Field(default_factory=dict)
     apps: dict[str, AppSnapshot] = Field(default_factory=dict)
     trajectory: list[Any] = Field(default_factory=list)
