@@ -229,7 +229,10 @@ What each field means:
   runs on your machine and is not a sandbox. To reuse a project [Runtime](runtimes.md), run
   `plural runtime use <runtime> <environment>`, which fills this block in for you.
 - `harness_policy`, `limits`, `guardrails`, and `metadata` take the same values as the
-  Environment arguments of those names.
+  Environment arguments of those names. `limits` is what stops a run that would
+  otherwise keep going. Leave the block out and there is no turn cap, and the run
+  stops after 10 minutes (600 seconds). Set `max_turns` to a number to cap turns.
+  `max_seconds` always stops the run.
 - `party` makes it an Environment several Agents share, such as `{min: 2, max: 8}`
   for poker. See [Several Agents in one Task](multi-agent.md).
 
@@ -278,7 +281,9 @@ Trial, the record of one attempt. The full set of values is `plural.STOP_REASONS
   optional `summary` becomes the Trial's response.
 - **A budget cuts it short.** `max_turns`, `max_seconds`, and `max_cost_usd` truncate
   the episode instead of failing the Trial, so you still get a trajectory and Verifier
-  results.
+  results. These are set on the Environment. The default, when you leave `limits`
+  out, is no turn cap and 10 minutes. Set `max_turns` to a number when you want the
+  run to stop after that many actions.
 
 `terminated` and `truncated` are recorded separately from `stop_reason`, because
 neither is set when the Agent chose to stop. Read `stop_reason` to tell an Agent that
@@ -470,8 +475,9 @@ model judges also need to reach their endpoint.
 ### Compute, timeouts, and persistence
 
 `cpus` and `memory_mb` request compute limits on providers that support them. The
-Runtime's `timeout_seconds` defaults to 300 seconds for execution and upload
-operations. Environment limits separately bound the episode.
+Runtime's `timeout_seconds` defaults to 900 seconds for execution and upload
+operations, above the 10 minute episode limit, so the Runtime does not cut a
+default run off first. Environment limits separately bound the episode.
 
 The two meet at the end of an episode. Plural's built-in Harness ends the episode
 itself at `max_seconds`, with the stop reason `max_seconds`, and its Trial is
@@ -496,8 +502,21 @@ environment = Environment(
 )
 ```
 
-The default episode limits are eight turns and 120 seconds. An optional `max_cost_usd`
-sets a cost budget, based on the usage the runner can measure.
+The default episode limits are no turn cap and 600 seconds (10 minutes), used
+whenever an Environment leaves `limits` out. Change the limits on the Environment:
+
+```yaml
+limits:
+  max_turns: 40
+  max_seconds: 1800
+```
+
+`max_turns: null` is the default and means no turn cap. Set it to any positive
+number to stop the run after that many actions. The time limit still stops the
+run. In the hosted editor a new Environment starts with the same defaults: an
+empty turn field and 10 minutes. Clear or set the turn field before the first run.
+An optional `max_cost_usd` sets a cost budget, based on the usage the runner can
+measure.
 
 Local, Docker, and the bundled remote provider do not keep workspaces between Trials.
 Recreate the data each Trial needs in `reset`.

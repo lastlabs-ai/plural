@@ -15,7 +15,13 @@ from plural.benchmarks.rules import (
     check_track_limits,
     validate_release_rules,
 )
-from plural.common import FrozenModel, content_hash, semantic_version, stable_id
+from plural.common import (
+    FrozenModel,
+    content_hash,
+    semantic_version,
+    stable_id,
+    without_unset_title,
+)
 from plural.environments.definition import (
     EnvironmentDefinition,
     EnvironmentResource,
@@ -357,11 +363,11 @@ def without_reset_options(payload: dict[str, Any], name: object) -> dict[str, An
 
 
 def _serialized_as_before(data: Any, seat_instructions: Mapping[str, str], expected: Any) -> Any:
-    """Serialize a Task as it was before seat instructions and ``expected`` existed.
+    """Serialize a Task as it was before seat instructions, ``expected``, and ``title``.
 
-    Every existing Task keeps its hash: one without seat instructions or an expected
-    answer omits them, and every Task carries the empty ``reset_options`` it was hashed
-    with.
+    Every existing Task keeps its hash: one without seat instructions, an expected
+    answer, or a title omits them, and every Task carries the empty ``reset_options``
+    it was hashed with.
 
     Returns:
         The serialized Task.
@@ -372,7 +378,7 @@ def _serialized_as_before(data: Any, seat_instructions: Mapping[str, str], expec
         if expected is None:
             data.pop("expected", None)
         data["reset_options"] = {}
-    return data
+    return without_unset_title(data)
 
 
 class Task(FrozenModel):
@@ -385,9 +391,17 @@ class Task(FrozenModel):
     ``expected`` is the answer key: what a correct episode produces. Verifiers
     read it as ``episode.expected``; it never reaches the Agent, unlike ``info``
     and ``metadata``.
+
+    ``name`` is the Task's identity, and what Benchmarks, Jobs, and results
+    call it. ``title`` is only the display name in the hosted project.
     """
 
     name: str = Field(min_length=1)
+    title: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Display name in the hosted project. Defaults to name.",
+    )
     version: str = "0.1.0"
     instructions: str = Field(min_length=1)
     goals: tuple[str, ...] = ()
@@ -813,14 +827,24 @@ class Benchmark(BenchmarkRelease):
 
     Each version is a release. Beyond its Tasks it may declare categories,
     scoring rules, and evaluation tracks; see :class:`BenchmarkRelease`.
+    ``title`` is only the display name in the hosted project.
     """
 
     name: str = Field(min_length=1)
+    title: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Display name in the hosted project. Defaults to name.",
+    )
     version: str
     tasks: tuple[Task, ...] = Field(min_length=1)
     primary_metric: Literal["score"] = "score"
     description: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return without_unset_title(handler(self))
 
     @model_validator(mode="after")
     def _valid_benchmark(self) -> Benchmark:

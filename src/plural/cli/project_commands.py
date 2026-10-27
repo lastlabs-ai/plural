@@ -11,6 +11,7 @@ import typer
 from plural.auth import AuthClient, Profile, Session, load_config, save_config
 from plural.cli.common import (
     JSON_OPTION,
+    counted,
     details,
     emit,
     handled,
@@ -194,15 +195,15 @@ def push(
     ]
 
     def text() -> None:
+        pushed = [step for step in steps if step.status == "pushed"]
+        typer.echo("")
+        typer.echo("Pushed:")
+        for step in pushed:
+            typer.echo(f"  {step.ref} {step.label}")
         for step in steps:
-            if step.status == "pushed":
-                typer.echo(f"  {step.ref} {step.label}")
             if step.note:
                 note(f"{step.ref}: {step.note}, so the new revision has no version.")
-        success(
-            f"Pushed {sum(step.status == 'pushed' for step in steps)} revisions "
-            f"to {binding.project_slug}."
-        )
+        success(f"Pushed {counted(len(pushed), 'revision')} to {binding.project_slug}.")
 
     emit(payload, as_json=as_json, text=text)
 

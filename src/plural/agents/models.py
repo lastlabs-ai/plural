@@ -6,7 +6,15 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import AliasChoices, Field, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationInfo,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from plural._deprecation import renamed_attribute, renamed_keys
 from plural.catalog import ModelCatalog
@@ -18,6 +26,7 @@ from plural.common import (
     content_hash,
     semantic_version,
     stable_id,
+    without_unset_title,
 )
 from plural.external.protocol import check_agent_url
 from plural.harness.models import Harness, HarnessDefinition
@@ -139,10 +148,18 @@ class Agent(FrozenModel):
 
     An agent that already runs elsewhere is an ``external`` Agent instead: the
     Job calls it over signed HTTPS, and ``model`` is the label it reports.
+
+    ``title`` is only the display name in the hosted project; Jobs and results
+    call the Agent by ``name``.
     """
 
     model: str = Field(min_length=1)
     name: str = ""
+    title: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Display name in the hosted project. Defaults to name.",
+    )
     version: str = "0.1.0"
     provider: str | None = None
     instructions: str = ""
@@ -177,6 +194,10 @@ class Agent(FrozenModel):
     harness_kwargs = renamed_attribute("harness_kwargs", "harness_config")
     auth_mode = renamed_attribute("auth_mode", "auth")
     secret_names = renamed_attribute("secret_names", "secrets")
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return without_unset_title(handler(self))
 
     @model_validator(mode="before")
     @classmethod

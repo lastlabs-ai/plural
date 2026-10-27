@@ -451,7 +451,7 @@
             "uniqueItems": true
           },
           "timeout_seconds": {
-            "default": 300,
+            "default": 900,
             "exclusiveMinimum": 0,
             "title": "Timeout Seconds",
             "type": "number"
@@ -473,17 +473,25 @@
       },
       "ExecutionLimits": {
         "additionalProperties": false,
-        "description": "Environment execution limits.",
+        "description": "How long one episode may run.\n\nThe defaults apply when ``limits`` is left out of an Environment: no turn\ncap, and 600 seconds. Set ``max_turns`` to any positive number to cap turns.\n``max_seconds`` always stops the run.",
         "properties": {
           "max_turns": {
-            "default": 8,
-            "maximum": 1000,
-            "minimum": 1,
-            "title": "Max Turns",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Turns the Agent may take. Null, the default, means no cap. Set any positive number to stop the run after that many actions.",
+            "title": "Max Turns"
           },
           "max_seconds": {
-            "default": 120,
+            "default": 600,
+            "description": "Seconds the episode may run. The default is 600, ten minutes.",
             "exclusiveMinimum": 0,
             "title": "Max Seconds",
             "type": "number"
@@ -499,6 +507,7 @@
               }
             ],
             "default": null,
+            "description": "Optional spending cap, in USD. Unset means no cost cap.",
             "title": "Max Cost Usd"
           }
         },
@@ -1532,12 +1541,26 @@
       }
     },
     "additionalProperties": false,
-    "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.",
+    "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.\n\n``name`` is the Task's identity, and what Benchmarks, Jobs, and results\ncall it. ``title`` is only the display name in the hosted project.",
     "properties": {
       "name": {
         "minLength": 1,
         "title": "Name",
         "type": "string"
+      },
+      "title": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Display name in the hosted project. Defaults to name.",
+        "title": "Title"
       },
       "version": {
         "default": "0.1.0",
@@ -2665,7 +2688,7 @@
       }
     },
     "additionalProperties": false,
-    "description": "A catalog-backed model and its optional execution harness.\n\nTo evaluate your own agent or model server instead, give ``endpoint``: the\nbase URL of an OpenAI-compatible API (one that serves\n``/chat/completions``). ``model`` is then sent to it as is and need not be\nin the catalog, and ``endpoint_key`` names the secret holding its API key.\nPlural's native Harness calls it with the Environment's actions as tools,\nand a custom Harness reaches it through ``agent.complete``.\n\nAn agent that already runs elsewhere is an ``external`` Agent instead: the\nJob calls it over signed HTTPS, and ``model`` is the label it reports.",
+    "description": "A catalog-backed model and its optional execution harness.\n\nTo evaluate your own agent or model server instead, give ``endpoint``: the\nbase URL of an OpenAI-compatible API (one that serves\n``/chat/completions``). ``model`` is then sent to it as is and need not be\nin the catalog, and ``endpoint_key`` names the secret holding its API key.\nPlural's native Harness calls it with the Environment's actions as tools,\nand a custom Harness reaches it through ``agent.complete``.\n\nAn agent that already runs elsewhere is an ``external`` Agent instead: the\nJob calls it over signed HTTPS, and ``model`` is the label it reports.\n\n``title`` is only the display name in the hosted project; Jobs and results\ncall the Agent by ``name``.",
     "properties": {
       "model": {
         "minLength": 1,
@@ -2676,6 +2699,20 @@
         "default": "",
         "title": "Name",
         "type": "string"
+      },
+      "title": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Display name in the hosted project. Defaults to name.",
+        "title": "Title"
       },
       "version": {
         "default": "0.1.0",
@@ -3655,12 +3692,26 @@
       },
       "Task": {
         "additionalProperties": false,
-        "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.",
+        "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.\n\n``name`` is the Task's identity, and what Benchmarks, Jobs, and results\ncall it. ``title`` is only the display name in the hosted project.",
         "properties": {
           "name": {
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Display name in the hosted project. Defaults to name.",
+            "title": "Title"
           },
           "version": {
             "default": "0.1.0",
@@ -3801,7 +3852,7 @@
       }
     },
     "additionalProperties": false,
-    "description": "A semantic version that pins an ordered set of Tasks.\n\nEach version is a release. Beyond its Tasks it may declare categories,\nscoring rules, and evaluation tracks; see :class:`BenchmarkRelease`.",
+    "description": "A semantic version that pins an ordered set of Tasks.\n\nEach version is a release. Beyond its Tasks it may declare categories,\nscoring rules, and evaluation tracks; see :class:`BenchmarkRelease`.\n``title`` is only the display name in the hosted project.",
     "properties": {
       "categories": {
         "default": [],
@@ -3870,6 +3921,20 @@
         "minLength": 1,
         "title": "Name",
         "type": "string"
+      },
+      "title": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Display name in the hosted project. Defaults to name.",
+        "title": "Title"
       },
       "version": {
         "title": "Version",

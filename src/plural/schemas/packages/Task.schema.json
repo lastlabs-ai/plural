@@ -584,7 +584,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.",
+  "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.\n\n``name`` is the Task's identity, and what Benchmarks, Jobs, and results\ncall it. ``title`` is only the display name in the hosted project.",
   "properties": {
     "environment": {
       "title": "Environment"
@@ -639,6 +639,20 @@
       },
       "title": "Seat Instructions",
       "type": "object"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Display name in the hosted project. Defaults to name.",
+      "title": "Title"
     },
     "verifiers": {
       "items": {

@@ -164,7 +164,8 @@ class ExternalAgentRunner:
             )
             for name, item in declared.items()
         )
-        max_turns = int((environment.get("limits") or {}).get("max_turns") or 1)
+        raw_turns = (environment.get("limits") or {}).get("max_turns")
+        max_turns = None if raw_turns is None else int(raw_turns)
         session, token, urls = await self.server.register(
             actions=actions, files=files, max_turns=max_turns, deadline=deadline, act=act
         )

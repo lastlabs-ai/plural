@@ -291,7 +291,7 @@ class EnvironmentRuntime(FrozenModel):
     persistent: bool = False
     compose: bool = False
     extra_capabilities: frozenset[SandboxCapability] = frozenset()
-    timeout_seconds: float = Field(default=300, gt=0)
+    timeout_seconds: float = Field(default=900, gt=0)
     build_timeout_seconds: float = Field(
         default=600,
         gt=0,
@@ -556,15 +556,30 @@ class HarnessGrant(FrozenModel):
         )
 
 
-MAX_TURNS = 1000
-
-
 class ExecutionLimits(FrozenModel):
-    """Environment execution limits."""
+    """How long one episode may run.
 
-    max_turns: int = Field(default=8, ge=1, le=MAX_TURNS)
-    max_seconds: float = Field(default=120, gt=0)
-    max_cost_usd: float | None = Field(default=None, gt=0)
+    The defaults apply when ``limits`` is left out of an Environment: no turn
+    cap, and 600 seconds. Set ``max_turns`` to any positive number to cap turns.
+    ``max_seconds`` always stops the run.
+    """
+
+    max_turns: int | None = Field(
+        default=None,
+        ge=1,
+        description="Turns the Agent may take. Null, the default, means no cap. "
+        "Set any positive number to stop the run after that many actions.",
+    )
+    max_seconds: float = Field(
+        default=600,
+        gt=0,
+        description="Seconds the episode may run. The default is 600, ten minutes.",
+    )
+    max_cost_usd: float | None = Field(
+        default=None,
+        gt=0,
+        description="Optional spending cap, in USD. Unset means no cost cap.",
+    )
 
 
 MAX_PARTY = 100

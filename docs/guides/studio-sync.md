@@ -73,6 +73,14 @@ A few rules keep revisions trustworthy:
   or has changed locally, the push stops with nothing uploaded. `--with-deps`
   pushes those dependencies too, dependencies first, so a revision is never saved
   pointing at one that is missing.
+- **A push saves everything or nothing.** The hosted project checks every
+  revision in a push before it keeps any, so a push that fails leaves the project
+  as it was. Each problem names the resource and field, such as
+  `task/refund: expected: Extra inputs are not permitted`.
+- **The CLI and the service agree on fields first.** Before uploading, the CLI asks
+  the service which Plural it checks revisions with and which fields it accepts. A
+  field this checkout sends that the service would refuse stops the push before
+  anything is uploaded, and the message says which Plural the service runs.
 
 A pushed revision is usable in its private project immediately. Sharing a
 Benchmark on the public Hub is described in [Publish to the Hub](../platform/publish.md).

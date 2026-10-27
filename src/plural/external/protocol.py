@@ -234,7 +234,7 @@ class EpisodeStart(_Model):
     urls: EpisodeURLs
     token: str
     deadline: str
-    max_turns: int
+    max_turns: int | None = None
     gateway: EpisodeGateway | None = None
 
 

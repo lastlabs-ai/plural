@@ -888,6 +888,7 @@ A semantic version that pins an ordered set of Tasks.
 ```text
 Each version is a release. Beyond its Tasks it may declare categories,
 scoring rules, and evaluation tracks; see :class:`BenchmarkRelease`.
+``title`` is only the display name in the hosted project.
 ```
 
 ### plural.Benchmark.diff

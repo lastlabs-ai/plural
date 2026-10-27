@@ -286,7 +286,7 @@ def check_track_limits(
     track: EvaluationTrack,
     task: str,
     *,
-    max_turns: int,
+    max_turns: int | None,
     max_seconds: float,
     max_cost_usd: float | None,
 ) -> list[str]:
@@ -296,9 +296,10 @@ def check_track_limits(
         Human-readable limit problems.
     """
     issues: list[str] = []
-    if track.max_turns is not None and max_turns > track.max_turns:
+    if track.max_turns is not None and (max_turns is None or max_turns > track.max_turns):
+        allowed = "unlimited turns" if max_turns is None else f"{max_turns} turns"
         issues.append(
-            f"Task {task!r} allows {max_turns} turns; track {track.reference} caps "
+            f"Task {task!r} allows {allowed}; track {track.reference} caps "
             f"turns at {track.max_turns}."
         )
     if track.max_seconds is not None and max_seconds > track.max_seconds:

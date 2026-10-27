@@ -43,7 +43,7 @@ from plural.agents import Agent
 from plural.blobs import read_blob, store_blob
 from plural.common import PackageSource
 from plural.environments.definition import EnvironmentResource
-from plural.errors import NotFoundError
+from plural.errors import NotFoundError, PluralError
 from plural.harness.models import PLURAL_PACKAGE_PREFIX, HarnessDefinition
 from plural.harness.retrieval import (
     MAX_ARCHIVE_BYTES,
@@ -79,7 +79,7 @@ from plural.project.resources import (
     Workspace,
     scaffold_problems,
 )
-from plural.studio import RevisionResourceAPI, Studio, slugify
+from plural.studio import PUSH_REFERENCE_PREFIX, RevisionResourceAPI, Studio, slugify
 
 # Concurrent requests per push or plan; each hosted call is one round trip.
 _WORKERS = 8
@@ -417,60 +417,103 @@ def _commit(
     version yet. A title change renames the hosted resource even when its
     content, and so its revision, is unchanged.
 
-    Resources whose dependencies are all in place are pushed together. When
-    one fails, the lock still records every revision that was pushed.
+    Every field is checked against what the server's Plural accepts before
+    anything is uploaded. A server that takes a whole push at once saves every
+    revision or none. An older one is sent each resource on its own,
+    dependencies first; when one fails, the lock still records every revision
+    that was pushed.
 
     Returns:
         One step per resource in ``order``.
+
+    Raises:
+        ProjectError: When the server would refuse a field, or refused a push.
     """
-    steps: dict[ResourceRef, PushStep] = {}
     lock = _lock_for(workspace, binding)
+    prepared = dict(
+        zip(to_push, _parallel(lambda item: _prepare(resources[item]), to_push), strict=True)
+    )
+    labels: dict[ResourceRef, tuple[str | None, str | None]] = {
+        item: _label(declared_version(workspace.project, item), hosted[item][1]) for item in to_push
+    }
+    bases = {
+        item: _base(lock.resources.get(str(item)), hosted[item][0], hosted[item][1])
+        for item in to_push
+    }
+
+    def item_for(item: ResourceRef) -> dict[str, Any]:
+        ids = [
+            resolved[dependency].revision_id
+            if dependency in resolved
+            else f"{PUSH_REFERENCE_PREFIX}{dependency}"
+            for dependency in resources[item].dependencies
+        ]
+        return _api(studio, item).batch_item(
+            prepared[item].value,
+            ref=str(item),
+            slug=slugify(item.name),
+            package_digest=prepared[item].digest,
+            version=labels[item][0],
+            parent_revision_id=bases[item],
+            **prepared[item].references(ids),
+        )
+
+    items = [item_for(item) for item in order if item in prepared]
+    server = studio.server_version() if items else None
+    refused = _field_problems(
+        server, [(item["ref"], item["kind"], item["revision"]) for item in items]
+    )
+    if refused and server is not None:
+        raise ProjectError(
+            f"This server's Plural ({_server_label(server)}) would refuse these fields, so "
+            "nothing was uploaded. Upgrade the server's Plural, or remove the fields.",
+            refused,
+        )
     uploads = _Uploads(studio)
+    if server is not None and "batch_push" in server.get("capabilities", []):
+        _parallel(lambda item: _upload(item, uploads), list(prepared.values()))
+        try:
+            saved = studio.push_batch(items, force=force)
+        except PluralError as exc:
+            raise ProjectError(
+                "The server refused the push, so nothing was saved.", _refusals(exc)
+            ) from exc
+        by_ref = {str(item["ref"]): item["revision"] for item in saved.get("items", [])}
+        for item in order:
+            if item in prepared:
+                parent = hosted[item][0]
+                resolved[item] = _saved(
+                    studio,
+                    prepared[item],
+                    by_ref[str(item)],
+                    str(parent["id"]) if parent else None,
+                )
+            else:
+                _rename(studio, item, hosted[item][0], resources[item])
+        for item in order:
+            _record(lock, item, resources[item], resolved[item])
+        workspace.project.write_lock(lock)
+        return [_step(item, resources, resolved, prepared, labels) for item in order]
+
+    steps: dict[ResourceRef, PushStep] = {}
 
     def one(item: ResourceRef) -> PushStep:
         resource = resources[item]
-        parent, revisions = hosted[item]
-        note = None
+        parent, _revisions = hosted[item]
         if item in to_push:
-            version, note = _label(declared_version(workspace.project, item), revisions)
-            revision = _push_one(
+            resolved[item] = _push_one(
                 studio,
                 resource,
                 resolved,
                 uploads=uploads,
                 resource_id=str(parent["id"]) if parent else None,
-                version=version,
-                parent_revision_id=_base(lock.resources.get(str(item)), parent, revisions),
+                version=labels[item][0],
+                parent_revision_id=bases[item],
                 force=force,
             )
-            status: Literal["unchanged", "pushed"] = "pushed"
         else:
-            revision = resolved[item]
-            status = "unchanged"
             _rename(studio, item, parent, resource)
-        resolved[item] = revision
-        return PushStep(
-            ref=item,
-            version=revision.version,
-            content_hash=resource.content_hash,
-            status=status,
-            revision_id=revision.revision_id,
-            number=revision.number,
-            note=note,
-        )
-
-    def record(item: ResourceRef, step: PushStep) -> None:
-        revision = resolved[item]
-        lock.resources[str(item)] = LockEntry(
-            version=revision.version,
-            number=revision.number,
-            content_hash=resources[item].content_hash,
-            package_digest=revision.package_digest,
-            dependencies=[str(dependency) for dependency in resources[item].dependencies],
-            resource_id=revision.resource_id,
-            revision_id=revision.revision_id,
-        )
-        steps[item] = step
+        return _step(item, resources, resolved, prepared, labels)
 
     for level in _levels(order, resources):
         with ThreadPoolExecutor(max_workers=min(_WORKERS, len(level))) as pool:
@@ -479,13 +522,47 @@ def _commit(
         for item, future in futures:
             error = future.exception()
             if error is None:
-                record(item, future.result())
+                steps[item] = future.result()
+                _record(lock, item, resources[item], resolved[item])
             elif failure is None:
                 failure = error
         workspace.project.write_lock(lock)
         if failure is not None:
             raise failure
     return [steps[item] for item in order]
+
+
+def _step(
+    item: ResourceRef,
+    resources: dict[ResourceRef, LocalResource],
+    resolved: dict[ResourceRef, HostedRevision],
+    prepared: dict[ResourceRef, _Prepared],
+    labels: dict[ResourceRef, tuple[str | None, str | None]],
+) -> PushStep:
+    revision = resolved[item]
+    return PushStep(
+        ref=item,
+        version=revision.version,
+        content_hash=resources[item].content_hash,
+        status="pushed" if item in prepared else "unchanged",
+        revision_id=revision.revision_id,
+        number=revision.number,
+        note=labels[item][1] if item in labels else None,
+    )
+
+
+def _record(
+    lock: LockFile, item: ResourceRef, resource: LocalResource, revision: HostedRevision
+) -> None:
+    lock.resources[str(item)] = LockEntry(
+        version=revision.version,
+        number=revision.number,
+        content_hash=resource.content_hash,
+        package_digest=revision.package_digest,
+        dependencies=[str(dependency) for dependency in resource.dependencies],
+        resource_id=revision.resource_id,
+        revision_id=revision.revision_id,
+    )
 
 
 def _levels(
@@ -529,7 +606,7 @@ def _rename(
     studio: Studio, ref: ResourceRef, parent: dict[str, Any] | None, resource: LocalResource
 ) -> None:
     """Give the hosted resource the local display name when only the title changed."""
-    name = getattr(resource.value, "name", None)
+    name = getattr(resource.value, "title", None) or getattr(resource.value, "name", None)
     if parent is None or not isinstance(name, str) or not name or parent.get("name") == name:
         return
     _api(studio, ref).update(str(parent["id"]), name=name)
@@ -651,13 +728,13 @@ def plan_project_push(
 
     hosted_only: list[ResourceRef] = []
     if studio is not None and not partial:
-        local = set(order)
+        local = {(item.kind, slugify(item.name)) for item in order}
         listed = _parallel(lambda kind: hosted_list(studio, kind), list(KINDS))
         for kind, records in zip(KINDS, listed, strict=True):
             for record in records:
-                ref = ResourceRef(kind.name, str(record.get("slug") or record.get("name")))
-                if ref not in local:
-                    hosted_only.append(ref)
+                slug = str(record.get("slug") or slugify(str(record.get("name") or "")))
+                if (kind.name, slug) not in local:
+                    hosted_only.append(ResourceRef(kind.name, slug))
     return ProjectPushPlan(steps=steps, hosted_only=hosted_only, hosted=hosted)
 
 
@@ -951,17 +1028,43 @@ def _package_problems(resource: LocalResource, workspace: Workspace) -> list[str
     return problems
 
 
-def _push_one(
-    studio: Studio,
-    resource: LocalResource,
-    resolved: dict[ResourceRef, HostedRevision],
-    *,
-    uploads: _Uploads,
-    resource_id: str | None = None,
-    version: str | None = None,
-    parent_revision_id: str | None = None,
-    force: bool = False,
-) -> HostedRevision:
+@dataclass(frozen=True)
+class _Prepared:
+    """A resource as its revision is sent: the package and the value naming it."""
+
+    resource: LocalResource
+    digest: str
+    payload: bytes
+    value: Any
+
+    @property
+    def blobs(self) -> list[tuple[str, str]]:
+        """Task resource files the revision refers to, as ``(digest, content_type)``."""
+        if self.resource.ref.kind != TASK.name:
+            return []
+        return [
+            (item.digest, item.content_type)
+            for item in self.resource.value.resources
+            if item.delivery == "blob" and item.digest
+        ]
+
+    def references(self, ids: list[str]) -> dict[str, Any]:
+        """Dependency revision ids, in the fields this kind sends them in.
+
+        Returns:
+            The reference fields.
+        """
+        kind = self.resource.ref.kind
+        if kind == TASK.name:
+            return {"environment_revision_id": ids[0], "verifier_revision_ids": ids[1:]}
+        if kind == AGENT.name:
+            return {"harness_revision_id": ids[0] if ids else None}
+        if kind == BENCHMARK.name:
+            return {"task_revision_ids": ids}
+        return {}
+
+
+def _prepare(resource: LocalResource) -> _Prepared:
     payload = archive_bytes(resource.directory)
     if len(payload) > MAX_ARCHIVE_BYTES:
         raise ProjectError(
@@ -969,10 +1072,7 @@ def _push_one(
             f"{MAX_ARCHIVE_BYTES}-byte package limit. List large data in .pluralignore."
         )
     digest = f"sha256:{hashlib.sha256(payload).hexdigest()}"
-    uploads.ensure(digest, payload)
     value = resource.value
-    references: dict[str, Any] = {}
-    ids = [resolved[dependency].revision_id for dependency in resource.dependencies]
     if resource.ref.kind == ENVIRONMENT.name:
         definition = value.definition()
         value = definition.model_copy(
@@ -988,26 +1088,27 @@ def _push_one(
         value = HarnessDefinition.from_package(
             value._package(), source=f"{PLURAL_PACKAGE_PREFIX}{digest}"
         )
-    elif resource.ref.kind == TASK.name:
-        references = {"environment_revision_id": ids[0], "verifier_revision_ids": ids[1:]}
-        for item in value.resources:
-            if item.delivery == "blob" and item.digest:
-                uploads.ensure_blob(item.digest, item.content_type)
-    elif resource.ref.kind == AGENT.name:
-        references = {"harness_revision_id": ids[0] if ids else None}
-    elif resource.ref.kind == BENCHMARK.name:
-        references = {"task_revision_ids": ids}
-    api = _api(studio, resource.ref)
-    record = api.push(
-        value,
-        package_digest=digest,
-        slug=slugify(resource.ref.name),
-        resource_id=resource_id,
-        version=version,
-        parent_revision_id=parent_revision_id,
-        force=force,
-        **references,
-    )
+    return _Prepared(resource=resource, digest=digest, payload=payload, value=value)
+
+
+def _upload(prepared: _Prepared, uploads: _Uploads) -> None:
+    uploads.ensure(prepared.digest, prepared.payload)
+    for digest, content_type in prepared.blobs:
+        uploads.ensure_blob(digest, content_type)
+
+
+def _saved(
+    studio: Studio, prepared: _Prepared, record: dict[str, Any], resource_id: str | None
+) -> HostedRevision:
+    """The revision the server saved, checked against the local content hash.
+
+    Returns:
+        The revision, with its parent's id.
+
+    Raises:
+        ProjectError: When the server hashed the content differently.
+    """
+    resource = prepared.resource
     parent_id = str(
         record.get(f"{resource.ref.kind}_id") or record.get("resource_id") or resource_id or ""
     )
@@ -1019,18 +1120,107 @@ def _push_one(
             f"{resource.content_hash}. The SDK and server versions disagree; upgrade both."
         )
     if not revision.resource_id:
-        parent = api.find(slugify(resource.ref.name))
+        parent = _api(studio, resource.ref).find(slugify(resource.ref.name))
         revision = HostedRevision(
             resource_id=str(parent["id"]) if parent else "",
             revision_id=revision.revision_id,
             version=revision.version,
             content_hash=revision.content_hash,
-            package_digest=revision.package_digest or digest,
+            package_digest=revision.package_digest or prepared.digest,
             dependencies=revision.dependencies,
             number=revision.number,
             legacy_content_hash=revision.legacy_content_hash,
         )
     return revision
+
+
+def _push_one(
+    studio: Studio,
+    resource: LocalResource,
+    resolved: dict[ResourceRef, HostedRevision],
+    *,
+    uploads: _Uploads,
+    resource_id: str | None = None,
+    version: str | None = None,
+    parent_revision_id: str | None = None,
+    force: bool = False,
+) -> HostedRevision:
+    prepared = _prepare(resource)
+    _upload(prepared, uploads)
+    ids = [resolved[dependency].revision_id for dependency in resource.dependencies]
+    try:
+        record = _api(studio, resource.ref).push(
+            prepared.value,
+            package_digest=prepared.digest,
+            slug=slugify(resource.ref.name),
+            resource_id=resource_id,
+            version=version,
+            parent_revision_id=parent_revision_id,
+            force=force,
+            **prepared.references(ids),
+        )
+    except PluralError as exc:
+        raise ProjectError(
+            f"The server refused {resource.ref}.", _refusals(exc, str(resource.ref))
+        ) from exc
+    return _saved(studio, prepared, record, resource_id)
+
+
+def _refusals(exc: PluralError, ref: str | None = None) -> list[str]:
+    """Each problem the server reported, naming the resource and field.
+
+    Returns:
+        One line per problem.
+    """
+    body = exc.body if isinstance(exc.body, dict) else {}
+    errors = body.get("errors")
+    if isinstance(errors, list) and errors:
+        lines = []
+        for error in errors:
+            loc = ".".join(str(part) for part in error.get("loc") or ())
+            name = error.get("ref") or ref
+            text = f"{loc}: {error.get('msg')}" if loc else str(error.get("msg"))
+            lines.append(f"{name}: {text}" if name else text)
+        return lines
+    message = exc.message.removeprefix("Nothing was saved.\n")
+    return [line for line in message.splitlines() if line] or [str(exc)]
+
+
+def _field_problems(
+    server: dict[str, Any] | None, items: list[tuple[str, str, dict[str, Any]]]
+) -> list[str]:
+    """Fields this checkout sends that the server's Plural does not accept.
+
+    Args:
+        server: The server's ``/version`` report, or ``None`` when it has none.
+        items: ``(ref, kind, revision body)`` for each revision to push.
+
+    Returns:
+        One line per kind and field, counting the resources that send it.
+    """
+    fields = (server or {}).get("fields")
+    if not isinstance(fields, dict):
+        return []
+    sent: dict[tuple[str, str], list[str]] = {}
+    for ref, kind, body in items:
+        accepted = fields.get(kind)
+        if not isinstance(accepted, list):
+            continue
+        for name in sorted(set(body) - set(accepted)):
+            sent.setdefault((kind, name), []).append(ref)
+    return [
+        f"{name} on {', '.join(refs)}: the server's Plural does not accept {kind} {name}"
+        for (kind, name), refs in sent.items()
+    ]
+
+
+def _server_label(server: dict[str, Any]) -> str:
+    version = str(server.get("plural") or "unknown")
+    if server.get("dirty"):
+        return f"{version}, a checkout with uncommitted changes"
+    if server.get("source") == "checkout" and not server.get("tag"):
+        return f"{version}, an unreleased checkout"
+    return version
 
 
 def _restore(
@@ -1120,7 +1310,7 @@ def _restore(
 
 REBUILT_NOTE = (
     "Revisions created in the web app have no source files, so these were written from "
-    "their stored definition. `title:` keeps the hosted name; the directory is the slug."
+    "their stored definition. `title:` keeps the display name; the directory is the slug."
 )
 
 
@@ -1217,7 +1407,8 @@ def _files_from_definition(
         return [item.name for item, _id in revision.dependencies if item.kind == kind]
 
     manifest: dict[str, Any] = {"name": ref.name}
-    title = definition.get("name")
+    # Revisions from before titles were their own field record the title as the name.
+    title = definition.get("title") or definition.get("name")
     if isinstance(title, str) and title and title != ref.name:
         manifest["title"] = title
     if revision.version:

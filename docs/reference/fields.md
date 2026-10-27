@@ -84,6 +84,7 @@ Base class for an Agent interaction loop.
 One versioned unit of work in a Python-authored Environment.
 
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
+- **`title`** — `string | null`; optional. Default: `null`. Display name in the hosted project. Defaults to name.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
 - **`instructions`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`goals`** — `array of string`; optional. Default: `[]`.
@@ -153,6 +154,7 @@ A catalog-backed model and its optional execution harness.
 
 - **`model`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`name`** — `string`; optional. Default: `""`.
+- **`title`** — `string | null`; optional. Default: `null`. Display name in the hosted project. Defaults to name.
 - **`version`** — `string`; optional. Default: `"0.1.0"`.
 - **`provider`** — `string | null`; optional. Default: `null`.
 - **`instructions`** — `string`; optional. Default: `""`.
@@ -183,6 +185,7 @@ A semantic version that pins an ordered set of Tasks.
 - **`license`** — `string`; optional. Default: `""`.
 - **`forked_from`** — `string | null`; optional. Default: `null`.
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
+- **`title`** — `string | null`; optional. Default: `null`. Display name in the hosted project. Defaults to name.
 - **`version`** — `string`; required.
 - **`tasks`** — `array of Task`; required. Constraints: `{"minItems": 1}`.
 - **`primary_metric`** — `"score"`; optional. Default: `"score"`.
@@ -297,7 +300,7 @@ Where an Environment runs: Docker, a trusted local process, or a remote sandbox.
 - **`persistent`** — `boolean`; optional. Default: `false`.
 - **`compose`** — `boolean`; optional. Default: `false`.
 - **`extra_capabilities`** — `array of SandboxCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
-- **`timeout_seconds`** — `number`; optional. Default: `300`. Constraints: `{"exclusiveMinimum": 0}`.
+- **`timeout_seconds`** — `number`; optional. Default: `900`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`build_timeout_seconds`** — `number`; optional. Default: `600`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`allow_unsafe_local`** — `boolean`; optional. Default: `false`.
 
@@ -323,11 +326,11 @@ Versioned rules that make results on one track comparable.
 
 ## ExecutionLimits
 
-Environment execution limits.
+How long one episode may run.
 
-- **`max_turns`** — `integer`; optional. Default: `8`. Constraints: `{"maximum": 1000, "minimum": 1}`.
-- **`max_seconds`** — `number`; optional. Default: `120`. Constraints: `{"exclusiveMinimum": 0}`.
-- **`max_cost_usd`** — `number | null`; optional. Default: `null`.
+- **`max_turns`** — `integer | null`; optional. Default: `null`. Turns the Agent may take. Null, the default, means no cap. Set any positive number to stop the run after that many actions.
+- **`max_seconds`** — `number`; optional. Default: `600`. Constraints: `{"exclusiveMinimum": 0}`. Seconds the episode may run. The default is 600, ten minutes.
+- **`max_cost_usd`** — `number | null`; optional. Default: `null`. Optional spending cap, in USD. Unset means no cost cap.
 
 ## ExecutionTarget
 

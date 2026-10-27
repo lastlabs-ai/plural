@@ -339,8 +339,9 @@ runtime:
 # Settings: which Agent harnesses may run here, and per-Trial limits.
 harness_policy:
   mode: allow_all
+# No turn cap. The run stops after 10 minutes. Set max_turns to a number to cap turns.
 limits:
-  max_turns: 20
+  max_turns: null
   max_seconds: 600
 """
 
@@ -485,8 +486,9 @@ runtime:
 # Settings: which Agent harnesses may run here, and per-Trial limits.
 harness_policy:
   mode: allow_all
+# No turn cap. The run stops after 10 minutes. Set max_turns to a number to cap turns.
 limits:
-  max_turns: 20
+  max_turns: null
   max_seconds: 600
 """
 
