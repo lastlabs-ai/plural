@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-10-27
+
+### Added
+
+- A project push is atomic: the hosted project checks every revision before it keeps any, so a failed push saves nothing. Before uploading, the CLI asks the service which Plural it runs and which fields it accepts, through `GET /api/v1/version`, and stops with the fields it would refuse. A service without either is pushed one resource at a time, as before.
+- `Studio.server_version()` and `Studio.push_batch()`, and `RevisionResourceAPI.batch_item()` and `revision_body()` to build what they send.
+
+### Changed
+
+- A hosted error names the resource and the field it is about, such as `task/refund: expected: Extra inputs are not permitted`, where it used to show only the message. The error keeps the response as `body`.
+- `plural project push` lists what it pushed under its own `Pushed:` heading, so the lines no longer appear to continue the list of hosted resources not in this checkout. Hosted resources are matched to local folders by slug, so a folder whose name is not already a slug is no longer listed as hosted-only.
+
+- An Environment's `limits` default to no turn cap and 600 seconds, up from eight turns and 120 seconds, and `max_turns` has no upper bound. `max_turns: null` means no cap; `max_seconds` always stops the run. A Runtime's `timeout_seconds` defaults to 900, so it no longer cuts a default run off first.
+
+### Fixed
+
+- A Task, Agent, or Benchmark with a `title:` keeps its folder name as its `name`, and carries the title in its own `title` field, the display name in the hosted project. In 0.23 a Task with a title was compiled under the title, so a Benchmark whose `categories` or `scoring.task_weights` named it by its folder failed to validate, and Jobs and results called it by its title. A title is a label: changing it renames the hosted resource without changing any revision or hash.
+
 ## [0.23.0] - 2026-10-22
 
 ### Added
@@ -828,7 +846,8 @@ command and API and how to move a project.
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.23.1...HEAD
+[0.23.1]: https://github.com/lastlabs-ai/plural/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/lastlabs-ai/plural/compare/v0.22.1...v0.23.0
 [0.14.1]: https://github.com/lastlabs-ai/plural/compare/v0.14.0...HEAD
 [0.14.0]: https://github.com/lastlabs-ai/plural/releases/tag/v0.14.0
