@@ -67,19 +67,13 @@ def manifest_schemas() -> dict[str, dict[str, Any]]:
     )
     from plural.verifiers import VerifierDefinition
 
-    agent = public_schema(Agent)
-    agent.setdefault("properties", {})["title"] = {
-        "type": "string",
-        "minLength": 1,
-        "description": "Display name in the hosted project. Defaults to name.",
-    }
     return {
         "project.yaml": public_schema(ProjectManifest),
         "environment.yaml": public_schema(EnvironmentManifest),
         "task.yaml": public_schema(TaskManifest),
         "verifier.yaml": TypeAdapter(VerifierDefinition).json_schema(),
         "harness.yaml": public_schema(HarnessManifest),
-        "agent.yaml": agent,
+        "agent.yaml": public_schema(Agent),
         "benchmark.yaml": public_schema(BenchmarkManifest),
     }
 

@@ -82,6 +82,21 @@ def test_versions_and_titles_label_a_revision_without_changing_its_hash(tmp_path
     assert _hashes(project) == before
 
 
+def test_retitling_a_task_a_benchmark_weighs_changes_no_hash(tmp_path: Path) -> None:
+    project = write_project(tmp_path / "desk")
+    _replace(
+        project.root / "benchmarks/basics/benchmark.yaml",
+        "  infrastructure_error: exclude\n",
+        "  infrastructure_error: exclude\n  task_weights:\n    refund: 3\n",
+    )
+    task = project.root / "tasks/refund/task.yaml"
+    before = _hashes(project)
+    _replace(task, "name: refund", "name: refund\ntitle: Refunds")
+    assert _hashes(project) == before
+    _replace(task, "title: Refunds", "title: Refund policy")
+    assert _hashes(project) == before
+
+
 def test_a_content_change_moves_every_dependent_and_nothing_else(tmp_path: Path) -> None:
     project = write_project(tmp_path / "desk")
     before = _hashes(project)

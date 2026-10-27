@@ -134,7 +134,8 @@ scoring:
 
 - `name` must match the folder name, which is the hosted slug. An optional `title`
   sets the display name.
-- Each entry in `tasks` names a Task in `tasks/`.
+- Each entry in `tasks` names a Task in `tasks/` by its folder name, and so do
+  `categories` and `scoring.task_weights`, whatever the Task's `title`.
 - Validation requires at least one Task. Pushing, releasing, and `--record` also
   require a `README.md`, a `purpose`, and a `scoring.description`; while the
   template's `PLURAL-TODO` lines mark them unfinished, the Benchmark still runs

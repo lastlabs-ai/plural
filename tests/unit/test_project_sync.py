@@ -259,6 +259,20 @@ def test_pull_writes_a_web_app_task_and_the_dependencies_it_lacks(hosted: Hosted
     assert hosted.project.read_lock().resources["task/web-task"].revision_id == "rev_web-task"
 
 
+def test_pull_writes_a_title_stored_in_its_own_field(hosted: Hosted) -> None:
+    assert hosted.cli("task", "push", "refund", "--with-deps")[0] == 0
+    _web_app_task(hosted, "web-task")
+    parent = hosted.fake.parents[(hosted.project_id, "tasks", "web-task")]
+    definition = hosted.fake.revisions[parent["id"]][0]["definition"]
+    definition |= {"name": "web-task", "title": "Order review"}
+
+    code, output = hosted.cli("task", "pull", "web-task")
+    assert code == 0, output
+    manifest = (hosted.project.root / "tasks/web-task/task.yaml").read_text()
+    assert "name: web-task" in manifest
+    assert "title: Order review" in manifest
+
+
 def test_a_title_is_the_hosted_name_and_the_directory_is_the_slug(hosted: Hosted) -> None:
     manifest = hosted.project.root / "tasks/refund/task.yaml"
     text = manifest.read_text().replace("name: refund", "name: refund\ntitle: Refund A-1")
@@ -267,6 +281,8 @@ def test_a_title_is_the_hosted_name_and_the_directory_is_the_slug(hosted: Hosted
     assert code == 0, output
     parent = hosted.fake.parents[(hosted.project_id, "tasks", "refund")]
     assert parent["name"] == "Refund A-1"
+    pushed = hosted.fake.revisions[parent["id"]][0]["payload"]
+    assert (pushed["name"], pushed["title"]) == ("refund", "Refund A-1")
     assert hosted.cli("task", "validate", "refund")[0] == 0
 
     code, output = hosted.cli("task", "push", "refund", "--json")
@@ -581,3 +597,86 @@ def test_push_uploads_a_tasks_files_once_and_pull_restores_them(
     assert (task / "drawings/A-201.pdf").read_bytes() == drawing
     assert (task / "notes.md").read_text() == "# Notes"
     assert hosted.cli("task", "validate", "web-task")[0] == 0
+
+
+BATCH_SERVER = {"plural": "0.23.1", "source": "release", "capabilities": ["batch_push"]}
+
+
+def test_a_batch_push_saves_every_revision_in_one_request(hosted: Hosted) -> None:
+    hosted.fake.server = dict(BATCH_SERVER)
+
+    code, output = hosted.cli("project", "push", "--yes")
+    assert code == 0, output
+    assert ("POST", "/api/v1/push") in hosted.fake.requests
+    assert not any(path.endswith("/revisions") for _method, path in hosted.fake.writes)
+    pinned = hosted.project.read_lock().resources
+    assert {"environment/queue", "task/refund", "benchmark/basics"} <= set(pinned)
+    assert "Pushed:\n  environment/queue #1" in output
+
+    writes = len(hosted.fake.writes)
+    code, output = hosted.cli("project", "push", "--yes")
+    assert code == 0, output
+    assert len(hosted.fake.writes) == writes
+
+
+def test_a_refused_batch_push_saves_nothing_and_names_the_resource(hosted: Hosted) -> None:
+    hosted.fake.server = dict(BATCH_SERVER)
+    hosted.fake.failing.add("tasks/deny")
+
+    code, output = hosted.cli("project", "push", "--yes")
+    assert code == 1
+    assert "The server refused the push, so nothing was saved." in output
+    assert "task/deny: Internal Server Error" in output
+    assert hosted.fake.revision_count() == 0
+    assert hosted.project.read_lock().resources == {}
+
+
+def test_a_field_the_server_does_not_accept_stops_the_push_before_any_upload(
+    hosted: Hosted,
+) -> None:
+    hosted.fake.server = {
+        **BATCH_SERVER,
+        "plural": "v0.22.2-8-gae31446-dirty",
+        "source": "checkout",
+        "dirty": True,
+        "fields": {"task": ["name"]},
+    }
+
+    code, output = hosted.cli("project", "push", "--yes")
+    assert code == 1
+    assert "v0.22.2-8-gae31446-dirty, a checkout with uncommitted changes" in output
+    assert "instructions on task/deny, task/refund" in output
+    assert hosted.fake.writes == []
+
+
+def test_an_older_server_is_pushed_one_resource_at_a_time_naming_failures(
+    hosted: Hosted,
+) -> None:
+    hosted.fake.failing.add("tasks/deny")
+
+    code, output = hosted.cli("project", "push", "--yes")
+    assert code == 1
+    assert "The server refused task/deny.\n  - Internal Server Error" in output
+
+
+def test_a_field_error_from_the_server_keeps_its_location() -> None:
+    import httpx
+
+    from plural.errors import InvalidRequestError
+    from plural.studio import _raise_http
+
+    response = httpx.Response(
+        422,
+        json={"detail": [{"loc": ["body", "expected"], "msg": "Extra inputs are not permitted"}]},
+    )
+    with pytest.raises(InvalidRequestError) as raised:
+        _raise_http(response)
+    assert raised.value.message == "expected: Extra inputs are not permitted"
+    assert raised.value.body == response.json()
+
+
+def test_hosted_resources_named_by_slug_match_their_local_folders(hosted: Hosted) -> None:
+    assert hosted.cli("project", "push", "--yes")[0] == 0
+    code, output = hosted.cli("project", "push", "--yes")
+    assert code == 0, output
+    assert "not in this checkout" not in output

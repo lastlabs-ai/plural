@@ -168,7 +168,7 @@ def _memory(help: str = "Memory for each sandbox.", **extra: Any) -> RuntimeFiel
     )
 
 
-def _timeout(maximum: float = 86400, default: int = 300) -> RuntimeField:
+def _timeout(maximum: float = 86400, default: int = 900) -> RuntimeField:
     return RuntimeField(
         key="timeout_seconds",
         label="Command timeout",
@@ -927,7 +927,7 @@ def runtime_from_settings(
         compute=resources,
         packages=RuntimePackages(python=tuple(values.get("python_packages") or ())),
         read_only_root=bool(values.get("read_only_root", False)),
-        timeout_seconds=values.get("timeout_seconds", 300),
+        timeout_seconds=values.get("timeout_seconds", 900),
         placement={
             key: str(value).lower() if isinstance(value, bool) else str(value)
             for key, value in values.items()

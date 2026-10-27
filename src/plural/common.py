@@ -88,6 +88,20 @@ def stable_id(prefix: str, value: Any) -> str:
     return f"{prefix}_{content_hash(value).removeprefix('sha256:')[:24]}"
 
 
+def without_unset_title(data: Any) -> Any:
+    """Drop an unset ``title`` from serialized data.
+
+    Identifiers hash the serialized model, so a resource without a title keeps
+    the identifier it had before titles existed.
+
+    Returns:
+        ``data``, without ``title`` when it is ``None``.
+    """
+    if isinstance(data, dict) and data.get("title", "") is None:
+        del data["title"]
+    return data
+
+
 def semantic_version(value: str) -> str:
     """Validate an ordinary semantic version.
 
@@ -384,4 +398,5 @@ __all__ = [
     "raised_at",
     "semantic_version",
     "stable_id",
+    "without_unset_title",
 ]

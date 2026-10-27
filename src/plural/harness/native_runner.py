@@ -293,8 +293,10 @@ def _run(
     agent = _mapping(request.get("agent"), "agent")
     environment = _mapping(request.get("environment"), "environment")
     limits = _mapping(environment.get("limits"), "environment.limits")
-    max_turns = int(limits.get("max_turns", 8))
-    max_seconds = float(limits.get("max_seconds", 120))
+    raw_turns = limits.get("max_turns")
+    # A missing or null turn cap means no limit. Time still stops the run.
+    max_turns = None if raw_turns is None else int(raw_turns)
+    max_seconds = float(limits.get("max_seconds", 600))
     max_cost = limits.get("max_cost_usd")
     stop = float(os.environ.get(STOP_VARIABLE) or max_seconds)
     deadline = time.monotonic() + min(max_seconds, stop)
@@ -356,8 +358,11 @@ def _run(
     if terminated or truncated:
         stop_reason = "environment_terminated" if terminated else "environment_truncated"
     seen_view: Any = None
-    for turn in range(1, max_turns + 1):
-        if stop_reason is not None:
+    turn = 0
+    while stop_reason is None:
+        turn += 1
+        if max_turns is not None and turn > max_turns:
+            stop_reason = "max_turns"
             break
         if environment.get("turn_command"):
             seat = _await_turn(environment, deadline)

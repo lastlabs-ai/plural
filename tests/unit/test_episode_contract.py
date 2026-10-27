@@ -197,6 +197,31 @@ def test_agent_can_finish_the_episode(tmp_path: Path, monkeypatch: pytest.Monkey
     assert episode.transitions[-1]["type"] == "finish"
 
 
+def test_a_null_turn_limit_does_not_stop_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _request(tmp_path, max_turns=None)
+    request["environment"]["actions"] = [_action(tmp_path, _envelope())]
+    consumed = _responses(monkeypatch, _call("act"), _call("act"), _text("done"))
+
+    result, _episode, _trace = native_runner._run("native.actions.v1", request)
+
+    assert result["stop_reason"] == "agent_response"
+    assert len(consumed) == 3
+
+
+def test_turn_limit_defaults_and_can_be_removed() -> None:
+    from plural import ExecutionLimits
+
+    assert ExecutionLimits().max_turns is None
+    assert ExecutionLimits().max_seconds == 600
+    assert ExecutionLimits(max_turns=None).max_turns is None
+    assert ExecutionLimits(max_turns=5000).max_turns == 5000
+    loaded = ExecutionLimits.model_validate({"max_turns": None, "max_seconds": 30})
+    assert loaded.max_turns is None
+    assert loaded.max_seconds == 30
+
+
 def test_exhausting_turns_truncates_instead_of_failing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

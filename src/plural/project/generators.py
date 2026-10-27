@@ -108,7 +108,7 @@ def _environment(
         "apps": apps,
         "runtime": _runtime(runtime),
         "harness_policy": {"mode": "allow_all"},
-        "limits": {"max_turns": 20, "max_seconds": 600},
+        "limits": {"max_turns": None, "max_seconds": 600},
     }
     secret_lines = (
         "\n".join(f"- `{item}`" for item in secrets)

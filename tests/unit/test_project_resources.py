@@ -192,6 +192,40 @@ def test_benchmark_rules(project: Project) -> None:
     assert "primary_metric" in problems(project, "benchmark", "basics")
 
 
+def test_a_title_is_a_display_name_and_the_folder_stays_the_name(project: Project) -> None:
+    edit(project.root / "tasks/refund/task.yaml", "name: refund", "name: refund\ntitle: Refunds")
+    agent_yaml = project.root / "agents/baseline/agent.yaml"
+    edit(agent_yaml, "name: baseline", "name: baseline\ntitle: Base")
+    benchmark_yaml = project.root / "benchmarks/basics/benchmark.yaml"
+    edit(benchmark_yaml, "name: basics", "name: basics\ntitle: Refund basics")
+    edit(
+        benchmark_yaml,
+        "  infrastructure_error: exclude\n",
+        "  infrastructure_error: exclude\n  task_weights:\n    refund: 3\n",
+    )
+    benchmark_yaml.write_text(
+        benchmark_yaml.read_text()
+        + "categories:\n  - id: money\n    name: Money\n    tasks: [refund, deny]\n"
+    )
+
+    task = load(project, "task", "refund").value
+    assert (task.name, task.title) == ("refund", "Refunds")
+    agent = load(project, "agent", "baseline").value
+    assert (agent.name, agent.title) == ("baseline", "Base")
+    benchmark = load(project, "benchmark", "basics").value
+    assert (benchmark.name, benchmark.title) == ("basics", "Refund basics")
+    assert [item.name for item in benchmark.tasks] == ["refund", "deny"]
+    assert benchmark.scoring.task_weights == {"refund": 3}
+
+    edit(benchmark_yaml, "    refund: 3\n", "    Refunds: 3\n")
+    assert "Refunds" in problems(project, "benchmark", "basics")
+
+
+def test_an_unset_title_leaves_serialized_resources_as_before(project: Project) -> None:
+    for kind, name in (("task", "refund"), ("agent", "baseline"), ("benchmark", "basics")):
+        assert "title" not in load(project, kind, name).value.model_dump()
+
+
 def test_benchmark_rejects_verifiers_that_score_outside_its_range(project: Project) -> None:
     verifier = project.root / "verifiers/reviewer"
     verifier.mkdir()

@@ -10,6 +10,7 @@ server's job and is verified against it separately.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import itertools
 import json
@@ -81,6 +82,8 @@ class FakeHosted:
     sandboxes: dict[str, dict[str, Any]] = field(default_factory=dict)
     # ``collection/slug`` pairs whose revision pushes fail with a 500.
     failing: set[str] = field(default_factory=set)
+    # What ``GET /version`` reports; ``None`` answers 404, like an older server.
+    server: dict[str, Any] | None = None
     _ids: Iterator[int] = field(default_factory=lambda: itertools.count(1))
 
     def add_project(self, slug: str, *, account_id: str = "acc_personal") -> dict[str, Any]:
@@ -153,9 +156,13 @@ class FakeHosted:
             return self._packages(request, parts[1])
         if parts and parts[0] == "blobs":
             return self._blobs(request, parts[1])
+        if parts == ["version"]:
+            return _ok(self.server) if self.server is not None else _error(404, "Not Found")
         project_id = key.project_id or request.headers.get("x-project-id")
         if project_id not in self.projects:
             return _error(400, "Project is required")
+        if parts == ["push"] and request.method == "POST" and self.server is not None:
+            return self._push(request, project_id, body)
         if parts and parts[0] in COLLECTIONS:
             return self._collection(request, project_id, parts, body)
         if parts and parts[0] == "runtimes":
@@ -401,8 +408,8 @@ class FakeHosted:
             }
             revisions.append(revision)
             parent["current_revision_id"] = revision["id"]
-            if body.get("name"):
-                parent["name"] = body["name"]
+            if body.get("title") or body.get("name"):
+                parent["name"] = body.get("title") or body["name"]
             return _ok(revision)
         found = next((r for r in revisions if r["id"] == parts[3]), None)
         if found is None:
@@ -416,6 +423,53 @@ class FakeHosted:
             found["version"] = version
             return _ok(found)
         return _ok(found)
+
+    def _push(self, request: httpx.Request, project_id: str, body: Any) -> httpx.Response:
+        before = copy.deepcopy((self.parents, self.revisions))
+        saved: dict[str, str] = {}
+        results = []
+        collections = {kind: collection for collection, kind in KIND.items()}
+
+        def resolve(value: Any) -> Any:
+            if isinstance(value, list):
+                return [resolve(item) for item in value]
+            if isinstance(value, str) and value.startswith("batch:"):
+                return saved[value.removeprefix("batch:")]
+            return value
+
+        for item in body["items"]:
+            collection = collections[item["kind"]]
+            revision = {key: resolve(value) for key, value in item["revision"].items()}
+            if (project_id, collection, item["slug"]) not in self.parents:
+                self._collection(
+                    request,
+                    project_id,
+                    [collection],
+                    {"slug": item["slug"], "name": item["name"]},
+                )
+            params = {"package_digest": item.get("package_digest") or ""}
+            if body.get("force"):
+                params["force"] = "true"
+            inner = httpx.Request("POST", request.url.copy_with(params=params))
+            response = self._collection(
+                inner, project_id, [collection, item["slug"], "revisions"], revision
+            )
+            if response.status_code >= 400:
+                self.parents, self.revisions = before
+                detail = json.loads(response.content)["detail"]
+                error = {"ref": item["ref"], "loc": [], "msg": detail}
+                return httpx.Response(
+                    response.status_code,
+                    json={
+                        "detail": f"Nothing was saved.\n{item['ref']}: {detail}",
+                        "errors": [error],
+                    },
+                )
+            saved[item["ref"]] = json.loads(response.content)["id"]
+            results.append({"ref": item["ref"], "revision": json.loads(response.content)})
+        if body.get("dry_run"):
+            self.parents, self.revisions = before
+        return _ok({"dry_run": bool(body.get("dry_run")), "items": results})
 
     def _parent_view(self, parent: dict[str, Any]) -> dict[str, Any]:
         current = next(

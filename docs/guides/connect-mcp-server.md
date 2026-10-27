@@ -50,7 +50,7 @@ apps:
 runtime:
   provider: local
 limits:
-  max_turns: 20
+  max_turns: null
   max_seconds: 600
 ```
 

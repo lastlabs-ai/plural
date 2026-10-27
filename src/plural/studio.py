@@ -42,6 +42,9 @@ JsonObject = dict[str, Any]
 JsonList = list[JsonObject]
 T = TypeVar("T", bound=BaseModel)
 
+# How a project push names a dependency saved earlier in the same push.
+PUSH_REFERENCE_PREFIX = "batch:"
+
 # Artifact and TITO uploads can be gigabytes, and the server validates and
 # stores the whole body before it answers.
 UPLOAD_TIMEOUT = httpx.Timeout(60.0, write=600.0, read=3600.0)
@@ -60,10 +63,24 @@ def studio_base_url(gateway_base: str) -> str:
     return f"{root.rstrip('/')}/api/v1"
 
 
+def _problem(problem: Any) -> str:
+    if not isinstance(problem, Mapping):
+        return str(problem)
+    loc = [str(part) for part in problem.get("loc") or () if part != "body"]
+    text = str(problem.get("msg") or "").removeprefix("Value error, ")
+    return f"{'.'.join(loc)}: {text}" if loc else text
+
+
 def _raise_http(response: httpx.Response) -> None:
+    body: Any = None
     try:
         body = response.json()
-        detail = str(body.get("detail") or body.get("message") or "")
+        detail = body.get("detail") or body.get("message") or ""
+        detail = (
+            "\n".join(_problem(item) for item in detail)
+            if isinstance(detail, list)
+            else str(detail)
+        )
     except Exception:
         detail = response.text.strip()
     message = detail or response.reason_phrase or "request failed"
@@ -75,7 +92,7 @@ def _raise_http(response: httpx.Response) -> None:
         409: ConflictError,
         422: InvalidRequestError,
     }.get(response.status_code, PluralError)
-    raise error_type(message, status_code=response.status_code)
+    raise error_type(message, status_code=response.status_code, body=body)
 
 
 def _items(response: Any) -> JsonList:
@@ -99,6 +116,7 @@ class RevisionResourceAPI(Generic[T]):
     """
 
     collection: str
+    kind: str
     model_type: type[Any]
 
     def __init__(self, studio: Studio) -> None:
@@ -183,7 +201,11 @@ class RevisionResourceAPI(Generic[T]):
 
     @staticmethod
     def _name(value: Any) -> str:
-        name = getattr(value, "name", None) or getattr(value, "task_id", None)
+        name = (
+            getattr(value, "title", None)
+            or getattr(value, "name", None)
+            or getattr(value, "task_id", None)
+        )
         if not isinstance(name, str) or not name:
             raise InvalidRequestError("revision object has no parent name")
         return name
@@ -191,6 +213,51 @@ class RevisionResourceAPI(Generic[T]):
     def _revision_payload(self, value: Any, **references: Any) -> JsonObject:
         del references
         return _dump(value, exclude={"name", "description"})
+
+    def _check_type(self, value: Any) -> None:
+        if not isinstance(value, self.model_type):
+            raise InvalidRequestError(f"{self.collection} push requires {self.model_type.__name__}")
+
+    def revision_body(
+        self,
+        value: T,
+        *,
+        version: str | None = None,
+        parent_revision_id: str | None = None,
+        lineage: Sequence[Mapping[str, str]] = (),
+        **references: Any,
+    ) -> JsonObject:
+        """The JSON body that adds ``value`` as a revision."""
+        payload = self._revision_payload(value, **references)
+        payload["version"] = version
+        payload["parent_revision_id"] = parent_revision_id
+        payload["lineage"] = [dict(item) for item in lineage]
+        return payload
+
+    def batch_item(
+        self,
+        value: T,
+        *,
+        ref: str,
+        slug: str,
+        package_digest: str | None = None,
+        version: str | None = None,
+        parent_revision_id: str | None = None,
+        **references: Any,
+    ) -> JsonObject:
+        """One :meth:`Studio.push_batch` item; the parent is created when missing."""
+        self._check_type(value)
+        return {
+            "ref": ref,
+            "kind": self.kind,
+            "slug": slug,
+            "name": self._name(value),
+            "description": str(getattr(value, "description", "") or ""),
+            "package_digest": package_digest,
+            "revision": self.revision_body(
+                value, version=version, parent_revision_id=parent_revision_id, **references
+            ),
+        }
 
     def push(
         self,
@@ -228,8 +295,7 @@ class RevisionResourceAPI(Generic[T]):
         Raises:
             InvalidRequestError: When ``value`` is not this collection's type.
         """
-        if not isinstance(value, self.model_type):
-            raise InvalidRequestError(f"{self.collection} push requires {self.model_type.__name__}")
+        self._check_type(value)
         if resource_id is None:
             resource_id = str(
                 self.parent(
@@ -238,10 +304,13 @@ class RevisionResourceAPI(Generic[T]):
                     description=str(getattr(value, "description", "") or ""),
                 )["id"]
             )
-        payload = self._revision_payload(value, **references)
-        payload["version"] = version
-        payload["parent_revision_id"] = parent_revision_id
-        payload["lineage"] = [dict(item) for item in lineage]
+        payload = self.revision_body(
+            value,
+            version=version,
+            parent_revision_id=parent_revision_id,
+            lineage=lineage,
+            **references,
+        )
         params: dict[str, Any] = {}
         if package_digest:
             params["package_digest"] = package_digest
@@ -260,6 +329,7 @@ class RevisionResourceAPI(Generic[T]):
 
 class EnvironmentsAPI(RevisionResourceAPI[EnvironmentDefinition]):
     collection = "environments"
+    kind = "environment"
     model_type = EnvironmentDefinition
 
     def stamp_harness(
@@ -290,6 +360,7 @@ class EnvironmentsAPI(RevisionResourceAPI[EnvironmentDefinition]):
 
 class TasksAPI(RevisionResourceAPI[Task]):
     collection = "tasks"
+    kind = "task"
     model_type = Task
 
     def _revision_payload(self, value: Task, **references: Any) -> JsonObject:
@@ -316,6 +387,7 @@ class TasksAPI(RevisionResourceAPI[Task]):
 
 class VerifiersAPI(RevisionResourceAPI[Any]):
     collection = "verifiers"
+    kind = "verifier"
     model_type = BaseModel
 
     def push(
@@ -332,6 +404,7 @@ class VerifiersAPI(RevisionResourceAPI[Any]):
 
 class AgentsAPI(RevisionResourceAPI[Agent]):
     collection = "agents"
+    kind = "agent"
     model_type = Agent
 
     def _revision_payload(self, value: Agent, **references: Any) -> JsonObject:
@@ -347,6 +420,7 @@ class AgentsAPI(RevisionResourceAPI[Agent]):
 
 class HarnessesAPI(RevisionResourceAPI[HarnessDefinition]):
     collection = "harnesses"
+    kind = "harness"
     model_type = HarnessDefinition
 
     def _revision_payload(self, value: HarnessDefinition, **references: Any) -> JsonObject:
@@ -356,6 +430,7 @@ class HarnessesAPI(RevisionResourceAPI[HarnessDefinition]):
 
 class BenchmarksAPI(RevisionResourceAPI[Benchmark]):
     collection = "benchmarks"
+    kind = "benchmark"
     model_type = Benchmark
 
     def _revision_payload(self, value: Benchmark, **references: Any) -> JsonObject:
@@ -1098,6 +1173,34 @@ class Studio:
 
     def request_bytes(self, method: str, path: str, *, params: JsonObject | None = None) -> bytes:
         return self._send(method, path, params=params).content
+
+    def server_version(self) -> JsonObject | None:
+        """The Plural the server checks revisions with, and the fields it accepts.
+
+        ``None`` for a server too old to say.
+        """
+        try:
+            return cast(JsonObject, self.request("GET", "/version", project=False))
+        except NotFoundError:
+            return None
+
+    def push_batch(
+        self, items: Sequence[JsonObject], *, force: bool = False, dry_run: bool = False
+    ) -> JsonObject:
+        """Save every item's revision in order, or none of them.
+
+        Each item is one :meth:`RevisionResourceAPI.batch_item`. A dependency
+        pushed in the same batch is named ``batch:<ref>``.
+        """
+        return cast(
+            JsonObject,
+            self.request(
+                "POST",
+                "/push",
+                json={"items": list(items), "force": force, "dry_run": dry_run},
+                timeout=300,
+            ),
+        )
 
     def watch(self, path: str, *, cursor: int = 0) -> Iterator[JsonObject]:
         headers = {**self._headers(), "Accept": "text/event-stream"}

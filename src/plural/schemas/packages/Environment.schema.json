@@ -453,7 +453,7 @@
           "uniqueItems": true
         },
         "timeout_seconds": {
-          "default": 300,
+          "default": 900,
           "exclusiveMinimum": 0,
           "title": "Timeout Seconds",
           "type": "number"
@@ -472,7 +472,7 @@
     },
     "ExecutionLimits": {
       "additionalProperties": false,
-      "description": "Environment execution limits.",
+      "description": "How long one episode may run.\n\nThe defaults apply when ``limits`` is left out of an Environment: no turn\ncap, and 600 seconds. Set ``max_turns`` to any positive number to cap turns.\n``max_seconds`` always stops the run.",
       "properties": {
         "max_cost_usd": {
           "anyOf": [
@@ -485,20 +485,29 @@
             }
           ],
           "default": null,
+          "description": "Optional spending cap, in USD. Unset means no cost cap.",
           "title": "Max Cost Usd"
         },
         "max_seconds": {
-          "default": 120,
+          "default": 600,
+          "description": "Seconds the episode may run. The default is 600, ten minutes.",
           "exclusiveMinimum": 0,
           "title": "Max Seconds",
           "type": "number"
         },
         "max_turns": {
-          "default": 8,
-          "maximum": 1000,
-          "minimum": 1,
-          "title": "Max Turns",
-          "type": "integer"
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Turns the Agent may take. Null, the default, means no cap. Set any positive number to stop the run after that many actions.",
+          "title": "Max Turns"
         }
       },
       "title": "ExecutionLimits",

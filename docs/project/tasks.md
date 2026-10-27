@@ -110,10 +110,10 @@ to validate the Task whose folder you are in.
 Here is what each field in `task.yaml` means, for when you need the exact rules:
 
 - `name` must match the folder name, which is also the Task's slug in the hosted
-  project. The optional `title` is its display name there, such as
-  `title: Refund triage`; without it, the display name is `name`. The title is part of
-  the Task's content, so changing it needs a new `version:`. Pushing that version
-  renames the hosted Task while its slug stays the same.
+  project. Benchmarks, Jobs, and results call the Task by this name. The optional
+  `title` is its display name there, such as `title: Refund triage`; without it, the
+  display name is `name`. A title is a label, not content: changing it and pushing
+  renames the hosted Task, and its revision and hash stay the same.
 - `instructions` is the path of a UTF-8 file in the Task folder, `instruction.md` by
   default. Its contents are the Task's instructions.
 - `environment` is the name of one Environment in `environments/`, and `verifiers`

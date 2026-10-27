@@ -105,7 +105,7 @@ class EpisodeSession:
     expires_at: float
     actions: dict[str, EpisodeAction]
     files: dict[str, bytes]
-    max_turns: int
+    max_turns: int | None
     act: ActionCall
     turns: int = 0
     done: bool = False
@@ -147,7 +147,7 @@ class EpisodeSession:
         async with self.lock:
             if self.done or self.finished.done():
                 raise EpisodeRefused(409, "The episode is over.")
-            if self.turns >= self.max_turns:
+            if self.max_turns is not None and self.turns >= self.max_turns:
                 raise EpisodeRefused(409, f"The episode allows {self.max_turns} actions.")
             self.turns += 1
             reply = await self.act(name, arguments)
@@ -228,7 +228,7 @@ class EpisodeServer:
         *,
         actions: tuple[EpisodeAction, ...],
         files: Mapping[str, bytes],
-        max_turns: int,
+        max_turns: int | None,
         deadline: float,
         act: ActionCall,
     ) -> tuple[EpisodeSession, str, EpisodeURLs]:

@@ -283,7 +283,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "A catalog-backed model and its optional execution harness.\n\nTo evaluate your own agent or model server instead, give ``endpoint``: the\nbase URL of an OpenAI-compatible API (one that serves\n``/chat/completions``). ``model`` is then sent to it as is and need not be\nin the catalog, and ``endpoint_key`` names the secret holding its API key.\nPlural's native Harness calls it with the Environment's actions as tools,\nand a custom Harness reaches it through ``agent.complete``.\n\nAn agent that already runs elsewhere is an ``external`` Agent instead: the\nJob calls it over signed HTTPS, and ``model`` is the label it reports.",
+  "description": "A catalog-backed model and its optional execution harness.\n\nTo evaluate your own agent or model server instead, give ``endpoint``: the\nbase URL of an OpenAI-compatible API (one that serves\n``/chat/completions``). ``model`` is then sent to it as is and need not be\nin the catalog, and ``endpoint_key`` names the secret holding its API key.\nPlural's native Harness calls it with the Environment's actions as tools,\nand a custom Harness reaches it through ``agent.complete``.\n\nAn agent that already runs elsewhere is an ``external`` Agent instead: the\nJob calls it over signed HTTPS, and ``model`` is the label it reports.\n\n``title`` is only the display name in the hosted project; Jobs and results\ncall the Agent by ``name``.",
   "properties": {
     "auth": {
       "default": "environment",
@@ -436,6 +436,20 @@
       ],
       "default": null,
       "title": "Temperature"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Display name in the hosted project. Defaults to name.",
+      "title": "Title"
     },
     "version": {
       "default": "0.1.0",
