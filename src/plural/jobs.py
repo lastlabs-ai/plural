@@ -40,7 +40,7 @@ from plural.environments.definition import (
     HarnessGrant,
     party_seats,
 )
-from plural.local_models import LocalModelError, LocalModelIdentity
+from plural.local_models import LocalModelError, LocalModelIdentity, Status
 from plural.rewards import RewardFailure
 from plural.sandbox.models import NetworkMode
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
@@ -1215,7 +1215,7 @@ class Job:
         def decide(
             name: str,
             identity: LocalModelIdentity,
-            status: Literal["new", "known", "changed"],
+            status: Status,
             record: dict[str, Any] | None,
         ) -> Literal["known", "allowed"]:
             if status == "known":

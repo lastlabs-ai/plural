@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -38,6 +39,7 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -82,6 +84,9 @@ class LocalModelIdentity(FrozenModel):
     parameters: int | None = None
     quantization: str | None = None
     method: Method
+    behavior: str | None = None
+    """For a server that reports nothing about its model, the hash of its
+    answers to :data:`PROBES`, which is part of its fingerprint."""
     fingerprint: str
     """``SHA256:`` and the base64 digest of the facts above, like an SSH key's."""
     warnings: tuple[str, ...] = ()
@@ -116,6 +121,11 @@ class LocalModelIdentity(FrozenModel):
             lines.append(f"parameters: {self.size}")
         if self.quantization:
             lines.append(f"quantization: {self.quantization}")
+        if self.behavior and not on_this_machine(self.endpoint):
+            lines.append(
+                "identified by: its answers alone; the server is not on this machine, so "
+                "Plural cannot read its weights"
+            )
         lines.append(f"fingerprint: {self.fingerprint} (from the {_METHODS[self.method]})")
         lines.extend(f"warning: {item}" for item in self.warnings)
         return lines
@@ -123,7 +133,7 @@ class LocalModelIdentity(FrozenModel):
 
 _METHODS: dict[str, str] = {
     "server": "model the server reports loaded",
-    "weights": "weight files on this machine",
+    "weights": "weight files on this machine and the model's answers to fixed prompts",
     "behavior": "model's answers to fixed prompts; the server reports nothing about its model",
 }
 
@@ -162,6 +172,7 @@ def inspect_local_model(
             )
     client = http
     base = endpoint.rstrip("/")
+    local = on_this_machine(base)
     root = base.removesuffix("/v1")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     hub = hf_hub or Path(os.environ.get("HF_HOME", Path.home() / ".cache/huggingface")) / "hub"
@@ -239,7 +250,7 @@ def inspect_local_model(
         if entry is None:
             raise LocalModelError(_unlisted(endpoint, model, ids))
         weights = str(entry.get("root") or model)
-        cached = _hf_weights(hub, weights)
+        cached = _hf_weights(hub, weights) if local else None
         if cached is not None:
             weights, parameters, quantization, files = cached
             method, facts = "weights", {"weights": weights, "files": files}
@@ -301,16 +312,20 @@ def inspect_local_model(
         if served and not _same_name(served, model) and server != "llama.cpp":
             warnings.append(f"asked for {model}, the server answered as {served}")
 
+    behavior: str | None = None
     if server in {"mlx-lm", "openai-compatible"}:
-        cached = _hf_weights(hub, model)
+        # Weights in the cache prove only what could be loaded; the answers show
+        # what does, so a server answering to one name with another model differs.
+        behavior = _behavior(client, base, model, headers) if probe else None
+        cached = _hf_weights(hub, model) if local else None
         if cached is not None:
             weights, parameters, quantization, files = cached
-            method, facts = "weights", {"weights": weights, "files": files}
-        elif probe:
-            method = "behavior"
-            facts = {"server": server, "answers": _behavior(client, base, model, headers)}
+            method = "weights"
+            facts = {"weights": weights, "files": files}
         else:
-            method, facts = "behavior", {"server": server, "unknown": model}
+            method = "behavior"
+            facts = {"server": server, "unknown": None if probe else model}
+        facts.update({"answers": behavior, "server_version": version})
 
     claimed = claimed_size(model)
     if claimed is not None and parameters:
@@ -329,9 +344,25 @@ def inspect_local_model(
         parameters=parameters,
         quantization=quantization,
         method=method,
+        behavior=behavior,
         fingerprint=_fingerprint(method, facts),
         warnings=tuple(warnings),
     )
+
+
+def on_this_machine(endpoint: str) -> bool:
+    """Whether ``endpoint`` is served from this machine, whose files Plural can read.
+
+    Returns:
+        ``True`` for ``localhost`` and loopback addresses.
+    """
+    host = (urlsplit(endpoint).hostname or "").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def claimed_size(name: str) -> float | None:
@@ -342,6 +373,15 @@ def claimed_size(name: str) -> float | None:
     """
     match = _SIZE.search(name.rsplit("/", 1)[-1].replace("_", "-"))
     return float(match.group(1)) if match else None
+
+
+Status = Literal["new", "known", "changed", "serving_changed", "answers_like"]
+"""How a model compares with the fingerprints accepted before: ``new`` when
+none was accepted for its endpoint and name; ``known`` when its fingerprint
+was; ``changed`` when another was; ``serving_changed`` when the weights are the
+same but the server's version and the model's answers are not; and
+``answers_like`` when it answers exactly like a model accepted under another
+name and other weights."""
 
 
 class KnownModels:
@@ -365,31 +405,44 @@ class KnownModels:
     def _key(identity: LocalModelIdentity) -> str:
         return f"{identity.endpoint} {identity.requested}"
 
-    def lookup(
-        self, identity: LocalModelIdentity
-    ) -> tuple[Literal["new", "known", "changed"], dict[str, Any] | None]:
-        """Whether this fingerprint was accepted for this endpoint and name before.
+    def lookup(self, identity: LocalModelIdentity) -> tuple[Status, dict[str, Any] | None]:
+        """How ``identity`` compares with the fingerprints accepted before.
 
         Returns:
-            ``known`` when it matches the accepted one, ``changed`` when another
-            was accepted, ``new`` otherwise; and the accepted record, if any.
+            The :data:`Status`, and the accepted record it refers to, if any.
         """
-        record = self._read().get(self._key(identity))
-        if record is None:
+        records = self._read()
+        own = records.get(self._key(identity))
+        if own is not None and own.get("fingerprint") == identity.fingerprint:
+            return "known", own
+        if identity.behavior is not None:
+            for key, record in records.items():
+                if key == self._key(identity) or record.get("behavior") != identity.behavior:
+                    continue
+                other = record.get("weights") or record.get("requested")
+                if other != (identity.weights or identity.requested):
+                    return "answers_like", {"requested": key.split(" ", 1)[-1], **record}
+        if own is None:
             return "new", None
-        if record.get("fingerprint") == identity.fingerprint:
-            return "known", record
-        return "changed", record
+        if (
+            own.get("weights") == identity.weights
+            and own.get("server_version") != identity.server_version
+        ):
+            return "serving_changed", own
+        return "changed", own
 
     def remember(self, identity: LocalModelIdentity) -> None:
         """Accept ``identity``'s fingerprint for its endpoint and name."""
         data = self._read()
         data[self._key(identity)] = {
             "fingerprint": identity.fingerprint,
+            "requested": identity.requested,
             "server": identity.server,
+            "server_version": identity.server_version,
             "weights": identity.weights,
             "parameters": identity.parameters,
             "quantization": identity.quantization,
+            "behavior": identity.behavior,
             "accepted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -407,12 +460,10 @@ def known_models(environ: Mapping[str, str] | None = None) -> KnownModels:
     return KnownModels(config_home(environ) / "known_models.json")
 
 
-Decide = Callable[
-    [str, LocalModelIdentity, Literal["new", "known", "changed"], "dict[str, Any] | None"], Trust
-]
-"""Given an Agent's name, its model's identity, whether its fingerprint was
-accepted before, and the accepted record, how the run trusts it; or raise
-:class:`LocalModelError` to stop."""
+Decide = Callable[[str, LocalModelIdentity, Status, "dict[str, Any] | None"], Trust]
+"""Given an Agent's name, its model's identity, how it compares with the
+fingerprints accepted before, and the accepted record, how the run trusts it;
+or raise :class:`LocalModelError` to stop."""
 
 
 def review_local_models(
@@ -425,7 +476,8 @@ def review_local_models(
     """Inspect every endpoint Agent's model and let ``decide`` accept or refuse it.
 
     A fingerprint ``decide`` confirms is remembered, so the next run of the
-    same model goes ahead without asking.
+    same model goes ahead without asking. A model that answers like another
+    accepted model carries that as a warning, whatever ``decide`` does.
 
     Args:
         agents: The Job's Agent bindings; those without an endpoint are skipped.
@@ -452,6 +504,10 @@ def review_local_models(
             inspected[place] = inspect_local_model(definition.endpoint, binding.model, api_key=key)
         identity = inspected[place]
         status, record = store.lookup(identity)
+        if status == "answers_like" and record is not None:
+            identity = identity.model_copy(
+                update={"warnings": (*identity.warnings, answers_like(record))}
+            )
         trust = decide(binding.name, identity, status, record)
         if trust == "confirmed":
             store.remember(identity)
@@ -459,10 +515,24 @@ def review_local_models(
     return identities
 
 
+def answers_like(record: Mapping[str, Any]) -> str:
+    """The warning for a model that answers exactly like another accepted one.
+
+    Returns:
+        One line naming the other model.
+    """
+    other = record.get("weights") or record.get("requested")
+    return (
+        f"it answers exactly like {record.get('requested')} ({other}), accepted on "
+        f"{str(record.get('accepted_at', ''))[:10]}, so the server is likely running that "
+        "model under this name"
+    )
+
+
 def unverified_message(
     name: str,
     identity: LocalModelIdentity,
-    status: Literal["new", "known", "changed"],
+    status: Status,
     record: Mapping[str, Any] | None,
 ) -> str:
     """Why a run stopped before using a model nobody accepted.
@@ -470,12 +540,21 @@ def unverified_message(
     Returns:
         The facts to check, and how to go ahead.
     """
-    if status == "changed" and record is not None:
+    accepted = str((record or {}).get("accepted_at", ""))[:10]
+    if status == "answers_like" and record is not None:
+        head = f"Agent {name!r}'s model is not what its name says:"
+    elif status == "serving_changed" and record is not None:
         head = (
-            f"Agent {name!r}'s model is not the one accepted on "
-            f"{str(record.get('accepted_at', ''))[:10]}: its fingerprint was "
-            f"{record.get('fingerprint')} ({record.get('weights') or 'unknown weights'}), and "
-            "is now:"
+            f"Agent {name!r}'s server changed since you accepted its model on {accepted}: "
+            f"it ran {record.get('server')} {record.get('server_version') or ''}".rstrip()
+            + ", and the same weights now answer differently. Serving changed, so accept "
+            "it again:"
+        )
+    elif status == "changed" and record is not None:
+        head = (
+            f"Agent {name!r}'s model is not the one accepted on {accepted}: its "
+            f"fingerprint was {record.get('fingerprint')} "
+            f"({record.get('weights') or 'unknown weights'}), and is now:"
         )
     else:
         head = f"Agent {name!r} runs a local model nobody has accepted yet:"
@@ -634,11 +713,13 @@ def _gguf_quantization(name: str | None) -> str | None:
 
 __all__ = [
     "KnownModels",
+    "Status",
     "LocalModelError",
     "LocalModelIdentity",
     "claimed_size",
     "inspect_local_model",
     "known_models",
+    "on_this_machine",
     "review_local_models",
     "unverified_message",
 ]
