@@ -20,6 +20,7 @@ from plural.execution.report import (
     publish_job,
 )
 from plural.jobs import JobSpec
+from plural.local_models import LocalModelIdentity
 
 
 class _Hosted:
@@ -36,6 +37,7 @@ class _Hosted:
         self.heartbeats: list[list[str]] = []
         self.cancelled: list[str] = []
         self.gateway_keys: list[str] = []
+        self.results: list[dict[str, Any]] = []
 
     def gateway_key(self, execution_id: str, *, ttl_seconds: int) -> str:
         self.gateway_keys.append(execution_id)
@@ -76,6 +78,8 @@ class _Hosted:
             record = next(item for item in self.executions.values() if item["id"] == execution_id)
             record["status"] = body["status"]
             self.transitions.append((execution_id, body["status"]))
+            if "result" in body:
+                self.results.append(body["result"])
         return {"status": body.get("status")}
 
 
@@ -114,7 +118,12 @@ def _studio(hosted: _Hosted) -> Any:
 
 
 async def _tracked_run(
-    tmp_path: Path, hosted: _Hosted, spec: JobSpec, *, environ: dict[str, str] | None = None
+    tmp_path: Path,
+    hosted: _Hosted,
+    spec: JobSpec,
+    *,
+    environ: dict[str, str] | None = None,
+    model_identities: dict[str, LocalModelIdentity] | None = None,
 ) -> tuple[JobStore, list[str]]:
     store = JobStore(tmp_path / "jobs")
     tracker = HostedTracker(
@@ -133,6 +142,7 @@ async def _tracked_run(
         store=store,
         environ=environ or {},
         gateway_keys=tracker.gateway_key,
+        model_identities=model_identities,
     ).run()
     assert result.status == "succeeded"
     return store, tracker.close()
@@ -166,6 +176,27 @@ async def test_each_recorded_execution_gets_its_own_gateway_key(tmp_path: Path) 
     assert sorted(hosted.gateway_keys) == sorted(
         record["id"] for record in hosted.executions.values()
     )
+
+
+async def test_a_recorded_trial_carries_the_local_model_it_ran(tmp_path: Path) -> None:
+    spec = _spec([_task("case-0")])
+    identity = LocalModelIdentity(
+        endpoint="http://localhost:2080/v1",
+        requested="mlx-community/Qwen3-8B-4bit",
+        server="mlx-lm",
+        method="behavior",
+        fingerprint="SHA256:abc",
+        trust="confirmed",
+    )
+    hosted = _Hosted(spec)
+
+    _, errors = await _tracked_run(
+        tmp_path, hosted, spec, model_identities={spec.agents[0].name: identity}
+    )
+
+    assert errors == []
+    assert [item["model_identity"]["fingerprint"] for item in hosted.results] == ["SHA256:abc"]
+    assert hosted.results[0]["model_identity"]["trust"] == "confirmed"
 
 
 async def test_pushing_a_tracked_job_records_nothing_twice(tmp_path: Path) -> None:

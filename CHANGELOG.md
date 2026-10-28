@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Before a run, Plural asks an endpoint Agent's server which model it has loaded: Ollama, vLLM, llama.cpp, and LM Studio report it, `mlx_lm.server`'s weights are read from the Hugging Face cache, and any other server is fingerprinted by its answers to fixed prompts. `plural run` shows what it found with an SSH-style fingerprint and asks once to use it, remembering the answer in `known_models.json`. It warns when the fingerprint changes, or when a name's size, such as `8b`, doesn't match the weights. `--yes` skips the prompt.
+- `Job(allow_local_models=True)`. Without it, a Job raises `LocalModelError` for an endpoint model whose fingerprint nobody has accepted.
+- `TrialResult.model_identity` records the model each endpoint Trial ran. The fingerprint is checked again before each Trial, and a Trial whose model changed mid-Job fails without running. `plural.local_models.inspect_local_model()` runs the inspection on its own.
+
+- `plural.usage.on_own_hardware()` and `price_own_hardware()`.
+
+### Changed
+
+- A model call to an endpoint on this machine or a private network, such as `localhost` or `192.168.x.x`, is recorded at $0 when the server reports no cost, so a local model's Trials and Jobs show a cost of $0.00 beside their tokens instead of none. A remote endpoint's cost stays unreported.
+- A recorded Trial uploads its `model_identity`, which the Trial page shows as **Local model**.
+- An endpoint Agent's Trials record their model resolution with provider `endpoint` and the server's host, where they used to guess a provider from the model's name.
+
 ## [0.23.1] - 2026-10-27
 
 ### Added

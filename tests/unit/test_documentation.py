@@ -148,7 +148,18 @@ def test_wordle_runs_a_model_and_records_its_messages(
     )
     env = {**isolated, "WORDLE_MODEL_KEY": "unused"}
     job = json.loads(
-        _run(str(CLI), "run", "-b", "wordle", "-a", "scripted", "--json", cwd=project, env=env)
+        _run(
+            str(CLI),
+            "run",
+            "-b",
+            "wordle",
+            "-a",
+            "scripted",
+            "--yes",
+            "--json",
+            cwd=project,
+            env=env,
+        )
     )
     assert job["status"] == "succeeded"
     scores = {trial["task"]: trial["score"] for trial in job["trials"]}

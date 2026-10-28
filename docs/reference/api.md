@@ -849,10 +849,18 @@ self-play. Left out, every Agent in ``agents`` plays, once each.
 
 ``episode_server`` says where the Job serves an external Agent's episodes;
 by default it listens on a free loopback port.
+
+An Agent with its own ``endpoint`` runs whatever model its server
+answers with, whatever the Agent's ``model`` says. Before the first Trial
+the Job asks the server what it is running and refuses a model whose
+fingerprint nobody has accepted, naming what it found. ``plural run``
+asks once and remembers the answer; ``allow_local_models=True`` goes
+ahead without one. Each Trial records the identity either way, as
+``TrialResult.model_identity``.
 ```
 
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None, episode_server: 'Any' = None) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None, episode_server: 'Any' = None, allow_local_models: 'bool' = False) -> 'None'
 ```
 
 ### plural.Job.run_async

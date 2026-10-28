@@ -10,8 +10,9 @@ and label the result.
 from __future__ import annotations
 
 import os
+import sys
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import Any, Literal
@@ -19,6 +20,7 @@ from typing import Any, Literal
 import typer
 from pydantic import ValidationError
 
+from plural.agents import AgentBinding
 from plural.apps.mcp import use_credential_source
 from plural.auth import Session
 from plural.cli.common import (
@@ -43,6 +45,7 @@ from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.execution.episode_server import EpisodeServerOptions
 from plural.jobs import JobResult, JobSpec, TrialResult, TrialSpec
+from plural.local_models import LocalModelError, LocalModelIdentity, review_local_models
 from plural.project import ProjectError, Workspace
 from plural.project.layout import (
     AGENT,
@@ -180,6 +183,12 @@ def run(
     tls_key: Path | None = typer.Option(
         None, "--tls-key", help="For an external Agent: the key of --tls-cert."
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Use an endpoint Agent's model without asking, even one you have not accepted.",
+    ),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
@@ -190,6 +199,11 @@ def run(
 
     NAME@REF runs that exact pushed revision even after your files have
     moved on. It is restored under .plural/versions without touching them.
+
+    For an Agent with its own endpoint, the run first asks the server what
+    model it is running and shows it with a fingerprint. Accept it once and
+    later runs of the same model go ahead; if the fingerprint changes, you
+    are asked again.
     """
     if hosted or follow:
         raise ProjectError(HOSTED_RUNS)
@@ -278,6 +292,7 @@ def run(
     )
     _runtime_credentials(space, plan, err=as_json)
     _project_secrets(space, plan.spec, environ, err=as_json)
+    identities = _review_local_models(plan.spec.agents, environ, yes=yes, err=as_json)
     with _credit_watch(current, environ, err=as_json):
         job_id, result = run_local(
             space,
@@ -287,8 +302,72 @@ def run(
             tracking=tracking,
             credential_source=_stored_credentials(as_json),
             episode_server=episode_server,
+            model_identities=identities,
         )
     _finish_local(space, job_id, result, tracking, as_json=as_json)
+
+
+def _interactive() -> bool:
+    return sys.stdin.isatty()
+
+
+def _review_local_models(
+    agents: Sequence[AgentBinding], environ: Mapping[str, str], *, yes: bool, err: bool
+) -> dict[str, LocalModelIdentity]:
+    """Show each endpoint Agent's model and ask, once per fingerprint, to use it.
+
+    Returns:
+        The identities by Agent name.
+
+    Raises:
+        ProjectError: When a model is unreachable or not accepted.
+    """
+
+    def show(line: str) -> None:
+        typer.echo(line, err=err)
+
+    def decide(
+        name: str,
+        identity: LocalModelIdentity,
+        status: Literal["new", "known", "changed"],
+        record: dict[str, Any] | None,
+    ) -> Literal["confirmed", "known", "allowed"]:
+        accepted = str((record or {}).get("accepted_at", ""))[:10]
+        if status == "known":
+            show(
+                f"{name}: {identity.weights or identity.requested}, {identity.fingerprint}, "
+                f"as you accepted on {accepted}."
+            )
+            for warning in identity.warnings:
+                show(f"  warning: {warning}")
+            return "known"
+        if status == "changed" and record is not None:
+            show(f"WARNING: THE MODEL BEHIND AGENT {name.upper()} HAS CHANGED.")
+            show(
+                f"When you accepted it on {accepted} it was "
+                f"{record.get('weights') or 'unknown weights'}, {record.get('fingerprint')}. "
+                "It is now:"
+            )
+        else:
+            show(f"Agent {name} runs a local model you have not accepted yet:")
+        for line in identity.describe():
+            show(f"  {line}")
+        if yes:
+            return "allowed"
+        if not _interactive():
+            raise ProjectError(
+                "Check that this is the model you mean, then pass --yes to run without a prompt."
+            )
+        if not typer.confirm("Is this the model you mean to evaluate?", default=False):
+            raise ProjectError(
+                "Nothing ran. Point the Agent at the model you mean, or load it on the server."
+            )
+        return "confirmed"
+
+    try:
+        return review_local_models(agents, environ, decide)
+    except LocalModelError as exc:
+        raise ProjectError(str(exc)) from None
 
 
 @job_app.command("list")

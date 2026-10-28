@@ -48,6 +48,7 @@ from plural.jobs import (
     TaskJobSource,
     TrialResult,
 )
+from plural.local_models import LocalModelIdentity
 from plural.project.layout import (
     AGENT,
     BENCHMARK,
@@ -328,6 +329,7 @@ def run_local(
     tracking: Tracking | None = None,
     credential_source: CredentialSource | None = None,
     episode_server: EpisodeServerOptions | None = None,
+    model_identities: Mapping[str, LocalModelIdentity] | None = None,
 ) -> tuple[str, JobResult]:
     """Execute a plan on this machine and record it under ``.plural/jobs``.
 
@@ -356,6 +358,7 @@ def run_local(
         tracking=tracking,
         credential_source=credential_source,
         episode_server=episode_server,
+        model_identities=model_identities,
     )
 
 
@@ -905,6 +908,7 @@ def _execute(
     tracking: Tracking | None = None,
     credential_source: CredentialSource | None = None,
     episode_server: EpisodeServerOptions | None = None,
+    model_identities: Mapping[str, LocalModelIdentity] | None = None,
 ) -> tuple[str, JobResult]:
     from plural.credentials import CredentialError
     from plural.credentials import resolve as resolve_credentials
@@ -989,6 +993,7 @@ def _execute(
         "environ": environ,
         "credentials": credentials,
         "episode_server": episode_server,
+        "model_identities": model_identities,
     }
     if tracker is not None:
         options["gateway_keys"] = tracker.gateway_key

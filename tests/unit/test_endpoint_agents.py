@@ -168,11 +168,12 @@ def test_a_job_runs_an_endpoint_agent_without_a_plural_key(
     )
     agent = Agent(model="acme/agent", endpoint=agent_server, endpoint_key="ACME_KEY")
 
-    result = Job(task, agents=[agent]).run()
+    result = Job(task, agents=[agent], allow_local_models=True).run()
 
     trial = result.trials[0]
     assert trial.score == 1.0, trial.error_message
-    assert _AgentServer.requests[0][1] == "Bearer sk-acme"
+    assert _AgentServer.requests[-1][1] == "Bearer sk-acme"
+    assert trial.receipt.cost_usd == 0.0
 
 
 def test_a_custom_harness_reaches_the_endpoint_through_complete(
@@ -195,11 +196,11 @@ def test_a_custom_harness_reaches_the_endpoint_through_complete(
         harness=AskTheEndpoint(),
     )
 
-    result = Job(task, agents=[agent]).run()
+    result = Job(task, agents=[agent], allow_local_models=True).run()
 
     trial = result.trials[0]
     assert trial.score == 1.0, trial.error_message
-    path, authorization, body = _AgentServer.requests[0]
+    path, authorization, body = _AgentServer.requests[-1]
     assert (path, authorization) == ("/v1/chat/completions", "Bearer sk-acme")
     assert body["model"] == "acme/agent"
 
@@ -228,7 +229,7 @@ def test_a_local_runtime_names_the_packages_it_lacks(
     agent = Agent(model="acme/agent", endpoint=agent_server, endpoint_key="ACME_KEY")
 
     with pytest.raises(ExecutionFailure) as failure:
-        Job(task, agents=[agent]).run()
+        Job(task, agents=[agent], allow_local_models=True).run()
 
     message = str(failure.value)
     assert "does not have: surely-not-installed-xyz>=1." in message

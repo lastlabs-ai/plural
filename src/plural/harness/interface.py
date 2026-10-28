@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from plural._deprecation import renamed_attribute
 from plural.common import FrozenModel
 from plural.harness.episode import EpisodeRecorder
-from plural.usage import normalize_usage
+from plural.usage import normalize_usage, price_own_hardware
 
 
 class HarnessTask(FrozenModel):
@@ -450,7 +450,7 @@ def _gateway_request(payload: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError(f"model gateway rejected Harness request: {detail[:1000]}") from exc
     if not isinstance(result, dict):
         raise RuntimeError("model gateway returned a non-object response")
-    return result
+    return price_own_hardware(result, endpoint)
 
 
 __all__ = [

@@ -40,6 +40,7 @@ from plural.environments.definition import (
     HarnessGrant,
     party_seats,
 )
+from plural.local_models import LocalModelError, LocalModelIdentity
 from plural.rewards import RewardFailure
 from plural.sandbox.models import NetworkMode
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
@@ -114,6 +115,13 @@ def _resolve_model(agent: AgentBinding, catalog: ModelCatalog) -> ModelResolutio
             catalog_model_id=agent.model,
             provider="external",
             endpoint=f"external:{urlsplit(agent.external.url).hostname}",
+            upstream_id=agent.model,
+        )
+    if agent.agent.endpoint is not None:
+        return ModelResolution(
+            catalog_model_id=agent.model,
+            provider="endpoint",
+            endpoint=f"endpoint:{urlsplit(agent.agent.endpoint).netloc}",
             upstream_id=agent.model,
         )
     model = catalog.get(agent.model)
@@ -920,6 +928,9 @@ class TrialResult(FrozenModel):
     integrity: tuple[IntegrityFinding, ...] = ()
     """For an External Agent, where its self-reported trace departs from the
     actions Plural observed and the answer it submitted. Never a score."""
+    model_identity: LocalModelIdentity | None = None
+    """For an endpoint Agent, what its model server was running when the
+    Trial started, its fingerprint, and how the run came to trust it."""
 
     @model_validator(mode="after")
     def _shape(self) -> TrialResult:
@@ -979,6 +990,14 @@ class Job:
 
     ``episode_server`` says where the Job serves an external Agent's episodes;
     by default it listens on a free loopback port.
+
+    An Agent with its own ``endpoint`` runs whatever model its server
+    answers with, whatever the Agent's ``model`` says. Before the first Trial
+    the Job asks the server what it is running and refuses a model whose
+    fingerprint nobody has accepted, naming what it found. ``plural run``
+    asks once and remembers the answer; ``allow_local_models=True`` goes
+    ahead without one. Each Trial records the identity either way, as
+    ``TrialResult.model_identity``.
     """
 
     def __init__(
@@ -1006,6 +1025,7 @@ class Job:
         api_key: str | None = None,
         credentials: Mapping[str, Mapping[str, str]] | None = None,
         episode_server: Any = None,
+        allow_local_models: bool = False,
     ) -> None:
         if not isinstance(source, (Task, Benchmark)):
             raise TypeError(
@@ -1030,6 +1050,7 @@ class Job:
             )
         self.source = source
         self.agents = tuple(agents)
+        self.allow_local_models = allow_local_models
         self.client = client
         self.api_key = api_key
         job_source: JobSource
@@ -1174,7 +1195,36 @@ class Job:
 
         options = dict(self._runner_options)
         options["environ"] = self._credential_environ()
+        options["model_identities"] = await asyncio.to_thread(
+            self._local_models, options["environ"]
+        )
         return await JobRunner(self.spec, **options).run(resume=resume)
+
+    def _local_models(self, environ: Mapping[str, str]) -> dict[str, LocalModelIdentity]:
+        """Each endpoint Agent's model, refused unless accepted before or allowed.
+
+        Returns:
+            The identities by Agent name.
+
+        Raises:
+            LocalModelError: When a model is unreachable, or nobody accepted it
+                and ``allow_local_models`` is off.
+        """
+        from plural.local_models import review_local_models, unverified_message
+
+        def decide(
+            name: str,
+            identity: LocalModelIdentity,
+            status: Literal["new", "known", "changed"],
+            record: dict[str, Any] | None,
+        ) -> Literal["known", "allowed"]:
+            if status == "known":
+                return "known"
+            if self.allow_local_models:
+                return "allowed"
+            raise LocalModelError(unverified_message(name, identity, status, record))
+
+        return review_local_models(self.spec.agents, environ, decide)
 
     def run(self, *, resume: bool = False) -> JobResult:
         """Execute synchronously when no event loop is already running.
