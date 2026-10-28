@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-10-27
+
+### Fixed
+
+- A local model's fingerprint reflects what answers, not only its name. For `mlx_lm.server` and other servers that report nothing about their model, Plural always fingerprints the model's answers to fixed prompts, with the server's version and, when the server runs on this machine, the cached weights. A server answering to one name with another model's weights no longer passes as the model it names. The Hugging Face cache is read only for an endpoint on this machine, and each Trial's recheck asks the prompts again, so a model swapped mid-Job fails the next Trial.
+- `plural run` stops when a model answers exactly like one accepted under another name and other weights, naming that model. A model whose weights are unchanged but whose server version and answers changed is reported as serving changed and asked about again. Accepted records store the answers' hash and the server's version. `LocalModelIdentity.behavior` holds the hash.
+
 ## [0.24.0] - 2026-10-27
 
 ### Added
@@ -862,7 +869,8 @@ command and API and how to move a project.
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/lastlabs-ai/plural/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/lastlabs-ai/plural/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/lastlabs-ai/plural/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/lastlabs-ai/plural/compare/v0.22.1...v0.23.0

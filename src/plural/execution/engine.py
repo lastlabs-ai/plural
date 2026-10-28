@@ -720,8 +720,7 @@ class TrialRunner:
                 server cannot be reached.
         """
         accepted = self.model_identity
-        if accepted is None or accepted.method == "behavior":
-            # A behavior fingerprint costs several model calls, too many to repeat.
+        if accepted is None or (accepted.method == "behavior" and accepted.behavior is None):
             return
         key_name = agent.agent.endpoint_key
         try:
@@ -730,7 +729,8 @@ class TrialRunner:
                 accepted.endpoint,
                 accepted.requested,
                 api_key=self.environ.get(key_name) if key_name else None,
-                probe=False,
+                # Answers are what show a swap on a server that reports nothing.
+                probe=accepted.behavior is not None,
             )
         except LocalModelError as exc:
             raise ExecutionFailure(ErrorCode.PROVIDER_UNAVAILABLE, str(exc)) from None

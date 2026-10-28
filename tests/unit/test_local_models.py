@@ -30,7 +30,9 @@ from plural.local_models import (
     LocalModelError,
     claimed_size,
     inspect_local_model,
+    known_models,
     review_local_models,
+    unverified_message,
 )
 
 
@@ -431,3 +433,176 @@ def test_plural_run_yes_skips_the_prompt_without_remembering(desk: Path) -> None
     code, output = _run()
     assert code == 1
     assert "you have not accepted yet" in output
+
+
+class _Mlx(BaseHTTPRequestHandler):
+    """An mlx_lm.server whose answers come from the model it actually runs.
+
+    ``serves`` maps a requested name to the model that answers it; after
+    ``swap_after`` answers to the Harness, ``swap_to`` answers every name.
+    """
+
+    version = "0.31.3"
+    serves: dict[str, str] = {}
+    swap_after: int | None = None
+    swap_to = ""
+    answered = 0
+
+    def _send(self, body: dict[str, Any], status: int = 200) -> None:
+        payload = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self) -> None:
+        if self.path == "/v1/models":
+            self._send({"data": [{"id": name} for name in type(self).serves]})
+        else:
+            self._send({"error": "not found"}, 404)
+
+    def do_POST(self) -> None:
+        cls = type(self)
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        actual = cls.serves.get(body["model"], body["model"])
+        prompt = body["messages"][-1]["content"]
+        if "max_tokens" not in body:
+            cls.answered += 1
+            if cls.swap_after is not None and cls.answered >= cls.swap_after:
+                cls.serves = {name: cls.swap_to for name in cls.serves}
+        self._send(
+            _reply(
+                body["model"],
+                system_fingerprint=f"{cls.version}-0.32.1-macOS-15",
+                choices=[{"message": {"role": "assistant", "content": f"PAID {actual} {prompt}"}}],
+            )
+        )
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+SMALL, LARGE = "mlx-community/Qwen3-8B-4bit", "mlx-community/Qwen3.8-27B-4bit"
+
+
+@pytest.fixture
+def mlx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[str]:
+    _Mlx.version, _Mlx.swap_after, _Mlx.swap_to, _Mlx.answered = "0.31.3", None, "", 0
+    _Mlx.serves = {SMALL: SMALL, LARGE: LARGE}
+    hf_home = tmp_path / "hf"
+    _cache(hf_home / "hub", SMALL, [[8_000, 1_024_000]], bits=4)
+    _cache(hf_home / "hub", LARGE, [[27_400, 1_000_000]], bits=4)
+    monkeypatch.setenv("HF_HOME", str(hf_home))
+    monkeypatch.delenv("PLURAL_API_KEY", raising=False)
+    monkeypatch.delenv("PLURAL_GATEWAY_URL", raising=False)
+    monkeypatch.setenv("PLURAL_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.chdir(tmp_path)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Mlx)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/v1"
+    finally:
+        server.shutdown()
+
+
+def test_an_honest_mlx_server_is_accepted_then_known(mlx: str, tmp_path: Path) -> None:
+    store = KnownModels(tmp_path / "known.json")
+    first = inspect_local_model(mlx, SMALL)
+
+    assert first.method == "weights"
+    assert first.behavior is not None
+    assert first.size == "8.2B"
+    assert store.lookup(first) == ("new", None)
+    store.remember(first)
+    again = inspect_local_model(mlx, SMALL)
+    assert again.fingerprint == first.fingerprint
+    assert store.lookup(again)[0] == "known"
+
+
+def test_a_server_answering_one_name_with_another_model_is_caught(mlx: str, tmp_path: Path) -> None:
+    store = KnownModels(tmp_path / "known.json")
+    store.remember(inspect_local_model(mlx, LARGE))
+    honest = inspect_local_model(mlx, SMALL)
+
+    _Mlx.serves[SMALL] = LARGE
+    lying = inspect_local_model(mlx, SMALL)
+
+    # The cache still says 8B; the answers are the 27B's.
+    assert lying.weights == honest.weights
+    assert lying.fingerprint != honest.fingerprint
+    status, record = store.lookup(lying)
+    assert status == "answers_like"
+    assert record is not None and record["requested"] == LARGE
+    message = unverified_message("small-local", lying, status, record)
+    assert "is not what its name says" in message
+
+
+def test_an_alias_of_the_same_weights_is_not_an_impostor(mlx: str, tmp_path: Path) -> None:
+    store = KnownModels(tmp_path / "known.json")
+    store.remember(inspect_local_model(mlx, SMALL))
+
+    alias = inspect_local_model(mlx.replace("127.0.0.1", "localhost"), SMALL)
+
+    assert store.lookup(alias) == ("new", None)
+
+
+def test_a_new_server_version_that_answers_differently_is_serving_changed(
+    mlx: str, tmp_path: Path
+) -> None:
+    store = KnownModels(tmp_path / "known.json")
+    store.remember(inspect_local_model(mlx, SMALL))
+
+    _Mlx.version = "0.32.0"
+    _Mlx.serves[SMALL] = "a requantized 8B"
+    status, record = store.lookup(inspect_local_model(mlx, SMALL))
+
+    assert status == "serving_changed"
+    assert record is not None and record["server_version"] == "0.31.3"
+
+
+def test_a_remote_endpoint_is_identified_by_its_answers_alone(tmp_path: Path) -> None:
+    _cache(tmp_path, SMALL, [[8_000, 1_024_000]], bits=4)
+
+    identity = inspect_local_model(
+        "http://gpu-box.lan:2080/v1", SMALL, http=_mlx(tmp_path), hf_hub=tmp_path
+    )
+
+    assert identity.method == "behavior"
+    assert identity.weights is None
+    assert identity.behavior is not None
+    assert any("not on this machine" in line for line in identity.describe())
+
+
+def test_an_mlx_model_swapped_mid_job_fails_the_next_trial(mlx: str) -> None:
+    _Mlx.swap_after, _Mlx.swap_to = 1, LARGE
+    agent = Agent(name="small-local", model=SMALL, endpoint=mlx)
+
+    result = Job(_task(), agents=[agent], attempts=2, allow_local_models=True).run()
+
+    first, second = result.trials
+    assert first.score == 1.0, first.error_message
+    assert second.error_message is not None
+    assert "changed after the Job started" in second.error_message
+
+
+def test_plural_run_refuses_a_model_that_answers_like_another(
+    mlx: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = write_project(tmp_path / "support-desk")
+    monkeypatch.chdir(project.root)
+    agent = project.root / "agents/local/agent.yaml"
+    agent.parent.mkdir(parents=True)
+    agent.write_text(f"name: local\nversion: 0.1.0\nmodel: {SMALL}\nendpoint: {mlx}\n")
+    known_models().remember(inspect_local_model(mlx, LARGE))
+    monkeypatch.setattr("plural.cli.run_commands._interactive", lambda: True)
+    _Mlx.serves[SMALL] = LARGE
+
+    code, output = _run(answer="y\n")
+
+    assert code == 1
+    assert "WARNING: AGENT LOCAL'S MODEL IS NOT WHAT ITS NAME SAYS." in output
+    assert f"it answers exactly like {LARGE}" in output
+    assert "Is this the model" not in output
+    assert _Mlx.answered == 0

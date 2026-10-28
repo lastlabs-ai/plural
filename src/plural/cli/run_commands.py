@@ -45,7 +45,12 @@ from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.execution.episode_server import EpisodeServerOptions
 from plural.jobs import JobResult, JobSpec, TrialResult, TrialSpec
-from plural.local_models import LocalModelError, LocalModelIdentity, review_local_models
+from plural.local_models import (
+    LocalModelError,
+    LocalModelIdentity,
+    Status,
+    review_local_models,
+)
 from plural.project import ProjectError, Workspace
 from plural.project.layout import (
     AGENT,
@@ -329,7 +334,7 @@ def _review_local_models(
     def decide(
         name: str,
         identity: LocalModelIdentity,
-        status: Literal["new", "known", "changed"],
+        status: Status,
         record: dict[str, Any] | None,
     ) -> Literal["confirmed", "known", "allowed"]:
         accepted = str((record or {}).get("accepted_at", ""))[:10]
@@ -341,7 +346,26 @@ def _review_local_models(
             for warning in identity.warnings:
                 show(f"  warning: {warning}")
             return "known"
-        if status == "changed" and record is not None:
+        if status == "answers_like":
+            show(f"WARNING: AGENT {name.upper()}'S MODEL IS NOT WHAT ITS NAME SAYS.")
+            for line in identity.describe():
+                show(f"  {line}")
+            if yes:
+                return "allowed"
+            raise ProjectError(
+                "Nothing ran. Load the model the Agent names on the server, or pass --yes to "
+                "run it anyway."
+            )
+        if status == "serving_changed" and record is not None:
+            show(
+                f"The server behind Agent {name} changed, and the same weights answer differently."
+            )
+            show(
+                f"When you accepted it on {accepted} it ran {record.get('server')} "
+                f"{record.get('server_version') or 'of an unknown version'}. Serving changed, so "
+                "accept it again:"
+            )
+        elif status == "changed" and record is not None:
             show(f"WARNING: THE MODEL BEHIND AGENT {name.upper()} HAS CHANGED.")
             show(
                 f"When you accepted it on {accepted} it was "

@@ -247,16 +247,28 @@ Is this the model you mean to evaluate? [y/N]:
 ```
 
 Plural reads Ollama's, vLLM's, llama.cpp's, and LM Studio's reports of the loaded
-model. For `mlx_lm.server`, it reads the weights from this machine's Hugging Face
-cache and counts their parameters. A server that reports nothing is fingerprinted by
-its answers to a few fixed prompts, which tells two models apart but not which one
-either is. A warning appears when the name and the weights disagree, such as `qwen:8b`
-answered by 27 billion parameters.
+model. `mlx_lm.server` and other servers report nothing about it, so Plural
+fingerprints the model by its answers to a few fixed prompts. When the server runs on
+this machine, Plural also reads the named model's weights from the Hugging Face cache
+and counts their parameters. Weights in the cache only show what could be loaded,
+while the answers show what actually responds, so the fingerprint uses both. A server
+on another machine is identified by its answers alone, and the prompt says so. A
+warning appears when the name and the weights disagree, such as `qwen:8b` answered by
+27 billion parameters.
 
 Plural remembers a fingerprint you accept, the way SSH remembers a host key, so the
-next run of the same model goes ahead without asking. If the fingerprint changes, the
-run warns that the model has changed and asks again. `plural run --yes` uses the model
-without asking or remembering, for scripts and CI.
+next run of the same model goes ahead without asking. When the fingerprint changes:
+
+- If the weights are different, the run warns that the model has changed and asks
+  again.
+- If the weights are the same but the server's version is new, the run says that
+  serving changed and asks again.
+- If the model answers exactly like one you accepted under another name, the run
+  stops, naming that model, because the server is likely running it under this
+  name.
+
+`plural run --yes` uses the model without asking or remembering, even in that last
+case, for scripts and CI.
 
 In Python, `Job` refuses an endpoint model whose fingerprint you haven't accepted, and
 its error lists what it found. Accept it once with `plural run`, or pass
@@ -267,8 +279,9 @@ Job(benchmark, agents=[tuned], allow_local_models=True).run()
 ```
 
 Each Trial records what it found as `TrialResult.model_identity`, with how the run
-came to trust it. Before each Trial starts, Plural checks the fingerprint again, and
-a Trial whose model changed mid-Job fails without running. This makes a mislabeled
+came to trust it. Before each Trial starts, Plural checks the fingerprint again, asking
+the fixed prompts again where the answers are part of it, and a Trial whose model
+changed mid-Job fails without running. This makes a mislabeled
 run visible. It can't prove what a server you don't control runs.
 
 An `endpoint` Agent's calls bypass Plural, so they never appear in the account's
