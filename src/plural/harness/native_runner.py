@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import os
@@ -15,11 +16,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 # This module is uploaded and run as a standalone script, so it cannot import
 # from the plural package. Keep these in sync with plural.apps.host.STEP_PROTOCOL,
-# plural.harness.episode, and plural.usage.normalize_usage; test_episode_contract.py
+# plural.harness.episode, plural.usage.normalize_usage, and
+# plural.usage.price_own_hardware; test_episode_contract.py
 # asserts they match.
 STEP_PROTOCOL = "plural-step-v1"
 EPISODE_SCHEMA = "plural.episode/v1"
@@ -645,7 +648,31 @@ def _model_call(
             paused += wait
     if not isinstance(payload, dict):
         raise GatewayError("provider_unavailable", "model gateway response must be an object")
-    return payload, paused
+    return _price_own_hardware(payload, endpoint), paused
+
+
+def _on_own_hardware(endpoint: str) -> bool:
+    host = (urlsplit(endpoint).hostname or "").lower()
+    if host in {"localhost", "host.docker.internal"} or host.endswith((".localhost", ".local")):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return (
+        address.is_loopback or address.is_private or address.is_link_local or address.is_unspecified
+    )
+
+
+def _price_own_hardware(response: dict[str, Any], endpoint: str) -> dict[str, Any]:
+    if not endpoint or not _on_own_hardware(endpoint):
+        return response
+    usage = response.get("usage")
+    if not isinstance(usage, dict):
+        usage = response["usage"] = {}
+    if response.get("cost") is None and usage.get("cost") is None and usage.get("cost_usd") is None:
+        usage["cost"] = 0.0
+    return response
 
 
 def _retry_after(value: str | None) -> float:

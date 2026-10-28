@@ -122,6 +122,7 @@ from plural.jobs import (
     TrialSpec,
     VerifierResult,
 )
+from plural.local_models import LocalModelError, LocalModelIdentity, inspect_local_model
 from plural.rewards import (
     LEDGER_FILE,
     HindsightTrial,
@@ -676,9 +677,11 @@ class TrialRunner:
         credentials: Mapping[str, CredentialValue | str] | None = None,
         episode_server: EpisodeServer | None = None,
         gateway_keys: GatewayKeys | None = None,
+        model_identity: LocalModelIdentity | None = None,
     ) -> None:
         self.spec = spec
         self.job_spec = job_spec
+        self.model_identity = model_identity
         self.credentials = dict(credentials or {})
         self.episode_server = episode_server
         self.gateway_keys = gateway_keys
@@ -708,6 +711,37 @@ class TrialRunner:
     def agent(self) -> AgentBinding:
         """Pinned Agent selected by this Trial."""
         return next(item for item in self.job_spec.agents if item.agent_id == self.spec.agent_id)
+
+    async def _check_model_identity(self, agent: AgentBinding) -> None:
+        """Refuse to start when the endpoint now serves another model than the Job accepted.
+
+        Raises:
+            ExecutionFailure: When the model's fingerprint changed, or its
+                server cannot be reached.
+        """
+        accepted = self.model_identity
+        if accepted is None or accepted.method == "behavior":
+            # A behavior fingerprint costs several model calls, too many to repeat.
+            return
+        key_name = agent.agent.endpoint_key
+        try:
+            current = await asyncio.to_thread(
+                inspect_local_model,
+                accepted.endpoint,
+                accepted.requested,
+                api_key=self.environ.get(key_name) if key_name else None,
+                probe=False,
+            )
+        except LocalModelError as exc:
+            raise ExecutionFailure(ErrorCode.PROVIDER_UNAVAILABLE, str(exc)) from None
+        if current.fingerprint != accepted.fingerprint:
+            raise ExecutionFailure(
+                ErrorCode.CONFIGURATION,
+                f"The model at {accepted.endpoint} changed after the Job started. It was "
+                f"{accepted.weights or accepted.requested} ({accepted.fingerprint}) and is now "
+                f"{current.weights or current.requested} ({current.fingerprint}), so this "
+                "Trial did not run.",
+            )
 
     async def cancel(self) -> None:
         """Cancel all active sandboxes."""
@@ -776,6 +810,7 @@ class TrialRunner:
         )
         try:
             self.environ = await self._execution_environ(task, execution_id)
+            await self._check_model_identity(agent)
             if self._gateway_key is not None:
                 secrets["PLURAL_TRIAL_GATEWAY_KEY"] = self._gateway_key
             for player in players:
@@ -1167,6 +1202,7 @@ class TrialRunner:
                 seat_isolation=seat_isolation,
                 seed=seed,
                 integrity=integrity,
+                model_identity=self.model_identity,
                 **_episode_totals(artifacts, failed=False),
             )
         except BaseException as exc:
@@ -1206,6 +1242,7 @@ class TrialRunner:
                 else (),
                 seat_isolation=seat_isolation,
                 seed=seed,
+                model_identity=self.model_identity,
                 **totals,
                 error_code=None if code is ErrorCode.CANCELLED else code,
                 error_message=_redact_bytes(str(exc).encode(), secrets).decode(errors="replace")[
@@ -2425,8 +2462,10 @@ class JobRunner:
         credentials: Mapping[str, Mapping[str, CredentialValue | str]] | None = None,
         episode_server: EpisodeServerOptions | None = None,
         gateway_keys: GatewayKeys | None = None,
+        model_identities: Mapping[str, LocalModelIdentity] | None = None,
     ) -> None:
         self.spec = spec
+        self.model_identities = dict(model_identities or {})
         self.credentials = dict(credentials or {})
         self.gateway_keys = gateway_keys
         self.episode_server_options = episode_server
@@ -2445,6 +2484,10 @@ class JobRunner:
             allow_unsafe_local=allow_local
         )
         self._trials: set[TrialRunner] = set()
+
+    def _model_identity(self, trial: TrialSpec) -> LocalModelIdentity | None:
+        agent = next(item for item in self.spec.agents if item.agent_id == trial.agent_id)
+        return self.model_identities.get(agent.name)
 
     def _agent_credentials(self, trial: TrialSpec) -> Mapping[str, CredentialValue | str]:
         agent = next(item for item in self.spec.agents if item.agent_id == trial.agent_id)
@@ -2585,6 +2628,7 @@ class JobRunner:
                         credentials=self._agent_credentials(trial_spec),
                         episode_server=self._episode_server,
                         gateway_keys=self.gateway_keys,
+                        model_identity=self._model_identity(trial_spec),
                     )
                     self._trials.add(trial)
                     try:

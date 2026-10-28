@@ -1932,6 +1932,11 @@ This section is generated from the Typer application. Run `uv run python scripts
  NAME@REF runs that exact pushed revision even after your files have
  moved on. It is restored under .plural/versions without touching them.
 
+ For an Agent with its own endpoint, the run first asks the server what
+ model it is running and shows it with a fingerprint. Accept it once and
+ later runs of the same model go ahead; if the fingerprint changes, you
+ are asked again.
+
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --task              -t      <str>               Task to run: NAME[@REF], where REF is a revision │
 │                                                 number (@3), a release version (@1.0.0), or a    │
@@ -1970,6 +1975,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --tls-cert                  <path>              For an external Agent: the certificate to serve  │
 │                                                 https with.                                      │
 │ --tls-key                   <path>              For an external Agent: the key of --tls-cert.    │
+│ --yes               -y                          Use an endpoint Agent's model without asking,    │
+│                                                 even one you have not accepted.                  │
 │ --json                                          Print machine-readable JSON.                     │
 │ --help                                          Show this message and exit.                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

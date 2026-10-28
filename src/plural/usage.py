@@ -9,9 +9,11 @@ shape so that totals are never double-counted.
 
 from __future__ import annotations
 
+import ipaddress
 import math
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 from plural.common import FrozenModel
 
@@ -133,4 +135,45 @@ class UsageTotals(FrozenModel):
         )
 
 
-__all__ = ["TokenUsage", "UsageTotals", "normalize_usage"]
+def on_own_hardware(endpoint: str) -> bool:
+    """Whether ``endpoint`` is on this machine or a private network, so its calls cost nothing.
+
+    Returns:
+        ``True`` for a loopback, private, or link-local address, ``localhost``,
+        a ``.local`` name, or Docker's ``host.docker.internal``.
+    """
+    host = (urlsplit(endpoint).hostname or "").lower()
+    if host in {"localhost", "host.docker.internal"} or host.endswith((".localhost", ".local")):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return (
+        address.is_loopback or address.is_private or address.is_link_local or address.is_unspecified
+    )
+
+
+def price_own_hardware(response: dict[str, Any], endpoint: str) -> dict[str, Any]:
+    """Price a call to a model on the user's own hardware at zero, unless it reports a cost.
+
+    Returns:
+        ``response``, with ``usage.cost`` set to 0 when Plural adds it.
+    """
+    if not endpoint or not on_own_hardware(endpoint):
+        return response
+    usage = response.get("usage")
+    if not isinstance(usage, dict):
+        usage = response["usage"] = {}
+    if response.get("cost") is None and usage.get("cost") is None and usage.get("cost_usd") is None:
+        usage["cost"] = 0.0
+    return response
+
+
+__all__ = [
+    "TokenUsage",
+    "UsageTotals",
+    "normalize_usage",
+    "on_own_hardware",
+    "price_own_hardware",
+]

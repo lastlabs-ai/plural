@@ -142,9 +142,10 @@ def test_an_endpoint_agent_needs_its_own_key_and_no_plural_key(
 
     monkeypatch.setenv("TUNED_KEY", "sk-tuned")
     code, output, _ = cli("run", "--task", "refund", "--agent", "tuned")
+    assert code == 1
+    assert "Cannot reach the model server at http://127.0.0.1:9/v1" in output
     assert "Plural API key" not in output
     assert "sk-tuned" not in output
-    assert any(project.jobs_dir.iterdir())
 
 
 def test_an_app_credential_comes_from_the_agent_that_runs(

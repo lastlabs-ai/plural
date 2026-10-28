@@ -460,6 +460,8 @@ def publish_execution(
         ]
     if result.integrity:
         report["integrity"] = [item.model_dump(mode="json") for item in result.integrity]
+    if result.model_identity is not None:
+        report["model_identity"] = result.model_identity.model_dump(mode="json")
     if result.seats:
         report["seats"] = [item.model_dump(mode="json") for item in result.seats]
         report["seat_isolation"] = result.seat_isolation

@@ -227,8 +227,56 @@ instructions: Follow the support policy and finish the ticket using the availabl
 This is the usual way to check a trained model against the same Benchmark you used
 for the baseline; see [Training and RL](../running/training.md).
 
-An `endpoint` Agent's calls bypass Plural, so the Trial records no gateway usage for
-them. To have them observed instead, an organization admin can add the server under
+### Check which model answers
+
+An endpoint's `model` is only a name, and many local servers answer to a name they
+don't have. llama.cpp serves its one loaded model whatever a request asks for, and
+`mlx_lm.server` loads whatever repository the request names. So before a run, Plural
+asks the server what it has loaded and shows you what it found:
+
+```console
+$ plural run -b support-triage -a local
+Agent local runs a local model you have not accepted yet:
+  server: ollama 0.12.0 at http://localhost:11434/v1
+  requested: qwen3:8b
+  weights: ollama:qwen3:8b@500a1f067a9f
+  parameters: 8.2B
+  quantization: Q4_K_M
+  fingerprint: SHA256:Rtzr8m0c... (from the model the server reports loaded)
+Is this the model you mean to evaluate? [y/N]:
+```
+
+Plural reads Ollama's, vLLM's, llama.cpp's, and LM Studio's reports of the loaded
+model. For `mlx_lm.server`, it reads the weights from this machine's Hugging Face
+cache and counts their parameters. A server that reports nothing is fingerprinted by
+its answers to a few fixed prompts, which tells two models apart but not which one
+either is. A warning appears when the name and the weights disagree, such as `qwen:8b`
+answered by 27 billion parameters.
+
+Plural remembers a fingerprint you accept, the way SSH remembers a host key, so the
+next run of the same model goes ahead without asking. If the fingerprint changes, the
+run warns that the model has changed and asks again. `plural run --yes` uses the model
+without asking or remembering, for scripts and CI.
+
+In Python, `Job` refuses an endpoint model whose fingerprint you haven't accepted, and
+its error lists what it found. Accept it once with `plural run`, or pass
+`allow_local_models=True`:
+
+```python
+Job(benchmark, agents=[tuned], allow_local_models=True).run()
+```
+
+Each Trial records what it found as `TrialResult.model_identity`, with how the run
+came to trust it. Before each Trial starts, Plural checks the fingerprint again, and
+a Trial whose model changed mid-Job fails without running. This makes a mislabeled
+run visible. It can't prove what a server you don't control runs.
+
+An `endpoint` Agent's calls bypass Plural, so they never appear in the account's
+**Usage** page and never draw on credits. The Trial still records each call's tokens
+from the `usage` the server returns, which Ollama, vLLM, llama.cpp, LM Studio, and
+`mlx_lm.server` all do. A call to a server on this machine or a private network costs
+$0. Plural can't know what a remote server charges, so its cost is left unreported.
+To have the calls observed instead, an organization admin can add the server under
 **Organization → Providers → Endpoints** in the web app. Calls the gateway routes there
 are recorded on the Trial with `billing="organization"` and a reference cost, and never
 draw on credits.

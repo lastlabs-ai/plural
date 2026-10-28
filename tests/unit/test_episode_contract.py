@@ -476,6 +476,33 @@ def test_native_episode_matches_the_recorded_contract() -> None:
         assert native_runner._usage(raw) == normalize_usage(raw).model_dump(mode="json")
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "free"),
+    [
+        ("http://localhost:11434/v1", True),
+        ("http://127.0.0.1:2080/v1", True),
+        ("http://[::1]:8000/v1", True),
+        ("http://192.168.1.20:8000/v1", True),
+        ("http://10.0.0.5/v1", True),
+        ("http://gpu-box.local:8080/v1", True),
+        ("http://host.docker.internal:11434/v1", True),
+        ("https://models.example.com/v1", False),
+        ("https://8.8.8.8/v1", False),
+    ],
+)
+def test_a_call_to_your_own_hardware_costs_nothing(endpoint: str, free: bool) -> None:
+    from plural.usage import normalize_usage, price_own_hardware
+
+    def response() -> dict[str, Any]:
+        return {"usage": {"prompt_tokens": 12, "completion_tokens": 3}}
+
+    priced = price_own_hardware(response(), endpoint)
+    assert native_runner._price_own_hardware(response(), endpoint) == priced
+    assert normalize_usage(priced["usage"]).cost_usd == (0.0 if free else None)
+    reported = {"usage": {"prompt_tokens": 1, "cost": 0.5}}
+    assert price_own_hardware(reported, endpoint)["usage"]["cost"] == 0.5
+
+
 def test_native_loop_records_model_calls_and_steps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
