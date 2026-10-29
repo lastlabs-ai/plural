@@ -25,10 +25,12 @@
 
 ---
 
-Intelligence is only worth what it gets done. Plural turns it into measurable outcomes:
-you describe the work you care about as **Tasks**, run any model or agent on them, and
-get a map of which intelligence is good at which task, how much it costs, and how long
-it takes. Every score comes from what actually happened, with the evidence attached.
+Plural is for builders who want to know what models are good at, and where they fall
+short, on the work they care about. Public benchmarks measure someone else's problems.
+Plural puts your private data and systems to work: your records, documents, APIs, and
+tools become **Tasks** a model can be measured on. Run any model or agent on them and
+see how each one scores, what it costs, and how long it takes, with every score backed
+by what actually happened.
 
 - **Your work, not someone else's benchmark.** Wrap the systems your agents use, a
   Python class, an MCP server, an OpenAPI service, or recorded traces, and write Tasks
