@@ -445,6 +445,7 @@ def publish_execution(
         "credentials": [item.model_dump(mode="json") for item in result.credentials],
         "usage": usage,
         "phases": [phase.model_dump(mode="json") for phase in receipt.phases],
+        "timings": dict(receipt.timings),
         "runtime": {
             "plural_version": __version__,
             "provider": receipt.runtime_provider,
@@ -522,7 +523,8 @@ def _result_key(result: TrialResult, pins: Mapping[str, AgentPin]) -> _HostedKey
     A Trial several Agents share is the first seat's Agent's.
     """
     receipt = result.receipt
-    return (receipt.task_pin.name, pins.get(receipt.agent_digest, ("", None))[0], receipt.attempt)
+    pin = _agent_pin(receipt.agent_digest, pins)
+    return (receipt.task_pin.name, pin[0] if pin else "", receipt.attempt)
 
 
 def _result_target(
@@ -530,8 +532,21 @@ def _result_target(
 ) -> str | None:
     receipt = result.receipt
     return _find_hosted(
-        hosted, receipt.task_pin.name, pins.get(receipt.agent_digest), receipt.attempt
+        hosted, receipt.task_pin.name, _agent_pin(receipt.agent_digest, pins), receipt.attempt
     )
+
+
+def _agent_pin(digest: str, pins: Mapping[str, AgentPin]) -> AgentPin | None:
+    """The hosted Agent a local result ran as.
+
+    A binding's digest covers its whole Harness package, so a Job run before a
+    Plural upgrade that added a package field records a digest its reloaded
+    spec no longer computes. A Job with one Agent is still that Agent's.
+    """
+    if digest in pins:
+        return pins[digest]
+    distinct = set(pins.values())
+    return next(iter(distinct)) if len(distinct) == 1 else None
 
 
 def publish_job(
@@ -565,7 +580,7 @@ def publish_job(
                 (execution_root / "result.json").read_text(encoding="utf-8")
             )
             receipt = outcome.receipt
-            _, definition = pins.get(receipt.agent_digest, ("", None))
+            _, definition = _agent_pin(receipt.agent_digest, pins) or ("", None)
             target = _result_target(hosted, outcome, pins)
             if target is None:
                 key = _result_key(outcome, pins)
