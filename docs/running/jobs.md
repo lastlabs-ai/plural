@@ -143,8 +143,12 @@ cannot be reached mid-run, the local Job still finishes and `plural job record`
 fills in what was missed.
 
 A hosted Job pins pushed revisions. `plural job record` needs the revisions the
-local Job ran to be pushed already. `--record` pushes whatever the hosted project
-lacks first, as a new numbered revision of any resource whose files changed. See
+local Job ran to be pushed already; `plural job record JOB_ID --push-pinned` pushes
+them from the copies kept when the Job ran, even after you edited the files.
+`--record` pushes whatever the hosted project lacks first, as a new numbered
+revision of any resource whose files changed. If a Trial cannot be uploaded, the
+hosted Job is marked failed, and `plural run` says whether `plural job record`
+can fill it in. See
 [Record runs and run in the cloud](../platform/runs.md).
 
 ## Evaluate before routing or training

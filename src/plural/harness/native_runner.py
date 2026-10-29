@@ -49,7 +49,8 @@ SEAT_TOKEN = "PLURAL_SEAT_TOKEN"
 # spent waiting does not count against the episode's max_seconds.
 CREDIT_PAUSE_VARIABLE = "PLURAL_CREDIT_PAUSE_SECONDS"
 # Seconds after which the runner ends the episode itself, set by the engine so the
-# Runtime's own timeout never kills it mid-episode.
+# Runtime's own timeout never kills it mid-episode. Keep in sync with
+# plural.harness.deadline.STOP_VARIABLE; this runner imports nothing from plural.
 STOP_VARIABLE = "PLURAL_STOP_SECONDS"
 DEFAULT_CREDIT_PAUSE_SECONDS = 3600.0
 _CREDIT_POLL_SECONDS = 30.0

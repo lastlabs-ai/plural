@@ -10,7 +10,9 @@ import typer
 
 from plural.auth import AuthClient, Profile, Session, load_config, save_config
 from plural.cli.common import (
+    BUMP_OPTION,
     JSON_OPTION,
+    bump_option,
     counted,
     details,
     emit,
@@ -35,6 +37,7 @@ from plural.project.sync import (
     ProjectPushPlan,
     ProjectPushStep,
     apply_project_push,
+    dropped_versions,
     plan_project_push,
 )
 from plural.project.templates import project_scaffold
@@ -138,7 +141,7 @@ def show(
 @handled
 def push(
     yes: bool = typer.Option(False, "--yes", "-y", help="Push without asking."),
-    bump: bool = typer.Option(False, "--bump", hidden=True),
+    bump: str | None = BUMP_OPTION,
     force: bool = typer.Option(
         False,
         "--force",
@@ -162,8 +165,7 @@ def push(
     Existing revisions are never overwritten or deleted, and versions never
     block a push. Label a revision with `plural <kind> release NAME VERSION`.
     """
-    if bump and not as_json:
-        note("--bump is no longer needed: pushes number revisions automatically.")
+    bumped = bump_option(bump)
     space = workspace()
     project = space.project
     binding = _register(project, signed_in(session()), connect=connect, hosted_name=hosted_name)
@@ -180,7 +182,7 @@ def push(
         else:
             success("Everything is already pushed.")
         return
-    steps = apply_project_push(space, studio, binding, plan, force=force)
+    steps = apply_project_push(space, studio, binding, plan, force=force, bump=bumped)
     payload["steps"] = [
         {
             "resource": str(step.ref),
@@ -200,9 +202,9 @@ def push(
         typer.echo("Pushed:")
         for step in pushed:
             typer.echo(f"  {step.ref} {step.label}")
-        for step in steps:
-            if step.note:
-                note(f"{step.ref}: {step.note}, so the new revision has no version.")
+        summary = dropped_versions(steps)
+        if summary:
+            note(summary)
         success(f"Pushed {counted(len(pushed), 'revision')} to {binding.project_slug}.")
 
     emit(payload, as_json=as_json, text=text)

@@ -30,6 +30,7 @@ class _Hosted:
 
     def __init__(self, spec: JobSpec, *, fail: bool = False) -> None:
         plan = spec.plan()
+        self.spec = spec
         self._trials = {f"hosted-{trial.trial_id}": trial for trial in plan.trials}
         self.fail = fail
         self.executions: dict[str, dict[str, Any]] = {}
@@ -84,12 +85,18 @@ class _Hosted:
 
 
 def _job_trials(hosted: _Hosted) -> list[dict[str, Any]]:
+    """Hosted Trials as the server lists them: display titles, plus the pins."""
+    agents = {binding.agent_id: binding.agent.content_hash for binding in hosted.spec.agents}
     return [
         {
             "id": key,
-            "task_name": trial.task_pin.name,
-            "agent_name": trial.agent_name,
+            "task_name": f"Title of {trial.task_pin.name}",
+            "agent_name": f"Title of {trial.agent_name}",
             "attempt": trial.attempt,
+            "pins": {
+                "task": trial.task_pin.model_dump(mode="json"),
+                "agent": agents[trial.agent_id],
+            },
         }
         for key, trial in hosted._trials.items()
     ]
@@ -291,3 +298,44 @@ def test_only_a_finished_local_job_can_be_pushed(
     assert "No local Job 'job_missing'" in unknown.output
     assert running.exit_code == 1
     assert "has not finished" in running.output
+
+
+def test_an_upload_that_still_fails_marks_the_hosted_job_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from plural.errors import PluralError
+    from plural.execution.report import PublishError
+    from plural.project.runs import Tracking, _finish_recording
+
+    transitions: list[tuple[str, str, dict[str, Any]]] = []
+
+    class Jobs:
+        def transition(self, job_id: str, status: str, **fields: Any) -> dict[str, Any]:
+            transitions.append((job_id, status, fields))
+            return {}
+
+    class Studio:
+        jobs = Jobs()
+
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        raise PublishError("No hosted Trial for Task t attempt 1 with Agent a")
+
+    monkeypatch.setattr("plural.execution.report.publish_job", refuse)
+    tracking = Tracking(studio=Studio(), hosted_job_id="job_1", errors=["first"])  # type: ignore[arg-type]
+    _finish_recording(tracking, None, "local-1", {})
+    assert tracking.retryable is False
+    assert transitions[0][:2] == ("job_1", "failed")
+    assert transitions[0][2]["error_code"] == "recording_incomplete"
+
+    def unavailable(*args: Any, **kwargs: Any) -> None:
+        raise PluralError("Service unavailable", status_code=503)
+
+    monkeypatch.setattr("plural.execution.report.publish_job", unavailable)
+    tracking = Tracking(studio=Studio(), hosted_job_id="job_2", errors=["first"])  # type: ignore[arg-type]
+    _finish_recording(tracking, None, "local-2", {})
+    assert tracking.retryable is True
+
+    monkeypatch.setattr("plural.execution.report.publish_job", lambda *a, **k: [])
+    tracking = Tracking(studio=Studio(), hosted_job_id="job_3", errors=["first"])  # type: ignore[arg-type]
+    _finish_recording(tracking, None, "local-3", {})
+    assert tracking.errors == []

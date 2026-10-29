@@ -10,14 +10,22 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from plural.harness.deadline import call_timeout, episode_deadline
 
-def start(host: str = "127.0.0.1", port: int = 0) -> tuple[ThreadingHTTPServer, str]:
+
+def start(
+    host: str = "127.0.0.1", port: int = 0, *, deadline: float | None = None
+) -> tuple[ThreadingHTTPServer, str]:
     """Start a local Messages compatibility server.
+
+    Each forwarded call may wait until ``deadline``, the ``time.monotonic()`` at
+    which the episode runs out of time; by default, ``PLURAL_STOP_SECONDS`` from now.
 
     Returns:
         The server and the base URL Claude Code should call.
     """
     server = ThreadingHTTPServer((host, port), _Handler)
+    server.deadline = episode_deadline() if deadline is None else deadline  # type: ignore[attr-defined]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     assigned = int(server.server_address[1])
@@ -46,7 +54,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": {"message": "not found"}})
             return
         try:
-            response = _forward_messages(payload if isinstance(payload, dict) else {})
+            response = _forward_messages(
+                payload if isinstance(payload, dict) else {},
+                call_timeout(getattr(self.server, "deadline", episode_deadline())),
+            )
         except Exception as exc:  # noqa: BLE001 - return a usable vendor error
             self._json(502, {"error": {"message": str(exc)}})
             return
@@ -61,9 +72,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def _forward_messages(payload: dict[str, Any]) -> dict[str, Any]:
+def _forward_messages(payload: dict[str, Any], timeout: float) -> dict[str, Any]:
     request = _to_openai(payload)
-    upstream = _gateway_request(request)
+    upstream = _gateway_request(request, timeout)
     model = str(payload.get("model") or request.get("model") or "model")
     return _from_openai(upstream, model=model)
 
@@ -128,7 +139,7 @@ def _from_openai(payload: dict[str, Any], *, model: str) -> dict[str, Any]:
     }
 
 
-def _gateway_request(payload: dict[str, Any]) -> dict[str, Any]:
+def _gateway_request(payload: dict[str, Any], timeout: float) -> dict[str, Any]:
     base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
     if not base:
         raise RuntimeError("Claude Code needs PLURAL_GATEWAY_URL from Job(client=...)")
@@ -145,7 +156,7 @@ def _gateway_request(payload: dict[str, Any]) -> dict[str, Any]:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
         if not isinstance(payload, dict):
             raise RuntimeError("gateway returned a non-object response")

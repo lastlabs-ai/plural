@@ -67,8 +67,8 @@ model. It is a JSONL log of the interaction, not a full trace in the tracing SDK
 format, and its trace ID alone does not upload the record to Plural Intel. Check
 what your Harness or tracing integration actually records.
 
-`atif-trajectory.json` is written as [ATIF](https://docs.harborframework.com/core-concepts/agents/atif),
-Harbor's Agent Trajectory Interchange Format (`ATIF-v1.7`). That is the document
+`atif-trajectory.json` is written as ATIF, the Agent Trajectory Interchange Format
+(`ATIF-v1.7`). That is the document
 to share with other tools. Plural derives it from the episode record, so it has
 every model call and step in order. Each step's `metrics.cost_usd` is the exact
 amount the gateway billed for that call, and `metrics.extra.request_id` is the

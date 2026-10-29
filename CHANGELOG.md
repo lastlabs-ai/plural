@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-29
+
+### Added
+
+- A Harness can describe itself. `harness.yaml` takes `readme`, a Markdown file shown as its overview (`README.md` by default, skipped when missing); a Python Harness sets the `readme` class attribute. It reaches `HarnessDefinition`, and joins the Harness hash only once set, so existing Harnesses keep their hash. `plural harness init` writes a starter README.
+- The Harnesses guide lists every `harness.yaml` field, and every built-in `harness_config` option with its allowed values.
+- `rubric_score(criteria, scores)` in `plural.verifiers`: the weighted mean of rubric scores normalized to 0 to 1.
+- `plural job record JOB_ID --push-pinned` records a Job whose resources you have edited since it ran. It pushes each revision the Job ran, rebuilt from the copies kept in `.plural/packages`, without touching your files; they are saved without a version and do not become current.
+- `--bump patch` on `plural project push` and `plural <kind> push` gives each new revision whose manifest version is already taken the next patch version. Without it, the push ends with one line naming every revision saved without a version and the command to label one.
+- An Agent's `harness_config` works with a Harness of your own: its keys replace the same keys of the Harness's `config` in `self.config`, so two Agents can share one Harness and differ only in options.
+- `plural job list` shows each Job's Agent and mean score.
+- `plural <kind> validate`, `show`, and `push` accept a path to the resource's folder or manifest, and a path to another kind's resource names the command to run.
+
+### Fixed
+
+- Pushing an Environment whose description changed no longer fails with a hash mismatch. The CLI sends the description, and a service with this release hashes the one uploaded rather than the stored one.
+- A push sends the content hash it computed with every revision. The service refuses the whole push when its hash differs, saving nothing, and the message lists the fields the two sides read differently and both Plural versions, with `uv add plural==VERSION` when they differ. Against an older service that saves one resource at a time, the CLI records the revisions already saved in `plural.lock` and says which, instead of "Nothing was saved."
+- Pushing a Harness revision without a version no longer fails on the service with a 500.
+- `plural run --record` uploads every Trial when its Tasks or Agent have a `title`. Hosted Trials are matched by resource name and Agent hash, not display name. If a Trial still cannot be uploaded, the hosted Job is marked failed with `recording_incomplete`, and the `plural job record` hint appears only when retrying can help.
+- `plural harness validate native` and the other built-in names explain the Harness is built in, instead of suggesting `plural harness init`.
+
+- A Harness's model call waits as long as the episode has left, not a fixed 120 seconds. `HarnessAgent.complete`, the Claude Code Messages bridge, and the Claude Code, Codex, and Hermes CLI runs are timed against the Environment's `max_seconds` (capped by the Runtime's timeout), so a slow local model is stopped by the episode's own limit. The built-in CLIs fell back to 120 seconds when `max_seconds` was unset; they now use the 600-second default. A call made after the deadline fails at once. `HarnessAgent` takes an optional `deadline`.
+- An `AgentVerifier`'s score follows its rubric, as documented. The judge now returns only per-criterion scores, evidence, and feedback; Plural normalizes each criterion over its range and takes the weighted mean, as it already did for a human review. Before, the judge also reported an overall score, which was recorded as the Verifier's score unchecked, so criterion ranges and weights did not bind it. A criterion score outside its range now fails the Verifier. Trials judged before this keep the scores they were given.
+
 ## [0.24.1] - 2026-10-27
 
 ### Fixed
@@ -869,7 +893,8 @@ command and API and how to move a project.
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.24.1...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/lastlabs-ai/plural/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/lastlabs-ai/plural/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/lastlabs-ai/plural/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/lastlabs-ai/plural/compare/v0.23.0...v0.23.1

@@ -162,7 +162,7 @@ def test_messages_bridge_translates_to_openai_gateway(monkeypatch: pytest.Monkey
             ).encode()
 
     def _urlopen(request: object, timeout: float = 0) -> _Response:
-        del timeout
+        captured["timeout"] = timeout
         captured["url"] = request.full_url  # type: ignore[attr-defined]
         captured["body"] = json.loads(request.data.decode())  # type: ignore[attr-defined]
         captured["auth"] = request.headers.get("Authorization")  # type: ignore[attr-defined]
@@ -176,8 +176,10 @@ def test_messages_bridge_translates_to_openai_gateway(monkeypatch: pytest.Monkey
             "model": "anthropic/claude-sonnet-5",
             "system": "Be brief.",
             "messages": [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}],
-        }
+        },
+        900.0,
     )
+    assert captured["timeout"] == 900.0
     assert captured["url"] == "https://gateway.example/v1/chat/completions"
     body = captured["body"]
     assert isinstance(body, dict)

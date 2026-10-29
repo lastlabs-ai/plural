@@ -69,6 +69,7 @@ class HarnessDefinition(FrozenModel):
     artifacts: tuple[FileDeclaration, ...] = ()
     trajectory: str | None = None
     tito: str | None = None
+    readme: str = Field(default="", description="Markdown overview shown on the Harness page.")
 
     @model_validator(mode="before")
     @classmethod
@@ -103,7 +104,8 @@ class HarnessDefinition(FrozenModel):
 
     @model_validator(mode="after")
     def _valid_harness(self) -> HarnessDefinition:
-        semantic_version(self.version)
+        if self.version is not None:
+            semantic_version(self.version)
         if self.source.startswith(PLURAL_PACKAGE_PREFIX):
             if self.digest is None:
                 raise ValueError("A Plural package Harness source requires its tree digest")
@@ -156,6 +158,7 @@ class HarnessDefinition(FrozenModel):
             trajectory_path=self.trajectory,
             supports_tito=self.tito is not None,
             tito_path=self.tito,
+            readme=self.readme,
         )
 
     @classmethod
@@ -191,6 +194,7 @@ class HarnessDefinition(FrozenModel):
             artifacts=protocol.artifacts,
             trajectory=protocol.trajectory_path,
             tito=protocol.tito_path,
+            readme=protocol.readme,
         )
 
     def _source(self) -> PackageSource:
@@ -223,6 +227,8 @@ class Harness(BaseModel, ABC):
     name: ClassVar[str] = "harness"
     version: ClassVar[str] = "0.1.0"
     description: ClassVar[str] = ""
+    readme: ClassVar[str] = ""
+    """Markdown overview shown on the Harness page."""
     requirements: ClassVar[tuple[str, ...]] = ()
     capabilities: ClassVar[frozenset[HarnessCapability]] = frozenset()
     models: ClassVar[tuple[str, ...]] = ("*",)
@@ -369,6 +375,7 @@ class Harness(BaseModel, ABC):
             trajectory_path="trajectory.jsonl",
             supports_tito=type(self).supports_tito,
             tito_path="tito.jsonl" if type(self).supports_tito else None,
+            readme=type(self).readme,
         )
         source = PackageSource(
             kind="local", uri=str(self._package_root), digest=digest, trusted=True

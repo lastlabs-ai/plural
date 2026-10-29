@@ -53,6 +53,7 @@ from plural.harness.retrieval import (
     package_files,
     tree_digest,
 )
+from plural.identity import LABEL_FIELDS
 from plural.project.layout import (
     AGENT,
     BENCHMARK,
@@ -205,11 +206,39 @@ class PushStep:
     number: int | None = None
     # Why a requested version label was not applied.
     note: str | None = None
+    # The next free patch version, when the requested one was taken.
+    suggested_version: str | None = None
 
     @property
     def label(self) -> str:
         """The revision's number and release version, as people read it."""
         return revision_label(self.number, self.version, self.revision_id or "")
+
+
+def dropped_versions(steps: Sequence[PushStep]) -> str | None:
+    """One line for every new revision whose manifest version could not be used.
+
+    Returns:
+        The line, naming the resources and the command that labels one, or
+        ``None`` when every requested version was applied.
+    """
+    dropped = [step for step in steps if step.note]
+    if not dropped:
+        return None
+    names = ", ".join(str(step.ref) for step in dropped[:5])
+    if len(dropped) > 5:
+        names += f", and {len(dropped) - 5} more"
+    first = dropped[0]
+    fix = (
+        f"plural {first.ref.info.cli} release {first.ref.name} "
+        f"{first.suggested_version or '<version>'}"
+    )
+    count = "1 new revision has" if len(dropped) == 1 else f"{len(dropped)} new revisions have"
+    return (
+        f"{count} no version, because the version in the manifest already names "
+        f"another revision or is only digits: {names}. Label one with `{fix}`, or push "
+        "with `--bump patch` to use the next free patch version."
+    )
 
 
 @dataclass
@@ -252,6 +281,9 @@ def push(
     *,
     with_deps: bool = False,
     force: bool = False,
+    bump: Bump | None = None,
+    current: bool = True,
+    versioned: bool = True,
 ) -> PushResult:
     """Validate ``ref`` and make it available as a revision in the bound project.
 
@@ -265,6 +297,11 @@ def push(
             matching the local files exactly.
         force: Add revisions even where the hosted resource changed since
             this checkout last synced it. Nothing is overwritten either way.
+        bump: ``"patch"`` gives a new revision whose manifest version is
+            taken the next free patch version instead of none.
+        current: Make each new revision its resource's current one. False
+            adds them without moving anything, as for a past Job's inputs.
+        versioned: Label new revisions with their manifest's version.
 
     Returns:
         One step per resource in the dependency graph.
@@ -289,9 +326,9 @@ def push(
         if match is not None:
             resolved[item] = match
         elif item != ref and not with_deps:
-            current = _current(parent, revisions)
+            latest = _current(parent, revisions)
             state = (
-                f"changed locally since {current.label} was pushed" if current else "not pushed yet"
+                f"changed locally since {latest.label} was pushed" if latest else "not pushed yet"
             )
             problems.append(f"{item} is {state}")
         else:
@@ -309,7 +346,18 @@ def push(
 
     result = PushResult(target=ref)
     result.steps = _commit(
-        workspace, studio, binding, order, resources, hosted, resolved, to_push, force=force
+        workspace,
+        studio,
+        binding,
+        order,
+        resources,
+        hosted,
+        resolved,
+        to_push,
+        force=force,
+        bump=bump,
+        current=current,
+        versioned=versioned,
     )
     return result
 
@@ -383,20 +431,48 @@ def declared_version(project: Project, ref: ResourceRef) -> str | None:
     return found.group(2) if found else None
 
 
-def _label(wanted: str | None, revisions: list[HostedRevision]) -> tuple[str | None, str | None]:
+Bump = Literal["patch"]
+
+
+def _label(
+    wanted: str | None, revisions: list[HostedRevision], bump: Bump | None = None
+) -> tuple[str | None, str | None, str | None]:
     """The release version to give a new revision, and why a wanted one was skipped.
 
     Returns:
-        ``(version, note)``: the manifest's version when no revision has it yet.
+        ``(version, note, suggestion)``: the manifest's version when no
+        revision has it yet. When it is taken, ``bump="patch"`` uses the next
+        free patch version; otherwise the revision gets none, and
+        ``suggestion`` is that patch version.
     """
     if wanted is None:
-        return None, None
+        return None, None, None
     if wanted.isdigit():
-        return None, f"version {wanted} is only digits, which reads as revision #{wanted}"
+        return None, f"version {wanted} is only digits, which reads as revision #{wanted}", None
     taken = next((item for item in revisions if item.version == wanted), None)
     if taken is None:
-        return wanted, None
-    return None, f"version {wanted} already names {taken.label}"
+        return wanted, None, None
+    following = _next_patch(wanted, {item.version for item in revisions if item.version})
+    if bump == "patch" and following is not None:
+        return following, None, None
+    return None, f"version {wanted} already names {taken.label}", following
+
+
+def _next_patch(version: str, taken: set[str]) -> str | None:
+    """The first patch release after ``version`` that no revision has.
+
+    Returns:
+        The version, or ``None`` when ``version`` is not ``MAJOR.MINOR.PATCH``.
+    """
+    found = _SEMVER.match(version)
+    if found is None:
+        return None
+    major, minor, patch = (int(part) for part in found.groups())
+    while True:
+        patch += 1
+        candidate = f"{major}.{minor}.{patch}"
+        if candidate not in taken:
+            return candidate
 
 
 def _commit(
@@ -410,6 +486,9 @@ def _commit(
     to_push: list[ResourceRef],
     *,
     force: bool = False,
+    bump: Bump | None = None,
+    current: bool = True,
+    versioned: bool = True,
 ) -> list[PushStep]:
     """Push ``to_push`` dependencies first and record every revision in the lock.
 
@@ -433,13 +512,21 @@ def _commit(
     prepared = dict(
         zip(to_push, _parallel(lambda item: _prepare(resources[item]), to_push), strict=True)
     )
-    labels: dict[ResourceRef, tuple[str | None, str | None]] = {
-        item: _label(declared_version(workspace.project, item), hosted[item][1]) for item in to_push
+    labels: dict[ResourceRef, tuple[str | None, str | None, str | None]] = {
+        item: _label(
+            declared_version(workspace.project, item) if versioned else None,
+            hosted[item][1],
+            bump,
+        )
+        for item in to_push
     }
     bases = {
         item: _base(lock.resources.get(str(item)), hosted[item][0], hosted[item][1])
         for item in to_push
     }
+
+    server = studio.server_version() if prepared else None
+    capabilities = (server or {}).get("capabilities") or []
 
     def item_for(item: ResourceRef) -> dict[str, Any]:
         ids = [
@@ -448,18 +535,24 @@ def _commit(
             else f"{PUSH_REFERENCE_PREFIX}{dependency}"
             for dependency in resources[item].dependencies
         ]
-        return _api(studio, item).batch_item(
+        body = _api(studio, item).batch_item(
             prepared[item].value,
             ref=str(item),
             slug=slugify(item.name),
             package_digest=prepared[item].digest,
             version=labels[item][0],
             parent_revision_id=bases[item],
+            content_hash=(
+                resources[item].content_hash if "push_content_hash" in capabilities else None
+            ),
+            current=current,
             **prepared[item].references(ids),
         )
+        for name in _older_server_omits(server, item.kind):
+            body["revision"].pop(name, None)
+        return body
 
     items = [item_for(item) for item in order if item in prepared]
-    server = studio.server_version() if items else None
     refused = _field_problems(
         server, [(item["ref"], item["kind"], item["revision"]) for item in items]
     )
@@ -476,23 +569,32 @@ def _commit(
             saved = studio.push_batch(items, force=force)
         except PluralError as exc:
             raise ProjectError(
-                "The server refused the push, so nothing was saved.", _refusals(exc)
+                "The server refused the push, so nothing was saved.",
+                _batch_refusals(exc, prepared),
             ) from exc
         by_ref = {str(item["ref"]): item["revision"] for item in saved.get("items", [])}
+        mismatches: list[_Mismatch] = []
         for item in order:
             if item in prepared:
                 parent = hosted[item][0]
-                resolved[item] = _saved(
-                    studio,
-                    prepared[item],
-                    by_ref[str(item)],
-                    str(parent["id"]) if parent else None,
-                )
-            else:
+                try:
+                    resolved[item] = _saved(
+                        studio,
+                        prepared[item],
+                        by_ref[str(item)],
+                        str(parent["id"]) if parent else None,
+                        server,
+                    )
+                except _Mismatch as exc:
+                    resolved[item] = exc.revision
+                    mismatches.append(exc)
+            elif current:
                 _rename(studio, item, hosted[item][0], resources[item])
         for item in order:
             _record(lock, item, resources[item], resolved[item])
         workspace.project.write_lock(lock)
+        if mismatches:
+            raise _saved_but_mismatched(mismatches)
         return [_step(item, resources, resolved, prepared, labels) for item in order]
 
     steps: dict[ResourceRef, PushStep] = {}
@@ -510,26 +612,91 @@ def _commit(
                 version=labels[item][0],
                 parent_revision_id=bases[item],
                 force=force,
+                omit=_older_server_omits(server, item.kind),
+                server=server,
+                current=current,
             )
-        else:
+        elif current:
             _rename(studio, item, parent, resource)
         return _step(item, resources, resolved, prepared, labels)
 
     for level in _levels(order, resources):
         with ThreadPoolExecutor(max_workers=min(_WORKERS, len(level))) as pool:
             futures = [(item, pool.submit(one, item)) for item in level]
-        failure: BaseException | None = None
+        failures: list[BaseException] = []
         for item, future in futures:
             error = future.exception()
             if error is None:
                 steps[item] = future.result()
                 _record(lock, item, resources[item], resolved[item])
-            elif failure is None:
-                failure = error
+            else:
+                if isinstance(error, _Mismatch):
+                    _record(lock, item, resources[item], error.revision)
+                failures.append(error)
         workspace.project.write_lock(lock)
-        if failure is not None:
-            raise failure
+        if failures:
+            mismatches = [error for error in failures if isinstance(error, _Mismatch)]
+            if len(mismatches) == len(failures):
+                raise _saved_but_mismatched(mismatches)
+            if not isinstance(failures[0], ProjectError):
+                raise failures[0]
+            pushed = [str(item) for item, step in steps.items() if step.status == "pushed"]
+            raise _partly_saved(failures[0], pushed)
     return [steps[item] for item in order]
+
+
+def _batch_refusals(exc: PluralError, prepared: Mapping[ResourceRef, _Prepared]) -> list[str]:
+    """The server's refusals, with each content hash mismatch explained.
+
+    Returns:
+        One line per problem.
+    """
+    body = exc.body if isinstance(exc.body, dict) else {}
+    errors = body.get("errors")
+    if not isinstance(errors, list):
+        return _refusals(exc)
+    lines: list[str] = []
+    for error in errors:
+        found = next((item for ref, item in prepared.items() if str(ref) == error.get("ref")), None)
+        if error.get("type") != "content_hash_mismatch" or found is None:
+            lines.append(_refusal_line(error))
+            continue
+        lines.append(
+            _hash_mismatch(
+                found.resource.ref,
+                found.value,
+                found.resource.content_hash,
+                str(error.get("server_content_hash")),
+                error.get("definition"),
+                error.get("server_plural"),
+            )
+        )
+    return lines
+
+
+def _saved_but_mismatched(mismatches: list[_Mismatch]) -> ProjectError:
+    return ProjectError(
+        "The server saved these revisions but hashed them differently than this "
+        "checkout. plural.lock records them, so the next push builds on them without "
+        "--force.",
+        [error.message for error in mismatches],
+    )
+
+
+def _partly_saved(failure: ProjectError, saved: list[str]) -> ProjectError:
+    """``failure``, saying which revisions were saved before it and recorded in the lock.
+
+    Returns:
+        The error to raise.
+    """
+    if not saved:
+        return ProjectError(f"{failure.message} Nothing was saved.", failure.problems)
+    were = "revision was" if len(saved) == 1 else "revisions were"
+    return ProjectError(
+        f"{failure.message} {len(saved)} other {were} saved and recorded in plural.lock: "
+        f"{', '.join(saved)}. Fix the problem and push again; those are reused.",
+        failure.problems,
+    )
 
 
 def _step(
@@ -537,7 +704,7 @@ def _step(
     resources: dict[ResourceRef, LocalResource],
     resolved: dict[ResourceRef, HostedRevision],
     prepared: dict[ResourceRef, _Prepared],
-    labels: dict[ResourceRef, tuple[str | None, str | None]],
+    labels: dict[ResourceRef, tuple[str | None, str | None, str | None]],
 ) -> PushStep:
     revision = resolved[item]
     return PushStep(
@@ -548,6 +715,7 @@ def _step(
         revision_id=revision.revision_id,
         number=revision.number,
         note=labels[item][1] if item in labels else None,
+        suggested_version=labels[item][2] if item in labels else None,
     )
 
 
@@ -745,8 +913,12 @@ def apply_project_push(
     plan: ProjectPushPlan,
     *,
     force: bool = False,
+    bump: Bump | None = None,
 ) -> list[PushStep]:
     """Push every planned change, dependencies first.
+
+    ``bump="patch"`` gives a new revision whose manifest version is taken the
+    next free patch version instead of none.
 
     Returns:
         One step per resource.
@@ -770,7 +942,16 @@ def apply_project_push(
     resolved = {step.ref: step.match for step in plan.steps if step.match is not None}
     to_push = [step.ref for step in plan.changes]
     return _commit(
-        workspace, studio, binding, order, resources, plan.hosted, resolved, to_push, force=force
+        workspace,
+        studio,
+        binding,
+        order,
+        resources,
+        plan.hosted,
+        resolved,
+        to_push,
+        force=force,
+        bump=bump,
     )
 
 
@@ -875,8 +1056,23 @@ def select_revision(
     return found
 
 
+def unpushed_pins(studio: Studio, pins: Mapping[str, Mapping[str, str]]) -> list[ResourceRef]:
+    """The inputs a recorded run pinned that no hosted revision holds yet.
+
+    Returns:
+        Their references, in ``pins`` order.
+    """
+    missing = []
+    for key, pin in pins.items():
+        ref = ResourceRef.parse(key)
+        digest = pin.get("content_hash")
+        if not any(item.holds(digest) for item in _hosted_revisions(studio, ref)):
+            missing.append(ref)
+    return missing
+
+
 def resolve_pinned(
-    studio: Studio, pins: Mapping[str, Mapping[str, str]]
+    studio: Studio, pins: Mapping[str, Mapping[str, str]], *, job_id: str | None = None
 ) -> dict[ResourceRef, HostedRevision]:
     """Find the hosted revision of every input a recorded run pinned.
 
@@ -905,10 +1101,12 @@ def resolve_pinned(
         else:
             resolved[ref] = match
     if problems:
+        job = job_id or "JOB"
         raise ProjectError(
             "The hosted project must hold the exact revisions a Job ran. Push them with "
-            "`plural project push`; if the files changed since the run, restore those "
-            "files first.",
+            "`plural project push`; if the files changed since the run, "
+            f"`plural job record {job} --push-pinned` pushes the copies the Job ran, "
+            "without touching your files.",
             problems,
         )
     return resolved
@@ -1097,8 +1295,67 @@ def _upload(prepared: _Prepared, uploads: _Uploads) -> None:
         uploads.ensure_blob(digest, content_type)
 
 
+class _Mismatch(ProjectError):
+    """The server saved a revision, but hashed its content differently."""
+
+    def __init__(self, message: str, revision: HostedRevision) -> None:
+        super().__init__(message)
+        self.revision = revision
+
+
+def _differing_fields(value: Any, definition: Any) -> list[str]:
+    """Top-level fields where the server's stored definition differs from ``value``.
+
+    Returns:
+        Field names, sorted; empty when the two cannot be compared.
+    """
+    if not isinstance(value, BaseModel) or not isinstance(definition, Mapping):
+        return []
+    local = value.model_dump(mode="json")
+    shared = (set(local) & set(definition)) - LABEL_FIELDS - {"source"}
+    return sorted(name for name in shared if local[name] != definition[name])
+
+
+def _hash_mismatch(
+    ref: ResourceRef,
+    value: Any,
+    local_hash: str,
+    server_hash: str,
+    definition: Any,
+    server_plural: str | None,
+) -> str:
+    """Why the server's content hash for ``ref`` differs, and what to do about it.
+
+    Returns:
+        One sentence naming both Plural versions, the differing fields, and the fix.
+    """
+    from plural import __version__ as client_plural
+
+    fields = _differing_fields(value, definition)
+    text = (
+        f"{ref}: the server's Plural {server_plural or 'unknown'} computed content hash "
+        f"{server_hash}, but this Plural {client_plural} computed {local_hash}"
+    )
+    text += f"; these fields differ: {', '.join(fields)}." if fields else "."
+    if not server_plural:
+        return (
+            f"{text} This server does not report its Plural version, so it is older than "
+            f"this one; upgrade the server's Plural to {client_plural}."
+        )
+    if server_plural != client_plural:
+        return (
+            f"{text} Run the server's version here with `uv add plural=={server_plural}`, "
+            f"or upgrade the server's Plural to {client_plural}."
+        )
+    return f"{text} Both run the same Plural, so this is a Plural bug; report it with this message."
+
+
 def _saved(
-    studio: Studio, prepared: _Prepared, record: dict[str, Any], resource_id: str | None
+    studio: Studio,
+    prepared: _Prepared,
+    record: dict[str, Any],
+    resource_id: str | None,
+    server: dict[str, Any] | None = None,
 ) -> HostedRevision:
     """The revision the server saved, checked against the local content hash.
 
@@ -1106,19 +1363,36 @@ def _saved(
         The revision, with its parent's id.
 
     Raises:
-        ProjectError: When the server hashed the content differently.
+        _Mismatch: When the server hashed the content differently. It carries
+            the saved revision, so the lock can still record it.
     """
     resource = prepared.resource
     parent_id = str(
         record.get(f"{resource.ref.kind}_id") or record.get("resource_id") or resource_id or ""
     )
-    revision = HostedRevision.from_payload(parent_id, record)
-    if revision.content_hash != resource.content_hash:
-        raise ProjectError(
-            f"{resource.ref} was saved as revision {revision.revision_id}, but the server "
-            f"computed content hash {revision.content_hash} where this SDK computed "
-            f"{resource.content_hash}. The SDK and server versions disagree; upgrade both."
+    revision = _with_parent(studio, prepared, HostedRevision.from_payload(parent_id, record))
+    if not revision.holds(resource.content_hash):
+        raise _Mismatch(
+            _hash_mismatch(
+                resource.ref,
+                prepared.value,
+                resource.content_hash,
+                revision.content_hash,
+                record.get("definition"),
+                str(server["plural"]) if server and server.get("plural") else None,
+            ),
+            revision,
         )
+    return revision
+
+
+def _with_parent(studio: Studio, prepared: _Prepared, revision: HostedRevision) -> HostedRevision:
+    """``revision``, with its parent's id looked up when the server left it out.
+
+    Returns:
+        The revision.
+    """
+    resource = prepared.resource
     if not revision.resource_id:
         parent = _api(studio, resource.ref).find(slugify(resource.ref.name))
         revision = HostedRevision(
@@ -1144,6 +1418,9 @@ def _push_one(
     version: str | None = None,
     parent_revision_id: str | None = None,
     force: bool = False,
+    omit: frozenset[str] = frozenset(),
+    server: dict[str, Any] | None = None,
+    current: bool = True,
 ) -> HostedRevision:
     prepared = _prepare(resource)
     _upload(prepared, uploads)
@@ -1157,13 +1434,15 @@ def _push_one(
             version=version,
             parent_revision_id=parent_revision_id,
             force=force,
+            omit=omit,
+            current=current,
             **prepared.references(ids),
         )
     except PluralError as exc:
         raise ProjectError(
             f"The server refused {resource.ref}.", _refusals(exc, str(resource.ref))
         ) from exc
-    return _saved(studio, prepared, record, resource_id)
+    return _saved(studio, prepared, record, resource_id, server)
 
 
 def _refusals(exc: PluralError, ref: str | None = None) -> list[str]:
@@ -1175,15 +1454,16 @@ def _refusals(exc: PluralError, ref: str | None = None) -> list[str]:
     body = exc.body if isinstance(exc.body, dict) else {}
     errors = body.get("errors")
     if isinstance(errors, list) and errors:
-        lines = []
-        for error in errors:
-            loc = ".".join(str(part) for part in error.get("loc") or ())
-            name = error.get("ref") or ref
-            text = f"{loc}: {error.get('msg')}" if loc else str(error.get("msg"))
-            lines.append(f"{name}: {text}" if name else text)
-        return lines
+        return [_refusal_line(error, ref) for error in errors]
     message = exc.message.removeprefix("Nothing was saved.\n")
     return [line for line in message.splitlines() if line] or [str(exc)]
+
+
+def _refusal_line(error: Mapping[str, Any], ref: str | None = None) -> str:
+    loc = ".".join(str(part) for part in error.get("loc") or ())
+    name = error.get("ref") or ref
+    text = f"{loc}: {error.get('msg')}" if loc else str(error.get("msg"))
+    return f"{name}: {text}" if name else text
 
 
 def _field_problems(
@@ -1212,6 +1492,24 @@ def _field_problems(
         f"{name} on {', '.join(refs)}: the server's Plural does not accept {kind} {name}"
         for (kind, name), refs in sent.items()
     ]
+
+
+def _older_server_omits(server: dict[str, Any] | None, kind: str) -> frozenset[str]:
+    """Fields this SDK added that an older server refuses, and that it does without.
+
+    An older server hashes an Environment with the description it stored, so
+    leaving the field out keeps an unchanged description pushable there.
+
+    Returns:
+        The field names to leave out of a ``kind`` revision body.
+    """
+    if kind != ENVIRONMENT.name:
+        return frozenset()
+    fields = (server or {}).get("fields")
+    accepted = fields.get(kind) if isinstance(fields, dict) else None
+    if isinstance(accepted, list) and "description" in accepted:
+        return frozenset()
+    return frozenset({"description"})
 
 
 def _server_label(server: dict[str, Any]) -> str:

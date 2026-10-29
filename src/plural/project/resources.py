@@ -549,11 +549,23 @@ def _build_harness(
     if not (inspect.isclass(cls) and issubclass(cls, Harness)) or cls is Harness:
         problems.append(f"python: {manifest.python} is not a Harness subclass")
         return None
+    readme = ""
+    if manifest.readme:
+        readme_path = _inside(directory, manifest.readme, "readme", problems)
+        if readme_path is None:
+            return None
+        if readme_path.is_file():
+            readme = readme_path.read_text(encoding="utf-8")
+        elif "readme" in manifest.model_fields_set:
+            problems.append(f"readme: {manifest.readme} does not exist")
+            return None
     source, object_path = _split_reference(directory, manifest.python)
     # Each load imports a fresh module, so identity set here belongs to this load only.
     cls.name = manifest.name
     cls.version = manifest.version
     cls.description = manifest.description
+    if readme:
+        cls.readme = readme
     cls._bound_python_source = source
     cls._bound_python_object = object_path
     try:

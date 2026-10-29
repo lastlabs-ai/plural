@@ -215,6 +215,11 @@ def test_local_run_records_a_job_and_trials_can_be_inspected(project: Project) -
     assert code == 0, output
     assert [item["job_id"] for item in listed] == [job["job_id"]]
     assert listed[0]["location"] == "local"
+    assert listed[0]["score"] == 1.0
+    code, output, _ = cli("job", "list", "--local")
+    header, row = output.splitlines()[:2]
+    assert header.split()[4:6] == ["agent", "score"]
+    assert row.split()[4:6] == ["baseline", "1.000"]
 
     code, output, shown = cli("trial", "show", trial["trial_id"], "--json")
     assert code == 0, output
@@ -409,3 +414,30 @@ def test_run_has_no_traces_option(project: Project) -> None:
 
     assert code != 0
     assert "No such option" in output
+
+
+def test_validate_takes_a_name_or_a_path_and_says_which_it_expected(project: Project) -> None:
+    for target in ["scripted", "harnesses/scripted", "./harnesses/scripted/harness.yaml"]:
+        code, output, checked = cli("harness", "validate", target, "--json")
+        assert code == 0, output
+        assert checked["resource"] == "harness/scripted"
+    code, output, _ = cli("harness", "validate", "tasks/refund")
+    assert code == 1
+    assert "'tasks/refund' is Task 'refund', not a Harness" in output
+    assert "plural task validate refund" in output
+    code, output, _ = cli("harness", "validate", "docs/notes.md")
+    assert code == 1
+    assert "takes a Harness name, such as 'scripted', or a path under harnesses/" in output
+    code, output, _ = cli("harness", "validate", DEFAULT_HARNESS)
+    assert code == 1
+    assert f"Harness {DEFAULT_HARNESS!r} is built into Plural" in output
+    assert "plural harness init <new-name>" in output
+
+
+def test_an_agents_harness_config_is_merged_into_the_harness_config(project: Project) -> None:
+    manifest = project.root / "agents" / "baseline" / "agent.yaml"
+    manifest.write_text(manifest.read_text() + "harness_config:\n  answer: denied\n")
+    code, output, job = cli("run", "--benchmark", "basics", "--agent", "baseline", "--json")
+    assert code == 0, output
+    scores = {item["task"]: item["score"] for item in job["trials"]}
+    assert scores == {"refund": 0.0, "deny": 1.0}

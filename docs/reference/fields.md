@@ -162,7 +162,7 @@ A catalog-backed model and its optional execution harness.
 - **`temperature`** — `number | null`; optional. Default: `null`.
 - **`max_tokens`** — `integer | null`; optional. Default: `null`.
 - **`harness`** — `HarnessDefinition | Harness | string | null`; optional. Default: `null`.
-- **`harness_config`** — `object`; optional. Options for a built-in Harness, such as reasoning_effort.
+- **`harness_config`** — `object`; optional. Options for the Agent's Harness. A built-in Harness validates them; a custom one reads them in self.config, over its own config.
 - **`auth`** — `"environment" | "api_key" | "oauth" | "none"`; optional. Default: `"environment"`. How the Harness authenticates to the model; none when it calls no model.
 - **`secrets`** — `array of string`; optional. Default: `[]`. Names of the Harness's declared secrets this Agent grants it.
 - **`endpoint`** — `string | null`; optional. Default: `null`.
@@ -391,6 +391,7 @@ A declared executable Agent interaction strategy.
 - **`artifacts`** — `array of FileDeclaration`; optional. Default: `[]`.
 - **`trajectory`** — `string | null`; optional. Default: `null`.
 - **`tito`** — `string | null`; optional. Default: `null`.
+- **`readme`** — `string`; optional. Default: `""`. Markdown overview shown on the Harness page.
 
 ## HarnessPolicy
 

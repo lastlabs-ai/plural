@@ -167,11 +167,74 @@ def test_push_refuses_credential_files(hosted: Hosted) -> None:
     assert hosted.fake.writes == []
 
 
-def test_server_hash_disagreement_is_reported(hosted: Hosted) -> None:
+def test_server_hash_disagreement_is_reported_and_the_saved_revision_recorded(
+    hosted: Hosted,
+) -> None:
     hosted.fake.hasher = lambda collection, slug, payload: "sha256:" + "f" * 64
     code, output = hosted.cli("verifier", "push", "resolved")
     assert code == 1
-    assert "SDK and server versions disagree" in output
+    assert "saved these revisions but hashed them differently" in output
+    assert "does not report its Plural version" in output
+    pinned = hosted.project.read_lock().resources["verifier/resolved"]
+    assert pinned.revision_id is not None
+
+    # The lock knows the revision, so the next push needs no --force.
+    hosted.fake.hasher = hasher_for(hosted.project.root)
+    code, output = hosted.cli("verifier", "push", "resolved")
+    assert code == 0, output
+
+
+def test_a_batch_push_the_server_hashes_differently_saves_nothing(hosted: Hosted) -> None:
+    hosted.fake.server = {**BATCH_SERVER, "capabilities": ["batch_push", "push_content_hash"]}
+    real = hasher_for(hosted.project.root)
+    hosted.fake.hasher = lambda collection, slug, payload: (
+        "sha256:" + "f" * 64 if collection == "environments" else real(collection, slug, payload)
+    )
+
+    code, output = hosted.cli("project", "push", "--yes")
+    assert code == 1
+    assert "The server refused the push, so nothing was saved." in output
+    assert "environment/queue: the server's Plural 0.23.1 computed content hash" in output
+    assert "`uv add plural==0.23.1`" in output
+    assert hosted.fake.revision_count() == 0
+    assert hosted.project.read_lock().resources == {}
+
+
+def test_a_hash_mismatch_on_the_same_plural_does_not_suggest_upgrading() -> None:
+    from plural import __version__
+    from plural.project.layout import ResourceRef
+    from plural.project.sync import _hash_mismatch
+
+    text = _hash_mismatch(
+        ResourceRef("environment", "queue"), None, "sha256:a", "sha256:b", None, __version__
+    )
+    assert "Plural bug" in text
+    assert "uv add" not in text
+
+
+def test_a_hash_mismatch_names_the_fields_that_differ() -> None:
+    from plural.environments.definition import EnvironmentDefinition
+    from plural.project.sync import _differing_fields
+
+    local = EnvironmentDefinition(name="queue", description="new words")
+    stored = {**local.model_dump(mode="json"), "description": "old words", "version": "9.9.9"}
+    assert _differing_fields(local, stored) == ["description"]
+
+
+def test_an_environment_pushes_its_description(hosted: Hosted) -> None:
+    from plural.environments.definition import EnvironmentDefinition
+
+    accepted = [*EnvironmentDefinition.model_fields, "parent_revision_id", "lineage"]
+    hosted.fake.server = {**BATCH_SERVER, "fields": {"environment": accepted}}
+    assert hosted.cli("env", "push", "queue")[0] == 0
+    revision = hosted.fake.revisions[next(iter(hosted.fake.revisions))][0]
+    assert "description" in revision["payload"]
+
+
+def test_an_older_server_gets_no_environment_description(hosted: Hosted) -> None:
+    assert hosted.cli("env", "push", "queue")[0] == 0
+    revision = hosted.fake.revisions[next(iter(hosted.fake.revisions))][0]
+    assert "description" not in revision["payload"]
 
 
 def test_pull_restores_files_and_protects_local_edits(hosted: Hosted) -> None:
@@ -375,7 +438,9 @@ def test_a_hosted_run_pushes_the_revisions_it_needs_first(hosted: Hosted) -> Non
     instruction.write_text("Review order A-1 carefully.\n")
     code, output = hosted.cli("run", "--task", "refund", "--agent", "baseline", "--record")
     assert code == 0, output
-    assert "task/refund #2 (version 0.1.0 already names #1 (0.1.0))" in output
+    assert "task/refund #2\n" in output
+    assert "1 new revision has no version" in output
+    assert "`plural task release refund 0.1.1`" in output
     assert "version: 0.1.0" in (hosted.project.root / "tasks/refund/task.yaml").read_text()
     newest = hosted.fake.revisions[task_parent["id"]][-1]
     assert (newest["number"], newest["version"]) == (2, None)
@@ -490,10 +555,29 @@ def test_project_push_adds_a_revision_for_a_change_without_touching_files(
     assert changed == []
 
 
-def test_project_push_ignores_the_retired_bump_flag(hosted: Hosted) -> None:
-    code, output = hosted.cli("project", "push", "--bump", "--yes")
+def test_dropped_versions_are_one_line_and_bump_patch_takes_the_next_free_one(
+    hosted: Hosted,
+) -> None:
+    assert hosted.cli("project", "push", "--yes")[0] == 0
+    for name in ("refund", "deny"):
+        (hosted.project.root / f"tasks/{name}/instruction.md").write_text("Edited.\n")
+    code, output = hosted.cli("project", "push", "--yes")
     assert code == 0, output
-    assert "--bump is no longer needed" in output
+    assert output.count("no version") == 1
+    assert "3 new revisions have no version" in output
+    assert "task/deny, task/refund, benchmark/basics" in output
+    assert "`plural task release " in output and " 0.1.1`" in output
+
+    for name in ("refund", "deny"):
+        (hosted.project.root / f"tasks/{name}/instruction.md").write_text("Again.\n")
+    code, output = hosted.cli("project", "push", "--yes", "--bump", "patch")
+    assert code == 0, output
+    assert "no version" not in output
+    assert hosted.project.read_lock().resources["task/refund"].version == "0.1.1"
+
+    code, output = hosted.cli("project", "push", "--bump", "minor")
+    assert code == 1
+    assert "--bump takes patch" in output
 
 
 def test_project_push_asks_before_uploading_without_yes(hosted: Hosted) -> None:
@@ -548,10 +632,15 @@ def test_a_wanted_version_labels_only_when_free_and_not_a_number() -> None:
     from plural.project.sync import HostedRevision, _label
 
     released = HostedRevision("res", "rev-1", "1.0.0", "sha256:a", None, number=1)
-    assert _label(None, [released]) == (None, None)
-    assert _label("1.1.0", [released]) == ("1.1.0", None)
-    assert _label("1.0.0", [released]) == (None, "version 1.0.0 already names #1 (1.0.0)")
-    version, note = _label("7", [released])
+    assert _label(None, [released]) == (None, None, None)
+    assert _label("1.1.0", [released]) == ("1.1.0", None, None)
+    assert _label("1.0.0", [released]) == (
+        None,
+        "version 1.0.0 already names #1 (1.0.0)",
+        "1.0.1",
+    )
+    assert _label("1.0.0", [released], "patch") == ("1.0.1", None, None)
+    version, note, _ = _label("7", [released])
     assert version is None
     assert note is not None and "#7" in note
 
@@ -656,7 +745,10 @@ def test_an_older_server_is_pushed_one_resource_at_a_time_naming_failures(
 
     code, output = hosted.cli("project", "push", "--yes")
     assert code == 1
-    assert "The server refused task/deny.\n  - Internal Server Error" in output
+    assert "The server refused task/deny." in output
+    assert "saved and recorded in plural.lock: environment/queue" in output
+    assert "\n  - Internal Server Error" in output
+    assert "environment/queue" in hosted.project.read_lock().resources
 
 
 def test_a_field_error_from_the_server_keeps_its_location() -> None:

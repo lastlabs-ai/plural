@@ -10,7 +10,7 @@ import functools
 import json
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, NoReturn, ParamSpec, TypeVar
+from typing import Any, Literal, NoReturn, ParamSpec, TypeVar
 
 import httpx
 import typer
@@ -25,6 +25,12 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 JSON_OPTION = typer.Option(False, "--json", help="Print machine-readable JSON.")
+BUMP_OPTION = typer.Option(
+    None,
+    "--bump",
+    help="patch: when a manifest's version already names a revision, label the new "
+    "revision with the next free patch version instead of none.",
+)
 REF_HELP = (
     "NAME\\[@REF], where REF is a revision number (@3), a release version (@1.0.0), "
     "or a content hash"
@@ -61,6 +67,19 @@ def alias(function: Callable[P, R], old: str, new: str) -> Callable[P, R]:
         return function(*args, **kwargs)
 
     return wrapper
+
+
+def bump_option(value: str | None) -> Literal["patch"] | None:
+    """The ``--bump`` value, checked.
+
+    Raises:
+        ProjectError: For anything but ``patch``.
+    """
+    if value is None:
+        return None
+    if value != "patch":
+        raise ProjectError(f"--bump takes patch, not {value!r}.")
+    return "patch"
 
 
 def counted(count: int, noun: str, plural: str | None = None) -> str:

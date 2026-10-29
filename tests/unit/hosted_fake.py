@@ -405,6 +405,7 @@ class FakeHosted:
                 "parent_revision_id": body.get("parent_revision_id"),
                 "lineage": body.get("lineage") or [],
                 "payload": body,
+                "definition": body,
             }
             revisions.append(revision)
             parent["current_revision_id"] = revision["id"]
@@ -465,8 +466,28 @@ class FakeHosted:
                         "errors": [error],
                     },
                 )
-            saved[item["ref"]] = json.loads(response.content)["id"]
-            results.append({"ref": item["ref"], "revision": json.loads(response.content)})
+            row = json.loads(response.content)
+            expected = item.get("content_hash")
+            if expected and expected != row["content_hash"]:
+                self.parents, self.revisions = before
+                server_plural = (self.server or {}).get("plural")
+                msg = f"the server computed {row['content_hash']}, the client {expected}"
+                error = {
+                    "ref": item["ref"],
+                    "loc": [],
+                    "msg": msg,
+                    "type": "content_hash_mismatch",
+                    "server_plural": server_plural,
+                    "server_content_hash": row["content_hash"],
+                    "client_content_hash": expected,
+                    "definition": row["definition"],
+                }
+                return httpx.Response(
+                    409,
+                    json={"detail": f"Nothing was saved.\n{item['ref']}: {msg}", "errors": [error]},
+                )
+            saved[item["ref"]] = row["id"]
+            results.append({"ref": item["ref"], "revision": row})
         if body.get("dry_run"):
             self.parents, self.revisions = before
         return _ok({"dry_run": bool(body.get("dry_run")), "items": results})

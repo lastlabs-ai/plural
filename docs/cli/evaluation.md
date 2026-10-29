@@ -501,10 +501,13 @@ This section is generated from the Typer application. Run `uv run python scripts
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --with-deps          Also push local dependencies that are not hosted yet.                       │
-│ --force              Add a revision even though the hosted resource moved since you last synced. │
-│ --json               Print machine-readable JSON.                                                │
-│ --help               Show this message and exit.                                                 │
+│ --with-deps               Also push local dependencies that are not hosted yet.                  │
+│ --force                   Add a revision even though the hosted resource moved since you last    │
+│                           synced.                                                                │
+│ --bump             <str>  patch: when a manifest's version already names a revision, label the   │
+│                           new revision with the next free patch version instead of none.         │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -947,10 +950,13 @@ This section is generated from the Typer application. Run `uv run python scripts
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --with-deps          Also push local dependencies that are not hosted yet.                       │
-│ --force              Add a revision even though the hosted resource moved since you last synced. │
-│ --json               Print machine-readable JSON.                                                │
-│ --help               Show this message and exit.                                                 │
+│ --with-deps               Also push local dependencies that are not hosted yet.                  │
+│ --force                   Add a revision even though the hosted resource moved since you last    │
+│                           synced.                                                                │
+│ --bump             <str>  patch: when a manifest's version already names a revision, label the   │
+│                           new revision with the next free patch version instead of none.         │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1234,10 +1240,13 @@ This section is generated from the Typer application. Run `uv run python scripts
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --with-deps          Also push local dependencies that are not hosted yet.                       │
-│ --force              Add a revision even though the hosted resource moved since you last synced. │
-│ --json               Print machine-readable JSON.                                                │
-│ --help               Show this message and exit.                                                 │
+│ --with-deps               Also push local dependencies that are not hosted yet.                  │
+│ --force                   Add a revision even though the hosted resource moved since you last    │
+│                           synced.                                                                │
+│ --bump             <str>  patch: when a manifest's version already names a revision, label the   │
+│                           new revision with the next free patch version instead of none.         │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1519,10 +1528,13 @@ This section is generated from the Typer application. Run `uv run python scripts
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --with-deps          Also push local dependencies that are not hosted yet.                       │
-│ --force              Add a revision even though the hosted resource moved since you last synced. │
-│ --json               Print machine-readable JSON.                                                │
-│ --help               Show this message and exit.                                                 │
+│ --with-deps               Also push local dependencies that are not hosted yet.                  │
+│ --force                   Add a revision even though the hosted resource moved since you last    │
+│                           synced.                                                                │
+│ --bump             <str>  patch: when a manifest's version already names a revision, label the   │
+│                           new revision with the next free patch version instead of none.         │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1634,15 +1646,19 @@ This section is generated from the Typer application. Run `uv run python scripts
  Record a finished local Job in the hosted project, with every Trial execution.
 
  The hosted Job pins the pushed revisions the local Job ran, so push those
- first. Recording again, or recording a Job that ran with --record, uploads
- only what the hosted Job does not hold yet.
+ first, or pass --push-pinned when your files changed since the run.
+ Recording again, or recording a Job that ran with --record, uploads only
+ what the hosted Job does not hold yet.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    job_id      <str>  Finished local Job to record in the hosted project. [required]           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --json          Print machine-readable JSON.                                                     │
-│ --help          Show this message and exit.                                                      │
+│ --push-pinned          First push the exact inputs the Job ran that are not hosted yet, from the │
+│                        copies the run kept, as unversioned revisions that do not become current. │
+│                        Your files are not touched.                                               │
+│ --json                 Print machine-readable JSON.                                              │
+│ --help                 Show this message and exit.                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1775,6 +1791,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --yes      -y             Push without asking.                                                   │
+│ --bump             <str>  patch: when a manifest's version already names a revision, label the   │
+│                           new revision with the next free patch version instead of none.         │
 │ --force                   Add revisions even if the hosted copy changed since this checkout last │
 │                           synced.                                                                │
 │ --connect                 Bind to the hosted project that already has this name.                 │
@@ -2702,10 +2720,13 @@ This section is generated from the Typer application. Run `uv run python scripts
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --with-deps          Also push local dependencies that are not hosted yet.                       │
-│ --force              Add a revision even though the hosted resource moved since you last synced. │
-│ --json               Print machine-readable JSON.                                                │
-│ --help               Show this message and exit.                                                 │
+│ --with-deps               Also push local dependencies that are not hosted yet.                  │
+│ --force                   Add a revision even though the hosted resource moved since you last    │
+│                           synced.                                                                │
+│ --bump             <str>  patch: when a manifest's version already names a revision, label the   │
+│                           new revision with the next free patch version instead of none.         │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2972,10 +2993,13 @@ This section is generated from the Typer application. Run `uv run python scripts
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --with-deps          Also push local dependencies that are not hosted yet.                       │
-│ --force              Add a revision even though the hosted resource moved since you last synced. │
-│ --json               Print machine-readable JSON.                                                │
-│ --help               Show this message and exit.                                                 │
+│ --with-deps               Also push local dependencies that are not hosted yet.                  │
+│ --force                   Add a revision even though the hosted resource moved since you last    │
+│                           synced.                                                                │
+│ --bump             <str>  patch: when a manifest's version already names a revision, label the   │
+│                           new revision with the next free patch version instead of none.         │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

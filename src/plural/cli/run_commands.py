@@ -75,13 +75,14 @@ from plural.project.runs import (
     local_trial,
     plan_run,
     push_local_job,
+    push_pinned,
     push_run_inputs,
     rerun_local_job,
     rerun_local_trial,
     run_local,
     run_roots,
 )
-from plural.project.sync import REBUILT_NOTE, PullStep, PushStep, pull_missing
+from plural.project.sync import REBUILT_NOTE, PullStep, PushStep, dropped_versions, pull_missing
 from plural.project.versions import holds_version, version_workspace, versioned
 from plural.sandbox import DaytonaProvider, default_registry
 from plural.sandbox.catalog import runtime_provider
@@ -413,6 +414,7 @@ def job_list(
                 "source": item["source"],
                 "agent": item["agent"],
                 "status": item["status"],
+                "score": item.get("score"),
                 "created_at": item["created_at"],
                 "rerun_of": item.get("rerun_of_job_id"),
                 "hosted_job_id": item.get("hosted_job_id"),
@@ -431,8 +433,9 @@ def job_list(
                     "location": "hosted",
                     "job_id": item.get("id"),
                     "source": item.get("name"),
-                    "agent": "",
+                    "agent": item.get("agent") or "",
                     "status": item.get("status"),
+                    "score": item.get("score"),
                     "created_at": item.get("created_at"),
                     "rerun_of": item.get("rerun_of_job_id"),
                     "executor": item.get("executor") or "hosted",
@@ -451,11 +454,13 @@ def job_list(
                         _where(item),
                         item["status"],
                         item["source"],
+                        _agent_label(item["agent"]),
+                        "—" if item.get("score") is None else f"{item['score']:.3f}",
                         item["created_at"] or "",
                     )
                     for item in items
                 ),
-                ("job", "where", "status", "source", "created"),
+                ("job", "where", "status", "source", "agent", "score", "created"),
             )
         else:
             typer.echo("No Jobs yet. Start one with `plural run --task <name> --model <model>`.")
@@ -507,17 +512,26 @@ def job_show(
 @handled
 def job_record(
     job_id: str = typer.Argument(help="Finished local Job to record in the hosted project."),
+    push_pinned_inputs: bool = typer.Option(
+        False,
+        "--push-pinned",
+        help="First push the exact inputs the Job ran that are not hosted yet, from the "
+        "copies the run kept, as unversioned revisions that do not become current. "
+        "Your files are not touched.",
+    ),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Record a finished local Job in the hosted project, with every Trial execution.
 
     The hosted Job pins the pushed revisions the local Job ran, so push those
-    first. Recording again, or recording a Job that ran with --record, uploads
-    only what the hosted Job does not hold yet.
+    first, or pass --push-pinned when your files changed since the run.
+    Recording again, or recording a Job that ran with --record, uploads only
+    what the hosted Job does not hold yet.
     """
     space = workspace()
     finished_local_job(space, job_id)
     studio, binding = project_studio(space, session())
+    pinned = push_pinned(space, studio, binding, job_id) if push_pinned_inputs else []
     pushed = push_local_job(space, studio, job_id)
     hosted = studio.jobs.get(pushed.job.job_id)
     payload = {
@@ -526,16 +540,21 @@ def job_record(
         "project": binding.project_slug,
         "executions": pushed.executions,
         "status": hosted.get("status"),
+        "pushed": [{"resource": str(step.ref), "revision": step.label} for step in pinned],
     }
-    emit(
-        payload,
-        as_json=as_json,
-        text=lambda: typer.echo(
+
+    def text() -> None:
+        if pinned:
+            typer.echo("Pushed the inputs this Job ran, without making them current:")
+            for step in pinned:
+                typer.echo(f"  {step.ref} {step.label}")
+        typer.echo(
             f"Recorded local Job {job_id} as hosted Job {pushed.job.job_id} in project "
             f"{binding.project_slug}: {counted(pushed.executions, 'execution')}, "
             f"{hosted.get('status')}."
-        ),
-    )
+        )
+
+    emit(payload, as_json=as_json, text=text)
 
 
 job_app.command("push", hidden=True)(alias(job_record, "plural job push", "plural job record"))
@@ -981,8 +1000,10 @@ def _credit_watch(
 def _print_pushed(steps: list[PushStep], *, err: bool) -> None:
     typer.echo("Pushed to the hosted project first, so the Job can pin them:", err=err)
     for step in steps:
-        note = f" ({step.note})" if step.note else ""
-        typer.echo(f"  {step.ref} {step.label}{note}", err=err)
+        typer.echo(f"  {step.ref} {step.label}", err=err)
+    summary = dropped_versions(steps)
+    if summary:
+        typer.echo(f"Note: {summary}", err=err)
 
 
 def _tracking(space: Workspace, current: Session) -> Tracking:
@@ -1011,16 +1032,22 @@ def _finish_local(
     if tracking is not None:
         payload["hosted_job_id"] = tracking.hosted_job_id
         payload["recording_errors"] = tracking.errors
+        payload["recording_retryable"] = tracking.retryable
 
     def text() -> None:
         _print_result(job_id, result)
         if tracking is None:
             return
-        typer.echo(f"Recorded in the hosted project as Job {tracking.hosted_job_id}.")
-        if tracking.errors:
-            typer.echo("Some of it could not be reported:", err=True)
-            for error in tracking.errors:
-                typer.echo(f"  {error}", err=True)
+        if not tracking.errors:
+            typer.echo(f"Recorded in the hosted project as Job {tracking.hosted_job_id}.")
+            return
+        typer.echo(
+            f"Not every Trial reached hosted Job {tracking.hosted_job_id}, so it is marked failed:",
+            err=True,
+        )
+        for error in dict.fromkeys(tracking.errors):
+            typer.echo(f"  {error}", err=True)
+        if tracking.retryable:
             typer.echo(f"Upload the rest with `plural job record {job_id}`.", err=True)
 
     emit(payload, as_json=as_json, text=text)
@@ -1106,6 +1133,13 @@ def _print_plan(payload: dict[str, Any]) -> None:
         ),
         ("input", "revision", "content hash"),
     )
+
+
+def _agent_label(agent: str | None) -> str:
+    """The Agent a Job ran, without the ``agent/`` prefix local records keep."""
+    if not agent:
+        return "—"
+    return agent.removeprefix("agent/")
 
 
 def _print_result(job_id: str, result: JobResult) -> None:

@@ -206,6 +206,7 @@ def resource_scaffold(
             files={
                 HARNESS.manifest: _HARNESS_YAML.format(name=name, cls=cls),
                 "harness.py": _HARNESS_PY.format(cls=cls),
+                "README.md": _HARNESS_README.format(name=name),
             }
         )
     if kind is AGENT and external:
@@ -688,6 +689,21 @@ name: {name}
 description: ""
 python: harness.py:{cls}Harness
 config: {{}}
+"""
+
+_HARNESS_README = """\
+# {name}
+
+What this Harness is for, and when to choose it over Plural's native loop.
+
+## How it plays
+
+What the model is shown each turn, how it is asked for its next move, how that move
+is carried out, and when the loop stops.
+
+## Settings
+
+List each `config` key this Harness reads, its type, and its default.
 """
 
 _HARNESS_PY = '''\
