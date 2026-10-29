@@ -7,7 +7,7 @@
   </a>
 </p>
 
-<h3 align="center">Turn intelligence into measurable outcomes.</h3>
+<h3 align="center">The task is the unit of intelligence. Find which model is best at yours.</h3>
 
 <p align="center">
   <a href="https://pypi.org/project/plural/"><img alt="PyPI" src="https://img.shields.io/pypi/v/plural?color=6a30a8"></a>
@@ -25,24 +25,15 @@
 
 ---
 
-Plural is for builders who want to know what models are good at, and where they fall
-short, on the work they care about. Public benchmarks measure someone else's problems.
-Plural puts your private data and systems to work: your records, documents, APIs, and
-tools become **Tasks** a model can be measured on. Run any model or agent on them and
-see how each one scores, what it costs, and how long it takes, with every score backed
-by what actually happened.
+Plural is a framework for building evals that optimize agent performance on the tasks
+you care about. It discovers which models work best on your task and routes work to
+those agents.
 
-- **Your work, not someone else's benchmark.** Wrap the systems your agents use, a
-  Python class, an MCP server, an OpenAPI service, or recorded traces, and write Tasks
-  in them.
-- **Graded on outcomes.** Verifiers check the system's real State after the run, not
-  what the agent says it did.
-- **Every model on the same footing.** Run any model in the catalog, Claude Code, Codex,
-  or your own agent on the same Tasks, and rank them on score, cost, tokens, and time.
-- **Repeatable.** Every input is pinned by content hash, so `plural job rerun` repeats
-  a run exactly.
-- **From measuring to improving.** The same Tasks feed a leaderboard and a training
-  loop, with a reward on every step.
+- **Local or hosted.** Keep your evals in a folder and run them on your machine, or
+  store them in a hosted project at [pluralintel.com](https://pluralintel.com) to track
+  and compare every run.
+- **Runs where you need it.** On your machine, in Docker, or in remote sandboxes such as
+  [Daytona](https://www.daytona.io) (`pip install "plural[daytona]"`).
 
 ## Get started
 
