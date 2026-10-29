@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `plural job record` sends each attempt's own run time, so the hosted time to solve is how long the Trial ran rather than how long the upload took.
+- `plural job record` matches a Job's results to its Agent when the Job ran under an earlier SDK version whose Agent hash differs.
+
 ## [0.25.0] - 2026-10-29
 
 ### Added

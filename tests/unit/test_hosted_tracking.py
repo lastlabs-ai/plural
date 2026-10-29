@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -217,6 +218,27 @@ async def test_pushing_a_tracked_job_records_nothing_twice(tmp_path: Path) -> No
     assert {item.status for item in published} == {"succeeded"}
     assert len(hosted.executions) == 2
     assert len(hosted.transitions) == before
+
+
+async def test_a_job_run_before_an_upgrade_is_recorded_with_each_attempts_time(
+    tmp_path: Path,
+) -> None:
+    spec = _spec([_task("case-0"), _task("case-1")])
+    store, errors = await _tracked_run(tmp_path, _Hosted(spec, fail=True), spec)
+    assert errors == ["hosted service unavailable"]
+    ran: list[float] = []
+    for path in sorted((store.job_path(spec.job_id) / "trials").glob("*/executions/*/result.json")):
+        result = json.loads(path.read_text())
+        # An older Plural hashed the binding's Harness package without a newer field.
+        result["receipt"]["agent_digest"] = "sha256:" + "0" * 64
+        ran.append(result["receipt"]["timings"]["total_seconds"])
+        path.write_text(json.dumps(result))
+    hosted = _Hosted(spec)
+
+    published = publish_job(_studio(hosted), store, spec.job_id, "hosted-job")
+
+    assert {item.status for item in published} == {"succeeded"}
+    assert sorted(item["timings"]["total_seconds"] for item in hosted.results) == sorted(ran)
 
 
 async def test_reporting_failures_never_stop_the_local_run(tmp_path: Path) -> None:

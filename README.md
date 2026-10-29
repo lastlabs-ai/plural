@@ -7,7 +7,7 @@
   </a>
 </p>
 
-<h3 align="center">Build the environment. Write the tasks. Benchmark and train agents on your real work.</h3>
+<h3 align="center">Turn intelligence into measurable outcomes.</h3>
 
 <p align="center">
   <a href="https://pypi.org/project/plural/"><img alt="PyPI" src="https://img.shields.io/pypi/v/plural?color=6a30a8"></a>
@@ -17,73 +17,61 @@
 </p>
 
 <p align="center">
-  <a href="https://pluralintel.com/docs/getting-started">Quickstart</a> ·
-  <a href="https://pluralintel.com/docs">Docs</a> ·
-  <a href="https://pluralintel.com/docs/tutorials/wordle">Tutorial</a> ·
-  <a href="examples/">Examples</a> ·
+  <a href="https://pluralintel.com/docs/getting-started">Quickstart</a> |
+  <a href="https://pluralintel.com/docs">Docs</a> |
+  <a href="https://github.com/lastlabs-ai/plural/tree/main/examples">Examples</a> |
   <a href="https://pluralintel.com">pluralintel.com</a>
 </p>
 
 ---
 
-Plural is a Python SDK and CLI for turning the systems your agents work with into
-**environments**, writing **tasks** in them, and finding out which model or agent does
-that work best, with the evidence behind every score.
+Intelligence is only worth what it gets done. Plural turns it into measurable outcomes:
+you describe the work you care about as **Tasks**, run any model or agent on them, and
+get a map of which intelligence is good at which task, how much it costs, and how long
+it takes. Every score comes from what actually happened, with the evidence attached.
 
-- **Any system becomes an environment.** Wrap a Python class, an MCP server, an
-  OpenAPI service, or a recorded trace as an App. The agent sees only what its actions
-  return.
-- **Grade what happened, not what the agent claims.** Verifiers read the App's hidden
-  State after the episode, and can reward every step for training.
-- **Reproducible by default.** Every run pins each input by content hash, so
-  `plural job rerun` repeats it exactly.
-- **Runs where you need it.** On your machine, in Docker, or in cloud sandboxes, with
-  any model in the catalog, Claude Code, Codex, or your own harness.
-- **Benchmarks and training from one setup.** The same Task feeds a leaderboard and an
-  RL loop, and several agents can share one Task to cooperate or compete.
+- **Your work, not someone else's benchmark.** Wrap the systems your agents use, a
+  Python class, an MCP server, an OpenAPI service, or recorded traces, and write Tasks
+  in them.
+- **Graded on outcomes.** Verifiers check the system's real State after the run, not
+  what the agent says it did.
+- **Every model on the same footing.** Run any model in the catalog, Claude Code, Codex,
+  or your own agent on the same Tasks, and rank them on score, cost, tokens, and time.
+- **Repeatable.** Every input is pinned by content hash, so `plural job rerun` repeats
+  a run exactly.
+- **From measuring to improving.** The same Tasks feed a leaderboard and a training
+  loop, with a reward on every step.
 
-## Install
+## Get started
+
+You need Python 3.10 or newer and an account at [pluralintel.com](https://pluralintel.com),
+which model calls go through.
 
 ```bash
 pip install "plural[mcp]"
-```
+plural auth login
 
-Python 3.10 or newer. Model calls go through the Plural gateway, so a live run needs
-an API key from [pluralintel.com](https://pluralintel.com): `plural auth login`.
-
-## Try it in 30 seconds
-
-The [support queue example](examples/first-project/) has a scripted Agent, so it runs
-offline with no account:
-
-```bash
-git clone --depth 1 https://github.com/lastlabs-ai/plural && cd plural/examples/first-project
-plural run --benchmark support-triage --agent scripted
-```
-
-```text
-Running benchmark/support-triage with scripted (openai/gpt-5.6-luna) locally: 3 Trials, 3 at a time (auto: every Trial at once).
-  [1/3] trl_e346797c26bf78918a0ccd64  ticket-3  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
-  [2/3] trl_eabb98d92a791437296f8a41  ticket-2  succeeded  score=1.000  | 2 succeeded, 0 failed, mean 1.000
-  [3/3] trl_d180e73c8fa30bc6cae755b5  ticket-1  succeeded  score=1.000  | 3 succeeded, 0 failed, mean 1.000
-Job job_e7bbd52f5a400c1409488cef succeeded.
-  scripted: mean score 1.000 over 3 Trials, 3 succeeded, coverage 100%
-```
-
-`plural job show <job-id>` lists each Trial, and `plural trial show <trial-id>` shows the
-Verifier's evidence and the full record.
-
-## Build your own
-
-From the command line, a project is a folder of small, versioned resources:
-
-```bash
 plural project init my-eval && cd my-eval
-plural env init support-desk                     # an Environment, a starter Task, a Verifier
+plural env init support-desk
 plural run --task support-desk-first --model openai/gpt-5.6-luna
 ```
 
-Or in Python. An App is a class whose actions are the agent's tools:
+```text
+Running task/support-desk-first with gpt-5.6-luna (openai/gpt-5.6-luna) locally: 1 Trial, 1 at a time (auto: every Trial at once).
+  [1/1] trl_6523ca3f8db536eaa894d2fb  support-desk-first  succeeded  score=1.000  | 1 succeeded, 0 failed, mean 1.000
+Job job_168352e303f3330932a452c6 succeeded.
+  gpt-5.6-luna: mean score 1.000 over 1 Trial, 1 succeeded, coverage 100%
+```
+
+That's a full measurement: `plural env init` wrote a small support desk (an
+**Environment**), one assignment in it (a **Task**), and the code that grades it (a
+**Verifier**), and `plural run` scored a model on it. Try another model with
+`--model`, see what happened with `plural job show <job-id>`, then make it yours: the
+run first lists each `PLURAL-TODO` in the new files, an example for you to replace.
+
+## Or write it in Python
+
+An App is a class whose actions are the agent's tools:
 
 ```python
 # wordle.py
@@ -155,14 +143,17 @@ observation, reward, terminated, truncated, info = environment.step("guess", wor
 
 ## See it in the web app
 
-Connect a folder to a private hosted project once, then add `--record` to any run to
-watch its Trials, trajectories, and costs in [pluralintel.com](https://pluralintel.com).
-Every Job still runs from your machine, and pushing never makes anything public.
+Connect your project folder to a private hosted project once, then add `--record` to
+any run to see its Trials, trajectories, and costs at [pluralintel.com](https://pluralintel.com),
+and to rank models on a Benchmark's leaderboard. Jobs still run on your machine, and
+nothing is ever made public.
 
 ```bash
-plural project init my-eval --push
+plural project init my-eval --push         # from inside my-eval
 plural run --task support-desk-first --model openai/gpt-5.6-luna --record
 ```
+
+Runs are recorded once the starter's `PLURAL-TODO` examples are replaced.
 
 ## Learn more
 
@@ -171,6 +162,7 @@ plural run --task support-desk-first --model openai/gpt-5.6-luna --record
 - [Verifiers](https://pluralintel.com/docs/project/verifiers) and [training](https://pluralintel.com/docs/running/training): scores, step rewards, and RL.
 - [Multi-agent Tasks](https://pluralintel.com/docs/project/multi-agent): seats, turns, and shared worlds.
 - [Python SDK](https://pluralintel.com/docs/sdk/evaluation) and [CLI reference](https://pluralintel.com/docs/cli/evaluation).
+- [Examples](https://github.com/lastlabs-ai/plural/tree/main/examples), including a support queue that runs offline with a scripted agent.
 - [Changelog](CHANGELOG.md).
 
 ## Development
