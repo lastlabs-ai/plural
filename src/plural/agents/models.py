@@ -170,7 +170,10 @@ class Agent(FrozenModel):
     harness_config: dict[str, Any] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("harness_config", "harness_kwargs"),
-        description="Options for a built-in Harness, such as reasoning_effort.",
+        description=(
+            "Options for the Agent's Harness. A built-in Harness validates them; a custom "
+            "one reads them in self.config, over its own config."
+        ),
     )
     auth: AuthMode = Field(
         default="environment",
@@ -282,18 +285,13 @@ class Agent(FrozenModel):
             self._check_custom_harness()
         elif self.harness_config:
             raise ValueError(
-                "harness_config requires harness to be a built-in name such as "
-                "'claude-code', 'codex', or 'hermes'"
+                "harness_config sets options of this Agent's Harness, and the native Harness "
+                "takes none. Name a Harness with `harness:`, or remove harness_config."
             )
         return self
 
     def _check_custom_harness(self) -> None:
         assert self.harness is not None and not isinstance(self.harness, str)
-        if self.harness_config:
-            raise ValueError(
-                "harness_config is only valid with a built-in Harness name such as "
-                "'claude-code', 'codex', or 'hermes'"
-            )
         package = self.harness._package()
         undeclared = sorted(set(self.secrets) - set(package.definition.secret_names))
         if undeclared:

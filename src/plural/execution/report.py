@@ -488,21 +488,50 @@ _HostedKey = tuple[str, str, int]
 
 
 def _hosted_trials(studio: Studio, hosted_job_id: str) -> dict[_HostedKey, str]:
-    return {
-        (str(item.get("task_name")), str(item.get("agent_name")), int(item["attempt"])): str(
-            item["id"]
+    """Each hosted Trial by its Task's name, its Agent's content hash, and attempt.
+
+    The pins hold the Task's name and the Agent's hash, never a display title.
+    A server that returns no pins is keyed by the names it does return.
+    """
+    found: dict[_HostedKey, str] = {}
+    for item in studio.jobs.trials(hosted_job_id):
+        attempt = int(item["attempt"])
+        pins = item.get("pins")
+        pins = pins if isinstance(pins, dict) else {}
+        task = pins.get("task")
+        task = task if isinstance(task, dict) else {}
+        if task.get("name") and pins.get("agent"):
+            found[(str(task["name"]), str(pins["agent"]), attempt)] = str(item["id"])
+        found.setdefault(
+            (str(item.get("task_name")), str(item.get("agent_name")), attempt), str(item["id"])
         )
-        for item in studio.jobs.trials(hosted_job_id)
-    }
+    return found
+
+
+def _find_hosted(
+    hosted: Mapping[_HostedKey, str], task: str, pin: AgentPin | None, attempt: int
+) -> str | None:
+    """The hosted Trial for one local Trial: by Agent hash, else by hosted Agent name."""
+    name, digest = pin if pin is not None else ("", "")
+    return (digest and hosted.get((task, digest, attempt))) or hosted.get((task, name, attempt))
 
 
 def _result_key(result: TrialResult, pins: Mapping[str, AgentPin]) -> _HostedKey:
-    """The hosted Trial a local result belongs to, by the hosted Agent's name.
+    """A local result's Task, hosted Agent name, and attempt, as people read them.
 
     A Trial several Agents share is the first seat's Agent's.
     """
     receipt = result.receipt
     return (receipt.task_pin.name, pins.get(receipt.agent_digest, ("", None))[0], receipt.attempt)
+
+
+def _result_target(
+    hosted: Mapping[_HostedKey, str], result: TrialResult, pins: Mapping[str, AgentPin]
+) -> str | None:
+    receipt = result.receipt
+    return _find_hosted(
+        hosted, receipt.task_pin.name, pins.get(receipt.agent_digest), receipt.attempt
+    )
 
 
 def publish_job(
@@ -516,7 +545,7 @@ def publish_job(
 ) -> list[Published]:
     """Publish every execution of a local Job to the hosted Job with the same plan.
 
-    Trials are matched on Task name, Agent name, and attempt. Every local
+    Trials are matched on Task name, Agent content hash, and attempt. Every local
     execution, including failed ones, becomes a hosted execution in order, so
     retries and their cost are kept. ``agents`` maps each local Agent binding
     to the hosted Agent it ran as; by default, the Agent of the same name and
@@ -537,9 +566,9 @@ def publish_job(
             )
             receipt = outcome.receipt
             _, definition = pins.get(receipt.agent_digest, ("", None))
-            key = _result_key(outcome, pins)
-            target = hosted.get(key)
+            target = _result_target(hosted, outcome, pins)
             if target is None:
+                key = _result_key(outcome, pins)
                 raise PublishError(
                     f"No hosted Trial for Task {key[0]} attempt {key[2]} with Agent {key[1]}"
                 )
@@ -592,7 +621,7 @@ def publish_rewards(
                 (execution_root / "result.json").read_text(encoding="utf-8")
             )
             receipt = outcome.receipt
-            target = hosted.get(_result_key(outcome, pins))
+            target = _result_target(hosted, outcome, pins)
             if target is None:
                 continue
             execution = studio.trials.create_execution(
@@ -731,9 +760,8 @@ class HostedTracker:
             return None
         if self._hosted is None:
             self._hosted = _hosted_trials(self.studio, self.hosted_job_id)
-        pin = self._agents.get(trial.agent_id)
-        name = pin[0] if pin is not None else trial.agent_name
-        return self._hosted.get((trial.task_pin.name, name, trial.attempt))
+        pin = self._agents.get(trial.agent_id) or (trial.agent_name, "")
+        return _find_hosted(self._hosted, trial.task_pin.name, pin, trial.attempt)
 
     def _handle(self, event: ProgressEvent) -> None:
         if event.trial_id is None or event.execution_id is None:

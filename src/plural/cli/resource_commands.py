@@ -12,11 +12,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import click
 import typer
 
 from plural.cli.common import (
+    BUMP_OPTION,
     JSON_OPTION,
     REF_HELP,
+    bump_option,
     counted,
     deprecated,
     emit,
@@ -42,9 +45,11 @@ from plural.project import (
 from plural.project.cases import read_cases, write_cases
 from plural.project.layout import AGENT, BENCHMARK, ENVIRONMENT, HARNESS, TASK, split_version
 from plural.project.membership import add_tasks, remove_tasks
+from plural.project.runs import DEFAULT_HARNESS
 from plural.project.sync import (
     REBUILT_NOTE,
     PushStep,
+    dropped_versions,
     hosted_list,
     hosted_resource,
     pull,
@@ -273,6 +278,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
             "--force",
             help="Add a revision even though the hosted resource moved since you last synced.",
         ),
+        bump: str | None = BUMP_OPTION,
         as_json: bool = JSON_OPTION,
     ) -> None:
         """Validate and push an immutable, private revision to the bound project.
@@ -285,7 +291,15 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         space = workspace()
         ref = _ref(space, kind, name)
         studio, binding = project_studio(space, session())
-        result = push(space, studio, binding, ref, with_deps=with_deps, force=force)
+        result = push(
+            space,
+            studio,
+            binding,
+            ref,
+            with_deps=with_deps,
+            force=force,
+            bump=bump_option(bump),
+        )
         _emit_push(binding.project_slug, result.steps, as_json=as_json)
 
     @app.command("release")
@@ -1002,6 +1016,8 @@ def _ref(
                 f"Name the {kind.label}, or run this inside {kind.directory}/<name>/."
             )
         return here
+    if must_exist and _looks_like_path(name):
+        return _ref_at(space, kind, name)
     if "@" in name:
         bare = name.partition("@")[0]
         raise ProjectError(
@@ -1011,6 +1027,17 @@ def _ref(
         )
     check_name(name, kind.label)
     ref = ResourceRef(kind.name, name)
+    builtin = name in BUILTIN_HARNESS_NAMES or name == DEFAULT_HARNESS
+    if must_exist and kind is HARNESS and builtin and not space.project.has(ref):
+        shown = (
+            f"See it with `plural harness show {name}`, or start"
+            if name in BUILTIN_HARNESS_NAMES
+            else "Start"
+        )
+        raise ProjectError(
+            f"Harness {name!r} is built into Plural, so it has no files to {_command_name()}. "
+            f"{shown} your own with `plural harness init <new-name>`."
+        )
     if must_exist and not space.project.has(ref):
         known = ", ".join(space.project.names(kind)) or "none"
         raise ProjectError(
@@ -1019,6 +1046,49 @@ def _ref(
             f"`plural {kind.cli} pull {name}`."
         )
     return ref
+
+
+def _looks_like_path(name: str) -> bool:
+    return "/" in name or "\\" in name or name in {".", ".."} or name.endswith((".yaml", ".yml"))
+
+
+def _ref_at(space: Workspace, kind: ResourceKind, name: str) -> ResourceRef:
+    """The resource whose directory or manifest ``name`` points at.
+
+    Raises:
+        ProjectError: When the path is not inside a resource directory, or is
+            inside one of another kind.
+    """
+    command = _command_name()
+    here = space.project.resource_at(Path(name))
+    if here is None:
+        raise ProjectError(
+            f"{name!r} is not inside a {kind.label} directory of this project. "
+            f"`plural {kind.cli} {command}` takes a {kind.label} name, such as "
+            f"{_example_name(space, kind)!r}, or a path under {kind.directory}/."
+        )
+    if here.kind != kind.name:
+        other = next(item for item in KINDS if item.name == here.kind)
+        raise ProjectError(
+            f"{name!r} is {other.label} {here.name!r}, not a {kind.label}. "
+            f"Run `plural {other.cli} {command} {here.name}`."
+        )
+    if not space.project.has(here):
+        raise ProjectError(
+            f"{name!r} has no {kind.manifest}, so it is not a {kind.label} yet. "
+            f"Create it with `plural {kind.cli} init {here.name}`."
+        )
+    return here
+
+
+def _command_name() -> str:
+    context = click.get_current_context(silent=True)
+    return context.info_name if context is not None and context.info_name else "validate"
+
+
+def _example_name(space: Workspace, kind: ResourceKind) -> str:
+    names = space.project.names(kind)
+    return names[0] if names else "support-refunds"
 
 
 def _versioned_ref(
@@ -1077,9 +1147,9 @@ def _emit_push(project_slug: str, steps: list[PushStep], *, as_json: bool) -> No
             ((step.ref, step.label, step.status) for step in steps),
             ("resource", "revision", "result"),
         )
-        for step in steps:
-            if step.note:
-                typer.echo(f"Note: {step.ref} {step.note}, so the new revision has no version.")
+        summary = dropped_versions(steps)
+        if summary:
+            typer.echo(f"Note: {summary}")
 
     emit(payload, as_json=as_json, text=text)
 

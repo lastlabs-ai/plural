@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from plural.harness.deadline import call_timeout, episode_deadline
 from plural.harness.interface import (
     HarnessAgent,
     HarnessEnvironment,
@@ -74,15 +75,15 @@ def run_vendor(
     environment: HarnessEnvironment,
 ) -> HarnessResult:
     """Run a built-in CLI through the same interface as a custom Harness."""
-    limits = environment.raw.get("limits") or {}
-    timeout = float(limits.get("max_seconds", 120))
+    limits = environment.raw.get("limits")
+    deadline = episode_deadline(limits if isinstance(limits, dict) else None)
     kwargs = agent.harness_config
     model = agent.model
     if model:
         os.environ.setdefault("PLURAL_MODEL", model)
     _write_environment(environment.raw)
     _write_config(vendor, kwargs.get("config"), root=Path(environment.workspace))
-    _map_credentials(vendor)
+    _map_credentials(vendor, deadline)
     mcp_config = Path(".plural/mcp.json").resolve()
     prompt = _prompt(task, agent, environment)
     command = _command(vendor, model, prompt, kwargs, mcp_config)
@@ -95,7 +96,7 @@ def run_vendor(
         command,
         capture_output=True,
         text=True,
-        timeout=timeout,
+        timeout=call_timeout(deadline),
         check=False,
         cwd=environment.workspace,
     )
@@ -179,7 +180,7 @@ def _command(
     raise SystemExit(f"unknown vendor adapter {vendor!r}")
 
 
-def _start_messages_bridge() -> str:
+def _start_messages_bridge(deadline: float) -> str:
     import importlib.util
 
     path = Path(__file__).with_name("messages_bridge.py")
@@ -188,7 +189,7 @@ def _start_messages_bridge() -> str:
         raise SystemExit("Claude Code adapter could not load the local Messages bridge")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    _server, url = module.start()
+    _server, url = module.start(deadline=deadline)
     return str(url)
 
 
@@ -233,7 +234,7 @@ def _write_config(vendor: str, config: Any, *, root: Path | None = None) -> None
     path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _map_credentials(vendor: str) -> None:
+def _map_credentials(vendor: str, deadline: float) -> None:
     """Point the vendor CLI at the Plural gateway, and nowhere else.
 
     Every model call goes through the gateway, which bills and records it, so a
@@ -252,7 +253,7 @@ def _map_credentials(vendor: str) -> None:
             "Job(client=...) and `plural run` set it."
         )
     if vendor == "claude-code":
-        os.environ["ANTHROPIC_BASE_URL"] = _start_messages_bridge()
+        os.environ["ANTHROPIC_BASE_URL"] = _start_messages_bridge(deadline)
         os.environ["ANTHROPIC_API_KEY"] = key or "plural"
         return
     os.environ["OPENAI_API_KEY"] = key or "plural"

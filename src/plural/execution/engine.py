@@ -161,6 +161,7 @@ from plural.verifiers import (
     VerifierOutput,
     VerifierRuntime,
     hindsight_hooks,
+    rubric_score,
 )
 
 
@@ -2071,6 +2072,14 @@ class TrialRunner:
                     ErrorCode.EVIDENCE_MISSING, f"Verifier {name!r} result is missing"
                 )
             output = VerifierOutput.model_validate_json(files[0].data).validated_finite()
+            if isinstance(verifier, AgentVerifier):
+                try:
+                    judged = rubric_score(verifier.criteria, output.scores)
+                except ValueError as exc:
+                    raise ExecutionFailure(
+                        ErrorCode.VERIFIER_FAILED, f"Verifier {name!r} judge {exc}"
+                    ) from exc
+                output = output.model_copy(update={"score": judged})
             self._check_seats(name, output.seats)
             if evidence_required and not output.evidence:
                 raise ExecutionFailure(
@@ -2710,22 +2719,10 @@ class JobRunner:
         )
         if binding is None or not isinstance(binding.verifier, HumanVerifier):
             raise ValueError(f"pending Human Verifier {verifier_name!r} was not found")
-        expected = {item.name: item for item in binding.verifier.rubric}
-        if set(scores) != set(expected):
-            raise ValueError(f"review scores must match rubric criteria: {sorted(expected)!r}")
-        weighted = 0.0
-        total_weight = 0.0
-        for name, criterion in expected.items():
-            value = float(scores[name])
-            if value < criterion.min_score or value > criterion.max_score:
-                raise ValueError(
-                    f"criterion {name!r} must be between "
-                    f"{criterion.min_score} and {criterion.max_score}"
-                )
-            normalized = (value - criterion.min_score) / (criterion.max_score - criterion.min_score)
-            weighted += normalized * criterion.weight
-            total_weight += criterion.weight
-        review_score = weighted / total_weight
+        try:
+            review_score = rubric_score(binding.verifier.rubric, scores)
+        except ValueError as exc:
+            raise ValueError(f"review {exc}") from exc
         source = next(item for item in aggregate.trials if item.receipt.trial_id == trial_id)
         replacements = tuple(
             VerifierResult(
@@ -2916,8 +2913,7 @@ prompt = json.dumps({
     "criteria": spec["criteria"],
     "evidence": judge_input,
     "output_contract": {
-        "score": "finite number",
-        "scores": "object mapping criterion names to finite numbers",
+        "scores": "object mapping each criterion name to a number in its min_score..max_score",
         "evidence": "non-empty list of concise strings citing supplied evidence",
         "feedback": "string",
     },
@@ -2926,7 +2922,6 @@ names = [criterion["name"] for criterion in spec["criteria"]]
 schema = {
     "type": "object",
     "properties": {
-        "score": {"type": "number"},
         "scores": {
             "type": "object",
             "properties": {name: {"type": "number"} for name in names},
@@ -2936,7 +2931,7 @@ schema = {
         "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1},
         "feedback": {"type": "string"},
     },
-    "required": ["score", "scores", "evidence", "feedback"],
+    "required": ["scores", "evidence", "feedback"],
     "additionalProperties": False,
 }
 body = json.dumps({
@@ -2960,15 +2955,24 @@ content = response["choices"][0]["message"]["content"]
 result = json.loads(content)
 def finite_number(value):
     return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
-if set(result) != {"score", "scores", "evidence", "feedback"}:
-    raise ValueError("AgentVerifier output must match VerifierOutput fields exactly")
-if not finite_number(result["score"]):
-    raise ValueError("AgentVerifier score must be finite")
+if set(result) != {"scores", "evidence", "feedback"}:
+    raise ValueError("AgentVerifier output must have exactly scores, evidence, and feedback")
 if not isinstance(result["scores"], dict) or any(
     not isinstance(name, str) or not finite_number(value)
     for name, value in result["scores"].items()
 ):
     raise ValueError("AgentVerifier scores must map names to finite numbers")
+if set(result["scores"]) != set(names):
+    raise ValueError(f"AgentVerifier scores must name exactly the criteria {sorted(names)!r}")
+weighted = total = 0.0
+for criterion in spec["criteria"]:
+    low, high, weight = criterion["min_score"], criterion["max_score"], criterion["weight"]
+    value = result["scores"][criterion["name"]]
+    if not low <= value <= high:
+        raise ValueError(f"criterion {criterion['name']!r} must be between {low} and {high}")
+    weighted += (value - low) / (high - low) * weight
+    total += weight
+result["score"] = weighted / total
 if not isinstance(result["evidence"], list) or not result["evidence"] or any(
     not isinstance(item, str) for item in result["evidence"]
 ):

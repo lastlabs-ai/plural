@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Literal, get_args, get_origin
 
 import pytest
 from project_fixtures import write_project
@@ -10,7 +11,11 @@ from typer.testing import CliRunner
 import plural
 from plural import Agent, Environment, Harness, Job, Runtime, Task
 from plural.cli.main import app
-from plural.project import Project, ResourceRef, Workspace
+from plural.common import revision_hash
+from plural.harness import HarnessDefinition
+from plural.harness.builtins import list_builtin_harnesses
+from plural.project import Project, ProjectError, ResourceRef, Workspace
+from plural.project.manifests import HarnessManifest
 from plural.project.resources import load_harness_directory
 from plural.verifiers import DeterministicVerifier
 
@@ -130,6 +135,50 @@ def test_harness_cli_scaffold_is_plain_and_unfinished_until_filled(
     assert validated.exit_code == 0, validated.output
     assert "harnesses/custom/harness.py:" in validated.output
     assert "unfinished" in validated.output
+
+
+def test_harness_readme_reaches_the_hosted_definition(tmp_path: Path) -> None:
+    source = tmp_path / "described"
+    _harness(source)
+    (source / "README.md").write_text("# Custom loop\n", encoding="utf-8")
+    described = load_harness_directory(source, name="custom-loop")
+
+    definition = HarnessDefinition.from_package(described._package())
+    assert definition.readme == "# Custom loop\n"
+    assert definition.content_hash == described.content_hash
+
+
+def test_harness_without_readme_keeps_its_hash(tmp_path: Path) -> None:
+    package = _harness(tmp_path / "runner")._package()
+    assert package.definition.readme == ""
+    payload = package.definition.model_dump(mode="json")
+    del payload["readme"]
+    payload["source_digest"] = package.source.digest
+    assert package.content_hash == revision_hash("harness", payload)
+
+
+def test_harness_readme_is_optional_unless_named(tmp_path: Path) -> None:
+    source = tmp_path / "runner"
+    _harness(source)
+    (source / "harness.yaml").write_text(HARNESS_YAML + "readme: OVERVIEW.md\n", encoding="utf-8")
+    with pytest.raises(ProjectError) as raised:
+        load_harness_directory(source, name="custom-loop")
+    assert "readme: OVERVIEW.md does not exist" in str(raised.value.problems)
+
+
+def test_harness_docs_list_every_manifest_field_and_builtin_option() -> None:
+    text = (ROOT / "docs/project/harnesses.md").read_text(encoding="utf-8")
+    for field in HarnessManifest.model_fields:
+        assert f"| `{field}` |" in text, field
+    for spec in list_builtin_harnesses():
+        assert spec.pinned_version in text, spec.name
+        for option, info in spec.options_model.model_fields.items():
+            assert f"| `{option}` |" in text, (spec.name, option)
+            for value in get_args(info.annotation):
+                if get_origin(value) is not Literal:
+                    continue
+                for allowed in get_args(value):
+                    assert f"`{allowed}`" in text, (spec.name, option, allowed)
 
 
 def test_current_harness_docs_and_examples_hide_internal_tokens() -> None:

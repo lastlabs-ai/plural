@@ -47,7 +47,7 @@ plural task init NAME [--environment ENV] [--verifier NAME]
 plural task cases TASK CASES_FILE [--benchmark NAME] [--replace]
 plural agent init NAME --model MODEL [--harness HARNESS]
 plural verifier|harness|benchmark init NAME
-plural env|task|verifier|harness|agent|benchmark validate|show|push|pull [NAME]
+plural env|task|verifier|harness|agent|benchmark validate|show|push|pull [NAME|PATH]
 plural env|task|verifier|harness|agent|benchmark list
 plural env|task|verifier|harness|agent|benchmark delete NAME [--hosted] [-y]
 plural benchmark add|remove TASK... [--benchmark NAME]
@@ -62,6 +62,7 @@ plural run (-t TASK | -b BENCHMARK) (-m MODEL [--harness HARNESS] | -a AGENT)
            [--plural-version VERSION] [--dry-run] [--json]
 plural job list
 plural job show|rerun|record JOB_ID
+plural job record JOB_ID --push-pinned
 plural trial show|rerun TRIAL_ID
 plural review list
 plural review submit TRIAL_ID --verifier NAME --score SCORE
@@ -77,7 +78,8 @@ plural session export|import
 ```
 
 Arguments in brackets are optional. A resource name you leave out defaults to the
-resource folder you are in, and `benchmark add` and `benchmark remove` default to the
+resource folder you are in, and a path such as `harnesses/support-loop` or its
+manifest names the resource in that folder, and `benchmark add` and `benchmark remove` default to the
 Benchmark folder you are in. Where a command takes NAME[@REF], REF is a revision
 number (@3), a release version (@1.0.0), or a content hash; `pull`, `show`, and `run`
 accept it.
@@ -93,7 +95,8 @@ place: create the new one, point its users at it, and delete the old one.
   in your project.
 - **Locally, and recorded in your hosted project.** `plural run ... --record` runs on
   your machine and records the Job in your private hosted project as it goes.
-  `plural job record JOB_ID` does the same for a local Job that has already finished.
+  `plural job record JOB_ID` does the same for a local Job that has already finished;
+  add `--push-pinned` when you have edited its resources since.
 - **In cloud sandboxes.** An Environment whose `runtime` is a cloud provider, such as
   `daytona`, runs each Trial in a remote sandbox. The Job still runs from your machine,
   with or without `--record`.

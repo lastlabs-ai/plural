@@ -76,7 +76,9 @@ A few rules keep revisions trustworthy:
 - **A push saves everything or nothing.** The hosted project checks every
   revision in a push before it keeps any, so a push that fails leaves the project
   as it was. Each problem names the resource and field, such as
-  `task/refund: expected: Extra inputs are not permitted`.
+  `task/refund: expected: Extra inputs are not permitted`. Against a service too
+  old to push in one request, the CLI pushes one resource at a time; when one is
+  refused, it records the ones already saved in `plural.lock` and lists them.
 - **The CLI and the service agree on fields first.** Before uploading, the CLI asks
   the service which Plural it checks revisions with and which fields it accepts. A
   field this checkout sends that the service would refuse stops the push before
@@ -94,6 +96,11 @@ content the resource already holds, such as undoing an edit, makes that earlier
 revision current again instead of creating a duplicate. The full rules are in
 [Revision identity](../architecture/revision-identity.md).
 
+The CLI sends the hash it computed with every revision, and the service refuses
+the push when its own hash differs, saving nothing. The message lists the fields
+the two sides read differently and both Plural versions. When the versions differ,
+install the service's version with `uv add plural==VERSION`, or upgrade the service.
+
 ### Release a version
 
 A number such as `#4` names a revision within one resource. When you want a name
@@ -107,7 +114,9 @@ plural benchmark release support-triage 1.2.0
 resulting revision that version. A version names one revision forever, and
 publishing a Benchmark requires one. A `version:` line in a manifest asks for the
 same thing on its next push: the new revision gets that version when no other
-revision has it yet, and otherwise the push says which revision already does.
+revision has it yet. Otherwise the revision is saved without a version, and the
+push ends with one line naming every such revision and the command to label one.
+`--bump patch` gives each of them the next patch version instead, such as `1.2.1`.
 
 ## Packages
 
@@ -188,7 +197,17 @@ its next numbered revision, and the command prints each one. If someone changed 
 resource in the hosted project since this checkout last synced it, the run stops
 before uploading anything; pull it first.
 
-`job record` uploads nothing new: the revisions a finished Job ran must already be
-hosted, so restore those files and push them if they are not. See
+`job record` uploads nothing new by default: the revisions a finished Job ran must
+already be hosted. When you have edited a resource since the Job ran, its files no
+longer match, and `job record` stops and names the command that fixes it:
+
+```bash
+plural job record JOB_ID --push-pinned
+```
+
+`--push-pinned` pushes each revision the Job ran, rebuilt from the copies Plural
+kept in `.plural/packages` when it ran, without touching your files. They are saved
+without a version and do not become current, so the hosted project still shows
+your latest push. See
 [Record runs and run in the cloud](../platform/runs.md) for recording runs and the
 [Python SDK](../sdk/evaluation.md) for programmatic use.

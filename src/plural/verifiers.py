@@ -6,7 +6,7 @@ import hashlib
 import inspect
 import math
 import shlex
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -325,6 +325,37 @@ class RubricCriterion(FrozenModel):
         if self.max_score <= self.min_score:
             raise ValueError("max_score must exceed min_score")
         return self
+
+
+def rubric_score(criteria: Sequence[RubricCriterion], scores: Mapping[str, float]) -> float:
+    """The score a rubric gives: each criterion normalized to 0 to 1, then weight-averaged.
+
+    A judge and a reviewer both score this way, so a rubric means the same thing
+    whoever applies it.
+
+    Returns:
+        The weighted mean of the normalized criterion scores, from 0 to 1.
+
+    Raises:
+        ValueError: When ``scores`` does not name exactly the rubric's criteria, or a
+            score is outside its criterion's range.
+    """
+    expected = {item.name: item for item in criteria}
+    if set(scores) != set(expected):
+        raise ValueError(f"scores must match rubric criteria: {sorted(expected)!r}")
+    weighted = 0.0
+    total_weight = 0.0
+    for name, criterion in expected.items():
+        value = float(scores[name])
+        if not math.isfinite(value) or not criterion.min_score <= value <= criterion.max_score:
+            raise ValueError(
+                f"criterion {name!r} must be between "
+                f"{criterion.min_score} and {criterion.max_score}"
+            )
+        normalized = (value - criterion.min_score) / (criterion.max_score - criterion.min_score)
+        weighted += normalized * criterion.weight
+        total_weight += criterion.weight
+    return weighted / total_weight
 
 
 @lru_cache(maxsize=1)

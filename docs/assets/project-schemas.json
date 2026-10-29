@@ -2677,6 +2677,12 @@
             ],
             "default": null,
             "title": "Tito"
+          },
+          "readme": {
+            "default": "",
+            "description": "Markdown overview shown on the Harness page.",
+            "title": "Readme",
+            "type": "string"
           }
         },
         "required": [
@@ -2789,7 +2795,7 @@
       },
       "harness_config": {
         "additionalProperties": true,
-        "description": "Options for a built-in Harness, such as reasoning_effort.",
+        "description": "Options for the Agent's Harness. A built-in Harness validates them; a custom one reads them in self.config, over its own config.",
         "title": "Harness Config",
         "type": "object"
       },

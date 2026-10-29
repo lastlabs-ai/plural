@@ -139,7 +139,9 @@ The fields, for reference:
   `title` sets the display name.
 - `harness` is optional. It names a Harness in the project's `harnesses/` folder, or a
   built-in (`hermes`, `claude-code`, or `codex`).
-- `harness_config` sets a built-in Harness's options.
+- `harness_config` sets the Harness's options. A built-in Harness checks them; a
+  Harness of your own reads them in `self.config`, over the `config:` in its
+  `harness.yaml`. Two Agents can share one Harness and differ only in options.
 - `auth: none` marks an Agent whose Harness never calls a model, so it runs
   without credentials.
 - `endpoint` and `endpoint_key` point the Agent at its own model server; see

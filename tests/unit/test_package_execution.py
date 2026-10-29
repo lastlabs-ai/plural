@@ -49,6 +49,7 @@ from plural.verifiers import (
     VerifierOutput,
     VerifierRuntime,
     WeightedVerifier,
+    rubric_score,
 )
 
 
@@ -86,7 +87,7 @@ class JudgeProvider(FakeProvider):
         assert self.judge_input["final"]["name"] == "result.json"
         self.files[handle.sandbox_id]["agent-verifier-result.json"] = json.dumps(
             {
-                "score": 0.8,
+                "score": 0.2,
                 "scores": {"quality": 0.8},
                 "evidence": ["result.json answer=42", "observation.text=done"],
                 "feedback": "Correct and concise.",
@@ -231,7 +232,7 @@ def test_agent_verifier_script_sends_a_strict_schema_and_writes_its_output(
             if errors:
                 payload, status = {"error": {"message": "; ".join(errors)}}, 400
             else:
-                output = {"score": 1, "scores": {"resolved": 1}, "evidence": ["ok"], "feedback": ""}
+                output = {"scores": {"resolved": 1}, "evidence": ["ok"], "feedback": ""}
                 payload = {"choices": [{"message": {"content": json.dumps(output)}}]}
                 status = 200
             data = json.dumps(payload).encode()
@@ -271,6 +272,22 @@ def test_agent_verifier_script_sends_a_strict_schema_and_writes_its_output(
     assert len(requests) == 1
     written = json.loads((tmp_path / "agent-verifier-result.json").read_text())
     assert written["scores"] == {"resolved": 1}
+    assert written["score"] == 1
+    assert "score" not in requests[0]["response_format"]["json_schema"]["schema"]["properties"]
+
+
+def test_rubric_score_normalizes_each_criterion_and_weights_them() -> None:
+    criteria = (
+        RubricCriterion(name="resolved", description="0 or 1."),
+        RubricCriterion(name="tone", description="1 to 5.", min_score=1, max_score=5, weight=3),
+    )
+    assert rubric_score(criteria, {"resolved": 1, "tone": 3}) == pytest.approx(
+        (1 * 1 + 0.5 * 3) / 4
+    )
+    with pytest.raises(ValueError, match="must be between 1.0 and 5.0"):
+        rubric_score(criteria, {"resolved": 1, "tone": 6})
+    with pytest.raises(ValueError, match="must match rubric criteria"):
+        rubric_score(criteria, {"resolved": 1})
 
 
 async def test_cross_environment_scheduler_uses_each_runtime_and_bounds_concurrency(

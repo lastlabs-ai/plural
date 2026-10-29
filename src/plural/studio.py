@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import threading
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
@@ -243,11 +243,18 @@ class RevisionResourceAPI(Generic[T]):
         package_digest: str | None = None,
         version: str | None = None,
         parent_revision_id: str | None = None,
+        content_hash: str | None = None,
+        current: bool = True,
         **references: Any,
     ) -> JsonObject:
-        """One :meth:`Studio.push_batch` item; the parent is created when missing."""
+        """One :meth:`Studio.push_batch` item; the parent is created when missing.
+
+        With ``content_hash``, a server that hashes the item differently saves
+        nothing from the push. With ``current`` false, the revision is saved
+        without becoming the resource's current one.
+        """
         self._check_type(value)
-        return {
+        item: JsonObject = {
             "ref": ref,
             "kind": self.kind,
             "slug": slug,
@@ -258,6 +265,11 @@ class RevisionResourceAPI(Generic[T]):
                 value, version=version, parent_revision_id=parent_revision_id, **references
             ),
         }
+        if not current:
+            item["revision"]["current"] = False
+        if content_hash is not None:
+            item["content_hash"] = content_hash
+        return item
 
     def push(
         self,
@@ -270,6 +282,8 @@ class RevisionResourceAPI(Generic[T]):
         parent_revision_id: str | None = None,
         lineage: Sequence[Mapping[str, str]] = (),
         force: bool = False,
+        omit: Collection[str] = (),
+        current: bool = True,
         **references: Any,
     ) -> JsonObject:
         """Add a revision, or return the existing one holding the same content.
@@ -287,6 +301,9 @@ class RevisionResourceAPI(Generic[T]):
             lineage: Extra ``{"relation", "revision_id"}`` links, where
                 ``relation`` is ``forked_from`` or ``derived_from``.
             force: Add the revision even though the current one moved.
+            omit: Revision fields to leave out, for a server too old to accept them.
+            current: Make the revision the resource's current one. False saves it
+                without moving the current revision or renaming the resource.
             **references: Revision ids of dependencies.
 
         Returns:
@@ -311,6 +328,10 @@ class RevisionResourceAPI(Generic[T]):
             lineage=lineage,
             **references,
         )
+        for name in omit:
+            payload.pop(name, None)
+        if not current:
+            payload["current"] = False
         params: dict[str, Any] = {}
         if package_digest:
             params["package_digest"] = package_digest
@@ -331,6 +352,11 @@ class EnvironmentsAPI(RevisionResourceAPI[EnvironmentDefinition]):
     collection = "environments"
     kind = "environment"
     model_type = EnvironmentDefinition
+
+    def _revision_payload(self, value: EnvironmentDefinition, **references: Any) -> JsonObject:
+        del references
+        # The description is part of an Environment's content hash.
+        return _dump(value, exclude={"name"})
 
     def stamp_harness(
         self,

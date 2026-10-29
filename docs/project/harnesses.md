@@ -104,18 +104,52 @@ pinned version of the tool inside that Runtime. Built-ins use the same
 `run(task, agent, environment)` lifecycle described below, so every Harness sees the
 Environment through one interface.
 
-### Shared options
+### `harness_config` options
+
+`harness_config` takes a different set of keys for each built-in. Every key is
+optional; leave one out to use the tool's own default. Unknown names and invalid
+values fail before the Runtime starts.
 
 Every built-in accepts:
 
-- **`version`**: override the release-pinned tool version.
-- **`config`**: the tool's own settings, as an inline mapping or a file path. Plural
-  loads a path, stores the mapping, and includes it in the Agent hash.
+| Key | Type | Allowed values |
+| --- | --- | --- |
+| `version` | string | A release number of the tool, such as `2.1.236`, in place of the pinned one. npm aliases, URLs, and paths are refused. |
+| `config` | mapping, JSON text, or file path | The tool's own settings. A path to a JSON or YAML file holding a mapping is loaded first. Plural stores the mapping and includes it in the Agent hash. |
 
-Claude Code also accepts `reasoning_effort`, `permission_mode`, and `max_turns`.
-Codex also accepts `reasoning_effort` and `sandbox`.
+Claude Code (`claude-code`, pinned to 2.1.236, Anthropic models only) also accepts:
 
-Unknown names and invalid options fail before the Runtime starts.
+| Key | Type | Allowed values |
+| --- | --- | --- |
+| `reasoning_effort` | string | `low`, `medium`, `high` |
+| `permission_mode` | string | `default`, `acceptEdits`, `plan`, `bypassPermissions` |
+| `max_turns` | integer | 1 or more. The most turns Claude Code takes in one Trial. |
+
+Codex (`codex`, pinned to 0.153.2, OpenAI models only) also accepts:
+
+| Key | Type | Allowed values |
+| --- | --- | --- |
+| `reasoning_effort` | string | `low`, `medium`, `high` |
+| `sandbox` | string | `read-only`, `workspace-write`, `danger-full-access` |
+
+Hermes (`hermes`, pinned to 0.19.0, any model) accepts only the shared keys.
+
+A full example:
+
+```yaml
+name: support-claude
+model: anthropic/claude-sonnet-5
+harness: claude-code
+harness_config:
+  version: 2.1.236
+  reasoning_effort: high
+  permission_mode: acceptEdits
+  max_turns: 40
+  config: claude-settings.json
+```
+
+`plural harness show claude-code --json` prints the same options as JSON Schema,
+with the pinned version.
 
 ### What Plural installs and how it runs
 
@@ -162,8 +196,8 @@ In a project, create the Harness folder from the template:
 plural harness init support-loop
 ```
 
-This writes `harnesses/support-loop/harness.yaml` and
-`harnesses/support-loop/harness.py`. Replace `harness.py` with:
+This writes `harness.yaml`, `harness.py`, and `README.md` in
+`harnesses/support-loop/`. Replace `harness.py` with:
 
 ```python
 import json
@@ -304,8 +338,22 @@ must already be available in the Environment Runtime.
 
 ### Save the Harness in a project
 
-`harnesses/support-loop/harness.yaml` names the class and supplies its settings,
-instead of repeating how to run it:
+A project Harness is a folder under `harnesses/`:
+
+```text
+harnesses/support-loop/
+  harness.yaml   # identity, the class to run, and its settings
+  harness.py     # the Harness subclass
+  README.md      # the overview shown on the Harness page
+```
+
+The Harness page in Plural Intel shows the README above the folder's code, so a
+reader sees what the loop does and then exactly how. Use the README for what the code
+doesn't say on its own: what the model is shown each turn, how it is asked for its
+next move, how the move is carried out, and when the loop stops.
+
+`harness.yaml` names the class and supplies its settings, instead of repeating how
+to run it:
 
 ```yaml
 name: support-loop
@@ -316,10 +364,52 @@ config:
   max_turns: 12
 ```
 
-`name` must match the folder name. The manifest supplies the Harness's identity, so a
-class saved in a project does not need `name` or `version` attributes; values set
-there are replaced by the manifest's. An Agent uses the Harness by name in
-`agent.yaml`:
+The manifest supplies the Harness's identity, so a class saved in a project does not
+need `name` or `version` attributes; values set there are replaced by the
+manifest's.
+
+### `harness.yaml` fields
+
+Unknown keys are errors, so a misspelled field fails validation instead of being
+ignored.
+
+| Field | Required | Type | Default | Allowed values |
+| --- | --- | --- | --- | --- |
+| `name` | Yes | string | | The folder name under `harnesses/`: lowercase letters, digits, and single hyphens, up to 63 characters, such as `support-loop`. |
+| `version` | No | string | `0.1.0` | A semantic version, such as `1.2.0` or `2.0.0-beta.1`. |
+| `description` | No | string | `""` | One line on what the loop is for. Shown under the Harness name. |
+| `python` | Yes | string | | The Harness subclass as `file.py:ClassName`, relative to the folder. The file must stay inside the folder. |
+| `config` | No | mapping | `{}` | Any JSON-compatible keys and values. The class reads them as `self.config`. |
+| `readme` | No | string or `null` | `README.md` | A Markdown file inside the folder. Left at the default, a missing file is skipped; named explicitly, a missing file is an error. `null` turns it off. |
+`config` has no fixed keys: its keys are whatever your class reads. Document each one
+in the README, with its type and default, and read it with a fallback so a missing
+key still runs:
+
+```python
+max_turns = int(self.config.get("max_turns", 20))
+```
+
+A `config` value must be JSON-compatible: a string, a number, `true` or `false`,
+`null`, a list, or a mapping of those. It is part of the Harness hash, so changing
+a value makes a new version.
+
+An Agent can change these options without a second Harness. The keys in its
+`agent.yaml` `harness_config:` replace the same keys in `config:` for that Agent's
+runs, and the Agent's hash records them:
+
+```yaml
+name: careful
+model: openai/gpt-5.6-luna
+harness: support-loop
+harness_config:
+  max_turns: 30
+```
+
+A Harness defined only in Python sets its README as the `readme` class attribute, a
+Markdown string. Like every file in the folder, the README is part of the Harness
+hash, so editing it saves a new version.
+
+An Agent uses the Harness by name in `agent.yaml`:
 
 ```yaml
 name: support-custom
@@ -372,9 +462,8 @@ the matching artifact. Ordinary transcripts do not satisfy that requirement. See
 This section is for readers exchanging records with other tools. A *trajectory* is
 the step-by-step record of what the Agent saw and did.
 
-The trajectory file to exchange with other tools is
-[`atif-trajectory.json` in ATIF](https://docs.harborframework.com/core-concepts/agents/atif),
-Harbor's Agent Trajectory Interchange Format. Current ATIF is `ATIF-v1.7`: an `agent`
+The trajectory file to exchange with other tools is `atif-trajectory.json`, in ATIF,
+the Agent Trajectory Interchange Format. Current ATIF is `ATIF-v1.7`: an `agent`
 block, ordered `steps`, and optional `final_metrics`. Put Plural-only notes in the
 format's `extra` field. A reward stays on the episode, and a verifier score stays on
 the Trial; neither is an ATIF step.
@@ -384,7 +473,6 @@ trajectories. For any Harness that runs through Plural's episode, including the
 built-in loops, Plural derives `atif-trajectory.json` from `episode.jsonl` itself, along with
 `trajectory.json`, the same turns as plain chat messages. A
 command-based Harness spec (`HarnessDefinition`) that writes ATIF sets its
-`trajectory` field to `atif-trajectory.json`. The spec is Harbor's
-[ATIF RFC](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md).
+`trajectory` field to `atif-trajectory.json`.
 
 Next, choose a model and instructions in [Agents](agents.md).

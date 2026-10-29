@@ -244,6 +244,7 @@ class HarnessProtocol(FrozenModel):
     artifacts: tuple[FileDeclaration, ...] = ()
     supports_tito: bool = False
     tito_path: str | None = None
+    readme: str = ""
 
     @field_validator(
         "command",
@@ -301,6 +302,9 @@ class HarnessPackage(FrozenModel):
     def content_hash(self) -> str:
         """Stable package hash: the protocol plus the source contents, not its location."""
         payload = self.definition.model_dump(mode="json")
+        # Harnesses without a README keep the hash they had before it existed.
+        if not self.definition.readme:
+            del payload["readme"]
         if self.source.digest is None:
             payload["source"] = self.source.model_dump(mode="json")
         else:

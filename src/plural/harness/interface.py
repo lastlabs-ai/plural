@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from plural._deprecation import renamed_attribute
 from plural.common import FrozenModel
+from plural.harness.deadline import call_timeout, episode_deadline
 from plural.harness.episode import EpisodeRecorder
 from plural.usage import normalize_usage, price_own_hardware
 
@@ -61,8 +62,20 @@ class HarnessAgent:
         *,
         model_resolution: dict[str, Any] | None = None,
         recorder: EpisodeRecorder | None = None,
+        deadline: float | None = None,
     ) -> None:
+        """Create the Agent a Harness drives.
+
+        Args:
+            payload: The Agent as the execution request sends it.
+            model_resolution: The model the Job resolved for this Agent.
+            recorder: Where each model call is recorded.
+            deadline: The ``time.monotonic()`` at which the episode runs out of
+                time. Each model call may wait until then. Defaults to now plus
+                ``PLURAL_STOP_SECONDS``, or 600 seconds without it.
+        """
         self._recorder = recorder
+        self._deadline = episode_deadline() if deadline is None else deadline
         self.raw = dict(payload)
         self.name = str(payload.get("name") or "")
         self.model = str(payload.get("model") or "")
@@ -81,7 +94,11 @@ class HarnessAgent:
         tools: list[dict[str, Any]] | None = None,
         **options: Any,
     ) -> HarnessCompletion:
-        """Call the Job's model gateway, or the Agent's own endpoint when it has one."""
+        """Call the Job's model gateway, or the Agent's own endpoint when it has one.
+
+        The call may wait as long as the episode has left, so a slow local model
+        is cut off by the Environment's ``max_seconds``, not a fixed timeout.
+        """
         model = (
             self.model_resolution.get("catalog_model_id")
             or self.model_resolution.get("model")
@@ -97,7 +114,7 @@ class HarnessAgent:
             payload["tools"] = tools
         started = self._recorder.start() if self._recorder else None
         try:
-            response = _gateway_request(payload)
+            response = _gateway_request(payload, call_timeout(self._deadline))
         except Exception as exc:
             if self._recorder and started:
                 self._recorder.model_call(
@@ -417,7 +434,7 @@ def _request_id(response: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _gateway_request(payload: dict[str, Any]) -> dict[str, Any]:
+def _gateway_request(payload: dict[str, Any], timeout: float) -> dict[str, Any]:
     endpoint = (os.environ.get("PLURAL_AGENT_ENDPOINT") or "").rstrip("/")
     if endpoint:
         base = endpoint
@@ -443,7 +460,7 @@ def _gateway_request(payload: dict[str, Any]) -> dict[str, Any]:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")

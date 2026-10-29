@@ -183,11 +183,22 @@ class HarnessManifest(ManifestModel):
     the class does not repeat ``name`` or ``version``.
     """
 
-    name: str = Field(min_length=1)
-    version: str = "0.1.0"
-    description: str = ""
-    python: str = Field(min_length=1)
-    config: dict[str, Any] = Field(default_factory=dict)
+    name: str = Field(min_length=1, description="The folder name under harnesses/.")
+    version: str = Field(default="0.1.0", description="A semantic version, such as 1.2.0.")
+    description: str = Field(default="", description="One line on what the loop is for.")
+    python: str = Field(
+        min_length=1,
+        description="The Harness subclass, as file.py:ClassName, relative to this folder.",
+    )
+    config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Settings the class reads as self.config. Any JSON-compatible values.",
+    )
+    readme: str | None = Field(
+        default="README.md",
+        description="A Markdown file in this folder shown as the Harness overview. Left "
+        "at the default, a missing file is skipped.",
+    )
 
 
 class BenchmarkManifest(BenchmarkRelease):

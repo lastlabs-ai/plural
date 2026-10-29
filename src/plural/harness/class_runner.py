@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
+from plural.harness.deadline import episode_deadline
 from plural.harness.episode import EPISODE_FILE, EpisodeRecorder
 from plural.harness.interface import (
     HarnessAgent,
@@ -33,12 +34,14 @@ def main(argv: list[str] | None = None) -> None:
     config = json.loads(args[1]) if len(args) == 2 else {}
     if not isinstance(config, dict):
         raise SystemExit("Harness config must be a JSON object")
-    harness = _load(args[0], config)
     request = json.loads(sys.stdin.readline())
     if not isinstance(request, dict):
         raise SystemExit("Harness request must be a JSON object")
     task_payload = request.get("task")
     agent_payload = request.get("agent")
+    if isinstance(agent_payload, dict) and isinstance(agent_payload.get("harness_config"), dict):
+        config = {**config, **agent_payload["harness_config"]}
+    harness = _load(args[0], config)
     environment_payload = request.get("environment")
     if not isinstance(task_payload, dict):
         raise SystemExit("Harness request is missing task")
@@ -48,12 +51,14 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("Harness request is missing environment")
     task = HarnessTask.from_payload(task_payload)
     recorder = EpisodeRecorder(EPISODE_FILE)
+    limits = environment_payload.get("limits")
     agent = HarnessAgent(
         agent_payload,
         model_resolution=(
             request["model_resolution"] if isinstance(request.get("model_resolution"), dict) else {}
         ),
         recorder=recorder,
+        deadline=episode_deadline(limits if isinstance(limits, dict) else None),
     )
     environment = HarnessEnvironment(environment_payload, recorder=recorder)
     try:

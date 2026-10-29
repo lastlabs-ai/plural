@@ -27,7 +27,8 @@ These apply when you push, pull, or run in a hosted project.
   that starts it, and cloud sandboxes come from an Environment's Runtime.
 - `plural run --record` pushes what the run needs first, as a new
   numbered revision of any resource whose files changed. `plural job record` pushes
-  no resources: the revisions a finished Job ran must already be hosted.
+  no resources unless you pass `--push-pinned`, which pushes the revisions the Job
+  ran from the copies kept in `.plural/packages`.
 - Revisions saved in the web app, or pushed before 0.15, have no source package.
   Tasks, Agents, and Benchmarks are rebuilt from their stored definition on pull;
   Environments, Verifiers, and Harnesses cannot be pulled. See

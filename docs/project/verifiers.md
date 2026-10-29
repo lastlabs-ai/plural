@@ -386,6 +386,12 @@ reply_quality = AgentVerifier(
 )
 ```
 
+The judge gives each criterion a score within its range, cites evidence, and writes
+feedback. It does not pick the Verifier's score: Plural normalizes each criterion's
+score to 0 to 1 and takes their weighted mean, so in this example a reply scoring 2 on
+`policy_accuracy` and 1 on `clarity` scores 0.75. A criterion score outside its range
+fails the Verifier rather than being clamped.
+
 Choose the judge model from `plural model list`, the same way you would when creating an
 Agent. You can also browse models and prices in the web app's model Catalog. An
 AgentVerifier brings its own judging instructions and rubric, so you don't need to
@@ -516,8 +522,9 @@ Trial's score.
 
 For power users who need the exact arithmetic:
 
-- Each rubric criterion's range is normalized to 0 to 1, and criterion weights are
-  applied.
+- For a judge or a reviewer, each rubric criterion's score is normalized to 0 to 1
+  over its range, and the Verifier's score is their mean weighted by each criterion's
+  `weight`.
 - Each Verifier's `weight` then sets its share of the Trial's weighted score.
 - Only `check` counts. Step rewards reach a score only through `check: total_reward`.
 

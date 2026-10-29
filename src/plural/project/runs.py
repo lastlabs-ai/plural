@@ -19,10 +19,12 @@ Job itself.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.util
 import json
 import shutil
 import sys
+import tempfile
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -37,6 +39,7 @@ from plural.agents.models import AgentDefinition
 from plural.common import HarnessPackage, PackageSource
 from plural.credentials import CredentialValue
 from plural.environments.definition import EnvironmentDefinition
+from plural.errors import PluralError
 from plural.execution.capacity import recommend_concurrency
 from plural.execution.episode_server import EpisodeServerOptions
 from plural.harness.retrieval import source_digest
@@ -56,6 +59,7 @@ from plural.project.layout import (
     HARNESS,
     TASK,
     VERIFIER,
+    Project,
     ProjectError,
     ResourceRef,
 )
@@ -66,8 +70,10 @@ from plural.project.sync import (
     PushStep,
     apply_project_push,
     plan_project_push,
+    push,
     resolve_pinned,
     revision_label,
+    unpushed_pins,
 )
 from plural.studio import Studio, slugify
 from plural.tasks import Benchmark, TaskDefinition
@@ -163,13 +169,16 @@ class Tracking:
     """Record a local run in the hosted project while it executes.
 
     Pass one to ``run_local`` or a rerun. Afterwards ``hosted_job_id`` names
-    the hosted Job, and ``errors`` lists what could not be reported; ``plural
-    job record`` uploads the rest.
+    the hosted Job, and ``errors`` lists what could not be reported even
+    after one more upload once the run finished. ``retryable`` says whether
+    ``plural job record`` could still upload the rest, which it can only
+    when the failure was the network or the service, not the data.
     """
 
     studio: Studio
     hosted_job_id: str | None = None
     errors: list[str] = field(default_factory=list)
+    retryable: bool = True
 
 
 @dataclass(frozen=True)
@@ -506,7 +515,7 @@ def submit_client_job(
     Raises:
         ProjectError: When an input the Job pinned is not pushed with the same content.
     """
-    resolved = resolve_pinned(studio, record.inputs)
+    resolved = resolve_pinned(studio, record.inputs, job_id=record.job_id)
     source = ResourceRef.parse(record.source)
     if source not in resolved:
         raise ProjectError(f"Job {record.job_id} does not pin its source {source}.")
@@ -565,6 +574,105 @@ def push_local_job(workspace: Workspace, studio: Studio, job_id: str) -> PushedJ
         replace(record, hosted_job_id=client.job_id, hosted_project_id=studio.project),
     )
     return PushedJob(job=client, executions=len(published))
+
+
+_COPY_IGNORED = (".plural", ".git", ".venv", "node_modules", "__pycache__", ".DS_Store")
+
+
+def push_pinned(
+    workspace: Workspace, studio: Studio, binding: ProjectBinding, job_id: str
+) -> list[PushStep]:
+    """Push the exact inputs a finished local Job ran that the hosted project lacks.
+
+    Each one is rebuilt in a scratch copy of the project from the copies the
+    run kept in ``.plural/packages``, so your files are never touched. They are
+    added as unversioned revisions that do not become current, so what the
+    hosted project shows as current does not change.
+
+    Returns:
+        One step per revision pushed.
+
+    Raises:
+        ProjectError: Naming each input that neither its files nor a kept
+            copy reproduce.
+    """
+    record = finished_local_job(workspace, job_id)
+    missing = unpushed_pins(studio, record.inputs)
+    if not missing:
+        return []
+    wanted = {
+        ResourceRef.parse(key): pin["content_hash"]
+        for key, pin in record.inputs.items()
+        if pin.get("content_hash")
+    }
+    kept = workspace.project.state_dir / "packages"
+    with tempfile.TemporaryDirectory(prefix="plural-pinned-") as scratch:
+        root = Path(scratch) / workspace.project.root.name
+        shutil.copytree(workspace.project.root, root, ignore=shutil.ignore_patterns(*_COPY_IGNORED))
+        order = Workspace(Project.at(root), catalog=workspace.catalog).dependency_order(
+            list(wanted)
+        )
+        problems = [
+            f"{ref}: neither its files nor a copy in .plural/packages hold the content "
+            f"Job {job_id} ran ({wanted[ref]})"
+            for ref in order
+            if not _rebuild(root, ref, wanted[ref], kept, workspace)
+        ]
+        if problems:
+            raise ProjectError(
+                f"Cannot push what Job {job_id} ran; nothing was uploaded. Restore those "
+                "files, for example with git, then record again.",
+                problems,
+            )
+        copy = Workspace(Project.at(root), catalog=workspace.catalog)
+        steps: dict[ResourceRef, PushStep] = {}
+        for ref in copy.dependency_order(missing):
+            if ref in steps:
+                continue
+            result = push(
+                copy,
+                studio,
+                binding,
+                ref,
+                with_deps=True,
+                force=True,
+                current=False,
+                versioned=False,
+            )
+            for step in result.steps:
+                if step.status == "pushed":
+                    steps.setdefault(step.ref, step)
+    return list(steps.values())
+
+
+def _rebuild(root: Path, ref: ResourceRef, digest: str, kept: Path, workspace: Workspace) -> bool:
+    """Make ``ref`` in the scratch project at ``root`` hold ``digest``.
+
+    The working copy is tried first, then each copy a run kept of it.
+
+    Returns:
+        Whether some copy holds exactly that content.
+    """
+    project = Project.at(root)
+
+    def holds() -> bool:
+        try:
+            loaded = Workspace(project, catalog=workspace.catalog).load(ref)
+        except (ProjectError, ValidationError, ValueError):
+            return False
+        return loaded.content_hash == digest
+
+    if holds():
+        return True
+    directory = project.resource_dir(ref)
+    for candidate in sorted(kept.glob(f"{ref.kind}-{ref.name}-*")):
+        if not candidate.is_dir():
+            continue
+        shutil.rmtree(directory, ignore_errors=True)
+        shutil.copytree(candidate, directory)
+        if holds():
+            return True
+    return False
 
 
 def finished_local_job(workspace: Workspace, job_id: str) -> RunRecord:
@@ -703,9 +811,13 @@ def local_jobs(workspace: Workspace) -> list[dict[str, Any]]:
         record = json.loads(record_path.read_text(encoding="utf-8"))
         result_path = directory / "result.json"
         status = "running"
+        score = None
         if result_path.is_file():
-            status = JobResult.model_validate_json(result_path.read_text("utf-8")).status
-        items.append({**record, "status": status})
+            result = JobResult.model_validate_json(result_path.read_text("utf-8"))
+            status = result.status
+            scores = [item.mean_score for item in result.aggregates if item.mean_score is not None]
+            score = sum(scores) / len(scores) if scores else None
+        items.append({**record, "status": status, "score": score})
     return sorted(items, key=lambda item: str(item.get("created_at")), reverse=True)
 
 
@@ -1009,7 +1121,57 @@ def _execute(
         raise
     if tracker is not None and tracking is not None:
         tracking.errors = tracker.close()
+        if tracking.errors:
+            _finish_recording(tracking, store, spec.job_id, client.agents)
     return spec.job_id, result
+
+
+def _finish_recording(
+    tracking: Tracking, store: Any, job_id: str, agents: Mapping[str, tuple[str, str]]
+) -> None:
+    """Upload what tracking missed; when that fails too, mark the hosted Job failed.
+
+    ``publish_job`` is idempotent, so it uploads only what the hosted Job lacks.
+    """
+    from plural.execution.report import publish_job
+
+    assert tracking.hosted_job_id is not None
+    try:
+        publish_job(
+            tracking.studio,
+            store,
+            job_id,
+            tracking.hosted_job_id,
+            worker_id="plural-cli",
+            agents=agents,
+        )
+    except Exception as exc:  # noqa: BLE001 - reported, never raised past the run
+        tracking.errors = [*tracking.errors, str(exc)]
+        tracking.retryable = _transient(exc)
+    else:
+        tracking.errors = []
+        return
+    with contextlib.suppress(PluralError):
+        tracking.studio.jobs.transition(
+            tracking.hosted_job_id,
+            "failed",
+            error_code="recording_incomplete",
+            error_message=(
+                f"The local run {job_id} finished, but not every Trial was uploaded: "
+                f"{tracking.errors[-1]}"
+            ),
+        )
+
+
+def _transient(exc: BaseException) -> bool:
+    """Whether trying the same upload again could succeed.
+
+    Returns:
+        ``True`` for the network, rate limits, and server errors.
+    """
+    if isinstance(exc, PluralError):
+        return exc.status_code is None or exc.status_code == 429 or exc.status_code >= 500
+    return isinstance(exc, (OSError, TimeoutError)) or type(exc).__module__.startswith("httpx")
 
 
 def _write_record(directory: Path, record: RunRecord) -> None:
