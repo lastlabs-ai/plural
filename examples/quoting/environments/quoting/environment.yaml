@@ -1,0 +1,19 @@
+# Environment: the Apps an Agent works with, plus where they run and the limits.
+# Quoting is one Python App: the Mill class in environment.py.
+name: quoting
+version: 1.0.0
+description: A steel mill's quoting desk. Look up prices, stock, and the schedule, then quote or hand off.
+overview: >-
+  One request for quote per episode. The price book, costs, stock, and bookings stay on
+  State; the Agent sees only what each action returns.
+python: environment.py:Mill
+readme: README.md
+
+# local runs on this machine as a trusted subprocess, so the project runs anywhere.
+# Use provider: docker or daytona to run each Trial in a sandbox instead.
+runtime:
+  provider: local
+
+limits:
+  max_turns: 12
+  max_seconds: 180

@@ -60,6 +60,7 @@ plural env serve NAME [--app APP] [--port 3825]
 plural run (-t TASK | -b BENCHMARK) (-m MODEL [--harness HARNESS] | -a AGENT)
            [--record] [--evaluation-track ID] [--attempts N] [--concurrency N]
            [--plural-version VERSION] [--dry-run] [--json]
+plural eval status [--benchmark NAME] [--json]
 plural job list
 plural job show|rerun|record JOB_ID
 plural job record JOB_ID --push-pinned

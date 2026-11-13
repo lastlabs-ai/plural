@@ -48,6 +48,20 @@ Commands that print data, such as `validate`, `show`, `list`, and `run`, accept
 Projects written for Plural 0.14 or earlier use a different layout; see
 [Migrate to 0.15](../migration/projects.md).
 
+To see how far you've got with evaluating an Agent, run:
+
+```bash
+plural eval status
+```
+
+It lists the steps of an evaluation (set up, define good, build the eval set, check
+the graders, baseline, diagnose, improve, and report), marks each one done, needing
+attention, or still to do, and ends with the command to run next. It reads only the
+project and its local Jobs. With several Benchmarks, name one with `--benchmark`.
+Plural has commands for setup, the eval set, and the baseline today; the other steps
+show as coming soon. From Python, `plural.evaluation.eval_status(".")` returns the
+same thing.
+
 ## Create a project
 
 ```bash
@@ -342,6 +356,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ task        Create, validate, push, pull, and inspect Tasks.                                     │
 │ agent       Create, validate, push, pull, and inspect Agents.                                    │
 │ benchmark   Create, validate, push, pull, and inspect Benchmarks.                                │
+│ eval        Evaluate an Agent and improve it, one step at a time.                                │
 │ job         List, inspect, and rerun Jobs.                                                       │
 │ trial       Inspect and rerun Trials.                                                            │
 │ review      List and submit human reviews.                                                       │
@@ -1331,6 +1346,41 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural eval`
+
+```text
+
+ Usage: plural eval [OPTIONS] COMMAND [ARGS]...
+
+ Evaluate an Agent and improve it, one step at a time.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ status  Show each step of evaluating an Agent and the command to run next.                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural eval status`
+
+```text
+
+ Usage: plural eval status [OPTIONS]
+
+ Show each step of evaluating an Agent and the command to run next.
+
+ The steps are: set up, define good, build the eval set, check the graders,
+ baseline, diagnose, improve, and report. This reads the project and its local
+ Jobs only. Steps whose commands are not in Plural yet show as coming soon.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --benchmark  -b      <str>  The Benchmark to evaluate, when there are several.                   │
+│ --json                      Print machine-readable JSON.                                         │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

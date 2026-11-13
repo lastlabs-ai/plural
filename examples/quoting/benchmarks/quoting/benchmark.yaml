@@ -1,0 +1,153 @@
+# Benchmark: a fixed set of Tasks and the rules for ranking results.
+name: quoting
+version: 1.0.0
+description: Sixty requests for quote to a steel mill, across four kinds of request.
+purpose: >-
+  Checks that an Agent prices an order from the mill's live figures, promises only a
+  delivery date the mill can meet, and hands off a request it can't quote safely.
+tasks:
+  - quote-001
+  - quote-002
+  - quote-003
+  - quote-004
+  - quote-005
+  - quote-006
+  - quote-007
+  - quote-008
+  - quote-009
+  - quote-010
+  - quote-011
+  - quote-012
+  - quote-013
+  - quote-014
+  - quote-015
+  - quote-016
+  - quote-017
+  - quote-018
+  - quote-019
+  - quote-020
+  - quote-021
+  - quote-022
+  - quote-023
+  - quote-024
+  - quote-025
+  - quote-026
+  - quote-027
+  - quote-028
+  - quote-029
+  - quote-030
+  - quote-031
+  - quote-032
+  - quote-033
+  - quote-034
+  - quote-035
+  - quote-036
+  - quote-037
+  - quote-038
+  - quote-039
+  - quote-040
+  - quote-041
+  - quote-042
+  - quote-043
+  - quote-044
+  - quote-045
+  - quote-046
+  - quote-047
+  - quote-048
+  - quote-049
+  - quote-050
+  - quote-051
+  - quote-052
+  - quote-053
+  - quote-054
+  - quote-055
+  - quote-056
+  - quote-057
+  - quote-058
+  - quote-059
+  - quote-060
+categories:
+  - id: simple
+    name: Simple
+    description: "In stock, and the requested date is one the mill can meet."
+    tasks:
+      - quote-002
+      - quote-009
+      - quote-010
+      - quote-013
+      - quote-016
+      - quote-018
+      - quote-020
+      - quote-021
+      - quote-023
+      - quote-026
+      - quote-028
+      - quote-029
+      - quote-031
+      - quote-032
+      - quote-039
+      - quote-042
+      - quote-043
+      - quote-046
+      - quote-049
+      - quote-051
+      - quote-052
+      - quote-053
+      - quote-057
+      - quote-060
+  - id: rush
+    name: Rush
+    description: "In stock, but the mill is booked: the requested date is too early, so quote the earliest date it can meet."
+    tasks:
+      - quote-004
+      - quote-006
+      - quote-008
+      - quote-019
+      - quote-022
+      - quote-033
+      - quote-036
+      - quote-037
+      - quote-038
+      - quote-041
+      - quote-044
+      - quote-045
+      - quote-047
+      - quote-048
+      - quote-054
+      - quote-056
+  - id: ambiguous
+    name: Ambiguous
+    description: "The grade or the quantity isn't settled, so the right answer is to hand off and ask."
+    tasks:
+      - quote-003
+      - quote-005
+      - quote-012
+      - quote-015
+      - quote-017
+      - quote-025
+      - quote-034
+      - quote-035
+      - quote-040
+      - quote-059
+  - id: out-of-stock
+    name: Out of stock
+    description: "Not enough on hand, or a grade the mill doesn't sell, so the right answer is to hand off."
+    tasks:
+      - quote-001
+      - quote-007
+      - quote-011
+      - quote-014
+      - quote-024
+      - quote-027
+      - quote-030
+      - quote-050
+      - quote-055
+      - quote-058
+scoring:
+  metric: Requests answered right
+  description: Share of requests answered right, as quote-check scores them.
+  aggregation: weighted_mean
+  score_range: [0.0, 1.0]
+  success_threshold: 1.0
+  agent_failure: zero
+  infrastructure_error: exclude

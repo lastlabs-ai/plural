@@ -1,0 +1,13 @@
+# Task: one request for quote. expected is the answer key, which the Agent never sees.
+name: quote-029
+version: 1.0.0
+instructions: instruction.md
+environment: quoting
+verifiers:
+  - quote-check
+expected:
+  decision: quote
+  grade: A36
+  tons: 15
+initial_state:
+  booked: ['2026-12-15', '2026-12-16']

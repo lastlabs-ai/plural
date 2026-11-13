@@ -1,0 +1,17 @@
+# Task: one request for quote. expected is the answer key, which the Agent never sees.
+name: quote-011
+version: 1.0.0
+instructions: instruction.md
+environment: quoting
+verifiers:
+  - quote-check
+expected:
+  decision: handoff
+initial_state:
+  stock:
+    A36: 400
+    A572-50: 250
+    A516-70: 120
+    A500-B: 180
+    '1018': 90
+    304SS: 9

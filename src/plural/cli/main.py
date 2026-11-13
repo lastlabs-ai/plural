@@ -9,6 +9,7 @@ from plural.cli.app_commands import app_app
 from plural.cli.auth_commands import auth_app
 from plural.cli.common import deprecated
 from plural.cli.credential_commands import credential_app
+from plural.cli.eval_commands import eval_app
 from plural.cli.external_commands import external_app
 from plural.cli.models_commands import models_app
 from plural.cli.project_commands import project_app
@@ -77,6 +78,7 @@ for _kind in KINDS:
         _group.command("apply")(verifier_apply)
     app.add_typer(_group, name=_kind.cli)
 app.command("run")(run)
+app.add_typer(eval_app, name="eval")
 app.add_typer(job_app, name="job")
 app.add_typer(trial_app, name="trial")
 app.add_typer(review_app, name="review")

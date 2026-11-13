@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(sys.executable).with_name("plural")
 TUTORIALS = {
     "first-project": ("support-triage", "scripted"),
+    "quoting": ("quoting", "quote-bot"),
     "wordle": ("wordle", "luna"),
 }
 

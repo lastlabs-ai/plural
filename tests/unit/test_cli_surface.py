@@ -41,6 +41,7 @@ def test_top_level_commands_are_the_documented_set() -> None:
         "app",
         *RESOURCE_GROUPS,
         "run",
+        "eval",
         "job",
         "trial",
         "review",

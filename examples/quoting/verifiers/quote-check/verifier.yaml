@@ -1,0 +1,7 @@
+# Verifier: what counts as good work for the Tasks that list it.
+# check scores the answered request. Its sub-scores are the checks behind the score:
+# decision_correct, price_correct, delivery_feasible, above_cost, and margin_usd.
+name: quote-check
+version: 1.0.0
+kind: deterministic
+check: verify.py:check

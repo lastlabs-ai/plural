@@ -126,6 +126,70 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   training system can learn from it. Short for "tokens in, tokens out". *Precisely:*
   exact tokens in and tokens out, with aligned provenance for training.
 
+## Evaluating and improving an Agent
+
+Plural is adding a guided way to find out how well an Agent works, where and why it
+fails, and which change makes it better. These words name its pieces. They are coming
+soon: each entry says what the word will mean, so that it means one thing from the
+start. Score and reward keep the meanings above.
+
+- **Metric:** one thing you measure about an attempt, such as "price correct" or
+  "margin in dollars". *Precisely:* a named, declared measurement with a kind (`binary`,
+  `score`, `number`, `rating`, or `running`), a direction, an optional unit, and a role.
+  A Verifier's `check` produces values at the end of the episode. A metric is never a
+  reward and never enters the reward ledger.
+- **Gate, objective, guardrail:** what a metric is for. A gate must pass, an objective
+  is something to do well on, and a guardrail is watched but never ranked on.
+  *Precisely:* a metric's role on a Scorecard. An attempt passes when every gate passes.
+- **Running metric:** a metric measured after every move, like the money in the till
+  as a simulated business runs. *Precisely:* a metric of kind `running`, produced by a
+  Verifier's `measure` hook after each step and reduced to one value by its aggregate,
+  such as the final or the lowest value.
+- **Scorecard:** your team's written definition of good work for one workflow.
+  *Precisely:* a versioned project resource holding the workflow's plain-language
+  definition of good, its metrics and their roles, the decisions that settled
+  disagreements, and the labels used to check the graders.
+- **Label:** one person's judgment of one attempt, with a reason. *Precisely:* a
+  judgment of a Trial against a Scorecard's metrics. Labels check how far the graders
+  agree with people; they never change a score.
+- **Held-out set:** Tasks kept back to confirm an improvement on work the Agent was
+  never tuned on. *Precisely:* a Benchmark's held-out Tasks, which diagnosis and fixing
+  never look at. Each run against them is a **peek**, and is counted.
+- **Checkpoint:** a saved moment of an attempt that it can be restarted from.
+  *Precisely:* everything needed to restart a Trial exactly as it stood after step *k*:
+  each App's State and random-number state, the step counters, and the Agent's context.
+- **Fork:** rerunning the rest of an attempt from a Checkpoint, to see whether a change
+  would have helped. *Precisely:* a Trial started from another Trial's Checkpoint, with
+  an Intervention or, as a **control**, with none.
+- **Intervention:** the change a Fork tries. *Precisely:* a typed change applied at the
+  fork point. A **deployable** one changes the Agent, such as its model or instructions.
+  A **diagnostic** one changes one moment of the attempt, such as an observation, and
+  only helps find a cause.
+- **Inspector:** Plural's agent for finding out why an Agent fails. *Precisely:* an
+  agent with read-only evidence tools that runs Forks as experiments. One run of it over
+  a Job is an **Investigation**.
+- **Finding:** the Inspector's explanation of one failed attempt. *Precisely:* the
+  critical step, a cause kind from the **cause lens** (model, context, tools,
+  instructions, Harness, environment, grader, task, integrity, or one a project adds), a
+  free-text cause, the evidence and experiments behind it, a status (`confirmed`,
+  `inferred`, `refuted`, or `inconclusive`), and suggested fixes.
+- **Failure pattern:** a kind of failure that recurs, with a name, a way to recognize
+  it, and fixes known to help. *Precisely:* a reusable pattern kept in a library at
+  project, organization, or Plural scope. A **failure mode** is a group of Findings in
+  one Job that share a pattern or cause.
+- **Fix:** a change to the Agent being tested to see whether it really helps.
+  *Precisely:* a deployable change with a lifecycle: proposed, tested, applied, and
+  confirmed, or rejected.
+- **Trust tier:** how far an attempt's result can be trusted, from how it ran.
+  *Precisely:* `verified`, `standard`, or `unverified`, computed for every Trial from its
+  isolation, network enforcement, pinned image, sandbox provider conformance, and signed
+  host report.
+- **Eval Report:** the document an evaluation ends with: how well the Agent works,
+  where and why it fails, which fixes worked, and how sure you can be. *Precisely:* an
+  immutable document generated from pinned inputs (a Scorecard version, Jobs, an
+  Investigation, and Fixes), in which every number is computed and links to its
+  evidence.
+
 ## Versions and sharing
 
 - **Push:** saving a copy of your work to your private hosted project. It never makes
