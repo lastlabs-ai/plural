@@ -655,7 +655,7 @@ async def test_app_host_holds_secrets_and_verifiers_query_it_before_teardown(
     remaining = provider.files["docker-0"]
     assert not any(path.startswith((".plural/apps/", ".plural/verifiers/")) for path in remaining)
     receipt = json.loads((execution.parent / "result.json").read_text())
-    assert receipt["app_isolation"] == "none"
+    assert receipt["app_isolation"] == "os_user"
 
 
 async def test_missing_app_secrets_fail_before_a_runtime_starts(tmp_path: Path) -> None:

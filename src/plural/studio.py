@@ -410,6 +410,20 @@ class TasksAPI(RevisionResourceAPI[Task]):
         payload["verifier_revision_ids"] = ids
         return payload
 
+    def record_check(self, task_id: str, revision_id: str, check: Mapping[str, Any]) -> JsonObject:
+        """Store ``plural task check`` on the pushed revision it checked.
+
+        The server refuses a check whose ``content_hash`` is not the revision's.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "PUT",
+                f"/tasks/{quote(task_id)}/revisions/{quote(revision_id)}/check",
+                json=dict(check),
+            ),
+        )
+
 
 class VerifiersAPI(RevisionResourceAPI[Any]):
     collection = "verifiers"
@@ -649,6 +663,17 @@ class RuntimesAPI:
     def providers(self) -> JsonList:
         return cast(JsonList, self._studio.request("GET", "/runtime-providers", project=False))
 
+    def record_conformance(self, report: Mapping[str, Any]) -> JsonObject:
+        """Store a conformance report so the web app can show it beside the provider."""
+        return cast(
+            JsonObject,
+            self._studio.request("POST", "/runtime-conformance", json=dict(report), project=False),
+        )
+
+    def conformance(self) -> JsonList:
+        """The latest conformance report for each provider version this account ran."""
+        return cast(JsonList, self._studio.request("GET", "/runtime-conformance", project=False))
+
     def policy(self) -> JsonObject:
         return cast(JsonObject, self._studio.request("GET", "/runtime-policy", project=False))
 
@@ -886,6 +911,13 @@ class TrialsAPI:
             json={"ttl_seconds": ttl_seconds},
         )
         return str(cast(JsonObject, response)["key"])
+
+    def gateway_calls(self, execution_id: str) -> int:
+        """Model calls the gateway saw on this execution's own key."""
+        response = self._studio.request(
+            "GET", f"/trial-executions/{quote(execution_id)}/gateway-calls"
+        )
+        return int(cast(JsonObject, response)["calls"])
 
     def watch(self, trial_id: str, *, cursor: int = 0) -> Iterator[JsonObject]:
         return self._studio.watch(f"/trials/{quote(trial_id)}/events", cursor=cursor)

@@ -152,6 +152,21 @@ After `@`, give a revision number, a release version, or a content hash. The rev
 is restored under `.plural/versions` without touching your files; see
 [Calling a revision by name](../project/updating.md#calling-a-revision-by-name).
 
+### Check before you run
+
+Before you spend model calls on a Benchmark, check that its Tasks can be solved,
+that its graders don't reward doing nothing, and that the Agent can't read the
+answers:
+
+```bash
+plural task check -b support-triage # every Task of a Benchmark
+plural eval check                   # the same, plus the Runtime's isolation
+plural eval status                  # the latest Job: score, interval, trust tiers
+```
+
+Each prints the problems it found and the next command to run. See
+[Integrity](../operations/integrity.md).
+
 ## Jobs, Trials, and reviews
 
 After a run, these commands let you look back at what happened, run it again, or add
@@ -1362,6 +1377,33 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ status  Show each step of evaluating an Agent and the command to run next.                       │
+│ check   Check the graders, leaks, and isolation before a baseline.                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural eval check`
+
+```text
+
+ Usage: plural eval check [OPTIONS]
+
+ Check the graders, leaks, and isolation before a baseline.
+
+ Each Task runs its reference policy and two probes that should fail, a
+ do-nothing Agent and one that repeats the instructions, in its own Runtime.
+ Everything the Agent can read is scanned for the answer key, git history,
+ solution files, Verifier code, and the Benchmark's canary. A Task's check is
+ kept until the Task changes.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --benchmark  -b      <str>               The Benchmark to check, when there are several.         │
+│ --rerun                                  Check every Task again, even those unchanged since      │
+│                                          their check.                                            │
+│ --random             <int range> [x>=0]  Also run an Agent that takes this many random actions.  │
+│                                          A pass is a warning.                                    │
+│                                          [default: 0]                                            │
+│ --json                                   Print machine-readable JSON.                            │
+│ --help                                   Show this message and exit.                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2074,6 +2116,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ edit       Change a project Runtime's settings or credentials.                                   │
 │ delete     Delete a project Runtime and its saved credentials.                                   │
 │ use        Run Environments on a project Runtime by copying its settings into environment.yaml.  │
+│ doctor     Check each sandbox provider, and the trust tier its Trials get.                       │
+│ sweep      Delete your sandboxes that no running Job is using.                                   │
 │ template   Runtime templates: an account's approved provider configurations. Admins only.        │
 │ policy     Which Runtimes an organization's members may create and run on.                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -2140,6 +2184,28 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --yes   -y        Do not ask for confirmation.                                                   │
 │ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime doctor`
+
+```text
+
+ Usage: plural runtime doctor [OPTIONS]
+
+ Check each sandbox provider, and the trust tier its Trials get.
+
+ With --conformance, run the suite and cache the report; the engine reads it
+ to give each Trial its tier.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --provider            <str>  Check only this provider. Repeat for more.                          │
+│ --conformance                Run the conformance suite: real probes in real sandboxes. Takes a   │
+│                              minute or two per provider and creates a few short-lived sandboxes. │
+│ --image               <str>  Image the conformance sandboxes start from.                         │
+│ --allowed-host        <str>  A public host the allowlist check may reach. [default: pypi.org]    │
+│ --json                       Print machine-readable JSON.                                        │
+│ --help                       Show this message and exit.                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2282,6 +2348,26 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime sweep`
+
+```text
+
+ Usage: plural runtime sweep [OPTIONS]
+
+ Delete your sandboxes that no running Job is using.
+
+ Every sandbox a Trial creates is labeled with your owner name. A sandbox
+ whose Job is no longer running here is an orphan, left by a process that
+ died before it could clean up.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --provider        <str>  Provider to sweep. [default: daytona]                                   │
+│ --yes                    Delete without asking.                                                  │
+│ --json                   Print machine-readable JSON.                                            │
+│ --help                   Show this message and exit.                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2647,6 +2733,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ list      List resources of this kind, labeled local or hosted.                                  │
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
 │ cases     Write one Task per case, each a copy of TASK with the case's fields.                   │
+│ check     Prove each Task can be solved and can't be passed by doing nothing.                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2668,6 +2755,34 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --replace                   Write over Tasks that already exist, such as on a rerun.             │
 │ --benchmark  -b      <str>  Also add the Tasks to this Benchmark.                                │
 │ --help                      Show this message and exit.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task check`
+
+```text
+
+ Usage: plural task check [OPTIONS] [names]...
+
+ Prove each Task can be solved and can't be passed by doing nothing.
+
+ Runs the Task's reference policy, which must pass, and a do-nothing Agent and
+ one that repeats the instructions, which must fail, through the normal engine
+ in the Task's own Runtime. Then scans everything the Agent can read for the
+ answer key and other leaks. Each result is saved to
+ .plural/checks/<task>@<version>.json.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   names      <str>  Tasks to check. Leave out to check every Task, or the Benchmark's with -b.   │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --benchmark  -b      <str>               Check this Benchmark's Tasks, against its success       │
+│                                          threshold and canary.                                   │
+│ --random             <int range> [x>=0]  Also run an Agent that takes this many random actions.  │
+│                                          A pass is a warning.                                    │
+│                                          [default: 0]                                            │
+│ --json                                   Print machine-readable JSON.                            │
+│ --help                                   Show this message and exit.                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

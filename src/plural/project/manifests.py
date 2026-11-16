@@ -118,6 +118,16 @@ class EnvironmentManifest(ManifestModel):
     )
     guardrails: list[Guardrail] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    reference: str | None = Field(
+        default=None,
+        pattern=r"^[\w./-]+\.py:[A-Za-z_]\w*$",
+        description=(
+            "A policy that solves every Task in this Environment, such as "
+            "reference.py:solve. `plural task check` runs it as the reference probe, "
+            "calling it with the Task and the episode. It never reaches the Agent and is "
+            "not part of the Environment's identity."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -165,6 +175,16 @@ class TaskManifest(ManifestModel):
         description=(
             "For an Environment with a party: what one seat alone is told after the Task's "
             "instructions, keyed seat_1, seat_2, and so on."
+        ),
+    )
+    reference: str | None = Field(
+        default=None,
+        pattern=r"^[\w./-]+\.py:[A-Za-z_]\w*$",
+        description=(
+            "A policy that solves this Task, such as reference.py:solve, in place of the "
+            "Environment's. `plural task check` runs it as the reference probe, calling it "
+            "with the Task and the episode. It never reaches the Agent and is not part of "
+            "the Task's identity."
         ),
     )
 

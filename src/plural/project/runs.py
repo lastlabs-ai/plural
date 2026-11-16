@@ -26,7 +26,7 @@ import shutil
 import sys
 import tempfile
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +44,7 @@ from plural.execution.capacity import recommend_concurrency
 from plural.execution.episode_server import EpisodeServerOptions
 from plural.harness.retrieval import source_digest
 from plural.jobs import (
+    AgentAggregate,
     BenchmarkJobSource,
     Job,
     JobResult,
@@ -841,12 +842,16 @@ def local_job(workspace: Workspace, job_id: str) -> dict[str, Any]:
         if result_path.is_file()
         else None
     )
+    threshold = _success_threshold(workspace, record.get("source"))
     if result is not None:
         return {
             **record,
             "status": result.status,
             "trials": [_trial_summary(item) for item in result.trials],
             "aggregates": [item.model_dump(mode="json") for item in result.aggregates],
+            "summaries": job_summaries(
+                result.trials, job_id, threshold=threshold, names=_names(result.aggregates)
+            ),
             "directory": str(directory),
         }
     from plural.execution.engine import job_progress
@@ -865,8 +870,80 @@ def local_job(workspace: Workspace, job_id: str) -> dict[str, Any]:
         },
         "trials": [_trial_summary(item) for item in progress.trials],
         "aggregates": [item.model_dump(mode="json") for item in progress.aggregates],
+        "summaries": job_summaries(
+            progress.trials, job_id, threshold=threshold, names=_names(progress.aggregates)
+        ),
         "directory": str(directory),
     }
+
+
+def job_summaries(
+    trials: Sequence[TrialResult],
+    job_id: str,
+    *,
+    threshold: float = 1.0,
+    names: Mapping[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Each Agent's headline score with its interval, pass^k, and trust tiers.
+
+    Args:
+        trials: The Job's Trials.
+        job_id: The Job, which seeds the interval.
+        threshold: The score that counts as passing.
+        names: Agent names by Agent digest, from the Job's aggregates.
+
+    Returns:
+        One summary per Agent, in the order its first Trial appears: its name,
+        the :class:`~plural.stats.ScoreSummary` as JSON (``None`` before any
+        score), a one-line ``text``, and how many Trials reached each tier.
+    """
+    from plural.stats import score_summary, seed_for
+
+    by_agent: dict[str, dict[str, list[float | None]]] = {}
+    seen: dict[str, str] = {}
+    tiers: dict[str, dict[str, int]] = {}
+    for trial in trials:
+        digest = trial.receipt.agent_digest
+        seen.setdefault(digest, (names or {}).get(digest) or trial.receipt.model.catalog_model_id)
+        if trial.status == "succeeded":
+            by_agent.setdefault(digest, {}).setdefault(trial.receipt.task_pin.name, []).append(
+                trial.score
+            )
+        tier = trial.trust.tier if trial.trust is not None else "unknown"
+        counts = tiers.setdefault(digest, {})
+        counts[tier] = counts.get(tier, 0) + 1
+    output = []
+    for digest, name in seen.items():
+        summary = score_summary(
+            by_agent.get(digest, {}), threshold=threshold, seed=seed_for(job_id, digest)
+        )
+        mix = tiers.get(digest, {})
+        trust = ", ".join(f"{count} {tier}" for tier, count in sorted(mix.items()))
+        output.append(
+            {
+                "agent_name": name,
+                "summary": summary.model_dump(mode="json") if summary is not None else None,
+                "text": (summary.summary if summary is not None else "no score yet")
+                + (f"; trust: {trust}" if trust else ""),
+                "trust": mix,
+            }
+        )
+    return output
+
+
+def _names(aggregates: Sequence[AgentAggregate]) -> dict[str, str]:
+    return {item.agent_digest: item.agent_name for item in aggregates}
+
+
+def _success_threshold(workspace: Workspace, source: Any) -> float:
+    kind, _, name = str(source or "").partition("/")
+    if kind != BENCHMARK.name or not name:
+        return 1.0
+    try:
+        benchmark = workspace.load(ResourceRef(BENCHMARK.name, name)).value
+    except (ProjectError, ValueError):
+        return 1.0
+    return float(benchmark.scoring.success_threshold)
 
 
 def local_job_spec(workspace: Workspace, job_id: str) -> JobSpec:
@@ -1109,6 +1186,7 @@ def _execute(
     }
     if tracker is not None:
         options["gateway_keys"] = tracker.gateway_key
+        options["gateway_calls"] = tracker.gateway_calls
     if progress is not None:
         options["progress"] = progress
     try:
@@ -1386,6 +1464,7 @@ def _trial_summary(result: TrialResult) -> dict[str, Any]:
         "error": result.error_message,
         "reward_failures": [item.model_dump(mode="json") for item in result.reward_failures],
         "integrity": [item.model_dump(mode="json") for item in result.integrity],
+        "trust": result.trust.tier if result.trust is not None else None,
     }
 
 

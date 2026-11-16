@@ -474,19 +474,21 @@ model judges also need to reach their endpoint.
 
 ### Compute, timeouts, and persistence
 
-`cpus` and `memory_mb` request compute limits on providers that support them. The
-Runtime's `timeout_seconds` defaults to 900 seconds for execution and upload
-operations, above the 10 minute episode limit, so the Runtime does not cut a
-default run off first. Environment limits separately bound the episode.
+`cpus` and `memory_mb` request compute limits on providers that support them.
 
-The two meet at the end of an episode. Plural's built-in Harness ends the episode
-itself at `max_seconds`, with the stop reason `max_seconds`, and its Trial is
-verified like any other; the Runtime allows it 30 seconds past that to finish. When
-`timeout_seconds` is the shorter of the two, it wins: the Harness stops 30 seconds
-before it. So raise `timeout_seconds` along with a `max_seconds` above 270. A
-Harness of your own is killed at `max_seconds` (or `timeout_seconds`, if shorter),
-and is told that deadline, in seconds, in `PLURAL_STOP_SECONDS`. A Trial killed that
-way fails with the stop reason `harness_timeout`; a Benchmark's
+Two limits bound time, and each governs different commands:
+
+- The Environment's `max_seconds` governs the Harness, however long it is. An
+  episode can run for hours or days; the sandbox's lifetime is set from it.
+- The Runtime's `timeout_seconds`, 900 seconds by default, governs every other
+  command: setup, uploads, the App host's start, and downloads. It never cuts an
+  episode short.
+
+Plural's built-in Harness ends the episode itself at `max_seconds`, with the stop
+reason `max_seconds`, and its Trial is verified like any other; the Runtime allows it
+30 seconds past that to finish. A Harness of your own is killed at `max_seconds`, and
+is told that deadline, in seconds, in `PLURAL_STOP_SECONDS`. A Trial killed that way
+fails with the stop reason `harness_timeout`; a Benchmark's
 [`harness_timeout` rule](benchmarks.md#how-failures-are-scored) decides whether it
 counts against the Agent.
 

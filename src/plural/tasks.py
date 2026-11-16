@@ -658,12 +658,13 @@ RELEASE_FIELDS = (
     "limitations",
     "license",
     "forked_from",
+    "canary",
 )
 
 
 # Scoring rules added after Benchmarks were first saved. At their default they
 # are left out of the digest, so an older Benchmark keeps its identity.
-_LATER_SCORING_FIELDS = ("harness_timeout",)
+_LATER_SCORING_FIELDS = ("harness_timeout", "integrity")
 
 
 class BenchmarkRelease(FrozenModel):
@@ -683,6 +684,9 @@ class BenchmarkRelease(FrozenModel):
         limitations: What results do not show.
         license: License for the Benchmark and its published results.
         forked_from: Immutable reference of the release this was derived from.
+        canary: A GUID kept out of every agent-visible file and placed beside
+            the Verifiers and answer keys. An Agent that writes it saw a grader
+            file, or its model was trained on this Benchmark.
     """
 
     categories: tuple[BenchmarkCategory, ...] = ()
@@ -694,6 +698,7 @@ class BenchmarkRelease(FrozenModel):
     limitations: tuple[str, ...] = ()
     license: str = ""
     forked_from: str | None = None
+    canary: str | None = Field(default=None, pattern=r"^[A-Za-z0-9-]{16,64}$")
 
     def _release_payload(self) -> dict[str, Any]:
         """Release fields that differ from their defaults.

@@ -447,9 +447,53 @@ when it ran on a track, covers the release's declared share of Tasks (all of the
 default), and every required attempt has finished. Anything else is still shown,
 labelled as not ranked, with the reasons.
 
-The interval shown beside a score is a 95% normal approximation over Task scores. It
-is reported only when at least `min_tasks_for_interval` Tasks (five by default) have
-results, and it does not include attempt-to-attempt variation. Cost is USD per attempt
-and latency is seconds per attempt, each averaged over the attempts that reported
-them; the count of measured attempts is always shown. Per-step rewards are
-part of a score only through a Verifier whose `check` is `total_reward`.
+The interval shown beside a score is a 95% interval from a clustered bootstrap. It
+resamples Tasks with replacement, then attempts within each sampled Task, so it
+includes both Task-to-Task and attempt-to-attempt variation. Resampling is seeded from
+the Job or release, so the same results always give the same interval. It is reported
+only when at least `min_tasks_for_interval` Tasks (five by default) have results;
+otherwise the reason is shown instead.
+
+With several attempts per Task, results also show **pass^k**: the share of Tasks where
+every attempt passed. It is the number to watch when an Agent must be reliable, not
+just able.
+
+Two results are never compared by their bare difference. A leaderboard row and a Job
+with several Agents show each one against the leader with a verdict from a paired
+bootstrap over the Tasks both ran:
+
+| Verdict | Meaning |
+| --- | --- |
+| Better or Worse | The 95% interval of the difference is entirely above or below zero |
+| Within noise | The interval crosses zero: these results can't tell them apart |
+| Not enough data | Fewer than ten shared Tasks |
+
+Cost is USD per attempt and latency is seconds per attempt, each averaged over the
+attempts that reported them; the count of measured attempts is always shown. Per-step
+rewards are part of a score only through a Verifier whose `check` is `total_reward`.
+
+### Integrity
+
+Every recorded Trial is checked for signs that the Agent won by exploiting the
+Benchmark instead of doing the Task. See [Integrity](../operations/integrity.md) for
+each check. A finding is evidence for a person and by default changes no score. A
+release's `scoring.integrity` decides what a `critical` finding does to its attempt:
+
+| `integrity` | Effect |
+| --- | --- |
+| `report` (default) | Shown with the result; nothing changes |
+| `exclude_critical` | The attempt is dropped, like an infrastructure error |
+| `zero_critical` | The attempt scores at the bottom of the range |
+
+Results count the attempts that were flagged and keep both the raw and the adjusted
+numbers whenever a rule applies.
+
+A Benchmark can also declare a `canary`: a random ID of 16 to 64 letters, digits, or
+dashes. It is kept out of everything the Agent can see. An Agent that writes it either
+read a grader file or was trained on the Benchmark, and is flagged.
+
+```yaml
+canary: 3f6b2a9e-1c4d-4e8f-9a7b-5d2c8e1f0a6b
+scoring:
+  integrity: exclude_critical
+```

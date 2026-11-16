@@ -1,4 +1,9 @@
-"""Run the quoting example end to end with scripted models instead of real ones."""
+"""Run the quoting example end to end with scripted models instead of real ones.
+
+By default this runs a stratified subset of ten Tasks: at least two from every
+category, both of quote-bot's weaknesses, and every Task that ``traps.py``
+plants a problem on. The whole Benchmark runs under ``-m slow``, nightly.
+"""
 
 from __future__ import annotations
 
@@ -43,6 +48,20 @@ def _tasks() -> dict[str, dict[str, Any]]:
 
 
 TASKS = _tasks()
+SUBSET = (
+    "quote-009",
+    "quote-013",
+    "quote-016",
+    "quote-053",
+    "quote-004",
+    "quote-006",
+    "quote-003",
+    "quote-005",
+    "quote-024",
+    "quote-001",
+)
+"""Two or more per category; rush and fractional prices for both weaknesses; and
+quote-009, -013, -016, -053 and -024, which carry ``traps.py``'s planted problems."""
 
 
 def _call(name: str, **arguments: Any) -> dict[str, Any]:
@@ -125,11 +144,16 @@ def model() -> Iterator[str]:
         server.shutdown()
 
 
-@pytest.fixture(scope="module")
-def results(tmp_path_factory: pytest.TempPathFactory, model: str) -> dict[str, dict[str, Any]]:
+def _run(project: Path, model: str, tasks: tuple[str, ...] | None) -> dict[str, dict[str, Any]]:
     """Run the Benchmark once per policy, and return each Trial's scores by policy and Task."""
-    project = tmp_path_factory.mktemp("quoting") / "quoting"
-    shutil.copytree(EXAMPLE, project)
+    shutil.copytree(EXAMPLE, project, ignore=shutil.ignore_patterns(".plural", "__pycache__"))
+    if tasks is not None:
+        path = project / "benchmarks/quoting/benchmark.yaml"
+        benchmark = yaml.safe_load(path.read_text())
+        benchmark["tasks"] = [name for name in benchmark["tasks"] if name in tasks]
+        for category in benchmark["categories"]:
+            category["tasks"] = [name for name in category["tasks"] if name in tasks]
+        path.write_text(yaml.safe_dump(benchmark, sort_keys=False), encoding="utf-8")
     env = {
         key: value
         for key, value in os.environ.items()
@@ -186,17 +210,20 @@ def results(tmp_path_factory: pytest.TempPathFactory, model: str) -> dict[str, d
     return output
 
 
-def test_the_reference_policy_answers_every_request_right(
-    results: dict[str, dict[str, Any]],
-) -> None:
-    trials = results["reference"]
-    assert len(trials) == 60
-    assert {name: trial["score"] for name, trial in trials.items() if trial["score"] != 1.0} == {}
+@pytest.fixture(scope="module")
+def results(tmp_path_factory: pytest.TempPathFactory, model: str) -> dict[str, dict[str, Any]]:
+    """The stratified subset."""
+    return _run(tmp_path_factory.mktemp("quoting") / "quoting", model, SUBSET)
 
 
-def test_quote_bots_planted_weaknesses_fail_where_they_should(
-    results: dict[str, dict[str, Any]],
-) -> None:
+@pytest.fixture(scope="module")
+def full_results(tmp_path_factory: pytest.TempPathFactory, model: str) -> dict[str, dict[str, Any]]:
+    """Every Task in the Benchmark."""
+    return _run(tmp_path_factory.mktemp("quoting-full") / "quoting", model, None)
+
+
+def _assert_weaknesses(results: dict[str, dict[str, Any]]) -> int:
+    """Check quote-bot fails exactly where its weaknesses say. Returns how many it quoted."""
     by_name = {task["name"]: task for task in TASKS.values()}
     for name, trial in results["weak"].items():
         category = by_name[name]["category"]
@@ -206,13 +233,41 @@ def test_quote_bots_planted_weaknesses_fail_where_they_should(
             continue
         assert trial["quote-check.delivery_feasible"] == float(category == "simple"), name
         assert trial["quote-check.above_cost"] == 1.0, name
-    rush = [name for name, task in by_name.items() if task["category"] == "rush"]
+    rush = [name for name in results["weak"] if by_name[name]["category"] == "rush"]
+    assert rush
     assert all(results["weak"][name]["score"] == 0.0 for name in rush)
     quoted = {name: trial for name, trial in results["weak"].items() if trial["state"]["quote"]}
-    assert len(quoted) == 40
+    rounded = 0
     for name, trial in quoted.items():
         (price,) = trial["state"]["prices_given"].values()
         assert trial["quote-check.price_correct"] == float(price == round(price)), name
+        rounded += price != round(price)
+    assert rounded, "no quoted Task has a fractional price, so the rounding weakness is untested"
+    return len(quoted)
+
+
+def test_the_subset_covers_every_category_and_trap() -> None:
+    by_name = {task["name"]: task for task in TASKS.values()}
+    categories = [by_name[name]["category"] for name in SUBSET]
+    assert all(categories.count(item) >= 2 for item in set(categories))
+    assert set(categories) == {task["category"] for task in TASKS.values()}
+    traps = (EXAMPLE / "traps.py").read_text()
+    for name in ("quote-009", "quote-013", "quote-024"):
+        assert name in traps and name in SUBSET
+
+
+def test_the_reference_policy_answers_every_request_right(
+    results: dict[str, dict[str, Any]],
+) -> None:
+    trials = results["reference"]
+    assert sorted(trials) == sorted(SUBSET)
+    assert {name: trial["score"] for name, trial in trials.items() if trial["score"] != 1.0} == {}
+
+
+def test_quote_bots_planted_weaknesses_fail_where_they_should(
+    results: dict[str, dict[str, Any]],
+) -> None:
+    _assert_weaknesses(results)
 
 
 def test_eval_status_reads_the_baseline_from_the_latest_run(
@@ -222,7 +277,20 @@ def test_eval_status_reads_the_baseline_from_the_latest_run(
     job = status["latest_job"]
     steps = {step["title"]: step for step in status["steps"]}
     assert status["benchmark"] == "quoting"
-    assert steps["Build the eval set"]["summary"].startswith("60 Tasks in 4 categories")
+    assert steps["Build the eval set"]["summary"].startswith("10 Tasks in 4 categories")
     assert steps["Baseline"]["status"] == "done"
-    assert steps["Baseline"]["summary"].startswith(f"{job}: weak scored ")
-    assert status["next_command"] == f"plural job show {job}"
+    summary = steps["Baseline"]["summary"]
+    assert summary.startswith(f"{job}: weak, score ")
+    assert "(95% " in summary
+    assert "trust: 10 unverified" in summary
+
+
+@pytest.mark.slow
+def test_the_whole_benchmark_holds(full_results: dict[str, dict[str, Any]]) -> None:
+    trials = full_results["reference"]
+    assert len(trials) == 60
+    assert {name: trial["score"] for name, trial in trials.items() if trial["score"] != 1.0} == {}
+    assert _assert_weaknesses(full_results) == 40
+    status = full_results["eval status"]
+    steps = {step["title"]: step for step in status["steps"]}
+    assert steps["Build the eval set"]["summary"].startswith("60 Tasks in 4 categories")

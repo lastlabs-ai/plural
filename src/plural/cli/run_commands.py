@@ -1035,7 +1035,7 @@ def _finish_local(
         payload["recording_retryable"] = tracking.retryable
 
     def text() -> None:
-        _print_result(job_id, result)
+        _print_result(job_id, result, payload.get("summaries") or ())
         if tracking is None:
             return
         if not tracking.errors:
@@ -1142,9 +1142,15 @@ def _agent_label(agent: str | None) -> str:
     return agent.removeprefix("agent/")
 
 
-def _print_result(job_id: str, result: JobResult) -> None:
+def _print_result(
+    job_id: str, result: JobResult, summaries: Sequence[Mapping[str, Any]] = ()
+) -> None:
     typer.echo(f"Job {job_id} {result.status}.")
+    texts = {item["agent_name"]: item["text"] for item in summaries}
     for aggregate in result.aggregates:
+        if aggregate.agent_name in texts:
+            typer.echo(f"  {aggregate.agent_name}: {texts[aggregate.agent_name]}")
+            continue
         mean = "-" if aggregate.mean_score is None else f"{aggregate.mean_score:.3f}"
         typer.echo(
             f"  {aggregate.agent_name}: mean score {mean} over "
@@ -1199,8 +1205,16 @@ def _print_job(payload: dict[str, Any]) -> None:
             f"{progress['running']} running, {progress['succeeded']} succeeded, "
             f"{progress['failed']} failed"
         )
+    texts = {
+        item["agent_name"]: item["text"]
+        for item in payload.get("summaries") or []
+        if isinstance(item, dict) and "agent_name" in item
+    }
     for aggregate in payload.get("aggregates") or []:
         if not isinstance(aggregate, dict) or "agent_name" not in aggregate:
+            continue
+        if aggregate["agent_name"] in texts:
+            typer.echo(f"  {aggregate['agent_name']}: {texts[aggregate['agent_name']]}")
             continue
         mean = aggregate.get("mean_score")
         typer.echo(

@@ -398,8 +398,33 @@
             "title": "Dockerfile"
           },
           "network": {
-            "$ref": "#/$defs/NetworkMode",
-            "default": "public"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NetworkMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Egress during the episode. Unset, Plural chooses: a recorded run on a provider that enforces an allowlist gets one with the gateway's hosts, and any other run is public. Set public explicitly to keep the open internet."
+          },
+          "isolation": {
+            "anyOf": [
+              {
+                "enum": [
+                  "required",
+                  "best_effort"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether a Trial may run when the sandbox cannot keep the Agent away from the App host and Verifiers. Unset, it is required everywhere but the local Runtime. best_effort runs anyway and marks the Trial unverified.",
+            "title": "Isolation"
           },
           "allowed_hosts": {
             "default": [],
@@ -3019,7 +3044,7 @@
       },
       "BenchmarkScoring": {
         "additionalProperties": false,
-        "description": "How a release turns attempts into one score per configuration.\n\nRepeated attempts of a Task are averaged first. Task scores are then\ncombined with ``task_weights``; a Task without a weight counts once. Only the\nVerifier score on each Trial counts; step rewards reach it only through a\nVerifier whose check is ``total_reward``.\n\nAttributes:\n    metric: Human-readable name of the success metric, such as\n        ``\"Resolution rate\"``. It labels the Verifier score; it never\n        selects a different value to rank on.\n    description: What a score means, in words a reader can act on.\n    aggregation: How Task scores combine. ``\"weighted_mean\"`` averages\n        attempts per Task, then takes the ``task_weights`` mean.\n    score_range: Lowest and highest possible Task score.\n    success_threshold: A Task attempt at or above this score counts as a\n        success. Left out, it is the top of ``score_range``. ``None`` means\n        the Benchmark has no pass/fail notion.\n    task_weights: Weight per Task name. Unlisted Tasks weigh 1.\n    coverage_required: Weighted share of Tasks that must have a score\n        before a result can be ranked officially.\n    agent_failure: How an attempt that ended without a Verifier score\n        because of the Agent (for example, a budget ran out) is scored.\n        ``\"zero\"`` scores it at the bottom of the range.\n    infrastructure_error: Attempts lost to the runtime or provider are\n        excluded from scores and reported separately. So are attempts whose\n        Verifier score falls outside ``score_range``.\n    harness_timeout: How an attempt whose Harness ran past its time and was\n        killed is scored. ``\"infrastructure_error\"`` excludes it;\n        ``\"agent_failure\"`` scores it like a budget that ran out. A Harness\n        is told its deadline in ``PLURAL_STOP_SECONDS``, and the built-in\n        Harness stops itself before it.\n    min_tasks_for_interval: Fewest scored Tasks before an uncertainty\n        interval is reported. Below this, uncertainty is shown as unknown.",
+        "description": "How a release turns attempts into one score per configuration.\n\nRepeated attempts of a Task are averaged first. Task scores are then\ncombined with ``task_weights``; a Task without a weight counts once. Only the\nVerifier score on each Trial counts; step rewards reach it only through a\nVerifier whose check is ``total_reward``.\n\nAttributes:\n    metric: Human-readable name of the success metric, such as\n        ``\"Resolution rate\"``. It labels the Verifier score; it never\n        selects a different value to rank on.\n    description: What a score means, in words a reader can act on.\n    aggregation: How Task scores combine. ``\"weighted_mean\"`` averages\n        attempts per Task, then takes the ``task_weights`` mean.\n    score_range: Lowest and highest possible Task score.\n    success_threshold: A Task attempt at or above this score counts as a\n        success. Left out, it is the top of ``score_range``. ``None`` means\n        the Benchmark has no pass/fail notion.\n    task_weights: Weight per Task name. Unlisted Tasks weigh 1.\n    coverage_required: Weighted share of Tasks that must have a score\n        before a result can be ranked officially.\n    agent_failure: How an attempt that ended without a Verifier score\n        because of the Agent (for example, a budget ran out) is scored.\n        ``\"zero\"`` scores it at the bottom of the range.\n    infrastructure_error: Attempts lost to the runtime or provider are\n        excluded from scores and reported separately. So are attempts whose\n        Verifier score falls outside ``score_range``.\n    harness_timeout: How an attempt whose Harness ran past its time and was\n        killed is scored. ``\"infrastructure_error\"`` excludes it;\n        ``\"agent_failure\"`` scores it like a budget that ran out. A Harness\n        is told its deadline in ``PLURAL_STOP_SECONDS``, and the built-in\n        Harness stops itself before it.\n    min_tasks_for_interval: Fewest scored Tasks before an uncertainty\n        interval is reported. Below this, uncertainty is shown as unknown.\n    integrity: What a ``critical`` integrity finding does to its attempt.\n        ``\"report\"`` shows it and changes nothing; ``\"exclude_critical\"``\n        drops the attempt like an infrastructure error;\n        ``\"zero_critical\"`` scores it at the bottom of the range. Results\n        carry the raw and the adjusted numbers whenever a rule applies.",
         "properties": {
           "metric": {
             "default": "Score",
@@ -3110,6 +3135,16 @@
             "minimum": 2,
             "title": "Min Tasks For Interval",
             "type": "integer"
+          },
+          "integrity": {
+            "default": "report",
+            "enum": [
+              "report",
+              "exclude_critical",
+              "zero_critical"
+            ],
+            "title": "Integrity",
+            "type": "string"
           }
         },
         "title": "BenchmarkScoring",
@@ -3922,6 +3957,19 @@
         ],
         "default": null,
         "title": "Forked From"
+      },
+      "canary": {
+        "anyOf": [
+          {
+            "pattern": "^[A-Za-z0-9-]{16,64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Canary"
       },
       "name": {
         "minLength": 1,

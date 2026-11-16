@@ -17,3 +17,7 @@ runtime:
 limits:
   max_turns: 12
   max_seconds: 180
+
+# The reference policy plural task check plays to prove each Task can be solved. It never
+# reaches the Agent and is not part of the Environment's identity.
+reference: reference.py:solve

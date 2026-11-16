@@ -1120,4 +1120,199 @@ def policy_set(
     emit(policy, as_json=as_json, text=text)
 
 
+# Conformance and hygiene
+
+DOCTOR_PROVIDERS = ("daytona", "docker", "local")
+
+
+def _local_provider(name: str) -> Any:
+    from plural.sandbox import default_registry
+
+    try:
+        return default_registry.get(name)
+    except KeyError:
+        fail(f"Unknown provider {name!r}.", [f"Known: {', '.join(DOCTOR_PROVIDERS)}"])
+
+
+def _expected_tier(name: str, report: Any) -> tuple[str, str]:
+    """The tier a recorded Trial gets on this provider by default, and why not higher."""
+    if name == "local":
+        return "unverified", "the local Runtime runs the Agent as you"
+    if report is None:
+        return "standard", "no conformance report; run plural runtime doctor --conformance"
+    if report.passed:
+        return "verified", ""
+    failed = [item for item in report.checks if not item.passed]
+    first = failed[0] if failed else None
+    reason = f"{first.id} {first.title.lower()}: {first.detail}" if first else "checks missing"
+    return "standard", reason
+
+
+@runtime_app.command("doctor")
+@handled
+def doctor_command(
+    provider: list[str] | None = typer.Option(
+        None, "--provider", help="Check only this provider. Repeat for more."
+    ),
+    conformance: bool = typer.Option(
+        False,
+        "--conformance",
+        help="Run the conformance suite: real probes in real sandboxes. Takes a minute or two "
+        "per provider and creates a few short-lived sandboxes.",
+    ),
+    image: str | None = typer.Option(
+        None, "--image", help="Image the conformance sandboxes start from."
+    ),
+    allowed_host: str = typer.Option(
+        "pypi.org", "--allowed-host", help="A public host the allowlist check may reach."
+    ),
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Check each sandbox provider, and the trust tier its Trials get.
+
+    With --conformance, run the suite and cache the report; the engine reads it
+    to give each Trial its tier.
+    """
+    import asyncio
+
+    from plural.sandbox.conformance import (
+        load_report,
+        report_json,
+        run_conformance,
+        save_report,
+    )
+
+    names = list(provider or DOCTOR_PROVIDERS)
+    items: list[dict[str, Any]] = []
+    for name in names:
+        selected = _local_provider(name)
+        doctor = asyncio.run(selected.doctor())
+        version = asyncio.run(selected.version()) if doctor.available else None
+        report = load_report(name, version) if version else None
+        if conformance and doctor.healthy and name != "local":
+            if not as_json:
+                typer.echo(f"Running conformance {name} ({version})…")
+            report = asyncio.run(
+                run_conformance(
+                    selected,
+                    image=image,
+                    allowed_host=allowed_host,
+                    progress=None
+                    if as_json
+                    else lambda item: typer.echo(
+                        f"  {'✓' if item.passed else '✗'} {item.id} {muted(item.detail)}"
+                    ),
+                )
+            )
+            save_report(report)
+            _share_report(report_json(report))
+        tier, reason = _expected_tier(name, report)
+        items.append(
+            {
+                "provider": name,
+                "available": doctor.available,
+                "healthy": doctor.healthy,
+                "reason": doctor.reason,
+                "version": version,
+                "conformance": report_json(report) if report is not None else None,
+                "tier": tier,
+                "tier_reason": reason,
+            }
+        )
+
+    def text() -> None:
+        for item in items:
+            report = item["conformance"]
+            if not item["healthy"]:
+                status = muted(f"unavailable: {item['reason'] or 'not configured'}")
+            elif item["provider"] == "local":
+                status = "not a sandbox"
+            elif report is None:
+                status = "conformance not run"
+            else:
+                mark = "✓" if report["passed"] else "✗"
+                status = f"conformance {report['conformance_version']}  {mark} {report['summary']}"
+            typer.echo(f"Runtime  {item['provider']:<8} {status:<40} tier: {item['tier']}")
+            if item["tier_reason"]:
+                typer.echo(f"           {muted(item['tier_reason'])}")
+        unrun = [
+            item["provider"]
+            for item in items
+            if item["healthy"] and item["conformance"] is None and item["provider"] != "local"
+        ]
+        if unrun:
+            typer.echo(f"Next: plural runtime doctor --conformance --provider {unrun[0]}")
+        elif not any(item["tier"] == "verified" for item in items):
+            typer.echo(
+                "Next: use Daytona for scores you'll report:  plural runtime doctor "
+                "--conformance --provider daytona"
+            )
+
+    emit(items, as_json=as_json, text=text)
+
+
+def _share_report(payload: dict[str, Any]) -> None:
+    """Send a conformance report to the account, when signed in. Never fails the command."""
+    try:
+        current = session()
+        if current.token is None:
+            return
+        current.studio(project=False).runtimes.record_conformance(payload)
+    except Exception:  # noqa: BLE001 - sharing is a convenience; the cache is what counts
+        return
+
+
+@runtime_app.command("sweep")
+@handled
+def sweep_command(
+    provider: str = typer.Option("daytona", "--provider", help="Provider to sweep."),
+    yes: bool = typer.Option(False, "--yes", help="Delete without asking."),
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Delete your sandboxes that no running Job is using.
+
+    Every sandbox a Trial creates is labeled with your owner name. A sandbox
+    whose Job is no longer running here is an orphan, left by a process that
+    died before it could clean up.
+    """
+    import asyncio
+    from pathlib import Path
+
+    from plural.sandbox.sweep import live_jobs, owner_label, sweep
+
+    selected = _local_provider(provider)
+    owner = owner_label()
+    space = _workspace_or_none()
+    roots = [space.project.jobs_dir] if space is not None else []
+    roots.append(Path(".plural/jobs"))
+    live = live_jobs(roots)
+    found = asyncio.run(sweep(selected, owner=owner, live=live))
+    delete = bool(found.orphans) and (
+        yes or (not as_json and sys.stdin.isatty() and _confirm_sweep(found.orphans, provider))
+    )
+    if delete:
+        found = asyncio.run(sweep(selected, owner=owner, live=live, delete=True))
+
+    def text() -> None:
+        if not found.orphans:
+            success(f"No orphaned {provider} sandboxes for {owner}.")
+            return
+        if not found.deleted:
+            typer.echo(f"{counted(len(found.orphans), 'orphaned sandbox')} left as they are.")
+            typer.echo(f"Next: plural runtime sweep --provider {provider} --yes")
+            return
+        success(f"Deleted {counted(len(found.deleted), 'orphaned sandbox')}.")
+        for sandbox_id, reason in found.failed.items():
+            note(f"Could not delete {sandbox_id}: {reason}")
+
+    emit(found.model_dump(mode="json"), as_json=as_json, text=text)
+
+
+def _confirm_sweep(orphans: Any, provider: str) -> bool:
+    for item in orphans:
+        job = item.labels.get("plural.job", "?")
+        typer.echo(f"  {item.sandbox_id}  job {job}  {muted(item.state)}")
+    return typer.confirm(f"Delete {counted(len(orphans), 'orphaned sandbox')} on {provider}?")
+
+
 __all__ = ["runtime_app"]

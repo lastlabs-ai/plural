@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
+import importlib.metadata
 import importlib.util
 import math
 import os
 import shlex
 import time
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
@@ -27,7 +30,9 @@ from plural.sandbox.models import (
     SandboxCapability,
     SandboxError,
     SandboxHandle,
+    SandboxLifetime,
     SandboxRequirements,
+    SandboxSummary,
     safe_relative_path,
 )
 
@@ -43,6 +48,10 @@ if sudo -n -u {AGENT_USER} -- sudo -n true >/dev/null 2>&1; then
     exit 1
 fi
 """
+_MAKE_WORKSPACE = (
+    "mkdir -p /workspace 2>/dev/null; [ -w /workspace ] || "
+    '{ sudo -n mkdir -p /workspace && sudo -n chown "$(id -u):$(id -g)" /workspace; } || true'
+)
 _OPEN_WORKSPACE = 'for path in "$@"; do mkdir -p "$path" && chmod -R a+rwX "$path"; done'
 SEAT_USER = "plural-seat-{index}"
 _CREATE_SEAT_USERS = """set -e
@@ -63,6 +72,17 @@ case "$target" in "$root"/*) ;; *) exit 3 ;; esac
 [ -f "$target" ] && [ -r "$target" ] || exit 3
 printf '%s' "$target"
 """
+
+
+def _instant(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 class DaytonaSandboxAdapter(Protocol):
@@ -132,6 +152,25 @@ class _OfficialSandbox:
     def image_identity(self) -> str | None:
         value = getattr(self.value, "snapshot", None) or getattr(self.value, "snapshot_id", None)
         return str(value) if value else None
+
+    async def lifetime(self) -> SandboxLifetime | None:
+        """What Daytona will do to this sandbox if nobody deletes it, read back from Daytona."""
+        with contextlib.suppress(Exception):
+            await self.value.refresh_data()
+        stop: float | None = None
+        destroy_at = _instant(getattr(self.value, "auto_destroy_at", None))
+        created_at = _instant(getattr(self.value, "created_at", None))
+        if destroy_at is not None and created_at is not None:
+            stop = (destroy_at - created_at).total_seconds()
+        interval = getattr(self.value, "auto_stop_interval", None)
+        if stop is None and isinstance(interval, int) and interval > 0:
+            stop = interval * 60.0
+        if stop is None:
+            return None
+        return SandboxLifetime(
+            stop_after_seconds=stop,
+            delete_after_stop=getattr(self.value, "auto_delete_interval", None) == 0,
+        )
 
     async def upload_file(self, data: bytes, path: str) -> None:
         await self.value.fs.upload_file(data, path)
@@ -236,12 +275,21 @@ class OfficialDaytonaAdapter:
                 cpu=max(1, round(cpu)) if cpu is not None else None,
                 memory=max(1, round(memory_mb / 1024)) if memory_mb is not None else None,
             )
+        lifetime: dict[str, Any] = {}
+        if requirements.lifetime_seconds is not None:
+            minutes = math.ceil(requirements.lifetime_seconds / 60)
+            # The wall-clock limit deletes the sandbox even if this process dies; the
+            # idle stop is no shorter, so a quiet episode is never stopped early.
+            lifetime = {"ttl_minutes": minutes, "auto_stop_interval": minutes, "ephemeral": True}
         common = {
+            **lifetime,
             **self._create_options,
             **dict(options or {}),
             **network,
             "resources": resources,
         }
+        if requirements.labels:
+            common["labels"] = {**dict(common.get("labels") or {}), **requirements.labels}
         image: Any = requirements.image
         if requirements.declarative_image is not None:
             specification = requirements.declarative_image
@@ -252,6 +300,7 @@ class OfficialDaytonaAdapter:
                 image = image.env(specification.environment)
             if specification.workdir:
                 image = image.workdir(specification.workdir)
+        params: Any
         if image:
             params = CreateSandboxFromImageParams(image=image, **common)
         else:
@@ -264,13 +313,41 @@ class OfficialDaytonaAdapter:
         """Reattach to a sandbox this client's account owns."""
         return _OfficialSandbox(await self._client.get(sandbox_id))
 
+    async def list(self, labels: Mapping[str, str]) -> tuple[SandboxSummary, ...]:
+        """This account's sandboxes that carry every label given."""
+        from daytona import ListSandboxesQuery
+
+        found = []
+        async for value in self._client.list(ListSandboxesQuery(labels=dict(labels))):
+            state = getattr(value, "state", "") or ""
+            found.append(
+                SandboxSummary(
+                    sandbox_id=str(value.id),
+                    provider="daytona",
+                    labels=dict(getattr(value, "labels", None) or {}),
+                    state=str(getattr(state, "value", state)),
+                    created_at=getattr(value, "created_at", None),
+                )
+            )
+        return tuple(found)
+
+    async def delete_by_id(self, sandbox_id: str) -> None:
+        """Delete a sandbox by id; one that is already gone is not an error."""
+        try:
+            value = await self._client.get(sandbox_id)
+        except Exception as exc:
+            if "not found" in str(exc).lower():
+                return
+            raise
+        await self._client.delete(value)
+
     async def delete(self, sandbox: DaytonaSandboxAdapter) -> None:
         official = cast(_OfficialSandbox, sandbox)
         await self._client.delete(official.value)
 
     async def close(self) -> None:
         """Close the client's HTTP connections."""
-        await self._client.close()
+        await cast(Any, self._client).close()
 
 
 class DaytonaProvider(SandboxProvider):
@@ -362,11 +439,12 @@ class DaytonaProvider(SandboxProvider):
         if not sandbox_id or sandbox_id == "None":
             sandbox_id = f"daytona-{uuid4().hex}"
         self._sandboxes[sandbox_id] = remote
-        return SandboxHandle(
+        snapshot = remote.image_identity
+        handle = SandboxHandle(
             sandbox_id=sandbox_id,
             provider=self.name,
             image_identity=(
-                remote.image_identity
+                snapshot
                 or requirements.snapshot
                 or requirements.image
                 or (
@@ -375,7 +453,20 @@ class DaytonaProvider(SandboxProvider):
                     else None
                 )
             ),
+            # A Daytona snapshot is an image Daytona built and keeps: it cannot change
+            # under its name the way a registry tag can.
+            metadata={"snapshot": snapshot} if snapshot else {},
         )
+        # Daytona's default image runs as a user that cannot create /workspace.
+        await self.exec(
+            handle,
+            ExecRequest(
+                command=("sh", "-c", _MAKE_WORKSPACE),
+                cwd="/",
+                timeout_seconds=60,
+            ),
+        )
+        return handle
 
     def _remote(self, handle: SandboxHandle) -> DaytonaSandboxAdapter:
         if handle.provider != self.name or handle.sandbox_id not in self._sandboxes:
@@ -458,15 +549,18 @@ class DaytonaProvider(SandboxProvider):
     async def exec(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
         """Execute through ``sandbox.process.exec``.
 
-        A ``user`` other than ``root`` runs through ``sudo -n -E -u``, which
-        fails rather than falling back to the default user.
+        A ``user``, ``root`` included, runs through ``sudo -n -E``, which fails
+        rather than falling back to the default user.
         """
         if request.stdin is not None:
             raise CapabilityError("Daytona process.exec does not support stdin in this adapter")
         command = request.command
         user = request.user
-        if user and user != "root":
-            command = ("sudo", "-n", "-E", "-u", user, "--", *command)
+        if user:
+            switch = () if user == "root" else ("-u", user)
+            # sudo drops PYTHONPATH and the like even under -E unless they are named.
+            keep = (f"--preserve-env={','.join(sorted(request.env))}",) if request.env else ()
+            command = ("sudo", "-n", "-E", *keep, *switch, "--", *command)
             user = None
         started = time.monotonic()
         try:
@@ -571,6 +665,47 @@ class DaytonaProvider(SandboxProvider):
     async def destroy(self, handle: SandboxHandle) -> None:
         """Idempotently delete the remote sandbox."""
         await self.cancel(handle)
+
+    async def version(self) -> str:
+        """The installed Daytona SDK's version, which keys the conformance report."""
+        try:
+            return f"daytona-sdk-{importlib.metadata.version('daytona')}"
+        except importlib.metadata.PackageNotFoundError:
+            return "daytona"
+
+    async def lifetime(self, handle: SandboxHandle) -> SandboxLifetime | None:
+        """Read the sandbox's time to live back from Daytona.
+
+        Returns:
+            The limit Daytona applied, or ``None`` when it reports none.
+        """
+        remote = self._remote(handle)
+        reader = getattr(remote, "lifetime", None)
+        return await reader() if reader is not None else None
+
+    async def list_sandboxes(self, labels: Mapping[str, str]) -> tuple[SandboxSummary, ...]:
+        """This account's Daytona sandboxes that carry every label given.
+
+        Returns:
+            One summary per sandbox; empty when the client cannot list.
+        """
+        lister = getattr(self._client(), "list", None)
+        return await lister(labels) if lister is not None else ()
+
+    async def delete_sandbox(self, sandbox_id: str) -> None:
+        """Delete a Daytona sandbox by id, even one another process created.
+
+        Raises:
+            CapabilityError: When this client cannot delete by id.
+        """
+        remote = self._sandboxes.pop(sandbox_id, None)
+        if remote is not None:
+            await self._client().delete(remote)
+            return
+        deleter = getattr(self._client(), "delete_by_id", None)
+        if deleter is None:
+            raise CapabilityError("this Daytona client cannot delete sandboxes by id")
+        await deleter(sandbox_id)
 
 
 __all__ = [

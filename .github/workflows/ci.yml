@@ -56,7 +56,7 @@ jobs:
       - name: Install
         run: uv sync --group dev
       - name: Pytest
-        run: uv run pytest -m "not live"
+        run: uv run pytest -m "not live and not slow"
 
   examples:
     runs-on: ubuntu-latest

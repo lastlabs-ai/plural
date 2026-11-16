@@ -163,7 +163,7 @@ async def test_daytona_provider_uses_adapter_without_importing_sdk() -> None:
     assert result.stdout == b"ok"
     assert files[0].data == b"a"
     assert client.requirements == requirements
-    assert client.sandbox.commands[0][0] == ("python", "agent.py")
+    assert client.sandbox.commands[-1][0] == ("python", "agent.py")
     assert len(client.deleted) == 1
 
 

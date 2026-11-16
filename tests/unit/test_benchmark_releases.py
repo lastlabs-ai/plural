@@ -256,6 +256,7 @@ def test_a_scoring_rule_added_later_keeps_older_benchmark_digests() -> None:
     custom = Benchmark(name="suite", version="1.0.0", tasks=(task("a"),), scoring=scoring)
     payload = scoring.model_dump(mode="json")
     del payload["harness_timeout"]
+    del payload["integrity"]
     expected = revision_hash(
         "benchmark",
         {
@@ -271,6 +272,10 @@ def test_a_scoring_rule_added_later_keeps_older_benchmark_digests() -> None:
         update={"scoring": scoring.model_copy(update={"harness_timeout": "agent_failure"})}
     )
     assert strict.content_hash != expected
+    excluding = custom.model_copy(
+        update={"scoring": scoring.model_copy(update={"integrity": "exclude_critical"})}
+    )
+    assert excluding.content_hash != expected
 
 
 def test_official_ranking_needs_declared_coverage_and_no_pending_attempts() -> None:
@@ -318,7 +323,20 @@ def test_uncertainty_is_unknown_until_there_are_enough_tasks() -> None:
     assert many.uncertainty.low < (many.score or 0) < many.uncertainty.high
     assert many.uncertainty.high <= 1.0
     assert many.uncertainty.sample_size == 6
-    assert "normal-approximation" in (many.uncertainty.method or "")
+    assert "clustered bootstrap" in (many.uncertainty.method or "")
+    again = aggregate_configuration(
+        specs,
+        [attempt(str(index), score) for index, score in enumerate(scores)],
+        scoring=BenchmarkScoring(),
+    )
+    assert again.uncertainty == many.uncertainty
+    normal = aggregate_configuration(
+        specs,
+        [attempt(str(index), score) for index, score in enumerate(scores)],
+        scoring=BenchmarkScoring(),
+        interval="normal",
+    )
+    assert "normal-approximation" in (normal.uncertainty.method or "")
 
 
 def test_cost_and_latency_use_attempts_that_ran_and_disclose_gaps() -> None:

@@ -29,8 +29,17 @@ def audit_external(
     actions: Iterable[str],
     started_at: datetime,
     finished_at: datetime,
+    gateway_calls: int | None = None,
 ) -> tuple[IntegrityFinding, ...]:
     """Compare an External Agent's trace with the episode Plural observed.
+
+    Args:
+        artifacts: The Trial's files, with the agent's trace and the host's steps.
+        actions: Names of every action the Environment offers.
+        started_at: When the episode started.
+        finished_at: When it finished.
+        gateway_calls: Model calls the gateway saw on the Trial's scoped key, or
+            ``None`` when the run was not recorded and nobody counted them.
 
     Returns:
         One finding per disagreement, in a stable order; empty when they agree.
@@ -102,7 +111,21 @@ def audit_external(
                 message=f"{outside} trace step(s) are timed outside the episode.",
             )
         )
+    if gateway_calls is not None:
+        traced = sum(_count(step.get("llm_call_count")) for step in steps)
+        if traced != gateway_calls:
+            findings.append(
+                IntegrityFinding(
+                    code="model_calls_differ",
+                    message=f"The trace shows {traced} model call(s); the gateway saw "
+                    f"{gateway_calls} on this Trial's key.",
+                )
+            )
     return tuple(findings)
+
+
+def _count(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
 def _json(data: bytes | None) -> Any:

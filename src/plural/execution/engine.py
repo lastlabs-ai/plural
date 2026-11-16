@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import urlsplit
 
 from plural._deprecation import module_getattr
 from plural.agents import AgentBinding
@@ -98,13 +99,19 @@ from plural.harness.packages import (
     native_chat_v1,
 )
 from plural.harness.protocol import HarnessProtocolError, HarnessRunRequest
-from plural.harness.retrieval import materialize_package, retrieve_archive, source_digest
+from plural.harness.retrieval import (
+    materialize_package,
+    reference_files,
+    retrieve_archive,
+    source_digest,
+)
 from plural.harness.runner import (
     HarnessExecution,
     HarnessExecutionError,
     HarnessRunner,
     is_native_runner,
 )
+from plural.integrity.detectors import TrialEvidence, detect
 from plural.jobs import (
     AgentAggregate,
     ArtifactReference,
@@ -139,16 +146,21 @@ from plural.sandbox import (
     DownloadedFile,
     ExecRequest,
     FileUpload,
+    NetworkMode,
     ProviderRegistry,
+    SandboxCapability,
     SandboxError,
     SandboxHandle,
     SandboxProvider,
     SandboxRequirements,
     default_registry,
 )
+from plural.sandbox.conformance import conformance_status
+from plural.sandbox.sweep import trial_labels
 from plural.tasks import TaskDefinition, validate_task_state
 from plural.trajectory import normalize_trajectory
 from plural.transcript import TRAJECTORY_FILE, episode_to_messages
+from plural.trust import ConformanceStatus, TrustAssessment, TrustFacts, trust_tier
 from plural.verifiers import (
     STOP_REASONS,
     AgentVerifier,
@@ -324,6 +336,49 @@ def _requirements(task: TaskDefinition, package: HarnessPackage) -> SandboxRequi
     return requirements.model_copy(update={"image": reference})
 
 
+def sandbox_lifetime(task: TaskDefinition) -> float:
+    """The longest a Trial's sandbox may live: its budgets plus a margin.
+
+    Setup, the episode, and verification each have their own limit, so the
+    sandbox outlives none of them, and a provider that can stop a sandbox on
+    its own stops one whose Job died.
+
+    Returns:
+        Seconds.
+    """
+    runtime = task.environment.runtime
+    return (
+        task.environment.limits.max_seconds
+        + runtime.timeout_seconds
+        + runtime.build_timeout_seconds
+        + LIFETIME_MARGIN_SECONDS
+    )
+
+
+def default_allowlist(environ: Mapping[str, str], declared: Sequence[str]) -> tuple[str, ...]:
+    """The hosts a recorded run may reach when its Environment leaves ``network`` unset.
+
+    The gateway's host, so the Agent can call models, the Python package
+    index, so setup can install Plural in an image without it, and the hosts
+    the Environment declares in ``allowed_hosts``.
+
+    Returns:
+        Host names, without duplicates.
+    """
+    hosts = []
+    for name in ("PLURAL_GATEWAY_URL", "PLURAL_BASE_URL"):
+        value = environ.get(name)
+        if value:
+            host = urlsplit(value).hostname
+            if host:
+                hosts.append(host)
+    if not hosts:
+        host = urlsplit(resolve_gateway_url(None, environ)).hostname
+        if host:
+            hosts.append(host)
+    return tuple(dict.fromkeys((*hosts, *PACKAGE_INDEX_HOSTS, *declared)))
+
+
 def _artifact_reference(file: DownloadedFile, media_type: str) -> ArtifactReference:
     return ArtifactReference(
         name=file.path,
@@ -351,6 +406,21 @@ _JOB_ARTIFACTS = frozenset({LEDGER_FILE, STATES_FILE, STEPS_FILE, "apps.json"})
 RESULT_FILES = ("result.json", "final-result.json", "output.json")
 GatewayKeys = Callable[[str, int, int], "str | None"]
 """Mints a gateway key for a local Trial's execution, given its time to live in seconds."""
+GatewayCalls = Callable[[str, int], "int | None"]
+"""Counts the model calls the gateway saw on a local Trial execution's key, or None."""
+ISOLATION_REQUIRED = (
+    "This Trial did not run: the sandbox could not keep the agent away from the graders.\n"
+    "The image needs passwordless sudo and useradd, or start from Plural's base image:\n"
+    "  image: ghcr.io/lastlabs-ai/plural-sandbox:py3.12\n"
+    "To run anyway for a quick local check, set isolation: best_effort (results will be "
+    "marked unverified)."
+)
+GATEWAY_KEY_MAX_SECONDS = 7 * 86_400
+"""Longest a Trial's gateway key lives; the backend refuses a longer one."""
+PACKAGE_INDEX_HOSTS = ("pypi.org", "files.pythonhosted.org")
+"""Reached during setup to install Plural when the image does not already have it."""
+LIFETIME_MARGIN_SECONDS = 1_800
+"""Added to a Trial's own budgets to get the longest its sandbox may live."""
 _HOST_VIEWS = frozenset(
     {"state.json", "final-state.json", "observation.json", "final-observation.json", "view.json"}
 )
@@ -541,14 +611,62 @@ def _episode_outcome(artifacts: Sequence[DownloadedFile]) -> EpisodeOutcome:
 
 
 def _integrity(
-    player: _Player, artifacts: Sequence[DownloadedFile]
+    player: _Player, artifacts: Sequence[DownloadedFile], *, gateway_calls: int | None = None
 ) -> tuple[IntegrityFinding, ...]:
     """An External Agent's trace set beside what the App host observed; empty otherwise."""
     run = player.run
     if run is None or run.started_at is None or run.finished_at is None:
         return ()
     return audit_external(
-        artifacts, actions=run.actions, started_at=run.started_at, finished_at=run.finished_at
+        artifacts,
+        actions=run.actions,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        gateway_calls=gateway_calls,
+    )
+
+
+def _answer(artifacts: Sequence[DownloadedFile]) -> Any:
+    for name in RESULT_FILES:
+        data = next((item.data for item in artifacts if item.path == name), None)
+        if data is None:
+            continue
+        try:
+            value = json.loads(data)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(value, Mapping):
+            return value.get("answer", value.get("response"))
+    return None
+
+
+def _trust(
+    provider: str,
+    handle: SandboxHandle | None,
+    requirements: SandboxRequirements | None,
+    app_isolation: Literal["os_user", "none"] | None,
+    host_signed: bool | None,
+    conformance: tuple[str, tuple[str, ...]],
+) -> TrustAssessment | None:
+    """The Trial's trust tier from what the engine observed.
+
+    None when no episode started: before a sandbox, or before the App host.
+    """
+    if handle is None or requirements is None or app_isolation is None:
+        return None
+    status, failures = conformance
+    return trust_tier(
+        TrustFacts(
+            provider=provider,
+            app_isolation=app_isolation,
+            network=requirements.network.value,
+            image_identity=handle.image_identity,
+            image_pinned=handle.image_pinned,
+            snapshot=handle.metadata.get("snapshot"),
+            conformance=cast(ConformanceStatus, status),
+            conformance_failures=failures,
+            host_report_signed=host_signed,
+        )
     )
 
 
@@ -678,6 +796,7 @@ class TrialRunner:
         credentials: Mapping[str, CredentialValue | str] | None = None,
         episode_server: EpisodeServer | None = None,
         gateway_keys: GatewayKeys | None = None,
+        gateway_calls: GatewayCalls | None = None,
         model_identity: LocalModelIdentity | None = None,
     ) -> None:
         self.spec = spec
@@ -686,6 +805,7 @@ class TrialRunner:
         self.credentials = dict(credentials or {})
         self.episode_server = episode_server
         self.gateway_keys = gateway_keys
+        self.gateway_calls = gateway_calls
         self._gateway_key: str | None = None
         self._job_environ = environ
         self._resource_files: dict[str, bytes] = {}
@@ -784,6 +904,10 @@ class TrialRunner:
         tito: ArtifactReference | None = None
         cost_usd: float | None = None
         phases: list[PhaseTiming] = []
+        sandbox: SandboxHandle | None = None
+        sandbox_requirements: SandboxRequirements | None = None
+        conformance: tuple[str, tuple[str, ...]] = ("missing", ())
+        host_signed: bool | None = None
 
         @contextlib.asynccontextmanager
         async def phase(name: PhaseName) -> AsyncIterator[None]:
@@ -850,12 +974,18 @@ class TrialRunner:
                         "of a Trial runs in one Runtime. Give their Agents Harnesses that "
                         "share one.",
                     )
+            requirements = await self._execution_requirements(
+                provider, task, requirements, execution_id
+            )
+            sandbox_requirements = requirements
             distribution = self._plural_distribution(provider, package)
             async with phase("environment_setup"):
                 if distribution is not None:
                     requirements = await prepare_requirements(provider, requirements, distribution)
                 handle = await provider.create(requirements)
             self._active[(provider.name, handle.sandbox_id)] = handle
+            sandbox = handle
+            conformance = await conformance_status(provider)
             self.store.emit(
                 self.spec.job_id,
                 "environment_ready",
@@ -891,10 +1021,7 @@ class TrialRunner:
                                 update={"workspace": player.stage}
                             ),
                             env=player.env,
-                            timeout_seconds=min(
-                                task.environment.runtime.timeout_seconds,
-                                task.environment.limits.max_seconds,
-                            ),
+                            timeout_seconds=task.environment.limits.max_seconds,
                         )
                 async with phase("environment_setup"):
                     if task.environment.apps:
@@ -903,6 +1030,8 @@ class TrialRunner:
                         except ValueError as exc:
                             raise ExecutionFailure(ErrorCode.CONFIGURATION, str(exc)) from exc
                         isolation = await provider.isolate_apps(handle)
+                        if isolation.app_user is None and requirements.isolation == "required":
+                            raise ExecutionFailure(ErrorCode.ENVIRONMENT_FAILED, ISOLATION_REQUIRED)
                         await provider.upload_files(handle, staged, root=WORKSPACE)
                         isolated = self._seats_isolated(task)
                         if self.seat_names:
@@ -954,6 +1083,8 @@ class TrialRunner:
                             },
                         )
                         app_isolation = "os_user" if host.isolated else "none"
+                        if not host.isolated and requirements.isolation == "required":
+                            raise ExecutionFailure(ErrorCode.ENVIRONMENT_FAILED, ISOLATION_REQUIRED)
                         if not self.seat_names:
                             await provider.open_workspace(
                                 handle,
@@ -1058,7 +1189,9 @@ class TrialRunner:
                     try:
                         host_report = await host.finish()
                     except AppHostTampered as exc:
+                        host_signed = False
                         raise ExecutionFailure(ErrorCode.ENVIRONMENT_FAILED, str(exc)) from exc
+                    host_signed = True
                     app_report = host_report.apps
                     environment_observation = host_report.observation
                     environment_view_doc = host_report.view
@@ -1175,7 +1308,23 @@ class TrialRunner:
                     host_report,
                     artifacts,
                 )
-            integrity = _integrity(players[0], artifacts)
+            integrity = (
+                *_integrity(
+                    players[0],
+                    artifacts,
+                    gateway_calls=await self._gateway_call_count(execution_id),
+                ),
+                *detect(
+                    TrialEvidence(
+                        task=task,
+                        artifacts=artifacts,
+                        logs=stdout + stderr,
+                        verifier_results=verifier_results,
+                        answer=_answer(artifacts),
+                        canary=self._canary(),
+                    )
+                ),
+            )
             status: Literal["succeeded", "awaiting_review"] = (
                 "awaiting_review" if awaiting else "succeeded"
             )
@@ -1203,6 +1352,14 @@ class TrialRunner:
                 seat_isolation=seat_isolation,
                 seed=seed,
                 integrity=integrity,
+                trust=_trust(
+                    provider.name,
+                    sandbox,
+                    sandbox_requirements,
+                    app_isolation,
+                    host_signed,
+                    conformance,
+                ),
                 model_identity=self.model_identity,
                 **_episode_totals(artifacts, failed=False),
             )
@@ -1243,6 +1400,14 @@ class TrialRunner:
                 else (),
                 seat_isolation=seat_isolation,
                 seed=seed,
+                trust=_trust(
+                    provider.name,
+                    sandbox,
+                    sandbox_requirements,
+                    app_isolation,
+                    host_signed,
+                    conformance,
+                ),
                 model_identity=self.model_identity,
                 **totals,
                 error_code=None if code is ErrorCode.CANCELLED else code,
@@ -1297,6 +1462,61 @@ class TrialRunner:
         await asyncio.gather(heartbeat, return_exceptions=True)
         return result
 
+    async def _execution_requirements(
+        self,
+        provider: SandboxProvider,
+        task: TaskDefinition,
+        requirements: SandboxRequirements,
+        execution_id: int,
+    ) -> SandboxRequirements:
+        """Stamp what the Runtime does not say: labels, a lifetime, isolation, and network.
+
+        A recorded run on a provider that enforces an allowlist, in an
+        Environment that leaves ``network`` unset, gets an allowlist with the
+        gateway's hosts. Any other unset network stays public.
+
+        Returns:
+            The requirements this execution's sandbox is created with.
+        """
+        runtime = task.environment.runtime
+        update: dict[str, Any] = {
+            "isolation": runtime.isolation_policy,
+            "labels": {
+                **requirements.labels,
+                **trial_labels(
+                    job=self.spec.job_id,
+                    trial=self.spec.trial_id,
+                    execution=str(execution_id),
+                    environ=self._job_environ,
+                ),
+            },
+            "lifetime_seconds": sandbox_lifetime(task),
+        }
+        if runtime.network is None and self._gateway_key is not None:
+            capabilities = await provider.capabilities()
+            if SandboxCapability.NETWORK_ALLOWLIST in capabilities.capabilities:
+                update["network"] = NetworkMode.ALLOWLIST
+                update["network_allowlist"] = default_allowlist(
+                    self._job_environ, runtime.allowed_hosts
+                )
+        return requirements.model_copy(update=update)
+
+    async def _gateway_call_count(self, execution_id: int) -> int | None:
+        """Model calls the gateway saw on this execution's key, for an External Agent."""
+        if self.gateway_calls is None or self._gateway_key is None:
+            return None
+        if self.agent.external is None:
+            return None
+        try:
+            return await asyncio.to_thread(self.gateway_calls, self.spec.trial_id, execution_id)
+        except Exception:  # noqa: BLE001 - a missing count is no finding, not a failed Trial
+            return None
+
+    def _canary(self) -> str | None:
+        source = self.job_spec.source
+        benchmark = getattr(source, "benchmark", None)
+        return getattr(benchmark, "canary", None)
+
     async def _execution_environ(
         self, task: TaskDefinition, execution_id: int
     ) -> Mapping[str, str]:
@@ -1309,7 +1529,7 @@ class TrialRunner:
         needed = self.agent.external is not None or bool(self._job_environ.get("PLURAL_API_KEY"))
         if self.gateway_keys is None or not needed:
             return self._job_environ
-        ttl = min(max(int(task.environment.limits.max_seconds) + 900, 600), 86_400)
+        ttl = min(max(math.ceil(sandbox_lifetime(task)), 600), GATEWAY_KEY_MAX_SECONDS)
         key = await asyncio.to_thread(self.gateway_keys, self.spec.trial_id, execution_id, ttl)
         if not key:
             return self._job_environ
@@ -1629,10 +1849,10 @@ class TrialRunner:
         return uploads
 
     def _environment_uploads(self, root: Path) -> list[FileUpload]:
-        """The Environment's source files, without any Verifier's code.
+        """The Environment's source files, without any Verifier's code or reference.
 
-        The Agent can read the Environment's workspace, so a Verifier kept in
-        the same folder is left out.
+        The Agent can read the Environment's workspace, so a Verifier or a
+        reference policy kept in the same folder is left out.
 
         Returns:
             The files to upload.
@@ -1643,6 +1863,7 @@ class TrialRunner:
         """
         root = root.resolve()
         hidden = [path for path in verifier_sources(self.task) if path.is_relative_to(root)]
+        hidden.extend(root / name for name in reference_files(root))
         _refuse_shared_files(self.task, root)
         uploads: list[FileUpload] = []
         for path in sorted(root.rglob("*")):
@@ -2359,29 +2580,27 @@ def _harness_timeout(
 ) -> float:
     """Seconds a Harness may run before it is killed.
 
-    Another Harness is killed at the episode's max_seconds. The native runner
-    stops itself at that deadline, timed from when it starts, so it gets a
-    grace period to end the episode and write its files; a Trial it ends that
-    way is still verified.
+    The episode's ``max_seconds`` governs the Harness, however long it is; the
+    Runtime's ``timeout_seconds`` governs every other command. Another Harness
+    is killed at ``max_seconds``. The native runner stops itself at that
+    deadline, timed from when it starts, so it gets a grace period to end the
+    episode and write its files; a Trial it ends that way is still verified.
     """
-    runtime, limits = task.environment.runtime, task.environment.limits
+    limits = task.environment.limits
     allowed = limits.max_seconds + (STOP_GRACE_SECONDS if is_native_runner(definition) else 0.0)
-    return min(runtime.timeout_seconds, allowed) + _credit_pause(definition, env)
+    return allowed + _credit_pause(definition, env)
 
 
 def _stop_env(
     task: TaskDefinition, definition: HarnessProtocol, env: Mapping[str, str]
 ) -> dict[str, str]:
-    """A Harness's environment, told how many seconds it has before it is killed.
+    """A Harness's environment, told how many seconds the episode has.
 
-    The native runner is told to stop a grace period early, so the Runtime's
-    own limit never cuts it off mid-episode.
+    The native runner stops at that deadline and is killed a grace period
+    later, so the kill never cuts it off mid-episode.
     """
-    runtime, limits = task.environment.runtime, task.environment.limits
-    if is_native_runner(definition):
-        stop = max(1.0, min(limits.max_seconds, runtime.timeout_seconds - STOP_GRACE_SECONDS))
-    else:
-        stop = min(limits.max_seconds, runtime.timeout_seconds)
+    del definition
+    stop = max(1.0, task.environment.limits.max_seconds)
     return {**env, STOP_VARIABLE: f"{stop:g}"}
 
 
@@ -2471,12 +2690,14 @@ class JobRunner:
         credentials: Mapping[str, Mapping[str, CredentialValue | str]] | None = None,
         episode_server: EpisodeServerOptions | None = None,
         gateway_keys: GatewayKeys | None = None,
+        gateway_calls: GatewayCalls | None = None,
         model_identities: Mapping[str, LocalModelIdentity] | None = None,
     ) -> None:
         self.spec = spec
         self.model_identities = dict(model_identities or {})
         self.credentials = dict(credentials or {})
         self.gateway_keys = gateway_keys
+        self.gateway_calls = gateway_calls
         self.episode_server_options = episode_server
         self._episode_server: EpisodeServer | None = None
         self.catalog = catalog or ModelCatalog()
@@ -2637,6 +2858,7 @@ class JobRunner:
                         credentials=self._agent_credentials(trial_spec),
                         episode_server=self._episode_server,
                         gateway_keys=self.gateway_keys,
+                        gateway_calls=self.gateway_calls,
                         model_identity=self._model_identity(trial_spec),
                     )
                     self._trials.add(trial)

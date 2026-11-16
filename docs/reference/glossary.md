@@ -95,6 +95,29 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   integrity information.
 - **Review:** a score a person gives when the grader is human. *Precisely:* a person's
   scoring submission for a pending human Verifier.
+- **Trust tier:** how far an attempt's result can be trusted, from how it ran.
+  *Precisely:* `verified`, `standard`, or `unverified`, computed for every Trial from its
+  isolation, network enforcement, pinned image, sandbox provider conformance, and signed
+  host report.
+- **Conformance:** a check that a sandbox provider really keeps the promises a
+  `verified` result depends on. *Precisely:* 14 probes run in real sandboxes, covering
+  isolation, network enforcement, and lifetime, cached per provider version. See
+  [Runtimes](../project/runtimes.md#conformance).
+- **Integrity finding:** a sign that an attempt may have won by a shortcut instead of
+  doing the Task, such as reading a grader file. *Precisely:* a coded finding on a
+  Trial with a severity (`info`, `warning`, or `critical`) and the steps it points to.
+  It never changes a score unless a Benchmark's `scoring.integrity` rule says so. See
+  [Integrity](../operations/integrity.md).
+- **Reference policy:** code that solves a Task the way a careful person would, used to
+  prove the Task can be solved. *Precisely:* a `reference:` function on a Task or its
+  Environment, run by `plural task check`; it never reaches the Agent.
+- **Canary:** a random ID hidden beside a Benchmark's graders. An Agent that writes it
+  read a grader or was trained on the Benchmark. *Precisely:* a Benchmark's `canary`,
+  kept out of every Agent-visible file and flagged as `canary_seen` when it appears in
+  an Agent's output.
+- **Verdict:** whether one result is really better than another, or only looks it.
+  *Precisely:* `better`, `worse`, `within_noise`, or `not_enough_data`, from a paired
+  bootstrap of the difference over the Tasks both results share.
 
 ## Scores, rewards, and training
 
@@ -180,10 +203,6 @@ start. Score and reward keep the meanings above.
 - **Fix:** a change to the Agent being tested to see whether it really helps.
   *Precisely:* a deployable change with a lifecycle: proposed, tested, applied, and
   confirmed, or rejected.
-- **Trust tier:** how far an attempt's result can be trusted, from how it ran.
-  *Precisely:* `verified`, `standard`, or `unverified`, computed for every Trial from its
-  isolation, network enforcement, pinned image, sandbox provider conformance, and signed
-  host report.
 - **Eval Report:** the document an evaluation ends with: how well the Agent works,
   where and why it fails, which fixes worked, and how sure you can be. *Precisely:* an
   immutable document generated from pinned inputs (a Scorecard version, Jobs, an

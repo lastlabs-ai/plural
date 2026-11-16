@@ -61,7 +61,8 @@ def package_files(root: Path) -> list[tuple[str, Path]]:
     """Files that make up a package, as sorted ``(relative path, path)`` pairs.
 
     ``.git``, ``.plural``, and ``__pycache__`` are never part of a package, nor
-    is any path listed in the package's ``.pluralignore``.
+    is any path listed in the package's ``.pluralignore``, nor the reference
+    policy its manifest names.
 
     Raises:
         ValueError: When the tree contains a symlink.
@@ -77,6 +78,7 @@ def package_files(root: Path) -> list[tuple[str, Path]]:
         if ignore_file.is_file()
         else set()
     )
+    ignored |= reference_files(base)
     files = []
     for path in sorted(base.rglob("*")):
         relative = path.relative_to(base)
@@ -89,6 +91,37 @@ def package_files(root: Path) -> list[tuple[str, Path]]:
         if path.is_file():
             files.append((relative.as_posix(), path))
     return files
+
+
+def reference_files(root: Path) -> set[str]:
+    """The reference policy a Task or Environment manifest at ``root`` names.
+
+    A reference solves the Task, so it is never shipped to a Runtime, where
+    the Agent could read it, and is not part of the resource's identity.
+
+    Returns:
+        Relative paths, empty when the manifest names none.
+
+    Examples:
+        >>> import tempfile
+        >>> root = Path(tempfile.mkdtemp())
+        >>> _ = (root / "environment.yaml").write_text("reference: reference.py:solve")
+        >>> reference_files(root)
+        {'reference.py'}
+    """
+    found = set()
+    for name in ("environment.yaml", "task.yaml"):
+        manifest = root / name
+        if not manifest.is_file():
+            continue
+        try:
+            payload = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        reference = payload.get("reference") if isinstance(payload, dict) else None
+        if isinstance(reference, str) and ":" in reference:
+            found.add(reference.rpartition(":")[0].removeprefix("./"))
+    return found
 
 
 MANIFEST_FILES = frozenset(

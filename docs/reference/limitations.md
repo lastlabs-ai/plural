@@ -48,8 +48,15 @@ These apply to where code runs and what a run can see or measure.
 - Use the named `local`, `docker`, or `daytona` Runtime provider. Other providers
   require a separately installed `SandboxProvider`, and the provider extension
   API is in alpha.
-- Receipts are unsigned integrity records, and local runs report
-  `self_reported` trust.
+- Receipts are unsigned integrity records. A Trial's
+  [trust tier](../project/runtimes.md#trust-tiers) comes from facts the machine that
+  ran the Job reports, including its provider's conformance result. pluralintel.com
+  recomputes the tier from those facts but cannot re-observe them.
+- An episode may run as long as its `max_seconds`, but a recorded Trial's gateway key
+  lives at most 7 days, and a sandbox on Plural's Daytona account is ended after 6
+  hours. Use your own Daytona key for longer episodes.
+- The `egress_denied` integrity check exists, but no provider reports blocked
+  connections yet.
 - Redaction matches exact secret values in captured logs. It cannot catch a
   secret that code has encoded or transformed, and it does not apply to custom
   artifacts or external logs.

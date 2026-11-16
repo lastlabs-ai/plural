@@ -209,7 +209,7 @@ async def test_the_job_kills_harness_processes_before_reading_files_or_finishing
     after = provider.order[provider.order.index("stop") :]
     assert after[:2] == ["stop", "download"]
     assert "host" in after
-    assert provider.stopped == [(None,)]
+    assert provider.stopped == [("plural-agent",)]
 
 
 class _Docker(DockerProvider):
@@ -265,7 +265,45 @@ class _Client:
 
 async def _daytona(remote: _Remote) -> tuple[DaytonaProvider, SandboxHandle]:
     provider = DaytonaProvider(adapter=_Client(remote))  # type: ignore[arg-type]
-    return provider, await provider.create(SandboxRequirements(image="python:3.12"))
+    handle = await provider.create(SandboxRequirements(image="python:3.12"))
+    remote.calls.clear()
+    return provider, handle
+
+
+async def test_daytona_makes_the_workspace_its_default_user_cannot() -> None:
+    remote = _Remote()
+    provider = DaytonaProvider(adapter=_Client(remote))  # type: ignore[arg-type]
+
+    await provider.create(SandboxRequirements(image="python:3.12"))
+
+    (command,) = remote.calls
+    assert command[:2] == ("sh", "-c")
+    assert "sudo -n mkdir -p /workspace" in command[2]
+
+
+async def test_daytona_runs_as_another_user_through_sudo_keeping_the_requested_env() -> None:
+    remote = _Remote()
+    provider, handle = await _daytona(remote)
+
+    await provider.exec(handle, ExecRequest(command=("id", "-u"), user="root"))
+    await provider.exec(
+        handle,
+        ExecRequest(command=("python",), env={"PYTHONPATH": "/x", "A": "b"}, user="plural-apps"),
+    )
+
+    assert remote.calls == [
+        ("sudo", "-n", "-E", "--", "id", "-u"),
+        (
+            "sudo",
+            "-n",
+            "-E",
+            "--preserve-env=A,PYTHONPATH",
+            "-u",
+            "plural-apps",
+            "--",
+            "python",
+        ),
+    ]
 
 
 async def test_daytona_kills_the_harness_users_processes_as_root() -> None:

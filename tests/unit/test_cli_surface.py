@@ -61,7 +61,7 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
         "agent": {"key", "test"},
         "benchmark": {"add", "remove"},
         "env": {"serve"},
-        "task": {"cases"},
+        "task": {"cases", "check"},
         "verifier": {"try", "apply"},
     }
     for name in RESOURCE_GROUPS:
@@ -89,6 +89,8 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
             {
                 "providers",
                 "provider",
+                "doctor",
+                "sweep",
                 "list",
                 "show",
                 "create",

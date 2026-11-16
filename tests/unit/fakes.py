@@ -10,6 +10,7 @@ from typing import Any
 
 from plural.apps import daemon
 from plural.sandbox import (
+    AppIsolation,
     DownloadedFile,
     ExecRequest,
     ExecResult,
@@ -48,8 +49,11 @@ _EPISODE = "".join(
 
 
 class FakeProvider(SandboxProvider):
-    def __init__(self, name: str, *, delay: float = 0, fail_first: bool = False) -> None:
+    def __init__(
+        self, name: str, *, delay: float = 0, fail_first: bool = False, isolates: bool = True
+    ) -> None:
         self.name = name
+        self.isolates = isolates
         self.delay = delay
         self.fail_first = fail_first
         self.created: list[SandboxRequirements] = []
@@ -89,6 +93,11 @@ class FakeProvider(SandboxProvider):
         self.created.append(requirements)
         self.files[identifier] = {}
         return SandboxHandle(sandbox_id=identifier, provider=self.name, image_identity="fake")
+
+    async def isolate_apps(self, handle: SandboxHandle) -> AppIsolation:
+        if not self.isolates:
+            return AppIsolation()
+        return AppIsolation(app_user="plural-apps", agent_user="plural-agent")
 
     async def upload_files(
         self,

@@ -53,6 +53,14 @@ Plural refuses to start a run when the selected provider cannot enforce a
 declared control. It cannot detect every provider bug or malicious
 implementation.
 
+On every sandbox provider, a Trial does not run unless the App host can run as
+its own OS user, apart from the Agent. Each Trial records a
+[trust tier](../project/runtimes.md#trust-tiers) from how it actually ran, and
+`plural runtime doctor --conformance` checks in real sandboxes that a provider
+keeps the promises a `verified` result depends on. To find out whether an Agent
+could have won by a shortcut, such as reading the answer key, see
+[Integrity](integrity.md).
+
 **Opening a project runs its code.** Treat a project folder like any repository
 you clone. Commands that load an Environment, such as `plural env validate`,
 `plural run --dry-run`, and `plural env push`, import its Python files, start its MCP

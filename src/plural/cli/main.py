@@ -9,7 +9,7 @@ from plural.cli.app_commands import app_app
 from plural.cli.auth_commands import auth_app
 from plural.cli.common import deprecated
 from plural.cli.credential_commands import credential_app
-from plural.cli.eval_commands import eval_app
+from plural.cli.eval_commands import eval_app, task_check
 from plural.cli.external_commands import external_app
 from plural.cli.models_commands import models_app
 from plural.cli.project_commands import project_app
@@ -76,6 +76,8 @@ for _kind in KINDS:
     if _kind.name == "verifier":
         _group.command("try")(verifier_try)
         _group.command("apply")(verifier_apply)
+    if _kind.name == "task":
+        _group.command("check")(task_check)
     app.add_typer(_group, name=_kind.cli)
 app.command("run")(run)
 app.add_typer(eval_app, name="eval")

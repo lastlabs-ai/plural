@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from typer.testing import CliRunner
 
 import plural.evaluation
+import plural.project.checks
 from plural.cli.main import app
 from plural.evaluation import STEPS, eval_status
 
@@ -22,6 +24,13 @@ def quoting(tmp_path: Path) -> Path:
     project = tmp_path / "quoting"
     shutil.copytree(EXAMPLE, project)
     return project
+
+
+@pytest.fixture
+def checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every Task's graders checked and passing."""
+    passing = SimpleNamespace(passed=True, problems=())
+    monkeypatch.setattr(plural.project.checks, "load_check", lambda _workspace, _task: passing)
 
 
 def _statuses(path: Path, **options: Any) -> dict[str, str]:
@@ -37,7 +46,7 @@ def test_outside_a_project_the_next_step_is_to_create_one(tmp_path: Path) -> Non
         "Set up": "todo",
         "Define good": "coming_soon",
         "Build the eval set": "todo",
-        "Check the graders": "coming_soon",
+        "Check the graders": "todo",
         "Baseline": "todo",
         "Diagnose": "coming_soon",
         "Improve": "coming_soon",
@@ -53,7 +62,7 @@ def test_an_empty_project_starts_with_an_environment(tmp_path: Path) -> None:
     assert status.next_command == "plural env init <name>"
 
 
-def test_a_project_with_its_benchmark_unrun_is_told_to_run_it(quoting: Path) -> None:
+def test_a_project_with_its_benchmark_unchecked_is_told_to_check_it(quoting: Path) -> None:
     status = eval_status(quoting)
     steps = {step.title: step for step in status.steps}
     assert status.benchmark == "quoting"
@@ -64,7 +73,15 @@ def test_a_project_with_its_benchmark_unrun_is_told_to_run_it(quoting: Path) -> 
     assert steps["Build the eval set"].summary == (
         "60 Tasks in 4 categories. Held-out split coming soon."
     )
+    assert steps["Check the graders"].status == "todo"
+    assert steps["Check the graders"].summary == "0 of 60 Tasks checked"
     assert steps["Baseline"].status == "todo"
+    assert status.next_command == "plural eval check -b quoting"
+
+
+def test_once_the_graders_pass_the_next_step_is_the_baseline(quoting: Path, checked: None) -> None:
+    status = eval_status(quoting)
+    assert {step.title: step.status for step in status.steps}["Check the graders"] == "done"
     assert status.next_command == "plural run -b quoting -a quote-bot"
 
 
@@ -94,7 +111,7 @@ def test_a_missing_or_invalid_benchmark_needs_attention(quoting: Path) -> None:
         (
             {"status": "succeeded", "score": 0.4166},
             "done",
-            "job_1: quote-bot scored 0.42",
+            "job_1: quote-bot, score 0.42",
         ),
         ({"status": "running", "score": None}, "attention", "job_1 is running"),
         ({"status": "awaiting_review", "score": None}, "attention", "job_1 is awaiting review"),
@@ -106,6 +123,7 @@ def test_the_baseline_is_the_latest_local_job_of_the_benchmark(
     job: dict[str, Any],
     status: str,
     summary: str,
+    checked: None,
 ) -> None:
     jobs = [
         {"job_id": "job_1", "source": "benchmark/quoting", "agent": "agent/quote-bot", **job},
@@ -126,6 +144,6 @@ def test_the_command_prints_every_step_and_ends_with_next(
     lines = text.output.splitlines()
     assert lines[0] == "Evaluation of quoting in quoting"
     assert len(lines) == 1 + len(STEPS) + 1
-    assert lines[-1] == "Next: plural run -b quoting -a quote-bot"
+    assert lines[-1] == "Next: plural eval check -b quoting"
     payload = json.loads(CliRunner().invoke(app, ["eval", "status", "--json"]).output)
-    assert payload["next_command"] == "plural run -b quoting -a quote-bot"
+    assert payload["next_command"] == "plural eval check -b quoting"

@@ -184,6 +184,7 @@ A semantic version that pins an ordered set of Tasks.
 - **`limitations`** — `array of string`; optional. Default: `[]`.
 - **`license`** — `string`; optional. Default: `""`.
 - **`forked_from`** — `string | null`; optional. Default: `null`.
+- **`canary`** — `string | null`; optional. Default: `null`.
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`title`** — `string | null`; optional. Default: `null`. Display name in the hosted project. Defaults to name.
 - **`version`** — `string`; required.
@@ -252,6 +253,7 @@ How a release turns attempts into one score per configuration.
 - **`infrastructure_error`** — `"exclude"`; optional. Default: `"exclude"`.
 - **`harness_timeout`** — `"infrastructure_error" | "agent_failure"`; optional. Default: `"infrastructure_error"`.
 - **`min_tasks_for_interval`** — `integer`; optional. Default: `5`. Constraints: `{"minimum": 2}`.
+- **`integrity`** — `"report" | "exclude_critical" | "zero_critical"`; optional. Default: `"report"`.
 
 ## DeclarativeImage
 
@@ -291,7 +293,8 @@ Where an Environment runs: Docker, a trusted local process, or a remote sandbox.
 - **`declarative_image`** — `DeclarativeImage | null`; optional. Default: `null`.
 - **`build_context`** — `string | null`; optional. Default: `null`.
 - **`dockerfile`** — `string | null`; optional. Default: `null`.
-- **`network`** — `NetworkMode`; optional. Default: `"public"`.
+- **`network`** — `NetworkMode | null`; optional. Default: `null`. Egress during the episode. Unset, Plural chooses: a recorded run on a provider that enforces an allowlist gets one with the gateway's hosts, and any other run is public. Set public explicitly to keep the open internet.
+- **`isolation`** — `"required" | "best_effort" | null`; optional. Default: `null`. Whether a Trial may run when the sandbox cannot keep the Agent away from the App host and Verifiers. Unset, it is required everywhere but the local Runtime. best_effort runs anyway and marks the Trial unverified.
 - **`allowed_hosts`** — `array of string`; optional. Default: `[]`. Hosts the Runtime may reach when network is 'allowlist'.
 - **`compute`** — `ResourceRequirements`; optional. CPU, memory, storage, and process limits for the Runtime.
 - **`packages`** — `RuntimePackages`; optional. Packages installed in the Runtime before an episode. In environment.yaml, list Python ones under python_packages. On the local Runtime they must already be installed.

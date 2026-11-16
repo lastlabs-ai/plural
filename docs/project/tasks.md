@@ -130,6 +130,10 @@ Here is what each field in `task.yaml` means, for when you need the exact rules:
   `resources/` folder is not an error. Files may be of any type, up to 16 MiB each and
   256 MiB per Task; see [Supply data for a single Task](#supply-data-for-a-single-task).
   Paths must stay inside the Task folder.
+- `reference` names a function that solves this Task, such as `reference.py:solve`,
+  in place of its Environment's `reference`. `plural task check` plays it to prove the
+  Task can be solved; see [Integrity](../operations/integrity.md#a-reference-policy).
+  It never reaches the Agent, and changing it does not create a new revision.
 
 ### Write many Tasks from a list of cases
 

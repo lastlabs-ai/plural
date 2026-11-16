@@ -168,12 +168,12 @@ def _memory(help: str = "Memory for each sandbox.", **extra: Any) -> RuntimeFiel
     )
 
 
-def _timeout(maximum: float = 86400, default: int = 900) -> RuntimeField:
+def _timeout(maximum: float = 604_800, default: int = 900) -> RuntimeField:
     return RuntimeField(
         key="timeout_seconds",
         label="Command timeout",
-        help="How long one command in the sandbox may run before Plural stops it. "
-        "The Environment's episode budget limits the whole run separately.",
+        help="How long one setup, reset, or Verifier command in the sandbox may run before "
+        "Plural stops it. The Agent's Harness runs for the Environment's max_seconds instead.",
         kind="integer",
         unit="seconds",
         minimum=1,
@@ -187,10 +187,12 @@ def _network(modes: tuple[str, ...]) -> tuple[RuntimeField, ...]:
         key="network",
         label="Network access",
         help="What the sandbox may reach. The Agent's model calls run inside it, so "
-        "keep the model endpoint reachable unless the Environment needs no model.",
+        "keep the model endpoint reachable unless the Environment needs no model. "
+        "Leave it unset for the open internet, except on recorded runs where the "
+        "provider can enforce it: those reach only the model gateway, the Python "
+        "package index, and your allowed hosts.",
         kind="select",
         group="network",
-        default="public",
         options=tuple(
             RuntimeFieldOption(
                 value=mode, label=_NETWORK_LABELS[mode][0], help=_NETWORK_LABELS[mode][1]
@@ -266,9 +268,11 @@ RUNTIME_PROVIDERS: tuple[RuntimeProviderSpec, ...] = (
                 ),
             ),
             _image(
-                "python:3.12-slim",
-                "Any public or registry image Daytona can pull. Leave empty when you "
-                "use a snapshot instead.",
+                None,
+                "Any public or registry image Daytona can pull. Leave empty for "
+                "Daytona's default image, which can keep the Agent away from the App "
+                "host, or when you use a snapshot instead.",
+                placeholder="python:3.12-slim",
             ),
             RuntimeField(
                 key="snapshot",
@@ -802,8 +806,8 @@ def resolved_settings(provider: str, settings: Mapping[str, Any]) -> dict[str, A
         cleaned[field.key] = field.default
     if "image" in cleaned and "snapshot" in cleaned:
         raise RuntimeSettingsError("Use either a container image or a snapshot, not both")
-    network = cleaned.get("network", "public")
-    if network not in spec.network_modes:
+    network = cleaned.get("network")
+    if network is not None and network not in spec.network_modes:
         raise RuntimeSettingsError(f"{spec.name} does not support network={network!r}")
     hosts = cleaned.get("allowed_hosts") or []
     if network == "allowlist" and not hosts:
@@ -915,7 +919,7 @@ def runtime_from_settings(
         "docker": frozenset({ExecutionTarget.DOCKER, ExecutionTarget.REMOTE}),
         "remote": frozenset({ExecutionTarget.REMOTE}),
     }[spec.target]
-    network = NetworkMode(values.get("network", "public"))
+    network = NetworkMode(values["network"]) if values.get("network") else None
     return EnvironmentRuntime(
         provider=provider,
         ref=ref,
@@ -956,7 +960,7 @@ def settings_from_runtime(runtime: EnvironmentRuntime) -> dict[str, Any]:
         "storage_mb": runtime.compute.storage_mb,
         "pids": runtime.compute.pids,
         "timeout_seconds": runtime.timeout_seconds,
-        "network": runtime.network.value,
+        "network": runtime.network.value if runtime.network is not None else None,
         "allowed_hosts": list(runtime.allowed_hosts),
         "read_only_root": runtime.read_only_root,
         "python_packages": list(runtime.packages.python),

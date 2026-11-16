@@ -8,6 +8,7 @@ released, or recorded as finished work.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -242,7 +243,9 @@ def resource_scaffold(
     if kind is BENCHMARK:
         return Scaffold(
             files={
-                BENCHMARK.manifest: _BENCHMARK_YAML.format(name=name),
+                BENCHMARK.manifest: _BENCHMARK_YAML.format(
+                    name=name, canary=f"plural-canary-{uuid.uuid4()}"
+                ),
                 "README.md": _BENCHMARK_README.format(title=title(name)),
             }
         )
@@ -763,6 +766,9 @@ scoring:
   infrastructure_error: exclude
   # A Harness killed for running past its time counts as the Agent's failure.
   harness_timeout: agent_failure
+# Never put this in a Task's instructions or files. A Trial whose Agent writes it saw a
+# grader file, or its model was trained on this Benchmark.
+canary: {canary}
 """
 
 _BENCHMARK_README = """\

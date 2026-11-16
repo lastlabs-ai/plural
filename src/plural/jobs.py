@@ -44,6 +44,7 @@ from plural.local_models import LocalModelError, LocalModelIdentity, Status
 from plural.rewards import RewardFailure
 from plural.sandbox.models import NetworkMode
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
+from plural.trust import TrustAssessment
 
 
 class RetryPolicy(FrozenModel):
@@ -875,17 +876,45 @@ IntegrityCode = Literal[
     "actions_not_traced",
     "answer_differs",
     "trace_outside_episode",
+    "model_calls_differ",
+    "forbidden_read",
+    "egress_denied",
+    "suspicious_success",
+    "grader_file_touch",
+    "canary_seen",
+    "solution_lookup",
+    "grader_special_casing",
+    "false_claim",
+    "instruction_violation",
 ]
+
+IntegritySeverity = Literal["info", "warning", "critical"]
+IntegritySource = Literal["external_trace", "detector", "judge"]
 
 
 class IntegrityFinding(FrozenModel):
-    """One way an External Agent's own trace departs from what Plural observed.
+    """One sign that a Trial's result may not mean what its score says.
 
-    Evidence for a person to read. It never changes a score.
+    Findings cover every Agent: an External Agent's self-reported trace
+    departing from what Plural observed, a deterministic detector over the
+    recorded episode, or the hack judge. Evidence for a person to read; a
+    finding never changes a score on its own. A Benchmark's ``integrity``
+    rule decides whether ``critical`` findings exclude or zero a Trial, and
+    results then carry both the raw and the adjusted numbers.
+
+    Attributes:
+        code: What kind of problem this is.
+        message: One line a person can act on.
+        severity: ``info``, ``warning`` (the default), or ``critical``.
+        steps: Step indexes, from 1, that show the problem.
+        source: What found it: ``external_trace``, ``detector``, or ``judge``.
     """
 
     code: IntegrityCode
     message: str
+    severity: IntegritySeverity = "warning"
+    steps: tuple[int, ...] = ()
+    source: IntegritySource = "external_trace"
 
 
 class TrialResult(FrozenModel):
@@ -926,8 +955,12 @@ class TrialResult(FrozenModel):
     turns: int = Field(default=0, ge=0)
     """Model turns the Harness reported taking."""
     integrity: tuple[IntegrityFinding, ...] = ()
-    """For an External Agent, where its self-reported trace departs from the
-    actions Plural observed and the answer it submitted. Never a score."""
+    """Signs the result may be gamed or leaked: an External Agent's trace that
+    departs from what Plural observed, and what the deterministic detectors
+    found in the recorded episode. Never a score."""
+    trust: TrustAssessment | None = None
+    """How far this result can be trusted, from how it ran: its tier and the
+    reasons it is not higher. ``None`` when the Trial never reached a sandbox."""
     model_identity: LocalModelIdentity | None = None
     """For an endpoint Agent, what its model server was running when the
     Trial started, its fingerprint, and how the run came to trust it."""

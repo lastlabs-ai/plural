@@ -92,7 +92,9 @@ def test_partial_settings_skip_required_fields_for_template_overrides() -> None:
 
 
 def test_resolved_settings_fill_defaults_and_check_the_network() -> None:
-    assert resolved_settings("daytona", {})["image"] == "python:3.12-slim"
+    assert "image" not in resolved_settings("daytona", {})
+    assert "network" not in resolved_settings("daytona", {})
+    assert resolved_settings("docker", {})["image"] == "python:3.12-slim"
     assert "image" not in resolved_settings("daytona", {"snapshot": "warm"})
     with pytest.raises(RuntimeSettingsError, match="at least one allowed host"):
         resolved_settings("daytona", {"network": "allowlist"})

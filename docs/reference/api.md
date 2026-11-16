@@ -2570,6 +2570,53 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 
 Idempotently delete the sandbox and scoped data.
 
+### plural.sandbox.SandboxProvider.version
+
+```python
+version(self) -> 'str'
+```
+
+The provider's version, which keys its conformance report.
+
+```text
+Returns:
+    A version string; the provider's name when it has none.
+```
+
+### plural.sandbox.SandboxProvider.lifetime
+
+```python
+lifetime(self, handle: 'SandboxHandle') -> 'SandboxLifetime | None'
+```
+
+Read back what stops this sandbox if its Trial never destroys it.
+
+```text
+Returns:
+    The limit the provider applied, or ``None`` when it has none.
+```
+
+### plural.sandbox.SandboxProvider.list_sandboxes
+
+```python
+list_sandboxes(self, labels: 'Mapping[str, str]') -> 'tuple[SandboxSummary, ...]'
+```
+
+List this account's sandboxes that carry every label given.
+
+```text
+Returns:
+    One summary per sandbox; empty when the provider cannot list them.
+```
+
+### plural.sandbox.SandboxProvider.delete_sandbox
+
+```python
+delete_sandbox(self, sandbox_id: 'str') -> 'None'
+```
+
+Delete a sandbox by id, including one this process did not create.
+
 ## plural.sandbox.SandboxRequirements
 
 Controls required for one sandbox before it may launch.
@@ -2847,6 +2894,49 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 
 Force-remove the container idempotently.
 
+### plural.sandbox.DockerProvider.version
+
+```python
+version(self) -> 'str'
+```
+
+The Docker Engine's version, which keys its conformance report.
+
+### plural.sandbox.DockerProvider.lifetime
+
+```python
+lifetime(self, handle: 'SandboxHandle') -> 'SandboxLifetime | None'
+```
+
+Read the container's sleep and auto-remove setting back from Docker.
+
+```text
+Returns:
+    How long the container lives and whether it is removed once it
+    stops, or ``None`` when it was created to live until destroyed.
+```
+
+### plural.sandbox.DockerProvider.list_sandboxes
+
+```python
+list_sandboxes(self, labels: 'Mapping[str, str]') -> 'tuple[SandboxSummary, ...]'
+```
+
+List Plural's containers that carry every label given.
+
+```text
+Returns:
+    One summary per container, running or stopped.
+```
+
+### plural.sandbox.DockerProvider.delete_sandbox
+
+```python
+delete_sandbox(self, sandbox_id: 'str') -> 'None'
+```
+
+Force-remove a container by id, even one another process created.
+
 ## plural.sandbox.DaytonaProvider
 
 Execute in Daytona while keeping its SDK an optional import.
@@ -2949,8 +3039,8 @@ exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
 Execute through ``sandbox.process.exec``.
 
 ```text
-A ``user`` other than ``root`` runs through ``sudo -n -E -u``, which
-fails rather than falling back to the default user.
+A ``user``, ``root`` included, runs through ``sudo -n -E``, which fails
+rather than falling back to the default user.
 ```
 
 ### plural.sandbox.DaytonaProvider.download_files
@@ -3006,6 +3096,53 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 ```
 
 Idempotently delete the remote sandbox.
+
+### plural.sandbox.DaytonaProvider.version
+
+```python
+version(self) -> 'str'
+```
+
+The installed Daytona SDK's version, which keys the conformance report.
+
+### plural.sandbox.DaytonaProvider.lifetime
+
+```python
+lifetime(self, handle: 'SandboxHandle') -> 'SandboxLifetime | None'
+```
+
+Read the sandbox's time to live back from Daytona.
+
+```text
+Returns:
+    The limit Daytona applied, or ``None`` when it reports none.
+```
+
+### plural.sandbox.DaytonaProvider.list_sandboxes
+
+```python
+list_sandboxes(self, labels: 'Mapping[str, str]') -> 'tuple[SandboxSummary, ...]'
+```
+
+This account's Daytona sandboxes that carry every label given.
+
+```text
+Returns:
+    One summary per sandbox; empty when the client cannot list.
+```
+
+### plural.sandbox.DaytonaProvider.delete_sandbox
+
+```python
+delete_sandbox(self, sandbox_id: 'str') -> 'None'
+```
+
+Delete a Daytona sandbox by id, even one another process created.
+
+```text
+Raises:
+    CapabilityError: When this client cannot delete by id.
+```
 
 ## plural.routing.policies.Explicit
 

@@ -166,6 +166,72 @@ afterwards that each one is. A Docker Runtime builds them into its image once an
 package manager today; others will be added beside it under `packages`.
 :::
 
+## Trust tiers
+
+Every Trial records how far its result can be trusted, from how it actually ran. The
+tier appears on the Trial, in `plural eval status`, and as a badge in the Trial table.
+
+| Tier | When |
+| --- | --- |
+| `verified` | A sandbox kept the Agent away from the App host and Verifiers, the network was enforced, the image was pinned, the provider passed conformance, and the App host signed its report |
+| `standard` | Isolated, but at least one of those is missing: an open network, an unpinned image, no conformance report, or an unsigned report |
+| `unverified` | The `local` Runtime, or a sandbox that could not isolate the App host |
+
+A Trial lists the reasons it is not `verified`. A Trial that failed before its
+episode started has no tier. pluralintel.com recomputes the tier from the facts a Job
+reports, so a Job cannot claim a tier its facts don't support.
+
+On Daytona with the default settings, a recorded run or `plural eval` run is
+`verified`: Daytona's default snapshot is pinned, the App host runs as its own user,
+and the network is limited to Plural's gateway.
+
+### Isolation fails closed
+
+On every sandbox provider, a Trial whose sandbox cannot run the App host as a separate
+OS user does not run. It fails with a message that names what the image lacks, which
+is passwordless `sudo` and `useradd`. To run anyway for a quick check, accept a weaker
+result:
+
+```yaml
+runtime:
+  provider: docker
+  isolation: best_effort # the Trial runs and is marked unverified
+```
+
+The `local` Runtime is `best_effort` by default, since it runs everything as you.
+
+### Network
+
+Leave `network` unset and Plural chooses. A recorded run on a provider that can
+enforce an allowlist, such as Daytona, may reach only Plural's model gateway, the
+Python package index used during setup, and the Environment's `allowed_hosts`. Any
+other run gets the open internet. Set `network`
+explicitly to override this. `public` keeps the open internet and makes the Trial
+`standard`.
+
+### Conformance
+
+Conformance is a suite of 14 probes that check, in a real sandbox, what a provider
+promises: that the Agent's user can't read the App host's files or signal its
+processes, that `network: none` and allowlists hold (even for an address resolved
+outside the sandbox), and that a sandbox stops and is deleted when its time is up.
+
+```bash
+plural runtime doctor --conformance --provider daytona
+```
+
+The report is cached for that provider version, and when you are signed in it is also
+shared to the account's **Runtimes** page. A Trial is `verified` only while its
+provider's cached report passes. Run the suite again after the provider's SDK or
+Docker version changes.
+
+### Sandboxes left behind
+
+Every sandbox a Trial starts is labeled with its Job, Trial, and owner, and is given a
+lifetime, so the provider deletes it even if `plural run` is killed.
+`plural runtime sweep` deletes your sandboxes whose Job is no longer running, after
+asking first.
+
 ## Runtime templates and policy
 
 Owners and admins of an account set up Runtime templates under **Runtimes** in the
@@ -215,6 +281,8 @@ still be pushed but cannot run in the organization's projects.
 | `plural runtime use <runtime> <environment>...` | Copy a Runtime into Environments |
 | `plural runtime template ...` | Manage the account's templates (admins) |
 | `plural runtime policy [set]` | Show or set the organization's policy |
+| `plural runtime doctor [--conformance]` | Check providers, or run the conformance suite |
+| `plural runtime sweep` | Delete your sandboxes that no running Job is using |
 
 Every command takes `--json`. See the [CLI reference](../cli/evaluation.md) for all
 options.

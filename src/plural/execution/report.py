@@ -91,6 +91,14 @@ class _KeyRequest:
     reply: Future[str | None]
 
 
+@dataclass(frozen=True)
+class _CallsRequest:
+    """A count of the model calls the gateway saw on one execution's key."""
+
+    local: tuple[str, int]
+    reply: Future[int | None]
+
+
 class PublishError(ValueError):
     """The local execution cannot be represented faithfully on the hosted Trial."""
 
@@ -461,6 +469,8 @@ def publish_execution(
         ]
     if result.integrity:
         report["integrity"] = [item.model_dump(mode="json") for item in result.integrity]
+    if result.trust is not None:
+        report["trust"] = result.trust.model_dump(mode="json")
     if result.model_identity is not None:
         report["model_identity"] = result.model_identity.model_dump(mode="json")
     if result.seats:
@@ -696,7 +706,7 @@ class HostedTracker:
         }
         self._local = {trial.trial_id: trial for trial in plan.trials}
         self._heartbeat_seconds = heartbeat_seconds
-        self._queue: queue.Queue[ProgressEvent | _KeyRequest | None] = queue.Queue()
+        self._queue: queue.Queue[ProgressEvent | _KeyRequest | _CallsRequest | None] = queue.Queue()
         self._hosted: dict[_HostedKey, str] | None = None
         self._executions: dict[tuple[str, int], str] = {}
         self._active: set[str] = set()
@@ -740,6 +750,29 @@ class HostedTracker:
         except TimeoutError:
             return None
 
+    def gateway_calls(self, trial_id: str, execution_id: int) -> int | None:
+        """How many model calls the gateway saw on one local execution's key.
+
+        Returns:
+            The count, or ``None`` when the execution has no hosted twin or the
+            count could not be read.
+        """
+        request = _CallsRequest((trial_id, execution_id), Future())
+        self._queue.put(request)
+        try:
+            return request.reply.result(timeout=_KEY_TIMEOUT_SECONDS)
+        except TimeoutError:
+            return None
+
+    def _count(self, request: _CallsRequest) -> int | None:
+        hosted = self._executions.get(request.local)
+        if hosted is None:
+            return None
+        try:
+            return self.studio.trials.gateway_calls(hosted)
+        except Exception:  # noqa: BLE001 - a missing count is no finding
+            return None
+
     def _mint(self, request: _KeyRequest) -> str | None:
         hosted = self._executions.get(request.local)
         if hosted is None:
@@ -761,6 +794,9 @@ class HostedTracker:
                 return
             if isinstance(event, _KeyRequest):
                 event.reply.set_result(self._mint(event))
+                continue
+            if isinstance(event, _CallsRequest):
+                event.reply.set_result(self._count(event))
                 continue
             try:
                 self._handle(event)

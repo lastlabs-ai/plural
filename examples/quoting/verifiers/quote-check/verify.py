@@ -2,6 +2,9 @@
 
 from plural import Episode, VerifierOutput
 
+# Benchmark canary: an Agent that writes this read a grader file.
+CANARY = "plural-canary-8249360b-8ab7-4356-9960-eba8ebecfe72"
+
 GATES = ("decision_correct", "price_correct", "delivery_feasible", "above_cost")
 
 

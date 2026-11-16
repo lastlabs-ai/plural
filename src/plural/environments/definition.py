@@ -249,6 +249,12 @@ class RuntimePackages(FrozenModel):
         return bool(self.python)
 
 
+def _network(value: NetworkMode | str | None) -> NetworkMode | None:
+    if value is None or isinstance(value, NetworkMode):
+        return value
+    return NetworkMode(value)
+
+
 class EnvironmentRuntime(FrozenModel):
     """Where an Environment runs: Docker, a trusted local process, or a remote sandbox."""
 
@@ -267,7 +273,18 @@ class EnvironmentRuntime(FrozenModel):
     declarative_image: DeclarativeImage | None = None
     build_context: str | None = None
     dockerfile: str | None = None
-    network: NetworkMode = NetworkMode.PUBLIC
+    network: NetworkMode | None = Field(
+        default=None,
+        description="Egress during the episode. Unset, Plural chooses: a recorded run on a "
+        "provider that enforces an allowlist gets one with the gateway's hosts, and any "
+        "other run is public. Set public explicitly to keep the open internet.",
+    )
+    isolation: Literal["required", "best_effort"] | None = Field(
+        default=None,
+        description="Whether a Trial may run when the sandbox cannot keep the Agent away "
+        "from the App host and Verifiers. Unset, it is required everywhere but the "
+        "local Runtime. best_effort runs anyway and marks the Trial unverified.",
+    )
     allowed_hosts: tuple[str, ...] = Field(
         default=(),
         validation_alias=AliasChoices("allowed_hosts", "network_allowlist"),
@@ -328,11 +345,11 @@ class EnvironmentRuntime(FrozenModel):
         names = [item.name for item in self.variables]
         if len(names) != len(set(names)):
             raise ValueError("Runtime variable names must be unique")
-        if self.allowed_hosts and self.network is not NetworkMode.ALLOWLIST:
+        if self.allowed_hosts and self.network not in {NetworkMode.ALLOWLIST, None}:
             raise ValueError(
                 "Cannot create Runtime.\n"
                 f"allowed_hosts is set ({list(self.allowed_hosts)!r}) but "
-                f"network={self.network.value!r}.\n"
+                f"network={self.network_mode.value!r}.\n"
                 "Set network='allowlist' (Harbor name) or network='restricted' "
                 "(legacy alias), or remove allowed_hosts."
             )
@@ -382,7 +399,7 @@ class EnvironmentRuntime(FrozenModel):
         image: str | None = "python:3.12-slim",
         dockerfile: str | None = None,
         build_context: str | None = None,
-        network: NetworkMode | str = NetworkMode.PUBLIC,
+        network: NetworkMode | str | None = None,
         allowed_hosts: tuple[str, ...] = (),
         cpus: float | None = None,
         memory_mb: int | None = None,
@@ -409,7 +426,7 @@ class EnvironmentRuntime(FrozenModel):
         return cls(
             provider="docker",
             image=image,
-            network=NetworkMode(network) if not isinstance(network, NetworkMode) else network,
+            network=_network(network),
             targets=frozenset({ExecutionTarget.DOCKER, ExecutionTarget.REMOTE}),
             **fields,
         )
@@ -418,7 +435,7 @@ class EnvironmentRuntime(FrozenModel):
     def local(
         cls,
         *,
-        network: NetworkMode | str = NetworkMode.PUBLIC,
+        network: NetworkMode | str | None = None,
         **fields: Any,
     ) -> EnvironmentRuntime:
         """Trusted local subprocess Runtime. Not a sandbox.
@@ -429,7 +446,7 @@ class EnvironmentRuntime(FrozenModel):
         return cls(
             provider="local",
             image=None,
-            network=NetworkMode(network) if not isinstance(network, NetworkMode) else network,
+            network=_network(network),
             targets=frozenset({ExecutionTarget.LOCAL}),
             allow_unsafe_local=True,
             **fields,
@@ -439,12 +456,16 @@ class EnvironmentRuntime(FrozenModel):
     def daytona(
         cls,
         *,
-        image: str | None = "python:3.12-slim",
-        network: NetworkMode | str = NetworkMode.PUBLIC,
+        image: str | None = None,
+        network: NetworkMode | str | None = None,
         allowed_hosts: tuple[str, ...] = (),
         **fields: Any,
     ) -> EnvironmentRuntime:
         """Daytona remote sandbox Runtime. Requires ``plural[daytona]``.
+
+        Without an image or snapshot, the sandbox starts from Daytona's default
+        snapshot, which has the passwordless ``sudo`` and ``useradd`` that keep
+        the Agent away from the App host.
 
         Returns:
             A Daytona Runtime.
@@ -454,10 +475,26 @@ class EnvironmentRuntime(FrozenModel):
         return cls(
             provider="daytona",
             image=image,
-            network=NetworkMode(network) if not isinstance(network, NetworkMode) else network,
+            network=_network(network),
             targets=frozenset({ExecutionTarget.REMOTE}),
             **fields,
         )
+
+    @property
+    def network_mode(self) -> NetworkMode:
+        """The network this Runtime asks for, with an unset one read as public."""
+        return self.network or NetworkMode.PUBLIC
+
+    @property
+    def isolation_policy(self) -> Literal["required", "best_effort"]:
+        """Whether a Trial must keep the Agent away from the App host to run.
+
+        Unset, it is ``best_effort`` on the ``local`` Runtime, which runs
+        everything as you, and ``required`` on every sandbox provider.
+        """
+        if self.isolation is not None:
+            return self.isolation
+        return "best_effort" if self.provider == "local" else "required"
 
     @property
     def requested_target(self) -> ExecutionTarget:

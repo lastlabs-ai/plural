@@ -151,3 +151,6 @@ scoring:
   success_threshold: 1.0
   agent_failure: zero
   infrastructure_error: exclude
+# Never put this in a Task's instructions or files. A Trial whose Agent writes it saw a
+# grader file, or its model was trained on this Benchmark.
+canary: plural-canary-8249360b-8ab7-4356-9960-eba8ebecfe72

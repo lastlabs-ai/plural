@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from enum import Enum
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -130,6 +130,12 @@ class SandboxRequirements(SandboxModel):
     persistent: bool = False
     compose: bool = False
     read_only_root: bool = False
+    isolation: Literal["required", "best_effort"] = "required"
+    labels: dict[str, str] = Field(default_factory=dict)
+    lifetime_seconds: float | None = Field(default=None, gt=0)
+    """Longest the sandbox may live. Providers that can stop or delete a
+    sandbox on their own set it at create, so a sandbox can't outlive its
+    Trial when the process that made it dies."""
 
     @model_validator(mode="after")
     def _network_shape(self) -> SandboxRequirements:
@@ -195,6 +201,12 @@ def runtime_hash_payload(runtime: dict[str, Any]) -> dict[str, Any]:
     for old, new in RUNTIME_RENAMES.items():
         if new in payload:
             payload[old] = payload.pop(new)
+    # A network Plural chooses hashes as the public default it replaced, and an
+    # isolation policy left to the provider's default is not part of the identity.
+    if "network" in payload and payload["network"] is None:
+        payload["network"] = NetworkMode.PUBLIC.value
+    if "isolation" in payload and payload["isolation"] is None:
+        del payload["isolation"]
     return payload
 
 
@@ -252,6 +264,40 @@ class SandboxHandle(SandboxModel):
     provider: str
     image_identity: str | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def image_pinned(self) -> bool:
+        """Whether ``image_identity`` names exactly one image.
+
+        A content digest does, and so does a snapshot the provider reports as
+        immutable (``metadata["snapshot"]``). A tag such as ``python:3.12``
+        does not: it can point at another image tomorrow.
+        """
+        identity = self.image_identity or ""
+        if identity.startswith("sha256:") or "@sha256:" in identity:
+            return True
+        return bool(self.metadata.get("snapshot")) and identity == self.metadata["snapshot"]
+
+
+class SandboxLifetime(SandboxModel):
+    """What a provider set, at create, to stop a sandbox that outlives its Trial.
+
+    Read back from the provider, not from the request, so a conformance check
+    can tell a limit that was applied from one that was only asked for.
+    """
+
+    stop_after_seconds: float | None = None
+    delete_after_stop: bool = False
+
+
+class SandboxSummary(SandboxModel):
+    """One sandbox a provider lists, for finding orphans."""
+
+    sandbox_id: str
+    provider: str
+    labels: dict[str, str] = Field(default_factory=dict)
+    state: str = ""
+    created_at: str | None = None
 
 
 class AppIsolation(SandboxModel):
@@ -391,7 +437,9 @@ __all__ = [
     "SandboxCapability",
     "SandboxError",
     "SandboxHandle",
+    "SandboxLifetime",
     "SandboxRequirements",
+    "SandboxSummary",
     "SandboxTimeoutError",
     "safe_relative_path",
 ]
