@@ -36,6 +36,8 @@ htmlcov/
 # Local plural data
 .plural/
 *.jsonl
+# Synthetic labels an example ships, for plural scorecard label --import.
+!examples/*/labels/*.jsonl
 *.sqlite
 *.db
 

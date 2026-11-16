@@ -1,0 +1,43 @@
+# Scorecard: what a good quote is at Forge Steel, in words and in metrics.
+# quote-check declares the binary checks and margin_usd; tone is the model judge's
+# 1-to-5 rating; cost_usd and latency_seconds are built-ins every Trial records.
+name: steel-quoting
+version: 1.0.0
+workflow: Respond to inbound steel RFQs with an accurate, profitable quote.
+owner: KB (sales lead)
+good: |
+  A good quote is correct on price, grade and delivery, never below cost,
+  and goes out fast. When unsure, the agent asks or hands off rather than guessing.
+metrics:
+  - name: decision_correct
+    role: gate
+    description: Quotes what should be quoted and hands off what should not.
+  - name: price_correct
+    role: gate
+  - name: delivery_feasible
+    role: gate
+    description: The promised date is one the mill can meet, by its calendar.
+  - name: above_cost
+    role: gate
+  - name: margin_usd
+    role: objective
+    target: ">= 150"
+  - name: tone
+    role: objective
+    weight: 0.5
+  - name: cost_usd
+    role: guardrail
+    target: "<= 0.50"
+  - name: latency_seconds
+    role: guardrail
+    target: "<= 600"
+primary: margin_usd
+inspector_lens: []
+decisions:
+  - question: Is a quote with the right price but an unmeetable delivery date acceptable?
+    answer: No. Delivery feasibility is a gate.
+    decided_by: KB
+    date: 2026-11-12
+calibration:
+  min_labels: 20
+  min_agreement: 0.6

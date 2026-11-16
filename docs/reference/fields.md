@@ -44,6 +44,7 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HarnessCapability](#harnesscapability)
 - [HarnessDefinition](#harnessdefinition)
 - [HarnessPolicy](#harnesspolicy)
+- [MetricSpec](#metricspec)
 - [NetworkMode](#networkmode)
 - [Party](#party)
 - [ResourceRequirements](#resourcerequirements)
@@ -108,10 +109,12 @@ Code that verifies an episode: it scores the end, rewards actions, or both.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
 - **`secrets`** — `array of Secret`; optional. Default: `[]`.
+- **`metrics`** — `array of MetricSpec`; optional. Default: `[]`.
 - **`kind`** — `"deterministic"`; optional. Default: `"deterministic"`.
 - **`check`** — `JSON value`; optional. Default: `null`.
 - **`reward`** — `JSON value`; optional. Default: `null`.
 - **`hindsight`** — `JSON value`; optional. Default: `null`.
+- **`measure`** — `JSON value`; optional. Default: `null`.
 - **`runtime`** — `VerifierRuntime`; optional.
 - **`result_path`** — `string`; optional. Default: `"verifier-result.json"`.
 - **`evidence_required`** — `boolean`; optional. Default: `true`.
@@ -127,6 +130,7 @@ Model-judge verifier with its own runtime and connectivity policy.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
 - **`secrets`** — `array of Secret`; optional. Default: `[]`.
+- **`metrics`** — `array of MetricSpec`; optional. Default: `[]`.
 - **`kind`** — `"agent"`; optional. Default: `"agent"`.
 - **`model`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`instructions`** — `string`; required. Constraints: `{"minLength": 1}`.
@@ -145,6 +149,7 @@ Human review verifier.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
 - **`secrets`** — `array of Secret`; optional. Default: `[]`.
+- **`metrics`** — `array of MetricSpec`; optional. Default: `[]`.
 - **`kind`** — `"human"`; optional. Default: `"human"`.
 - **`instructions`** — `string`; optional. Default: `""`.
 
@@ -189,9 +194,11 @@ A semantic version that pins an ordered set of Tasks.
 - **`title`** — `string | null`; optional. Default: `null`. Display name in the hosted project. Defaults to name.
 - **`version`** — `string`; required.
 - **`tasks`** — `array of Task`; required. Constraints: `{"minItems": 1}`.
-- **`primary_metric`** — `"score"`; optional. Default: `"score"`.
+- **`primary_metric`** — `string`; optional. Default: `"score"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`metadata`** — `object`; optional.
+- **`scorecard`** — `string | null`; optional. Default: `null`.
+- **`heldout`** — `array of string`; optional. Default: `[]`.
 
 ## AgentCredential
 
@@ -404,6 +411,19 @@ Environment ceiling for a Trial's optional Agent harness.
 - **`allowed_harnesses`** — `array of string`; optional. Default: `[]`.
 - **`allowed_capabilities`** — `array of HarnessCapability | null`; optional. Default: `null`.
 - **`denied_capabilities`** — `array of HarnessCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
+
+## MetricSpec
+
+One metric a Verifier declares: what it measures and which way is better.
+
+- **`name`** — `string`; required. Constraints: `{"maxLength": 64, "minLength": 1}`.
+- **`kind`** — `"binary" | "score" | "number" | "rating" | "running"`; optional. Default: `"score"`.
+- **`unit`** — `string | null`; optional. Default: `null`.
+- **`direction`** — `"higher" | "lower"`; optional. Default: `"higher"`.
+- **`range`** — `array of JSON value | null`; optional. Default: `null`.
+- **`aggregate`** — `"final" | "mean" | "min" | "max" | "auc" | "time_to" | null`; optional. Default: `null`.
+- **`threshold`** — `number | null`; optional. Default: `null`.
+- **`description`** — `string`; optional. Default: `""`.
 
 ## NetworkMode
 

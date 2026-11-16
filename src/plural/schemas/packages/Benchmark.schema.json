@@ -1178,6 +1178,14 @@
       "default": null,
       "title": "Forked From"
     },
+    "heldout": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Heldout",
+      "type": "array"
+    },
     "license": {
       "default": "",
       "title": "License",
@@ -1202,7 +1210,6 @@
       "type": "string"
     },
     "primary_metric": {
-      "const": "score",
       "default": "score",
       "title": "Primary Metric",
       "type": "string"
@@ -1211,6 +1218,18 @@
       "default": "",
       "title": "Purpose",
       "type": "string"
+    },
+    "scorecard": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scorecard"
     },
     "scoring": {
       "$ref": "#/$defs/BenchmarkScoring"

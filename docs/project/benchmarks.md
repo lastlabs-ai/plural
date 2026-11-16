@@ -230,6 +230,36 @@ for row in result.aggregates:
 [How a score is aggregated](#how-a-score-is-aggregated)); `coverage` is the share of
 Tasks with at least one scored attempt.
 
+## Hold Tasks out
+
+If you fix an Agent by looking at the Tasks it fails, it gets better at those Tasks.
+That doesn't tell you it got better at the work. Keep some Tasks back, never looked at
+while you diagnose and fix, and use them only to confirm a fix:
+
+```bash
+plural benchmark split support-triage --heldout 0.3 --stratify category
+```
+
+This writes a `heldout` list to the Benchmark's file: 30% of its Tasks, chosen at
+random with `--seed`, the same share from each category with `--stratify category`.
+The rest are the **development** Tasks. Edit the list by hand if you prefer.
+
+From then on:
+
+- `plural run --benchmark support-triage` runs only the development Tasks, and says how
+  many it left out.
+- `plural run --benchmark support-triage --heldout` runs every Task. That run is a
+  **peek**. Plural counts each one, in `.plural/heldout.jsonl` and in the hosted
+  project, and tells you which peek it is. Every peek makes the held-out Tasks a little
+  less independent.
+- A Job run to diagnose failures refuses held-out Tasks.
+- The hosted leaderboard ranks on the development Tasks only.
+- In a hosted Job, a held-out Trial's score, metrics, and outcome stay hidden until you
+  reveal them from the Benchmark's **Tasks** tab. Revealing is per person, and counts
+  as a peek.
+
+`plural eval status` shows the split and the number of peeks so far.
+
 ## Read the four metrics
 
 Every completed Trial records a score, whether later attempts agree, how long it

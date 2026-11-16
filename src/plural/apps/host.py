@@ -26,6 +26,7 @@ import traceback
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -806,11 +807,12 @@ class AppHost:
                 point["seat"] = step.seat
             self._metrics.append(point)
 
-    def _sim_time(self, acting: str) -> float | None:
+    def _sim_time(self, acting: str) -> float | str | None:
         """The simulated time: the acting App's clock, else the first App with one.
 
         Returns:
-            The time, or ``None`` when no App keeps a clock.
+            A number of simulated seconds (or the App's own unit, such as days), an
+            ISO-8601 timestamp, or ``None`` when no App keeps a clock.
         """
         order = [acting, *(name for name in self.apps if name != acting)]
         for name in order:
@@ -818,6 +820,14 @@ class AppHost:
                 value = self.apps[name].sim_time()
             except Exception:  # noqa: BLE001 - a broken clock only loses the time axis
                 continue
+            if isinstance(value, datetime):
+                return value.isoformat()
+            if isinstance(value, str):
+                try:
+                    datetime.fromisoformat(value)
+                except ValueError:
+                    continue
+                return value
             if value is not None:
                 try:
                     number = float(value)

@@ -1027,6 +1027,14 @@
             "title": "Secrets",
             "type": "array"
           },
+          "metrics": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/MetricSpec"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
           "kind": {
             "const": "agent",
             "default": "agent",
@@ -1143,6 +1151,14 @@
             "title": "Secrets",
             "type": "array"
           },
+          "metrics": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/MetricSpec"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
           "kind": {
             "const": "deterministic",
             "default": "deterministic",
@@ -1160,6 +1176,10 @@
           "hindsight": {
             "default": null,
             "title": "Hindsight"
+          },
+          "measure": {
+            "default": null,
+            "title": "Measure"
           },
           "runtime": {
             "$ref": "#/$defs/VerifierRuntime"
@@ -1340,6 +1360,14 @@
             "title": "Secrets",
             "type": "array"
           },
+          "metrics": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/MetricSpec"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
           "kind": {
             "const": "human",
             "default": "human",
@@ -1357,6 +1385,115 @@
           "criteria"
         ],
         "title": "HumanVerifier",
+        "type": "object"
+      },
+      "MetricSpec": {
+        "additionalProperties": false,
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "score",
+            "enum": [
+              "binary",
+              "score",
+              "number",
+              "rating",
+              "running"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unit"
+          },
+          "direction": {
+            "default": "higher",
+            "enum": [
+              "higher",
+              "lower"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "range": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Range"
+          },
+          "aggregate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "final",
+                  "mean",
+                  "min",
+                  "max",
+                  "auc",
+                  "time_to"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Aggregate"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Threshold"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MetricSpec",
         "type": "object"
       },
       "NetworkMode": {
@@ -1679,6 +1816,115 @@
   },
   "DeterministicVerifier": {
     "$defs": {
+      "MetricSpec": {
+        "additionalProperties": false,
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "score",
+            "enum": [
+              "binary",
+              "score",
+              "number",
+              "rating",
+              "running"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unit"
+          },
+          "direction": {
+            "default": "higher",
+            "enum": [
+              "higher",
+              "lower"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "range": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Range"
+          },
+          "aggregate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "final",
+                  "mean",
+                  "min",
+                  "max",
+                  "auc",
+                  "time_to"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Aggregate"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Threshold"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MetricSpec",
+        "type": "object"
+      },
       "NetworkMode": {
         "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
         "enum": [
@@ -1951,6 +2197,14 @@
         "title": "Secrets",
         "type": "array"
       },
+      "metrics": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/MetricSpec"
+        },
+        "title": "Metrics",
+        "type": "array"
+      },
       "kind": {
         "const": "deterministic",
         "default": "deterministic",
@@ -1968,6 +2222,10 @@
       "hindsight": {
         "default": null,
         "title": "Hindsight"
+      },
+      "measure": {
+        "default": null,
+        "title": "Measure"
       },
       "runtime": {
         "$ref": "#/$defs/VerifierRuntime"
@@ -1991,6 +2249,115 @@
   },
   "AgentVerifier": {
     "$defs": {
+      "MetricSpec": {
+        "additionalProperties": false,
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "score",
+            "enum": [
+              "binary",
+              "score",
+              "number",
+              "rating",
+              "running"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unit"
+          },
+          "direction": {
+            "default": "higher",
+            "enum": [
+              "higher",
+              "lower"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "range": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Range"
+          },
+          "aggregate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "final",
+                  "mean",
+                  "min",
+                  "max",
+                  "auc",
+                  "time_to"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Aggregate"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Threshold"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MetricSpec",
+        "type": "object"
+      },
       "NetworkMode": {
         "description": "Requested sandbox network policy.\n\nUse public, no-network, or allowlist to configure outbound access.",
         "enum": [
@@ -2241,6 +2608,14 @@
         "title": "Secrets",
         "type": "array"
       },
+      "metrics": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/MetricSpec"
+        },
+        "title": "Metrics",
+        "type": "array"
+      },
       "kind": {
         "const": "agent",
         "default": "agent",
@@ -2292,6 +2667,115 @@
   },
   "HumanVerifier": {
     "$defs": {
+      "MetricSpec": {
+        "additionalProperties": false,
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "score",
+            "enum": [
+              "binary",
+              "score",
+              "number",
+              "rating",
+              "running"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unit"
+          },
+          "direction": {
+            "default": "higher",
+            "enum": [
+              "higher",
+              "lower"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "range": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Range"
+          },
+          "aggregate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "final",
+                  "mean",
+                  "min",
+                  "max",
+                  "auc",
+                  "time_to"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Aggregate"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Threshold"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MetricSpec",
+        "type": "object"
+      },
       "RubricCriterion": {
         "additionalProperties": false,
         "description": "One Agent or Human rubric criterion.",
@@ -2407,6 +2891,14 @@
           "$ref": "#/$defs/SecretReference"
         },
         "title": "Secrets",
+        "type": "array"
+      },
+      "metrics": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/MetricSpec"
+        },
+        "title": "Metrics",
         "type": "array"
       },
       "kind": {
@@ -2946,6 +3438,14 @@
             "title": "Secrets",
             "type": "array"
           },
+          "metrics": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/MetricSpec"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
           "kind": {
             "const": "agent",
             "default": "agent",
@@ -3217,6 +3717,14 @@
             "title": "Secrets",
             "type": "array"
           },
+          "metrics": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/MetricSpec"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
           "kind": {
             "const": "deterministic",
             "default": "deterministic",
@@ -3234,6 +3742,10 @@
           "hindsight": {
             "default": null,
             "title": "Hindsight"
+          },
+          "measure": {
+            "default": null,
+            "title": "Measure"
           },
           "runtime": {
             "$ref": "#/$defs/VerifierRuntime"
@@ -3554,6 +4066,14 @@
             "title": "Secrets",
             "type": "array"
           },
+          "metrics": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/MetricSpec"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
           "kind": {
             "const": "human",
             "default": "human",
@@ -3571,6 +4091,115 @@
           "criteria"
         ],
         "title": "HumanVerifier",
+        "type": "object"
+      },
+      "MetricSpec": {
+        "additionalProperties": false,
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "score",
+            "enum": [
+              "binary",
+              "score",
+              "number",
+              "rating",
+              "running"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unit"
+          },
+          "direction": {
+            "default": "higher",
+            "enum": [
+              "higher",
+              "lower"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "range": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Range"
+          },
+          "aggregate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "final",
+                  "mean",
+                  "min",
+                  "max",
+                  "auc",
+                  "time_to"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Aggregate"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Threshold"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MetricSpec",
         "type": "object"
       },
       "NetworkMode": {
@@ -4003,7 +4632,6 @@
         "type": "array"
       },
       "primary_metric": {
-        "const": "score",
         "default": "score",
         "title": "Primary Metric",
         "type": "string"
@@ -4017,6 +4645,26 @@
         "additionalProperties": true,
         "title": "Metadata",
         "type": "object"
+      },
+      "scorecard": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Scorecard"
+      },
+      "heldout": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Heldout",
+        "type": "array"
       }
     },
     "required": [

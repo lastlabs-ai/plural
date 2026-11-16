@@ -370,6 +370,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ harness     Create, validate, push, pull, and inspect Harnesses.                                 │
 │ task        Create, validate, push, pull, and inspect Tasks.                                     │
 │ agent       Create, validate, push, pull, and inspect Agents.                                    │
+│ scorecard   Create, validate, push, pull, and inspect Scorecards.                                │
 │ benchmark   Create, validate, push, pull, and inspect Benchmarks.                                │
 │ eval        Evaluate an Agent and improve it, one step at a time.                                │
 │ job         List, inspect, and rerun Jobs.                                                       │
@@ -862,6 +863,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
 │ add       Add Tasks to a Benchmark (a local edit until you push).                                │
 │ remove    Remove Tasks from a Benchmark (a local edit until you push).                           │
+│ split     Hold some Tasks out, to confirm fixes on Tasks diagnosis never saw.                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1052,6 +1054,31 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --hosted          Only read the hosted project.                                                  │
 │ --json            Print machine-readable JSON.                                                   │
 │ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural benchmark split`
+
+```text
+
+ Usage: plural benchmark split [OPTIONS] [benchmark]
+
+ Hold some Tasks out, to confirm fixes on Tasks diagnosis never saw.
+
+ Writes ``heldout`` to the Benchmark's file. A plain ``plural run`` then
+ runs only the dev Tasks; ``plural run --heldout`` runs every Task and
+ counts as a peek.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   benchmark      <str>  Benchmark to split. Defaults to the one you are in.                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --heldout         <float>  The share of Tasks to hold out, such as 0.3. [default: 0.3]           │
+│ --stratify        <str>    category: hold out the same share of each category.                   │
+│ --seed            <int>    The sample's seed; the same seed, the same split. [default: 0]        │
+│ --push                     Push the Benchmark afterwards.                                        │
+│ --json                     Print machine-readable JSON.                                          │
+│ --help                     Show this message and exit.                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2067,6 +2094,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │                                                 tracks, by id, so the results can be published.  │
 │                                                 Implies --record, and uses the track's attempts. │
 │ --attempts                  <int range> [x>=1]  Advanced: Trials per Task (default 1).           │
+│ --heldout                                       Run the Benchmark's held-out Tasks too. Each     │
+│                                                 such run is a peek, and is counted.              │
 │ --concurrency       -n      <str>               Trials to run at once: a number, or auto to size │
 │                                                 it from this machine, the runtime, and where the │
 │                                                 model runs.                                      │
@@ -2585,6 +2614,340 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
+### `plural scorecard`
+
+```text
+
+ Usage: plural scorecard [OPTIONS] COMMAND [ARGS]...
+
+ Create, validate, push, pull, and inspect Scorecards.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ init       Create a new Scorecard from the standard template.                                    │
+│ validate   Check a resource and everything it depends on, without uploading.                     │
+│ push       Validate and push an immutable, private revision to the bound project.                │
+│ release    Label the revision matching your files with a release version, pushing it first.      │
+│ pull       Restore a hosted revision's editable files into this project.                         │
+│ show       Show a resource: the local copy if there is one, otherwise the hosted one.            │
+│ list       List resources of this kind, labeled local or hosted.                                 │
+│ delete     Delete a resource's local folder, refusing while other local resources use it.        │
+│ draft      Draft a Scorecard from your documents and traces, after five questions.               │
+│ label      Label Trials against the Scorecard, so calibrate can check the graders.               │
+│ calibrate  Check the graders against your team's labels, metric by metric.                       │
+│ decide     Settle the examples calibrate flagged, and record each ruling as a decision.          │
+│ rescore    Apply the Scorecard's gates and targets to a Job's stored metrics, with no rerun.     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard calibrate`
+
+```text
+
+ Usage: plural scorecard calibrate [OPTIONS] {name}
+
+ Check the graders against your team's labels, metric by metric.
+
+ Team agreement is Cohen's kappa (Fleiss' for three or more labelers) on
+ binary and rating metrics and Spearman's rho on numbers; the grader is
+ compared with the labelers' consensus. Saved for the Scorecard version.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Scorecard, by name. [required]                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard decide`
+
+```text
+
+ Usage: plural scorecard decide [OPTIONS] {name}
+
+ Settle the examples calibrate flagged, and record each ruling as a decision.
+
+ Each decision is appended to ``scorecard.yaml`` and bumps its patch version;
+ ``GOOD.md`` is rewritten to match. With ``--question`` and ``--answer`` it
+ records one decision without asking.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Scorecard, by name. [required]                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --question           <str>  Record one decision without the queue: the question.                 │
+│ --answer             <str>  The ruling, with --question.                                         │
+│ --metric             <str>  The metric the decision is about.                                    │
+│ --trial              <str>  The example that raised it.                                          │
+│ --by                 <str>  Who decided.                                                         │
+│ --description        <str>  With --metric: the metric's new description.                         │
+│ --json                      Print machine-readable JSON.                                         │
+│ --help                      Show this message and exit.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard delete`
+
+```text
+
+ Usage: plural scorecard delete [OPTIONS] {name}
+
+ Delete a resource's local folder, refusing while other local resources use it.
+
+ Without --hosted this is a local edit: the hosted project keeps the
+ resource until you add --hosted.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Scorecard to delete. [required]                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --hosted            Also delete it from the hosted project. Jobs and Trials that pinned its      │
+│                     revisions can still read them.                                               │
+│ --yes     -y        Delete without asking.                                                       │
+│ --json              Print machine-readable JSON.                                                 │
+│ --help              Show this message and exit.                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard draft`
+
+```text
+
+ Usage: plural scorecard draft [OPTIONS] {name}
+
+ Draft a Scorecard from your documents and traces, after five questions.
+
+ The model reads the documents and traces, finds what matters and where
+ sources disagree, and suggests an answer to each question. It then writes
+ scorecard.yaml, GOOD.md, questions.md, and a Verifier for each kind of
+ check the new metrics need: code checks with PLURAL-TODO, a model judge,
+ or a person's review. It calls models with a key minted for this draft
+ alone and revoked when it ends.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Scorecard to draft, by name. [required]                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --docs               <path>                Documents, or a folder of them: text, Markdown, or    │
+│                                            PDF. Repeatable.                                      │
+│ --traces             <path>                Recorded conversations of the work, as JSONL. Up to   │
+│                                            50 are read.                                          │
+│ --workflow           <str>                 The work, in a sentence. Default: the project's       │
+│                                            description.                                          │
+│ --environment        <str>                 The Environment whose State the checks read.          │
+│ --model              <str>                 The model that drafts. [default: openai/gpt-5.6-luna] │
+│ --budget-usd         <float range> [x>=0]  The most the draft may spend on model calls.          │
+│                                            [default: 0.5]                                        │
+│ --no-input                                 Accept the suggested answers and list the questions   │
+│                                            in questions.md.                                      │
+│ --force                                    Replace files a draft wrote before.                   │
+│ --json                                     Print machine-readable JSON.                          │
+│ --help                                     Show this message and exit.                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard init`
+
+```text
+
+ Usage: plural scorecard init [OPTIONS] {name}
+
+ Create a new Scorecard from the standard template.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  Scorecard name. [required]                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard label`
+
+```text
+
+ Usage: plural scorecard label [OPTIONS] {name}
+
+ Label Trials against the Scorecard, so calibrate can check the graders.
+
+ Asks about each binary and rating metric (y/n/?, or a number), then the
+ overall verdict (good/bad/unsure). Picks half the Trials the graders passed
+ and half they failed, one per Task first. Labels never change a score.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Scorecard, by name. [required]                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --job            <str>               The local Job whose Trials to label. [required]          │
+│    --import         <path>              Labels to attach, as JSONL keyed by task and agent,      │
+│                                         instead of asking.                                       │
+│    --labeler        <str>               Who is labeling. Asked for when left out.                │
+│    --count          <int range> [x>=1]  How many Trials to label. [default: 20]                  │
+│    --json                               Print machine-readable JSON.                             │
+│    --help                               Show this message and exit.                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard list`
+
+```text
+
+ Usage: plural scorecard list [OPTIONS]
+
+ List resources of this kind, labeled local or hosted.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --local           Only list local resources.                                                     │
+│ --hosted          Only list hosted resources.                                                    │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard pull`
+
+```text
+
+ Usage: plural scorecard pull [OPTIONS] [name]
+
+ Restore a hosted revision's editable files into this project.
+
+ Name a retained revision as NAME@REF.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --with-deps          Also replace dependencies you already have with the exact revisions it      │
+│                      pins. Missing dependencies are always restored.                             │
+│ --force              Replace local files that differ. The old copy is kept under                 │
+│                      .plural/backups.                                                            │
+│ --json               Print machine-readable JSON.                                                │
+│ --help               Show this message and exit.                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard push`
+
+```text
+
+ Usage: plural scorecard push [OPTIONS] [name]
+
+ Validate and push an immutable, private revision to the bound project.
+
+ The hosted project numbers revisions. Pushing content it already holds
+ reuses that revision. Without --with-deps, every dependency must
+ already be pushed with identical content. Nothing is uploaded unless
+ the whole push can succeed.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --with-deps               Also push local dependencies that are not hosted yet.                  │
+│ --force                   Add a revision even though the hosted resource moved since you last    │
+│                           synced.                                                                │
+│ --bump             <str>  patch: when a manifest's version already names a revision, label the   │
+│                           new revision with the next free patch version instead of none.         │
+│ --json                    Print machine-readable JSON.                                           │
+│ --help                    Show this message and exit.                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard release`
+
+```text
+
+ Usage: plural scorecard release [OPTIONS] {name} {version}
+
+ Label the revision matching your files with a release version, pushing it first.
+
+ A version names one revision forever, so collaborators and Jobs can
+ refer to it as name@VERSION.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name         <str>  Resource to release. [required]                                         │
+│ *    version      <str>  Release version, MAJOR.MINOR.PATCH. [required]                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard rescore`
+
+```text
+
+ Usage: plural scorecard rescore [OPTIONS] {name}
+
+ Apply the Scorecard's gates and targets to a Job's stored metrics, with no rerun.
+
+ Use it after the Scorecard's version changes, or with ``--target`` to see
+ what a different target would do. When a Verifier changed, use
+ ``plural verifier apply`` instead.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Scorecard, by name. [required]                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --job           <str>  The local Job whose stored metrics to rescore. [required]              │
+│    --target        <str>  Try a different target without saving it, as METRIC='>= 0.8'.          │
+│                           Repeatable.                                                            │
+│    --json                 Print machine-readable JSON.                                           │
+│    --help                 Show this message and exit.                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard show`
+
+```text
+
+ Usage: plural scorecard show [OPTIONS] [name]
+
+ Show a resource: the local copy if there is one, otherwise the hosted one.
+
+ An invalid local copy is shown with its problems, never swapped for the
+ hosted one.
+ NAME@REF shows that revision: the working copy when it holds
+ exactly that content, otherwise the retained hosted revision.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  The resource: NAME[@REF], where REF is a revision number (@3), a release      │
+│                    version (@1.0.0), or a content hash. Defaults to the resource directory you   │
+│                    are in.                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --local           Only read local files.                                                         │
+│ --hosted          Only read the hosted project.                                                  │
+│ --json            Print machine-readable JSON.                                                   │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural scorecard validate`
+
+```text
+
+ Usage: plural scorecard validate [OPTIONS] [name]
+
+ Check a resource and everything it depends on, without uploading.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json          Print machine-readable JSON.                                                     │
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
 ### `plural secret`
 
 ```text
@@ -2733,6 +3096,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ list      List resources of this kind, labeled local or hosted.                                  │
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
 │ cases     Write one Task per case, each a copy of TASK with the case's fields.                   │
+│ generate  Draft Tasks from the Environment, a Scorecard, and the Tasks you have.                 │
+│ review    Approve, edit, or reject drafted Tasks, one at a time.                                 │
 │ check     Prove each Task can be solved and can't be passed by doing nothing.                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -2806,6 +3171,37 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --yes     -y        Delete without asking.                                                       │
 │ --json              Print machine-readable JSON.                                                 │
 │ --help              Show this message and exit.                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task generate`
+
+```text
+
+ Usage: plural task generate [OPTIONS]
+
+ Draft Tasks from the Environment, a Scorecard, and the Tasks you have.
+
+ Each draft's starting state is checked against the Environment's State;
+ exact and near-duplicates are dropped. Drafts go to tasks/_drafts/, where
+ no Benchmark runs them and nothing pushes them, until you approve them
+ with ``plural task review``.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --environment  -e      <str>                    The Environment the Tasks run in.                │
+│ --scorecard            <str>                    The Scorecard whose metrics the Tasks should     │
+│                                                 exercise.                                        │
+│ --count                <int range> [1<=x<=100]  Tasks to draft. [default: 20]                    │
+│ --benchmark    -b      <str>                    Take categories from this Benchmark.             │
+│ --traces               <path>                   Recorded conversations of real work, as JSONL.   │
+│ --prefix               <str>                    Name prefix. Default: the one the project's      │
+│                                                 Tasks share.                                     │
+│ --model                <str>                    The model that drafts.                           │
+│                                                 [default: openai/gpt-5.6-luna]                   │
+│ --budget-usd           <float range> [x>=0]     The most the drafts may spend on model calls.    │
+│                                                 [default: 0.5]                                   │
+│ --json                                          Print machine-readable JSON.                     │
+│ --help                                          Show this message and exit.                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2913,6 +3309,30 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural task review`
+
+```text
+
+ Usage: plural task review [OPTIONS] [name]
+
+ Approve, edit, or reject drafted Tasks, one at a time.
+
+ Approving moves the draft to tasks/NAME/ (and into --benchmark, in its
+ drafted category). Editing opens it in $EDITOR. With --json, or NAME with
+ --approve or --reject, nothing is asked.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│   name      <str>  One draft to act on. Default: each in turn.                                   │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --approve                   Approve NAME.                                                        │
+│ --reject                    Reject NAME.                                                         │
+│ --benchmark  -b      <str>  Add approved Tasks to this Benchmark.                                │
+│ --json                      Print machine-readable JSON.                                         │
+│ --help                      Show this message and exit.                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -3223,8 +3643,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Run a Verifier on stored Trials and print what it gives, without saving anything.
 
- Its reward runs again on each recorded step, its hindsight on the finished
- trajectory, and a Python check on the stored episode. Edit the Verifier and
+ Its reward and measure run again on each recorded step, its hindsight on
+ the finished trajectory, and a Python check on the stored episode. Edit the Verifier and
  run this again to see the difference; the Agent is not run.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮

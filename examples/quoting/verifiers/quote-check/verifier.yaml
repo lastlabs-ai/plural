@@ -1,7 +1,25 @@
 # Verifier: what counts as good work for the Tasks that list it.
-# check scores the answered request. Its sub-scores are the checks behind the score:
-# decision_correct, price_correct, delivery_feasible, above_cost, and margin_usd.
+# check scores the answered request: 1 when the Agent made the right call and every check
+# on its quote passes. Its metrics are the checks behind the score. A handoff has no
+# quote, so the price, delivery, cost, and margin checks are None there: not applicable.
 name: quote-check
-version: 1.0.0
+version: 1.1.0
 kind: deterministic
 check: verify.py:check
+metrics:
+  - name: decision_correct
+    kind: binary
+    description: Quoted a request that should be quoted, or handed off one that should not.
+  - name: price_correct
+    kind: binary
+    description: The quote's price per ton and total match today's looked-up price for the order.
+  - name: delivery_feasible
+    kind: binary
+    description: The promised date is no earlier than the mill can deliver.
+  - name: above_cost
+    kind: binary
+    description: The price per ton is at or above the mill's cost.
+  - name: margin_usd
+    kind: number
+    unit: USD
+    description: Price minus cost, times the tons quoted.

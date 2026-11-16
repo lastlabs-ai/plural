@@ -857,10 +857,16 @@ fingerprint nobody has accepted, naming what it found. ``plural run``
 asks once and remembers the answer; ``allow_local_models=True`` goes
 ahead without one. Each Trial records the identity either way, as
 ``TrialResult.model_identity``.
+
+A Benchmark Job runs its dev Tasks. ``heldout=True`` runs the held-out
+Tasks too; each such run is a peek, and ``plural run`` counts it.
+``purpose`` says why the Job runs; ``diagnose``, ``fork`` and ``fix_test``
+Jobs refuse held-out Tasks. ``scorecard`` is the Scorecard the Benchmark
+names; with it each Trial records its ``gates`` and whether it ``passed``.
 ```
 
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None, episode_server: 'Any' = None, allow_local_models: 'bool' = False) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None, episode_server: 'Any' = None, allow_local_models: 'bool' = False, scorecard: 'Scorecard | None' = None, heldout: 'bool' = False, purpose: 'JobPurpose' = 'eval') -> 'None'
 ```
 
 ### plural.Job.run_async
@@ -1172,6 +1178,14 @@ Returns:
 Raises:
     ProjectError: Listing every problem found.
 ```
+
+### plural.project.resources.Workspace.invalidate
+
+```python
+invalidate(self, ref: 'ResourceRef') -> 'None'
+```
+
+Forget a cached load, after its files changed on disk.
 
 ### plural.project.resources.Workspace.get
 
@@ -1695,7 +1709,7 @@ zero-sum game.
 ```
 
 ```python
-plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = ()) -> None
+plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = (), source: "Literal['agent', 'environment']" = 'agent') -> None
 ```
 
 ## plural.environments.types.Observation

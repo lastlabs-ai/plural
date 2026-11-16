@@ -156,6 +156,34 @@ Every case becomes its own Task folder: a copy of `ticket-1` with the case's fie
 it is validated, pushed, and versioned like any other Task. Every case is checked before
 any folder is written. Run the command again with `--replace` after you edit the cases.
 
+### Draft Tasks with a model
+
+When you need more Tasks than you have cases, let a model draft them from the
+Environment, a [Scorecard](scorecards.md), and the Tasks you already have:
+
+```bash
+plural task generate --environment mill --scorecard steel-quoting \
+  --benchmark quoting --count 20
+```
+
+It aims the drafts at the Scorecard's metrics and the Benchmark's categories, and can
+read recorded conversations of real work with `--traces`. Each draft's starting State
+is checked against the Environment's State, and drafts that repeat a Task you have, or
+each other, are dropped. It shows a cost estimate first and accepts `--model` and
+`--budget-usd`.
+
+Drafts go to `tasks/_drafts/`, where no Benchmark runs them and nothing pushes them.
+Review each one before it counts:
+
+```bash
+plural task review --benchmark quoting
+```
+
+Approve, edit, or reject each draft in turn. Approving moves it to `tasks/NAME/`, and
+with `--benchmark` adds it to that Benchmark in its drafted category. A drafted Task's
+answer key needs the same care as a hand-written one: read its `expected` before you
+approve it.
+
 ### Push the Task
 
 Pushing saves the Task as an unchangeable, private revision in the hosted project this

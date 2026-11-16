@@ -58,6 +58,7 @@ from plural.project.layout import (
     BENCHMARK,
     ENVIRONMENT,
     HARNESS,
+    SCORECARD,
     TASK,
     VERIFIER,
     Project,
@@ -76,6 +77,7 @@ from plural.project.sync import (
     revision_label,
     unpushed_pins,
 )
+from plural.scorecards import parse_reference
 from plural.studio import Studio, slugify
 from plural.tasks import Benchmark, TaskDefinition
 from plural.verifiers import DeterministicVerifier, WeightedVerifier
@@ -105,6 +107,8 @@ class RunRequest:
     hosted: bool = False
     evaluation_track: str | None = None
     """The Benchmark evaluation track the hosted Job is bound to, by id."""
+    heldout: bool = False
+    """Run the Benchmark's held-out Tasks too. Each such run is a counted peek."""
 
 
 @dataclass
@@ -120,6 +124,8 @@ class RunPlan:
     concurrency_reason: str | None = None
     """Why ``auto`` chose the Job's concurrency; ``None`` when a number was given."""
     evaluation_track: str | None = None
+    peek: tuple[str, ...] = ()
+    """The held-out Tasks this run touches; a run with any is a peek."""
 
     @property
     def spec(self) -> JobSpec:
@@ -254,12 +260,25 @@ def plan_run(
         )
     attempts = _track_attempts(loaded.value, request) or request.attempts or 1
     auto = request.concurrency == "auto"
+    is_benchmark = source.kind == BENCHMARK.name
+    if request.heldout and not (is_benchmark and loaded.value.heldout):
+        raise ProjectError(
+            "--heldout runs a Benchmark's held-out Tasks, and "
+            + (f"Benchmark {source.name} has none." if is_benchmark else "this is a Task.")
+            + "\nNext: plural benchmark split BENCHMARK holds some out."
+        )
+    scorecard = None
+    if is_benchmark and loaded.value.scorecard:
+        name = parse_reference(loaded.value.scorecard)[0]
+        scorecard = workspace.load(ResourceRef(SCORECARD.name, name)).value
     job = Job(
         loaded.value,
         agents=[agent],
         attempts=attempts,
         concurrency=1 if auto else request.concurrency,
         catalog=workspace.catalog,
+        scorecard=scorecard,
+        heldout=request.heldout,
     )
     update: dict[str, Any] = {"run_id": uuid.uuid4().hex}
     reason = None
@@ -298,6 +317,7 @@ def plan_run(
         pins=pins,
         concurrency_reason=reason,
         evaluation_track=request.evaluation_track,
+        peek=tuple(loaded.value.heldout) if request.heldout else (),
     )
 
 
@@ -1113,6 +1133,16 @@ def _execute(
             missing[app].extend(name for name in names if name not in missing[app])
     if missing:
         raise ProjectError(describe_missing(missing))
+    if isinstance(spec.source, BenchmarkJobSource) and spec.source.heldout_tasks:
+        from plural.heldout import record_peek
+
+        record_peek(
+            workspace.project.state_dir,
+            benchmark=spec.source.benchmark.name,
+            job_id=spec.job_id,
+            purpose=spec.purpose,
+            tasks=spec.source.heldout_tasks,
+        )
     hosted_agent = (
         record.agent.removeprefix(f"{AGENT.name}/")
         if record.agent.startswith(f"{AGENT.name}/")
@@ -1324,10 +1354,12 @@ def _snapshot_sources(workspace: Workspace, spec: JobSpec) -> JobSpec:
         source: TaskJobSource | BenchmarkJobSource = TaskJobSource(task=task(spec.source.task))
     else:
         benchmark = spec.source.benchmark
-        source = BenchmarkJobSource(
-            benchmark=benchmark.model_copy(
-                update={"tasks": tuple(task(item) for item in benchmark.tasks)}
-            )
+        source = spec.source.model_copy(
+            update={
+                "benchmark": benchmark.model_copy(
+                    update={"tasks": tuple(task(item) for item in benchmark.tasks)}
+                )
+            }
         )
     agents = []
     for binding in spec.agents:
@@ -1466,6 +1498,8 @@ def _trial_summary(result: TrialResult) -> dict[str, Any]:
         "reward_failures": [item.model_dump(mode="json") for item in result.reward_failures],
         "integrity": [item.model_dump(mode="json") for item in result.integrity],
         "trust": result.trust.tier if result.trust is not None else None,
+        "metrics": dict(result.metrics),
+        "passed": result.passed,
     }
 
 

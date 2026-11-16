@@ -469,6 +469,12 @@ def publish_execution(
         ]
     if result.integrity:
         report["integrity"] = [item.model_dump(mode="json") for item in result.integrity]
+    if result.metrics:
+        report["metrics"] = dict(result.metrics)
+    if result.metric_failures:
+        report["metric_failures"] = [
+            item.model_dump(mode="json") for item in result.metric_failures
+        ]
     if result.trust is not None:
         report["trust"] = result.trust.model_dump(mode="json")
     if result.model_identity is not None:

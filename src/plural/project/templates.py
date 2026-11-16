@@ -20,6 +20,7 @@ from plural.project.layout import (
     HARNESS,
     LOCK_FILE,
     PROJECT_FILE,
+    SCORECARD,
     TASK,
     VERIFIER,
     ResourceKind,
@@ -247,6 +248,13 @@ def resource_scaffold(
                     name=name, canary=f"plural-canary-{uuid.uuid4()}"
                 ),
                 "README.md": _BENCHMARK_README.format(title=title(name)),
+            }
+        )
+    if kind is SCORECARD:
+        return Scaffold(
+            files={
+                SCORECARD.manifest: _SCORECARD_YAML.format(name=name),
+                "GOOD.md": _SCORECARD_GOOD.format(title=title(name)),
             }
         )
     raise ValueError(f"no scaffold for {kind.name}")
@@ -769,6 +777,37 @@ scoring:
 # Never put this in a Task's instructions or files. A Trial whose Agent writes it saw a
 # grader file, or its model was trained on this Benchmark.
 canary: {canary}
+"""
+
+_SCORECARD_YAML = """\
+# Scorecard: what good work is for one workflow, in words and in metrics.
+# `plural scorecard draft {name} --docs DIR` drafts one from your documents.
+name: {name}
+version: 1.0.0
+# PLURAL-TODO: the workflow, in one sentence, and who has the final say.
+workflow: ""
+owner: ""
+good: |
+  # PLURAL-TODO: what a good result looks like, in your team's words.
+# Each metric is declared by a Verifier, or is a built-in (succeeded, cost_usd,
+# latency_seconds, turns, total_tokens). A gate must pass; an objective is
+# maximized or minimized; a guardrail is reported, never ranked on.
+metrics:
+  - name: succeeded
+    role: gate
+  - name: cost_usd
+    role: guardrail
+    target: "<= 0.50"
+decisions: []
+calibration:
+  min_labels: 20
+  min_agreement: 0.6
+"""
+
+_SCORECARD_GOOD = """\
+# {title}: what good means
+
+<!-- PLURAL-TODO: what good work is, in your team's words. -->
 """
 
 _BENCHMARK_README = """\

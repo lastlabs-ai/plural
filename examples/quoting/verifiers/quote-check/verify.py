@@ -6,6 +6,8 @@ from plural import Episode, VerifierOutput
 CANARY = "plural-canary-8249360b-8ab7-4356-9960-eba8ebecfe72"
 
 GATES = ("decision_correct", "price_correct", "delivery_feasible", "above_cost")
+QUOTE_CHECKS = ("price_correct", "delivery_feasible", "above_cost", "margin_usd")
+"""Checks on a quote. With no quote they do not apply, so they are None, not 0."""
 
 
 def check(episode: Episode) -> VerifierOutput:
@@ -13,22 +15,25 @@ def check(episode: Episode) -> VerifierOutput:
 
     The answer key says whether the request should be quoted or handed off, and for a
     quote, the grade and short tons. The price, the earliest delivery, and the cost come
-    from State, because the price moves on each lookup.
+    from State, because the price moves on each lookup. A request answered without a
+    quote has no price, date, or margin to check, so those metrics are None: not
+    applicable, rather than failed.
     """
     state = episode.state
     expected = episode.expected
     quote = state.get("quote")
     decided = "quote" if quote else "handoff" if state.get("handoff") else "nothing"
-    scores = {"decision_correct": float(decided == expected["decision"])}
+    metrics = {"decision_correct": float(decided == expected["decision"])}
+    metrics.update(dict.fromkeys(QUOTE_CHECKS))
     problems = []
     if decided != expected["decision"]:
         problems.append(f"expected a {expected['decision']}, but the Agent sent {decided}")
     if quote:
-        scores.update(_quote_scores(quote, state, expected, problems))
-    passed = all(scores[name] == 1.0 for name in GATES if name in scores)
+        metrics.update(_quote_scores(quote, state, expected, problems))
+    passed = all(metrics[name] in (1.0, None) for name in GATES)
     return VerifierOutput(
         score=float(passed),
-        scores=scores,
+        metrics=metrics,
         evidence=[_summary(quote, state)],
         feedback="; ".join(problems) or "Every check passed.",
     )

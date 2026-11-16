@@ -231,13 +231,14 @@ class App(Generic[StateT]):
         """
         return {}
 
-    def sim_time(self) -> float | None:
+    def sim_time(self) -> float | str | None:
         """The simulated time now, for an App that runs its own clock.
 
         A shop that advances a day per ``wait`` returns the day number, so
         running metrics can be charted against simulated time as well as
-        steps. It is recorded beside each metric point and never shown to the
-        Agent.
+        steps. Return a number (simulated seconds, or the App's own unit) or
+        an ISO-8601 timestamp, the same kind every time. It is recorded beside
+        each metric point and never shown to the Agent.
 
         Returns:
             The simulated time, or ``None``, the default, for an App without a clock.

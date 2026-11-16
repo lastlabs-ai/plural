@@ -42,7 +42,7 @@ STEPS = (
 )
 
 
-_AVAILABLE = frozenset({1, 3, 4, 5})
+_AVAILABLE = frozenset({1, 2, 3, 4, 5})
 
 
 class EvalStep(FrozenModel):
@@ -135,21 +135,8 @@ def eval_status(path: str | Path = ".", *, benchmark: str | None = None) -> Eval
         )
         return _status(project.name, chosen, steps)
     verifiers = {item.name for task in loaded.tasks for item in task.verifiers}
-    steps.append(
-        _coming_soon(2, f"Graded by {_counted(len(verifiers), 'Verifier')} today. Scorecards")
-    )
-    summary = _counted(len(loaded.tasks), "Task")
-    if loaded.categories:
-        summary += f" in {_counted(len(loaded.categories), 'category', 'categories')}"
-    steps.append(
-        EvalStep(
-            number=3,
-            title=STEPS[2],
-            status="done",
-            summary=f"{summary}. Held-out split coming soon.",
-            command=f"plural benchmark show {chosen}",
-        )
-    )
+    steps.append(_define_good(workspace, chosen, loaded.scorecard, len(verifiers)))
+    steps.append(_eval_set(workspace, chosen, loaded))
     steps.append(_graders(workspace, chosen, [task.name for task in loaded.tasks]))
     steps.append(_baseline(workspace, chosen, agents))
     return _status(project.name, chosen, steps)
@@ -262,6 +249,106 @@ def _graders(workspace: Workspace, benchmark: str, tasks: list[str]) -> EvalStep
         status="done",
         summary=f"{_counted(len(tasks), 'Task')} checked: references pass, probes fail, no leaks",
         command=command,
+    )
+
+
+def _define_good(
+    workspace: Workspace, benchmark: str, scorecard: str | None, verifiers: int
+) -> EvalStep:
+    """Step 2: a Scorecard on the Benchmark, labeled, with its graders calibrated.
+
+    Returns:
+        The step, naming the next Scorecard command.
+    """
+    from plural.project.layout import SCORECARD
+    from plural.project.scorecards import labels, latest_calibration, load_scorecard
+
+    graded = f"Graded by {_counted(verifiers, 'Verifier')}"
+    if scorecard is None:
+        written = workspace.project.names(SCORECARD)
+        if written:
+            return EvalStep(
+                number=2,
+                title=STEPS[1],
+                status="todo",
+                summary=f"{graded}. Scorecard {written[0]} is in the project but not on "
+                f"the Benchmark: add `scorecard: {written[0]}` to its file.",
+                command=f"plural scorecard calibrate {written[0]}",
+            )
+        return EvalStep(
+            number=2,
+            title=STEPS[1],
+            status="todo",
+            summary=f"{graded}. No Scorecard yet.",
+            command="plural scorecard draft <workflow>",
+        )
+    scorecard = scorecard.partition("@")[0]
+    try:
+        card = load_scorecard(workspace, scorecard)
+    except ProjectError as exc:
+        return EvalStep(
+            number=2,
+            title=STEPS[1],
+            status="attention",
+            summary=f"Scorecard {scorecard} is not valid: {exc.message}",
+            command=f"plural scorecard validate {scorecard}",
+        )
+    labeled = len({label.trial_id for label in labels(workspace, scorecard)})
+    facts = f"{card.reference}: {_counted(len(card.metrics), 'metric')}, {labeled} Trials labeled"
+    if labeled < card.calibration.min_labels:
+        return EvalStep(
+            number=2,
+            title=STEPS[1],
+            status="todo",
+            summary=f"{facts}; calibration needs {card.calibration.min_labels}.",
+            command=f"plural scorecard label {scorecard} --job <job>",
+        )
+    calibration = latest_calibration(workspace, scorecard)
+    if calibration is None:
+        return EvalStep(
+            number=2,
+            title=STEPS[1],
+            status="todo",
+            summary=f"{facts}. The graders are not checked yet.",
+            command=f"plural scorecard calibrate {scorecard}",
+        )
+    unready = [item.metric for item in calibration.metrics if item.status != "trusted"]
+    return EvalStep(
+        number=2,
+        title=STEPS[1],
+        status="attention" if unready else "done",
+        summary=f"{facts}. "
+        + (f"Not calibrated: {', '.join(unready)}." if unready else "Every grader calibrated."),
+        command=f"plural scorecard calibrate {scorecard}",
+    )
+
+
+def _eval_set(workspace: Workspace, benchmark: str, loaded: Any) -> EvalStep:
+    """Step 3: the Benchmark's Tasks, with some held out to confirm fixes on.
+
+    Returns:
+        The step: a split to make, or the split and its peeks.
+    """
+    from plural.heldout import peeks
+
+    summary = _counted(len(loaded.tasks), "Task")
+    if loaded.categories:
+        summary += f" in {_counted(len(loaded.categories), 'category', 'categories')}"
+    if not loaded.heldout:
+        return EvalStep(
+            number=3,
+            title=STEPS[2],
+            status="todo",
+            summary=f"{summary}, none held out to confirm fixes on.",
+            command=f"plural benchmark split {benchmark}",
+        )
+    looked = len(peeks(workspace.project.state_dir, benchmark))
+    return EvalStep(
+        number=3,
+        title=STEPS[2],
+        status="done",
+        summary=f"{summary}, {len(loaded.heldout)} held out; {_counted(looked, 'peek')}.",
+        command=f"plural benchmark show {benchmark}",
     )
 
 

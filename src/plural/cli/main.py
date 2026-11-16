@@ -17,6 +17,7 @@ from plural.cli.resource_commands import resource_app
 from plural.cli.reward_commands import rewards_app, verifier_apply, verifier_try
 from plural.cli.run_commands import job_app, review_app, run, trial_app
 from plural.cli.runtime_commands import runtime_app
+from plural.cli.scorecard_commands import add_scorecard_commands
 from plural.cli.secret_commands import project_secret_source, secret_app
 from plural.cli.session import session_app
 from plural.project import KINDS
@@ -78,6 +79,8 @@ for _kind in KINDS:
         _group.command("apply")(verifier_apply)
     if _kind.name == "task":
         _group.command("check")(task_check)
+    if _kind.name == "scorecard":
+        add_scorecard_commands(_group)
     app.add_typer(_group, name=_kind.cli)
 app.command("run")(run)
 app.add_typer(eval_app, name="eval")

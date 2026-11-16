@@ -13,6 +13,7 @@ tasks:
   - shop-002
   - shop-003
 primary_metric: cash_on_hand
+scorecard: shopkeeping
 scoring:
   metric: Season profit
   description: Profit against each season's target, 0 for a shop that ever went below zero cash.

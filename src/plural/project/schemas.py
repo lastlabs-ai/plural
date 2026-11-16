@@ -65,6 +65,7 @@ def manifest_schemas() -> dict[str, dict[str, Any]]:
         ProjectManifest,
         TaskManifest,
     )
+    from plural.scorecards import Scorecard
     from plural.verifiers import VerifierDefinition
 
     return {
@@ -75,6 +76,7 @@ def manifest_schemas() -> dict[str, dict[str, Any]]:
         "harness.yaml": public_schema(HarnessManifest),
         "agent.yaml": public_schema(Agent),
         "benchmark.yaml": public_schema(BenchmarkManifest),
+        "scorecard.yaml": public_schema(Scorecard),
     }
 
 

@@ -173,6 +173,7 @@ from plural.sandbox import (
 )
 from plural.sandbox.conformance import conformance_status
 from plural.sandbox.sweep import trial_labels
+from plural.scorecards import task_categories
 from plural.tasks import TaskDefinition, validate_task_state
 from plural.trajectory import normalize_trajectory
 from plural.transcript import TRAJECTORY_FILE, episode_to_messages
@@ -1391,6 +1392,16 @@ class TrialRunner:
                 phases=phases,
                 cost_usd=cost_usd,
             )
+            metrics = trial_metrics(
+                task,
+                verifier_results,
+                artifacts,
+                cost_usd=cost_usd,
+                latency_seconds=receipt.timings.get("total_seconds"),
+                turns=totals["turns"],
+                stop_reason=totals["stop_reason"],
+                succeeded=True,
+            )
             result = TrialResult(
                 status=status,
                 receipt=receipt,
@@ -1413,17 +1424,9 @@ class TrialRunner:
                     conformance,
                 ),
                 model_identity=self.model_identity,
-                metrics=trial_metrics(
-                    task,
-                    verifier_results,
-                    artifacts,
-                    cost_usd=cost_usd,
-                    latency_seconds=receipt.timings.get("total_seconds"),
-                    turns=totals["turns"],
-                    stop_reason=totals["stop_reason"],
-                    succeeded=True,
-                ),
+                metrics=metrics,
                 metric_failures=metric_failures(host_report.metric_failures),
+                **self._gates(metrics, awaiting=awaiting),
                 **totals,
             )
         except BaseException as exc:
@@ -1489,6 +1492,7 @@ class TrialRunner:
                     checked=False,
                 ),
                 metric_failures=metric_failures(host_report.metric_failures),
+                passed=False if self.job_spec.scorecard is not None else None,
                 **totals,
                 error_code=None if code is ErrorCode.CANCELLED else code,
                 error_message=_redact_bytes(str(exc).encode(), secrets).decode(errors="replace")[
@@ -1788,6 +1792,27 @@ class TrialRunner:
         )
         player.artifacts = own
         return own
+
+    def _gates(self, metrics: Mapping[str, float | None], *, awaiting: bool) -> dict[str, Any]:
+        """The Trial's gates under the Job's Scorecard, as ``TrialResult`` fields.
+
+        Returns:
+            ``gates`` and ``passed``; nothing without a Scorecard, and no verdict
+            while a Verifier awaits review.
+        """
+        scorecard = self.job_spec.scorecard
+        if scorecard is None or awaiting:
+            return {}
+        source = self.job_spec.source
+        groups = (
+            task_categories(source.benchmark.categories)
+            if isinstance(source, BenchmarkJobSource)
+            else {}
+        )
+        verdict = scorecard.evaluate(
+            metrics, task=self.task.task_id, categories=groups.get(self.task.task_id, ())
+        )
+        return {"gates": verdict.gates, "passed": verdict.passed}
 
     def _seat_results(
         self,
@@ -2597,6 +2622,7 @@ def _agent_aggregates(
         )
         metrics = _metric_aggregates(spec, selected)
         primary_metric = release.primary_metric if release is not None else "score"
+        verdicts = [item.passed for item in selected if item.passed is not None]
         primary = (
             combined.score
             if primary_metric == "score"
@@ -2618,6 +2644,7 @@ def _agent_aggregates(
                 metrics=metrics,
                 primary_metric=primary_metric,
                 primary=primary,
+                pass_rate=sum(verdicts) / len(verdicts) if verdicts else None,
             )
         )
     return tuple(rows)

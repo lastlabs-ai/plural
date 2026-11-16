@@ -143,6 +143,9 @@ def _start(tmp_path: Path, mode: str) -> subprocess.Popen[str]:
         stderr=subprocess.STDOUT,
         text=True,
         start_new_session=True,
+        # A shell's background jobs inherit SIGINT ignored, and Python then never raises
+        # KeyboardInterrupt; a terminal's Ctrl-C reaches a run with the default handler.
+        preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL),
     )
     assert process.stdout is not None
     output = []

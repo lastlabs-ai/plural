@@ -1,8 +1,9 @@
 """Run the quoting example end to end with scripted models instead of real ones.
 
-By default this runs a stratified subset of ten Tasks: at least two from every
-category, both of quote-bot's weaknesses, and every Task that ``traps.py``
-plants a problem on. The whole Benchmark runs under ``-m slow``, nightly.
+By default this runs a stratified subset of fourteen Tasks: at least two from every
+category, both of quote-bot's weaknesses, every Task that ``traps.py`` plants a
+problem on, and the ten quoted Tasks the steel-quoting labels judge. The whole
+Benchmark runs under ``-m slow``, nightly.
 """
 
 from __future__ import annotations
@@ -59,9 +60,17 @@ SUBSET = (
     "quote-005",
     "quote-024",
     "quote-001",
+    "quote-020",
+    "quote-008",
+    "quote-019",
+    "quote-022",
 )
-"""Two or more per category; rush and fractional prices for both weaknesses; and
-quote-009, -013, -016, -053 and -024, which carry ``traps.py``'s planted problems."""
+"""Two or more per category; rush and fractional prices for both weaknesses;
+quote-009, -013, -016, -053 and -024, which carry ``traps.py``'s planted problems;
+and quote-020, -008, -019 and -022, which complete the labeled quoted Tasks."""
+AGENTS = {"reference": "reference", "weak": "quote-bot"}
+"""Each scripted policy's Agent name; the weak policy stands in for quote-bot."""
+LABELS = EXAMPLE / "labels" / "steel-quoting.jsonl"
 
 
 def _call(name: str, **arguments: Any) -> dict[str, Any]:
@@ -160,17 +169,18 @@ def _run(project: Path, model: str, tasks: tuple[str, ...] | None) -> dict[str, 
         if not key.startswith(("PLURAL_", "OPENAI_", "ANTHROPIC_"))
     }
     env.update(PLURAL_CONFIG_HOME=str(project.parent / "config"), QUOTING_MODEL_KEY="unused")
-    output = {}
-    for policy in ("reference", "weak"):
-        agent = project / "agents" / policy
+    output: dict[str, Any] = {"jobs": {}, "project": project, "env": env}
+    for policy, name in AGENTS.items():
+        agent = project / "agents" / name
+        shutil.rmtree(agent, ignore_errors=True)
         agent.mkdir()
         (agent / "agent.yaml").write_text(
-            f"name: {policy}\nversion: 1.0.0\nmodel: test/{policy}\ninstructions: Quote steel.\n"
+            f"name: {name}\nversion: 1.0.0\nmodel: test/{policy}\ninstructions: Quote steel.\n"
             f"endpoint: {model}/{policy}/v1\nendpoint_key: QUOTING_MODEL_KEY\n",
             encoding="utf-8",
         )
         run = subprocess.run(
-            [str(CLI), "run", "-b", "quoting", "-a", policy, "--yes", "--json"],
+            [str(CLI), "run", "-b", "quoting", "-a", name, "--yes", "--json"],
             cwd=project,
             env=env,
             text=True,
@@ -180,6 +190,7 @@ def _run(project: Path, model: str, tasks: tuple[str, ...] | None) -> dict[str, 
         assert run.returncode == 0, run.stdout + run.stderr
         job = json.loads(run.stdout)
         assert job["status"] == "succeeded"
+        output["jobs"][policy] = job["job_id"]
         directory = project / ".plural/jobs" / job["job_id"]
         result = json.loads((directory / "result.json").read_text())
         output[policy] = {
@@ -194,6 +205,7 @@ def _run(project: Path, model: str, tasks: tuple[str, ...] | None) -> dict[str, 
                     ).read_text()
                 ),
                 **trial["scores"],
+                **{f"quote-check.{key}": value for key, value in trial["metrics"].items()},
             }
             for trial in result["trials"]
         }
@@ -230,6 +242,9 @@ def _assert_weaknesses(results: dict[str, dict[str, Any]]) -> int:
         assert trial["quote-check.decision_correct"] == 1.0, name
         if category in {"ambiguous", "out-of-stock"}:
             assert trial["score"] == 1.0, name
+            # A handoff has no quote to check: not applicable, rather than failed.
+            assert trial["quote-check.price_correct"] is None, name
+            assert trial["quote-check.margin_usd"] is None, name
             continue
         assert trial["quote-check.delivery_feasible"] == float(category == "simple"), name
         assert trial["quote-check.above_cost"] == 1.0, name
@@ -277,12 +292,12 @@ def test_eval_status_reads_the_baseline_from_the_latest_run(
     job = status["latest_job"]
     steps = {step["title"]: step for step in status["steps"]}
     assert status["benchmark"] == "quoting"
-    assert steps["Build the eval set"]["summary"].startswith("10 Tasks in 4 categories")
+    assert steps["Build the eval set"]["summary"].startswith("14 Tasks in 4 categories")
     assert steps["Baseline"]["status"] == "done"
     summary = steps["Baseline"]["summary"]
-    assert summary.startswith(f"{job}: weak, score ")
+    assert summary.startswith(f"{job}: quote-bot, score ")
     assert "(95% " in summary
-    assert "trust: 10 unverified" in summary
+    assert "trust: 14 unverified" in summary
 
 
 @pytest.mark.slow
@@ -294,3 +309,121 @@ def test_the_whole_benchmark_holds(full_results: dict[str, dict[str, Any]]) -> N
     status = full_results["eval status"]
     steps = {step["title"]: step for step in status["steps"]}
     assert steps["Build the eval set"]["summary"].startswith("60 Tasks in 4 categories")
+
+
+def _cli(results: dict[str, Any], *arguments: str) -> Any:
+    run = subprocess.run(
+        [str(CLI), *arguments, "--json"],
+        cwd=results["project"],
+        env=results["env"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert run.returncode == 0, run.stdout + run.stderr
+    return json.loads(run.stdout)
+
+
+@pytest.fixture(scope="module")
+def calibrated(results: dict[str, Any]) -> dict[str, Any]:
+    """The 20 labeled Trials' labels imported into both Jobs, then calibrated."""
+    for policy, job in results["jobs"].items():
+        imported = _cli(
+            results, "scorecard", "label", "steel-quoting", "--job", job, "--import", str(LABELS)
+        )
+        assert imported["trials"] == 10, (policy, imported)
+        assert imported["labelers"] == ["labeler-a", "labeler-b"]
+    return _cli(results, "scorecard", "calibrate", "steel-quoting")  # type: ignore[no-any-return]
+
+
+def test_calibration_trusts_the_delivery_check_and_lists_the_split_examples(
+    calibrated: dict[str, Any],
+) -> None:
+    metrics = {item["metric"]: item for item in calibrated["metrics"]}
+    assert calibrated["labels"] == 20
+    assert calibrated["labelers"] == ["labeler-a", "labeler-b"]
+    delivery = metrics["delivery_feasible"]
+    assert delivery["labeled"] == 20
+    assert delivery["consensus"] == 17
+    assert delivery["grader_agreement"] == pytest.approx(1.0)
+    assert 0.4 <= delivery["team_agreement"] < 1.0
+    assert delivery["status"] == "trusted"
+    splits = [item for item in calibrated["needs_decision"] if item["kind"] == "labelers_split"]
+    assert sorted(item["task"] for item in splits if item["metric"] == "delivery_feasible") == [
+        "quote-004",
+        "quote-008",
+        "quote-016",
+    ]
+    # The labelers' tone ratings barely agree, so tone needs a better definition first.
+    assert metrics["tone"]["status"] == "undefined"
+    assert metrics["margin_usd"]["status"] == "not_calibrated"
+
+
+def test_a_lenient_delivery_check_needs_work(results: dict[str, Any], calibrated: Any) -> None:
+    """The lenient-delivery trap's check passes every date; calibrate catches it."""
+    from plural.project import Project, Workspace
+    from plural.project.scorecards import labels, load_scorecard, metric_specs, trial_metrics
+    from plural.scorecards import calibrate
+
+    del calibrated
+    space = Workspace(Project.at(results["project"]))
+    given = labels(space, "steel-quoting")
+    graders = trial_metrics(space, {item.trial_id for item in given})
+    lenient = {trial: {**values, "delivery_feasible": 1.0} for trial, values in graders.items()}
+    result = calibrate(load_scorecard(space, "steel-quoting"), given, lenient, metric_specs(space))
+    delivery = result.metric("delivery_feasible")
+    assert delivery is not None and delivery.status == "needs_work"
+    flagged = {item.task for item in result.needs_decision if item.kind == "grader_disagrees"}
+    assert flagged == {"quote-006", "quote-019", "quote-022"}
+    planted = (EXAMPLE / "traps.py").read_text()
+    assert "lenient-delivery" in planted and "feasible = True" in planted
+
+
+def test_changing_a_gate_target_changes_pass_rates_without_a_rerun(
+    results: dict[str, Any],
+) -> None:
+    job = results["jobs"]["weak"]
+    before = _cli(results, "scorecard", "rescore", "steel-quoting", "--job", job)
+    after = _cli(
+        results,
+        "scorecard",
+        "rescore",
+        "steel-quoting",
+        "--job",
+        job,
+        "--target",
+        "price_correct=>= 0",
+    )
+    # quote-bot rounds every price, so only its handoffs pass until price stops gating.
+    assert before["pass_rate"]["quote-bot"] == pytest.approx(4 / 14)
+    assert after["pass_rate"]["quote-bot"] == pytest.approx(9 / 14)
+    assert after["targets"] == {"price_correct": ">= 0"}
+
+
+def test_a_decision_bumps_the_version_and_rewrites_good(
+    results: dict[str, Any], calibrated: Any
+) -> None:
+    del calibrated
+    queue = _cli(results, "scorecard", "decide", "steel-quoting")
+    assert len(queue["needs_decision"]) >= 3
+    decided = _cli(
+        results,
+        "scorecard",
+        "decide",
+        "steel-quoting",
+        "--question",
+        "Does a customer's flexible date make a late delivery feasible?",
+        "--answer",
+        "No. Feasible means by the date quoted, whatever the customer says.",
+        "--metric",
+        "delivery_feasible",
+        "--by",
+        "KB",
+    )
+    assert decided["scorecard"] == "steel-quoting@1.0.1"
+    folder = results["project"] / "scorecards" / "steel-quoting"
+    assert "flexible date" in (folder / "GOOD.md").read_text()
+    manifest = yaml.safe_load((folder / "scorecard.yaml").read_text())
+    assert manifest["version"] == "1.0.1"
+    assert len(manifest["decisions"]) == 2
+    assert _cli(results, "scorecard", "validate", "steel-quoting")

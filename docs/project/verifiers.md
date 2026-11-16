@@ -340,6 +340,113 @@ function scores a short episode or a long one, so an Agent playing one poker han
 Agent playing a whole match are each scored by the points earned over their own episode.
 Choose the horizon in the Environment and Task; the Verifier does not change.
 
+### Declare metrics
+
+A score says how good an attempt was, in one number. **Metrics** say why: they are
+named measurements a Verifier declares, such as "was the price right?" or "how much
+margin did the quote make?". A Benchmark can rank on any of them, and a
+[Scorecard](scorecards.md) turns them into gates and objectives.
+
+List the metrics in `verifier.yaml`, and return their values from `check`:
+
+```yaml
+name: quote-check
+kind: deterministic
+check: verify.py:check
+metrics:
+  - name: decision_correct
+    kind: binary
+  - name: price_correct
+    kind: binary
+  - name: margin_usd
+    kind: number
+    unit: USD
+```
+
+```python
+def check(episode: Episode) -> VerifierOutput:
+    quote = episode.state.get("quote")
+    metrics = {
+        "decision_correct": float(decided(episode) == episode.expected["decision"]),
+        "price_correct": None,
+        "margin_usd": None,
+    }
+    if quote:
+        metrics.update(price_correct=price_ok(quote), margin_usd=margin(quote))
+    return VerifierOutput(score=score(metrics), metrics=metrics)
+```
+
+Each metric has a **kind**:
+
+| Kind | Values | Example |
+| --- | --- | --- |
+| `binary` | 0 or 1 | `price_correct` |
+| `score` | Within `range`, 0 to 1 by default | `coverage` |
+| `number` | Any number, with an optional `unit` | `margin_usd` |
+| `rating` | Within `range`, which it needs | `tone`, 1 to 5 |
+| `running` | Sampled after every step, then reduced to one number | `cash_on_hand` |
+
+`direction` says which way is better, `higher` (the default) or `lower`. A metric
+name is lowercase letters, digits, and underscores.
+
+**`None` means not applicable.** Return `None` when a metric doesn't apply to this
+attempt, rather than 0. A correct handoff has no quote, so it has no price to check:
+`price_correct` is `None` there, not a failure. A `None` is left out of every average,
+and each average says how many Trials it covers.
+
+Every Trial also records five **built-in** metrics with no Verifier at all:
+`cost_usd`, `latency_seconds`, `turns`, `total_tokens`, and `succeeded`, which is 1
+when the episode ended on its own, without an error or hitting a limit. An [AgentVerifier](#agentverifier) declares
+one `rating` metric per rubric criterion, named after the criterion.
+
+Metrics are measurements, not credit. They never enter the reward ledger, a reward is
+never a metric, and the Agent never sees either.
+
+### Measure while the episode runs
+
+Some work has no single finished answer to check. A shop is open all season, and what
+matters is how its cash moves. A **running metric** is sampled after every action by
+the Verifier's `measure` hook:
+
+```yaml
+measure: verify.py:measure
+metrics:
+  - name: cash_on_hand
+    kind: running
+    unit: USD
+    aggregate: final
+```
+
+```python
+from plural import Step
+
+
+def measure(step: Step) -> dict[str, float]:
+    books = step.current_state or {}
+    return {"cash_on_hand": float(books["cash"])} if "cash" in books else {}
+```
+
+`measure` runs in the App host, like `reward`, and sees the same `Step`. Its points go
+to the Trial's metric series, never to the reward ledger. The `aggregate` turns the
+series into the Trial's value:
+
+| Aggregate | Trial value |
+| --- | --- |
+| `final` | The last point |
+| `mean`, `min`, `max` | Over every point |
+| `auc` | The area under the series, by step |
+| `time_to` | Steps until the value first crosses `threshold` in the good direction |
+
+`check` reads the whole series as `episode.metric_series`, a list of `(step, value)`
+pairs per metric, so the score can depend on the path, not only the end. The Trial
+page charts each running metric over the episode.
+
+Each point records whether an Agent action or the Environment itself produced it,
+and, when an App runs its own clock, the simulated time. An App reports its clock
+by overriding `sim_time()` to return a number or an ISO-8601 timestamp. The chart can
+then use simulated time instead of steps. The
+[shopkeeper tutorial](../tutorials/shopkeeper.md) builds this end to end.
+
 ## AgentVerifier
 
 An `AgentVerifier` uses an **AI model as a judge**. It reads the completed Episode and

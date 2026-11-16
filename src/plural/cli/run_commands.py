@@ -44,7 +44,15 @@ from plural.cli.runtime_commands import _project_studio
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.execution.episode_server import EpisodeServerOptions
-from plural.jobs import AgentAggregate, JobResult, JobSpec, TrialResult, TrialSpec
+from plural.heldout import peeks
+from plural.jobs import (
+    AgentAggregate,
+    BenchmarkJobSource,
+    JobResult,
+    JobSpec,
+    TrialResult,
+    TrialSpec,
+)
 from plural.local_models import (
     LocalModelError,
     LocalModelIdentity,
@@ -151,6 +159,11 @@ def run(
     attempts: int | None = typer.Option(
         None, "--attempts", min=1, help="Advanced: Trials per Task (default 1)."
     ),
+    heldout: bool = typer.Option(
+        False,
+        "--heldout",
+        help="Run the Benchmark's held-out Tasks too. Each such run is a peek, and is counted.",
+    ),
     concurrency: str = typer.Option(
         "auto",
         "--concurrency",
@@ -238,6 +251,7 @@ def run(
         attempts=attempts,
         concurrency=_concurrency(concurrency),
         evaluation_track=evaluation_track,
+        heldout=heldout,
     )
     requested = {
         ResourceRef(kind.name, name): version
@@ -296,6 +310,7 @@ def run(
         + (" Recording it in the hosted project as it runs." if tracking else ""),
         err=as_json,
     )
+    _heldout_notice(space, plan, err=as_json)
     _runtime_credentials(space, plan, err=as_json)
     _project_secrets(space, plan.spec, environ, err=as_json)
     identities = _review_local_models(plan.spec.agents, environ, yes=yes, err=as_json)
@@ -311,6 +326,29 @@ def run(
             model_identities=identities,
         )
     _finish_local(space, job_id, result, tracking, as_json=as_json)
+
+
+def _heldout_notice(space: Workspace, plan: RunPlan, *, err: bool) -> None:
+    """Say what a Benchmark run leaves out, and count a run that peeks at held-out Tasks."""
+    source = plan.spec.source
+    if not isinstance(source, BenchmarkJobSource) or not source.benchmark.heldout:
+        return
+    held = source.benchmark.heldout
+    if not plan.peek:
+        typer.echo(
+            f"Running the {len(source.benchmark.dev_tasks)} dev Tasks; "
+            f"{counted(len(held), 'held-out Task')} stay hidden. "
+            "--heldout runs them too, as a counted peek.",
+            err=err,
+        )
+        return
+    count = len(peeks(space.project.state_dir, source.benchmark.name)) + 1
+    typer.echo(
+        f"PEEK: this run includes {counted(len(held), 'held-out Task')} of "
+        f"{source.benchmark.name}. It is peek {count}; every peek makes the held-out "
+        "result a little less of a test.",
+        err=err,
+    )
 
 
 def _interactive() -> bool:
@@ -1155,23 +1193,26 @@ def _print_result(
     typer.echo(f"Job {job_id} {result.status}.")
     texts = {item["agent_name"]: item["text"] for item in summaries}
     for aggregate in ranked(result.aggregates):
-        if aggregate.agent_name in texts:
-            typer.echo(f"  {aggregate.agent_name}: {texts[aggregate.agent_name]}")
-            continue
-        mean = "-" if aggregate.mean_score is None else f"{aggregate.mean_score:.3f}"
         primary = aggregate.metrics.get(aggregate.primary_metric)
         ranked_on = (
             f"{aggregate.primary_metric} "
             + ("-" if primary is None or primary.mean is None else f"{primary.mean:,.3f}")
-            + ("" if primary is None else f" (over {primary.n} of {primary.total}), ")
+            + ("" if primary is None else f" (over {primary.n} of {primary.total})")
             if aggregate.primary_metric != "score"
             else ""
         )
-        typer.echo(
-            f"  {aggregate.agent_name}: {ranked_on}mean score {mean} over "
-            f"{counted(aggregate.count, 'Trial')}, "
-            f"{aggregate.successes} succeeded, coverage {aggregate.coverage:.0%}"
-        )
+        if aggregate.agent_name in texts:
+            line = ", ".join(item for item in (ranked_on, texts[aggregate.agent_name]) if item)
+        else:
+            mean = "-" if aggregate.mean_score is None else f"{aggregate.mean_score:.3f}"
+            line = (
+                f"{ranked_on}{', ' if ranked_on else ''}mean score {mean} over "
+                f"{counted(aggregate.count, 'Trial')}, "
+                f"{aggregate.successes} succeeded, coverage {aggregate.coverage:.0%}"
+            )
+        if aggregate.pass_rate is not None:
+            line += f"; {aggregate.pass_rate:.0%} passed the Scorecard's gates"
+        typer.echo(f"  {aggregate.agent_name}: {line}")
     for line in _reward_warnings(result.trials):
         typer.echo(f"! {line}", err=True)
     typer.echo(f"Details: plural job show {job_id}")

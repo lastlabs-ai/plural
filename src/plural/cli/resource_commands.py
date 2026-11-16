@@ -24,6 +24,7 @@ from plural.cli.common import (
     deprecated,
     emit,
     handled,
+    note,
     project_studio,
     relative,
     rows,
@@ -32,7 +33,9 @@ from plural.cli.common import (
     workspace,
 )
 from plural.cli.secret_commands import secret_status
+from plural.cli.task_generation_commands import add_task_generation_commands
 from plural.harness.builtins import BUILTIN_HARNESS_NAMES, builtin_schema, get_builtin
+from plural.heldout import MIN_TASKS_FOR_DEFAULT
 from plural.project import (
     KINDS,
     LocalResource,
@@ -44,7 +47,7 @@ from plural.project import (
 )
 from plural.project.cases import read_cases, write_cases
 from plural.project.layout import AGENT, BENCHMARK, ENVIRONMENT, HARNESS, TASK, split_version
-from plural.project.membership import add_tasks, remove_tasks
+from plural.project.membership import add_tasks, remove_tasks, set_heldout
 from plural.project.runs import DEFAULT_HARNESS
 from plural.project.sync import (
     REBUILT_NOTE,
@@ -655,6 +658,7 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         _benchmark_membership(app)
     if kind is TASK:
         _task_cases(app)
+        add_task_generation_commands(app)
     if kind is AGENT:
         _external_commands(app)
     return app
@@ -955,6 +959,56 @@ def _benchmark_membership(app: typer.Typer) -> None:
         ref = _ref(space, BENCHMARK, benchmark)
         removed = remove_tasks(space.project, ref.name, tasks)
         typer.echo(f"Removed {_task_list(removed)} from Benchmark {ref.name}.")
+        _maybe_push(space, ref, push_after, changed=True)
+
+    @app.command("split")
+    @handled
+    def split(
+        benchmark: str | None = typer.Argument(
+            None, help="Benchmark to split. Defaults to the one you are in."
+        ),
+        heldout: float = typer.Option(
+            0.3, "--heldout", help="The share of Tasks to hold out, such as 0.3."
+        ),
+        stratify: str | None = typer.Option(
+            None, "--stratify", help="category: hold out the same share of each category."
+        ),
+        seed: int = typer.Option(
+            0, "--seed", help="The sample's seed; the same seed, the same split."
+        ),
+        push_after: bool = push_option,
+        as_json: bool = JSON_OPTION,
+    ) -> None:
+        """Hold some Tasks out, to confirm fixes on Tasks diagnosis never saw.
+
+        Writes ``heldout`` to the Benchmark's file. A plain ``plural run`` then
+        runs only the dev Tasks; ``plural run --heldout`` runs every Task and
+        counts as a peek.
+        """
+        space = workspace()
+        ref = _ref(space, BENCHMARK, benchmark)
+        dev, held = set_heldout(
+            space.project, ref.name, fraction=heldout, seed=seed, stratify=stratify
+        )
+        payload = {"benchmark": ref.name, "dev": dev, "heldout": held, "seed": seed}
+
+        if len(dev) + len(held) < MIN_TASKS_FOR_DEFAULT:
+            payload["warning"] = (
+                f"With {len(dev) + len(held)} Tasks, {len(held)} held out is too few to "
+                f"confirm a fix; aim for {MIN_TASKS_FOR_DEFAULT} or more Tasks."
+            )
+
+        def text() -> None:
+            if "warning" in payload:
+                note(str(payload["warning"]))
+            how = f" (stratified by {stratify})" if stratify else ""
+            typer.echo(
+                f"{ref.name}: {len(dev)} dev · {len(held)} held-out{how}. Held-out results "
+                "stay hidden until you confirm a fix."
+            )
+            typer.echo(f"Next: plural run --benchmark {ref.name} runs the dev Tasks.")
+
+        emit(payload, as_json=as_json, text=text)
         _maybe_push(space, ref, push_after, changed=True)
 
 

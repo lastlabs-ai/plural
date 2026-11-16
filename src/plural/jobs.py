@@ -44,6 +44,7 @@ from plural.local_models import LocalModelError, LocalModelIdentity, Status
 from plural.metrics import MetricAggregate, MetricFailure
 from plural.rewards import RewardFailure
 from plural.sandbox.models import NetworkMode
+from plural.scorecards import Scorecard
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
 from plural.trust import TrustAssessment
 
@@ -82,15 +83,35 @@ class TaskJobSource(FrozenModel):
 
 
 class BenchmarkJobSource(FrozenModel):
-    """A Job selecting one Benchmark revision."""
+    """A Job selecting one Benchmark revision.
+
+    It runs the Benchmark's dev Tasks: held-out Tasks only with
+    ``include_heldout``, and each such run is a peek, and is counted.
+    """
 
     kind: Literal["benchmark"] = "benchmark"
     benchmark: BenchmarkDefinition
+    include_heldout: bool = False
+
+    @model_serializer(mode="wrap")
+    def _omit_dev_only(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        # A dev-only run serializes, and so hashes, as every run did before held-out Tasks.
+        if isinstance(data, dict) and not self.include_heldout:
+            data.pop("include_heldout", None)
+        return data
 
     @property
     def tasks(self) -> tuple[TaskDefinition, ...]:
-        """Selected Tasks."""
-        return self.benchmark.tasks
+        """Selected Tasks: the dev Tasks, and the held-out ones only when included."""
+        if self.include_heldout:
+            return self.benchmark.tasks
+        return self.benchmark.dev_tasks
+
+    @property
+    def heldout_tasks(self) -> tuple[str, ...]:
+        """The held-out Tasks this Job runs, by name: none unless included."""
+        return self.benchmark.heldout if self.include_heldout else ()
 
 
 JobSource = Annotated[TaskJobSource | BenchmarkJobSource, Field(discriminator="kind")]
@@ -461,6 +482,11 @@ def resolve_trial_harness_grant(
     )
 
 
+JobPurpose = Literal["eval", "diagnose", "fork", "fix_test", "confirm"]
+REFUSE_HELDOUT: frozenset[str] = frozenset({"diagnose", "fork", "fix_test"})
+"""Job purposes that may never run, or read, a held-out Task."""
+
+
 class JobSpec(FrozenModel):
     """Complete schema-v2 Job orchestration input."""
 
@@ -488,13 +514,30 @@ class JobSpec(FrozenModel):
             "Empty, every Agent of the Job plays, once each."
         ),
     )
+    purpose: JobPurpose = Field(
+        default="eval",
+        description=(
+            "Why the Job runs: eval, diagnose, fork, fix_test, or confirm. Diagnosis, "
+            "forks, and fix tests never run held-out Tasks."
+        ),
+    )
+    scorecard: Scorecard | None = Field(
+        default=None,
+        description="The Benchmark's Scorecard, whose gates decide which Trials pass.",
+    )
 
     @model_serializer(mode="wrap")
     def _omit_no_party(self, handler: SerializerFunctionWrapHandler) -> Any:
         data = handler(self)
-        # A Job without a party serializes, and so hashes, as it did before parties.
-        if isinstance(data, dict) and not self.party:
-            data.pop("party", None)
+        # A Job without a party, a purpose, or a Scorecard serializes, and so hashes, as
+        # it did before each existed.
+        if isinstance(data, dict):
+            if not self.party:
+                data.pop("party", None)
+            if self.purpose == "eval":
+                data.pop("purpose", None)
+            if self.scorecard is None:
+                data.pop("scorecard", None)
         return data
 
     @model_validator(mode="after")
@@ -502,6 +545,13 @@ class JobSpec(FrozenModel):
         agent_ids = [agent.agent_id for agent in self.agents]
         if len(agent_ids) != len(set(agent_ids)):
             raise ValueError("agents must have unique identities")
+        heldout = self.source.heldout_tasks if isinstance(self.source, BenchmarkJobSource) else ()
+        if heldout and self.purpose in REFUSE_HELDOUT:
+            raise ValueError(
+                f"A {self.purpose} Job cannot run held-out Tasks ({', '.join(heldout)}): "
+                "held-out Tasks are kept for confirming a fix, so diagnosis never sees "
+                "them.\nNext: plural fix confirm FIX runs them once, as a counted peek."
+            )
         names = {agent.name for agent in self.agents}
         unknown = sorted(set(self.party) - names)
         if unknown:
@@ -571,6 +621,8 @@ class JobSpec(FrozenModel):
             identity["run_id"] = self.run_id
         if self.party:
             identity["party"] = self.party
+        if self.purpose != "eval":
+            identity["purpose"] = self.purpose
         return stable_id("job", identity)
 
     def plan(self, catalog: ModelCatalog | None = None) -> JobPlan:
@@ -978,6 +1030,11 @@ class TrialResult(FrozenModel):
     does not apply here, and is left out of every aggregate."""
     metric_failures: tuple[MetricFailure, ...] = ()
     """Each Verifier whose ``measure`` hook failed, on how many steps. Never fatal."""
+    gates: dict[str, bool] = Field(default_factory=dict)
+    """Under the Benchmark's Scorecard, each applicable gate's verdict."""
+    passed: bool | None = None
+    """Under the Benchmark's Scorecard, whether every applicable gate passed. ``None``
+    without a Scorecard or while awaiting review; ``False`` for a Trial that failed."""
 
     @model_validator(mode="after")
     def _shape(self) -> TrialResult:
@@ -1017,6 +1074,9 @@ class AgentAggregate(FrozenModel):
     primary: float | None = None
     """This Agent's value of ``primary_metric``: ``mean_score`` for ``score``, else
     the metric's mean (its pass rate, for a binary metric)."""
+    pass_rate: float | None = None
+    """Under the Benchmark's Scorecard, the share of this Agent's Trials that passed
+    every applicable gate."""
 
 
 class JobResult(FrozenModel):
@@ -1055,6 +1115,12 @@ class Job:
     asks once and remembers the answer; ``allow_local_models=True`` goes
     ahead without one. Each Trial records the identity either way, as
     ``TrialResult.model_identity``.
+
+    A Benchmark Job runs its dev Tasks. ``heldout=True`` runs the held-out
+    Tasks too; each such run is a peek, and ``plural run`` counts it.
+    ``purpose`` says why the Job runs; ``diagnose``, ``fork`` and ``fix_test``
+    Jobs refuse held-out Tasks. ``scorecard`` is the Scorecard the Benchmark
+    names; with it each Trial records its ``gates`` and whether it ``passed``.
     """
 
     def __init__(
@@ -1083,6 +1149,9 @@ class Job:
         credentials: Mapping[str, Mapping[str, str]] | None = None,
         episode_server: Any = None,
         allow_local_models: bool = False,
+        scorecard: Scorecard | None = None,
+        heldout: bool = False,
+        purpose: JobPurpose = "eval",
     ) -> None:
         if not isinstance(source, (Task, Benchmark)):
             raise TypeError(
@@ -1112,9 +1181,20 @@ class Job:
         self.api_key = api_key
         job_source: JobSource
         if isinstance(source, Task):
+            if heldout:
+                raise ValueError("Cannot create Job.\nheldout applies to a Benchmark, not a Task.")
             job_source = TaskJobSource(task=source._definition())
         else:
-            job_source = BenchmarkJobSource(benchmark=source._definition())
+            job_source = BenchmarkJobSource(benchmark=source._definition(), include_heldout=heldout)
+        if scorecard is not None and (
+            not isinstance(source, Benchmark) or source.scorecard != scorecard.reference
+        ):
+            named = source.scorecard if isinstance(source, Benchmark) else None
+            raise ValueError(
+                "Cannot create Job.\n"
+                f"scorecard is {scorecard.reference}, but the source names "
+                f"{named or 'no Scorecard'}. Pass the Scorecard its Benchmark names."
+            )
         bindings = tuple(AgentBinding(agent=agent._definition()) for agent in self.agents)
         members: list[str] = []
         for member in party or ():
@@ -1130,6 +1210,8 @@ class Job:
             attempts=attempts,
             priority=priority,
             retry=retry or RetryPolicy(),
+            purpose=purpose,
+            scorecard=scorecard,
         )
         self.catalog = catalog or ModelCatalog()
         self.plan = self.spec.plan(self.catalog)
@@ -1305,7 +1387,9 @@ __all__ = [
     "ArtifactManifestEntry",
     "ArtifactReference",
     "BenchmarkPin",
+    "REFUSE_HELDOUT",
     "BenchmarkJobSource",
+    "JobPurpose",
     "ExecutionStatus",
     "IntegrityFinding",
     "Job",

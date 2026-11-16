@@ -60,6 +60,7 @@ from plural.project.layout import (
     ENVIRONMENT,
     HARNESS,
     KINDS,
+    SCORECARD,
     TASK,
     VERIFIER,
     Project,
@@ -1207,7 +1208,13 @@ def hosted_list(studio: Studio, kind: ResourceKind) -> list[dict[str, Any]]:
         Parent records as the service returns them.
     """
     api: RevisionResourceAPI[Any] = getattr(studio, kind.collection)
-    return [dict(item) for item in api.list()]
+    try:
+        return [dict(item) for item in api.list()]
+    except NotFoundError:
+        if kind.name == SCORECARD.name:
+            # A service from before Scorecards has none to list.
+            return []
+        raise
 
 
 def _package_problems(resource: LocalResource, workspace: Workspace) -> list[str]:
@@ -1258,7 +1265,11 @@ class _Prepared:
         if kind == AGENT.name:
             return {"harness_revision_id": ids[0] if ids else None}
         if kind == BENCHMARK.name:
-            return {"task_revision_ids": ids}
+            count = len(self.resource.value.tasks)
+            references: dict[str, Any] = {"task_revision_ids": ids[:count]}
+            if len(ids) > count:
+                references["scorecard_revision_id"] = ids[count]
+            return references
         return {}
 
 

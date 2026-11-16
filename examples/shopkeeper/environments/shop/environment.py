@@ -97,7 +97,9 @@ class Shop(App[ShopState]):
             last = state.history[-1]
             lines.append(
                 f"Yesterday: revenue ${last['revenue']:,.2f}, "
-                + ", ".join(f"{item} sold {int(last.get(item, 0))}" for item in sorted(state.wholesale))
+                + ", ".join(
+                    f"{item} sold {int(last.get(item, 0))}" for item in sorted(state.wholesale)
+                )
                 + "."
             )
         return "\n".join(lines)
@@ -138,8 +140,9 @@ class Shop(App[ShopState]):
             revenue += units * price
         state.cash = round(state.cash + revenue - state.rent, 2)
         state.lowest_cash = min(state.lowest_cash, state.cash)
-        state.history.append({"day": float(state.day), "revenue": round(revenue, 2), **sold,
-                              "cash": state.cash})
+        state.history.append(
+            {"day": float(state.day), "revenue": round(revenue, 2), **sold, "cash": state.cash}
+        )
         state.day += 1
         ending = (
             " The season is over."
@@ -147,7 +150,7 @@ class Shop(App[ShopState]):
             else f" Day {state.day} of {state.days} begins."
         )
         return (
-            f"Sold "
+            "Sold "
             + ", ".join(f"{int(units)} {item}" for item, units in sold.items())
             + f" for ${revenue:,.2f}; paid ${state.rent:,.2f} rent. Cash ${state.cash:,.2f}."
             + ending
