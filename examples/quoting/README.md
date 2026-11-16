@@ -111,22 +111,19 @@ steps have causes to find:
 - **In the Environment**, the `check_schedule` action is described as "Optional: view
   mill bookings", so it skips the schedule and promises dates the mill can't meet.
 
-Measured on the real model (`gpt-5.6-luna`, default reasoning), one attempt at each of
-the 60 Tasks, on November 16, 2026:
+Measured on the real model (`openai/gpt-5.6-luna` through Plural's gateway), one
+attempt at each of the 60 Tasks, on November 16, 2026:
 
 | Weakness | Tasks it affects | Failed because of it |
 | --- | --- | --- |
-| Rounding | 25 quoted Tasks; every looked-up price had cents | 25 (100%) |
-| Skipped schedule | 16 rush Tasks | 8 (50%): quoted the customer's date without checking the schedule, 1 to 7 days before the mill could deliver |
+| Rounding | 23 quoted Tasks; every looked-up price had cents | 23 (100%) |
+| Skipped schedule | 16 rush Tasks | 5 (31%): quoted the customer's date without checking the schedule, 2 to 7 days before the mill could deliver |
 
-The other 8 rush requests were handed off instead of quoted, a wrong decision; 3 of
-those followed a schedule check. quote-bot also handed off 7 of the 24 simple requests
+The other 11 rush requests were handed off instead of quoted, a wrong decision; 5 of
+those followed a schedule check. quote-bot also handed off 6 of the 24 simple requests
 because their wording ("1018 cold-finished bar", "304 stainless sheet") didn't match
 the price book's grade names. That third failure was not planted. The mean score was
 0.33: only the ambiguous and out-of-stock requests, where a handoff is right, passed.
-
-This run reached OpenAI through a local stand-in for Plural's gateway that used the
-gateway's own OpenAI adapter, rather than through pluralintel.com.
 
 ## Tests
 
