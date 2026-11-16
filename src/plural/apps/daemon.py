@@ -465,9 +465,34 @@ def _ensure_home(private: Path) -> None:
     os.environ["HOME"] = str(folder)
 
 
+def _abandoned(owner: int | None, sandbox: Path | None) -> bool:
+    """Whether the local sandbox this host serves is gone, or the run that owns it died.
+
+    A run that crashes, or is killed, never sends the stop, and the host runs
+    in its own session, so nothing else would end it. Only the local Runtime
+    names an owner and a sandbox folder; elsewhere the sandbox is the boundary,
+    and the host ends with it.
+
+    Returns:
+        True when the host should exit.
+    """
+    if owner is not None:
+        try:
+            os.kill(owner, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            pass
+    return sandbox is not None and not sandbox.exists()
+
+
 def serve(root: Path, private: Path | None = None) -> None:
-    """Run the App host for one workspace until stopped or idle."""
+    """Run the App host for one workspace until stopped, idle, or abandoned."""
     not_dumpable()
+    owner_pid = os.environ.get("PLURAL_SANDBOX_OWNER", "")
+    owner = int(owner_pid) if owner_pid.isdigit() else None
+    sandbox_root = os.environ.get("PLURAL_SANDBOX_ROOT")
+    sandbox = Path(sandbox_root) if sandbox_root else None
     private = private or root
     # The workspace is not on the import path: a Harness could write modules there.
     unsafe = {"", str(root)} | ({os.getcwd()} if Path.cwd().resolve() != private else set())
@@ -533,8 +558,9 @@ def serve(root: Path, private: Path | None = None) -> None:
             not stopping.is_set()
             and time.monotonic() - activity[0] < IDLE_SECONDS
             # Under a Job the Harness can delete or move any shared path, so only the
-            # signed stop or the idle timer ends the host.
+            # signed stop, the idle timer, or the end of the run's sandbox ends the host.
             and (token is not None or root.exists())
+            and not _abandoned(owner, sandbox)
         ):
             try:
                 connection, _ = server.accept()

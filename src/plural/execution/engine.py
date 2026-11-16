@@ -25,6 +25,7 @@ from plural.agents import AgentBinding
 from plural.apps.daemon import MANAGED
 from plural.apps.host import STATES_FILE
 from plural.atif import ATIF_FILE, episode_to_atif
+from plural.auth import AuthHTTPError, check_gateway_key
 from plural.benchmarks.results import AttemptEvidence, aggregate_configuration
 from plural.benchmarks.rules import BenchmarkScoring
 from plural.catalog import ModelCatalog
@@ -129,7 +130,12 @@ from plural.jobs import (
     TrialSpec,
     VerifierResult,
 )
-from plural.local_models import LocalModelError, LocalModelIdentity, inspect_local_model
+from plural.local_models import (
+    LocalModelError,
+    LocalModelIdentity,
+    inspect_local_model,
+    on_this_machine,
+)
 from plural.rewards import (
     LEDGER_FILE,
     HindsightTrial,
@@ -802,6 +808,7 @@ class TrialRunner:
         self.spec = spec
         self.job_spec = job_spec
         self.model_identity = model_identity
+        self.identity_findings: list[IntegrityFinding] = []
         self.credentials = dict(credentials or {})
         self.episode_server = episode_server
         self.gateway_keys = gateway_keys
@@ -836,25 +843,48 @@ class TrialRunner:
     async def _check_model_identity(self, agent: AgentBinding) -> None:
         """Refuse to start when the endpoint now serves another model than the Job accepted.
 
+        Answers are evidence, never grounds to fail: a model whose answers to
+        the fixed prompts changed is recorded as an ``model_answers_changed``
+        integrity finding on the Trial, and the Trial runs.
+
         Raises:
-            ExecutionFailure: When the model's fingerprint changed, or its
-                server cannot be reached.
+            ExecutionFailure: When what the server reports about the model
+                changed, or the server cannot be reached.
         """
         accepted = self.model_identity
         if accepted is None or (accepted.method == "behavior" and accepted.behavior is None):
             return
         key_name = agent.agent.endpoint_key
+        # Hosted answers vary by request, so only a local server's are worth re-asking.
+        answers = accepted.behavior is not None and (
+            accepted.method == "behavior" or on_this_machine(accepted.endpoint)
+        )
         try:
             current = await asyncio.to_thread(
                 inspect_local_model,
                 accepted.endpoint,
                 accepted.requested,
                 api_key=self.environ.get(key_name) if key_name else None,
-                # Answers are what show a swap on a server that reports nothing.
-                probe=accepted.behavior is not None,
+                probe=accepted.method in {"reported", "behavior"} or answers,
+                answers=answers,
             )
         except LocalModelError as exc:
             raise ExecutionFailure(ErrorCode.PROVIDER_UNAVAILABLE, str(exc)) from None
+        if answers and current.behavior != accepted.behavior:
+            self.identity_findings.append(
+                IntegrityFinding(
+                    code="model_answers_changed",
+                    message=(
+                        f"The model at {accepted.endpoint} answered the fixed identity prompts "
+                        "differently than when the Job started. It reports the same model, so "
+                        "the Trial ran; check the server if you did not expect a change."
+                    ),
+                    severity="warning",
+                    source="detector",
+                )
+            )
+        if accepted.method == "behavior":
+            return
         if current.fingerprint != accepted.fingerprint:
             raise ExecutionFailure(
                 ErrorCode.CONFIGURATION,
@@ -924,6 +954,7 @@ class TrialRunner:
         self.episode_recorded = False
         self.harness_killed = False
         self._cost_usd = None
+        self.identity_findings = []
         heartbeat = asyncio.create_task(self._heartbeat(execution_id))
         self.store.emit(
             self.spec.job_id,
@@ -1290,9 +1321,11 @@ class TrialRunner:
             finally:
                 self._active.pop((provider.name, handle.sandbox_id), None)
                 async with phase("cleanup"):
-                    if host is not None:
-                        await host.stop()
-                    await provider.destroy(handle)
+                    try:
+                        if host is not None:
+                            await host.stop()
+                    finally:
+                        await provider.destroy(handle)
             awaiting = any(item.status == "awaiting_review" for item in verifier_results)
             score, scores = _aggregate(task, verifier_results)
             artifacts = self._with_ledger(
@@ -1309,6 +1342,7 @@ class TrialRunner:
                     artifacts,
                 )
             integrity = (
+                *self.identity_findings,
                 *_integrity(
                     players[0],
                     artifacts,
@@ -1370,6 +1404,11 @@ class TrialRunner:
                 stdout = _redact_bytes(exc.stdout, secrets)
                 stderr = _redact_bytes(exc.stderr, secrets)
             code = _classify(exc)
+            if code is not ErrorCode.AUTHENTICATION and self.store.cancel_requested(
+                self.spec.job_id
+            ):
+                # Killed by the cancel, so its failure is the cancel's, not its own.
+                code = ErrorCode.CANCELLED
             if host_report.steps and not any(item.path == LEDGER_FILE for item in artifacts):
                 # The episode ran, so its step rewards stand even when a check failed.
                 with contextlib.suppress(Exception):
@@ -2692,8 +2731,10 @@ class JobRunner:
         gateway_keys: GatewayKeys | None = None,
         gateway_calls: GatewayCalls | None = None,
         model_identities: Mapping[str, LocalModelIdentity] | None = None,
+        key_check: Callable[[str, str], None] | None = check_gateway_key,
     ) -> None:
         self.spec = spec
+        self.key_check = key_check
         self.model_identities = dict(model_identities or {})
         self.credentials = dict(credentials or {})
         self.gateway_keys = gateway_keys
@@ -2714,6 +2755,8 @@ class JobRunner:
             allow_unsafe_local=allow_local
         )
         self._trials: set[TrialRunner] = set()
+        self.stopped: str | None = None
+        """Why the Job stopped early, when a Trial's failure means every Trial would fail."""
 
     def _model_identity(self, trial: TrialSpec) -> LocalModelIdentity | None:
         agent = next(item for item in self.spec.agents if item.agent_id == trial.agent_id)
@@ -2752,6 +2795,7 @@ class JobRunner:
                 missing[app].extend(name for name in names if name not in missing[app])
         if missing:
             raise ExecutionFailure(ErrorCode.AUTHENTICATION, describe_missing(missing))
+        await self._check_gateway_key()
         for agent in self.spec.agents:
             if agent.external is not None:
                 _check_external(agent, self.environ)
@@ -2805,6 +2849,33 @@ class JobRunner:
                 )
                 provider = self._provider_for(provider_name)
                 await provider.preflight(requirements)
+
+    async def _check_gateway_key(self) -> None:
+        """Check the Plural key once, before any Trial, when the Job calls the gateway.
+
+        Raises:
+            ExecutionFailure: When the gateway rejects the key or has locked
+                this address out.
+        """
+        key = self.environ.get("PLURAL_API_KEY")
+        if not key or self.key_check is None:
+            return
+        judged = any(
+            binding.verifier.kind == "agent"
+            for task in self.spec.tasks
+            for binding in task.verifiers
+        )
+        native = any(
+            agent.external is None and agent.agent.endpoint is None and agent.auth != "none"
+            for agent in self.spec.agents
+        )
+        if not (judged or native):
+            return
+        gateway = resolve_gateway_url(None, self.environ)
+        try:
+            await asyncio.to_thread(self.key_check, gateway, key)
+        except AuthHTTPError as exc:
+            raise ExecutionFailure(ErrorCode.AUTHENTICATION, str(exc)) from None
 
     async def run(self, *, resume: bool = False) -> JobResult:
         """Execute all ready Trials with global and per-runtime bounds."""
@@ -2869,6 +2940,22 @@ class JobRunner:
                 results[trial_spec.trial_id] = result
                 if self.progress:
                     self.progress(trial_spec, result)
+            if result.error_code is ErrorCode.AUTHENTICATION and self.stopped is None:
+                # A rejected key fails every Trial alike, and each retry from the same
+                # address counts toward the gateway's lockout, so stop them all now.
+                self.stopped = (
+                    f"Stopped the Job: Trial {trial_spec.trial_id} failed to authenticate, "
+                    "so the others were cancelled rather than fail the same way. "
+                    f"{(result.error_message or '').strip()[:500]}"
+                ).strip()
+                self.store.emit(
+                    self.plan.job_id,
+                    "cancelled",
+                    "cancelled",
+                    message=self.stopped,
+                    data={"reason": "authentication", "trial_id": trial_spec.trial_id},
+                )
+                await self.cancel()
 
         async with contextlib.AsyncExitStack() as stack:
             if any(agent.external is not None for agent in self.spec.agents):
@@ -2894,6 +2981,7 @@ class JobRunner:
             trials=ordered,
             benchmark=self.plan.lock.benchmark,
             aggregates=_agent_aggregates(self.spec, ordered),
+            stopped=self.stopped,
         )
         self.store.write_job_result(result)
         self.store.emit(

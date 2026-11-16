@@ -16,10 +16,20 @@ The facts come from the strongest source the server offers:
     The weights are in this machine's Hugging Face cache, as for
     ``mlx_lm.server``, which loads the repository a request names. Plural
     counts their parameters from the safetensors headers.
+``reported``
+    A server Plural cannot look inside, such as a hosted API, still names the
+    model that answered in each response, and may say more in its headers.
+    Plural fingerprints those.
 ``behavior``
     Nothing else is known, so Plural hashes the model's greedy answers to a
     few fixed prompts. This is the weakest: it tells two models apart, not
     which one either is.
+
+Answers are evidence, never proof. Plural records their hash beside every
+fingerprint it can read from the server, so a model that answers exactly like
+another is flagged, but a model whose answers vary from one request to the
+next, as hosted models' do, never fails a Trial for it. Only a change in what
+the server reports does.
 
 None of this proves what weights a server you do not control is running. It
 makes a mislabeled run visible before it starts, instead of results recorded
@@ -46,7 +56,7 @@ import httpx
 from plural.common import FrozenModel
 
 ServerKind = Literal["ollama", "vllm", "llama.cpp", "lm-studio", "mlx-lm", "openai-compatible"]
-Method = Literal["server", "weights", "behavior"]
+Method = Literal["server", "weights", "reported", "behavior"]
 Trust = Literal["confirmed", "known", "allowed", "recorded"]
 """How a run came to use a model: ``confirmed`` at a prompt, ``known`` from a
 fingerprint confirmed before, ``allowed`` by ``allow_local_models`` or
@@ -58,6 +68,12 @@ PROBES = (
     "Write one sentence about a lighthouse keeper who collects keys.",
     "List five invented city names, comma separated, nothing else.",
 )
+IDENTITY_HEADERS = ("openai-model", "x-model", "x-served-model", "x-model-id", "server")
+"""Response headers that name what served a request, read into a ``reported``
+fingerprint when the server sends them."""
+_SAMPLING = ("max_tokens", "temperature", "seed")
+# Endpoints that refused the sampling parameters once, so later probes skip them.
+_PLAIN_ENDPOINTS: set[str] = set()
 # A model whose size is in its name must count within this share of it.
 SIZE_TOLERANCE = 0.3
 _SIZE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*b(?![a-z])", re.IGNORECASE)
@@ -85,8 +101,10 @@ class LocalModelIdentity(FrozenModel):
     quantization: str | None = None
     method: Method
     behavior: str | None = None
-    """For a server that reports nothing about its model, the hash of its
-    answers to :data:`PROBES`, which is part of its fingerprint."""
+    """The hash of the model's answers to :data:`PROBES`. Part of the
+    fingerprint only when ``method`` is ``behavior``; otherwise evidence."""
+    reported: dict[str, str] = {}
+    """The identifying response headers the server sent, by lowercase name."""
     fingerprint: str
     """``SHA256:`` and the base64 digest of the facts above, like an SSH key's."""
     warnings: tuple[str, ...] = ()
@@ -121,7 +139,8 @@ class LocalModelIdentity(FrozenModel):
             lines.append(f"parameters: {self.size}")
         if self.quantization:
             lines.append(f"quantization: {self.quantization}")
-        if self.behavior and not on_this_machine(self.endpoint):
+        lines.extend(f"header {name}: {value}" for name, value in sorted(self.reported.items()))
+        if self.method == "behavior" and not on_this_machine(self.endpoint):
             lines.append(
                 "identified by: its answers alone; the server is not on this machine, so "
                 "Plural cannot read its weights"
@@ -133,7 +152,8 @@ class LocalModelIdentity(FrozenModel):
 
 _METHODS: dict[str, str] = {
     "server": "model the server reports loaded",
-    "weights": "weight files on this machine and the model's answers to fixed prompts",
+    "weights": "weight files on this machine",
+    "reported": "model name and headers the server sends with each answer",
     "behavior": "model's answers to fixed prompts; the server reports nothing about its model",
 }
 
@@ -144,6 +164,7 @@ def inspect_local_model(
     *,
     api_key: str | None = None,
     probe: bool = True,
+    answers: bool = True,
     http: httpx.Client | None = None,
     hf_hub: Path | None = None,
 ) -> LocalModelIdentity:
@@ -153,9 +174,12 @@ def inspect_local_model(
         endpoint: The OpenAI-compatible base URL, such as ``http://localhost:11434/v1``.
         model: The name the Agent sends.
         api_key: The endpoint's key, when it needs one.
-        probe: Send a one-token request to learn the name the server answers
-            as, and fall back to fingerprinting behavior. Without it, only
-            what the server reports is read, which is cheap enough to repeat.
+        probe: Send a short request to learn the name and headers the server
+            answers with. Without it, only what the server reports about
+            itself is read, which is cheap enough to repeat.
+        answers: With ``probe``, also hash the model's answers to
+            :data:`PROBES`, as evidence or, when the server reports nothing
+            else, as the fingerprint.
         http: HTTP client, injectable for tests.
         hf_hub: The Hugging Face cache, by default ``$HF_HOME/hub``.
 
@@ -168,7 +192,13 @@ def inspect_local_model(
     if http is None:
         with httpx.Client(timeout=httpx.Timeout(10.0, read=600.0)) as owned:
             return inspect_local_model(
-                endpoint, model, api_key=api_key, probe=probe, http=owned, hf_hub=hf_hub
+                endpoint,
+                model,
+                api_key=api_key,
+                probe=probe,
+                answers=answers,
+                http=owned,
+                hf_hub=hf_hub,
             )
     client = http
     base = endpoint.rstrip("/")
@@ -287,24 +317,15 @@ def inspect_local_model(
         }
 
     served: str | None = None
+    reported: dict[str, str] = {}
     if probe:
-        answer = _post_json(
-            client,
-            f"{base}/chat/completions",
-            {
-                "model": model,
-                "max_tokens": 1,
-                "temperature": 0,
-                "messages": [{"role": "user", "content": "hi"}],
-            },
-            headers,
-            timeout=600,
-        )
-        if answer is None:
+        replied = _chat(client, base, model, "hi", 1, headers)
+        if replied is None:
             raise LocalModelError(
                 f"The model server at {endpoint} refused a request for {model!r}."
                 + (f" It lists: {', '.join(ids)}." if ids else "")
             )
+        answer, reported = replied
         served = str(answer.get("model") or "") or None
         mlx = _MLX_FINGERPRINT.match(str(answer.get("system_fingerprint") or ""))
         if server == "openai-compatible" and mlx:
@@ -314,18 +335,22 @@ def inspect_local_model(
 
     behavior: str | None = None
     if server in {"mlx-lm", "openai-compatible"}:
-        # Weights in the cache prove only what could be loaded; the answers show
-        # what does, so a server answering to one name with another model differs.
-        behavior = _behavior(client, base, model, headers) if probe else None
+        if probe and answers:
+            # Evidence beside the fingerprint: a server answering to one name with
+            # another model answers like that model, whatever its cache holds.
+            behavior = _behavior(client, base, model, headers)
         cached = _hf_weights(hub, model) if local else None
         if cached is not None:
             weights, parameters, quantization, files = cached
             method = "weights"
             facts = {"weights": weights, "files": files}
+        elif served or reported:
+            method = "reported"
+            facts = {"server": server, "served": served, "headers": reported}
         else:
             method = "behavior"
-            facts = {"server": server, "unknown": None if probe else model}
-        facts.update({"answers": behavior, "server_version": version})
+            facts = {"server": server, "answers": behavior, "unknown": None if probe else model}
+        facts["server_version"] = version
 
     claimed = claimed_size(model)
     if claimed is not None and parameters:
@@ -345,6 +370,7 @@ def inspect_local_model(
         quantization=quantization,
         method=method,
         behavior=behavior,
+        reported=reported,
         fingerprint=_fingerprint(method, facts),
         warnings=tuple(warnings),
     )
@@ -588,23 +614,59 @@ def _post_json(
     return payload if isinstance(payload, dict) else None
 
 
+def _chat(
+    client: httpx.Client,
+    base: str,
+    model: str,
+    prompt: str,
+    max_tokens: int,
+    headers: Mapping[str, str],
+) -> tuple[dict[str, Any], dict[str, str]] | None:
+    """One short chat completion, and the identifying headers it came back with.
+
+    Asks for greedy, bounded output, which local servers honor. A server that
+    refuses those parameters, as newer OpenAI models refuse ``max_tokens`` and
+    ``temperature``, is asked again without them, and remembered.
+
+    Returns:
+        The response body and identifying headers, or ``None`` when refused.
+    """
+    url = f"{base}/chat/completions"
+    plain = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+    tuned = {**plain, "max_tokens": max_tokens, "temperature": 0, "seed": 0}
+    for body in (plain,) if base in _PLAIN_ENDPOINTS else (tuned, plain):
+        try:
+            response = client.post(url, json=body, headers=dict(headers), timeout=600)
+        except httpx.HTTPError:
+            return None
+        if response.status_code == 400 and body is tuned and _refuses_sampling(response):
+            _PLAIN_ENDPOINTS.add(base)
+            continue
+        if response.status_code != 200:
+            return None
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        found = {
+            name: response.headers[name] for name in IDENTITY_HEADERS if name in response.headers
+        }
+        return payload, found
+    return None
+
+
+def _refuses_sampling(response: httpx.Response) -> bool:
+    text = response.text.lower()
+    return any(name in text for name in _SAMPLING) or "unsupported" in text
+
+
 def _behavior(client: httpx.Client, base: str, model: str, headers: Mapping[str, str]) -> str:
     outputs = []
     for prompt in PROBES:
-        answer = _post_json(
-            client,
-            f"{base}/chat/completions",
-            {
-                "model": model,
-                "temperature": 0,
-                "seed": 0,
-                "max_tokens": 48,
-                "messages": [{"role": "user", "content": f"/no_think {prompt}"}],
-            },
-            headers,
-            timeout=600,
-        )
-        choices = (answer or {}).get("choices") or [{}]
+        replied = _chat(client, base, model, prompt, 48, headers)
+        choices = (replied[0] if replied else {}).get("choices") or [{}]
         outputs.append(str((choices[0].get("message") or {}).get("content") or ""))
     return hashlib.sha256("\x1e".join(outputs).encode()).hexdigest()
 

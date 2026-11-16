@@ -1036,6 +1036,13 @@ def _finish_local(
 
     def text() -> None:
         _print_result(job_id, result, payload.get("summaries") or ())
+        if result.stopped:
+            typer.echo(result.stopped, err=True)
+            typer.echo(
+                "Next: plural auth login, or export a current PLURAL_API_KEY, then run "
+                f"plural job rerun {job_id}",
+                err=True,
+            )
         if tracking is None:
             return
         if not tracking.errors:

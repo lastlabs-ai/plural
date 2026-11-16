@@ -613,7 +613,7 @@ def _model_call(
         except urllib.error.HTTPError as exc:
             detail = exc.read(2048).decode(errors="replace")
             failure = f"model gateway returned HTTP {exc.code}: {detail}"
-            if exc.code in {401, 403}:
+            if exc.code in {401, 403} or (exc.code == 429 and "auth_locked_out" in detail):
                 raise GatewayError("authentication", failure) from exc
             if exc.code == 429 or exc.code >= 500:
                 code = "rate_limited" if exc.code == 429 else "provider_unavailable"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from fakes import FakeProvider
 
 from plural.agents import AgentBinding, AgentDefinition
@@ -152,3 +153,21 @@ async def test_cancel_stops_a_parallel_job(tmp_path: Path) -> None:
     assert provider.harness_runs <= 2
     assert [trial.status for trial in result.trials].count("cancelled") >= 6
     assert all(trial.status in {"succeeded", "cancelled"} for trial in result.trials)
+
+
+async def test_an_interrupted_job_destroys_every_sandbox_it_made(tmp_path: Path) -> None:
+    provider = FakeProvider("docker", delay=5)
+    spec = _spec([f"case-{index}" for index in range(4)], concurrency=2, per_runtime_concurrency=2)
+    runner = JobRunner(spec, provider=provider, store=JobStore(tmp_path / "jobs"))
+
+    running = asyncio.ensure_future(runner.run())
+    while provider.active < 2 and not running.done():
+        await asyncio.sleep(0.01)
+    assert not running.done(), running.result()
+    # What Ctrl-C does to the run's task under asyncio.run.
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    assert len(provider.created) >= 2
+    assert len(provider.destroyed) == len(provider.created)

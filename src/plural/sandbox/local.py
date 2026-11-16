@@ -129,6 +129,8 @@ class LocalProvider(SandboxProvider):
         env = {
             **inherited,
             "PLURAL_SANDBOX_ROOT": str(root),
+            # Background processes, such as the App host, exit when this process does.
+            "PLURAL_SANDBOX_OWNER": str(os.getpid()),
             **request.env,
         }
         command = resolve_local_command(request.command)

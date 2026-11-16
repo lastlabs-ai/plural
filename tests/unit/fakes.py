@@ -57,6 +57,7 @@ class FakeProvider(SandboxProvider):
         self.delay = delay
         self.fail_first = fail_first
         self.created: list[SandboxRequirements] = []
+        self.destroyed: list[str] = []
         self.files: dict[str, dict[str, bytes]] = {}
         self.active = 0
         self.max_active = 0
@@ -267,4 +268,4 @@ class FakeProvider(SandboxProvider):
         return
 
     async def destroy(self, handle: SandboxHandle) -> None:
-        return
+        self.destroyed.append(handle.sandbox_id)

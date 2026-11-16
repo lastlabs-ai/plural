@@ -657,6 +657,66 @@ def resolve_session(
     )
 
 
+def check_gateway_key(
+    gateway_url: str,
+    api_key: str,
+    *,
+    http: httpx.Client | None = None,
+) -> None:
+    """Ask the gateway once whether it accepts ``api_key``, before any work starts.
+
+    A rejected key would fail every Trial alike, and every rejected request
+    counts toward the gateway's lockout of this machine's address, so a run
+    checks once and stops with the reason instead. A gateway that cannot be
+    reached, or that predates the check, is not an answer, and the run goes on.
+
+    Args:
+        gateway_url: The gateway base URL, such as ``https://api.pluralintel.com/v1``.
+        api_key: The key to check. Sent only in the ``Authorization`` header.
+        http: HTTP client, injectable for tests.
+
+    Raises:
+        AuthHTTPError: When the gateway rejects the key, or has locked this
+            address out; the message says why and what to do next.
+
+    Examples:
+        >>> import httpx
+        >>> ok = httpx.MockTransport(lambda _request: httpx.Response(200, json={"valid": True}))
+        >>> check_gateway_key("https://gw/v1", "k", http=httpx.Client(transport=ok))
+    """
+    if http is None:
+        with httpx.Client(timeout=10.0) as owned:
+            return check_gateway_key(gateway_url, api_key, http=owned)
+    url = f"{gateway_url.rstrip('/')}/key"
+    try:
+        response = http.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    except httpx.HTTPError:
+        return None
+    if response.status_code in {401, 403}:
+        raise AuthHTTPError(
+            f"The Plural gateway at {gateway_url} rejected PLURAL_API_KEY: it is missing, "
+            "revoked, expired, or from another server. Nothing ran.\n"
+            "Next: plural auth login, or export a current PLURAL_API_KEY",
+            code=ErrorCode.AUTHENTICATION,
+            status_code=response.status_code,
+        )
+    if response.status_code == 429:
+        try:
+            error = response.json().get("error") or {}
+        except (ValueError, AttributeError):
+            error = {}
+        if error.get("type") != "auth_locked_out":
+            return None
+        wait = response.headers.get("Retry-After", "")
+        raise AuthHTTPError(
+            f"{error.get('message') or 'The gateway has locked this address out.'} Nothing ran.\n"
+            + (f"Next: wait {wait} seconds, then run again" if wait else "Next: run again later"),
+            code=ErrorCode.AUTHENTICATION,
+            status_code=429,
+        )
+    return None
+
+
 __all__ = [
     "DEFAULT_API_URL",
     "AuthClient",
@@ -674,6 +734,7 @@ __all__ = [
     "LoginAccount",
     "Profile",
     "Session",
+    "check_gateway_key",
     "config_home",
     "default_credential_store",
     "load_config",

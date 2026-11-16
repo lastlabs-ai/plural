@@ -886,6 +886,7 @@ IntegrityCode = Literal[
     "grader_special_casing",
     "false_claim",
     "instruction_violation",
+    "model_answers_changed",
 ]
 
 IntegritySeverity = Literal["info", "warning", "critical"]
@@ -1007,6 +1008,9 @@ class JobResult(FrozenModel):
     trials: tuple[TrialResult, ...]
     benchmark: BenchmarkPin | None = None
     aggregates: tuple[AgentAggregate, ...] = ()
+    stopped: str | None = None
+    """Why the Job stopped before every Trial ran, such as a rejected API key,
+    which would fail every Trial alike. ``None`` when it ran to the end."""
 
 
 class Job:
