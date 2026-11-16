@@ -225,7 +225,7 @@ class BenchmarkManifest(BenchmarkRelease):
     """``benchmark.yaml``: Task references plus release and scoring rules.
 
     ``purpose`` is the Benchmark's motivation. It ranks on the Verifier-derived
-    ``score`` only; step rewards never contribute.
+    ``score`` unless ``primary_metric`` names a metric; step rewards never contribute.
     """
 
     name: str = Field(min_length=1)
@@ -237,7 +237,15 @@ class BenchmarkManifest(BenchmarkRelease):
     version: str = "0.1.0"
     description: str = ""
     tasks: list[str] = Field(default_factory=list)
-    primary_metric: Literal["score"] = "score"
+    primary_metric: str = "score"
+    """What the leaderboard ranks on: ``score``, a built-in metric, a metric a
+    Task's Verifier declares, or an objective of the Benchmark's Scorecard."""
+    scorecard: str | None = None
+    """The Scorecard, as ``name`` or ``name@version``, whose gates decide which
+    Trials pass and whose primary objective the leaderboard ranks on by default."""
+    heldout: list[str] = Field(default_factory=list)
+    """Tasks kept back for confirmation. ``plural run --benchmark`` leaves them out,
+    and every run that includes them is counted as a peek."""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

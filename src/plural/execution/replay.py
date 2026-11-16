@@ -1,6 +1,6 @@
 """Run a Verifier again on a stored Trial, without running the Agent.
 
-``reward`` is replayed step by step from the App host's record of each step in
+``reward`` and ``measure`` are replayed step by step from the App host's record of each step in
 ``steps.jsonl`` (``episode.jsonl`` for older Trials) and the App State recorded
 around each step in ``states.jsonl``. ``hindsight`` and an
 in-process ``check`` run on the stored artifacts as they did live. Apps are
@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from plural.apps.host import STATES_FILE, STEPS_FILE
+from plural.metrics import METRICS_FILE, series_by_metric
 from plural.rewards import (
     LEDGER_FILE,
     HindsightVerifier,
@@ -86,6 +87,8 @@ class Replay:
     """What one Verifier gives a stored Trial."""
 
     rewards: list[RewardRecord] = field(default_factory=list)
+    metrics: list[dict[str, Any]] = field(default_factory=list)
+    """Each running metric point ``measure`` gives, as ``metrics.jsonl`` holds them."""
     output: VerifierOutput | None = None
     problems: list[str] = field(default_factory=list)
 
@@ -102,45 +105,27 @@ def _step_number(record: Mapping[str, Any]) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _step_rewards(
-    verifier: DeterministicVerifier,
+def _replayed_steps(
     events: Sequence[Mapping[str, Any]],
     states: Sequence[Mapping[str, Any]],
     task: StepTask,
-    *,
     steps: Sequence[Mapping[str, Any]] = (),
-) -> tuple[list[RewardRecord], list[str]]:
-    """Replay ``reward`` on each step, as the App host ran it live.
+) -> Iterator[tuple[int, Mapping[str, Any], Step]]:
+    """Each recorded step as a hook saw it live, with the App State around it.
 
     The steps come from the host's ``steps.jsonl`` when the Trial has one, and
-    otherwise from ``episode.jsonl``. Each reward targets the episode record
-    for that step. As live, a hook that raises or returns a value that is not
-    a finite number gives that step no reward, and the rest still run.
+    otherwise from ``episode.jsonl``.
 
-    Returns:
-        The rewards, and a problem for each step whose hook failed.
+    Yields:
+        The step number, its record, and the :class:`Step`.
     """
-    fn = verifier.reward_fn
-    assert fn is not None
     by_step = {int(line["step"]): line for line in states if "step" in line}
-    identifiers: dict[int, str] = {}
-    for record in events:
-        number = _step_number(record)
-        if record.get("kind") == "environment.step" and number is not None:
-            info = record.get("info") or {}
-            if not (isinstance(info, Mapping) and info.get("unverified")):
-                identifiers.setdefault(
-                    number,
-                    str(record.get("event_id") or event_id(int(record.get("sequence") or 0))),
-                )
     source = (
         list(steps)
         if steps
         else [record for record in events if record.get("kind") == "environment.step"]
     )
     current: dict[str, Any] = dict((by_step.get(0) or {}).get("state") or {})
-    records: list[RewardRecord] = []
-    problems: list[str] = []
     turns = 0
     for record in source:
         number = _step_number(record)
@@ -153,18 +138,58 @@ def _step_rewards(
         turns += 1
         info = record.get("info") if isinstance(record.get("info"), Mapping) else {}
         error = (info or {}).get("error") or record.get("error") or line.get("error")
-        step = Step(
-            task=task,
-            turn=turns,
-            app=app,
-            action=str(line.get("action") or record.get("action") or ""),
-            arguments=dict(record.get("arguments") or {}),
-            observation=None if error else record.get("observation"),
-            error=error,
-            previous_state=previous,
-            current_state=current.get(app),
-            apps={name: _RecordedApp(name, state) for name, state in current.items()},
+        yield (
+            number,
+            record,
+            Step(
+                task=task,
+                turn=turns,
+                app=app,
+                action=str(line.get("action") or record.get("action") or ""),
+                arguments=dict(record.get("arguments") or {}),
+                observation=None if error else record.get("observation"),
+                error=error,
+                previous_state=previous,
+                current_state=current.get(app),
+                apps={name: _RecordedApp(name, state) for name, state in current.items()},
+                source="environment" if line.get("source") == "environment" else "agent",
+            ),
         )
+
+
+def _step_rewards(
+    verifier: DeterministicVerifier,
+    events: Sequence[Mapping[str, Any]],
+    states: Sequence[Mapping[str, Any]],
+    task: StepTask,
+    *,
+    steps: Sequence[Mapping[str, Any]] = (),
+) -> tuple[list[RewardRecord], list[str]]:
+    """Replay ``reward`` on each step, as the App host ran it live.
+
+    Each reward targets the episode record for that step. As live, a hook that
+    raises or returns a value that is not a finite number gives that step no
+    reward, and the rest still run.
+
+    Returns:
+        The rewards, and a problem for each step whose hook failed.
+    """
+    fn = verifier.reward_fn
+    assert fn is not None
+    identifiers: dict[int, str] = {}
+    for record in events:
+        number = _step_number(record)
+        if record.get("kind") == "environment.step" and number is not None:
+            info = record.get("info") or {}
+            if not (isinstance(info, Mapping) and info.get("unverified")):
+                identifiers.setdefault(
+                    number,
+                    str(record.get("event_id") or event_id(int(record.get("sequence") or 0))),
+                )
+    records: list[RewardRecord] = []
+    problems: list[str] = []
+    for number, record, step in _replayed_steps(events, states, task, steps):
+        info = record.get("info") if isinstance(record.get("info"), Mapping) else {}
         try:
             value = fn(step)
             if value is None:
@@ -183,11 +208,58 @@ def _step_rewards(
                 source="step",
                 verifier=verifier.name,
                 version=verifier.version,
-                app=app,
+                app=step.app,
                 off_recording=bool((info or {}).get("off_recording")),
             )
         )
     return records, problems
+
+
+def _step_metrics(
+    verifier: DeterministicVerifier,
+    events: Sequence[Mapping[str, Any]],
+    states: Sequence[Mapping[str, Any]],
+    task: StepTask,
+    *,
+    steps: Sequence[Mapping[str, Any]] = (),
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Replay ``measure`` on each step, as the App host ran it live.
+
+    The stored Trial has no wall clock or simulated time for a replayed point,
+    so points carry only their step. As live, a hook that fails on a step
+    gives that step no point and the rest still run.
+
+    Returns:
+        The points, and a problem for each step whose hook failed.
+    """
+    fn = verifier.measure_fn
+    assert fn is not None
+    running = {spec.name for spec in verifier.metrics if spec.kind == "running"}
+    points: list[dict[str, Any]] = []
+    problems: list[str] = []
+    for number, _, step in _replayed_steps(events, states, task, steps):
+        try:
+            value = fn(step)
+            if value is None:
+                continue
+            if not isinstance(value, Mapping):
+                raise ValueError("measure must return a mapping of running metric to value")
+            unknown = sorted(str(key) for key in value if key not in running)
+            if unknown:
+                raise ValueError(f"measure returned undeclared metrics: {', '.join(unknown)}")
+            values: dict[str, float | None] = {}
+            for key, item in value.items():
+                number_value = None if item is None else float(item)
+                if number_value is not None and not math.isfinite(number_value):
+                    raise ValueError(f"{key} must be a finite number, not {number_value!r}")
+                values[str(key)] = number_value
+        except Exception as exc:  # noqa: BLE001 - as live, one step's failure is reported
+            problems.append(f"measure failed on step {number}: {type(exc).__name__}: {exc}")
+            continue
+        points.append(
+            {"step": number, "verifier": verifier.name, "values": values, "source": step.source}
+        )
+    return points, problems
 
 
 def replay_verifier(
@@ -226,6 +298,24 @@ def replay_verifier(
                 steps=_jsonl(artifacts / STEPS_FILE),
             )
             result.rewards.extend(rewards)
+            result.problems.extend(problems)
+    if verifier.measure is not None:
+        states = _jsonl(artifacts / STATES_FILE)
+        if verifier.measure_fn is None:
+            result.problems.append(f"measure {verifier.measure_ref} could not be imported.")
+        elif not states:
+            result.problems.append(
+                "This Trial has no recorded State per step, so measure cannot be replayed."
+            )
+        else:
+            points, problems = _step_metrics(
+                verifier,
+                events,
+                states,
+                task or StepTask(),
+                steps=_jsonl(artifacts / STEPS_FILE),
+            )
+            result.metrics.extend(points)
             result.problems.extend(problems)
     if verifier.hindsight is not None:
         fn = verifier.hindsight_fn
@@ -280,9 +370,17 @@ def replay_verifier(
                 expected=task.expected if task is not None else None,
                 trajectory=events,
                 rewards=tuple(r.value for r in result.rewards if r.source == "step"),
+                metric_series={
+                    name: tuple(points)
+                    for name, points in series_by_metric(
+                        result.metrics or _jsonl(artifacts / METRICS_FILE)
+                    ).items()
+                },
             )
             try:
-                result.output = coerce_verifier_output(fn(episode), verifier_name=verifier.name)
+                result.output = coerce_verifier_output(
+                    fn(episode), verifier_name=verifier.name, metrics=verifier.metric_specs
+                )
             except Exception as exc:  # noqa: BLE001 - report it and keep going
                 result.problems.append(f"check failed: {type(exc).__name__}: {exc}")
     return result

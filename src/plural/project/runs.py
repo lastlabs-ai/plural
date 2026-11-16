@@ -1405,6 +1405,7 @@ def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
                 ("check", verifier.check),
                 ("reward", verifier.reward),
                 ("hindsight", verifier.hindsight),
+                ("measure", verifier.measure),
             )
             if isinstance(hook, dict) and hook.get("python")
         }

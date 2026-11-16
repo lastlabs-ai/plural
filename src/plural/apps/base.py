@@ -231,6 +231,24 @@ class App(Generic[StateT]):
         """
         return {}
 
+    def sim_time(self) -> float | None:
+        """The simulated time now, for an App that runs its own clock.
+
+        A shop that advances a day per ``wait`` returns the day number, so
+        running metrics can be charted against simulated time as well as
+        steps. It is recorded beside each metric point and never shown to the
+        Agent.
+
+        Returns:
+            The simulated time, or ``None``, the default, for an App without a clock.
+
+        Examples:
+            >>> from plural import App
+            >>> App.sim_time(object()) is None
+            True
+        """
+        return None
+
     def view(self) -> dict[str, Any]:
         """Return an optional render document for the run viewer.
 

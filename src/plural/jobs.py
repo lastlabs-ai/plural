@@ -41,6 +41,7 @@ from plural.environments.definition import (
     party_seats,
 )
 from plural.local_models import LocalModelError, LocalModelIdentity, Status
+from plural.metrics import MetricAggregate, MetricFailure
 from plural.rewards import RewardFailure
 from plural.sandbox.models import NetworkMode
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
@@ -371,12 +372,18 @@ class VerifierResult(FrozenModel):
     feedback: str = ""
     seats: dict[str, float] = Field(default_factory=dict)
     """Each seat's score, for a Task several Agents share."""
+    metrics: dict[str, float | None] = Field(default_factory=dict)
+    """The metrics its ``check`` returned; ``None`` where one does not apply."""
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
     @model_validator(mode="after")
     def _finite(self) -> VerifierResult:
-        values = [*self.scores.values(), *self.seats.values()]
+        values = [
+            *self.scores.values(),
+            *self.seats.values(),
+            *(item for item in self.metrics.values() if item is not None),
+        ]
         if self.score is not None:
             values.append(self.score)
         if any(not math.isfinite(item) for item in values):
@@ -965,6 +972,12 @@ class TrialResult(FrozenModel):
     model_identity: LocalModelIdentity | None = None
     """For an endpoint Agent, what its model server was running when the
     Trial started, its fingerprint, and how the run came to trust it."""
+    metrics: dict[str, float | None] = Field(default_factory=dict)
+    """Every metric's value on this Trial: the built-ins, what each Verifier's
+    ``check`` returned, and each running metric's aggregate. ``None`` means it
+    does not apply here, and is left out of every aggregate."""
+    metric_failures: tuple[MetricFailure, ...] = ()
+    """Each Verifier whose ``measure`` hook failed, on how many steps. Never fatal."""
 
     @model_validator(mode="after")
     def _shape(self) -> TrialResult:
@@ -997,6 +1010,13 @@ class AgentAggregate(FrozenModel):
     coverage: float = 0
     total_cost: float | None = None
     mean_latency_seconds: float | None = None
+    metrics: dict[str, MetricAggregate] = Field(default_factory=dict)
+    """Every metric across this Agent's Trials, by name, with how many it applied to."""
+    primary_metric: str = "score"
+    """What the leaderboard ranks on: ``score``, or a metric the Benchmark names."""
+    primary: float | None = None
+    """This Agent's value of ``primary_metric``: ``mean_score`` for ``score``, else
+    the metric's mean (its pass rate, for a binary metric)."""
 
 
 class JobResult(FrozenModel):

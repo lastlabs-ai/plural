@@ -86,6 +86,7 @@ from plural.execution.seats import (
 )
 from plural.execution.steps import STEPS_FILE, dump_jsonl, episode_terminated, merge_host_steps
 from plural.execution.store import JobStore
+from plural.execution.trial_metrics import metric_lines, task_metric_specs, trial_metrics
 from plural.external.protocol import EpisodeGateway, signing_key
 from plural.harness.episode import EPISODE_FILE
 from plural.harness.native_runner import (
@@ -136,6 +137,15 @@ from plural.local_models import (
     inspect_local_model,
     on_this_machine,
 )
+from plural.metrics import (
+    BUILTIN_METRICS,
+    METRICS_FILE,
+    MetricAggregate,
+    MetricSpec,
+    aggregate_metric,
+    metric_failures,
+    series_by_metric,
+)
 from plural.rewards import (
     LEDGER_FILE,
     HindsightTrial,
@@ -178,7 +188,9 @@ from plural.verifiers import (
     VerifierDefinition,
     VerifierOutput,
     VerifierRuntime,
+    criterion_metrics,
     hindsight_hooks,
+    resolve_metrics,
     rubric_score,
 )
 
@@ -408,7 +420,7 @@ def _with_artifact(
     return (*tuple(item for item in artifacts if item.path != artifact.path), artifact)
 
 
-_JOB_ARTIFACTS = frozenset({LEDGER_FILE, STATES_FILE, STEPS_FILE, "apps.json"})
+_JOB_ARTIFACTS = frozenset({LEDGER_FILE, METRICS_FILE, STATES_FILE, STEPS_FILE, "apps.json"})
 RESULT_FILES = ("result.json", "final-result.json", "output.json")
 GatewayKeys = Callable[[str, int, int], "str | None"]
 """Mints a gateway key for a local Trial's execution, given its time to live in seconds."""
@@ -470,13 +482,18 @@ def _with_host_steps(
     """Take every App step from the App host's report rather than the Harness.
 
     Returns:
-        The artifacts with the host's ``steps.jsonl`` and ``states.jsonl``, and
+        The artifacts with the host's ``steps.jsonl``, ``states.jsonl``, and
+        ``metrics.jsonl``, and
         ``episode.jsonl`` rebuilt so each App step carries the host's account.
     """
     result = tuple(artifacts)
     if report.states:
         result = _with_artifact(
             result, DownloadedFile(path=STATES_FILE, data=dump_jsonl(report.states))
+        )
+    if report.metrics:
+        result = _with_artifact(
+            result, DownloadedFile(path=METRICS_FILE, data=dump_jsonl(report.metrics))
         )
     # Even empty: without it, readers fall back to the Harness's own result.json.
     result = _with_artifact(result, DownloadedFile(path=STEPS_FILE, data=dump_jsonl(report.steps)))
@@ -1362,6 +1379,7 @@ class TrialRunner:
             status: Literal["succeeded", "awaiting_review"] = (
                 "awaiting_review" if awaiting else "succeeded"
             )
+            totals = _episode_totals(artifacts, failed=False)
             receipt = self._receipt(
                 execution_id=execution_id,
                 retry=retry,
@@ -1395,7 +1413,18 @@ class TrialRunner:
                     conformance,
                 ),
                 model_identity=self.model_identity,
-                **_episode_totals(artifacts, failed=False),
+                metrics=trial_metrics(
+                    task,
+                    verifier_results,
+                    artifacts,
+                    cost_usd=cost_usd,
+                    latency_seconds=receipt.timings.get("total_seconds"),
+                    turns=totals["turns"],
+                    stop_reason=totals["stop_reason"],
+                    succeeded=True,
+                ),
+                metric_failures=metric_failures(host_report.metric_failures),
+                **totals,
             )
         except BaseException as exc:
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
@@ -1448,6 +1477,18 @@ class TrialRunner:
                     conformance,
                 ),
                 model_identity=self.model_identity,
+                metrics=trial_metrics(
+                    self.task,
+                    (),
+                    artifacts,
+                    cost_usd=cost_usd,
+                    latency_seconds=receipt.timings.get("total_seconds"),
+                    turns=totals["turns"],
+                    stop_reason=totals["stop_reason"],
+                    succeeded=False,
+                    checked=False,
+                ),
+                metric_failures=metric_failures(host_report.metric_failures),
                 **totals,
                 error_code=None if code is ErrorCode.CANCELLED else code,
                 error_message=_redact_bytes(str(exc).encode(), secrets).decode(errors="replace")[
@@ -2098,6 +2139,7 @@ class TrialRunner:
                         status="succeeded",
                         score=parsed.score,
                         scores=parsed.scores,
+                        metrics=parsed.metrics,
                         evidence=parsed.evidence,
                         feedback=parsed.feedback,
                         seats=parsed.seats,
@@ -2221,6 +2263,10 @@ class TrialRunner:
             rewards=rewards,
             seats=self.seat_names,
             seat_rewards=seat_rewards,
+            metric_series={
+                key: tuple(points)
+                for key, points in series_by_metric(metric_lines(artifacts)).items()
+            },
         )
         if not hosted and not episode.apps and not episode.state:
             fallback = first_json_mapping(artifacts, ("final-state.json", "state.json"))
@@ -2331,15 +2377,22 @@ class TrialRunner:
                 raise ExecutionFailure(
                     ErrorCode.EVIDENCE_MISSING, f"Verifier {name!r} result is missing"
                 )
-            output = VerifierOutput.model_validate_json(files[0].data).validated_finite()
-            if isinstance(verifier, AgentVerifier):
-                try:
+            try:
+                output = VerifierOutput.model_validate_json(files[0].data).validated_finite()
+                if isinstance(verifier, AgentVerifier):
                     judged = rubric_score(verifier.criteria, output.scores)
-                except ValueError as exc:
-                    raise ExecutionFailure(
-                        ErrorCode.VERIFIER_FAILED, f"Verifier {name!r} judge {exc}"
-                    ) from exc
-                output = output.model_copy(update={"score": judged})
+                    rated = criterion_metrics(verifier, output.scores)
+                    output = output.model_copy(
+                        update={"score": judged, "metrics": {**rated, **output.metrics}}
+                    )
+                elif verifier is not None:
+                    output = resolve_metrics(
+                        output, verifier.metric_specs, verifier_name=verifier.name
+                    )
+            except ValueError as exc:
+                raise ExecutionFailure(
+                    ErrorCode.VERIFIER_FAILED, f"Verifier {name!r}: {exc}"
+                ) from exc
             self._check_seats(name, output.seats)
             if evidence_required and not output.evidence:
                 raise ExecutionFailure(
@@ -2353,6 +2406,7 @@ class TrialRunner:
                     status="succeeded",
                     score=output.score,
                     scores=output.scores,
+                    metrics=output.metrics,
                     evidence=output.evidence,
                     feedback=output.feedback,
                     seats=output.seats,
@@ -2541,6 +2595,15 @@ def _agent_aggregates(
             required_attempts=spec.attempts,
             declared=release is not None,
         )
+        metrics = _metric_aggregates(spec, selected)
+        primary_metric = release.primary_metric if release is not None else "score"
+        primary = (
+            combined.score
+            if primary_metric == "score"
+            else metrics[primary_metric].mean
+            if primary_metric in metrics
+            else None
+        )
         rows.append(
             AgentAggregate(
                 agent_name=agent.name,
@@ -2552,9 +2615,35 @@ def _agent_aggregates(
                 coverage=combined.coverage,
                 total_cost=sum(costs) if costs else None,
                 mean_latency_seconds=sum(latencies) / len(latencies) if latencies else None,
+                metrics=metrics,
+                primary_metric=primary_metric,
+                primary=primary,
             )
         )
     return tuple(rows)
+
+
+def _metric_aggregates(spec: JobSpec, trials: Sequence[TrialResult]) -> dict[str, MetricAggregate]:
+    """Each metric across one Agent's Trials, grouped by Task for pass^k and pass@k.
+
+    A Trial without a value, because the metric did not apply or the Trial
+    failed before its checks, counts toward the total and not toward ``n``.
+
+    Returns:
+        Each metric's aggregate, the built-ins first.
+    """
+    specs: dict[str, MetricSpec] = dict(BUILTIN_METRICS)
+    for task in spec.tasks:
+        for name, item in task_metric_specs(task).items():
+            specs.setdefault(name, item)
+    rows: dict[str, MetricAggregate] = {}
+    for name, item in specs.items():
+        by_task: dict[str, list[float | None]] = {}
+        for trial in trials:
+            by_task.setdefault(trial.receipt.task_pin.name, []).append(trial.metrics.get(name))
+        if any(value is not None for values in by_task.values() for value in values):
+            rows[name] = aggregate_metric(item, by_task)
+    return rows
 
 
 @dataclass(frozen=True)

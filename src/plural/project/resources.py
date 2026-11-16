@@ -490,7 +490,7 @@ def _build_verifier(
     prepared = dict(payload)
     prepared.setdefault("kind", "deterministic")
     bound = False
-    for hook in ("check", "reward", "hindsight"):
+    for hook in ("check", "reward", "hindsight", "measure"):
         reference = prepared.get(hook)
         if not (isinstance(reference, str) and _looks_like_reference(reference)):
             continue
@@ -768,6 +768,8 @@ def _load_benchmark(workspace: Workspace, ref: ResourceRef, directory: Path) -> 
                         "description": manifest.description,
                         "metadata": manifest.metadata,
                         "primary_metric": manifest.primary_metric,
+                        "scorecard": manifest.scorecard,
+                        "heldout": tuple(manifest.heldout),
                         "tasks": tuple(item.value for item in loaded),
                         **{field: getattr(manifest, field) for field in RELEASE_FIELDS},
                     }

@@ -1,0 +1,17 @@
+# Verifier: what counts as good work for the Tasks that list it.
+# check scores the season by profit against the Task's target. measure samples cash after
+# every action, a running metric the Trial page charts and a Benchmark can rank on.
+name: shop-books
+version: 1.0.0
+kind: deterministic
+check: verify.py:check
+measure: verify.py:measure
+metrics:
+  - name: cash_on_hand
+    kind: running
+    unit: USD
+    aggregate: final
+    description: Cash after each action. Its Trial value is the cash at the end of the season.
+  - name: never_negative_cash
+    kind: binary
+    description: 1 when cash never went below zero, even for a moment after a purchase.

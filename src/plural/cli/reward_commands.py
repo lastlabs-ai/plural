@@ -172,8 +172,14 @@ def _replays(
 def _summary(replay: Replay) -> dict[str, Any]:
     step = [item.value for item in replay.rewards if item.source == "step"]
     hindsight = [item.value for item in replay.rewards if item.source == "hindsight"]
+    final: dict[str, float] = {}
+    for point in replay.metrics:
+        final.update({k: v for k, v in point["values"].items() if v is not None})
     return {
         "score": replay.output.score if replay.output else None,
+        "metrics": dict(replay.output.metrics) if replay.output else {},
+        "running_final": final,
+        "metric_points": len(replay.metrics),
         "step_rewards": len(step),
         "step_total": sum(step),
         "hindsight_rewards": len(hindsight),
@@ -191,8 +197,8 @@ def verifier_try(
 ) -> None:
     """Run a Verifier on stored Trials and print what it gives, without saving anything.
 
-    Its reward runs again on each recorded step, its hindsight on the finished
-    trajectory, and a Python check on the stored episode. Edit the Verifier and
+    Its reward and measure run again on each recorded step, its hindsight on
+    the finished trajectory, and a Python check on the stored episode. Edit the Verifier and
     run this again to see the difference; the Agent is not run.
     """
     _, verifier, replays = _replays(name, trial, job)
@@ -204,6 +210,7 @@ def verifier_try(
                 "trial_id": trial_dir.name,
                 **_summary(replay),
                 "rewards": [item.model_dump(mode="json") for item in replay.rewards],
+                "metric_series": replay.metrics,
             }
             for trial_dir, _, replay in replays
         ],
@@ -228,6 +235,15 @@ def verifier_try(
                     f"  {item.target.kind:<5} {item.target.event_id:<6} {item.value:+.3f}  "
                     f"{item.source}"
                 )
+            values = {
+                **{
+                    f"{key} (last of {summary['metric_points']} points)": value
+                    for key, value in summary["running_final"].items()
+                },
+                **summary["metrics"],
+            }
+            for key, value in values.items():
+                typer.echo(f"  metric {key}: {'n/a' if value is None else f'{value:g}'}")
             for problem in replay.problems:
                 note(problem)
 

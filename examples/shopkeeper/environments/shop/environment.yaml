@@ -1,0 +1,22 @@
+# Environment: one Python App, the Shop class in environment.py.
+name: shop
+version: 1.0.0
+description: A corner shop. Buy stock, set prices, and open for a day at a time.
+overview: >-
+  The Agent runs the shop for a fixed number of days. Each wait opens it for one day:
+  seeded customers buy what is on the shelf, and the rent comes due. Cash can go below
+  zero, which the shop must never do.
+python: environment.py:Shop
+readme: README.md
+
+runtime:
+  provider: local
+
+# A season of 14 days is about 70 actions for a careful Agent: look at the books, buy
+# for the day, and open. 200 leaves room to dither, and stops one that never opens.
+limits:
+  max_turns: 200
+  max_seconds: 900
+
+# The reference policy plural task check plays to prove each Task can be won.
+reference: reference.py:solve

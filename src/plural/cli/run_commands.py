@@ -44,7 +44,7 @@ from plural.cli.runtime_commands import _project_studio
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.execution.episode_server import EpisodeServerOptions
-from plural.jobs import JobResult, JobSpec, TrialResult, TrialSpec
+from plural.jobs import AgentAggregate, JobResult, JobSpec, TrialResult, TrialSpec
 from plural.local_models import (
     LocalModelError,
     LocalModelIdentity,
@@ -1154,19 +1154,45 @@ def _print_result(
 ) -> None:
     typer.echo(f"Job {job_id} {result.status}.")
     texts = {item["agent_name"]: item["text"] for item in summaries}
-    for aggregate in result.aggregates:
+    for aggregate in ranked(result.aggregates):
         if aggregate.agent_name in texts:
             typer.echo(f"  {aggregate.agent_name}: {texts[aggregate.agent_name]}")
             continue
         mean = "-" if aggregate.mean_score is None else f"{aggregate.mean_score:.3f}"
+        primary = aggregate.metrics.get(aggregate.primary_metric)
+        ranked_on = (
+            f"{aggregate.primary_metric} "
+            + ("-" if primary is None or primary.mean is None else f"{primary.mean:,.3f}")
+            + ("" if primary is None else f" (over {primary.n} of {primary.total}), ")
+            if aggregate.primary_metric != "score"
+            else ""
+        )
         typer.echo(
-            f"  {aggregate.agent_name}: mean score {mean} over "
+            f"  {aggregate.agent_name}: {ranked_on}mean score {mean} over "
             f"{counted(aggregate.count, 'Trial')}, "
             f"{aggregate.successes} succeeded, coverage {aggregate.coverage:.0%}"
         )
     for line in _reward_warnings(result.trials):
         typer.echo(f"! {line}", err=True)
     typer.echo(f"Details: plural job show {job_id}")
+
+
+def ranked(aggregates: Iterable[AgentAggregate]) -> list[AgentAggregate]:
+    """Leaderboard order: best on the primary metric first, Agents without a value last.
+
+    Returns:
+        The aggregates, ranked.
+    """
+    items = list(aggregates)
+
+    def key(item: AgentAggregate) -> tuple[bool, float]:
+        if item.primary is None:
+            return (True, 0.0)
+        spec = item.metrics.get(item.primary_metric)
+        lower = spec is not None and spec.direction == "lower"
+        return (False, item.primary if lower else -item.primary)
+
+    return sorted(items, key=key)
 
 
 def _reward_warnings(trials: Iterable[TrialResult]) -> list[str]:

@@ -152,7 +152,7 @@ def judge_probe(kind: ProbeKind, trial: TrialResult, threshold: float) -> ProbeR
     zero = tuple(
         name
         for result in trial.verifier_results
-        for name, value in sorted(result.scores.items())
+        for name, value in sorted({**result.scores, **result.metrics}.items())
         if value == 0.0
     )
     feedback = "; ".join(

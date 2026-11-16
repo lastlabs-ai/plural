@@ -27,7 +27,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from plural.apps.base import App, observation_payload
 from plural.common import described
@@ -132,18 +132,24 @@ class AppView:
 
 @dataclass(frozen=True)
 class RewardHook:
-    """A Task Verifier's ``reward`` hook, loaded where the Apps run."""
+    """A Task Verifier's ``reward`` or ``measure`` hook, loaded where the Apps run.
+
+    A ``measure`` hook names the running metrics it may return.
+    """
 
     name: str
     version: str
     fn: Callable[[Step], Any]
+    hook: Literal["reward", "measure"] = "reward"
+    metrics: tuple[str, ...] = ()
 
 
 def load_reward_hooks(root: Path, entries: Sequence[Mapping[str, Any]]) -> list[RewardHook]:
-    """Import each Verifier's ``reward`` hook from the files the Job staged under ``root``.
+    """Import each Verifier's ``reward`` and ``measure`` hooks from the files the Job staged.
 
     Each entry names a Verifier, its version, its hook as ``file.py:function``,
-    and the folder holding its source, relative to ``root``.
+    and the folder holding its source, relative to ``root``. A ``measure``
+    entry also says so in ``hook`` and lists its running metrics.
 
     Returns:
         The hooks, in the Task's order.
@@ -174,7 +180,15 @@ def load_reward_hooks(root: Path, entries: Sequence[Mapping[str, Any]]) -> list[
             function = getattr(function, part, None)
             if function is None:
                 raise ValueError(f"Verifier {name!r}: {file_name} has no {function_name}")
-        loaded.append(RewardHook(name=name, version=str(entry.get("version") or ""), fn=function))
+        loaded.append(
+            RewardHook(
+                name=name,
+                version=str(entry.get("version") or ""),
+                fn=function,
+                hook="measure" if entry.get("hook") == "measure" else "reward",
+                metrics=tuple(str(item) for item in entry.get("metrics") or ()),
+            )
+        )
     return loaded
 
 
@@ -224,6 +238,9 @@ class AppHost:
         self._last_view: dict[str, Any] | None = None
         self._hidden: tuple[str, ...] = ()
         self._acting: str | None = None
+        self._metrics: list[dict[str, Any]] = []
+        self._metric_failures: list[dict[str, Any]] = []
+        self._clock = time.monotonic()
 
     # Episode operations.
 
@@ -315,8 +332,9 @@ class AppHost:
 
         Returns:
             Each App's snapshots and control level, every step as the host
-            recorded it with its rewards and info, each step's App State, and
-            the last observation and view.
+            recorded it with its rewards and info, each step's App State, the
+            last observation and view, and every running metric point and
+            ``measure`` failure.
         """
         return {
             "apps": self.snapshot(),
@@ -324,6 +342,8 @@ class AppHost:
             "states": list(self._states),
             "observation": self._last_observation,
             "view": self._last_view,
+            "metrics": list(self._metrics),
+            "metric_failures": list(self._metric_failures),
         }
 
     def finish(self) -> dict[str, Any]:
@@ -370,6 +390,9 @@ class AppHost:
         self._recorded = {}
         self._states = []
         self._log = []
+        self._metrics = []
+        self._metric_failures = []
+        self._clock = time.monotonic()
         self._record_states(0)
         if len(texts) == 1:
             observation, rendered = texts[0][1], texts[0][2]
@@ -458,10 +481,12 @@ class AppHost:
                 traceback.print_exc()
                 internal = f"{type(exc).__name__}: {exc}"
                 error = f"The {app_name} App could not complete {name}."
-            reward, signals = self._reward(
+            step = self._step_view(
                 app_name, action_name, arguments, None, error, previous, previous
             )
+            reward, signals = self._reward(step)
             self._record_states(self.steps, app=app_name, action=action_name, error=error)
+            self._measure(step, app_name)
             failed: dict[str, Any] = {**app.step_info(), "step": self.steps, "error": error}
             if internal is not None:
                 failed["internal_error"] = internal
@@ -493,10 +518,10 @@ class AppHost:
                 "Apps now. Move the reward to a Verifier's reward hook on the Task."
             )
         current = self._snapshot(app) if watched else None
-        reward, signals = self._reward(
-            app_name, action_name, arguments, payload, None, previous, current
-        )
+        step = self._step_view(app_name, action_name, arguments, payload, None, previous, current)
+        reward, signals = self._reward(step)
         self._record_states(self.steps, app=app_name, action=action_name)
+        self._measure(step, app_name)
         info: dict[str, Any] = {
             **app.step_info(),
             "step": self.steps,
@@ -670,7 +695,7 @@ class AppHost:
 
     # Helpers.
 
-    def _reward(
+    def _step_view(
         self,
         app: str,
         action: str,
@@ -679,16 +704,16 @@ class AppHost:
         error: str | None,
         previous: Any,
         current: Any,
-    ) -> tuple[float, list[dict[str, Any]]]:
-        """Call every ``reward`` hook on one action; a failing hook never fails the action.
+    ) -> Step | None:
+        """The one action, as ``reward`` and ``measure`` hooks see it.
 
         Returns:
-            The step's total reward and one signal per Verifier that answered.
+            The Step, or ``None`` when no hook would read it.
         """
         if not self.verifiers:
-            return 0.0, []
+            return None
         seat = self._acting
-        step = Step(
+        return Step(
             task=self.task,
             turn=self.turns,
             app=app,
@@ -702,13 +727,25 @@ class AppHost:
             seat=seat,
             seats=self.seats,
         )
+
+    def _reward(self, step: Step | None) -> tuple[float, list[dict[str, Any]]]:
+        """Call every ``reward`` hook on one action; a failing hook never fails the action.
+
+        Returns:
+            The step's total reward and one signal per Verifier that answered.
+        """
+        if step is None:
+            return 0.0, []
+        seat = step.seat
         total = 0.0
         signals: list[dict[str, Any]] = []
         for verifier in self.verifiers:
+            if verifier.hook != "reward":
+                continue
             entry: dict[str, Any] = {
                 "name": verifier.name,
                 "version": verifier.version,
-                "app": app,
+                "app": step.app,
             }
             if seat is not None:
                 entry["seat"] = seat
@@ -729,6 +766,66 @@ class AppHost:
                 if credited_seat == seat:
                     total += number
         return total, signals
+
+    def _measure(self, step: Step | None, acting: str) -> None:
+        """Call every ``measure`` hook on one action and keep its running metric values.
+
+        A hook that raises or returns something invalid is recorded in
+        ``metric_failures`` and never fails the action. Points stay in memory
+        and go to the Job in the signed report, never to a file the Harness
+        can read.
+        """
+        if step is None:
+            return
+        elapsed = round(time.monotonic() - self._clock, 3)
+        clock = self._sim_time(acting)
+        for hook in self.verifiers:
+            if hook.hook != "measure":
+                continue
+            try:
+                values = _measured(hook, hook.fn(step))
+            except Exception as exc:  # noqa: BLE001 - a metric never fails the action
+                self._metric_failures.append(
+                    self._redact(
+                        {"step": self.steps, "verifier": hook.name, "error": described(exc)}
+                    )
+                )
+                continue
+            if not values:
+                continue
+            point: dict[str, Any] = {
+                "step": self.steps,
+                "t": elapsed,
+                "verifier": hook.name,
+                "values": values,
+                "source": step.source,
+            }
+            if clock is not None:
+                point["sim_time"] = clock
+            if step.seat is not None:
+                point["seat"] = step.seat
+            self._metrics.append(point)
+
+    def _sim_time(self, acting: str) -> float | None:
+        """The simulated time: the acting App's clock, else the first App with one.
+
+        Returns:
+            The time, or ``None`` when no App keeps a clock.
+        """
+        order = [acting, *(name for name in self.apps if name != acting)]
+        for name in order:
+            try:
+                value = self.apps[name].sim_time()
+            except Exception:  # noqa: BLE001 - a broken clock only loses the time axis
+                continue
+            if value is not None:
+                try:
+                    number = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(number):
+                    return number
+        return None
 
     def _credited(self, value: Any, seat: str | None) -> list[tuple[str | None, float]]:
         """The seats a reward credits: the acting one for a number, or each one named.
@@ -763,6 +860,7 @@ class AppHost:
                     "step": self.steps,
                     "turn": self.turns,
                     "at": time.time(),
+                    "source": "agent",
                     **({"seat": self._acting} if self._acting is not None else {}),
                 }
             )
@@ -807,7 +905,11 @@ class AppHost:
             if step == 0 or snapshot != self._recorded.get(name):
                 changed[name] = snapshot
                 self._recorded[name] = snapshot
-        line: dict[str, Any] = {"step": step, "state": changed}
+        line: dict[str, Any] = {
+            "step": step,
+            "state": changed,
+            "source": "environment" if step == 0 else "agent",
+        }
         if app is not None:
             line.update(app=app, action=action)
         if error is not None:
@@ -923,6 +1025,34 @@ def _finite(value: Any) -> float:
     if not math.isfinite(number):
         raise ValueError(f"reward must be a finite number, not {number!r}")
     return number
+
+
+def _measured(hook: RewardHook, value: Any) -> dict[str, float | None]:
+    """Check what a ``measure`` hook returned: its declared running metrics, as numbers.
+
+    Returns:
+        Each metric's value, ``None`` where it does not apply.
+
+    Raises:
+        ValueError: When it is not a mapping, names an undeclared metric, or a
+            value is not a finite number.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(
+            f"measure must return a mapping of running metric to value, not {type(value).__name__}"
+        )
+    unknown = sorted(str(key) for key in value if key not in hook.metrics)
+    if unknown:
+        raise ValueError(
+            f"measure returned {', '.join(unknown)}, which the Verifier does not declare as "
+            f"running metrics ({', '.join(hook.metrics) or 'none'})"
+        )
+    measured: dict[str, float | None] = {}
+    for key, item in value.items():
+        measured[str(key)] = None if item is None else _finite(item)
+    return measured
 
 
 def _accepts_seed(app: App[Any]) -> bool:

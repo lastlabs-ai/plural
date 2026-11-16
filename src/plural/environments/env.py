@@ -329,6 +329,11 @@ class Environment:
             if isinstance(item, DeterministicVerifier):
                 if item.reward_fn is not None:
                     hooks.append(RewardHook(item.name, item.version, item.reward_fn))
+                if item.measure_fn is not None:
+                    running = tuple(spec.name for spec in item.metrics if spec.kind == "running")
+                    hooks.append(
+                        RewardHook(item.name, item.version, item.measure_fn, "measure", running)
+                    )
             elif callable(item):
                 hooks.append(RewardHook(getattr(item, "__name__", "step"), "", item))
             else:
