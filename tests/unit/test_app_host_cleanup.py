@@ -153,8 +153,23 @@ def _start(tmp_path: Path, mode: str) -> subprocess.Popen[str]:
         output.append(line)
         if "MODEL-CALLED" in line:
             break
-    assert _hosts(sandboxes), "the App host never started:\n" + "".join(output)
+    assert _hosts(sandboxes), (
+        "the App host never started:\n" + "".join(output) + _evidence(sandboxes)
+    )
     return process
+
+
+def _evidence(sandboxes: Path) -> str:
+    """Every App host process, and each host's log, for a failure message."""
+    listing = subprocess.run(
+        ["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=True
+    ).stdout
+    lines = [line for line in listing.splitlines() if "plural.apps.daemon" in line]
+    logs = [
+        f"{path}:\n{path.read_text(errors='replace')[-3000:]}"
+        for path in sorted(sandboxes.rglob("host.log"))
+    ]
+    return "\nprocesses:\n" + "\n".join(lines) + "\nlogs:\n" + "\n".join(logs)
 
 
 def _gone(root: Path, seconds: float = 10) -> bool:
