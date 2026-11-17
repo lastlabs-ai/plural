@@ -12,10 +12,11 @@ nav_group: Operations
 A high score means something only when the Agent could not get it without doing
 the Task. Plural checks this at three points:
 
-1. **Before any Agent runs**, `plural task check` proves each Task can be solved and
+1. **Before any Agent runs**, `plural task validate` proves each Task can be solved and
    can't be passed by doing nothing.
-2. **Before a baseline**, the same check scans everything the Agent can read for the
-   answer or the graders.
+2. **Before a baseline**, the same command scans everything the Agent can read for the
+   answer or the graders, and `plural benchmark validate` also reports the default
+   Runtime's trust.
 3. **After every recorded Trial**, detectors look for signs that the Agent exploited
    the Environment instead of doing the work.
 
@@ -24,9 +25,10 @@ Findings are evidence for a person. On their own they never change a score.
 ## Check the graders
 
 ```bash
-plural task check            # every Task
-plural task check -b quoting # a Benchmark's Tasks, against its success threshold
-plural eval check            # the same, plus isolation, before a baseline
+plural task validate                # every Task
+plural task validate quote-001      # one Task
+plural benchmark validate quoting   # a Benchmark's Tasks, against its success threshold, plus trust
+plural task validate --no-probes    # the files only, without running anything
 ```
 
 Each Task runs through the normal engine, in its own Runtime, with fixed players in
@@ -107,7 +109,7 @@ steps timed outside the episode. On a recorded run, `model_calls_differ` means t
 trace reports a different number of model calls than the gateway counted on the
 Trial's own key.
 
-Findings appear on the Trial, in `plural eval status`, and in the Trial table, which
+Findings appear on the Trial, in `plural trial show`, and in the Trial table, which
 can filter to flagged Trials. A Benchmark release decides what a `critical` finding
 does to its attempt with
 [`scoring.integrity`](../project/benchmarks.md#integrity).

@@ -11,6 +11,10 @@ aggregate says how many Trials it covers.
 Metrics are measurements, not credit. They never enter the reward ledger, and
 nothing here reaches the Agent.
 
+A metric may be a **gate** (``gate: true``), which must pass, and may have a
+``target``. A Trial **passes** when every applicable gate passes; with no
+applicable gate it is not judged (``passed`` is ``None``). See :func:`judge`.
+
 Five built-in metrics need no Verifier: ``cost_usd``, ``latency_seconds``,
 ``turns``, ``total_tokens``, and ``succeeded``.
 
@@ -25,9 +29,11 @@ Examples:
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import Field, model_validator
@@ -43,6 +49,59 @@ METRICS_FILE = "metrics.jsonl"
 """The App host's record of every running metric point, in its private folder."""
 
 _SLUG = re.compile(r"^[a-z][a-z0-9_]*$")
+_TARGET = re.compile(
+    r"^\s*(?:(?P<op>>=|<=|==)\s*(?P<value>-?\d+(?:\.\d+)?)"
+    r"|between\s+(?P<low>-?\d+(?:\.\d+)?)\s+(?:and\s+)?(?P<high>-?\d+(?:\.\d+)?))\s*$"
+)
+
+
+def parse_target(text: str) -> tuple[str, float, float | None]:
+    """Read a target: ``>= 150``, ``<= 0.5``, ``== 1``, or ``between 1 5``.
+
+    Returns:
+        The operator, the value (the low end for ``between``), and the high end.
+
+    Raises:
+        ValueError: When the text is not one of those forms.
+
+    Examples:
+        >>> parse_target(">= 150")
+        ('>=', 150.0, None)
+        >>> parse_target("between 3 and 5")
+        ('between', 3.0, 5.0)
+    """
+    match = _TARGET.match(text)
+    if match is None:
+        raise ValueError(f"target {text!r} must be '>= N', '<= N', '== N', or 'between A B'")
+    if match.group("op"):
+        return match.group("op"), float(match.group("value")), None
+    low, high = float(match.group("low")), float(match.group("high"))
+    if low > high:
+        raise ValueError(f"target {text!r}: the low end comes first")
+    return "between", low, high
+
+
+def meets(target: str, value: float | None) -> bool | None:
+    """Whether a value meets a target.
+
+    Returns:
+        ``None`` when the value is ``None``: the metric does not apply.
+
+    Examples:
+        >>> meets("<= 0.50", 0.31), meets("between 1 5", 7), meets(">= 1", None)
+        (True, False, None)
+    """
+    if value is None:
+        return None
+    op, low, high = parse_target(target)
+    if op == ">=":
+        return value >= low
+    if op == "<=":
+        return value <= low
+    if op == "==":
+        return math.isclose(value, low, abs_tol=1e-9)
+    assert high is not None
+    return low <= value <= high
 
 
 class MetricSpec(FrozenModel):
@@ -53,6 +112,11 @@ class MetricSpec(FrozenModel):
     ``aggregate`` to become one number per Trial; ``time_to`` also needs a
     ``threshold``, and counts the steps until the value first crosses it in the
     good direction.
+
+    ``gate: true`` makes the metric one a Trial must pass: a binary gate passes
+    at 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,
+    ``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``
+    on a metric that is not a gate is reported, never judged.
 
     Examples:
         >>> MetricSpec(name="price_correct", kind="binary").range
@@ -68,6 +132,8 @@ class MetricSpec(FrozenModel):
     range: tuple[float, float] | None = None
     aggregate: Aggregate | None = None
     threshold: float | None = None
+    gate: bool = False
+    target: str | None = None
     description: str = ""
 
     @model_validator(mode="before")
@@ -82,6 +148,9 @@ class MetricSpec(FrozenModel):
         if kind == "running" and payload.get("aggregate") == "time_to":
             # Steps until a threshold: fewer is better, whatever the series' direction.
             payload.setdefault("unit", "steps")
+        target = payload.get("target")
+        if isinstance(target, (int, float)) and not isinstance(target, bool):
+            payload["target"] = f"== {target}"
         return payload
 
     @model_validator(mode="after")
@@ -108,7 +177,33 @@ class MetricSpec(FrozenModel):
             raise ValueError(
                 f"running metric {self.name!r} with aggregate time_to needs a threshold"
             )
+        if self.target is not None:
+            try:
+                parse_target(self.target)
+            except ValueError as exc:
+                raise ValueError(f"metric {self.name!r}: {exc}") from None
+        if self.gate and self.kind != "binary" and self.target is None:
+            raise ValueError(
+                f"gate {self.name!r} is a {self.kind} metric, so it needs a target, "
+                "such as '>= 0.8'"
+            )
         return self
+
+    def passes(self, value: float | None) -> bool | None:
+        """Whether one Trial's value passes this metric as a gate.
+
+        Returns:
+            ``None`` when the value is ``None``: the gate does not apply.
+
+        Examples:
+            >>> MetricSpec(name="ok", kind="binary", gate=True).passes(1.0)
+            True
+            >>> MetricSpec(name="m", kind="number", gate=True, target=">= 150").passes(90)
+            False
+        """
+        if value is None:
+            return None
+        return bool(meets(self.target, value)) if self.target else value >= 1
 
     @property
     def trial_direction(self) -> Direction:
@@ -293,8 +388,8 @@ def default_score(specs: Iterable[MetricSpec], values: Mapping[str, float | None
 
     The mean of its applicable ``binary`` and ``score`` metrics, each scaled to
     0 to 1 by its range. With none applicable, as for a Verifier with only
-    ``number`` or ``running`` metrics, 1.0: gates and targets live on the
-    Scorecard, which decides whether the Trial passes.
+    ``number`` or ``running`` metrics, 1.0: a metric's ``gate`` and
+    ``target``, not its score, decide whether the Trial passes.
 
     Returns:
         A score from 0 to 1.
@@ -318,19 +413,57 @@ def default_score(specs: Iterable[MetricSpec], values: Mapping[str, float | None
     return sum(scaled) / len(scaled) if scaled else 1.0
 
 
+class TrialGates(FrozenModel):
+    """A Trial's gates: each applicable gate's verdict, and whether it passed.
+
+    A gate whose value is ``None`` or missing does not apply and is left out.
+    ``passed`` is ``True`` when every applicable gate passes, ``False`` when one
+    fails, and ``None`` when no gate applies: the Trial is not judged.
+    """
+
+    gates: dict[str, bool] = Field(default_factory=dict)
+    passed: bool | None = None
+
+
+def judge(specs: Iterable[MetricSpec], values: Mapping[str, float | None]) -> TrialGates:
+    """Apply the gates among ``specs`` to one Trial's metric values.
+
+    Returns:
+        Each applicable gate's verdict, and whether the Trial passed.
+
+    Examples:
+        >>> specs = [
+        ...     MetricSpec(name="price_correct", kind="binary", gate=True),
+        ...     MetricSpec(name="margin_usd", kind="number", target=">= 150"),
+        ... ]
+        >>> judge(specs, {"price_correct": 1.0, "margin_usd": 90.0}).passed
+        True
+        >>> judge(specs, {"price_correct": None}).passed is None
+        True
+    """
+    verdicts: dict[str, bool] = {}
+    for spec in specs:
+        if not spec.gate:
+            continue
+        verdict = spec.passes(values.get(spec.name))
+        if verdict is not None:
+            verdicts[spec.name] = verdict
+    return TrialGates(gates=verdicts, passed=all(verdicts.values()) if verdicts else None)
+
+
 class MetricAggregate(FrozenModel):
     """One metric across a set of Trials, such as one Agent's on a Benchmark.
 
     ``n`` is how many Trials the metric applied to and ``total`` how many there
     were: a ``None`` value is left out, so read ``mean`` as "over n of total".
-    For a ``binary`` metric, ``pass_rate`` is the share of applicable Trials
-    that passed; with several attempts per Task, ``pass_hat_k`` is the share of
-    Tasks where every applicable attempt passed and ``pass_at_k`` where any did.
+    For a ``binary`` metric, ``mean`` is the share of applicable Trials where it
+    was 1; with several attempts per Task, ``pass_hat_k`` is the share of Tasks
+    where it was 1 on every applicable attempt and ``pass_at_k`` on any.
 
     Examples:
         >>> spec = MetricSpec(name="ok", kind="binary")
         >>> row = aggregate_metric(spec, {"a": [1.0, 0.0], "b": [1.0, None], "c": [None]})
-        >>> (row.n, row.total, row.pass_rate, row.pass_hat_k, row.pass_at_k)
+        >>> (row.n, row.total, row.mean, row.pass_hat_k, row.pass_at_k)
         (3, 5, 0.6666666666666666, 0.5, 1.0)
     """
 
@@ -341,7 +474,6 @@ class MetricAggregate(FrozenModel):
     mean: float | None = None
     n: int = Field(default=0, ge=0)
     total: int = Field(default=0, ge=0)
-    pass_rate: float | None = None
     pass_hat_k: float | None = None
     pass_at_k: float | None = None
     k: int | None = None
@@ -358,7 +490,7 @@ def aggregate_metric(
 
     Returns:
         The mean over applicable Trials, ``n`` of ``total``, and for a binary
-        metric its pass rate, pass^k, and pass@k.
+        metric its pass^k and pass@k.
     """
     applicable = [
         float(value) for values in values_by_task.values() for value in values if value is not None
@@ -379,7 +511,6 @@ def aggregate_metric(
             [value for value in values if value is not None] for values in values_by_task.values()
         ]
         per_task = [values for values in per_task if values]
-        row["pass_rate"] = mean
         if per_task:
             row["k"] = max(len(values) for values in per_task)
             row["pass_hat_k"] = sum(all(v >= 1 for v in values) for values in per_task) / len(
@@ -443,6 +574,47 @@ def series_by_metric(
     return {name: sorted(items, key=lambda item: item[0]) for name, items in grouped.items()}
 
 
+def store_metric_points(
+    path: Path, verifier: str, version: str, points: Sequence[Mapping[str, Any]]
+) -> int:
+    """Put one Verifier version's running metric points into a ``metrics.jsonl``.
+
+    Points already there from this Verifier at this version are kept as they are,
+    as ``plural verifier apply`` keeps rewards: bump the Verifier's version when its
+    logic changes. Otherwise this Verifier's earlier points, from the live run or
+    an older version, are replaced, so each running metric has one series. Other
+    Verifiers' points are untouched.
+
+    Returns:
+        How many points were stored; 0 when this version's points were already there.
+
+    Examples:
+        >>> import tempfile
+        >>> path = Path(tempfile.mkdtemp()) / METRICS_FILE
+        >>> store_metric_points(path, "books", "1.1.0", [{"step": 1, "values": {"cash": 3}}])
+        1
+        >>> store_metric_points(path, "books", "1.1.0", [{"step": 1, "values": {"cash": 4}}])
+        0
+    """
+    lines = (
+        [json.loads(line) for line in path.read_text("utf-8").splitlines() if line.strip()]
+        if path.is_file()
+        else []
+    )
+    mine = [line for line in lines if line.get("verifier") == verifier]
+    if any(line.get("version") == version for line in mine):
+        return 0
+    kept = [line for line in lines if line.get("verifier") != verifier]
+    added = [{**point, "verifier": verifier, "version": version} for point in points]
+    merged = sorted([*kept, *added], key=lambda line: int(line.get("step") or 0))
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        "".join(json.dumps(line, sort_keys=True) + "\n" for line in merged), encoding="utf-8"
+    )
+    temporary.replace(path)
+    return len(added)
+
+
 __all__ = [
     "BUILTIN_METRICS",
     "METRICS_FILE",
@@ -453,10 +625,15 @@ __all__ = [
     "MetricKind",
     "MetricSource",
     "MetricSpec",
+    "TrialGates",
     "aggregate_metric",
     "aggregate_series",
     "builtin_values",
     "default_score",
+    "judge",
+    "meets",
     "metric_failures",
+    "parse_target",
     "series_by_metric",
+    "store_metric_points",
 ]

@@ -94,70 +94,12 @@ def _is_pattern(value: str) -> bool:
     return any(character in value for character in "*?[")
 
 
-def set_heldout(
-    project: Project,
-    benchmark: str,
-    *,
-    fraction: float,
-    seed: int = 0,
-    stratify: str | None = None,
-) -> tuple[list[str], list[str]]:
-    """Choose a Benchmark's held-out Tasks with a seeded sample, and write them to its file.
-
-    ``stratify="category"`` samples each category alike; a Task in no category
-    is a stratum of its own.
-
-    Returns:
-        The dev Tasks and the held-out Tasks, in Benchmark order.
-
-    Raises:
-        ProjectError: When the share is out of range, or the Benchmark is too small.
-    """
-    from plural.heldout import split_heldout
-
-    tasks = benchmark_tasks(project, benchmark)
-    if len(tasks) < 2:
-        raise ProjectError(
-            f"Benchmark {benchmark!r} has {len(tasks)} Task(s); holding any out needs two or "
-            f"more.\nNext: plural benchmark add TASK --benchmark {benchmark}"
-        )
-    groups: dict[str, str] = {}
-    if stratify is not None:
-        if stratify != "category":
-            raise ProjectError(
-                f"--stratify takes category, not {stratify!r}.\n"
-                f"Next: plural benchmark split {benchmark} --stratify category"
-            )
-        payload = read_yaml_mapping(project.manifest_path(ResourceRef(BENCHMARK.name, benchmark)))
-        for group in payload.get("categories") or ():
-            for name in group.get("tasks") or ():
-                groups.setdefault(str(name), str(group.get("id")))
-    try:
-        heldout = split_heldout(tasks, fraction, seed=seed, groups=groups or None)
-    except ValueError as exc:
-        raise ProjectError(
-            f"Cannot split Benchmark {benchmark!r}: {exc}.\n"
-            f"Next: plural benchmark split {benchmark} --heldout 0.3"
-        ) from exc
-    _write_list(project, benchmark, "heldout", list(heldout), omit_empty=True)
-    return [name for name in tasks if name not in heldout], list(heldout)
-
-
 def _write_tasks(project: Project, benchmark: str, tasks: list[str]) -> None:
-    _write_list(project, benchmark, "tasks", tasks)
-
-
-def _write_list(
-    project: Project, benchmark: str, key: str, items: list[str], *, omit_empty: bool = False
-) -> None:
-    """Replace one top-level list, keeping every other line as written."""
+    """Replace the top-level ``tasks`` value, keeping every other line as written."""
     path = project.manifest_path(ResourceRef(BENCHMARK.name, benchmark))
     lines = path.read_text(encoding="utf-8").splitlines()
-    if not items and omit_empty:
-        block: list[str] = []
-    else:
-        block = [f"{key}: []"] if not items else [f"{key}:", *(f"  - {name}" for name in items)]
-    start = next((index for index, line in enumerate(lines) if line.startswith(f"{key}:")), None)
+    block = ["tasks: []"] if not tasks else ["tasks:", *(f"  - {name}" for name in tasks)]
+    start = next((index for index, line in enumerate(lines) if line.startswith("tasks:")), None)
     if start is None:
         lines.extend(block)
     else:
@@ -174,4 +116,4 @@ def _write_list(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-__all__ = ["add_tasks", "benchmark_tasks", "remove_tasks", "set_heldout"]
+__all__ = ["add_tasks", "benchmark_tasks", "remove_tasks"]

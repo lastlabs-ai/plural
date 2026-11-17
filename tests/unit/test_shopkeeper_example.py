@@ -2,8 +2,7 @@
 
 The scripted shopkeeper stocks up, then opens the shop day after day until the
 season ends. It never writes a final answer, so the Trial is judged only on
-what the App host measured and the books in State, under the shopkeeping
-Scorecard.
+what the App host measured and the books in State, by shop-books' gate.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from typing import Any
 import pytest
 import yaml
 
-from plural.scorecards import Scorecard
+from plural.metrics import MetricSpec, judge
 
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = ROOT / "examples" / "shopkeeper"
@@ -108,7 +107,14 @@ def season(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         result = json.loads((directory / "result.json").read_text())
         (trial,) = result["trials"]
         artifacts = directory / "trials" / trial["receipt"]["trial_id"] / "executions/0/artifacts"
-        return {"job": job, "result": result, "trial": trial, "artifacts": artifacts}
+        return {
+            "job": job,
+            "result": result,
+            "trial": trial,
+            "artifacts": artifacts,
+            "project": project,
+            "env": env,
+        }
     finally:
         server.shutdown()
 
@@ -128,7 +134,7 @@ def test_the_running_metric_is_sampled_after_every_action(season: dict[str, Any]
     assert season["trial"]["metrics"]["cash_on_hand"] == cash[-1]["values"]["cash_on_hand"]
 
 
-def test_the_scorecard_gates_a_trial_with_no_final_answer(season: dict[str, Any]) -> None:
+def test_the_verifier_gate_judges_a_trial_with_no_final_answer(season: dict[str, Any]) -> None:
     trial = season["trial"]
     state = json.loads((season["artifacts"] / "state.json").read_text())
     harness = json.loads((season["artifacts"] / "result.json").read_text())
@@ -143,18 +149,18 @@ def test_the_scorecard_gates_a_trial_with_no_final_answer(season: dict[str, Any]
     assert aggregate["pass_rate"] == float(trial["passed"])
 
 
-def test_a_scorecard_of_running_metrics_alone_gates_without_an_answer() -> None:
+def test_running_metrics_alone_gate_without_an_answer() -> None:
     """Constraint C5: every metric running and no answer still yields gates."""
-    card = Scorecard(
-        name="cash-only",
-        metrics=[
-            {"name": "cash_on_hand", "role": "gate", "target": ">= 0"},
-            {"name": "cash_on_hand_peak", "role": "objective"},
-        ],
-    )
-    assert card.evaluate({"cash_on_hand": 512.0}).passed is True
-    assert card.evaluate({"cash_on_hand": -3.0}).gates == {"cash_on_hand": False}
-    assert card.evaluate({"cash_on_hand": None}).gates == {}
+    specs = [
+        MetricSpec(
+            name="cash_on_hand", kind="running", aggregate="final", gate=True, target=">= 0"
+        ),
+        MetricSpec(name="cash_on_hand_peak", kind="running", aggregate="max"),
+    ]
+    assert judge(specs, {"cash_on_hand": 512.0}).passed is True
+    assert judge(specs, {"cash_on_hand": -3.0}).gates == {"cash_on_hand": False}
+    # No applicable gate: the Trial is not judged, never a vacuous pass.
+    assert judge(specs, {"cash_on_hand": None}).passed is None
 
 
 def test_the_run_summary_ranks_on_the_running_metric_and_shows_the_pass_rate(
@@ -168,13 +174,49 @@ def test_the_run_summary_ranks_on_the_running_metric_and_shows_the_pass_rate(
     _print_result("job_1", result)
     line = capsys.readouterr().out.splitlines()[1]
     assert line.startswith("  scripted: cash_on_hand ")
-    assert line.endswith(f"; {passed} passed the Scorecard's gates")
-    # The statistical summary's "pass rate" is the score threshold, so the gates say theirs.
-    summary = {"agent_name": "scripted", "text": "score 0.43, pass rate 0%, over 1 Task"}
+    assert line.endswith(f"; pass rate {passed} (passed every gate)")
+    # The success rate counts scores at the threshold; the pass rate counts gates.
+    summary = {"agent_name": "scripted", "text": "score 0.43, success rate 0%, over 1 Task"}
     _print_result("job_1", result, [summary])
     line = capsys.readouterr().out.splitlines()[1]
     cash = season["trial"]["metrics"]["cash_on_hand"]
     assert line == (
-        f"  scripted: cash_on_hand {cash:,.3f} (over 1 of 1), score 0.43, pass rate 0%, "
-        f"over 1 Task; {passed} passed the Scorecard's gates"
+        f"  scripted: cash_on_hand {cash:,.3f} (over 1 of 1), score 0.43, success rate 0%, "
+        f"over 1 Task; pass rate {passed} (passed every gate)"
     )
+
+
+def test_verifier_apply_stores_the_measured_points_once(season: dict[str, Any]) -> None:
+    """``verifier apply`` keeps measure's points, with the clocks the run recorded."""
+    path = season["artifacts"] / "metrics.jsonl"
+    live = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+    def apply() -> dict[str, Any]:
+        run = subprocess.run(
+            [
+                str(CLI),
+                "verifier",
+                "apply",
+                "shop-books",
+                "--job",
+                season["job"]["job_id"],
+                "--json",
+            ],
+            cwd=season["project"],
+            env=season["env"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert run.returncode == 0, run.stdout + run.stderr
+        return json.loads(run.stdout)  # type: ignore[no-any-return]
+
+    (first,) = apply()["trials"]
+    stored = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    assert first["metric_points"] == len(live) == len(stored)
+    assert {point["version"] for point in stored} == {"1.1.0"}
+    assert [(p["step"], p["values"], p["sim_time"]) for p in stored] == [
+        (p["step"], p["values"], p["sim_time"]) for p in live
+    ]
+    (again,) = apply()["trials"]
+    assert again["metric_points"] == 0

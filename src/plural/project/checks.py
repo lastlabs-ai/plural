@@ -1,4 +1,9 @@
-"""Run ``plural task check``: the probes, the leak scan, and the saved results.
+"""The checks behind ``plural task validate`` and ``plural benchmark validate``.
+
+Each Task runs its reference policy, which must pass, and two probes that must
+fail, a do-nothing Agent and one that repeats the instructions. Everything the
+Agent can read is scanned for leaks, and each Environment's default Runtime is
+checked for how far its results can be trusted.
 
 Each Task version's check is saved as ``.plural/checks/<task>@<version>.json``
 and is current while the Task's content hash matches. The probes run as local
@@ -7,15 +12,17 @@ Jobs kept in ``.plural/checks/jobs``, apart from the project's own Jobs.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from plural.blobs import read_blob
+from plural.common import FrozenModel
 from plural.harness.probes import PROBE_KINDS, SCAN_KEY, ProbeKind, probe_package
 from plural.integrity.checks import ProbeResult, TaskCheck, judge_probe
 from plural.integrity.leaks import AgentFile, LeakFinding, scan_task
@@ -38,7 +45,7 @@ PROBE_MODEL = "openai/gpt-5.6-luna"
 
 @dataclass
 class CheckPlan:
-    """What ``plural task check`` will run.
+    """What a validation's probes will run.
 
     Attributes:
         tasks: The Tasks to check, by name.
@@ -414,10 +421,314 @@ def _resource_files(resource: Any, root: Path) -> list[tuple[str, bytes]]:
     return []
 
 
+CheckMark = Literal["ok", "problem", "warning"]
+
+
+class CheckLine(FrozenModel):
+    """One line of a validation report.
+
+    Attributes:
+        mark: ``ok``, ``problem`` to fix before a baseline, or ``warning``.
+        text: The line.
+        detail: An indented second line, such as the Verifier's feedback.
+        tasks: The Tasks it is about.
+        command: The command that shows more or fixes it.
+    """
+
+    mark: CheckMark
+    text: str
+    detail: str = ""
+    tasks: tuple[str, ...] = ()
+    command: str | None = None
+
+
+class CheckSection(FrozenModel):
+    """A titled group of lines: ``Graders``, ``Leaks``, or ``Trust``."""
+
+    title: str
+    lines: tuple[CheckLine, ...]
+
+
+class CheckReport(FrozenModel):
+    """What validating Tasks found, beyond their files.
+
+    Attributes:
+        tasks: Tasks checked.
+        sections: Graders, Leaks, and Trust.
+        problems: Lines marked ``problem``.
+        next_command: The command that fixes the first problem, if any.
+    """
+
+    tasks: int
+    sections: tuple[CheckSection, ...]
+    problems: int
+    next_command: str | None = None
+
+
+def check_report(
+    workspace: Workspace,
+    tasks: Sequence[str] = (),
+    *,
+    benchmark: str | None = None,
+    rerun: bool = False,
+    random_steps: int = 0,
+    progress: Callable[[str], None] | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[CheckReport, list[TaskCheck]]:
+    """Check Tasks' graders, leaks, and trust, reusing each unchanged Task's check.
+
+    Args:
+        workspace: The project.
+        tasks: Task names; all of the Benchmark's, or the project's, when empty.
+        benchmark: A Benchmark whose Tasks, threshold, and canary to use.
+        rerun: Run every Task's probes again, even when unchanged.
+        random_steps: Also run the ``random`` probe for this many actions.
+        progress: Called with a line as each probe starts.
+        environ: Where to look up the conformance cache.
+
+    Returns:
+        The report, and the checks that ran now.
+    """
+    plan = plan_checks(workspace, tasks, benchmark=benchmark)
+    stale = (
+        plan.tasks
+        if rerun or random_steps
+        else [name for name in plan.tasks if load_check(workspace, name) is None]
+    )
+    probes: tuple[Any, ...] = ("reference", "noop", "echo") + (("random",) if random_steps else ())
+    ran: list[TaskCheck] = []
+    if stale:
+        subset = plan_checks(workspace, stale, benchmark=benchmark)
+        ran = run_checks(
+            workspace, subset, probes=probes, random_steps=random_steps or 20, progress=progress
+        )
+    checks = {name: load_check(workspace, name) for name in plan.tasks}
+    present = {name: check for name, check in checks.items() if check is not None}
+    sections = (
+        CheckSection(title="Graders", lines=tuple(_grader_lines(present, plan.skipped))),
+        CheckSection(title="Leaks", lines=tuple(_leak_lines(present))),
+        CheckSection(title="Trust", lines=tuple(_isolation_lines(workspace, plan.tasks, environ))),
+    )
+    problems = [line for section in sections for line in section.lines if line.mark == "problem"]
+    return (
+        CheckReport(
+            tasks=len(plan.tasks),
+            sections=sections,
+            problems=len(problems),
+            next_command=problems[0].command if problems else None,
+        ),
+        ran,
+    )
+
+
+def _counted(count: int, noun: str) -> str:
+    return f"{count} {noun if count == 1 else noun + 's'}"
+
+
+_PROBE_LABELS: dict[ProbeKind, str] = {
+    "noop": "do-nothing agent fails",
+    "echo": "copy-the-instructions agent fails",
+    "random": "random-actions agent fails",
+}
+
+
+def _grader_lines(checks: Mapping[str, TaskCheck], skipped: Mapping[str, str]) -> list[CheckLine]:
+    lines: list[CheckLine] = []
+    references = {
+        name: item
+        for name, check in checks.items()
+        if (item := check.probe("reference")) is not None and item.status != "skipped"
+    }
+    if references:
+        passing = sum(item.status == "passed" for item in references.values())
+        lines.append(
+            CheckLine(
+                mark="ok",
+                text=f"{'reference solution passes every gate':<44} {passing}/{len(references)}",
+            )
+        )
+        lines.extend(_failures("reference", references))
+    missing = tuple(name for name in checks if name not in references)
+    if missing:
+        lines.append(
+            CheckLine(
+                mark="warning",
+                text=f"{_names(missing)}: no reference policy, so nothing shows the Task "
+                "can be solved",
+                detail="add reference: file.py:function to the Task or its Environment",
+                tasks=missing,
+            )
+        )
+    for kind, label in _PROBE_LABELS.items():
+        results = {
+            name: item for name, check in checks.items() if (item := check.probe(kind)) is not None
+        }
+        if not results:
+            continue
+        failing = sum(item.status == "passed" for item in results.values())
+        lines.append(CheckLine(mark="ok", text=f"{label:<44} {failing}/{len(results)}"))
+        lines.extend(_failures(kind, results))
+    for name, reason in skipped.items():
+        lines.append(
+            CheckLine(mark="warning", text=f"{name}: not checked, {reason}", tasks=(name,))
+        )
+    return lines
+
+
+def _failures(kind: str, results: Mapping[str, ProbeResult]) -> list[CheckLine]:
+    groups: dict[tuple[str, ...], list[str]] = {}
+    for name, item in results.items():
+        if item.status == "error":
+            groups.setdefault(("error",), []).append(name)
+        elif item.status == "failed":
+            key = item.failed_checks if kind == "reference" else ()
+            groups.setdefault(key, []).append(name)
+    lines = []
+    for key, names in groups.items():
+        first = results[names[0]]
+        if key == ("error",):
+            text = f"{_names(names)}: {first.detail}"
+        elif kind == "reference":
+            text = f"{_names(names)}: reference fails {', '.join(key) or 'the threshold'}"
+        else:
+            text = f"{_names(names)}: {first.detail}"
+        lines.append(
+            CheckLine(
+                mark="warning" if kind == "random" else "problem",
+                text=text,
+                detail=first.feedback,
+                tasks=tuple(names),
+                command=f"plural task validate {names[0]}",
+            )
+        )
+    return lines
+
+
+def _leak_lines(checks: Mapping[str, TaskCheck]) -> list[CheckLine]:
+    lines: list[CheckLine] = []
+    groups: dict[tuple[str, str], list[str]] = {}
+    messages: dict[tuple[str, str], tuple[str, str]] = {}
+    unread: dict[str, list[str]] = {}
+    for name, check in checks.items():
+        for leak in check.leaks:
+            if leak.severity == "info":
+                unread.setdefault(leak.path, []).append(name)
+                continue
+            key: tuple[str, str] = (leak.kind, leak.path)
+            groups.setdefault(key, []).append(name)
+            messages[key] = (leak.message, leak.severity)
+    for key, names in groups.items():
+        message, _severity = messages[key]
+        lines.append(
+            CheckLine(
+                mark="problem",
+                text=f"{_names(tuple(names))}: {message}",
+                detail=_LEAK_FIXES[key[0]],
+                tasks=tuple(names),
+                command=f"plural task validate {names[0]}",
+            )
+        )
+    if not groups:
+        lines.append(
+            CheckLine(
+                mark="ok",
+                text="no answer keys, git history, solution files or Verifier code in "
+                "agent-visible files",
+            )
+        )
+    if unread:
+        paths = sorted(unread)
+        lines.append(
+            CheckLine(
+                mark="warning",
+                text=f"{_counted(len(paths), 'file')} not scanned: {', '.join(paths[:3])}"
+                + (f" and {len(paths) - 3} more" if len(paths) > 3 else ""),
+                detail="check these by hand; their format has no text the scan can read",
+            )
+        )
+    return lines
+
+
+_LEAK_FIXES = {
+    "answer_key": "remove it from what the Agent sees; the answer key belongs in expected",
+    "git_history": "ship the repository with one commit: no older commits, tags, or branches",
+    "solution_file": "rename or remove the file, or move it out of the Agent's files",
+    "verifier_copy": "keep Verifier code in its own folder, never in the Agent's files",
+    "canary": "keep the Benchmark's canary out of every agent-visible file",
+    "not_scanned": "",
+}
+
+
+def _isolation_lines(
+    workspace: Workspace, tasks: Sequence[str], environ: Mapping[str, str] | None
+) -> list[CheckLine]:
+    from plural.sandbox import default_registry
+    from plural.sandbox.conformance import conformance_status
+
+    providers: dict[str, list[str]] = {}
+    for name in tasks:
+        environment = workspace.load(ResourceRef(TASK.name, name)).value._environment_definition()
+        provider = environment.runtime.provider
+        if environment.name not in providers.setdefault(provider, []):
+            providers[provider].append(environment.name)
+    lines = []
+    for provider, environments in sorted(providers.items()):
+        where = ", ".join(environments)
+        if provider == "local":
+            lines.append(
+                CheckLine(
+                    mark="warning",
+                    text=f"{where} runs on the local Runtime, so Trials are unverified",
+                    detail="use runtime: {provider: daytona} for verified results",
+                )
+            )
+            continue
+        try:
+            status, failures = asyncio.run(
+                conformance_status(default_registry.get(provider), environ)
+            )
+        except Exception:  # noqa: BLE001 - an unreachable provider has no report
+            status, failures = "missing", ()
+        if status == "passed":
+            lines.append(
+                CheckLine(
+                    mark="ok", text=f"{where} runs on {provider}: verified, conformance passed"
+                )
+            )
+        elif status == "failed":
+            lines.append(
+                CheckLine(
+                    mark="warning",
+                    text=f"{where} runs on {provider}: standard, conformance failed "
+                    f"{', '.join(failures)}",
+                    command=f"plural runtime doctor --provider {provider} --conformance",
+                )
+            )
+        else:
+            lines.append(
+                CheckLine(
+                    mark="warning",
+                    text=f"{where} runs on {provider}: standard until its conformance suite runs",
+                    command=f"plural runtime doctor --provider {provider} --conformance",
+                )
+            )
+    return lines
+
+
+def _names(names: Sequence[str]) -> str:
+    shown = ", ".join(names[:3])
+    return shown + (f" and {len(names) - 3} more" if len(names) > 3 else "")
+
+
 __all__ = [
     "CHECKS_DIRECTORY",
     "PROBE_MODEL",
+    "CheckLine",
+    "CheckMark",
     "CheckPlan",
+    "CheckReport",
+    "CheckSection",
+    "check_report",
     "agent_files",
     "check_path",
     "environment_source",

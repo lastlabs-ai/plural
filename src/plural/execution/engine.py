@@ -143,6 +143,7 @@ from plural.metrics import (
     MetricAggregate,
     MetricSpec,
     aggregate_metric,
+    judge,
     metric_failures,
     series_by_metric,
 )
@@ -173,7 +174,6 @@ from plural.sandbox import (
 )
 from plural.sandbox.conformance import conformance_status
 from plural.sandbox.sweep import trial_labels
-from plural.scorecards import task_categories
 from plural.tasks import TaskDefinition, validate_task_state
 from plural.trajectory import normalize_trajectory
 from plural.transcript import TRAJECTORY_FILE, episode_to_messages
@@ -1492,7 +1492,9 @@ class TrialRunner:
                     checked=False,
                 ),
                 metric_failures=metric_failures(host_report.metric_failures),
-                passed=False if self.job_spec.scorecard is not None else None,
+                passed=False
+                if any(spec.gate for spec in task_metric_specs(self.task).values())
+                else None,
                 **totals,
                 error_code=None if code is ErrorCode.CANCELLED else code,
                 error_message=_redact_bytes(str(exc).encode(), secrets).decode(errors="replace")[
@@ -1794,24 +1796,15 @@ class TrialRunner:
         return own
 
     def _gates(self, metrics: Mapping[str, float | None], *, awaiting: bool) -> dict[str, Any]:
-        """The Trial's gates under the Job's Scorecard, as ``TrialResult`` fields.
+        """The Trial's gates, from the metrics its Verifiers mark ``gate: true``.
 
         Returns:
-            ``gates`` and ``passed``; nothing without a Scorecard, and no verdict
-            while a Verifier awaits review.
+            ``gates`` and ``passed`` as ``TrialResult`` fields; no verdict while a
+            Verifier awaits review.
         """
-        scorecard = self.job_spec.scorecard
-        if scorecard is None or awaiting:
+        if awaiting:
             return {}
-        source = self.job_spec.source
-        groups = (
-            task_categories(source.benchmark.categories)
-            if isinstance(source, BenchmarkJobSource)
-            else {}
-        )
-        verdict = scorecard.evaluate(
-            metrics, task=self.task.task_id, categories=groups.get(self.task.task_id, ())
-        )
+        verdict = judge(task_metric_specs(self.task).values(), metrics)
         return {"gates": verdict.gates, "passed": verdict.passed}
 
     def _seat_results(

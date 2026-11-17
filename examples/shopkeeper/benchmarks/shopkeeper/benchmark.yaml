@@ -1,7 +1,7 @@
 # Benchmark: a fixed set of Tasks and the rules for ranking results.
 # It ranks on cash_on_hand, a running metric: the cash at the end of each season. The
-# score still records profit against each Task's target, and never_negative_cash is a
-# gate on the shopkeeper Scorecard.
+# score still records profit against each Task's target, and shop-books makes
+# never_negative_cash a gate.
 name: shopkeeper
 version: 1.0.0
 description: Three seasons at a corner shop.
@@ -13,7 +13,6 @@ tasks:
   - shop-002
   - shop-003
 primary_metric: cash_on_hand
-scorecard: shopkeeping
 scoring:
   metric: Season profit
   description: Profit against each season's target, 0 for a shop that ever went below zero cash.

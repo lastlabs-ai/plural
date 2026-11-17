@@ -9,7 +9,6 @@ from plural.cli.app_commands import app_app
 from plural.cli.auth_commands import auth_app
 from plural.cli.common import deprecated
 from plural.cli.credential_commands import credential_app
-from plural.cli.eval_commands import eval_app, task_check
 from plural.cli.external_commands import external_app
 from plural.cli.models_commands import models_app
 from plural.cli.project_commands import project_app
@@ -17,7 +16,6 @@ from plural.cli.resource_commands import resource_app
 from plural.cli.reward_commands import rewards_app, verifier_apply, verifier_try
 from plural.cli.run_commands import job_app, review_app, run, trial_app
 from plural.cli.runtime_commands import runtime_app
-from plural.cli.scorecard_commands import add_scorecard_commands
 from plural.cli.secret_commands import project_secret_source, secret_app
 from plural.cli.session import session_app
 from plural.project import KINDS
@@ -77,13 +75,8 @@ for _kind in KINDS:
     if _kind.name == "verifier":
         _group.command("try")(verifier_try)
         _group.command("apply")(verifier_apply)
-    if _kind.name == "task":
-        _group.command("check")(task_check)
-    if _kind.name == "scorecard":
-        add_scorecard_commands(_group)
     app.add_typer(_group, name=_kind.cli)
 app.command("run")(run)
-app.add_typer(eval_app, name="eval")
 app.add_typer(job_app, name="job")
 app.add_typer(trial_app, name="trial")
 app.add_typer(review_app, name="review")

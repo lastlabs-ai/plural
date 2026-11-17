@@ -45,59 +45,48 @@ Harness.
 
 ### Evaluation vocabulary
 
-These words belong to the evaluation foundation, which is being built in milestones.
-Most of them name things that don't exist in code yet; use them, and only them, for
-those things when they arrive. Keep the glossary's "Evaluating and improving an Agent"
-section in step.
+These words belong to the evaluation foundation (`docs/specs/plural-spec.md` in
+pluralintel), which is being built in milestones. Its rule: every feature is a field on
+an existing primitive, a verb in that primitive's existing command group, or an agent
+built on Plural. No new resource kinds and no new top-level command groups. Use these
+words, and only these, for the things they name. Keep the glossary's "Evaluating and
+improving an Agent" section in step.
 
-- A **Metric** is a named, declared measurement of an episode. It has a **kind**
-  (`binary`, `score`, `number`, `rating`, `running`), a **direction**, an optional
-  **unit**, and a **role**: a **gate** must pass; an **objective** is something to
-  maximize or minimize; a **guardrail** is reported but never ranked on. A Verifier's
-  `check` produces metric values at the end of the episode, and its `measure` hook
-  produces values for a **running metric** after each step. Metrics are measurements,
-  not credit: they never enter the reward ledger.
+- A **Metric** is a named measurement a Verifier declares. It has a **kind** (`binary`,
+  `score`, `number`, `rating`, `running`), a **direction**, an optional **unit**, and
+  optionally `gate: true` and a `target`. A Verifier's `check` produces metric values at
+  the end of the episode, and its `measure` hook produces values for a **running
+  metric** after each step. `None` means not applicable. Metrics are measurements, not
+  credit: they never enter the reward ledger.
+- A **gate** is a metric with `gate: true`. A Trial **passes** when every applicable
+  gate passes; with none applicable it is **not judged** (`passed` is `None`).
+- **Success rate** is the share of Trials whose score reached the success threshold.
+  **Pass rate** is the share of judged Trials that passed every gate. Never use one
+  word for the other.
 - **Score** keeps its meaning: the weighted Verifier score on a Trial (`Trial.score`).
-  When a Benchmark has a Scorecard, `primary_metric` may name one of the Scorecard's
-  objectives instead of `score`.
+  `primary_metric` may name any declared metric instead of `score`.
 - **Reward** keeps its meaning: credit for one action, in `rewards.jsonl`. A reward is
   never a metric, and a metric is never a reward.
-- A **Scorecard** is a versioned project resource that records what "good" means for one
-  workflow: its plain-language definition, its Metrics, the **decisions** that settled
-  disagreements, and the **labels** used to check the graders.
-- A **Label** is a person's judgment of one Trial against a Scorecard's Metrics, with a
-  reason. Labels check graders. They never change a score.
-- A Benchmark's **held-out** Tasks are kept back for confirmation. Diagnosis and fixing
-  never look at them. Each run against them is a **peek**, and is counted.
-- A **Checkpoint** is everything needed to restart a Trial exactly as it stood after
-  step *k*: each App's State and RNG state, the host counters, and the Agent's context.
-- A **Fork** is a Trial started from another Trial's Checkpoint, with an
-  **Intervention** (a change) or with none (a **control**).
-- An **Intervention** is a typed change applied at the fork point. A **deployable** one
-  changes the Agent (model, instructions, Harness config, the whole Agent). A
-  **diagnostic** one changes one moment of the episode (an observation, the next action,
-  an injected hint) and is used only to find causes.
-- The **Inspector** is Plural's investigating agent. It explains why an Agent fails,
-  using read-only evidence tools and experiments (forks). One run of it over a Job is an
-  **Investigation**.
-- A **Finding** is the Inspector's conclusion about one failed Trial: the critical step,
-  a **cause kind** (a dimension of the **cause lens**: model, context, tools,
-  instructions, Harness, environment, grader, task, integrity, or one a project adds), a
-  free-text cause, the evidence, the experiments, a status (`confirmed`, `inferred`,
-  `refuted`, `inconclusive`), and suggested fixes.
-- A **failure pattern** is a reusable, named kind of failure, with a signature, a way to
-  confirm it, and fixes with measured effects. Patterns live in a **library** at project,
-  organization, and Plural scope. A **failure mode** is a group of Findings in one Job
-  that share a pattern or cause.
-- A **Fix** is a deployable change under test, with a lifecycle: proposed, tested,
-  applied, confirmed (or rejected).
+- A Benchmark's **held-out** Tasks (`heldout:`) are kept back for confirmation.
+  Diagnosis never looks at them, and their results stay hidden until revealed. Each run
+  against them, and each reveal, is a **peek**, and is counted.
 - A **trust tier** (`verified`, `standard`, `unverified`) is computed for every Trial
   from how it ran: isolation, network enforcement, a pinned image, provider conformance,
   and a signed host report.
-- An **Eval Report** is an immutable document generated from pinned inputs (Scorecard
-  version, Jobs, Investigation, Fixes) that answers three questions: how well the Agent
-  works, where and why it fails, and which change makes it better and how sure we are.
+- A **Checkpoint** is everything needed to restart a Trial exactly as it stood after
+  step *k*: each App's State and RNG state, the workspace, the host counters, the
+  Environment clock, and the Agent's context.
+- A **Fork** is a Trial started from another Trial's Checkpoint, by another Agent or, as
+  a **control**, by the original Agent.
+- A **change** is one thing a Fork alters at the fork point other than the Agent (an
+  observation, a message, the next action), registered with `@change("name")`. A Fork
+  with a change is **diagnostic**: it explains a cause, and is never shipped.
+- The **Inspector** is Plural's investigating agent, an Agent built on Plural with
+  read-only evidence tools over a Job and Forks as experiments.
+- A **Finding** is the Inspector's conclusion about one failed Trial: the critical step,
+  a cause dimension (model, context, tools, instructions, Harness, environment, grader,
+  task, integrity, or one a project adds), the cause, the evidence, the Forks that
+  tested it, and a status (`confirmed`, `inferred`, `refuted`, `inconclusive`).
 
-In the UI and docs, say "Eval Report", "Scorecard", "Finding", "Fix", and "Fork". In
-code: `EvalReport`, `Scorecard`, `Finding`, `Fix`, `ForkSpec`, `Checkpoint`, `Metric`,
-and `Label`.
+In code: `MetricSpec`, `Checkpoint`, `ForkSpec`, and `Finding`. A fix is a new Agent
+revision, never a resource of its own.

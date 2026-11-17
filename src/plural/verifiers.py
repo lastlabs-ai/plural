@@ -406,6 +406,40 @@ def criterion_metric(name: str) -> str:
     return slug if slug[0].isalpha() else f"m_{slug}"
 
 
+def criterion_metric_names(
+    criteria: Sequence[RubricCriterion], declared: Iterable[str] = ()
+) -> dict[str, str]:
+    """Each rubric criterion's rating metric name, unique within its Verifier.
+
+    A criterion whose slug a declared metric already has is that metric.
+    Criteria whose names slug the same, such as ``Tone`` and ``tone!``, get
+    ``_2``, ``_3`` and so on, in the order they are listed.
+
+    Returns:
+        The metric name by criterion name.
+
+    Examples:
+        >>> rubric = [RubricCriterion(name=n, description="d") for n in ("Tone", "tone!")]
+        >>> criterion_metric_names(rubric)
+        {'Tone': 'tone', 'tone!': 'tone_2'}
+    """
+    own = set(declared)
+    taken = set(own)
+    names: dict[str, str] = {}
+    for item in criteria:
+        base = criterion_metric(item.name)
+        if base in own and base not in names.values():
+            names[item.name] = base
+            continue
+        name, number = base, 1
+        while name in taken:
+            number += 1
+            name = f"{base}_{number}"
+        taken.add(name)
+        names[item.name] = name
+    return names
+
+
 def criterion_metrics(
     verifier: AgentVerifier | HumanVerifier, scores: Mapping[str, float]
 ) -> dict[str, float | None]:
@@ -416,10 +450,10 @@ def criterion_metrics(
     Returns:
         Each criterion's rating by metric name.
     """
+    declared = {spec.name for spec in verifier.metrics}
+    names = criterion_metric_names(verifier.criteria, declared)
     return {
-        criterion_metric(item.name): (
-            float(scores[item.name]) if scores.get(item.name) is not None else None
-        )
+        names[item.name]: (float(scores[item.name]) if scores.get(item.name) is not None else None)
         for item in verifier.criteria
     }
 
@@ -553,7 +587,7 @@ class Verifier(FrozenModel):
     secrets: tuple[SecretReference, ...] = ()
     """Names the Job supplies to this Verifier, such as a key for a system it checks."""
     metrics: tuple[MetricSpec, ...] = ()
-    """The metrics this Verifier produces. Roles and targets live on a Scorecard."""
+    """The metrics this Verifier produces, each optionally a ``gate`` with a ``target``."""
 
     @model_validator(mode="before")
     @classmethod
@@ -611,15 +645,17 @@ class Verifier(FrozenModel):
         already declare.
         """
         declared = {spec.name for spec in self.metrics}
+        criteria = getattr(self, "criteria", ())
+        names = criterion_metric_names(criteria, declared)
         rated = tuple(
             MetricSpec(
-                name=criterion_metric(item.name),
+                name=names[item.name],
                 kind="rating",
                 range=(item.min_score, item.max_score),
                 description=item.description,
             )
-            for item in getattr(self, "criteria", ())
-            if criterion_metric(item.name) not in declared
+            for item in criteria
+            if names[item.name] not in declared
         )
         return (*self.metrics, *rated)
 
@@ -939,9 +975,20 @@ TOTAL_REWARD = "total_reward"
 
 
 def _without_empty_metrics(payload: dict[str, Any]) -> dict[str, Any]:
-    # A Verifier with no metrics hashes as it did before metrics existed.
+    # A Verifier with no metrics hashes as it did before metrics existed, and a
+    # metric with no gate or target as it did before those fields existed.
     if not payload.get("metrics"):
         payload.pop("metrics", None)
+        return payload
+    metrics = []
+    for item in payload["metrics"]:
+        item = dict(item)
+        if not item.get("gate"):
+            item.pop("gate", None)
+        if item.get("target") is None:
+            item.pop("target", None)
+        metrics.append(item)
+    payload["metrics"] = metrics
     return payload
 
 
@@ -1076,6 +1123,7 @@ __all__ = [
     "WeightedVerifier",
     "coerce_verifier_output",
     "criterion_metric",
+    "criterion_metric_names",
     "criterion_metrics",
     "resolve_metrics",
 ]

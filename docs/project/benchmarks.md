@@ -236,13 +236,15 @@ If you fix an Agent by looking at the Tasks it fails, it gets better at those Ta
 That doesn't tell you it got better at the work. Keep some Tasks back, never looked at
 while you diagnose and fix, and use them only to confirm a fix:
 
-```bash
-plural benchmark split support-triage --heldout 0.3 --stratify category
+```yaml
+# benchmarks/support-triage/benchmark.yaml
+tasks: [triage-001, triage-002, triage-003, triage-004, triage-005, triage-006]
+heldout: [triage-002, triage-005]
 ```
 
-This writes a `heldout` list to the Benchmark's file: 30% of its Tasks, chosen at
-random with `--seed`, the same share from each category with `--stratify category`.
-The rest are the **development** Tasks. Edit the list by hand if you prefer.
+List some of the Benchmark's Tasks under `heldout`, such as a third of them, with
+about the same share from each category. The rest are the **development** Tasks. A
+Benchmark whose every Task is held out is refused.
 
 From then on:
 
@@ -257,8 +259,6 @@ From then on:
 - In a hosted Job, a held-out Trial's score, metrics, and outcome stay hidden until you
   reveal them from the Benchmark's **Tasks** tab. Revealing is per person, and counts
   as a peek.
-
-`plural eval status` shows the split and the number of peeks so far.
 
 ## Read the four metrics
 

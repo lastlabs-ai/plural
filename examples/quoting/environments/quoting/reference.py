@@ -1,6 +1,6 @@
 """The quoting desk's reference policy: what a careful person at the desk would do.
 
-`plural task check` plays it on every Task through the normal engine, so a Task
+`plural task validate` plays it on every Task through the normal engine, so a Task
 whose reference fails has a broken Task or a broken grader, not a weak Agent. It
 reads only what an Agent reads, the request and each action's reply, never the
 answer key.

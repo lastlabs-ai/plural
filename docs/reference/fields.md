@@ -197,7 +197,6 @@ A semantic version that pins an ordered set of Tasks.
 - **`primary_metric`** — `string`; optional. Default: `"score"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`metadata`** — `object`; optional.
-- **`scorecard`** — `string | null`; optional. Default: `null`.
 - **`heldout`** — `array of string`; optional. Default: `[]`.
 
 ## AgentCredential
@@ -423,6 +422,8 @@ One metric a Verifier declares: what it measures and which way is better.
 - **`range`** — `array of JSON value | null`; optional. Default: `null`.
 - **`aggregate`** — `"final" | "mean" | "min" | "max" | "auc" | "time_to" | null`; optional. Default: `null`.
 - **`threshold`** — `number | null`; optional. Default: `null`.
+- **`gate`** — `boolean`; optional. Default: `false`.
+- **`target`** — `string | null`; optional. Default: `null`.
 - **`description`** — `string`; optional. Default: `""`.
 
 ## NetworkMode

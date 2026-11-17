@@ -31,7 +31,6 @@ from plural.errors import (
 )
 from plural.harness.models import Harness, HarnessDefinition
 from plural.jobs import JobSpec
-from plural.scorecards import Scorecard
 from plural.tasks import Benchmark, Task
 from plural.tracing.schema import Trace
 from plural.verifiers import DeterministicVerifier, HumanVerifier
@@ -412,7 +411,7 @@ class TasksAPI(RevisionResourceAPI[Task]):
         return payload
 
     def record_check(self, task_id: str, revision_id: str, check: Mapping[str, Any]) -> JsonObject:
-        """Store ``plural task check`` on the pushed revision it checked.
+        """Store ``plural task validate`` on the pushed revision it checked.
 
         The server refuses a check whose ``content_hash`` is not the revision's.
         """
@@ -487,57 +486,7 @@ class BenchmarksAPI(RevisionResourceAPI[Benchmark]):
         if not payload.get("heldout"):
             payload.pop("heldout", None)
         payload["task_revision_ids"] = ids
-        if references.get("scorecard_revision_id"):
-            payload["scorecard_revision_id"] = str(references["scorecard_revision_id"])
         return payload
-
-
-class ScorecardsAPI(RevisionResourceAPI[Scorecard]):
-    """Scorecards, their labels, and each revision's calibration.
-
-    Labels are hosted data, like reviews: each person has at most one label
-    per Trial, and labels never change a Scorecard's hash or a Trial's score.
-    """
-
-    collection = "scorecards"
-    kind = "scorecard"
-    model_type = Scorecard
-
-    def _revision_payload(self, value: Scorecard, **references: Any) -> JsonObject:
-        del references
-        return _dump(value, exclude={"name"})
-
-    def labels(self, scorecard_id: str, *, job_id: str | None = None) -> JsonList:
-        """Every label on a Scorecard, from every labeler; ``job_id`` limits the Trials."""
-        params = {"job_id": job_id} if job_id else None
-        return _items(
-            self._studio.request(
-                "GET", f"/{self.collection}/{quote(scorecard_id)}/labels", params=params
-            )
-        )
-
-    def put_label(self, scorecard_id: str, label: Mapping[str, Any]) -> JsonObject:
-        """Save the caller's label on one Trial, replacing their earlier one."""
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "PUT", f"/{self.collection}/{quote(scorecard_id)}/labels", json=dict(label)
-            ),
-        )
-
-    def calibrate(self, scorecard_id: str, revision_id: str) -> JsonObject:
-        """Check the graders against every hosted label and store it on the revision.
-
-        The service runs the same ``plural.scorecards.calibrate`` the CLI does.
-        """
-        return cast(
-            JsonObject,
-            self._studio.request(
-                "POST",
-                f"/{self.collection}/{quote(scorecard_id)}/revisions/{quote(revision_id)}"
-                "/calibration",
-            ),
-        )
 
 
 class ProjectsAPI:
@@ -1003,6 +952,34 @@ class TrialsAPI:
             ),
         )
 
+    def add_metric_points(
+        self,
+        trial_id: str,
+        points: Sequence[JsonObject],
+        *,
+        verifier: str,
+        version: str,
+        execution_id: str | None = None,
+    ) -> JsonObject:
+        """Store one Verifier version's running metric points on the Trial.
+
+        They replace that Verifier's series in the Trial's metrics. A version
+        the Trial already has is kept as it is.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/trials/{quote(trial_id)}/metric-points",
+                json={
+                    "verifier": verifier,
+                    "version": version,
+                    "points": list(points),
+                    "execution_id": execution_id,
+                },
+            ),
+        )
+
 
 class SecretsAPI:
     """Values for the secrets the project's Apps and Verifiers declare.
@@ -1173,7 +1150,6 @@ class Studio:
         self.agents = AgentsAPI(self)
         self.harnesses = HarnessesAPI(self)
         self.benchmarks = BenchmarksAPI(self)
-        self.scorecards = ScorecardsAPI(self)
         self.traces = TracesAPI(self)
         self.jobs = JobsAPI(self)
         self.trials = TrialsAPI(self)
@@ -1379,7 +1355,6 @@ __all__ = [
     "AccountsAPI",
     "AgentsAPI",
     "BenchmarksAPI",
-    "ScorecardsAPI",
     "CredentialsAPI",
     "EnvironmentsAPI",
     "HarnessesAPI",

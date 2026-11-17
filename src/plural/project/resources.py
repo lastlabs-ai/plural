@@ -43,13 +43,11 @@ from plural.environments.definition import (
 )
 from plural.harness.models import Harness
 from plural.harness.retrieval import source_digest
-from plural.metrics import MetricSpec
 from plural.project.layout import (
     AGENT,
     BENCHMARK,
     ENVIRONMENT,
     HARNESS,
-    SCORECARD,
     TASK,
     VERIFIER,
     Project,
@@ -67,7 +65,6 @@ from plural.project.manifests import (
     validation_problems,
 )
 from plural.sandbox.catalog import RuntimeSettingsError, runtime_from_settings, runtime_provider
-from plural.scorecards import Scorecard, parse_reference, resolve_primary
 from plural.tasks import RELEASE_FIELDS, Benchmark, Task
 from plural.verifiers import (
     AgentVerifier,
@@ -137,10 +134,6 @@ class Workspace:
             self._loading.pop()
         self._loaded[ref] = resource
         return resource
-
-    def invalidate(self, ref: ResourceRef) -> None:
-        """Forget a cached load, after its files changed on disk."""
-        self._loaded.pop(ref, None)
 
     def get(self, kind: str, name: str) -> Any:
         """Load a resource by kind and name, the way the CLI addresses it.
@@ -271,8 +264,6 @@ def declared_dependencies(kind: str, payload: Mapping[str, Any]) -> tuple[Resour
             for name in payload.get("tasks") or ()
             if isinstance(name, str)
         )
-        if isinstance(payload.get("scorecard"), str):
-            refs.append(ResourceRef(SCORECARD.name, parse_reference(payload["scorecard"])[0]))
     return tuple(dict.fromkeys(refs))
 
 
@@ -767,7 +758,6 @@ def _load_benchmark(workspace: Workspace, ref: ResourceRef, directory: Path) -> 
         problems.extend(item for item in tasks if isinstance(item, str))
         loaded = [item for item in tasks if isinstance(item, LocalResource)]
         problems.extend(_score_compatibility(manifest, loaded))
-        scorecard = _benchmark_scorecard(workspace, manifest, loaded, problems)
         if not problems:
             try:
                 benchmark = Benchmark.model_validate(
@@ -777,8 +767,7 @@ def _load_benchmark(workspace: Workspace, ref: ResourceRef, directory: Path) -> 
                         "version": manifest.version,
                         "description": manifest.description,
                         "metadata": manifest.metadata,
-                        "primary_metric": resolve_primary(scorecard, manifest.primary_metric),
-                        "scorecard": scorecard.reference if scorecard is not None else None,
+                        "primary_metric": manifest.primary_metric,
                         "heldout": tuple(manifest.heldout),
                         "tasks": tuple(item.value for item in loaded),
                         **{field: getattr(manifest, field) for field in RELEASE_FIELDS},
@@ -787,84 +776,6 @@ def _load_benchmark(workspace: Workspace, ref: ResourceRef, directory: Path) -> 
             except ValidationError as exc:
                 problems.extend(validation_problems(exc))
     return _finish(workspace, ref, directory, benchmark, dependencies, problems)
-
-
-def _benchmark_scorecard(
-    workspace: Workspace,
-    manifest: BenchmarkManifest,
-    tasks: list[LocalResource],
-    problems: list[str],
-) -> Scorecard | None:
-    """Load a Benchmark's Scorecard and check every metric it names is produced.
-
-    Returns:
-        The Scorecard, or ``None`` without one or when it does not load.
-    """
-    if manifest.scorecard is None:
-        return None
-    name, version = parse_reference(manifest.scorecard)
-    loaded = _dependency(workspace, ResourceRef(SCORECARD.name, name))
-    if isinstance(loaded, str):
-        problems.append(loaded)
-        return None
-    scorecard = cast(Scorecard, loaded.value)
-    if version is not None and version != scorecard.version:
-        problems.append(
-            f"scorecard: names {manifest.scorecard}, but scorecards/{name} is version "
-            f"{scorecard.version}. Name {scorecard.reference}, or leave the version out."
-        )
-        return None
-    specs: dict[str, MetricSpec] = {}
-    produced: dict[str, list[str]] = {}
-    for task in tasks:
-        names: dict[str, MetricSpec] = {}
-        for verifier in task.value.verifiers:
-            for item in verifier.metric_specs:
-                names.setdefault(item.name, item)
-        specs.update(names)
-        produced[task.value.task_id] = list(names)
-    groups: dict[str, list[str]] = {item.id: list(item.tasks) for item in manifest.categories or ()}
-    problems.extend(
-        f"scorecard {scorecard.reference}: {item}"
-        for item in scorecard.problems(specs, produced, groups)
-    )
-    return scorecard
-
-
-def _load_scorecard(workspace: Workspace, ref: ResourceRef, directory: Path) -> LocalResource:
-    problems, payload = _begin(workspace, ref, directory)
-    scorecard = None
-    if payload:
-        _check_identity(str(payload.get("name") or ""), ref, problems)
-        try:
-            scorecard = Scorecard.model_validate(payload)
-        except ValidationError as exc:
-            problems.extend(validation_problems(exc))
-        if scorecard is not None:
-            unknown = [
-                item
-                for item in scorecard.problems(_project_metric_specs(workspace))
-                if "no Verifier declares it" in item
-            ]
-            problems.extend(unknown)
-            if unknown:
-                scorecard = None
-    return _finish(workspace, ref, directory, scorecard, (), problems)
-
-
-def _project_metric_specs(workspace: Workspace) -> dict[str, MetricSpec]:
-    """Every metric the project's Verifiers declare, from those that load.
-
-    Returns:
-        Metric specs by name.
-    """
-    specs: dict[str, MetricSpec] = {}
-    for name in workspace.project.names(VERIFIER):
-        loaded = _dependency(workspace, ResourceRef(VERIFIER.name, name))
-        if isinstance(loaded, LocalResource):
-            for item in loaded.value.metric_specs:
-                specs.setdefault(item.name, item)
-    return specs
 
 
 def _score_compatibility(manifest: BenchmarkManifest, tasks: list[LocalResource]) -> list[str]:
@@ -1075,7 +986,6 @@ _LOADERS: dict[str, Callable[[Workspace, ResourceRef, Path], LocalResource]] = {
     TASK.name: _load_task,
     AGENT.name: _load_agent,
     BENCHMARK.name: _load_benchmark,
-    SCORECARD.name: _load_scorecard,
 }
 
 

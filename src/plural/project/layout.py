@@ -84,17 +84,8 @@ HARNESS = ResourceKind("harness", "harness", "harnesses", "harness.yaml", "Harne
 TASK = ResourceKind("task", "task", "tasks", "task.yaml", "Task")
 AGENT = ResourceKind("agent", "agent", "agents", "agent.yaml", "Agent")
 BENCHMARK = ResourceKind("benchmark", "benchmark", "benchmarks", "benchmark.yaml", "Benchmark")
-SCORECARD = ResourceKind("scorecard", "scorecard", "scorecards", "scorecard.yaml", "Scorecard")
 
-KINDS: tuple[ResourceKind, ...] = (
-    ENVIRONMENT,
-    VERIFIER,
-    HARNESS,
-    TASK,
-    AGENT,
-    SCORECARD,
-    BENCHMARK,
-)
+KINDS: tuple[ResourceKind, ...] = (ENVIRONMENT, VERIFIER, HARNESS, TASK, AGENT, BENCHMARK)
 _BY_NAME = {kind.name: kind for kind in KINDS} | {kind.cli: kind for kind in KINDS}
 
 
@@ -289,8 +280,7 @@ class Project:
         return sorted(
             path.name
             for path in directory.iterdir()
-            # ``tasks/_drafts`` and other underscored folders hold work in progress.
-            if path.is_dir() and not path.name.startswith((".", "_"))
+            if path.is_dir() and not path.name.startswith(".")
         )
 
     def resource_at(self, path: Path) -> ResourceRef | None:
@@ -306,7 +296,7 @@ class Project:
         if len(parts) < 2:
             return None
         for kind in KINDS:
-            if parts[0] == kind.directory and not parts[1].startswith("_"):
+            if parts[0] == kind.directory:
                 return ResourceRef(kind.name, parts[1])
         return None
 
@@ -393,7 +383,6 @@ class Project:
 __all__ = [
     "AGENT",
     "BENCHMARK",
-    "SCORECARD",
     "ENVIRONMENT",
     "HARNESS",
     "KINDS",

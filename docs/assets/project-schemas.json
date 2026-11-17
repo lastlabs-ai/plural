@@ -1389,7 +1389,7 @@
       },
       "MetricSpec": {
         "additionalProperties": false,
-        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
         "properties": {
           "name": {
             "maxLength": 64,
@@ -1483,6 +1483,23 @@
             ],
             "default": null,
             "title": "Threshold"
+          },
+          "gate": {
+            "default": false,
+            "title": "Gate",
+            "type": "boolean"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target"
           },
           "description": {
             "default": "",
@@ -1818,7 +1835,7 @@
     "$defs": {
       "MetricSpec": {
         "additionalProperties": false,
-        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
         "properties": {
           "name": {
             "maxLength": 64,
@@ -1912,6 +1929,23 @@
             ],
             "default": null,
             "title": "Threshold"
+          },
+          "gate": {
+            "default": false,
+            "title": "Gate",
+            "type": "boolean"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target"
           },
           "description": {
             "default": "",
@@ -2251,7 +2285,7 @@
     "$defs": {
       "MetricSpec": {
         "additionalProperties": false,
-        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
         "properties": {
           "name": {
             "maxLength": 64,
@@ -2345,6 +2379,23 @@
             ],
             "default": null,
             "title": "Threshold"
+          },
+          "gate": {
+            "default": false,
+            "title": "Gate",
+            "type": "boolean"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target"
           },
           "description": {
             "default": "",
@@ -2669,7 +2720,7 @@
     "$defs": {
       "MetricSpec": {
         "additionalProperties": false,
-        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
         "properties": {
           "name": {
             "maxLength": 64,
@@ -2763,6 +2814,23 @@
             ],
             "default": null,
             "title": "Threshold"
+          },
+          "gate": {
+            "default": false,
+            "title": "Gate",
+            "type": "boolean"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target"
           },
           "description": {
             "default": "",
@@ -4095,7 +4163,7 @@
       },
       "MetricSpec": {
         "additionalProperties": false,
-        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
         "properties": {
           "name": {
             "maxLength": 64,
@@ -4189,6 +4257,23 @@
             ],
             "default": null,
             "title": "Threshold"
+          },
+          "gate": {
+            "default": false,
+            "title": "Gate",
+            "type": "boolean"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target"
           },
           "description": {
             "default": "",
@@ -4645,18 +4730,6 @@
         "additionalProperties": true,
         "title": "Metadata",
         "type": "object"
-      },
-      "scorecard": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Scorecard"
       },
       "heldout": {
         "default": [],

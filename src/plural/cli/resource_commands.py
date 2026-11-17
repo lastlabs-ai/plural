@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ from plural.cli.common import (
     deprecated,
     emit,
     handled,
-    note,
+    muted,
     project_studio,
     relative,
     rows,
@@ -33,9 +34,7 @@ from plural.cli.common import (
     workspace,
 )
 from plural.cli.secret_commands import secret_status
-from plural.cli.task_generation_commands import add_task_generation_commands
 from plural.harness.builtins import BUILTIN_HARNESS_NAMES, builtin_schema, get_builtin
-from plural.heldout import MIN_TASKS_FOR_DEFAULT
 from plural.project import (
     KINDS,
     LocalResource,
@@ -47,7 +46,7 @@ from plural.project import (
 )
 from plural.project.cases import read_cases, write_cases
 from plural.project.layout import AGENT, BENCHMARK, ENVIRONMENT, HARNESS, TASK, split_version
-from plural.project.membership import add_tasks, remove_tasks, set_heldout
+from plural.project.membership import add_tasks, remove_tasks
 from plural.project.runs import DEFAULT_HARNESS
 from plural.project.sync import (
     REBUILT_NOTE,
@@ -191,13 +190,9 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
 
         add_generators(app)
 
-    @app.command("validate")
-    @handled
-    def validate(
-        name: str | None = typer.Argument(None, help=NAME_HELP),
-        as_json: bool = JSON_OPTION,
+    def validate_files(
+        name: str | None, as_json: bool, checks: Callable[[Any, ResourceRef], Any] | None = None
     ) -> None:
-        """Check a resource and everything it depends on, without uploading."""
         space = workspace()
         ref = _ref(space, kind, name)
         resource = space.load(ref)
@@ -267,7 +262,92 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                     ", so results can change as the data behind them changes."
                 )
 
-        emit(payload, as_json=as_json, text=text)
+        report = None
+        if checks is not None and unfinished:
+            payload = {**payload, "checks": None}
+        elif checks is not None:
+            report = checks(space, ref)
+            payload = {**payload, "checks": report.model_dump(mode="json")}
+
+        def full_text() -> None:
+            text()
+            if checks is not None and unfinished:
+                typer.echo("\nThe probes run once the unfinished places are done.")
+            if report is not None:
+                _print_report(report)
+
+        emit(payload, as_json=as_json, text=full_text)
+        if report is not None and report.problems:
+            raise typer.Exit(1)
+
+    if kind in (TASK, BENCHMARK):
+
+        @app.command("validate")
+        @handled
+        def validate_checked(
+            name: str | None = typer.Argument(None, help=NAME_HELP),
+            probes: bool = typer.Option(
+                True,
+                "--probes/--no-probes",
+                help="Run the reference and the probe Agents. --no-probes checks the files only.",
+            ),
+            rerun: bool = typer.Option(
+                False, "--rerun", help="Run the probes again, even for unchanged Tasks."
+            ),
+            random_steps: int = typer.Option(
+                0,
+                "--random",
+                min=0,
+                help="Also run an Agent that takes this many random actions. A pass is a warning.",
+            ),
+            as_json: bool = JSON_OPTION,
+        ) -> None:
+            """Check a resource and everything it depends on, then prove its Tasks are fair.
+
+            Each Task runs its reference policy, which must pass, and a do-nothing
+            Agent and one that repeats the instructions, which must fail, in its
+            own Runtime. Everything the Agent can read is scanned for the answer
+            key, git history, solution files, Verifier code, and the Benchmark's
+            canary, and each default Runtime is checked for how far its results
+            can be trusted. A Task's probes are kept until the Task changes.
+            Problems exit 1.
+            """
+
+            def checks(space: Any, ref: ResourceRef) -> Any:
+                from plural.project.checks import check_report
+
+                def progress(line: str) -> None:
+                    if not as_json:
+                        typer.echo(muted(line), err=True)
+
+                report, ran = check_report(
+                    space,
+                    (ref.name,) if kind is TASK else (),
+                    benchmark=ref.name if kind is BENCHMARK else None,
+                    rerun=rerun,
+                    random_steps=random_steps,
+                    progress=progress,
+                )
+                shared = _share_checks(ran)
+                if shared and not as_json:
+                    typer.echo(
+                        muted(f"Recorded {counted(shared, 'check')} on the pushed Task revisions."),
+                        err=True,
+                    )
+                return report
+
+            validate_files(name, as_json, checks if probes else None)
+
+    else:
+
+        @app.command("validate")
+        @handled
+        def validate(
+            name: str | None = typer.Argument(None, help=NAME_HELP),
+            as_json: bool = JSON_OPTION,
+        ) -> None:
+            """Check a resource and everything it depends on, without uploading."""
+            validate_files(name, as_json)
 
     @app.command("push")
     @handled
@@ -658,7 +738,6 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         _benchmark_membership(app)
     if kind is TASK:
         _task_cases(app)
-        add_task_generation_commands(app)
     if kind is AGENT:
         _external_commands(app)
     return app
@@ -961,55 +1040,68 @@ def _benchmark_membership(app: typer.Typer) -> None:
         typer.echo(f"Removed {_task_list(removed)} from Benchmark {ref.name}.")
         _maybe_push(space, ref, push_after, changed=True)
 
-    @app.command("split")
-    @handled
-    def split(
-        benchmark: str | None = typer.Argument(
-            None, help="Benchmark to split. Defaults to the one you are in."
-        ),
-        heldout: float = typer.Option(
-            0.3, "--heldout", help="The share of Tasks to hold out, such as 0.3."
-        ),
-        stratify: str | None = typer.Option(
-            None, "--stratify", help="category: hold out the same share of each category."
-        ),
-        seed: int = typer.Option(
-            0, "--seed", help="The sample's seed; the same seed, the same split."
-        ),
-        push_after: bool = push_option,
-        as_json: bool = JSON_OPTION,
-    ) -> None:
-        """Hold some Tasks out, to confirm fixes on Tasks diagnosis never saw.
 
-        Writes ``heldout`` to the Benchmark's file. A plain ``plural run`` then
-        runs only the dev Tasks; ``plural run --heldout`` runs every Task and
-        counts as a peek.
-        """
-        space = workspace()
-        ref = _ref(space, BENCHMARK, benchmark)
-        dev, held = set_heldout(
-            space.project, ref.name, fraction=heldout, seed=seed, stratify=stratify
+_CHECK_MARKS = {
+    "ok": typer.style("✓", fg="green", bold=True),
+    "problem": typer.style("✗", fg="red", bold=True),
+    "warning": typer.style("!", fg="yellow", bold=True),
+}
+
+
+def _print_report(report: Any) -> None:
+    for section in report.sections:
+        typer.echo(f"\n{section.title}")
+        for line in section.lines:
+            typer.echo(f"  {_CHECK_MARKS[line.mark]} {line.text}")
+            if line.detail:
+                typer.echo(f"      {muted(line.detail)}")
+    if report.problems:
+        typer.echo(
+            f"\n{counted(report.problems, 'problem')} to fix before you baseline. "
+            f"Next: {report.next_command}"
         )
-        payload = {"benchmark": ref.name, "dev": dev, "heldout": held, "seed": seed}
 
-        if len(dev) + len(held) < MIN_TASKS_FOR_DEFAULT:
-            payload["warning"] = (
-                f"With {len(dev) + len(held)} Tasks, {len(held)} held out is too few to "
-                f"confirm a fix; aim for {MIN_TASKS_FOR_DEFAULT} or more Tasks."
+
+def _share_checks(checks: list[Any]) -> int:
+    """Record each check on its pushed Task revision, when signed in. Never fails the command.
+
+    Returns:
+        How many checks were recorded.
+    """
+    from plural.studio import slugify
+
+    if not checks:
+        return 0
+    try:
+        current = session()
+        if current.token is None:
+            return 0
+        tasks = current.studio().tasks
+    except Exception:  # noqa: BLE001 - recording is a convenience, never a failure
+        return 0
+    recorded = 0
+    for check in checks:
+        try:
+            parent = tasks.find(slugify(check.task))
+            if parent is None:
+                continue
+            revision = next(
+                (
+                    item
+                    for item in tasks.revisions(str(parent["id"]))
+                    if item.get("content_hash") == check.content_hash
+                ),
+                None,
             )
-
-        def text() -> None:
-            if "warning" in payload:
-                note(str(payload["warning"]))
-            how = f" (stratified by {stratify})" if stratify else ""
-            typer.echo(
-                f"{ref.name}: {len(dev)} dev · {len(held)} held-out{how}. Held-out results "
-                "stay hidden until you confirm a fix."
+            if revision is None:
+                continue
+            tasks.record_check(
+                str(parent["id"]), str(revision["id"]), check.model_dump(mode="json")
             )
-            typer.echo(f"Next: plural run --benchmark {ref.name} runs the dev Tasks.")
-
-        emit(payload, as_json=as_json, text=text)
-        _maybe_push(space, ref, push_after, changed=True)
+            recorded += 1
+        except Exception:  # noqa: BLE001
+            continue
+    return recorded
 
 
 def _task_list(names: list[str]) -> str:

@@ -110,7 +110,7 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   [Integrity](../operations/integrity.md).
 - **Reference policy:** code that solves a Task the way a careful person would, used to
   prove the Task can be solved. *Precisely:* a `reference:` function on a Task or its
-  Environment, run by `plural task check`; it never reaches the Agent.
+  Environment, run by `plural task validate`; it never reaches the Agent.
 - **Canary:** a random ID hidden beside a Benchmark's graders. An Agent that writes it
   read a grader or was trained on the Benchmark. *Precisely:* a Benchmark's `canary`,
   kept out of every Agent-visible file and flagged as `canary_seen` when it appears in
@@ -151,63 +151,53 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
 
 ## Evaluating and improving an Agent
 
-Plural is adding a guided way to find out how well an Agent works, where and why it
-fails, and which change makes it better. These words name its pieces. They are coming
-soon: each entry says what the word will mean, so that it means one thing from the
-start. Score and reward keep the meanings above.
+These words name how Plural measures an Agent, and how it finds out why one fails.
+Score and reward keep the meanings above. Checkpoints and Forks are being built now,
+and the Inspector after them: their entries say what each word will mean, so that it
+means one thing from the start.
 
 - **Metric:** one thing you measure about an attempt, such as "price correct" or
-  "margin in dollars". *Precisely:* a named, declared measurement with a kind (`binary`,
-  `score`, `number`, `rating`, or `running`), a direction, an optional unit, and a role.
-  A Verifier's `check` produces values at the end of the episode. A metric is never a
-  reward and never enters the reward ledger.
-- **Gate, objective, guardrail:** what a metric is for. A gate must pass, an objective
-  is something to do well on, and a guardrail is watched but never ranked on.
-  *Precisely:* a metric's role on a Scorecard. An attempt passes when every gate passes.
+  "margin in dollars". *Precisely:* a named measurement a Verifier declares, with a
+  kind (`binary`, `score`, `number`, `rating`, or `running`), a direction, and an
+  optional unit. A Verifier's `check` produces values at the end of the episode; `None`
+  means it does not apply. A metric is never a reward and never enters the reward
+  ledger. See [Declare metrics](../project/verifiers.md#declare-metrics).
+- **Gate:** a metric an attempt must pass to count as done. *Precisely:* a Verifier
+  metric with `gate: true`; a `binary` gate passes at 1, and any other kind passes when
+  its value meets its `target`, such as `">= 150"`.
+- **Pass:** an attempt passes when every gate that applies to it passes. *Precisely:*
+  `TrialResult.passed`; with no gate that applies, the Trial is **not judged** and
+  `passed` is `None`.
+- **Success rate, pass rate:** two different shares of attempts. *Precisely:* the
+  success rate is the share whose score reached the Benchmark's success threshold; the
+  pass rate is the share of judged Trials that passed every gate.
 - **Running metric:** a metric measured after every move, like the money in the till
   as a simulated business runs. *Precisely:* a metric of kind `running`, produced by a
   Verifier's `measure` hook after each step and reduced to one value by its aggregate,
   such as the final or the lowest value.
-- **Scorecard:** your team's written definition of good work for one workflow.
-  *Precisely:* a versioned project resource holding the workflow's plain-language
-  definition of good, its metrics and their roles, the decisions that settled
-  disagreements, and the labels used to check the graders.
-- **Label:** one person's judgment of one attempt, with a reason. *Precisely:* a
-  judgment of a Trial against a Scorecard's metrics. Labels check how far the graders
-  agree with people; they never change a score.
 - **Held-out set:** Tasks kept back to confirm an improvement on work the Agent was
-  never tuned on. *Precisely:* a Benchmark's held-out Tasks, which diagnosis and fixing
-  never look at. Each run against them is a **peek**, and is counted.
+  never tuned on. *Precisely:* the Tasks under a Benchmark's `heldout:`, which diagnosis
+  never looks at. Each run against them, and each reveal of their results, is a
+  **peek**, and is counted.
 - **Checkpoint:** a saved moment of an attempt that it can be restarted from.
   *Precisely:* everything needed to restart a Trial exactly as it stood after step *k*:
-  each App's State and random-number state, the step counters, and the Agent's context.
-- **Fork:** rerunning the rest of an attempt from a Checkpoint, to see whether a change
-  would have helped. *Precisely:* a Trial started from another Trial's Checkpoint, with
-  an Intervention or, as a **control**, with none.
-- **Intervention:** the change a Fork tries. *Precisely:* a typed change applied at the
-  fork point. A **deployable** one changes the Agent, such as its model or instructions.
-  A **diagnostic** one changes one moment of the attempt, such as an observation, and
-  only helps find a cause.
+  each App's State and random-number state, the workspace, the step counters, the
+  Environment's clock, and the Agent's context.
+- **Fork:** rerunning the rest of an attempt from a Checkpoint, to see whether a
+  different Agent would have done better. *Precisely:* a Trial started from another
+  Trial's Checkpoint, by another Agent or, as a **control**, by the original one.
+- **Change:** one thing a Fork alters at the fork point, other than the Agent, such as
+  an observation, to find a cause. *Precisely:* a plugin registered with
+  `@change("name")`. A Fork with a change is **diagnostic**: it explains a cause and is
+  never shipped.
 - **Inspector:** Plural's agent for finding out why an Agent fails. *Precisely:* an
-  agent with read-only evidence tools that runs Forks as experiments. One run of it over
-  a Job is an **Investigation**.
+  Agent built on Plural, with read-only evidence tools over a Job, that runs Forks as
+  experiments.
 - **Finding:** the Inspector's explanation of one failed attempt. *Precisely:* the
-  critical step, a cause kind from the **cause lens** (model, context, tools,
-  instructions, Harness, environment, grader, task, integrity, or one a project adds), a
-  free-text cause, the evidence and experiments behind it, a status (`confirmed`,
-  `inferred`, `refuted`, or `inconclusive`), and suggested fixes.
-- **Failure pattern:** a kind of failure that recurs, with a name, a way to recognize
-  it, and fixes known to help. *Precisely:* a reusable pattern kept in a library at
-  project, organization, or Plural scope. A **failure mode** is a group of Findings in
-  one Job that share a pattern or cause.
-- **Fix:** a change to the Agent being tested to see whether it really helps.
-  *Precisely:* a deployable change with a lifecycle: proposed, tested, applied, and
-  confirmed, or rejected.
-- **Eval Report:** the document an evaluation ends with: how well the Agent works,
-  where and why it fails, which fixes worked, and how sure you can be. *Precisely:* an
-  immutable document generated from pinned inputs (a Scorecard version, Jobs, an
-  Investigation, and Fixes), in which every number is computed and links to its
-  evidence.
+  critical step, a cause dimension (model, context, tools, instructions, Harness,
+  environment, grader, task, integrity, or one a project adds), the cause, the evidence
+  and the Forks that tested it, and a status (`confirmed`, `inferred`, `refuted`, or
+  `inconclusive`).
 
 ## Versions and sharing
 

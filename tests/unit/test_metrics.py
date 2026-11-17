@@ -30,6 +30,7 @@ from plural.metrics import (
     aggregate_metric,
     aggregate_series,
     default_score,
+    judge,
     metric_failures,
 )
 from plural.sandbox import DownloadedFile
@@ -76,7 +77,7 @@ def test_none_is_not_applicable_and_left_out_of_aggregates() -> None:
     gate = MetricSpec(name="price_correct", kind="binary")
     row = aggregate_metric(gate, {"q1": [1.0, 1.0], "q2": [None, None], "q3": [0.0, 1.0]})
     assert (row.n, row.total) == (4, 6)
-    assert row.pass_rate == 0.75
+    assert row.mean == 0.75
     assert row.pass_hat_k == 0.5
     assert row.pass_at_k == 1.0
     assert row.k == 2
@@ -426,4 +427,53 @@ def test_the_leaderboard_ranks_on_the_benchmarks_primary_metric() -> None:
     assert rows["thrifty"].primary == 100.0
     assert rows["spender"].primary == 350.0
     solvent = rows["thrifty"].metrics["solvent"]
-    assert (solvent.n, solvent.total, solvent.pass_rate) == (1, 2, 1.0)
+    assert (solvent.n, solvent.total, solvent.mean) == (1, 2, 1.0)
+
+
+def test_a_gate_needs_a_target_unless_it_is_binary() -> None:
+    assert MetricSpec(name="ok", kind="binary", gate=True).passes(1.0) is True
+    assert MetricSpec(name="ok", kind="binary", gate=True).passes(0.0) is False
+    with pytest.raises(ValidationError, match="needs a target"):
+        MetricSpec(name="margin", kind="number", gate=True)
+    with pytest.raises(ValidationError, match="target"):
+        MetricSpec(name="margin", kind="number", target="about 3")
+    # A plain number means equal to it.
+    assert MetricSpec(name="turns", kind="number", target=3).target == "== 3"
+
+
+def test_a_trial_passes_when_every_applicable_gate_passes() -> None:
+    specs = [
+        MetricSpec(name="decision", kind="binary", gate=True),
+        MetricSpec(name="price", kind="binary", gate=True),
+        MetricSpec(name="margin", kind="number", gate=True, target=">= 150"),
+        MetricSpec(name="tone", kind="rating", range=(1, 5), target=">= 4"),
+    ]
+    handoff = judge(specs, {"decision": 1.0, "price": None, "margin": None, "tone": 1.0})
+    assert handoff.gates == {"decision": True}
+    assert handoff.passed is True
+    quote = judge(specs, {"decision": 1.0, "price": 1.0, "margin": 120.0, "tone": 5.0})
+    assert quote.gates == {"decision": True, "price": True, "margin": False}
+    assert quote.passed is False
+    # A target on a metric that is not a gate never decides a pass.
+    assert "tone" not in quote.gates
+    # No gate applies: not judged, never a vacuous pass.
+    assert judge(specs, {"decision": None}).passed is None
+    assert (
+        judge([MetricSpec(name="tone", kind="rating", range=(1, 5))], {"tone": 5.0}).passed is None
+    )
+
+
+def test_rating_metrics_from_colliding_criterion_names_stay_apart() -> None:
+    grader = AgentVerifier(
+        name="reply",
+        model="openai/gpt-5.6-luna",
+        instructions="Judge the reply.",
+        criteria=[
+            RubricCriterion(name="Tone", description="1-5", min_score=1, max_score=5),
+            RubricCriterion(name="tone!", description="1-5", min_score=1, max_score=5),
+            RubricCriterion(name="TONE", description="1-5", min_score=1, max_score=5),
+        ],
+    )
+    assert [item.name for item in grader.metric_specs] == ["tone", "tone_2", "tone_3"]
+    rated = criterion_metrics(grader, {"Tone": 2.0, "tone!": 5.0, "TONE": 4.0})
+    assert rated == {"tone": 2.0, "tone_2": 5.0, "tone_3": 4.0}

@@ -50,6 +50,7 @@ plural verifier|harness|benchmark init NAME
 plural env|task|verifier|harness|agent|benchmark validate|show|push|pull [NAME|PATH]
 plural env|task|verifier|harness|agent|benchmark list
 plural env|task|verifier|harness|agent|benchmark delete NAME [--hosted] [-y]
+plural task|benchmark validate [NAME] [--no-probes] [--rerun] [--random N]
 plural benchmark add|remove TASK... [--benchmark NAME]
 plural app add ENV (--mcp URL_OR_COMMAND | --openapi SPEC | --traces FILE | --files-server)
            [--app APP] [--header K=V] [--server-env K=V] [--tool NAME] [--operation ID]
@@ -59,8 +60,7 @@ plural app remove ENV APP
 plural env serve NAME [--app APP] [--port 3825]
 plural run (-t TASK | -b BENCHMARK) (-m MODEL [--harness HARNESS] | -a AGENT)
            [--record] [--evaluation-track ID] [--attempts N] [--concurrency N]
-           [--plural-version VERSION] [--dry-run] [--json]
-plural eval status [--benchmark NAME] [--json]
+           [--plural-version VERSION] [--heldout] [--dry-run] [--json]
 plural job list
 plural job show|rerun|record JOB_ID
 plural job record JOB_ID --push-pinned

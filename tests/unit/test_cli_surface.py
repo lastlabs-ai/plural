@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 
 from plural.cli.main import app
 
-RESOURCE_GROUPS = ("env", "task", "verifier", "harness", "agent", "benchmark", "scorecard")
+RESOURCE_GROUPS = ("env", "task", "verifier", "harness", "agent", "benchmark")
 RESOURCE_VERBS = {"init", "validate", "push", "release", "pull", "show", "list", "delete"}
 
 
@@ -41,7 +41,6 @@ def test_top_level_commands_are_the_documented_set() -> None:
         "app",
         *RESOURCE_GROUPS,
         "run",
-        "eval",
         "job",
         "trial",
         "review",
@@ -59,10 +58,9 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
     root = _root()
     extras = {
         "agent": {"key", "test"},
-        "benchmark": {"add", "remove", "split"},
+        "benchmark": {"add", "remove"},
         "env": {"serve"},
-        "scorecard": {"draft", "label", "calibrate", "decide", "rescore"},
-        "task": {"cases", "check", "generate", "review"},
+        "task": {"cases"},
         "verifier": {"try", "apply"},
     }
     for name in RESOURCE_GROUPS:

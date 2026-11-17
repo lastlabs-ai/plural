@@ -1,7 +1,8 @@
 # Quoting
 
 A steel mill's quoting desk as a Plural project, built to walk through evaluating an
-Agent: check that the graders can be trusted, run a baseline, and read the result.
+Agent: check that the Tasks and graders can be trusted, run a baseline, and read the
+result.
 
 ```text
 environments/quoting/         the mill: prices, stock, the schedule, and a reference policy
@@ -18,23 +19,14 @@ or is handed off to a person when it can't be quoted safely. See
 [the Benchmark's README](benchmarks/quoting/README.md) for the four categories and how
 a Trial is scored.
 
-## 1. See where you are
+## 1. Check the Tasks and graders
 
 ```bash
-plural eval status
+plural benchmark validate quoting
 ```
 
-Every step of an evaluation is listed with its status, followed by the command to run
-next. In a fresh copy, that is checking the graders.
-
-## 2. Check the graders
-
-```bash
-plural eval check
-```
-
-Before any model is called, each Task runs three times through the normal engine,
-each time with a fixed player in place of an Agent:
+After checking the files, each Task runs three times through the normal engine, each
+time with a fixed player in place of an Agent, before any model is called:
 
 - the Environment's **reference policy** (`environments/quoting/reference.py`), which
   quotes or hands off the way a careful person would, and must pass;
@@ -42,8 +34,9 @@ each time with a fixed player in place of an Agent:
 - an Agent that **repeats the instructions** back, which must fail.
 
 Everything an Agent can read is then scanned for answer keys, git history, solution
-files, Verifier code, and the Benchmark's canary. On this folder the check finds
-nothing, and its next command is the baseline.
+files, Verifier code, and the Benchmark's canary, and the Environment's default
+Runtime is checked for how far its results can be trusted. On this folder the check
+finds no problems. Add `--no-probes` to check the files alone.
 
 ### Plant problems for it to find
 
@@ -56,11 +49,12 @@ stays as it is:
 | `broken-check` | quote-024 is graded by a Verifier that forgot the `decision_correct` gate |
 | `leaked-key` | The Environment ships a quote log holding quote-009's answer key |
 | `git-history` | quote-013 runs in a Docker image whose `/repo` has older commits and a tag that held the answers |
+| `lenient-delivery` | quote-check's delivery check passes every date, ignoring the mill calendar |
 
 ```bash
 python traps.py /tmp/quoting-traps --enable unit-bug,broken-check,leaked-key
 cd /tmp/quoting-traps
-plural eval check
+plural benchmark validate quoting
 ```
 
 ```text
@@ -74,31 +68,44 @@ Graders
   ✓ copy-the-instructions agent fails            59/60
   ✗ quote-024: echo passes: the graders gave 1.00 to an Agent that repeated the instructions
       expected a handoff, but the Agent sent nothing
+
 Leaks
   ✗ quote-009: The answer key "{"decision":"quote","grade":"304SS","tons":8}" appears in resources/quote-log.json.
       remove it from what the Agent sees; the answer key belongs in expected
-Isolation
+
+Trust
   ! quoting runs on the local Runtime, so Trials are unverified
       use runtime: {provider: daytona} for verified results
 
-4 problems to fix before you baseline. Next: plural task check quote-016
+4 problems to fix before you baseline. Next: plural task validate quote-016
 ```
 
 `--all` adds `git-history`, which needs Docker and is reported under Leaks for
 quote-013. A check is saved per Task in `.plural/checks/` and reused until the Task
-changes, so running it again is quick.
+changes, so running it again is quick. `lenient-delivery` is a grader bug the probes
+can't see: the reference still passes, and so do Agents that promise impossible dates.
+
+## 2. What passes
+
+`verifiers/quote-check/verifier.yaml` marks its four binary checks as gates
+(`gate: true`): `decision_correct`, `price_correct`, `delivery_feasible`, and
+`above_cost`. A Trial **passes** when every gate that applies passes. A handoff has no
+quote, so its price, delivery and cost checks are `None` and don't apply. `margin_usd`
+has a `target` of `>= 150`, which is reported but never decides a pass.
+
+The **pass rate** is the share of Trials that passed every gate. The **success rate** is
+the share whose score reached the Benchmark's success threshold. Both are reported.
 
 ## 3. Run the baseline
 
 ```bash
 plural auth login
 plural run -b quoting -a quote-bot --attempts 3
-plural eval status
 ```
 
-`eval status` then shows the score with its 95% interval, pass^k across the three
-attempts, and how many Trials ran at each trust tier. On the `local` Runtime every
-Trial is `unverified`. Set `runtime: {provider: daytona}` in
+The summary shows the score with its 95% interval, the success rate, pass^k across
+the three attempts, the pass rate, and how many Trials ran at each trust tier. On the
+`local` Runtime every Trial is `unverified`. Set `runtime: {provider: daytona}` in
 `environments/quoting/environment.yaml` for `verified` results.
 
 ## quote-bot's planted weaknesses

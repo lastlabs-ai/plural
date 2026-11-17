@@ -44,7 +44,6 @@ from plural.local_models import LocalModelError, LocalModelIdentity, Status
 from plural.metrics import MetricAggregate, MetricFailure
 from plural.rewards import RewardFailure
 from plural.sandbox.models import NetworkMode
-from plural.scorecards import Scorecard
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
 from plural.trust import TrustAssessment
 
@@ -482,8 +481,8 @@ def resolve_trial_harness_grant(
     )
 
 
-JobPurpose = Literal["eval", "diagnose", "fork", "fix_test", "confirm"]
-REFUSE_HELDOUT: frozenset[str] = frozenset({"diagnose", "fork", "fix_test"})
+JobPurpose = Literal["eval", "diagnose", "fork", "confirm"]
+REFUSE_HELDOUT: frozenset[str] = frozenset({"diagnose", "fork"})
 """Job purposes that may never run, or read, a held-out Task."""
 
 
@@ -517,27 +516,21 @@ class JobSpec(FrozenModel):
     purpose: JobPurpose = Field(
         default="eval",
         description=(
-            "Why the Job runs: eval, diagnose, fork, fix_test, or confirm. Diagnosis, "
-            "forks, and fix tests never run held-out Tasks."
+            "Why the Job runs: eval, diagnose, fork, or confirm. Diagnosis and "
+            "forks never run held-out Tasks."
         ),
-    )
-    scorecard: Scorecard | None = Field(
-        default=None,
-        description="The Benchmark's Scorecard, whose gates decide which Trials pass.",
     )
 
     @model_serializer(mode="wrap")
     def _omit_no_party(self, handler: SerializerFunctionWrapHandler) -> Any:
         data = handler(self)
-        # A Job without a party, a purpose, or a Scorecard serializes, and so hashes, as
-        # it did before each existed.
+        # A Job without a party or a purpose serializes, and so hashes, as it did
+        # before each existed.
         if isinstance(data, dict):
             if not self.party:
                 data.pop("party", None)
             if self.purpose == "eval":
                 data.pop("purpose", None)
-            if self.scorecard is None:
-                data.pop("scorecard", None)
         return data
 
     @model_validator(mode="after")
@@ -550,7 +543,8 @@ class JobSpec(FrozenModel):
             raise ValueError(
                 f"A {self.purpose} Job cannot run held-out Tasks ({', '.join(heldout)}): "
                 "held-out Tasks are kept for confirming a fix, so diagnosis never sees "
-                "them.\nNext: plural fix confirm FIX runs them once, as a counted peek."
+                "them.\nNext: plural run --benchmark BENCHMARK --heldout runs them, as a "
+                "counted peek."
             )
         names = {agent.name for agent in self.agents}
         unknown = sorted(set(self.party) - names)
@@ -1031,10 +1025,12 @@ class TrialResult(FrozenModel):
     metric_failures: tuple[MetricFailure, ...] = ()
     """Each Verifier whose ``measure`` hook failed, on how many steps. Never fatal."""
     gates: dict[str, bool] = Field(default_factory=dict)
-    """Under the Benchmark's Scorecard, each applicable gate's verdict."""
+    """Each applicable gate's verdict, for the metrics the Task's Verifiers mark
+    ``gate: true``. A gate whose value is ``None`` does not apply and is left out."""
     passed: bool | None = None
-    """Under the Benchmark's Scorecard, whether every applicable gate passed. ``None``
-    without a Scorecard or while awaiting review; ``False`` for a Trial that failed."""
+    """Whether every applicable gate passed. ``None`` when no gate applies (the
+    Trial is not judged) or while a Verifier awaits review; ``False`` for a
+    Trial that failed and has gates."""
 
     @model_validator(mode="after")
     def _shape(self) -> TrialResult:
@@ -1073,10 +1069,11 @@ class AgentAggregate(FrozenModel):
     """What the leaderboard ranks on: ``score``, or a metric the Benchmark names."""
     primary: float | None = None
     """This Agent's value of ``primary_metric``: ``mean_score`` for ``score``, else
-    the metric's mean (its pass rate, for a binary metric)."""
+    the metric's mean (the share of 1s, for a binary metric)."""
     pass_rate: float | None = None
-    """Under the Benchmark's Scorecard, the share of this Agent's Trials that passed
-    every applicable gate."""
+    """The pass rate: the share of this Agent's judged Trials that passed every
+    applicable gate. ``None`` when no Trial was judged. The success rate, which
+    counts scores at the success threshold, is separate."""
 
 
 class JobResult(FrozenModel):
@@ -1118,9 +1115,9 @@ class Job:
 
     A Benchmark Job runs its dev Tasks. ``heldout=True`` runs the held-out
     Tasks too; each such run is a peek, and ``plural run`` counts it.
-    ``purpose`` says why the Job runs; ``diagnose``, ``fork`` and ``fix_test``
-    Jobs refuse held-out Tasks. ``scorecard`` is the Scorecard the Benchmark
-    names; with it each Trial records its ``gates`` and whether it ``passed``.
+    ``purpose`` says why the Job runs; ``diagnose`` and ``fork`` Jobs refuse
+    held-out Tasks. Each Trial records its ``gates``, from the
+    metrics its Task's Verifiers mark ``gate: true``, and whether it ``passed``.
     """
 
     def __init__(
@@ -1149,7 +1146,6 @@ class Job:
         credentials: Mapping[str, Mapping[str, str]] | None = None,
         episode_server: Any = None,
         allow_local_models: bool = False,
-        scorecard: Scorecard | None = None,
         heldout: bool = False,
         purpose: JobPurpose = "eval",
     ) -> None:
@@ -1186,15 +1182,6 @@ class Job:
             job_source = TaskJobSource(task=source._definition())
         else:
             job_source = BenchmarkJobSource(benchmark=source._definition(), include_heldout=heldout)
-        if scorecard is not None and (
-            not isinstance(source, Benchmark) or source.scorecard != scorecard.reference
-        ):
-            named = source.scorecard if isinstance(source, Benchmark) else None
-            raise ValueError(
-                "Cannot create Job.\n"
-                f"scorecard is {scorecard.reference}, but the source names "
-                f"{named or 'no Scorecard'}. Pass the Scorecard its Benchmark names."
-            )
         bindings = tuple(AgentBinding(agent=agent._definition()) for agent in self.agents)
         members: list[str] = []
         for member in party or ():
@@ -1211,7 +1198,6 @@ class Job:
             priority=priority,
             retry=retry or RetryPolicy(),
             purpose=purpose,
-            scorecard=scorecard,
         )
         self.catalog = catalog or ModelCatalog()
         self.plan = self.spec.plan(self.catalog)

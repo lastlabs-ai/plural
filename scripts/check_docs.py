@@ -42,7 +42,6 @@ PACKAGE_NAV = [
     ("Build", "/docs/project/runtimes", "project/runtimes.md"),
     ("Build", "/docs/project/tasks", "project/tasks.md"),
     ("Build", "/docs/project/verifiers", "project/verifiers.md"),
-    ("Build", "/docs/project/scorecards", "project/scorecards.md"),
     ("Build", "/docs/project/harnesses", "project/harnesses.md"),
     ("Build", "/docs/project/agents", "project/agents.md"),
     ("Build", "/docs/project/external-agents", "project/external-agents.md"),

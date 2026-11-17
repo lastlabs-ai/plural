@@ -1,6 +1,6 @@
 """The shop's reference policy: a cautious shopkeeper who stocks for an ordinary day.
 
-`plural task check` plays it on every Task through the normal engine, so a Task
+`plural task validate` plays it on every Task through the normal engine, so a Task
 whose reference loses money has a broken Task or a broken grader, not a weak
 Agent. It reads only what an Agent reads: the books and each action's reply.
 """

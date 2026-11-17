@@ -43,7 +43,6 @@ plugins:
           - project/runtimes.md
           - project/tasks.md
           - project/verifiers.md
-          - project/scorecards.md
           - project/harnesses.md
           - project/agents.md
           - project/external-agents.md
@@ -114,7 +113,6 @@ nav:
       - Runtimes: project/runtimes.md
       - Tasks: project/tasks.md
       - Verifiers: project/verifiers.md
-      - Scorecards: project/scorecards.md
       - Harnesses: project/harnesses.md
       - Agents: project/agents.md
       - External Agents: project/external-agents.md

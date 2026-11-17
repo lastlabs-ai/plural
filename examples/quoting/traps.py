@@ -1,7 +1,7 @@
 """Plant the quoting example's grader bug and integrity traps in a copy of it.
 
 The example in this folder is the clean fixture. This script copies it and plants
-whichever problems you name, so `plural eval check` and the Inspector have something
+whichever problems you name, so `plural benchmark validate` and the Inspector have something
 real to find:
 
     python traps.py /tmp/quoting-traps --all
@@ -15,8 +15,7 @@ real to find:
 - git-history: quote-013 runs in an image whose /repo has older commits and a tag,
   one of which held the answers. It needs Docker, and runs from the project folder.
 - lenient-delivery: quote-check's delivery check ignores the mill calendar and passes
-  every date, so `plural scorecard calibrate steel-quoting` marks delivery_feasible
-  needs_work against the labels in labels/steel-quoting.jsonl.
+  every date, a grader bug: Trials that promise a date the mill can't meet still pass.
 """
 
 from __future__ import annotations
@@ -148,7 +147,7 @@ def main() -> None:
     traps = set(TRAPS) if arguments.all else {item.strip() for item in arguments.enable.split(",")}
     plant(arguments.destination, traps)
     print(f"Planted {', '.join(sorted(traps))} in {arguments.destination}.")
-    print(f"Next: cd {arguments.destination} && plural eval check")
+    print(f"Next: cd {arguments.destination} && plural benchmark validate quoting")
 
 
 if __name__ == "__main__":

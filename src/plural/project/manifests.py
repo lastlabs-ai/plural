@@ -123,7 +123,7 @@ class EnvironmentManifest(ManifestModel):
         pattern=r"^[\w./-]+\.py:[A-Za-z_]\w*$",
         description=(
             "A policy that solves every Task in this Environment, such as "
-            "reference.py:solve. `plural task check` runs it as the reference probe, "
+            "reference.py:solve. `plural task validate` runs it as the reference probe, "
             "calling it with the Task and the episode. It never reaches the Agent and is "
             "not part of the Environment's identity."
         ),
@@ -182,7 +182,7 @@ class TaskManifest(ManifestModel):
         pattern=r"^[\w./-]+\.py:[A-Za-z_]\w*$",
         description=(
             "A policy that solves this Task, such as reference.py:solve, in place of the "
-            "Environment's. `plural task check` runs it as the reference probe, calling it "
+            "Environment's. `plural task validate` runs it as the reference probe, calling it "
             "with the Task and the episode. It never reaches the Agent and is not part of "
             "the Task's identity."
         ),
@@ -238,11 +238,8 @@ class BenchmarkManifest(BenchmarkRelease):
     description: str = ""
     tasks: list[str] = Field(default_factory=list)
     primary_metric: str = "score"
-    """What the leaderboard ranks on: ``score``, a built-in metric, a metric a
-    Task's Verifier declares, or an objective of the Benchmark's Scorecard."""
-    scorecard: str | None = None
-    """The Scorecard, as ``name`` or ``name@version``, whose gates decide which
-    Trials pass and whose primary objective the leaderboard ranks on by default."""
+    """What the leaderboard ranks on: ``score``, a built-in metric, or a metric a
+    Task's Verifier declares."""
     heldout: list[str] = Field(default_factory=list)
     """Tasks kept back for confirmation. ``plural run --benchmark`` leaves them out,
     and every run that includes them is counted as a peek."""

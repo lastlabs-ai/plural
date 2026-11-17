@@ -58,7 +58,6 @@ from plural.project.layout import (
     BENCHMARK,
     ENVIRONMENT,
     HARNESS,
-    SCORECARD,
     TASK,
     VERIFIER,
     Project,
@@ -77,7 +76,6 @@ from plural.project.sync import (
     revision_label,
     unpushed_pins,
 )
-from plural.scorecards import parse_reference
 from plural.studio import Studio, slugify
 from plural.tasks import Benchmark, TaskDefinition
 from plural.verifiers import DeterministicVerifier, WeightedVerifier
@@ -265,19 +263,14 @@ def plan_run(
         raise ProjectError(
             "--heldout runs a Benchmark's held-out Tasks, and "
             + (f"Benchmark {source.name} has none." if is_benchmark else "this is a Task.")
-            + "\nNext: plural benchmark split BENCHMARK holds some out."
+            + "\nNext: list some of the Benchmark's Tasks under heldout: in benchmark.yaml."
         )
-    scorecard = None
-    if is_benchmark and loaded.value.scorecard:
-        name = parse_reference(loaded.value.scorecard)[0]
-        scorecard = workspace.load(ResourceRef(SCORECARD.name, name)).value
     job = Job(
         loaded.value,
         agents=[agent],
         attempts=attempts,
         concurrency=1 if auto else request.concurrency,
         catalog=workspace.catalog,
-        scorecard=scorecard,
         heldout=request.heldout,
     )
     update: dict[str, Any] = {"run_id": uuid.uuid4().hex}
@@ -1028,6 +1021,11 @@ def local_trial(workspace: Workspace, trial_id: str) -> dict[str, Any]:
         ),
         "credentials": (
             [item.model_dump(mode="json") for item in result.credentials] if result else []
+        ),
+        "trust": (
+            result.trust.model_dump(mode="json", include={"tier", "reasons"})
+            if result and result.trust
+            else None
         ),
         "artifacts": str(latest / "artifacts") if latest else None,
         "logs": str(latest / "logs") if latest else None,

@@ -311,8 +311,11 @@ class ScoreSummary(FrozenModel):
         estimate: The mean of Task means.
         interval: The 95% clustered-bootstrap interval, or ``None`` with fewer
             than two scored Tasks.
-        pass_rate: The share of attempts that reached the success threshold.
-        pass_hat_k: pass^k: the share of Tasks where every attempt passed.
+        success_rate: The share of attempts that reached the success threshold.
+            This is not the pass rate, which counts Trials that passed every
+            gate (``AgentAggregate.pass_rate``).
+        pass_hat_k: pass^k: the share of Tasks where every attempt reached the
+            success threshold.
         k: The most attempts any Task had.
         tasks: Scored Tasks.
         attempts: Scored attempts.
@@ -320,7 +323,7 @@ class ScoreSummary(FrozenModel):
 
     estimate: float
     interval: Interval | None = None
-    pass_rate: float
+    success_rate: float
     pass_hat_k: float | None = None
     k: int
     tasks: int
@@ -332,12 +335,12 @@ class ScoreSummary(FrozenModel):
 
         Examples:
             >>> score_summary({"a": [1.0, 0.0], "b": [1.0, 1.0]}, seed=1).summary
-            'score 0.75 (95% 0.25 to 1.00), pass rate 75%, pass^2 50%, over 2 Tasks'
+            'score 0.75 (95% 0.25 to 1.00), success rate 75%, pass^2 50%, over 2 Tasks'
         """
         text = f"score {self.estimate:.2f}"
         if self.interval is not None:
             text += f" (95% {self.interval.low:.2f} to {self.interval.high:.2f})"
-        text += f", pass rate {self.pass_rate:.0%}"
+        text += f", success rate {self.success_rate:.0%}"
         if self.k > 1 and self.pass_hat_k is not None:
             text += f", pass^{self.k} {self.pass_hat_k:.0%}"
         return text + f", over {self.tasks} Task{'s' if self.tasks != 1 else ''}"
@@ -349,11 +352,11 @@ def score_summary(
     threshold: float = 1.0,
     seed: int,
 ) -> ScoreSummary | None:
-    """Summarize scores by Task: the mean, its interval, pass rate, and pass^k.
+    """Summarize scores by Task: the mean, its interval, success rate, and pass^k.
 
     Args:
         attempts: Each Task's attempt scores; ``None`` attempts are left out.
-        threshold: The score that counts as passing.
+        threshold: The score that counts as a success.
         seed: The bootstrap seed; see :func:`seed_for`.
 
     Returns:
@@ -381,7 +384,7 @@ def score_summary(
     return ScoreSummary(
         estimate=_weighted_mean([(1.0, _mean(values)) for values in scored.values()]),
         interval=interval,
-        pass_rate=sum(value >= threshold for value in flat) / len(flat),
+        success_rate=sum(value >= threshold for value in flat) / len(flat),
         pass_hat_k=pass_hat_k(outcomes),
         k=max(len(values) for values in scored.values()),
         tasks=len(scored),

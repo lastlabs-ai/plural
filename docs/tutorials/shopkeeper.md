@@ -2,11 +2,11 @@
 route: /docs/tutorials/shopkeeper
 title: Shopkeeper
 order: 117
-description: Run a corner shop for a season, an episode with no final answer, and evaluate it by a running metric, cash on hand after every action, charted over the season and gated by a Scorecard.
+description: Run a corner shop for a season, an episode with no final answer, and evaluate it by a running metric, cash on hand after every action, charted over the season and gated by a Verifier metric.
 audience: all
 nav: true
 nav_group: Tutorials
-outcome: You can measure an Agent after every action with a running metric, rank a Benchmark by it, and gate Trials with a Scorecard when there is no answer to check.
+outcome: You can measure an Agent after every action with a running metric, rank a Benchmark by it, and gate Trials on a metric when there is no answer to check.
 ---
 # Shopkeeper
 
@@ -23,7 +23,7 @@ By the end you will have:
 
 - measured the shop's cash after every action, and seen it charted over the season,
 - ranked a Benchmark by that running metric instead of the score,
-- gated each Trial with a [Scorecard](../project/scorecards.md), with no answer to read.
+- gated each Trial on a [metric](../project/verifiers.md#gates-and-targets), with no answer to read.
 
 ## Before you start
 
@@ -43,8 +43,7 @@ cd shopkeeper
 | **App** | `Shop`: the shelf, the prices, the cash, and the books, on its State |
 | **Environment** | `shop`: the App, a local Runtime, and a 200-action limit |
 | **Task** | `shop-001` to `shop-003`: three seasons, with different cash, rent, and customers |
-| **Verifier** | `shop-books`: measures cash after every action, and scores the season |
-| **Scorecard** | `shopkeeping`: never below zero is a gate; cash at the end is the objective |
+| **Verifier** | `shop-books`: measures cash after every action, scores the season, and gates on never going below zero |
 | **Agent** | `shopkeeper-bot`: a model and its instructions |
 | **Benchmark** | `shopkeeper`: the three seasons, ranked by cash at the end |
 
@@ -63,8 +62,10 @@ metrics:
     kind: running
     unit: USD
     aggregate: final
+    target: ">= 400"
   - name: never_negative_cash
     kind: binary
+    gate: true
 ```
 
 `measure` runs after every action, in the App host, beside the Verifier's other hooks.
@@ -108,33 +109,16 @@ def check(episode: Episode) -> VerifierOutput:
 A shop that ever went below zero scores 0, however much cash it ended with. Nothing here
 reads `episode.answer`: the Agent never gives one, and doesn't need to.
 
-## Gate with a Scorecard
+## Gate on a metric
 
-`scorecards/shopkeeping/scorecard.yaml` says what a good season is:
+`never_negative_cash` is a **gate**: a Trial passes only when every gate that applies to
+it passes, so a season that dipped below zero fails, whatever its cash. `cash_on_hand`
+has a `target` of `">= 400"`, which is reported as met or not and never decides a pass.
 
-```yaml
-name: shopkeeping
-good: |
-  A good season never dips below zero cash, not even for a moment after a big
-  delivery, and ends with more cash than it started with.
-metrics:
-  - name: never_negative_cash
-    role: gate
-  - name: cash_on_hand
-    role: objective
-    target: ">= 400"
-  - name: turns
-    role: guardrail
-    target: "<= 200"
-```
-
-A Trial that dipped below zero fails the gate, whatever its cash. `turns` is a built-in
-metric every Trial records; as a guardrail, it is reported and never ranked on. The
-Benchmark names the Scorecard and ranks on the objective:
+The Benchmark ranks on the running metric instead of the score:
 
 ```yaml
 primary_metric: cash_on_hand
-scorecard: shopkeeping
 ```
 
 ## Check the Tasks
@@ -144,10 +128,10 @@ ordinary day's demand and keeps cash back for the rent. Check that it can win ev
 season, and that an Agent that does nothing can't:
 
 ```bash
-plural eval check -b shopkeeper
+plural benchmark validate shopkeeper
 ```
 
-This calls no model.
+This calls no model. It also reports the trust the default Runtime would give.
 
 ## Run it
 
@@ -159,17 +143,17 @@ plural run -b shopkeeper -a shopkeeper-bot --dry-run
 plural run -b shopkeeper -a shopkeeper-bot --record
 ```
 
-The summary ranks by `cash_on_hand` and shows how many Trials passed the Scorecard's
-gates. With `--record`, open the Job in the hosted project:
+The summary ranks by `cash_on_hand` and shows the pass rate: the share of Trials that
+passed every gate. With `--record`, open the Job in the hosted project:
 
 - The Job's **Overview** has a metric selector: the mean of any metric, how many Trials
   it covers, and the pass rate.
 - Each Trial's **Metrics** tab charts `cash_on_hand` over the season, step by step.
-- The Benchmark's leaderboard can rank by any metric the Scorecard declares.
+- The Benchmark's leaderboard can rank by any metric its Verifiers declare.
 
 ## Where to go next
 
 - [Verifiers](../project/verifiers.md#measure-while-the-episode-runs): every running
   metric aggregate.
-- [Scorecards](../project/scorecards.md): label Trials and check that the graders agree
-  with your team.
+- [Gates and targets](../project/verifiers.md#gates-and-targets): what passes, and how
+  the pass rate differs from the success rate.

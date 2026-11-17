@@ -344,8 +344,8 @@ Choose the horizon in the Environment and Task; the Verifier does not change.
 
 A score says how good an attempt was, in one number. **Metrics** say why: they are
 named measurements a Verifier declares, such as "was the price right?" or "how much
-margin did the quote make?". A Benchmark can rank on any of them, and a
-[Scorecard](scorecards.md) turns them into gates and objectives.
+margin did the quote make?". A Benchmark can rank on any of them, and any of them can
+be a [gate](#gates-and-targets) that every attempt must pass.
 
 List the metrics in `verifier.yaml`, and return their values from `check`:
 
@@ -394,10 +394,43 @@ attempt, rather than 0. A correct handoff has no quote, so it has no price to ch
 `price_correct` is `None` there, not a failure. A `None` is left out of every average,
 and each average says how many Trials it covers.
 
+#### Gates and targets
+
+Mark a metric `gate: true` when an attempt must pass it to count as done. A `binary`
+gate passes at 1. Any other kind needs a `target`, a comparison such as `">= 150"` or
+`"<= 30"`; a plain number means equal to it:
+
+```yaml
+metrics:
+  - name: price_correct
+    kind: binary
+    gate: true
+  - name: margin_usd
+    kind: number
+    unit: USD
+    target: ">= 150"
+```
+
+A Trial **passes** when every gate that applies to it passes. A gate whose value is
+`None` does not apply, so a correct handoff passes on `decision_correct` alone. A Trial
+with no gate that applies is **not judged**: it neither passes nor fails, and it is
+left out of the pass rate. A `target` on a metric that is not a gate is reported as
+met or not, and never decides a pass.
+
+Two rates follow, and they are different numbers:
+
+- The **success rate** is the share of attempts whose score reached the Benchmark's
+  success threshold.
+- The **pass rate** is the share of judged attempts that passed every gate.
+
+The run summary shows both, and `TrialResult.gates` and `TrialResult.passed` hold each
+Trial's verdicts.
+
 Every Trial also records five **built-in** metrics with no Verifier at all:
 `cost_usd`, `latency_seconds`, `turns`, `total_tokens`, and `succeeded`, which is 1
 when the episode ended on its own, without an error or hitting a limit. An [AgentVerifier](#agentverifier) declares
-one `rating` metric per rubric criterion, named after the criterion.
+one `rating` metric per rubric criterion, named after the criterion; two criteria whose
+names would collide get `_2`, `_3`, and so on, in order.
 
 Metrics are measurements, not credit. They never enter the reward ledger, a reward is
 never a metric, and the Agent never sees either.

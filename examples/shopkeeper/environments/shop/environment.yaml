@@ -18,5 +18,5 @@ limits:
   max_turns: 200
   max_seconds: 900
 
-# The reference policy plural task check plays to prove each Task can be won.
+# The reference policy plural task validate plays to prove each Task can be won.
 reference: reference.py:solve

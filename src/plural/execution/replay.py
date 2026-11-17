@@ -222,12 +222,14 @@ def _step_metrics(
     task: StepTask,
     *,
     steps: Sequence[Mapping[str, Any]] = (),
+    recorded: Sequence[Mapping[str, Any]] = (),
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Replay ``measure`` on each step, as the App host ran it live.
 
-    The stored Trial has no wall clock or simulated time for a replayed point,
-    so points carry only their step. As live, a hook that fails on a step
-    gives that step no point and the rest still run.
+    Each point keeps the elapsed time and simulated time the host recorded for
+    that step, from ``recorded`` (the Trial's ``metrics.jsonl``) or the step's own
+    record; a step with neither carries only its step. As live, a hook that
+    fails on a step gives that step no point and the rest still run.
 
     Returns:
         The points, and a problem for each step whose hook failed.
@@ -235,6 +237,13 @@ def _step_metrics(
     fn = verifier.measure_fn
     assert fn is not None
     running = {spec.name for spec in verifier.metrics if spec.kind == "running"}
+    clocks: dict[int, dict[str, Any]] = {}
+    for line in (*recorded, *steps):
+        number = line.get("step")
+        if isinstance(number, int) and not isinstance(number, bool):
+            for key in ("t", "sim_time"):
+                if line.get(key) is not None:
+                    clocks.setdefault(number, {}).setdefault(key, line[key])
     points: list[dict[str, Any]] = []
     problems: list[str] = []
     for number, _, step in _replayed_steps(events, states, task, steps):
@@ -256,9 +265,17 @@ def _step_metrics(
         except Exception as exc:  # noqa: BLE001 - as live, one step's failure is reported
             problems.append(f"measure failed on step {number}: {type(exc).__name__}: {exc}")
             continue
-        points.append(
-            {"step": number, "verifier": verifier.name, "values": values, "source": step.source}
-        )
+        point: dict[str, Any] = {
+            "step": number,
+            **clocks.get(number, {}),
+            "verifier": verifier.name,
+            "version": verifier.version,
+            "values": values,
+            "source": step.source,
+        }
+        if step.seat is not None:
+            point["seat"] = step.seat
+        points.append(point)
     return points, problems
 
 
@@ -314,6 +331,7 @@ def replay_verifier(
                 states,
                 task or StepTask(),
                 steps=_jsonl(artifacts / STEPS_FILE),
+                recorded=_jsonl(artifacts / METRICS_FILE),
             )
             result.metrics.extend(points)
             result.problems.extend(problems)

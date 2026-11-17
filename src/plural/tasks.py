@@ -765,15 +765,13 @@ class BenchmarkRelease(FrozenModel):
 def _check_ranking(
     name: str,
     primary_metric: str,
-    scorecard: str | None,
     heldout: Sequence[str],
     verifiers: Mapping[str, Sequence[Any]],
 ) -> None:
     """Check what a Benchmark ranks on, and that its held-out Tasks are its own.
 
-    Without a Scorecard, ``primary_metric`` must be ``score``, a built-in, or a
-    metric some Task's Verifier declares. With one, the Scorecard is checked
-    where it is resolved, since it may name an objective defined there.
+    ``primary_metric`` must be ``score``, a built-in, or a metric some Task's
+    Verifier declares.
 
     Raises:
         ValueError: When the metric or a held-out Task is unknown, or every Task
@@ -781,7 +779,7 @@ def _check_ranking(
     """
     from plural.metrics import BUILTIN_METRICS
 
-    if scorecard is None and primary_metric != "score":
+    if primary_metric != "score":
         known = set(BUILTIN_METRICS) | {
             spec.name
             for items in verifiers.values()
@@ -805,8 +803,8 @@ def _check_ranking(
     if heldout and set(heldout) >= set(verifiers):
         raise ValueError(
             f"Cannot create Benchmark {name!r}.\nEvery Task is held out, so a plain run "
-            "would have nothing to run. Hold out a share, such as with "
-            "plural benchmark split --heldout 0.3."
+            "would have nothing to run. List only some Tasks under heldout:, such as "
+            "a third."
         )
 
 
@@ -821,8 +819,6 @@ class BenchmarkDefinition(BenchmarkRelease):
     primary_metric: str = "score"
     description: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
-    scorecard: str | None = None
-    """The Scorecard (``name@version``) whose gates decide which Trials pass."""
     heldout: tuple[str, ...] = ()
     """Task names kept back for confirmation; a plain run leaves them out."""
 
@@ -844,7 +840,6 @@ class BenchmarkDefinition(BenchmarkRelease):
         _check_ranking(
             self.name,
             self.primary_metric,
-            self.scorecard,
             self.heldout,
             {
                 task.task_id: tuple(binding.verifier for binding in task.verifiers)
@@ -870,9 +865,7 @@ class BenchmarkDefinition(BenchmarkRelease):
         if self.source_hash:
             return self.source_hash
         payload = self.model_dump(exclude={"source_hash", *RELEASE_FIELDS})
-        # A Benchmark without a Scorecard or held-out Tasks hashes as it did before them.
-        if payload.get("scorecard") is None:
-            payload.pop("scorecard", None)
+        # A Benchmark without held-out Tasks hashes as it did before them.
         if not payload.get("heldout"):
             payload.pop("heldout", None)
         return content_hash({**payload, **self._release_payload()})
@@ -937,11 +930,9 @@ class Benchmark(BenchmarkRelease):
     tasks: tuple[Task, ...] = Field(min_length=1)
     primary_metric: str = "score"
     """What the leaderboard ranks on: ``score``, a built-in metric such as
-    ``cost_usd``, a metric a Task's Verifier declares, or a Scorecard objective."""
+    ``cost_usd``, or a metric a Task's Verifier declares."""
     description: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
-    scorecard: str | None = None
-    """The Scorecard, as ``name@version``, whose gates decide which Trials pass."""
     heldout: tuple[str, ...] = ()
     """Tasks kept back for confirmation. A plain run leaves them out; each run
     that includes them is a peek, and is counted."""
@@ -972,7 +963,6 @@ class Benchmark(BenchmarkRelease):
         _check_ranking(
             self.name,
             self.primary_metric,
-            self.scorecard,
             self.heldout,
             {task.name: tuple(task.verifiers) for task in self.tasks},
         )
@@ -1004,7 +994,6 @@ class Benchmark(BenchmarkRelease):
                 "description": self.description,
                 "metadata": self.metadata,
                 **release,
-                **({"scorecard": self.scorecard} if self.scorecard is not None else {}),
                 **({"heldout": sorted(self.heldout)} if self.heldout else {}),
             },
         )
@@ -1031,7 +1020,7 @@ class Benchmark(BenchmarkRelease):
         after_release = other.model_dump(mode="json", include=set(RELEASE_FIELDS))
         configuration_changes = {
             field: (getattr(self, field), getattr(other, field))
-            for field in ("primary_metric", "description", "metadata", "scorecard", "heldout")
+            for field in ("primary_metric", "description", "metadata", "heldout")
             if getattr(self, field) != getattr(other, field)
         }
         configuration_changes.update(
@@ -1104,7 +1093,6 @@ class Benchmark(BenchmarkRelease):
             primary_metric=self.primary_metric,
             description=self.description,
             metadata=self.metadata,
-            scorecard=self.scorecard,
             heldout=self.heldout,
             **{field: getattr(self, field) for field in RELEASE_FIELDS},
         )

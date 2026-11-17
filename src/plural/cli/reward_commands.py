@@ -2,7 +2,8 @@
 
 Rewards live in each Trial's ``rewards.jsonl`` ledger, beside the trajectory.
 ``plural verifier try`` runs a Verifier's hooks on stored Trials and prints what
-it would give; ``plural verifier apply`` appends those rewards to the ledgers.
+it would give; ``plural verifier apply`` appends those rewards to the ledgers and
+stores the running metric points its ``measure`` gives.
 Neither runs the Agent. ``export`` joins a ledger with the trajectory and any
 TITO records.
 """
@@ -30,6 +31,7 @@ from plural.errors import PluralError
 from plural.execution.replay import Replay, replay_verifier
 from plural.execution.store import JobStore
 from plural.jobs import TrialResult
+from plural.metrics import METRICS_FILE, store_metric_points
 from plural.project import ProjectError, Workspace
 from plural.project.runs import RUN_RECORD, find_local_trial, finished_local_job
 from plural.rewards import (
@@ -86,14 +88,16 @@ def _trial_dirs(space: Workspace, trials: list[str], job: str | None) -> list[Pa
     return [find_local_trial(space, trial_id)[1] for trial_id in trials]
 
 
-def _publish(space: Workspace, trial_dirs: list[Path]) -> tuple[int, str | None]:
-    """Add new ledger records to the hosted Trials of Jobs that were pushed.
+def _publish(
+    space: Workspace, trial_dirs: list[Path], verifier: DeterministicVerifier
+) -> tuple[int, int, str | None]:
+    """Add new ledger records and metric points to the hosted Trials of pushed Jobs.
 
     Returns:
-        How many records were new to the hosted ledgers, and why some could
-        not be recorded, if any.
+        How many records were new to the hosted ledgers, how many metric points
+        the hosted Trials stored, and why some could not be recorded, if any.
     """
-    from plural.execution.report import publish_rewards
+    from plural.execution.report import publish_metric_points, publish_rewards
     from plural.execution.store import JobStore
 
     by_job: dict[str, set[str]] = {}
@@ -107,18 +111,24 @@ def _publish(space: Workspace, trial_dirs: list[Path]) -> tuple[int, str | None]
             and (record := finished_local_job(space, job_id)).hosted_job_id
         }
         if not pushed:
-            return 0, None
+            return 0, 0, None
         studio, _ = project_studio(space, signed_in(session()))
         store = JobStore(space.project.jobs_dir)
-        return (
-            sum(
-                publish_rewards(studio, store, job_id, hosted_id, trial_ids=by_job[job_id])
-                for job_id, hosted_id in pushed.items()
-            ),
-            None,
-        )
+        records = points = 0
+        for job_id, hosted_id in pushed.items():
+            records += publish_rewards(studio, store, job_id, hosted_id, trial_ids=by_job[job_id])
+            points += publish_metric_points(
+                studio,
+                store,
+                job_id,
+                hosted_id,
+                verifier=verifier.name,
+                version=verifier.version,
+                trial_ids=by_job[job_id],
+            )
+        return records, points, None
     except (PluralError, ProjectError) as exc:
-        return 0, f"The hosted project was not updated: {exc} Run this again to retry."
+        return 0, 0, f"The hosted project was not updated: {exc} Run this again to retry."
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -257,12 +267,15 @@ def verifier_apply(
     job: str | None = typer.Option(None, "--job", help="Every Trial of this local Job."),
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Run a Verifier on stored Trials and add its rewards to their ledgers.
+    """Run a Verifier on stored Trials, add its rewards, and store its metric points.
 
     Records are kept under the Verifier's name and version. A Trial that already
     has rewards from this version is left as it is: bump the Verifier's version
-    when its logic changes, so an export can choose which labels to use. Pushed
-    Jobs get the new records in the hosted project too.
+    when its logic changes, so an export can choose which labels to use. Running
+    metric points from ``measure`` replace the Verifier's earlier points in the
+    Trial's metric series, unless this version's are already there. The Trial's
+    score and metric values stay as the run recorded them. Pushed Jobs get the
+    new records and points in the hosted project too.
     """
     space, verifier, replays = _replays(name, trial, job)
     applied: list[dict[str, Any]] = []
@@ -274,21 +287,32 @@ def verifier_apply(
         }
         records = [item for item in replay.rewards if item.source not in existing]
         added = append_ledger(artifacts / LEDGER_FILE, records)
+        points = (
+            store_metric_points(
+                artifacts / METRICS_FILE, verifier.name, verifier.version, replay.metrics
+            )
+            if replay.metrics
+            else 0
+        )
         applied.append(
             {
                 "trial_id": trial_dir.name,
                 "records": len(records),
                 "new_records": added,
+                "metric_points": points,
                 "skipped": sorted(existing & {item.source for item in replay.rewards}),
                 "problems": replay.problems,
             }
         )
-    hosted, problem = _publish(space, [trial_dir for trial_dir, _, _ in replays])
+    hosted, hosted_points, problem = _publish(
+        space, [trial_dir for trial_dir, _, _ in replays], verifier
+    )
     payload = {
         "verifier": verifier.name,
         "version": verifier.version,
         "trials": applied,
         "hosted_records": hosted,
+        "hosted_metric_points": hosted_points,
     }
 
     def text() -> None:
@@ -299,8 +323,14 @@ def verifier_apply(
                 if item["skipped"]
                 else ""
             )
+            points = (
+                f", stored {counted(item['metric_points'], 'metric point')}"
+                if item["metric_points"]
+                else ""
+            )
             typer.echo(
-                f"{item['trial_id']}: added {counted(item['new_records'], 'reward')}{skipped}"
+                f"{item['trial_id']}: added {counted(item['new_records'], 'reward')}"
+                f"{points}{skipped}"
             )
             for message in item["problems"]:
                 note(message)
@@ -308,6 +338,8 @@ def verifier_apply(
             note("Bump the Verifier's version to record new labels beside the old ones.")
         if hosted:
             typer.echo(f"Recorded {counted(hosted, 'new reward')} in the hosted project.")
+        if hosted_points:
+            typer.echo(f"Stored {counted(hosted_points, 'metric point')} in the hosted project.")
         if problem:
             note(problem)
 

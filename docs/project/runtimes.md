@@ -169,7 +169,9 @@ package manager today; others will be added beside it under `packages`.
 ## Trust tiers
 
 Every Trial records how far its result can be trusted, from how it actually ran. The
-tier appears on the Trial, in `plural eval status`, and as a badge in the Trial table.
+tier appears on the Trial, in `plural job show`, and as a badge in the Trial table.
+`plural benchmark validate` reports the tier the default Runtime would give, before
+you run anything.
 
 | Tier | When |
 | --- | --- |
@@ -181,7 +183,7 @@ A Trial lists the reasons it is not `verified`. A Trial that failed before its
 episode started has no tier. pluralintel.com recomputes the tier from the facts a Job
 reports, so a Job cannot claim a tier its facts don't support.
 
-On Daytona with the default settings, a recorded run or `plural eval` run is
+On Daytona with the default settings, a recorded run is
 `verified`: Daytona's default snapshot is pinned, the App host runs as its own user,
 and the network is limited to Plural's gateway.
 

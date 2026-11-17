@@ -44,6 +44,7 @@ from plural.jobs import (
     TrialResult,
     VerifierResult,
 )
+from plural.metrics import METRICS_FILE
 from plural.rewards import LEDGER_FILE, read_ledger
 from plural.studio import UPLOAD_TIMEOUT, Studio
 from plural.usage import TokenUsage, UsageTotals
@@ -670,6 +671,73 @@ def publish_rewards(
     return added
 
 
+def publish_metric_points(
+    studio: Studio,
+    store: JobStore,
+    local_job_id: str,
+    hosted_job_id: str,
+    *,
+    verifier: str,
+    version: str,
+    trial_ids: Collection[str] | None = None,
+    agents: Mapping[str, AgentPin] | None = None,
+) -> int:
+    """Send one Verifier version's running metric points to each hosted Trial.
+
+    Use this after ``plural verifier apply`` stores them in a pushed Job's
+    ``metrics.jsonl``. The hosted Trial keeps one set per Verifier version, so
+    publishing again stores nothing new.
+
+    Returns:
+        How many points the hosted Trials stored.
+    """
+    pins = dict(agents) if agents is not None else agent_pins(store.load_spec(local_job_id))
+    hosted = _hosted_trials(studio, hosted_job_id)
+    stored = 0
+    trials_root = store.job_path(local_job_id) / "trials"
+    for trial_root in sorted(path for path in trials_root.iterdir() if path.is_dir()):
+        if trial_ids is not None and trial_root.name not in trial_ids:
+            continue
+        for execution_root in sorted(
+            (path for path in (trial_root / "executions").iterdir() if path.name.isdigit()),
+            key=lambda path: int(path.name),
+        ):
+            path = execution_root / "artifacts" / METRICS_FILE
+            points = [
+                line
+                for line in (
+                    json.loads(text)
+                    for text in (path.read_text("utf-8").splitlines() if path.is_file() else ())
+                    if text.strip()
+                )
+                if line.get("verifier") == verifier and line.get("version") == version
+            ]
+            if not points:
+                continue
+            outcome = TrialResult.model_validate_json(
+                (execution_root / "result.json").read_text(encoding="utf-8")
+            )
+            receipt = outcome.receipt
+            target = _result_target(hosted, outcome, pins)
+            if target is None:
+                continue
+            execution = studio.trials.create_execution(
+                target,
+                idempotency_key=execution_key(
+                    receipt.job_id, receipt.trial_id, receipt.execution_id
+                ),
+            )
+            response = studio.trials.add_metric_points(
+                target,
+                points,
+                verifier=verifier,
+                version=version,
+                execution_id=str(execution["id"]),
+            )
+            stored += int(response.get("stored") or 0)
+    return stored
+
+
 class HostedTracker:
     """Report a local Job to its hosted client Job while it runs.
 
@@ -898,5 +966,6 @@ __all__ = [
     "execution_key",
     "publish_execution",
     "publish_job",
+    "publish_metric_points",
     "publish_rewards",
 ]

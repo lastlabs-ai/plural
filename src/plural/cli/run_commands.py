@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import uuid
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
@@ -1208,11 +1209,15 @@ def _print_result(
             line = (
                 f"{ranked_on}{', ' if ranked_on else ''}mean score {mean} over "
                 f"{counted(aggregate.count, 'Trial')}, "
-                f"{aggregate.successes} succeeded, coverage {aggregate.coverage:.0%}"
+                f"{aggregate.successes} finished without an error, "
+                f"coverage {aggregate.coverage:.0%}"
             )
         if aggregate.pass_rate is not None:
-            line += f"; {aggregate.pass_rate:.0%} passed the Scorecard's gates"
+            line += f"; pass rate {aggregate.pass_rate:.0%} (passed every gate)"
         typer.echo(f"  {aggregate.agent_name}: {line}")
+    tiers = Counter(trial.trust.tier for trial in result.trials if trial.trust is not None)
+    if tiers:
+        typer.echo("  trust: " + ", ".join(f"{count} {tier}" for tier, count in tiers.items()))
     for line in _reward_warnings(result.trials):
         typer.echo(f"! {line}", err=True)
     typer.echo(f"Details: plural job show {job_id}")
@@ -1336,6 +1341,10 @@ def _print_trial(payload: dict[str, Any]) -> None:
     ):
         if payload.get(key) is not None:
             typer.echo(f"  {label + ':':<15} {payload[key]}")
+    trust = payload.get("trust") or {}
+    if trust.get("tier"):
+        reasons = "; ".join(trust.get("reasons") or [])
+        typer.echo(f"  {'Trust:':<15} {trust['tier']}" + (f" ({reasons})" if reasons else ""))
     for verifier in payload.get("verifiers") or []:
         typer.echo(
             f"  Verifier {verifier.get('verifier_name')}: {verifier.get('status')} "

@@ -1,8 +1,9 @@
 # Verifier: what counts as good work for the Tasks that list it.
 # check scores the season by profit against the Task's target. measure samples cash after
 # every action, a running metric the Trial page charts and a Benchmark can rank on.
+# never_negative_cash is a gate: a season that ever dips below zero cash doesn't pass.
 name: shop-books
-version: 1.0.0
+version: 1.1.0
 kind: deterministic
 check: verify.py:check
 measure: verify.py:measure
@@ -11,7 +12,9 @@ metrics:
     kind: running
     unit: USD
     aggregate: final
+    target: ">= 400"
     description: Cash after each action. Its Trial value is the cash at the end of the season.
   - name: never_negative_cash
     kind: binary
+    gate: true
     description: 1 when cash never went below zero, even for a moment after a purchase.

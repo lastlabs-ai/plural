@@ -1,6 +1,6 @@
 """A Task's grader check: the probes' verdicts and the leak scan, kept per Task version.
 
-``plural task check`` writes one :class:`TaskCheck` per Task version to
+``plural task validate`` writes one :class:`TaskCheck` per Task version to
 ``.plural/checks/<task>@<version>.json``. The rules:
 
 - the ``reference`` probe must reach the success threshold;
