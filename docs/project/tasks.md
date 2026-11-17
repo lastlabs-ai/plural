@@ -134,6 +134,15 @@ Here is what each field in `task.yaml` means, for when you need the exact rules:
   in place of its Environment's `reference`. `plural task validate` plays it to prove the
   Task can be solved; see [Integrity](../operations/integrity.md#a-reference-policy).
   It never reaches the Agent, and changing it does not create a new revision.
+- `from_checkpoint` starts the Task partway through another Trial, from a checkpoint
+  saved as `TRIAL/NAME` with `plural trial checkpoint`. Each Trial restores every
+  App's State and the workspace files from that moment instead of resetting, and the
+  Agent gets the history before it as the
+  [fork rule](../running/forks.md#how-the-history-reaches-the-agent) decides. The
+  Task's hash includes the checkpoint, so a Benchmark of such Tasks measures one
+  hard moment exactly. The Environment must be
+  [forkable](environments.md#forkable-environments), and the checkpoint's Apps must
+  be the Environment's.
 
 ### Write many Tasks from a list of cases
 

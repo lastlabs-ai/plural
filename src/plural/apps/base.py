@@ -67,6 +67,12 @@ class App(Generic[StateT]):
     credentials: Sequence[str | SecretReference] = ()
     control: ClassVar[AppControl | None] = None
     snapshot_on_step: ClassVar[bool] = True
+    restorable: ClassVar[bool] = True
+    """Whether :meth:`restore` puts the App back exactly as a snapshot found it.
+
+    The default :meth:`restore` loads ``self.state``. An App that keeps facts
+    outside ``self.state`` overrides :meth:`restore` or sets this to ``False``,
+    and a fork from one of its Trials is refused."""
 
     _init_config: dict[str, Any]
     _source_file: ClassVar[Path | None] = None
@@ -186,6 +192,33 @@ class App(Generic[StateT]):
             The App's state, or ``None`` when it cannot be read.
         """
         return self.state.model_dump(mode="json")
+
+    def restore(self, snapshot: Any) -> None:
+        """Put the App back as :meth:`snapshot` found it, without a reset.
+
+        A fork or a Task that starts from a checkpoint calls this instead of
+        :meth:`reset`. The default loads ``snapshot`` into ``self.state``.
+
+        Args:
+            snapshot: What :meth:`snapshot` returned at the checkpoint.
+        """
+        self.state = cast(StateT, self._state_type().model_validate(snapshot or {}))
+
+    def restore_status(self) -> tuple[bool, str | None]:
+        """Whether this App can be restored from a checkpoint, and why not.
+
+        Returns:
+            ``(True, None)``, or ``(False, reason)``.
+        """
+        if self.resolved_control() == "live":
+            return False, f"App {self.name!r} is live; its state cannot be put back"
+        if not type(self).restorable:
+            return False, f"App {self.name!r} sets restorable = False"
+        if not self.has_snapshot():
+            return False, f"App {self.name!r} reports no snapshot to restore from"
+        if not self.snapshot_on_step:
+            return False, f"App {self.name!r} sets snapshot_on_step = False; no step has its State"
+        return True, None
 
     def terminated(self) -> bool:
         """Return whether this App ended the episode."""
@@ -415,6 +448,7 @@ class App(Generic[StateT]):
             has_reset=self.has_reset(),
             has_snapshot=self.has_snapshot(),
             control=self.resolved_control(),
+            unrestorable=self.restore_status()[1],
         )
 
 

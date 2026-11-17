@@ -523,6 +523,45 @@ measure.
 Local, Docker, and the bundled remote provider do not keep workspaces between Trials.
 Recreate the data each Trial needs in `reset`.
 
+### Workspace snapshots
+
+After every step, Plural snapshots the Agent's workspace files, so a Verifier can
+read the files the Agent left as `episode.workspace` and a fork can put the files
+back exactly as they were after any step. Snapshots never hold the Environment's
+resources, a Harness's own files, or an App's private files. `workspace_snapshot_mib`
+in `limits`, 512 by default, caps the snapshot's size per Trial; files past the cap
+are listed as skipped, and `0` turns snapshots off. Snapshots need `git` in the
+Runtime.
+
+## An Environment with no Apps
+
+An Environment needs no Apps when the work is answering a question or editing files.
+Give it resources and a Runtime, and Verifiers check the Agent's final answer and
+the files it wrote:
+
+```yaml
+name: files
+resources:
+  - invoices.csv
+runtime:
+  provider: local
+```
+
+The Agent works with its Harness's own tools, such as Claude Code's `Read` and
+`Write`. Every tool call is a step in the Trial's timeline. The
+`examples/bare-files` project in the [Plural repository](https://github.com/lastlabs-ai/plural)
+totals a CSV file and checks the total in both the answer and a file.
+
+## Forkable Environments
+
+A fork continues a Trial from the moment after one step, with every App's State put
+back. An Environment is **forkable** when every App can do that. A Python App can,
+unless its class sets `restorable = False`; override `restore(snapshot)` when
+loading the snapshot into `self.state` isn't enough. An MCP or OpenAPI App can when
+it has `snapshot` and `restore` commands and snapshots after every step. A `live`
+App never can. `plural env validate` and the Environment's page say whether an
+Environment is forkable, and why not. See [Checkpoints and forks](../running/forks.md).
+
 ## Resources
 
 **Resources** are the files and data the world starts with, like the Wordle word list

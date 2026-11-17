@@ -71,6 +71,8 @@ contestants.
 - Docker, Daytona, hosted runs, and reruns: [Build and run a job](../guides/jobs.md).
 - `plural job list`, `job show`, `job rerun`, `trial show`, and `trial rerun`:
   [Trials and trajectories](../running/trials.md).
+- `plural trial checkpoint`, `trial fork`, `from_checkpoint`, and `assert_restorable`:
+  [Checkpoints and forks](../running/forks.md).
 - Receipts, artifacts, logs, and redaction:
   [Artifacts and evidence](../running/artifacts.md).
 - `plural review list` and `review submit`: [Reviews](../running/reviews.md).

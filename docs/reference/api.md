@@ -1844,6 +1844,23 @@ model_post_init(self, context: 'Any', /) -> 'None'
 
 Bind the subclass source immediately after validation.
 
+### plural.Harness.tools
+
+```python
+tools() -> 'tuple[HarnessTool | str, ...]'
+```
+
+The tools this Harness brings itself, such as ``bash`` or ``edit``.
+
+```text
+Override to declare them, by name or as :class:`~plural.common.HarnessTool`.
+Each Trial records them, with the Environment's actions, as the tools its
+Agent was offered; a fork compares them with the tools a history used.
+
+Returns:
+    The tools; none by default.
+```
+
 ### plural.Harness.run
 
 ```python
@@ -1996,6 +2013,15 @@ The Job refused a request, such as an action after the episode ended.
 
 ```python
 plural.external.client.EpisodeError
+```
+
+## plural.external.protocol.EpisodeResume
+
+An episode under way: what a fork tells an agent that declares ``supports_resume``.
+
+```text
+Its tools are its own, so the history is always a readable transcript of
+what happened before ``step``. The Apps and files are already as they were then.
 ```
 
 ## plural.external.protocol.EpisodeStart

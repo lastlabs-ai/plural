@@ -289,18 +289,7 @@ def plan_run(
     inputs = workspace.dependency_order(
         [source, *([agent_ref] if agent_ref else []), *([harness_ref] if harness_ref else [])]
     )
-    locked = workspace.project.read_lock().resources
-    pins = {}
-    for item in inputs:
-        digest = workspace.load(item).content_hash
-        entry = locked.get(str(item))
-        pushed = entry is not None and entry.content_hash == digest
-        pins[str(item)] = {
-            "revision": revision_label(entry.number, entry.version, "pushed")
-            if pushed and entry is not None
-            else "local",
-            "content_hash": digest,
-        }
+    pins = pinned_inputs(workspace, inputs)
     return RunPlan(
         source=source,
         agent=agent,
@@ -971,6 +960,27 @@ def local_job_spec(workspace: Workspace, job_id: str) -> JobSpec:
     return _load_local(workspace, job_id)[0]
 
 
+def pinned_inputs(workspace: Workspace, inputs: Sequence[ResourceRef]) -> dict[str, dict[str, str]]:
+    """Each input's content hash, and the pushed revision that holds it, if any.
+
+    Returns:
+        A pin for each input, by reference.
+    """
+    locked = workspace.project.read_lock().resources
+    pins = {}
+    for item in inputs:
+        digest = workspace.load(item).content_hash
+        entry = locked.get(str(item))
+        pushed = entry is not None and entry.content_hash == digest
+        pins[str(item)] = {
+            "revision": revision_label(entry.number, entry.version, "pushed")
+            if pushed and entry is not None
+            else "local",
+            "content_hash": digest,
+        }
+    return pins
+
+
 def find_local_trial(workspace: Workspace, trial_id: str) -> tuple[str, Path]:
     """Locate a Trial among local Jobs.
 
@@ -1498,6 +1508,7 @@ def _trial_summary(result: TrialResult) -> dict[str, Any]:
         "trust": result.trust.tier if result.trust is not None else None,
         "metrics": dict(result.metrics),
         "passed": result.passed,
+        **({"fork": result.fork.model_dump(mode="json")} if result.fork is not None else {}),
     }
 
 

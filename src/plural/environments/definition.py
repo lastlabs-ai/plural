@@ -617,6 +617,13 @@ class ExecutionLimits(FrozenModel):
         gt=0,
         description="Optional spending cap, in USD. Unset means no cost cap.",
     )
+    workspace_snapshot_mib: int = Field(
+        default=512,
+        ge=0,
+        description="MiB of the workspace the App host snapshots after each step, so a "
+        "Trial can be forked from any step. Files past the cap are recorded as skipped. "
+        "0 turns snapshots off.",
+    )
 
 
 MAX_PARTY = 100
@@ -868,6 +875,17 @@ class EnvironmentDefinition(FrozenModel):
         return all(item.reproducible for item in self.apps)
 
     @property
+    def forkable(self) -> bool:
+        """Whether a checkpoint can put every App back, so a Trial can be forked."""
+        return self.fork_problem is None
+
+    @property
+    def fork_problem(self) -> str | None:
+        """Why this Environment's Trials cannot be forked, or ``None`` when they can."""
+        problems = [problem for item in self.apps if (problem := item.restore_problem)]
+        return "; ".join(problems) or None
+
+    @property
     def revision(self) -> str:
         """Compatibility version name used by execution and hosted internals."""
         return self.version
@@ -891,6 +909,10 @@ class EnvironmentDefinition(FrozenModel):
             # Apps that need no credentials keep the identity they had before credentials.
             if not app["credentials"]:
                 del app["credentials"]
+            if app["unrestorable"] is None:
+                del app["unrestorable"]
+        if payload["limits"]["workspace_snapshot_mib"] == 512:
+            del payload["limits"]["workspace_snapshot_mib"]
 
         digest = self.source.digest if self.source else None
         payload["source_digest"] = digest

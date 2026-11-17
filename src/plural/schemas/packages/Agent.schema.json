@@ -41,6 +41,11 @@
           "title": "Signing Key",
           "type": "string"
         },
+        "supports_resume": {
+          "default": false,
+          "title": "Supports Resume",
+          "type": "boolean"
+        },
         "url": {
           "title": "Url",
           "type": "string"
@@ -250,6 +255,12 @@
           "title": "Source",
           "type": "string"
         },
+        "supports_resume": {
+          "default": false,
+          "description": "Whether the Harness reads HarnessEnvironment.resume and continues a history as its own conversation.",
+          "title": "Supports Resume",
+          "type": "boolean"
+        },
         "tito": {
           "anyOf": [
             {
@@ -261,6 +272,15 @@
           ],
           "default": null,
           "title": "Tito"
+        },
+        "tools": {
+          "default": [],
+          "description": "The tools the Harness brings itself, such as bash or edit, by name or {name, description}. A fork compares them with the tools a history used.",
+          "items": {
+            "$ref": "#/$defs/HarnessTool"
+          },
+          "title": "Tools",
+          "type": "array"
         },
         "trajectory": {
           "anyOf": [
@@ -285,6 +305,27 @@
         "command"
       ],
       "title": "HarnessDefinition",
+      "type": "object"
+    },
+    "HarnessTool": {
+      "additionalProperties": false,
+      "description": "One tool a Harness brings itself, such as ``Bash`` or ``apply_patch``.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "HarnessTool",
       "type": "object"
     }
   },

@@ -152,9 +152,8 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
 ## Evaluating and improving an Agent
 
 These words name how Plural measures an Agent, and how it finds out why one fails.
-Score and reward keep the meanings above. Checkpoints and Forks are being built now,
-and the Inspector after them: their entries say what each word will mean, so that it
-means one thing from the start.
+Score and reward keep the meanings above. The Inspector is being built now: its
+entries say what each word will mean, so that it means one thing from the start.
 
 - **Metric:** one thing you measure about an attempt, such as "price correct" or
   "margin in dollars". *Precisely:* a named measurement a Verifier declares, with a
@@ -182,10 +181,20 @@ means one thing from the start.
 - **Checkpoint:** a saved moment of an attempt that it can be restarted from.
   *Precisely:* everything needed to restart a Trial exactly as it stood after step *k*:
   each App's State and random-number state, the workspace, the step counters, the
-  Environment's clock, and the Agent's context.
+  Environment's clock, and the Agent's context. Save one by name with
+  `plural trial checkpoint`. See [Checkpoints and forks](../running/forks.md).
 - **Fork:** rerunning the rest of an attempt from a Checkpoint, to see whether a
   different Agent would have done better. *Precisely:* a Trial started from another
   Trial's Checkpoint, by another Agent or, as a **control**, by the original one.
+  Run with `plural trial fork`.
+- **History:** how a Fork's Agent learns what happened before the fork point.
+  *Precisely:* `native` (as its own conversation, when it has every tool the history
+  used), `transcript` (as text in its first message), or `none`; each Fork Trial
+  records which.
+- **Forkable:** an Environment whose Apps can all be put back from a Checkpoint.
+  A `live` App never can.
+- **Harness tool:** a tool a Harness brings itself, such as a shell or a file editor,
+  as opposed to an Environment's actions. Each call is a step in the same timeline.
 - **Change:** one thing a Fork alters at the fork point, other than the Agent, such as
   an observation, to find a cause. *Precisely:* a plugin registered with
   `@change("name")`. A Fork with a change is **diagnostic**: it explains a cause and is

@@ -566,6 +566,11 @@ def _build_harness(
     cls.description = manifest.description
     if readme:
         cls.readme = readme
+    if manifest.tools:
+        declared = tuple(manifest.tools)
+        cls.tools = classmethod(lambda _cls: declared)  # type: ignore[method-assign,assignment]
+    if manifest.supports_resume:
+        cls.supports_resume = True
     cls._bound_python_source = source
     cls._bound_python_object = object_path
     try:
@@ -596,6 +601,15 @@ def _load_task(workspace: Workspace, ref: ResourceRef, directory: Path) -> Local
                 problems.append(item)
         if len(set(manifest.verifiers)) != len(manifest.verifiers):
             problems.append("verifiers: each Verifier may be listed once")
+        checkpoint: Any = None
+        bundle: Path | None = None
+        if manifest.from_checkpoint is not None:
+            from plural.project.forks import resolve_from_checkpoint
+
+            try:
+                checkpoint, bundle = resolve_from_checkpoint(workspace, manifest.from_checkpoint)
+            except ProjectError as exc:
+                problems.append(f"from_checkpoint: {_first_line(exc)}")
         if instructions and not problems:
             assert isinstance(environment, LocalResource)
             try:
@@ -616,6 +630,9 @@ def _load_task(workspace: Workspace, ref: ResourceRef, directory: Path) -> Local
                         "initial_state": manifest.initial_state,
                         "expected": manifest.expected,
                         "seat_instructions": manifest.seat_instructions,
+                        "from_checkpoint": manifest.from_checkpoint,
+                        "checkpoint": checkpoint,
+                        "checkpoint_bundle": str(bundle) if bundle is not None else None,
                     },
                     context={"catalog": workspace.catalog},
                 )

@@ -220,6 +220,19 @@ class EpisodeGateway(_Model):
     key: str
 
 
+class EpisodeResume(_Model):
+    """An episode under way: what a fork tells an agent that declares ``supports_resume``.
+
+    Its tools are its own, so the history is always a readable transcript of
+    what happened before ``step``. The Apps and files are already as they were then.
+    """
+
+    step: int
+    transcript: str = ""
+    observation: Any = None
+    note: str = ""
+
+
 class EpisodeStart(_Model):
     """The signed request that starts one episode."""
 
@@ -236,6 +249,8 @@ class EpisodeStart(_Model):
     deadline: str
     max_turns: int | None = None
     gateway: EpisodeGateway | None = None
+    resume: EpisodeResume | None = None
+    """Set when the episode continues one under way; see :class:`EpisodeResume`."""
 
 
 __all__ = [
@@ -243,6 +258,7 @@ __all__ = [
     "SIGNATURE_TOLERANCE_SECONDS",
     "EpisodeAction",
     "EpisodeGateway",
+    "EpisodeResume",
     "EpisodeStart",
     "EpisodeTask",
     "EpisodeURLs",

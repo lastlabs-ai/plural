@@ -80,11 +80,13 @@ def action_command(name: str) -> tuple[str, ...]:
     return (*HOST_COMMAND, "step", name)
 
 
-def environment_payload(task: TaskDefinition) -> dict[str, Any]:
+def environment_payload(task: TaskDefinition, *, hosted: bool | None = None) -> dict[str, Any]:
     """What a Harness learns about the Environment.
 
     It lists each exposed action with the command that runs it, and nothing
-    about App state, verifiers, or secrets.
+    about App state, verifiers, or secrets. With an App host running
+    (``hosted``, by default when there are Apps), it also names the command
+    that reports a Harness tool call as a step.
 
     Returns:
         The ``environment`` field of the Harness run request.
@@ -117,6 +119,11 @@ def environment_payload(task: TaskDefinition) -> dict[str, Any]:
         **(
             {"turn_command": list((*HOST_COMMAND, "turn"))}
             if task.party is not None and environment.apps
+            else {}
+        ),
+        **(
+            {"tool_command": list((*HOST_COMMAND, "tool"))}
+            if (bool(environment.apps) if hosted is None else hosted)
             else {}
         ),
     }
@@ -398,6 +405,8 @@ class HostReport:
     view: dict[str, Any] = field(default_factory=dict)
     metrics: list[dict[str, Any]] = field(default_factory=list)
     metric_failures: list[dict[str, Any]] = field(default_factory=list)
+    workspace: dict[str, Any] = field(default_factory=dict)
+    """The workspace snapshots: each step's commit, skipped files, and the bundle."""
 
     @classmethod
     def parse(cls, value: Any) -> HostReport:
@@ -427,6 +436,7 @@ class HostReport:
             view=mapping("view"),
             metrics=rows("metrics"),
             metric_failures=rows("metric_failures"),
+            workspace=mapping("workspace"),
         )
 
 

@@ -1,5 +1,72 @@
 {
   "$defs": {
+    "AgentContext": {
+      "additionalProperties": false,
+      "description": "What one Agent had seen through observation *k*, in a Harness-neutral form.",
+      "properties": {
+        "compaction": {
+          "anyOf": [
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compaction"
+        },
+        "memory": {
+          "default": null,
+          "title": "Memory"
+        },
+        "messages": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Messages",
+          "type": "array"
+        },
+        "source": {
+          "default": "steps",
+          "enum": [
+            "recorded",
+            "steps",
+            "reported"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        },
+        "tools_used": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools Used",
+          "type": "array"
+        },
+        "turn": {
+          "default": 0,
+          "title": "Turn",
+          "type": "integer"
+        }
+      },
+      "title": "AgentContext",
+      "type": "object"
+    },
     "AgentVerifier": {
       "additionalProperties": false,
       "description": "Model-judge verifier with its own runtime and connectivity policy.",
@@ -255,6 +322,178 @@
         }
       },
       "title": "BenchmarkScoring",
+      "type": "object"
+    },
+    "Checkpoint": {
+      "additionalProperties": false,
+      "description": "Everything needed to continue a Trial from after step ``step``.\n\n``apps`` and ``rng`` are private to the Job: they restore the App host and\nnever reach a Harness. ``contexts`` is keyed by seat, with ``\"\"`` for a\nTrial one Agent works alone.",
+      "properties": {
+        "agent_digest": {
+          "default": "",
+          "title": "Agent Digest",
+          "type": "string"
+        },
+        "apps": {
+          "additionalProperties": true,
+          "title": "Apps",
+          "type": "object"
+        },
+        "contexts": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AgentContext"
+          },
+          "title": "Contexts",
+          "type": "object"
+        },
+        "elapsed": {
+          "default": 0.0,
+          "title": "Elapsed",
+          "type": "number"
+        },
+        "heldout": {
+          "default": false,
+          "title": "Heldout",
+          "type": "boolean"
+        },
+        "initial": {
+          "additionalProperties": true,
+          "title": "Initial",
+          "type": "object"
+        },
+        "job_id": {
+          "default": "",
+          "title": "Job Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "observation": {
+          "default": null,
+          "title": "Observation"
+        },
+        "prefix_metrics": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Prefix Metrics",
+          "type": "array"
+        },
+        "prefix_states": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Prefix States",
+          "type": "array"
+        },
+        "prefix_steps": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Prefix Steps",
+          "type": "array"
+        },
+        "rendered": {
+          "default": "",
+          "title": "Rendered",
+          "type": "string"
+        },
+        "rng": {
+          "additionalProperties": true,
+          "title": "Rng",
+          "type": "object"
+        },
+        "step": {
+          "minimum": 0,
+          "title": "Step",
+          "type": "integer"
+        },
+        "task_digest": {
+          "default": "",
+          "title": "Task Digest",
+          "type": "string"
+        },
+        "trial_id": {
+          "title": "Trial Id",
+          "type": "string"
+        },
+        "turns": {
+          "default": 0,
+          "title": "Turns",
+          "type": "integer"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "workspace": {
+          "$ref": "#/$defs/CheckpointWorkspace"
+        }
+      },
+      "required": [
+        "trial_id",
+        "step"
+      ],
+      "title": "Checkpoint",
+      "type": "object"
+    },
+    "CheckpointWorkspace": {
+      "additionalProperties": false,
+      "description": "The workspace snapshot a checkpoint restores.",
+      "properties": {
+        "available": {
+          "default": false,
+          "title": "Available",
+          "type": "boolean"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commit"
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Problem"
+        },
+        "skipped": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skipped",
+          "type": "array"
+        }
+      },
+      "title": "CheckpointWorkspace",
       "type": "object"
     },
     "DeterministicVerifier": {
@@ -986,14 +1225,49 @@
     },
     "Task": {
       "additionalProperties": false,
-      "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.\n\n``name`` is the Task's identity, and what Benchmarks, Jobs, and results\ncall it. ``title`` is only the display name in the hosted project.",
+      "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.\n\n``name`` is the Task's identity, and what Benchmarks, Jobs, and results\ncall it. ``title`` is only the display name in the hosted project.\n\n``from_checkpoint`` (``TRIAL/NAME``) starts each episode from a saved\ncheckpoint instead of a reset: the moment an Agent once reached, as a test\nof its own. A project resolves it to ``checkpoint``.",
       "properties": {
+        "checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Checkpoint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "checkpoint_bundle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checkpoint Bundle"
+        },
         "environment": {
           "title": "Environment"
         },
         "expected": {
           "default": null,
           "title": "Expected"
+        },
+        "from_checkpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Checkpoint"
         },
         "goals": {
           "default": [],

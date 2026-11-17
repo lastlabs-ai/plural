@@ -31,12 +31,12 @@ def main(argv: list[str] | None = None) -> None:
     if name not in BINARIES:
         raise SystemExit(f"unknown built-in Harness {name!r}")
     provider = os.environ.get("PLURAL_RUNTIME_PROVIDER", "local")
-    prefix = Path(
-        os.environ.get(
-            "PLURAL_TOOLS_PREFIX",
-            str(Path.cwd() / ".plural" / "tools"),
-        )
-    )
+    given = os.environ.get("PLURAL_TOOLS_PREFIX", str(Path.cwd() / ".plural" / "tools"))
+    root = os.environ.get("PLURAL_SANDBOX_ROOT")
+    if root and (given == "/workspace" or given.startswith("/workspace/")):
+        # The local Runtime keeps /workspace under its own folder.
+        given = str(Path(root) / given.removeprefix("/"))
+    prefix = Path(given)
     if provider == "local":
         # Elsewhere setup installs system-wide; the workspace is not root's to write.
         prefix.mkdir(parents=True, exist_ok=True)
@@ -86,7 +86,7 @@ def _install_npm(package: str, version: str, provider: str, prefix: Path) -> Non
             )
     spec = f"{package}@{version}"
     if provider == "local":
-        _run((npm, "install", "--prefix", str(prefix), spec))
+        _run((npm, "install", "--global", "--prefix", str(prefix), spec))
         return
     _run((npm, "install", "--global", spec))
 

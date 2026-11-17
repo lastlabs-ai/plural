@@ -166,6 +166,8 @@ plural job show JOB_ID
 plural job rerun JOB_ID
 plural trial show TRIAL_ID
 plural trial rerun TRIAL_ID
+plural trial checkpoint TRIAL_ID --step 4 --name before-rounding
+plural trial fork TRIAL_ID --step 4 --agent AGENT
 plural review list
 plural review submit TRIAL_ID --verifier policy-review --score 2 \
   --feedback "Meets policy."
@@ -179,6 +181,9 @@ plural review submit TRIAL_ID --verifier policy-review --score 2 \
   Job linked to the original. `trial rerun` runs one Trial again as a new one-Trial
   Job. Add `--record` to either to record a local rerun in the hosted project as it
   runs.
+- `trial checkpoint` saves the moment after one step of a Trial by name, and
+  `trial fork` continues a Trial from such a moment with other Agents, beside
+  controls that rerun the original. See [Checkpoints and forks](../running/forks.md).
 - `review list` shows Trials waiting for a HumanVerifier score, and `review submit`
   records one. Use one `--score criterion=value` per rubric criterion, or a bare value
   for a one-criterion rubric. Add `--hosted` to either for hosted review assignments.
@@ -360,7 +365,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ agent       Create, validate, push, pull, and inspect Agents.                                    │
 │ benchmark   Create, validate, push, pull, and inspect Benchmarks.                                │
 │ job         List, inspect, and rerun Jobs.                                                       │
-│ trial       Inspect and rerun Trials.                                                            │
+│ trial       Inspect, rerun, checkpoint, and fork Trials.                                         │
 │ review      List and submit human reviews.                                                       │
 │ reward      Show a Trial's rewards and export training data. Add rewards with `plural verifier   │
 │             apply`.                                                                              │
@@ -2893,14 +2898,72 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural trial [OPTIONS] COMMAND [ARGS]...
 
- Inspect and rerun Trials.
+ Inspect, rerun, checkpoint, and fork Trials.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ show   Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted).       │
-│ rerun  Run one Trial again with its pinned inputs, as a new one-Trial Job.                       │
+│ show        Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted).  │
+│ rerun       Run one Trial again with its pinned inputs, as a new one-Trial Job.                  │
+│ checkpoint  Name the moment after one step of a Trial, to fork from it or start a Task there.    │
+│ fork        Continue a Trial from step k with other Agents, beside controls that rerun the       │
+│             original.                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural trial checkpoint`
+
+```text
+
+ Usage: plural trial checkpoint [OPTIONS] {trial_id}
+
+ Name the moment after one step of a Trial, to fork from it or start a Task there.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    trial_id      <str>  Trial to take the checkpoint from: a local Trial, or one this folder   │
+│                           recorded.                                                              │
+│                           [required]                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --step        <int>  The step the checkpoint is after. [required]                             │
+│ *  --name        <str>  A lowercase name; a Task names it as TRIAL/NAME. [required]              │
+│    --json               Print machine-readable JSON.                                             │
+│    --help               Show this message and exit.                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural trial fork`
+
+```text
+
+ Usage: plural trial fork [OPTIONS] {trial_id}
+
+ Continue a Trial from step k with other Agents, beside controls that rerun the original.
+
+ The world (App State and workspace) is restored exactly. How the history
+ reaches each Agent follows one rule: as its own conversation when it has
+ every tool the history used, as a transcript when it lacks some, and not
+ at all when it can't accept one. Each case but the first prints why.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    trial_id      <str>  Trial to continue: a local Trial, or one this folder recorded.         │
+│                           [required]                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --step              <int>               Continue after this step.                                │
+│ --checkpoint        <str>               Continue from this Trial's checkpoint, by name.          │
+│ --agent             <str>               A saved Agent to fork into. Repeat for several.          │
+│ --model             <str>               A model to fork into, with --harness. Repeat for         │
+│                                         several.                                                 │
+│ --harness           <str>               Harness for --model.                                     │
+│ --attempts          <int range> [x>=1]  Forks per Agent, and as many controls. [default: 3]      │
+│ --seat              <str>               For a Trial several Agents share: the seat to replace.   │
+│ --change            <str>               Change one thing at the fork point: a diagnostic fork.   │
+│ --payload           <str>               The change's JSON payload.                               │
+│ --record                                Record the fork Job in the hosted project as it runs.    │
+│ --json                                  Print machine-readable JSON.                             │
+│ --help                                  Show this message and exit.                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

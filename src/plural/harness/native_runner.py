@@ -330,12 +330,27 @@ def _run(
     system = str(agent.get("instructions") or "").strip()
     if denials:
         system = "\n\n".join(part for part in (system, _denial_text(denials)) if part)
-    episode.messages.extend(
-        [
-            {"role": "system", "content": system},
-            {"role": "user", "content": prompt},
+    resume = request.get("resume") if isinstance(request.get("resume"), dict) else None
+    if resume is not None and resume.get("history") == "native":
+        # The history is this Agent's own conversation; its own instructions lead it.
+        history = [
+            dict(item)
+            for item in resume.get("messages") or ()
+            if isinstance(item, dict) and item.get("role") != "system"
         ]
-    )
+        episode.messages.extend([{"role": "system", "content": system}, *history])
+        after = _after_history(resume, reset)
+        if after:
+            episode.messages.append({"role": "user", "content": after})
+    else:
+        if resume is not None:
+            prompt = _resumed_prompt(prompt, resume, reset)
+        episode.messages.extend(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ]
+        )
     messages = episode.messages
     tools = [
         {
@@ -362,7 +377,8 @@ def _run(
     if terminated or truncated:
         stop_reason = "environment_terminated" if terminated else "environment_truncated"
     seen_view: Any = None
-    turn = 0
+    # Limits count the whole episode, so a fork continues the original's turn count.
+    turn = int(resume.get("turn") or 0) if resume is not None else 0
     while stop_reason is None:
         turn += 1
         if max_turns is not None and turn > max_turns:
@@ -908,6 +924,38 @@ def _response_message(response: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(message, dict):
         raise ValueError("model gateway response has no message")
     return dict(message)
+
+
+def _resumed_prompt(prompt: str, resume: dict[str, Any], reset: dict[str, Any]) -> str:
+    """The opening message of a fork that gets the history as text, or none at all."""
+    now = _observation_text(reset.get("observation")) or _observation_text(
+        resume.get("observation"), resume.get("rendered")
+    )
+    parts = [prompt]
+    transcript = str(resume.get("transcript") or "").strip()
+    if resume.get("history") == "transcript" and transcript:
+        parts.append(transcript)
+    else:
+        parts.append("This episode is already under way; earlier steps are not shown.")
+    if now:
+        parts.append(f"Where things stand now:\n{now}")
+    if resume.get("note"):
+        parts.append(str(resume["note"]))
+    return "\n\n".join(parts)
+
+
+def _after_history(resume: dict[str, Any], reset: dict[str, Any]) -> str:
+    """What follows a native history: a forced action's result, and a diagnostic note."""
+    parts: list[str] = []
+    raw = reset.get("info")
+    info: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    if info.get("step") is not None and info.get("step") != resume.get("step"):
+        now = _observation_text(reset.get("observation"))
+        if now:
+            parts.append(f"Your next action ran. Where things stand now:\n{now}")
+    if resume.get("note"):
+        parts.append(str(resume["note"]))
+    return "\n\n".join(parts)
 
 
 def _prompt(request: dict[str, Any], environment: dict[str, Any]) -> str:

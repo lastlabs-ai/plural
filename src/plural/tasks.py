@@ -15,6 +15,7 @@ from plural.benchmarks.rules import (
     check_track_limits,
     validate_release_rules,
 )
+from plural.checkpoints import Checkpoint
 from plural.common import (
     FrozenModel,
     content_hash,
@@ -401,6 +402,10 @@ class Task(FrozenModel):
 
     ``name`` is the Task's identity, and what Benchmarks, Jobs, and results
     call it. ``title`` is only the display name in the hosted project.
+
+    ``from_checkpoint`` (``TRIAL/NAME``) starts each episode from a saved
+    checkpoint instead of a reset: the moment an Agent once reached, as a test
+    of its own. A project resolves it to ``checkpoint``.
     """
 
     name: str = Field(min_length=1)
@@ -420,10 +425,16 @@ class Task(FrozenModel):
     initial_state: dict[str, Any] = Field(default_factory=dict)
     seat_instructions: dict[str, str] = Field(default_factory=dict)
     expected: Any = None
+    from_checkpoint: str | None = None
+    checkpoint: Checkpoint | None = Field(default=None, exclude=True)
+    checkpoint_bundle: str | None = Field(default=None, exclude=True)
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
-        return _serialized_as_before(handler(self), self.seat_instructions, self.expected)
+        data = _serialized_as_before(handler(self), self.seat_instructions, self.expected)
+        if isinstance(data, dict) and self.from_checkpoint is None:
+            data.pop("from_checkpoint", None)
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -511,6 +522,14 @@ class Task(FrozenModel):
                 # keeps its hash.
                 **({"seat_instructions": self.seat_instructions} if self.seat_instructions else {}),
                 **({"expected": self.expected} if self.expected is not None else {}),
+                **(
+                    {
+                        "from_checkpoint": self.from_checkpoint,
+                        "checkpoint": self.checkpoint.digest if self.checkpoint else None,
+                    }
+                    if self.from_checkpoint is not None
+                    else {}
+                ),
             },
         )
 
@@ -548,6 +567,9 @@ class Task(FrozenModel):
             state=self.initial_state,
             seat_instructions=self.seat_instructions,
             expected=self.expected,
+            from_checkpoint=self.from_checkpoint,
+            checkpoint=self.checkpoint,
+            checkpoint_bundle=self.checkpoint_bundle,
         )
 
     def _definition(self) -> TaskDefinition:
@@ -577,10 +599,23 @@ class TaskDefinition(FrozenModel):
     seat_instructions: dict[str, str] = Field(default_factory=dict)
     expected: Any = None
     """The answer key, for Verifiers only; never in :attr:`public_payload`."""
+    from_checkpoint: str | None = None
+    """``TRIAL/NAME``: the saved checkpoint the episode starts from instead of a reset."""
+    checkpoint: Checkpoint | None = None
+    """The resolved ``from_checkpoint``. Its App State stays with the Job."""
+    checkpoint_bundle: str | None = Field(default=None, exclude=True)
+    """Where the checkpoint's workspace snapshot is on this machine; never hashed."""
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
-        return _serialized_as_before(handler(self), self.seat_instructions, self.expected)
+        data = _serialized_as_before(handler(self), self.seat_instructions, self.expected)
+        if isinstance(data, dict):
+            # A Task that starts from a reset keeps the hash it had before checkpoints.
+            if self.from_checkpoint is None:
+                data.pop("from_checkpoint", None)
+            if self.checkpoint is None:
+                data.pop("checkpoint", None)
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -624,6 +659,27 @@ class TaskDefinition(FrozenModel):
                 f"Task {self.task_id!r} needs at least one Verifier with a check, to score "
                 "the finished episode."
             )
+        if self.from_checkpoint is not None and self.checkpoint is None:
+            raise ValueError(
+                f"Task {self.task_id!r} starts from checkpoint {self.from_checkpoint!r}, which "
+                "was not found. Save it with plural trial checkpoint TRIAL --step N --name NAME."
+            )
+        if self.checkpoint is not None:
+            problem = self.environment.fork_problem
+            if problem:
+                raise ValueError(
+                    f"Task {self.task_id!r} starts from a checkpoint, but its Environment "
+                    f"can't be restored: {problem}."
+                )
+            unknown = sorted(
+                set(self.checkpoint.apps) - {app.name for app in self.environment.apps}
+            )
+            if unknown:
+                raise ValueError(
+                    f"Task {self.task_id!r} starts from checkpoint {self.from_checkpoint!r}, "
+                    f"which holds Apps its Environment doesn't have ({', '.join(unknown)}). "
+                    "Take the checkpoint from a Trial in the same Environment."
+                )
         return self
 
     @property

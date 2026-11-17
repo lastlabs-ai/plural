@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import fnmatch
 import functools
 import json
@@ -11,7 +12,9 @@ import math
 import os
 import secrets as token_source
 import shlex
+import shutil
 import sys
+import tempfile
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
@@ -24,11 +27,14 @@ from plural._deprecation import module_getattr
 from plural.agents import AgentBinding
 from plural.apps.daemon import MANAGED
 from plural.apps.host import STATES_FILE
+from plural.apps.workspace import BUNDLE_FILE, snapshot_entries
 from plural.atif import ATIF_FILE, episode_to_atif
 from plural.auth import AuthHTTPError, check_gateway_key
 from plural.benchmarks.results import AttemptEvidence, aggregate_configuration
 from plural.benchmarks.rules import BenchmarkScoring
 from plural.catalog import ModelCatalog
+from plural.changes import ForkPoint, apply_change
+from plural.checkpoints import Checkpoint, history_rule, transcript_text
 from plural.common import ErrorCode, HarnessPackage, HarnessProtocol, content_hash
 from plural.config import resolve_gateway_url
 from plural.credentials import CredentialError, CredentialUse, CredentialValue
@@ -88,6 +94,7 @@ from plural.execution.steps import STEPS_FILE, dump_jsonl, episode_terminated, m
 from plural.execution.store import JobStore
 from plural.execution.trial_metrics import metric_lines, task_metric_specs, trial_metrics
 from plural.external.protocol import EpisodeGateway, signing_key
+from plural.harness.builtins import package_tools
 from plural.harness.episode import EPISODE_FILE
 from plural.harness.native_runner import (
     CREDIT_PAUSE_VARIABLE,
@@ -100,7 +107,7 @@ from plural.harness.packages import (
     native_actions_v1,
     native_chat_v1,
 )
-from plural.harness.protocol import HarnessProtocolError, HarnessRunRequest
+from plural.harness.protocol import HarnessProtocolError, HarnessResume, HarnessRunRequest
 from plural.harness.retrieval import (
     materialize_package,
     reference_files,
@@ -118,6 +125,7 @@ from plural.jobs import (
     AgentAggregate,
     ArtifactReference,
     BenchmarkJobSource,
+    ForkRecord,
     IntegrityFinding,
     JobMode,
     JobResult,
@@ -185,6 +193,7 @@ from plural.verifiers import (
     Episode,
     EpisodeOutcome,
     EpisodeUsage,
+    EpisodeWorkspace,
     HumanVerifier,
     VerifierDefinition,
     VerifierOutput,
@@ -421,7 +430,17 @@ def _with_artifact(
     return (*tuple(item for item in artifacts if item.path != artifact.path), artifact)
 
 
-_JOB_ARTIFACTS = frozenset({LEDGER_FILE, METRICS_FILE, STATES_FILE, STEPS_FILE, "apps.json"})
+_JOB_ARTIFACTS = frozenset(
+    {
+        LEDGER_FILE,
+        METRICS_FILE,
+        STATES_FILE,
+        STEPS_FILE,
+        "apps.json",
+        "workspace.json",
+        BUNDLE_FILE,
+    }
+)
 RESULT_FILES = ("result.json", "final-result.json", "output.json")
 GatewayKeys = Callable[[str, int, int], "str | None"]
 """Mints a gateway key for a local Trial's execution, given its time to live in seconds."""
@@ -845,6 +864,10 @@ class TrialRunner:
         self.harness_killed = False
         """Whether the last execution's Harness was killed for running past its time."""
         self._cost_usd: float | None = None
+        self._hosted = bool(self.task.environment.apps)
+        self._scratch: Path | None = None
+        self._workspace_report: dict[str, Any] = {}
+        self._point: ForkPoint | None = None
 
     @property
     def task(self) -> TaskDefinition:
@@ -857,6 +880,283 @@ class TrialRunner:
     def agent(self) -> AgentBinding:
         """Pinned Agent selected by this Trial."""
         return next(item for item in self.job_spec.agents if item.agent_id == self.spec.agent_id)
+
+    @property
+    def checkpoint(self) -> Checkpoint | None:
+        """The checkpoint this Trial starts from: its fork's, or its Task's, or none."""
+        if self.job_spec.fork is not None:
+            return self.job_spec.fork.checkpoint
+        return self.task.checkpoint
+
+    def _checkpoint_bundle(self) -> Path | None:
+        """Where the starting checkpoint's workspace snapshots are, on the Job's side."""
+        if self.job_spec.fork is not None:
+            path = self.job_spec.fork.bundle
+        else:
+            path = self.task.checkpoint_bundle
+        return Path(path) if path and Path(path).is_file() else None
+
+    def _wants_host(self, provider: SandboxProvider, package: HarnessPackage) -> bool:
+        """Whether an App host runs: always with Apps, and for a bare Environment
+
+        whenever the Runtime has Plural, so Harness tools and workspace snapshots are
+        recorded. An External Agent's tools are its own, so its bare episode has none.
+        """
+        if self.task.environment.apps:
+            return True
+        if self.agent.external is not None:
+            return False
+        return provider.name == "local" or needs_plural(self.task, package)
+
+    def _fork_point(self) -> ForkPoint | None:
+        """A diagnostic fork's change, made once, or ``None`` for a fork that changes the Agent.
+
+        Raises:
+            ExecutionFailure: When the change is unknown or its payload doesn't fit.
+        """
+        fork = self.spec.fork
+        job_fork = self.job_spec.fork
+        checkpoint = self.checkpoint
+        if fork is None or fork.change is None or job_fork is None or job_fork.change is None:
+            return None
+        if checkpoint is None:
+            return None
+        if self._point is None:
+            context = checkpoint.context(fork.seat)
+            given = job_fork.change.payload
+            point = ForkPoint(
+                payload=dict(given) if isinstance(given, dict) else {"text": given},
+                messages=[dict(item) for item in context.messages],
+                observation=checkpoint.observation,
+                rendered=checkpoint.rendered,
+                environment=environment_payload(self.task, hosted=self._hosted),
+            )
+            try:
+                self._point = apply_change(job_fork.change.name, point)
+            except ValueError as exc:
+                raise ExecutionFailure(ErrorCode.CONFIGURATION, str(exc)) from None
+        return self._point
+
+    def _restore_inputs(self) -> dict[str, Any]:
+        """What the App host restores, with a diagnostic change's edits to step *k*."""
+        checkpoint = self.checkpoint
+        if checkpoint is None:
+            return {}
+        restore = checkpoint.restore_inputs()
+        point = self._fork_point()
+        if point is None:
+            return {"restore": restore}
+        return {
+            "restore": {
+                **restore,
+                "observation": point.observation,
+                "rendered": point.rendered,
+                "forced": point.forced,
+            },
+            "oracles": point.oracles,
+        }
+
+    def _tools_offered(self, player: _Player) -> tuple[str, ...]:
+        """Every tool a player's Agent is offered: the Environment's actions and its Harness's."""
+        actions = {item.name for item in self.task.environment.actions}
+        point = self._fork_point()
+        if point is not None:
+            actions |= set(point.oracles)
+        if player.binding.external is not None:
+            return tuple(sorted(actions))
+        own, _ = package_tools(player.package)
+        return tuple(sorted({*actions, *own}))
+
+    def _history(self, player: _Player) -> tuple[HarnessResume | None, ForkRecord | None]:
+        """How the starting checkpoint's history reaches one player, by §4.2's rule.
+
+        Returns:
+            What its Harness is told, and what the Trial records; ``None`` for both
+            when the episode starts from a reset.
+        """
+        checkpoint = self.checkpoint
+        if checkpoint is None:
+            return None, None
+        context = checkpoint.context(player.seat)
+        fork = self.spec.fork
+        point = self._fork_point() if fork is not None and fork.seat == player.seat else None
+        if point is not None:
+            context = context.model_copy(update={"messages": tuple(point.messages)})
+        external = player.binding.external is not None
+        supports = (
+            player.binding.external.supports_resume
+            if player.binding.external is not None
+            else package_tools(player.package)[1]
+        )
+        history, warnings = history_rule(
+            context,
+            self._tools_offered(player),
+            supports_resume=supports,
+            external=external,
+            agent_name=player.binding.name,
+            step=checkpoint.step,
+        )
+        if point is not None and point.fresh:
+            history = "none"
+            warnings = [
+                *warnings,
+                f"The context change started {player.binding.name} with no history.",
+            ]
+        resume = HarnessResume(
+            history=history,
+            step=checkpoint.step,
+            turn=context.turn,
+            messages=tuple(context.messages) if history == "native" else (),
+            transcript=transcript_text(context) if history == "transcript" else "",
+            observation=point.observation if point is not None else checkpoint.observation,
+            rendered=point.rendered if point is not None else checkpoint.rendered,
+            summary=context.summary,
+            memory=context.memory,
+            note=point.note if point is not None else "",
+        )
+        record = ForkRecord(
+            of_trial_id=checkpoint.trial_id,
+            step=checkpoint.step,
+            role=fork.role if fork is not None else None,
+            history=history,
+            checkpoint_digest=checkpoint.digest,
+            warnings=tuple(dict.fromkeys([*warnings, *checkpoint.warnings])),
+            seat=fork.seat if fork is not None else None,
+            change=fork.change if fork is not None else None,
+            from_checkpoint=None if fork is not None else self.task.from_checkpoint,
+            of_hosted_trial_id=self.job_spec.fork.hosted_trial_id
+            if self.job_spec.fork is not None
+            else None,
+        )
+        return resume, record
+
+    def _fork_fields(self, players: Sequence[_Player]) -> dict[str, Any]:
+        """The Trial's ``tools_offered`` and, from a checkpoint, its ``fork`` record."""
+        if not players:
+            return {}
+        seat = self.spec.fork.seat if self.spec.fork is not None else None
+        player = next((item for item in players if item.seat == seat), players[0])
+        _, record = self._history(player)
+        return {"tools_offered": self._tools_offered(player), "fork": record}
+
+    async def _restore_workspace(self, provider: SandboxProvider, handle: SandboxHandle) -> None:
+        """Put the checkpoint's workspace snapshot back, before the App host restores the Apps.
+
+        Raises:
+            ExecutionFailure: When the snapshot can't be read.
+        """
+        checkpoint = self.checkpoint
+        if checkpoint is None or not checkpoint.workspace.commit:
+            return
+        bundle = self._checkpoint_bundle()
+        if bundle is None:
+            raise ExecutionFailure(
+                ErrorCode.CONFIGURATION,
+                f"The checkpoint after step {checkpoint.step} of Trial {checkpoint.trial_id} "
+                "has a workspace snapshot, but its workspace.bundle is not on this machine, so "
+                "the workspace can't be restored. Run it from the project that holds the Trial.",
+            )
+        try:
+            entries = await asyncio.to_thread(snapshot_entries, bundle, checkpoint.workspace.commit)
+        except (OSError, RuntimeError) as exc:
+            raise ExecutionFailure(
+                ErrorCode.ENVIRONMENT_FAILED,
+                f"Could not read the checkpoint's workspace snapshot: {exc}",
+            ) from exc
+        if entries:
+            await provider.upload_files(
+                handle,
+                [FileUpload(path=path, data=data, mode=mode) for path, data, mode in entries],
+                root="/workspace",
+            )
+
+    def _snapshot_ignore(self, players: Sequence[_Player]) -> list[str]:
+        """What a workspace snapshot leaves out.
+
+        The Job's resources, the Harnesses' own files, and the Apps' private
+        files, which the host can read and the Agent never may.
+        """
+        ignored: list[str] = ["resources/"]
+        for name in app_private_files(self.task.environment):
+            # A recordings entry may name a folder.
+            ignored.extend((f"environment/{name}", f"environment/{name}/"))
+        for player in players:
+            source = player.source
+            if source is None or not Path(source).is_dir():
+                continue
+            prefix = player.stage.removeprefix("/workspace/").strip("/")
+            # Python's bytecode for the Harness's own modules, written as it loads.
+            ignored.append(f"{prefix}/__pycache__/")
+            for path in Path(source).rglob("*"):
+                if path.is_file():
+                    ignored.append(f"{prefix}/{path.relative_to(source).as_posix()}")
+        return ignored
+
+    async def _collect_workspace(
+        self,
+        provider: SandboxProvider,
+        handle: SandboxHandle,
+        report: HostReport,
+        artifacts: tuple[DownloadedFile, ...],
+    ) -> tuple[DownloadedFile, ...]:
+        """Download the workspace snapshots the host bundled, for checkpoints and Verifiers.
+
+        Returns:
+            The artifacts, with ``workspace.json`` and ``workspace.bundle``.
+        """
+        snapshots = dict(report.workspace or {})
+        if not snapshots:
+            return artifacts
+        bundle_path = str(snapshots.pop("bundle", "") or "")
+        self._workspace_report = snapshots
+        if bundle_path:
+            folder, _, name = bundle_path.rpartition("/")
+            try:
+                downloaded = await provider.download_files(handle, [name], root=folder or "/")
+            except (OSError, RuntimeError, ValueError) as exc:
+                snapshots["available"] = False
+                snapshots["problem"] = f"the workspace bundle could not be collected: {exc}"
+            else:
+                data = downloaded[0].data
+                artifacts = _with_artifact(artifacts, DownloadedFile(path=BUNDLE_FILE, data=data))
+                if self._scratch is None:
+                    self._scratch = Path(tempfile.mkdtemp(prefix="plural-trial-"))
+                (self._scratch / BUNDLE_FILE).write_bytes(data)
+        return _with_artifact(artifacts, _json_artifact("workspace.json", snapshots))
+
+    def _episode_workspace(self) -> EpisodeWorkspace:
+        """The final workspace for Verifiers, from the snapshot taken after the Harness stopped."""
+        report = self._workspace_report
+        bundle = self._scratch / BUNDLE_FILE if self._scratch is not None else None
+        final = report.get("final") if report else None
+        if not report or bundle is None or not bundle.is_file() or not final:
+            problem = (report or {}).get("problem") or "the Trial took no workspace snapshot"
+            return EpisodeWorkspace(available=False, problem=str(problem))
+        skipped = [str(item.get("path")) for item in report.get("skipped") or ()]
+        return EpisodeWorkspace.from_bundle(bundle, str(final), skipped=skipped)
+
+    def _with_prefix(self, report: HostReport) -> HostReport:
+        """A fork's host report with the original's steps before the checkpoint, inherited.
+
+        The host recorded only the fork's own steps; the prefix's rewards and metric
+        points are copied, and ``reward`` / ``measure`` never ran on them again.
+        """
+        checkpoint = self.checkpoint
+        if checkpoint is None or not checkpoint.prefix_steps:
+            return report
+        inherited = [{**item, "inherited": True} for item in checkpoint.prefix_steps]
+        states = [{**item, "inherited": True} for item in checkpoint.prefix_states]
+        metrics = [{**item, "inherited": True} for item in checkpoint.prefix_metrics]
+        return HostReport(
+            apps=report.apps,
+            steps=[*inherited, *report.steps],
+            states=[*states, *report.states],
+            observation=report.observation,
+            view=report.view,
+            metrics=[*metrics, *report.metrics],
+            metric_failures=report.metric_failures,
+            workspace=report.workspace,
+        )
 
     async def _check_model_identity(self, agent: AgentBinding) -> None:
         """Refuse to start when the endpoint now serves another model than the Job accepted.
@@ -1028,6 +1328,20 @@ class TrialRunner:
             )
             sandbox_requirements = requirements
             distribution = self._plural_distribution(provider, package)
+            self._hosted = self._wants_host(provider, package)
+            checkpoint = self.checkpoint
+            if checkpoint is not None:
+                problem = task.environment.fork_problem or (
+                    None
+                    if self._hosted
+                    else "its Agent runs as its own service, with no App host to restore"
+                )
+                if problem:
+                    raise ExecutionFailure(
+                        ErrorCode.CONFIGURATION,
+                        f"This Trial starts from step {checkpoint.step} of Trial "
+                        f"{checkpoint.trial_id}, but its Environment can't be restored: {problem}.",
+                    )
             async with phase("environment_setup"):
                 if distribution is not None:
                     requirements = await prepare_requirements(provider, requirements, distribution)
@@ -1073,7 +1387,7 @@ class TrialRunner:
                             timeout_seconds=task.environment.limits.max_seconds,
                         )
                 async with phase("environment_setup"):
-                    if task.environment.apps:
+                    if self._hosted:
                         try:
                             staged = host_files(task)
                         except ValueError as exc:
@@ -1116,6 +1430,7 @@ class TrialRunner:
                             seat_isolation = "os_user" if isolated else "none"
                         else:
                             players[0].user = isolation.agent_user
+                        await self._restore_workspace(provider, handle)
                         host = AppHostSession(
                             provider,
                             handle,
@@ -1126,7 +1441,13 @@ class TrialRunner:
                         )
                         await host.start(
                             secrets=app_secrets,
-                            inputs=host_inputs(task, seed=seed),
+                            inputs={
+                                **host_inputs(task, seed=seed),
+                                "workspace": "/workspace",
+                                "snapshot_mib": task.environment.limits.workspace_snapshot_mib,
+                                "snapshot_ignore": self._snapshot_ignore(players),
+                                **self._restore_inputs(),
+                            },
                             seats={
                                 str(item.seat): str(item.token) for item in players if item.seat
                             },
@@ -1213,7 +1534,7 @@ class TrialRunner:
                     (item.execution.trace_id for item in players if item.execution is not None),
                     None,
                 )
-                job_only = _JOB_ARTIFACTS | (_HOST_VIEWS if task.environment.apps else frozenset())
+                job_only = _JOB_ARTIFACTS | (_HOST_VIEWS if self._hosted else frozenset())
                 for player in players:
                     if player.execution is None:
                         continue
@@ -1241,6 +1562,7 @@ class TrialRunner:
                         host_signed = False
                         raise ExecutionFailure(ErrorCode.ENVIRONMENT_FAILED, str(exc)) from exc
                     host_signed = True
+                    host_report = self._with_prefix(host_report)
                     app_report = host_report.apps
                     environment_observation = host_report.observation
                     environment_view_doc = host_report.view
@@ -1248,6 +1570,9 @@ class TrialRunner:
                     # is stored is masked, while the Verifiers below read the live report.
                     stored = HostReport.parse(_redact_json(asdict(host_report), secrets))
                     artifacts = _with_host_steps(artifacts, stored)
+                    artifacts = await self._collect_workspace(
+                        provider, handle, host_report, artifacts
+                    )
                     if self.seat_names:
                         for player in players:
                             artifacts = (
@@ -1427,6 +1752,7 @@ class TrialRunner:
                 metrics=metrics,
                 metric_failures=metric_failures(host_report.metric_failures),
                 **self._gates(metrics, awaiting=awaiting),
+                **self._fork_fields(players),
                 **totals,
             )
         except BaseException as exc:
@@ -1495,6 +1821,7 @@ class TrialRunner:
                 passed=False
                 if any(spec.gate for spec in task_metric_specs(self.task).values())
                 else None,
+                **self._fork_fields(players),
                 **totals,
                 error_code=None if code is ErrorCode.CANCELLED else code,
                 error_message=_redact_bytes(str(exc).encode(), secrets).decode(errors="replace")[
@@ -1511,6 +1838,10 @@ class TrialRunner:
             verifier_stdout=_redact_bytes(verifier_stdout, secrets),
             verifier_stderr=_redact_bytes(verifier_stderr, secrets),
         )
+        if self._scratch is not None:
+            shutil.rmtree(self._scratch, ignore_errors=True)
+            self._scratch = None
+        self._workspace_report = {}
         for stream, payload in (("stdout", stdout), ("stderr", stderr)):
             if payload:
                 self.store.emit(
@@ -1719,6 +2050,13 @@ class TrialRunner:
         party = task.environment.party
         return party is None or party.isolation == "isolated"
 
+    def _environment_payload(self, task: TaskDefinition) -> dict[str, Any]:
+        """The Environment as a Harness is told it, with a diagnostic change's edits."""
+        point = self._fork_point()
+        if point is not None:
+            return copy.deepcopy(point.environment)
+        return environment_payload(task, hosted=self._hosted)
+
     def _run_request(self, task: TaskDefinition, player: _Player) -> HarnessRunRequest:
         """What one Harness is told: the Task as its seat sees it, and its own Agent."""
         binding = player.binding
@@ -1742,8 +2080,9 @@ class TrialRunner:
                 "harness_config": binding.harness_config,
             },
             model_resolution=model.model_dump(mode="json"),
-            environment=environment_payload(task),
+            environment=self._environment_payload(task),
             mode=self.job_spec.mode.value,
+            resume=self._history(player)[0],
             capture_tito=self.job_spec.mode is JobMode.TRAIN,
             workspace=player.workspace,
             granted_capabilities=tuple(sorted(item.value for item in grant.granted))
@@ -2285,6 +2624,7 @@ class TrialRunner:
                 key: tuple(points)
                 for key, points in series_by_metric(metric_lines(artifacts)).items()
             },
+            workspace=self._episode_workspace(),
         )
         if not hosted and not episode.apps and not episode.state:
             fallback = first_json_mapping(artifacts, ("final-state.json", "state.json"))

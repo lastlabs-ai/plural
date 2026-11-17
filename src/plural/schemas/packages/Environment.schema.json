@@ -133,6 +133,18 @@
           "additionalProperties": true,
           "title": "State Schema",
           "type": "object"
+        },
+        "unrestorable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unrestorable"
         }
       },
       "required": [
@@ -533,6 +545,13 @@
           "default": null,
           "description": "Turns the Agent may take. Null, the default, means no cap. Set any positive number to stop the run after that many actions.",
           "title": "Max Turns"
+        },
+        "workspace_snapshot_mib": {
+          "default": 512,
+          "description": "MiB of the workspace the App host snapshots after each step, so a Trial can be forked from any step. Files past the cap are recorded as skipped. 0 turns snapshots off.",
+          "minimum": 0,
+          "title": "Workspace Snapshot Mib",
+          "type": "integer"
         }
       },
       "title": "ExecutionLimits",

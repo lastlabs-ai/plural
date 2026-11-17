@@ -185,12 +185,15 @@ def test_an_unset_ref_leaves_environment_hashes_unchanged(tmp_path: Path) -> Non
     assert referenced.content_hash != definition.content_hash
     del payload["runtime"]["ref"]
     del payload["runtime"]["packages"]
+    del payload["limits"]["workspace_snapshot_mib"]
     from plural.identity import revision_hash
     from plural.sandbox.models import runtime_hash_payload
 
     for item in payload["apps"]:
         if not item["credentials"]:
             del item["credentials"]
+        if item["unrestorable"] is None:
+            del item["unrestorable"]
     payload["source_digest"] = definition.source.digest if definition.source else None
     # Renamed Runtime fields hash under their original names.
     payload["runtime"] = runtime_hash_payload(payload["runtime"])

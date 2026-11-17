@@ -50,6 +50,7 @@ PACKAGE_NAV = [
     ("Build", "/docs/project/multi-agent", "project/multi-agent.md"),
     ("Run", "/docs/running/jobs", "running/jobs.md"),
     ("Run", "/docs/running/trials", "running/trials.md"),
+    ("Run", "/docs/running/forks", "running/forks.md"),
     ("Run", "/docs/running/sessions", "running/sessions.md"),
     ("Run", "/docs/running/artifacts", "running/artifacts.md"),
     ("Run", "/docs/running/reviews", "running/reviews.md"),

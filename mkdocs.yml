@@ -52,6 +52,7 @@ plugins:
         Run:
           - running/jobs.md
           - running/trials.md
+          - running/forks.md
           - running/artifacts.md
           - running/reviews.md
           - running/training.md
@@ -122,6 +123,7 @@ nav:
   - Run:
       - Jobs: running/jobs.md
       - Trials and trajectories: running/trials.md
+      - Checkpoints and forks: running/forks.md
       - Sessions: running/sessions.md
       - Artifacts and evidence: running/artifacts.md
       - Reviews: running/reviews.md

@@ -553,6 +553,10 @@ class MCPApp(App[State]):
             with the App's initial state as JSON on stdin. Use it to seed a
             sandbox tenant. Its output, if any, is the App's first observation.
         snapshot: Command that prints the App's state as JSON, for Verifiers.
+        restore: Command that puts the server back as a ``snapshot`` printed it,
+            with that JSON on stdin, so a Trial can be forked from any step.
+            The App is restorable only with ``snapshot``, ``restore``, and
+            ``snapshot_on_step``.
         snapshot_on_step: Also snapshot before and after each action, so
             verifiers receive states. Off by default because it costs a call.
         actions: Tool declarations to use instead of asking the server, so a
@@ -591,6 +595,7 @@ class MCPApp(App[State]):
         exclude: Sequence[str] = (),
         reset: str | Sequence[str] | None = None,
         snapshot: str | Sequence[str] | None = None,
+        restore: str | Sequence[str] | None = None,
         snapshot_on_step: bool = False,
         actions: Sequence[Mapping[str, Any] | AppAction] | None = None,
         secrets: Iterable[str | SecretReference] | None = None,
@@ -627,6 +632,7 @@ class MCPApp(App[State]):
         self.exclude = tuple(exclude)
         self.reset_command = _argv(reset)
         self.snapshot_command = _argv(snapshot)
+        self.restore_command = _argv(restore)
         self.snapshot_on_step = snapshot_on_step  # type: ignore[misc]
         self.timeout_seconds = timeout_seconds
         self._pinned = (
@@ -794,6 +800,33 @@ class MCPApp(App[State]):
             return json.loads(output) if output.strip() else None
         except json.JSONDecodeError as exc:
             raise ValueError(f"MCP App {self.name!r} snapshot did not print JSON: {exc}") from exc
+
+    def restore(self, snapshot: Any) -> None:
+        """Run the ``restore`` command with the snapshot as JSON on stdin, and open the session.
+
+        Raises:
+            ValueError: When the App has no ``restore`` command.
+        """
+        if not self.restore_command:
+            raise ValueError(f"MCP App {self.name!r} has no restore command")
+        self._run(self.restore_command, stdin=json.dumps(snapshot))
+        self.connect()
+
+    def restore_status(self) -> tuple[bool, str | None]:
+        """Whether a fork can put this server back: snapshot, restore, and snapshot_on_step.
+
+        Returns:
+            ``(True, None)``, or ``(False, reason)``.
+        """
+        restorable, reason = super().restore_status()
+        if not restorable:
+            return restorable, reason
+        overridden = type(self).restore is not MCPApp.restore
+        if not (self.restore_command or overridden):
+            return False, f"MCP App {self.name!r} has no restore command"
+        if not self.snapshot_on_step:
+            return False, f"MCP App {self.name!r} needs snapshot_on_step: true to be restored"
+        return True, None
 
     def has_reset(self) -> bool:
         """Whether a reset command or Python ``reset`` override sets up each episode.

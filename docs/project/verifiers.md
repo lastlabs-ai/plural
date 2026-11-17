@@ -151,6 +151,29 @@ One Verifier then scores every Task that lists it, each against its own answer. 
 `reward` hook reads the same answer key as `step.task.expected`, and an
 [AgentVerifier](#agentverifier) is shown it as the reference answer.
 
+### Check the files the Agent wrote
+
+`episode.workspace` holds the files the Agent left in its workspace when the episode
+ended, read from Plural's last [workspace snapshot](environments.md#workspace-snapshots).
+Paths are relative to the workspace, so a file the Agent wrote in its own folder
+reads as `harness/report.txt`:
+
+```python
+def wrote_total(episode: Episode) -> VerifierOutput:
+    found = episode.workspace.list("**/march-total.txt")
+    text = episode.workspace.read(found[0]).strip() if found else ""
+    return VerifierOutput(
+        metrics={"file_correct": float(text == episode.expected["total_usd"])},
+        feedback=f"wrote {text!r}" if found else "no march-total.txt",
+    )
+```
+
+`list(pattern)` matches glob patterns, `exists(path)` and `read(path)` read one
+file, and `read_bytes(path)` reads it as bytes. `available` is false when snapshots
+were off or `git` was missing, and reading then raises an error that says why. The
+workspace is read by `check` in the Job's process; a Verifier that runs as a command
+in its own sandbox gets the snapshots as the `workspace.bundle` artifact instead.
+
 The function must live in a Python file. In a project, each Verifier is a folder under
 `verifiers/`, named after it. This command creates
 `verifiers/correct-resolution/verifier.yaml` and `verify.py`:

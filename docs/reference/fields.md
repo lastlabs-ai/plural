@@ -27,11 +27,14 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HumanVerifier](#humanverifier)
 - [Agent](#agent)
 - [Benchmark](#benchmark)
+- [AgentContext](#agentcontext)
 - [AgentCredential](#agentcredential)
 - [AppAction](#appaction)
 - [AppDefinition](#appdefinition)
 - [BenchmarkCategory](#benchmarkcategory)
 - [BenchmarkScoring](#benchmarkscoring)
+- [Checkpoint](#checkpoint)
+- [CheckpointWorkspace](#checkpointworkspace)
 - [DeclarativeImage](#declarativeimage)
 - [Resource](#resource)
 - [Runtime](#runtime)
@@ -44,6 +47,7 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HarnessCapability](#harnesscapability)
 - [HarnessDefinition](#harnessdefinition)
 - [HarnessPolicy](#harnesspolicy)
+- [HarnessTool](#harnesstool)
 - [MetricSpec](#metricspec)
 - [NetworkMode](#networkmode)
 - [Party](#party)
@@ -97,6 +101,9 @@ One versioned unit of work in a Python-authored Environment.
 - **`initial_state`** — `object`; optional.
 - **`seat_instructions`** — `object`; optional.
 - **`expected`** — `JSON value`; optional. Default: `null`.
+- **`from_checkpoint`** — `string | null`; optional. Default: `null`.
+- **`checkpoint`** — `Checkpoint | null`; optional. Default: `null`.
+- **`checkpoint_bundle`** — `string | null`; optional. Default: `null`.
 
 ## DeterministicVerifier
 
@@ -199,6 +206,18 @@ A semantic version that pins an ordered set of Tasks.
 - **`metadata`** — `object`; optional.
 - **`heldout`** — `array of string`; optional. Default: `[]`.
 
+## AgentContext
+
+What one Agent had seen through observation *k*, in a Harness-neutral form.
+
+- **`messages`** — `array of object`; optional.
+- **`turn`** — `integer`; optional. Default: `0`.
+- **`tools_used`** — `array of string`; optional.
+- **`source`** — `"recorded" | "steps" | "reported"`; optional. Default: `"steps"`.
+- **`summary`** — `string | null`; optional. Default: `null`.
+- **`memory`** — `JSON value`; optional. Default: `null`.
+- **`compaction`** — `array of JSON value | null`; optional. Default: `null`.
+
 ## AgentCredential
 
 A credential this Agent supplies to the Apps it works with.
@@ -233,6 +252,7 @@ One App inside an Environment.
 - **`has_reset`** — `boolean`; optional. Default: `false`.
 - **`has_snapshot`** — `boolean`; optional. Default: `false`.
 - **`control`** — `"owned" | "sandboxed" | "live" | "replayed"`; optional. Default: `"owned"`.
+- **`unrestorable`** — `string | null`; optional. Default: `null`.
 
 ## BenchmarkCategory
 
@@ -260,6 +280,40 @@ How a release turns attempts into one score per configuration.
 - **`harness_timeout`** — `"infrastructure_error" | "agent_failure"`; optional. Default: `"infrastructure_error"`.
 - **`min_tasks_for_interval`** — `integer`; optional. Default: `5`. Constraints: `{"minimum": 2}`.
 - **`integrity`** — `"report" | "exclude_critical" | "zero_critical"`; optional. Default: `"report"`.
+
+## Checkpoint
+
+Everything needed to continue a Trial from after step ``step``.
+
+- **`trial_id`** — `string`; required.
+- **`job_id`** — `string`; optional. Default: `""`.
+- **`step`** — `integer`; required. Constraints: `{"minimum": 0}`.
+- **`name`** — `string | null`; optional. Default: `null`.
+- **`task_digest`** — `string`; optional. Default: `""`.
+- **`agent_digest`** — `string`; optional. Default: `""`.
+- **`apps`** — `object`; optional.
+- **`rng`** — `object`; optional.
+- **`initial`** — `object`; optional.
+- **`turns`** — `integer`; optional. Default: `0`.
+- **`elapsed`** — `number`; optional. Default: `0.0`.
+- **`observation`** — `JSON value`; optional. Default: `null`.
+- **`rendered`** — `string`; optional. Default: `""`.
+- **`workspace`** — `CheckpointWorkspace`; optional.
+- **`contexts`** — `object`; optional.
+- **`warnings`** — `array of string`; optional.
+- **`heldout`** — `boolean`; optional. Default: `false`.
+- **`prefix_steps`** — `array of object`; optional.
+- **`prefix_states`** — `array of object`; optional.
+- **`prefix_metrics`** — `array of object`; optional.
+
+## CheckpointWorkspace
+
+The workspace snapshot a checkpoint restores.
+
+- **`available`** — `boolean`; optional. Default: `false`.
+- **`commit`** — `string | null`; optional. Default: `null`.
+- **`skipped`** — `array of string`; optional.
+- **`problem`** — `string | null`; optional. Default: `null`.
 
 ## DeclarativeImage
 
@@ -340,6 +394,7 @@ How long one episode may run.
 - **`max_turns`** — `integer | null`; optional. Default: `null`. Turns the Agent may take. Null, the default, means no cap. Set any positive number to stop the run after that many actions.
 - **`max_seconds`** — `number`; optional. Default: `600`. Constraints: `{"exclusiveMinimum": 0}`. Seconds the episode may run. The default is 600, ten minutes.
 - **`max_cost_usd`** — `number | null`; optional. Default: `null`. Optional spending cap, in USD. Unset means no cost cap.
+- **`workspace_snapshot_mib`** — `integer`; optional. Default: `512`. Constraints: `{"minimum": 0}`. MiB of the workspace the App host snapshots after each step, so a Trial can be forked from any step. Files past the cap are recorded as skipped. 0 turns snapshots off.
 
 ## ExecutionTarget
 
@@ -356,6 +411,7 @@ An agent that already runs as a service of its own.
 - **`signing_key`** — `string`; required.
 - **`version`** — `string`; optional. Default: `""`.
 - **`ca_bundle`** — `string | null`; optional. Default: `null`.
+- **`supports_resume`** — `boolean`; optional. Default: `false`.
 
 ## FileDeclaration
 
@@ -401,6 +457,8 @@ A declared executable Agent interaction strategy.
 - **`trajectory`** — `string | null`; optional. Default: `null`.
 - **`tito`** — `string | null`; optional. Default: `null`.
 - **`readme`** — `string`; optional. Default: `""`. Markdown overview shown on the Harness page.
+- **`tools`** — `array of HarnessTool`; optional. Default: `[]`. The tools the Harness brings itself, such as bash or edit, by name or {name, description}. A fork compares them with the tools a history used.
+- **`supports_resume`** — `boolean`; optional. Default: `false`. Whether the Harness reads HarnessEnvironment.resume and continues a history as its own conversation.
 
 ## HarnessPolicy
 
@@ -410,6 +468,13 @@ Environment ceiling for a Trial's optional Agent harness.
 - **`allowed_harnesses`** — `array of string`; optional. Default: `[]`.
 - **`allowed_capabilities`** — `array of HarnessCapability | null`; optional. Default: `null`.
 - **`denied_capabilities`** — `array of HarnessCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
+
+## HarnessTool
+
+One tool a Harness brings itself, such as ``Bash`` or ``apply_patch``.
+
+- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
+- **`description`** — `string`; optional. Default: `""`.
 
 ## MetricSpec
 

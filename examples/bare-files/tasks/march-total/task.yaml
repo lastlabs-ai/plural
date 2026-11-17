@@ -1,0 +1,11 @@
+# Task: total March's invoices into a file, and answer with the total.
+name: march-total
+version: 1.0.0
+instructions: instruction.md
+environment: files
+verifiers:
+  - total-check
+# The answer key: only the Verifier reads it, never the Agent.
+expected:
+  total_usd: "5740.00"
+  file: march-total.txt

@@ -1,0 +1,4 @@
+# Plural project identity. Resources live in the directories beside this file.
+schema_version: 1
+name: bare-files
+description: Total a month's invoices from a file, with no Apps, only a workspace.

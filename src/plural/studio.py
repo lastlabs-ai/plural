@@ -836,7 +836,7 @@ class JobsAPI:
                         "revision_id": source_revision_id,
                     },
                     "agent_revision_ids": list(agent_revision_ids),
-                    "attempts": spec.attempts,
+                    "attempts": spec.max_attempt,
                     "concurrency": spec.concurrency,
                     "per_runtime_concurrency": spec.per_runtime_concurrency,
                     "priority": spec.priority,

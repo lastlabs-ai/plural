@@ -543,7 +543,7 @@ def _grader_lines(checks: Mapping[str, TaskCheck], skipped: Mapping[str, str]) -
         passing = sum(item.status == "passed" for item in references.values())
         lines.append(
             CheckLine(
-                mark="ok",
+                mark="ok" if passing == len(references) else "warning",
                 text=f"{'reference solution passes every gate':<44} {passing}/{len(references)}",
             )
         )
@@ -566,7 +566,12 @@ def _grader_lines(checks: Mapping[str, TaskCheck], skipped: Mapping[str, str]) -
         if not results:
             continue
         failing = sum(item.status == "passed" for item in results.values())
-        lines.append(CheckLine(mark="ok", text=f"{label:<44} {failing}/{len(results)}"))
+        lines.append(
+            CheckLine(
+                mark="ok" if failing == len(results) else "warning",
+                text=f"{label:<44} {failing}/{len(results)}",
+            )
+        )
         lines.extend(_failures(kind, results))
     for name, reason in skipped.items():
         lines.append(

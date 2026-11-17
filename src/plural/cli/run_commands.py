@@ -99,7 +99,7 @@ from plural.sandbox.hosted_daytona import HostedDaytonaAdapter
 from plural.studio import Studio
 
 job_app = typer.Typer(help="List, inspect, and rerun Jobs.", no_args_is_help=True)
-trial_app = typer.Typer(help="Inspect and rerun Trials.", no_args_is_help=True)
+trial_app = typer.Typer(help="Inspect, rerun, checkpoint, and fork Trials.", no_args_is_help=True)
 review_app = typer.Typer(help="List and submit human reviews.", no_args_is_help=True)
 
 HOSTED_RUNS = (
@@ -691,6 +691,163 @@ def trial_rerun(
         _finish_local(space, new_id, result, tracking, as_json=as_json)
         return
     raise ProjectError(_not_here("Trial", trial_id))
+
+
+@trial_app.command("checkpoint")
+@handled
+def trial_checkpoint(
+    trial_id: str = typer.Argument(
+        help="Trial to take the checkpoint from: a local Trial, or one this folder recorded."
+    ),
+    step: int = typer.Option(..., "--step", help="The step the checkpoint is after."),
+    name: str = typer.Option(
+        ..., "--name", help="A lowercase name; a Task names it as TRIAL/NAME."
+    ),
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Name the moment after one step of a Trial, to fork from it or start a Task there."""
+    from plural.checkpoints import load_checkpoint
+    from plural.project.forks import local_trial_id, save_trial_checkpoint
+
+    space = workspace()
+    trial_id = local_trial_id(space, trial_id, lambda: project_studio(space, session())[0])
+    path = save_trial_checkpoint(space, trial_id, step=step, name=name)
+    checkpoint = load_checkpoint(path)
+    payload = {
+        "trial_id": trial_id,
+        "step": step,
+        "name": name,
+        "reference": f"{trial_id}/{name}",
+        "digest": checkpoint.digest,
+        "path": str(path),
+        "warnings": list(checkpoint.warnings),
+    }
+
+    def text() -> None:
+        typer.echo(f"Saved checkpoint {trial_id}/{name}, after step {step}.")
+        for warning in checkpoint.warnings:
+            typer.echo(f"! {warning}", err=True)
+        typer.echo(f"Start a Task there with from_checkpoint: {trial_id}/{name}")
+
+    emit(payload, as_json=as_json, text=text)
+
+
+@trial_app.command("fork")
+@handled
+def trial_fork(
+    trial_id: str = typer.Argument(
+        help="Trial to continue: a local Trial, or one this folder recorded."
+    ),
+    step: int | None = typer.Option(None, "--step", help="Continue after this step."),
+    checkpoint: str | None = typer.Option(
+        None, "--checkpoint", help="Continue from this Trial's checkpoint, by name."
+    ),
+    agent: list[str] = typer.Option(
+        [], "--agent", help="A saved Agent to fork into. Repeat for several."
+    ),
+    model: list[str] = typer.Option(
+        [], "--model", help="A model to fork into, with --harness. Repeat for several."
+    ),
+    harness: str | None = typer.Option(None, "--harness", help="Harness for --model."),
+    attempts: int = typer.Option(
+        3, "--attempts", min=1, help="Forks per Agent, and as many controls."
+    ),
+    seat: str | None = typer.Option(
+        None, "--seat", help="For a Trial several Agents share: the seat to replace."
+    ),
+    change: str | None = typer.Option(
+        None, "--change", help="Change one thing at the fork point: a diagnostic fork."
+    ),
+    payload: str | None = typer.Option(None, "--payload", help="The change's JSON payload."),
+    record: bool = typer.Option(
+        False, "--record", help="Record the fork Job in the hosted project as it runs."
+    ),
+    track: bool = TRACK_OPTION,
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Continue a Trial from step k with other Agents, beside controls that rerun the original.
+
+    The world (App State and workspace) is restored exactly. How the history
+    reaches each Agent follows one rule: as its own conversation when it has
+    every tool the history used, as a transcript when it lacks some, and not
+    at all when it can't accept one. Each case but the first prints why.
+    """
+    import json as json_module
+
+    from plural.project.forks import (
+        ForkRequest,
+        fork_local_trial,
+        fork_results,
+        hosted_trial_id,
+        local_trial_id,
+        trial_source,
+    )
+
+    space = workspace()
+    given = trial_id
+    trial_id = local_trial_id(space, trial_id, lambda: project_studio(space, session())[0])
+    recording = _recording(record, track)
+    hosted = (
+        given
+        if given != trial_id
+        else hosted_trial_id(space, project_studio(space, session())[0], trial_id)
+        if recording
+        else None
+    )
+    try:
+        payload_value = json_module.loads(payload) if payload is not None else None
+    except json_module.JSONDecodeError as exc:
+        raise ProjectError(f"--payload is not JSON: {exc}") from None
+    if payload is not None and change is None:
+        raise ProjectError("--payload goes with --change.")
+    request = ForkRequest(
+        trial_id=trial_id,
+        step=step,
+        checkpoint=checkpoint,
+        agents=tuple(agent),
+        models=tuple(model),
+        harness=harness,
+        attempts=attempts,
+        seat=seat,
+        change=change,
+        payload=payload_value,
+        hosted_trial_id=hosted,
+    )
+    source = trial_source(space, trial_id)
+    tracking = _tracking(space, session()) if recording else None
+    environ = _project_secrets(space, source.spec, _run_environ(session()), err=as_json)
+    with _credit_watch(session(), environ, err=as_json):
+        job_id, result, spec = fork_local_trial(
+            space,
+            request,
+            environ=environ,
+            progress=_progress(as_json),
+            tracking=tracking,
+            credential_source=_stored_credentials(as_json),
+        )
+    outcome = fork_results(spec, result, source.result)
+    view = {"job_id": job_id, "of_trial_id": trial_id, **outcome}
+
+    def text() -> None:
+        for warning in outcome["warnings"]:
+            typer.echo(f"! {warning}", err=True)
+        kind = "Diagnostic fork" if outcome["diagnostic"] else "Fork"
+        typer.echo(f"{kind} {job_id} of Trial {trial_id} after step {outcome['step']}:")
+        for name, summary in outcome["summaries"].items():
+            typer.echo(f"  {name}: {summary}")
+        reproduced = outcome["controls_reproduced"]
+        if reproduced is not None:
+            typer.echo(
+                f"  controls repeated the original outcome in {reproduced:.0%} of "
+                f"{outcome['controls']}"
+            )
+        histories = ", ".join(f"{count} {kind}" for kind, count in outcome["history"].items())
+        if histories:
+            typer.echo(f"  history: {histories}")
+
+    emit(view, as_json=as_json, text=text)
+    if result.status in {"failed", "cancelled"}:
+        raise typer.Exit(1)
 
 
 @review_app.command("list")

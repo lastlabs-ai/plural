@@ -38,6 +38,7 @@ from plural.execution.steps import STEPS_FILE, episode_terminated
 from plural.execution.store import JobStore
 from plural.harness.episode import EPISODE_FILE, EPISODE_SCHEMA
 from plural.jobs import (
+    ForkRecord,
     JobPlan,
     JobSpec,
     ProgressEvent,
@@ -478,6 +479,10 @@ def publish_execution(
         ]
     if result.trust is not None:
         report["trust"] = result.trust.model_dump(mode="json")
+    if result.tools_offered:
+        report["tools_offered"] = list(result.tools_offered)
+    if result.fork is not None:
+        report["fork"] = fork_report(result.fork)
     if result.model_identity is not None:
         report["model_identity"] = result.model_identity.model_dump(mode="json")
     if result.seats:
@@ -500,6 +505,17 @@ def publish_execution(
         }
     done = studio.request("POST", f"{path}/transition", json=body)
     return Published(execution_id, str(done.get("status") or final), len(events), uploaded)
+
+
+def fork_report(fork: ForkRecord) -> dict[str, Any]:
+    """A fork record as the hosted project reads it: the original by its hosted id.
+
+    Returns:
+        The record, with ``of_trial_id`` the hosted Trial's when it was recorded.
+    """
+    payload = fork.model_dump(mode="json", exclude_none=True)
+    hosted = payload.pop("of_hosted_trial_id", None)
+    return {**payload, "of_trial_id": hosted} if hosted else payload
 
 
 _HostedKey = tuple[str, str, int]

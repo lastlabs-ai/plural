@@ -212,6 +212,18 @@ class FileDeclaration(FrozenModel):
         return safe_relative_path(value)
 
 
+class HarnessTool(FrozenModel):
+    """One tool a Harness brings itself, such as ``Bash`` or ``apply_patch``."""
+
+    name: str = Field(min_length=1)
+    description: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_name(cls, value: Any) -> Any:
+        return {"name": value} if isinstance(value, str) else value
+
+
 class HarnessProtocol(FrozenModel):
     """Internal versioned executable harness contract.
 
@@ -245,6 +257,8 @@ class HarnessProtocol(FrozenModel):
     supports_tito: bool = False
     tito_path: str | None = None
     readme: str = ""
+    tools: tuple[HarnessTool, ...] = ()
+    supports_resume: bool = False
 
     @field_validator(
         "command",
@@ -275,6 +289,9 @@ class HarnessProtocol(FrozenModel):
             raise ValueError("tito_path must be declared in artifacts")
         if self.implementation == "runnable" and not self.command:
             raise ValueError("runnable harnesses require a command")
+        names = [item.name for item in self.tools]
+        if len(names) != len(set(names)):
+            raise ValueError("Harness tool names must be unique")
         for command in self.setup:
             if not command or any(not item.strip() for item in command):
                 raise ValueError("setup commands must be non-empty argv tuples")
@@ -305,6 +322,10 @@ class HarnessPackage(FrozenModel):
         # Harnesses without a README keep the hash they had before it existed.
         if not self.definition.readme:
             del payload["readme"]
+        if not self.definition.tools:
+            del payload["tools"]
+        if not self.definition.supports_resume:
+            del payload["supports_resume"]
         if self.source.digest is None:
             payload["source"] = self.source.model_dump(mode="json")
         else:
@@ -392,6 +413,7 @@ __all__ = [
     "HarnessCapability",
     "HarnessPackage",
     "HarnessProtocol",
+    "HarnessTool",
     "PackageSource",
     "RoutingSpec",
     "SHA256_PATTERN",

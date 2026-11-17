@@ -1,0 +1,9 @@
+# Agent: Codex, with its own tools (shell, apply_patch, ...).
+name: files-codex
+version: 1.0.0
+model: openai/gpt-5.6-luna
+harness: codex
+# Codex runs read-only by default; let it write in its working folder.
+harness_config:
+  sandbox: workspace-write
+instructions: Work carefully and give the exact figure the Task asks for.

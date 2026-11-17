@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from plural.apps.base import App, observation_payload
+from plural.apps.workspace import BUNDLE_FILE, WorkspaceSnapshots
 from plural.common import described
 from plural.verifiers import Step, StepTask
 
@@ -205,6 +206,10 @@ class AppHost:
         task: StepTask | None = None,
         private_state: bool = False,
         seats: Sequence[str] = (),
+        agent_workspace: str | Path | None = None,
+        snapshot_store: str | Path | None = None,
+        snapshot_mib: int = 512,
+        snapshot_ignore: Sequence[str] = (),
     ) -> None:
         # When the Harness shares this workspace, the full App State, which may hold
         # a secret, must not sit in a file it can read: keep it in memory and hand it
@@ -242,6 +247,21 @@ class AppHost:
         self._metrics: list[dict[str, Any]] = []
         self._metric_failures: list[dict[str, Any]] = []
         self._clock = time.monotonic()
+        self._rng_recorded: dict[str, Any] = {}
+        self._base_step = 0
+        self.restored_from: int | None = None
+        self.oracles: dict[str, str] = {}
+        """Diagnostic tools a fork added, by name, with the answer each returns."""
+        self.snapshots = (
+            WorkspaceSnapshots(
+                Path(agent_workspace),
+                Path(snapshot_store),
+                cap_mib=snapshot_mib,
+                ignore=snapshot_ignore,
+            )
+            if agent_workspace is not None and snapshot_store is not None
+            else None
+        )
 
     # Episode operations.
 
@@ -276,7 +296,7 @@ class AppHost:
             return self.agent_view(self._ended("reset", None))
         if self.opening is None:
             self.start()
-        if self.steps == 0 and self.opening is not None:
+        if self.steps == self._base_step and self.opening is not None:
             return self.agent_view(self.opening)
         return self.agent_view(
             self._envelope(
@@ -301,6 +321,33 @@ class AppHost:
                 rendered="",
                 info={"error": "action arguments must be a JSON object"},
             )
+        )
+
+    def oracle(
+        self, name: str, arguments: Mapping[str, Any], *, seat: str | None = None
+    ) -> dict[str, Any]:
+        """Answer a diagnostic fork's added tool, and record the call as a Harness tool step.
+
+        The answer is the text the fork's ``oracle_tool`` change was given, never
+        read from an App's State.
+
+        Returns:
+            What the Agent sees: the answer as the observation, and the step number.
+        """
+        answer = self.oracles.get(name)
+        if answer is None:
+            return self.agent_view(
+                {"observation": None, "rendered": "", "info": {"error": f"no tool {name!r}"}}
+            )
+        recorded = self.tool(name, dict(arguments), output=answer, seat=seat)
+        return self.agent_view(
+            {
+                "observation": {"text": answer},
+                "rendered": answer,
+                "terminated": False,
+                "truncated": False,
+                "info": {"step": recorded["step"]},
+            }
         )
 
     def agent_view(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
@@ -345,6 +392,8 @@ class AppHost:
             "view": self._last_view,
             "metrics": list(self._metrics),
             "metric_failures": list(self._metric_failures),
+            "workspace": self.snapshots.report() if self.snapshots is not None else None,
+            "restored_from": self.restored_from,
         }
 
     def finish(self) -> dict[str, Any]:
@@ -357,7 +406,20 @@ class AppHost:
             The same report as :meth:`report`.
         """
         self.finished = True
-        return self.report()
+        report = self.report()
+        if self.snapshots is not None and self.snapshots.available:
+            # What the Harness left behind, for Verifiers that read the workspace.
+            final = self.snapshots.take_final()
+            bundle = None
+            if final is not None:
+                with contextlib.suppress(OSError, RuntimeError):
+                    bundle = self.snapshots.bundle(self.snapshots.git_dir.parent / BUNDLE_FILE)
+            report["workspace"] = {
+                **self.snapshots.report(),
+                "final": final,
+                "bundle": str(bundle) if bundle is not None else None,
+            }
+        return report
 
     def reset(
         self,
@@ -394,7 +456,10 @@ class AppHost:
         self._metrics = []
         self._metric_failures = []
         self._clock = time.monotonic()
+        self._rng_recorded = {}
+        self._base_step = 0
         self._record_states(0)
+        self._snapshot_workspace(0)
         if len(texts) == 1:
             observation, rendered = texts[0][1], texts[0][2]
         elif texts:
@@ -402,12 +467,20 @@ class AppHost:
             rendered = "\n\n".join(f"## {name}\n{text}" for name, _, text in texts if text)
         else:
             observation, rendered = None, ""
-        return self._envelope(
+        envelope = self._envelope(
             "reset",
             observation=observation,
             rendered=rendered,
             view=self._view(None),
         )
+        if self._states:
+            # A checkpoint at step 0 hands this back to the Agent: what it saw, never State.
+            opening = self.agent_view(envelope)
+            self._states[0]["opening"] = {
+                "observation": opening.get("observation"),
+                "rendered": opening.get("rendered", ""),
+            }
+        return envelope
 
     def step(
         self, name: str, arguments: Mapping[str, Any], *, seat: str | None = None
@@ -452,6 +525,8 @@ class AppHost:
         route = self.routes.get(name)
         if route is None:
             available = ", ".join(self.routes) or "none"
+            self._record_states(self.steps, action=name, error="unknown action")
+            self._snapshot_workspace(self.steps)
             return self._logged(
                 self._envelope(
                     "step",
@@ -487,6 +562,7 @@ class AppHost:
             )
             reward, signals = self._reward(step)
             self._record_states(self.steps, app=app_name, action=action_name, error=error)
+            self._snapshot_workspace(self.steps)
             self._measure(step, app_name)
             failed: dict[str, Any] = {**app.step_info(), "step": self.steps, "error": error}
             if internal is not None:
@@ -522,6 +598,7 @@ class AppHost:
         step = self._step_view(app_name, action_name, arguments, payload, None, previous, current)
         reward, signals = self._reward(step)
         self._record_states(self.steps, app=app_name, action=action_name)
+        self._snapshot_workspace(self.steps)
         self._measure(step, app_name)
         info: dict[str, Any] = {
             **app.step_info(),
@@ -544,6 +621,152 @@ class AppHost:
             ),
             arguments,
         )
+
+    def tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        output: Any = None,
+        error: str | None = None,
+        seat: str | None = None,
+        background: bool = False,
+    ) -> dict[str, Any]:
+        """Record one call of the Harness's own tool, such as ``Bash``, as a step.
+
+        The Harness reports it, since the host did not run it, so the step is
+        marked ``reported``. It takes the next step number, so actions and
+        Harness tools share one timeline, and the workspace is snapshotted
+        after it. No ``reward`` or ``measure`` hook runs on it.
+
+        Returns:
+            The step number given to the call, or an error.
+        """
+        if self.finished:
+            return {"error": EPISODE_OVER}
+        if not self.started:
+            self.start()
+        self.steps += 1
+        self._acting = seat
+        try:
+            self._record_states(self.steps, action=name)
+            self._snapshot_workspace(self.steps)
+            text = output if isinstance(output, str) else json.dumps(output, default=str)
+            self._log.append(
+                self._redact(
+                    {
+                        "protocol": STEP_PROTOCOL,
+                        "kind": "harness_tool",
+                        "reported": True,
+                        "app": None,
+                        "action": str(name)[:200],
+                        "arguments": json.loads(json.dumps(dict(arguments or {}), default=str)),
+                        "observation": None if output is None else {"text": text[:20_000]},
+                        "rendered": "" if output is None else text[:20_000],
+                        "reward": 0.0,
+                        "rewards": [],
+                        "terminated": False,
+                        "truncated": False,
+                        "info": {
+                            "step": self.steps,
+                            **({"error": str(error)[:2000]} if error else {}),
+                            **({"background": True} if background else {}),
+                        },
+                        "view": None,
+                        "step": self.steps,
+                        "turn": self.turns,
+                        "at": time.time(),
+                        "t": round(time.monotonic() - self._clock, 3),
+                        "source": "agent",
+                        **({"seat": seat} if seat is not None else {}),
+                    }
+                )
+            )
+        finally:
+            self._acting = None
+        return {"step": self.steps}
+
+    def restore(
+        self,
+        *,
+        states: Mapping[str, Any],
+        rng: Mapping[str, Any] | None = None,
+        initial: Mapping[str, Any] | None = None,
+        step: int,
+        turns: int,
+        elapsed: float = 0.0,
+        observation: Any = None,
+        rendered: str = "",
+        info: Any = None,
+        seed: int | None = None,
+        forced: Sequence[Mapping[str, Any]] = (),
+    ) -> dict[str, Any]:
+        """Put every App back as it stood after step ``step``, without a reset.
+
+        Sets the step and turn counters, each App's random number generator,
+        and the clock; calls each App's :meth:`~plural.App.restore` with its
+        State; and keeps observation *k* as the opening, which a Harness that
+        resets sees. The Agent's workspace is put back by the Job beforehand,
+        and snapshotted here as step ``step``.
+
+        A diagnostic fork's ``forced`` actions run next, as the Agent's, and are
+        recorded with ``source: "intervention"``; the last one's result is the
+        opening instead.
+
+        Returns:
+            The opening envelope: observation *k*.
+
+        Raises:
+            ValueError: When an App cannot be restored.
+        """
+        for name, app in self.apps.items():
+            restorable, reason = app.restore_status()
+            if not restorable:
+                raise ValueError(reason or f"App {name!r} cannot be restored")
+            app.seed = seed
+            app.rng = random.Random(None if seed is None else f"{seed}:{name}")
+            app.task_info = info
+            app.restore(copy.deepcopy(states.get(name)))
+            saved = (rng or {}).get(name)
+            if saved is not None:
+                app.rng.setstate(_rng_state(saved))
+        self.initial = (
+            {key: copy.deepcopy(value) for key, value in initial.items()}
+            if initial is not None
+            else {name: self._snapshot(app) for name, app in self.apps.items()}
+        )
+        self.steps = step
+        self.turns = turns
+        self._base_step = step
+        self.restored_from = step
+        self.started = True
+        self._states = []
+        self._log = []
+        self._metrics = []
+        self._metric_failures = []
+        self._clock = time.monotonic() - max(0.0, float(elapsed))
+        self._recorded = {
+            name: self._snapshot(app) for name, app in self.apps.items() if app.snapshot_on_step
+        }
+        self._rng_recorded = {name: _rng_payload(app.rng) for name, app in self.apps.items()}
+        self._snapshot_workspace(step)
+        self.opening = self._envelope(
+            "reset",
+            observation=observation,
+            rendered=rendered,
+            info={"restored": step},
+            view=self._view(None),
+        )
+        for item in forced:
+            arguments = item.get("arguments")
+            envelope = self.step(
+                str(item.get("action")), dict(arguments) if isinstance(arguments, Mapping) else {}
+            )
+            if self._log:
+                self._log[-1]["source"] = "intervention"
+            self.opening = envelope
+        self._base_step = self.steps
+        return self.opening
 
     def turn(self) -> tuple[str, ...] | None:
         """The seats that may act now: those every App that answers allows.
@@ -866,6 +1089,7 @@ class AppHost:
             self._redact(
                 {
                     **json.loads(json.dumps(envelope, sort_keys=True, default=str)),
+                    "kind": "action",
                     "arguments": json.loads(json.dumps(dict(arguments), default=str)),
                     "step": self.steps,
                     "turn": self.turns,
@@ -908,7 +1132,12 @@ class AppHost:
         if self.workspace is None:
             return
         changed: dict[str, Any] = {}
+        generators: dict[str, Any] = {}
         for name, item in self.apps.items():
+            current = _rng_payload(item.rng)
+            if step == 0 or current != self._rng_recorded.get(name):
+                generators[name] = current
+                self._rng_recorded[name] = current
             if not item.snapshot_on_step:
                 continue
             snapshot = self._snapshot(item)
@@ -920,6 +1149,8 @@ class AppHost:
             "state": changed,
             "source": "environment" if step == 0 else "agent",
         }
+        if generators:
+            line["rng"] = generators
         if app is not None:
             line.update(app=app, action=action)
         if error is not None:
@@ -939,6 +1170,10 @@ class AppHost:
             One entry per step, oldest first.
         """
         return list(self._states)
+
+    def _snapshot_workspace(self, step: int) -> None:
+        if self.snapshots is not None:
+            self.snapshots.take(step)
 
     def _snapshot(self, app: App[Any]) -> Any:
         if not app.has_snapshot():
@@ -1063,6 +1298,26 @@ def _measured(hook: RewardHook, value: Any) -> dict[str, float | None]:
     for key, item in value.items():
         measured[str(key)] = None if item is None else _finite(item)
     return measured
+
+
+def _rng_payload(generator: random.Random) -> list[Any]:
+    """A generator's state as JSON: ``[version, internal state, gauss_next]``.
+
+    Returns:
+        The JSON-safe state.
+    """
+    version, internal, gauss = generator.getstate()
+    return [version, list(internal), gauss]
+
+
+def _rng_state(payload: Any) -> tuple[Any, ...]:
+    """The state :func:`_rng_payload` wrote, ready for ``random.Random.setstate``.
+
+    Returns:
+        The state tuple.
+    """
+    version, internal, gauss = payload
+    return (int(version), tuple(int(item) for item in internal), gauss)
 
 
 def _accepts_seed(app: App[Any]) -> bool:

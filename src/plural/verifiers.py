@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import math
+import re
 import shlex
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -186,6 +187,139 @@ class AppSnapshot(FrozenModel):
         return self._query(action, arguments)
 
 
+class EpisodeWorkspace(FrozenModel):
+    """The Agent's workspace as it was when the episode ended, read-only.
+
+    The App host snapshots the workspace after the Harness stops, so the Agent
+    cannot change it afterwards. Paths are relative to the workspace, with
+    ``/`` separators. Files over the snapshot cap are not there; ``skipped``
+    names them.
+    """
+
+    available: bool = False
+    problem: str | None = None
+    skipped: tuple[str, ...] = ()
+    _bundle: Path | None = PrivateAttr(default=None)
+    _commit: str | None = PrivateAttr(default=None)
+    _files: dict[str, bytes] | None = PrivateAttr(default=None)
+
+    @classmethod
+    def from_files(cls, files: Mapping[str, bytes | str]) -> EpisodeWorkspace:
+        """A workspace holding exactly these files, as for a Verifier's own tests.
+
+        Returns:
+            The workspace.
+        """
+        workspace = cls(available=True)
+        workspace._files = {
+            str(path): value.encode() if isinstance(value, str) else bytes(value)
+            for path, value in files.items()
+        }
+        return workspace
+
+    @classmethod
+    def from_bundle(
+        cls, bundle: Path, commit: str, *, skipped: Sequence[str] = ()
+    ) -> EpisodeWorkspace:
+        """The workspace in one commit of a Trial's ``workspace.bundle``.
+
+        Returns:
+            The workspace; its files are read on first use.
+        """
+        workspace = cls(available=True, skipped=tuple(skipped))
+        workspace._bundle = bundle
+        workspace._commit = commit
+        return workspace
+
+    def _all(self) -> dict[str, bytes]:
+        if self._files is None:
+            if self._bundle is None or self._commit is None:
+                self._files = {}
+            else:
+                from plural.apps.workspace import snapshot_files
+
+                self._files = snapshot_files(self._bundle, self._commit)
+        return self._files
+
+    def _require(self) -> None:
+        if not self.available:
+            raise FileNotFoundError(
+                f"The workspace was not captured: {self.problem or 'no snapshot'}."
+            )
+
+    def exists(self, path: str) -> bool:
+        """Whether a file is in the workspace.
+
+        Returns:
+            True when the file was there when the episode ended.
+        """
+        self._require()
+        return _relative(path) in self._all()
+
+    def read_bytes(self, path: str) -> bytes:
+        """One file's bytes.
+
+        Returns:
+            The file's content.
+
+        Raises:
+            FileNotFoundError: When the file was not in the workspace.
+        """
+        self._require()
+        key = _relative(path)
+        files = self._all()
+        if key not in files:
+            raise FileNotFoundError(f"{path} was not in the workspace when the episode ended.")
+        return files[key]
+
+    def read(self, path: str, encoding: str = "utf-8") -> str:
+        """One file's text.
+
+        Returns:
+            The decoded content.
+        """
+        return self.read_bytes(path).decode(encoding, errors="replace")
+
+    def list(self, pattern: str = "**/*") -> list[str]:
+        """The files matching a glob: ``*`` stays in one folder, ``**/`` spans folders.
+
+        Returns:
+            Matching paths, sorted.
+        """
+        self._require()
+        matcher = _glob(pattern)
+        return [name for name in sorted(self._all()) if matcher.fullmatch(name)]
+
+
+def _relative(path: str) -> str:
+    while path.startswith("./"):
+        path = path[2:]
+    return path.lstrip("/")
+
+
+def _glob(pattern: str) -> re.Pattern[str]:
+    parts: list[str] = []
+    index = 0
+    pattern = _relative(pattern)
+    while index < len(pattern):
+        if pattern.startswith("**/", index):
+            parts.append("(?:.*/)?")
+            index += 3
+        elif pattern.startswith("**", index):
+            parts.append(".*")
+            index += 2
+        elif pattern[index] == "*":
+            parts.append("[^/]*")
+            index += 1
+        elif pattern[index] == "?":
+            parts.append("[^/]")
+            index += 1
+        else:
+            parts.append(re.escape(pattern[index]))
+            index += 1
+    return re.compile("".join(parts))
+
+
 class Episode(FrozenModel):
     """Completed Agent episode handed to a Verifier.
 
@@ -196,10 +330,12 @@ class Episode(FrozenModel):
     ``observation`` is what the Agent last saw, and ``answer`` is the final
     answer it gave, which is all there is to check in an Environment with no
     Apps. ``expected`` is the Task's answer key, which the Agent never sees.
-    ``rewards`` are the values this Verifier's ``reward`` gave each step, in
-    order; :func:`total_reward` sums them. ``metric_series`` holds each running
-    metric's points, and ``answer`` may be ``None``: an episode that runs a
-    business for a simulated year has no final answer to check.
+    ``workspace`` reads the Agent's workspace as it was at the end
+    (``read``, ``list``, ``exists``). ``rewards`` are the values this
+    Verifier's ``reward`` gave each step, in order; :func:`total_reward` sums
+    them. ``metric_series`` holds each running metric's points, and ``answer``
+    may be ``None``: an episode that runs a business for a simulated year has
+    no final answer to check.
 
     When several Agents share the episode, ``seats`` names them, each step in
     ``trajectory`` carries the ``seat`` that took it, and ``seat_rewards`` holds
@@ -222,6 +358,8 @@ class Episode(FrozenModel):
     metric_series: dict[str, tuple[tuple[int, float], ...]] = Field(default_factory=dict)
     """Each running metric's points so far, ``(step, value)``, from every
     Verifier's ``measure`` hook, so ``check`` can use them."""
+    workspace: EpisodeWorkspace = Field(default_factory=EpisodeWorkspace, exclude=True)
+    """The Agent's workspace as the episode left it, read-only."""
 
     @classmethod
     def from_apps(cls, report: Mapping[str, Any], **fields: Any) -> Episode:

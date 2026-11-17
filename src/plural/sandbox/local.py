@@ -133,6 +133,14 @@ class LocalProvider(SandboxProvider):
             "PLURAL_SANDBOX_OWNER": str(os.getpid()),
             **request.env,
         }
+        if "PATH" in env:
+            # A Runtime path on PATH, such as a Harness's installed tools, lives under root.
+            env["PATH"] = os.pathsep.join(
+                str(root / entry.removeprefix("/"))
+                if entry == "/workspace" or entry.startswith("/workspace/")
+                else entry
+                for entry in env["PATH"].split(os.pathsep)
+            )
         command = resolve_local_command(request.command)
         if request.user and request.user not in {"root", ""}:
             command = ["sudo", "-n", "-u", request.user, "--", *command]

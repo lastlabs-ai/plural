@@ -276,6 +276,121 @@ def compare_configurations(
     )
 
 
+MIN_FORK_ATTEMPTS = 3
+"""Fewest forks each side needs, candidates and controls, before a fork gives a verdict."""
+FORK_METHOD = (
+    "95% percentile interval of the difference in means from a two-sample bootstrap of "
+    "the candidates' and the controls' attempts, 2,000 resamples, seeded from the Job."
+)
+
+ForkVerdict = Literal["likely_matters", "no_clear_effect", "too_few"]
+
+
+class ForkComparison(FrozenModel):
+    """One fork candidate against the controls: the original Agent from the same point.
+
+    Attributes:
+        metric: What was compared: ``"pass"`` (the share that passed) or a metric.
+        candidate: The candidate's mean.
+        control: The controls' mean.
+        delta: Candidate minus controls.
+        low: Lower end of the 95% interval of ``delta``.
+        high: Upper end of the 95% interval of ``delta``.
+        verdict: ``likely_matters`` when the interval excludes zero,
+            ``no_clear_effect`` when it doesn't, ``too_few`` below
+            :data:`MIN_FORK_ATTEMPTS` on either side.
+        candidates: How many candidate forks had a value.
+        controls: How many controls had a value.
+        method: How the interval was computed.
+    """
+
+    metric: str = "pass"
+    candidate: float | None = None
+    control: float | None = None
+    delta: float | None = None
+    low: float | None = None
+    high: float | None = None
+    verdict: ForkVerdict
+    candidates: int = 0
+    controls: int = 0
+    method: str = FORK_METHOD
+
+    @property
+    def summary(self) -> str:
+        """One line for a person, with the verdict first.
+
+        Examples:
+            >>> ForkComparison(verdict="too_few", candidates=2, controls=3).summary
+            'too few: 2 candidate and 3 control forks, 3 of each needed'
+        """
+        if self.verdict == "too_few":
+            return (
+                f"too few: {self.candidates} candidate and {self.controls} control forks, "
+                f"{MIN_FORK_ATTEMPTS} of each needed"
+            )
+        label = self.verdict.replace("_", " ")
+        return (
+            f"{label}: {self.candidate:.2f} vs {self.control:.2f} for the controls, "
+            f"{self.delta:+.2f} (95% {self.low:+.2f} to {self.high:+.2f})"
+        )
+
+
+def compare_fork(
+    candidate: Sequence[float],
+    control: Sequence[float],
+    *,
+    seed: int,
+    metric: str = "pass",
+    resamples: int = BOOTSTRAP_RESAMPLES,
+) -> ForkComparison:
+    """Compare a fork candidate's attempts with the controls'.
+
+    Args:
+        candidate: One value per candidate fork.
+        control: One value per control.
+        seed: The resampling seed; see :func:`seed_for`.
+        metric: What the values measure.
+        resamples: How many resamples to draw.
+
+    Returns:
+        The comparison.
+
+    Examples:
+        >>> compare_fork([1.0, 1.0, 1.0], [0.0, 0.0, 0.0], seed=1).verdict
+        'likely_matters'
+        >>> compare_fork([1.0, 0.0, 1.0], [0.0, 1.0, 1.0], seed=1).verdict
+        'no_clear_effect'
+    """
+    a, b = [float(item) for item in candidate], [float(item) for item in control]
+    if not a or not b:
+        return ForkComparison(metric=metric, verdict="too_few", candidates=len(a), controls=len(b))
+    mean_a, mean_b = _mean(a), _mean(b)
+    common = ForkComparison(
+        metric=metric,
+        candidate=mean_a,
+        control=mean_b,
+        delta=mean_a - mean_b,
+        verdict="too_few",
+        candidates=len(a),
+        controls=len(b),
+    )
+    if len(a) < MIN_FORK_ATTEMPTS or len(b) < MIN_FORK_ATTEMPTS:
+        return common
+    rng = random.Random(seed)
+    deltas = sorted(
+        _mean([a[rng.randrange(len(a))] for _ in a]) - _mean([b[rng.randrange(len(b))] for _ in b])
+        for _ in range(resamples)
+    )
+    low, high = _percentile(deltas, 0.025), _percentile(deltas, 0.975)
+    return common.model_copy(
+        update={
+            "low": low,
+            "high": high,
+            "verdict": "no_clear_effect" if low <= 0 <= high else "likely_matters",
+        }
+    )
+
+
 def pass_hat_k(outcomes: Sequence[Sequence[bool]]) -> float | None:
     """pass^k: the share of Tasks where every attempt passed.
 
@@ -433,14 +548,19 @@ def _stdev(values: Sequence[float]) -> float:
 __all__ = [
     "BOOTSTRAP_METHOD",
     "BOOTSTRAP_RESAMPLES",
+    "FORK_METHOD",
+    "MIN_FORK_ATTEMPTS",
     "MIN_SHARED_TASKS",
     "PAIRED_METHOD",
     "Comparison",
+    "ForkComparison",
+    "ForkVerdict",
     "Interval",
     "ScoreSummary",
     "Verdict",
     "clustered_bootstrap",
     "compare_configurations",
+    "compare_fork",
     "paired_bootstrap",
     "pass_at_k",
     "pass_hat_k",

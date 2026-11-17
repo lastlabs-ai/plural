@@ -23,6 +23,7 @@ from pydantic import (
 
 from plural.agents import Agent, AgentBinding, AgentDefinition
 from plural.catalog import ModelCatalog
+from plural.checkpoints import Checkpoint, History
 from plural.common import (
     SHA256_PATTERN,
     ErrorCode,
@@ -485,6 +486,87 @@ JobPurpose = Literal["eval", "diagnose", "fork", "confirm"]
 REFUSE_HELDOUT: frozenset[str] = frozenset({"diagnose", "fork"})
 """Job purposes that may never run, or read, a held-out Task."""
 
+ForkRole = Literal["candidate", "control"]
+
+
+class ForkChange(FrozenModel):
+    """One change applied at the fork point, which makes the fork diagnostic."""
+
+    name: str = Field(min_length=1)
+    payload: Any = None
+
+
+class ForkSpec(FrozenModel):
+    """A fork Job: Trials that continue one Trial from its checkpoint after ``step``.
+
+    Each candidate Agent gets ``attempts`` forks, and the original Agent, the
+    control, as many again. With ``seat``, only that seat's Agent is replaced;
+    the other seats continue with their original Agents.
+    """
+
+    trial_id: str
+    job_id: str = ""
+    checkpoint: Checkpoint
+    control_agent_id: str
+    candidate_agent_ids: tuple[str, ...] = Field(min_length=1)
+    seat: str | None = None
+    change: ForkChange | None = None
+    bundle: str | None = Field(
+        default=None,
+        description="Path of the original Trial's workspace.bundle, read by the Job only.",
+    )
+    hosted_trial_id: str | None = Field(
+        default=None,
+        description="The original Trial's id in the hosted project, when it was recorded.",
+    )
+
+    @property
+    def step(self) -> int:
+        """The step the fork continues after."""
+        return self.checkpoint.step
+
+    @property
+    def controls_follow(self) -> bool:
+        """Whether the controls' attempts follow the candidates'.
+
+        A diagnostic fork of the original Agent runs it twice per attempt, with
+        the change and without, so the two can't share attempt numbers.
+        """
+        return self.change is not None and self.control_agent_id in self.candidate_agent_ids
+
+    @property
+    def diagnostic(self) -> bool:
+        """Whether a change makes this fork a diagnosis rather than something to ship."""
+        return self.change is not None
+
+
+class TrialFork(FrozenModel):
+    """A Trial's place in a fork Job."""
+
+    trial_id: str
+    step: int = Field(ge=0)
+    role: ForkRole
+    checkpoint_digest: str
+    seat: str | None = None
+    change: str | None = None
+
+
+class ForkRecord(FrozenModel):
+    """What a fork Trial records: where it started and how the history reached its Agent."""
+
+    of_trial_id: str
+    step: int = Field(ge=0)
+    role: ForkRole | None = None
+    history: History
+    checkpoint_digest: str
+    warnings: tuple[str, ...] = ()
+    seat: str | None = None
+    change: str | None = None
+    from_checkpoint: str | None = None
+    """``TRIAL/NAME`` when the Task, not a fork Job, named the checkpoint."""
+    of_hosted_trial_id: str | None = None
+    """The original Trial's id in the hosted project, when it was recorded."""
+
 
 class JobSpec(FrozenModel):
     """Complete schema-v2 Job orchestration input."""
@@ -520,6 +602,10 @@ class JobSpec(FrozenModel):
             "forks never run held-out Tasks."
         ),
     )
+    fork: ForkSpec | None = Field(
+        default=None,
+        description="For a fork Job: the checkpoint, the candidates, and the control.",
+    )
 
     @model_serializer(mode="wrap")
     def _omit_no_party(self, handler: SerializerFunctionWrapHandler) -> Any:
@@ -531,6 +617,8 @@ class JobSpec(FrozenModel):
                 data.pop("party", None)
             if self.purpose == "eval":
                 data.pop("purpose", None)
+            if self.fork is None:
+                data.pop("fork", None)
         return data
 
     @model_validator(mode="after")
@@ -546,6 +634,8 @@ class JobSpec(FrozenModel):
                 "them.\nNext: plural run --benchmark BENCHMARK --heldout runs them, as a "
                 "counted peek."
             )
+        if self.fork is not None:
+            self._check_fork(self.fork)
         names = {agent.name for agent in self.agents}
         unknown = sorted(set(self.party) - names)
         if unknown:
@@ -582,6 +672,28 @@ class JobSpec(FrozenModel):
                     _check_external_agent(self.mode, task, agent)
         return self
 
+    def _check_fork(self, fork: ForkSpec) -> None:
+        if self.purpose != "fork":
+            raise ValueError("A Job with a fork must have purpose fork.")
+        if fork.checkpoint.heldout:
+            raise ValueError(
+                f"Trial {fork.trial_id} ran a held-out Task, so it cannot be forked: held-out "
+                "Tasks are kept for confirming a fix."
+            )
+        if len(self.tasks) != 1:
+            raise ValueError("A fork Job continues one Trial, so it has exactly one Task.")
+        ids = {agent.agent_id for agent in self.agents}
+        named = {fork.control_agent_id, *fork.candidate_agent_ids}
+        if not named <= ids:
+            raise ValueError("A fork names Agents that are not in the Job.")
+        if fork.control_agent_id in fork.candidate_agent_ids and fork.change is None:
+            raise ValueError(
+                "A fork's candidate is the original Agent, which already runs as the control. "
+                "Change the Agent, or use --change for a diagnostic fork."
+            )
+        if self.tasks[0].party is not None and fork.seat is None:
+            raise ValueError("A fork of a Trial several Agents share must name a --seat.")
+
     @property
     def tasks(self) -> tuple[TaskDefinition, ...]:
         """Selected Tasks in deterministic order."""
@@ -617,7 +729,26 @@ class JobSpec(FrozenModel):
             identity["party"] = self.party
         if self.purpose != "eval":
             identity["purpose"] = self.purpose
+        if self.fork is not None:
+            identity["fork"] = {
+                "trial": self.fork.trial_id,
+                "checkpoint": self.fork.checkpoint.digest,
+                "candidates": self.fork.candidate_agent_ids,
+                "seat": self.fork.seat,
+                "change": self.fork.change,
+            }
         return stable_id("job", identity)
+
+    @property
+    def max_attempt(self) -> int:
+        """The highest attempt number the plan uses.
+
+        That is ``attempts``, or twice it when a diagnostic fork's controls follow
+        its candidates.
+        """
+        if self.fork is not None and self.fork.controls_follow:
+            return self.attempts * 2
+        return self.attempts
 
     def plan(self, catalog: ModelCatalog | None = None) -> JobPlan:
         """Expand Agent x Task x attempt and freeze per-Trial compatibility.
@@ -632,7 +763,12 @@ class JobSpec(FrozenModel):
             agent.agent_id: _resolve_model(agent, effective_catalog) for agent in self.agents
         }
 
-        def trial(task: TaskDefinition, attempt: int, party: Sequence[AgentBinding]) -> TrialSpec:
+        def trial(
+            task: TaskDefinition,
+            attempt: int,
+            party: Sequence[AgentBinding],
+            role: ForkRole | None = None,
+        ) -> TrialSpec:
             agent = party[0]
             seats = tuple(
                 SeatAssignment(
@@ -664,20 +800,37 @@ class JobSpec(FrozenModel):
                 runtime_provider=task.environment.runtime.provider,
                 placement=task.environment.runtime.placement,
                 seats=seats,
+                fork=(
+                    TrialFork(
+                        trial_id=self.fork.trial_id,
+                        step=self.fork.step,
+                        role=role,
+                        checkpoint_digest=self.fork.checkpoint.digest,
+                        seat=self.fork.seat,
+                        change=self.fork.change.name
+                        if self.fork.change is not None and role == "candidate"
+                        else None,
+                    )
+                    if self.fork is not None and role is not None
+                    else None
+                ),
             )
 
         solo = [task for task in self.tasks if task.party is None]
         shared = [task for task in self.tasks if task.party is not None]
-        trials = tuple(
-            trial(task, attempt, (agent,))
-            for agent in self.agents
-            for task in solo
-            for attempt in range(1, self.attempts + 1)
-        ) + tuple(
-            trial(task, attempt, self.party_agents)
-            for task in shared
-            for attempt in range(1, self.attempts + 1)
-        )
+        if self.fork is not None:
+            trials = self._fork_trials(trial)
+        else:
+            trials = tuple(
+                trial(task, attempt, (agent,))
+                for agent in self.agents
+                for task in solo
+                for attempt in range(1, self.attempts + 1)
+            ) + tuple(
+                trial(task, attempt, self.party_agents)
+                for task in shared
+                for attempt in range(1, self.attempts + 1)
+            )
         lock = JobLock(
             job_id=self.job_id,
             spec_hash=self.content_hash,
@@ -701,6 +854,45 @@ class JobSpec(FrozenModel):
             mode=self.mode,
         )
         return JobPlan(job_id=self.job_id, spec_hash=self.content_hash, lock=lock, trials=trials)
+
+    def _fork_trials(self, trial: Any) -> tuple[TrialSpec, ...]:
+        """Each candidate's forks, then the controls: the original Agent from the same point.
+
+        Returns:
+            The Trials, in order.
+        """
+        fork = self.fork
+        assert fork is not None
+        task = self.tasks[0]
+        by_id = {agent.agent_id: agent for agent in self.agents}
+        attempts = range(1, self.attempts + 1)
+
+        def seated(agent: AgentBinding) -> tuple[AgentBinding, ...]:
+            if task.party is None:
+                return (agent,)
+            seats = party_seats(len(self.party_agents))
+            index = seats.index(str(fork.seat))
+            party = list(self.party_agents)
+            party[index] = agent
+            return tuple(party)
+
+        candidates = tuple(
+            trial(task, attempt, seated(by_id[agent_id]), "candidate")
+            for agent_id in fork.candidate_agent_ids
+            for attempt in attempts
+        )
+        control = by_id[fork.control_agent_id]
+        shift = self.attempts if fork.controls_follow else 0
+        controls = tuple(
+            trial(
+                task,
+                attempt + shift,
+                seated(control) if task.party is None else self.party_agents,
+                "control",
+            )
+            for attempt in attempts
+        )
+        return candidates + controls
 
 
 class SeatAssignment(FrozenModel):
@@ -740,8 +932,16 @@ class TrialSpec(FrozenModel):
     runtime_provider: str
     placement: dict[str, str] = Field(default_factory=dict)
     seats: tuple[SeatAssignment, ...] = ()
+    fork: TrialFork | None = None
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+    @model_serializer(mode="wrap")
+    def _omit_no_fork(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        if isinstance(data, dict) and self.fork is None:
+            data.pop("fork", None)
+        return data
 
     @property
     def trial_id(self) -> str:
@@ -754,6 +954,8 @@ class TrialSpec(FrozenModel):
         }
         if self.seats:
             identity["seats"] = [[item.seat, item.agent_id] for item in self.seats]
+        if self.fork is not None:
+            identity["fork"] = self.fork.role
         return stable_id("trl", identity)
 
     @property
@@ -1031,6 +1233,12 @@ class TrialResult(FrozenModel):
     """Whether every applicable gate passed. ``None`` when no gate applies (the
     Trial is not judged) or while a Verifier awaits review; ``False`` for a
     Trial that failed and has gates."""
+    tools_offered: tuple[str, ...] = ()
+    """Every tool the Agent was offered: the Environment's actions and its
+    Harness's own tools."""
+    fork: ForkRecord | None = None
+    """For a Trial that started from a checkpoint: where, and how the history
+    reached its Agent."""
 
     @model_validator(mode="after")
     def _shape(self) -> TrialResult:
@@ -1372,30 +1580,35 @@ __all__ = [
     "ArtifactManifest",
     "ArtifactManifestEntry",
     "ArtifactReference",
-    "BenchmarkPin",
-    "REFUSE_HELDOUT",
     "BenchmarkJobSource",
-    "JobPurpose",
+    "BenchmarkPin",
     "ExecutionStatus",
+    "ForkChange",
+    "ForkRecord",
+    "ForkRole",
+    "ForkSpec",
     "IntegrityFinding",
     "Job",
     "JobLock",
     "JobMode",
     "JobPlan",
+    "JobPurpose",
     "JobResult",
     "JobSource",
     "JobSpec",
     "ModelResolution",
+    "PhaseName",
+    "PhaseTiming",
     "ProgressEvent",
+    "REFUSE_HELDOUT",
     "RetryPolicy",
+    "SeatAssignment",
+    "SeatResult",
     "TITORecord",
     "TaskJobSource",
     "TrialExecution",
-    "PhaseName",
-    "PhaseTiming",
+    "TrialFork",
     "TrialReceipt",
-    "SeatAssignment",
-    "SeatResult",
     "TrialResult",
     "TrialSpec",
     "TrialStatus",

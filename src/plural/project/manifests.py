@@ -20,6 +20,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from plural.common import HarnessTool
 from plural.environments.definition import (
     EnvironmentResource,
     ExecutionLimits,
@@ -170,6 +171,11 @@ class TaskManifest(ManifestModel):
         description="The answer key Verifiers read as episode.expected. Never shown to the "
         "Agent, unlike info and metadata.",
     )
+    from_checkpoint: str | None = Field(
+        default=None,
+        description="TRIAL/NAME: start each episode from a checkpoint saved with plural trial "
+        "checkpoint, instead of from a reset.",
+    )
     seat_instructions: dict[str, str] = Field(
         default_factory=dict,
         description=(
@@ -218,6 +224,16 @@ class HarnessManifest(ManifestModel):
         default="README.md",
         description="A Markdown file in this folder shown as the Harness overview. Left "
         "at the default, a missing file is skipped.",
+    )
+    tools: list[HarnessTool] = Field(
+        default_factory=list,
+        description="The tools the loop brings itself, such as bash or edit: a name, or "
+        "{name, description}. Overrides the class's tools().",
+    )
+    supports_resume: bool = Field(
+        default=False,
+        description="Whether the loop reads environment.resume and continues a history "
+        "as its own conversation, when a fork starts it mid-episode.",
     )
 
 

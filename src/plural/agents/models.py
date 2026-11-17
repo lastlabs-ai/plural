@@ -122,6 +122,18 @@ class ExternalAgent(FrozenModel):
     ca_bundle: str | None = None
     """A PEM file of the certificate authority that signed the agent's certificate,
     for a service inside your own network."""
+    supports_resume: bool = False
+    """Whether the service continues an episode under way: a fork sends it the
+    history as a transcript in the episode's ``resume``. Without it, a fork gives
+    it only the restored world."""
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        # An agent that can't resume keeps the identity it had before forks.
+        if isinstance(data, dict) and not self.supports_resume:
+            data.pop("supports_resume", None)
+        return data
 
     @field_validator("url")
     @classmethod

@@ -49,8 +49,14 @@ def _step_number(record: Mapping[str, Any]) -> int | None:
 def _host_fields(step: Mapping[str, Any]) -> dict[str, Any]:
     info = dict(step.get("info") or {}) if isinstance(step.get("info"), Mapping) else {}
     seat = {"seat": step["seat"]} if step.get("seat") else {}
+    reported = (
+        {"step_kind": "harness_tool", "reported": True}
+        if step.get("kind") == "harness_tool"
+        else {}
+    )
     return {
         **seat,
+        **reported,
         "observation": step.get("observation"),
         "reward": float(step.get("reward") or 0.0),
         "rewards": list(step.get("rewards") or []),
@@ -107,15 +113,23 @@ def merge_host_steps(
             clean.update(_host_fields(host))
         merged.append(clean)
     turn = max((_integer(item.get("turn")) for item in merged), default=0)
+    inherited: list[dict[str, Any]] = []
     for number in sorted(set(by_number) - used):
         host = by_number[number]
-        merged.append(
-            {
-                "kind": "environment.step",
-                "turn": max(turn, _integer(host.get("turn"))),
-                **_host_fields(host),
-            }
-        )
+        record = {
+            "kind": "environment.step",
+            "turn": _integer(host.get("turn"))
+            if host.get("inherited")
+            else max(turn, _integer(host.get("turn"))),
+            **_host_fields(host),
+        }
+        if host.get("inherited"):
+            # A fork's steps before the checkpoint: the original Trial's, ahead of its own.
+            record["inherited"] = True
+            inherited.append(record)
+        else:
+            merged.append(record)
+    merged = [*inherited, *merged]
     for sequence, item in enumerate(merged, start=1):
         item["sequence"] = sequence
         item["event_id"] = event_id(sequence)

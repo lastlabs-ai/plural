@@ -199,8 +199,15 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
         payload = _local_payload(space, resource)
         apps = _app_summary(resource.value) if kind is ENVIRONMENT else None
         tools = _agent_tools(resource.value) if kind is ENVIRONMENT else []
+        fork_problem = resource.value.definition().fork_problem if kind is ENVIRONMENT else None
         if apps is not None:
-            payload = {**payload, "apps": apps, "tools": tools}
+            payload = {
+                **payload,
+                "apps": apps,
+                "tools": tools,
+                "forkable": fork_problem is None,
+                "fork_problem": fork_problem,
+            }
         credentials = _agent_credentials(resource.value) if kind is AGENT else []
         if kind is AGENT:
             payload = {**payload, "credentials": credentials}
@@ -254,6 +261,12 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                     else f"NOT SET: run `plural credential set {credential['name']}`"
                 )
                 typer.echo(f"  credential {credential['name']} ({scopes}): {status}")
+            if kind is ENVIRONMENT:
+                typer.echo(
+                    f"\nNot forkable: {fork_problem}."
+                    if fork_problem
+                    else "\nForkable: a checkpoint puts every App back after any step."
+                )
             if live:
                 one = len(live) == 1
                 typer.echo(
