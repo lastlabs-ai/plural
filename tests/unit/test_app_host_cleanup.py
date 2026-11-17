@@ -108,9 +108,12 @@ _APP = textwrap.dedent(
 
 
 def _hosts(root: Path) -> list[int]:
-    """The App host processes serving a workspace under ``root``."""
+    """The App host processes serving a workspace under ``root``.
+
+    ``ww`` keeps ``ps`` from cutting a long command line to the terminal's width.
+    """
     listing = subprocess.run(
-        ["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=True
+        ["ps", "-axww", "-o", "pid=,command="], capture_output=True, text=True, check=True
     ).stdout
     return [
         int(line.split(None, 1)[0])
@@ -162,7 +165,7 @@ def _start(tmp_path: Path, mode: str) -> subprocess.Popen[str]:
 def _evidence(sandboxes: Path) -> str:
     """Every App host process, and each host's log, for a failure message."""
     listing = subprocess.run(
-        ["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=True
+        ["ps", "-axww", "-o", "pid=,command="], capture_output=True, text=True, check=True
     ).stdout
     lines = [line for line in listing.splitlines() if "plural.apps.daemon" in line]
     logs = [
