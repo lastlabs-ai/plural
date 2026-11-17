@@ -1,0 +1,10 @@
+# Passes only on the file; the answer is not checked, so a Harness can't pass by talking.
+name: file-written
+version: 1.0.0
+kind: deterministic
+check: verify.py:check
+metrics:
+  - name: file_written
+    kind: binary
+    gate: true
+    description: smoke.txt holds the expected text and nothing else.

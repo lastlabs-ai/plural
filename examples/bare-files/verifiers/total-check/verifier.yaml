@@ -1,6 +1,6 @@
 # Verifier: checks the Agent's answer and the one file it was asked to write.
-# An Agent whose Harness has no file tools, like the native loop here, can answer but
-# can't write the file, so it passes one gate and not the other.
+# An Agent whose Harness has no file tools can answer but can't write the file, so it
+# passes one gate and not the other.
 name: total-check
 version: 1.0.0
 kind: deterministic

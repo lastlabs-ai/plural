@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import importlib.metadata
 import importlib.util
 import math
 import os
+import posixpath
 import shlex
 import time
 from collections.abc import Mapping, Sequence
@@ -62,6 +64,14 @@ for name in "$@"; do
         exit 1
     fi
 done
+"""
+_COPY_PRIVATE = """set -e
+[ "$(sudo -n realpath -e -- "$1")" = "$1" ] || exit 3
+sudo -n test -f "$1" || exit 3
+folder=$(mktemp -d)
+sudo -n cp -- "$1" "$folder/file"
+sudo -n chown "$(id -u):$(id -g)" "$folder/file"
+printf %s "$folder"
 """
 _CHECK_ARTIFACT = """root=$1
 path="$1/$2"
@@ -362,6 +372,8 @@ class DaytonaProvider(SandboxProvider):
         environ: Mapping[str, str] | None = None,
     ) -> None:
         self._adapter = adapter
+        self._owns_adapter = adapter is None
+        self._adapter_loop: asyncio.AbstractEventLoop | None = None
         self._environ = os.environ if environ is None else environ
         self._sandboxes: dict[str, DaytonaSandboxAdapter] = {}
 
@@ -427,8 +439,13 @@ class DaytonaProvider(SandboxProvider):
         )
 
     def _client(self) -> DaytonaClientAdapter:
-        if self._adapter is None:
+        # The SDK's client belongs to the event loop it was made on, and each Job runs
+        # its own loop, so a provider shared by several Jobs makes one per loop.
+        loop = asyncio.get_running_loop()
+        if self._adapter is None or (self._owns_adapter and self._adapter_loop is not loop):
             self._adapter = OfficialDaytonaAdapter()
+            self._adapter_loop = loop
+            self._sandboxes.clear()
         return self._adapter
 
     async def create(self, requirements: SandboxRequirements) -> SandboxHandle:
@@ -638,6 +655,40 @@ class DaytonaProvider(SandboxProvider):
             output.append(DownloadedFile(path=safe, data=await remote.download_file(resolved)))
         return tuple(output)
 
+    async def read_private_file(self, handle: SandboxHandle, path: str) -> bytes:
+        """Read a file the App host's user owns, such as its workspace bundle.
+
+        Daytona's file API reads as the sandbox's default user, which can't open the
+        host's folder, so the file is copied out with ``sudo`` into a folder only that
+        user can read. A path that resolves through a link is refused.
+
+        Returns:
+            The file's bytes.
+
+        Raises:
+            FileNotFoundError: When the path is not a regular file, or resolves elsewhere.
+        """
+        remote = self._remote(handle)
+        absolute = posixpath.normpath(path)
+        copied = await self.exec(
+            handle,
+            ExecRequest(
+                command=("sh", "-c", _COPY_PRIVATE, "plural", absolute),
+                cwd="/",
+                timeout_seconds=120,
+            ),
+        )
+        folder = copied.stdout.decode(errors="replace").strip()
+        if copied.timed_out or copied.exit_code != 0 or not folder.startswith("/"):
+            raise FileNotFoundError(f"not a regular file the App host wrote: {absolute}")
+        try:
+            return await remote.download_file(f"{folder}/file")
+        finally:
+            await self.exec(
+                handle,
+                ExecRequest(command=("rm", "-rf", "--", folder), cwd="/", timeout_seconds=30),
+            )
+
     async def stop_user_processes(self, handle: SandboxHandle, users: Sequence[str | None]) -> None:
         """Kill, as root, what the Harnesses' own users left running.
 
@@ -657,9 +708,10 @@ class DaytonaProvider(SandboxProvider):
 
     async def cancel(self, handle: SandboxHandle) -> None:
         """Delete the sandbox to force cancellation."""
+        client = self._client()
         remote = self._sandboxes.get(handle.sandbox_id)
         if remote is not None:
-            await self._client().delete(remote)
+            await client.delete(remote)
             self._sandboxes.pop(handle.sandbox_id, None)
 
     async def destroy(self, handle: SandboxHandle) -> None:
@@ -698,11 +750,12 @@ class DaytonaProvider(SandboxProvider):
         Raises:
             CapabilityError: When this client cannot delete by id.
         """
+        client = self._client()
         remote = self._sandboxes.pop(sandbox_id, None)
         if remote is not None:
-            await self._client().delete(remote)
+            await client.delete(remote)
             return
-        deleter = getattr(self._client(), "delete_by_id", None)
+        deleter = getattr(client, "delete_by_id", None)
         if deleter is None:
             raise CapabilityError("this Daytona client cannot delete sandboxes by id")
         await deleter(sandbox_id)

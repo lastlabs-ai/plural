@@ -17,17 +17,27 @@ seat that took it.
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
+from plural.apps.workspace import SnapshotEntry
 from plural.harness.episode import EPISODE_FILE
 from plural.jobs import SeatResult, VerifierResult
 from plural.rewards import RewardRecord
-from plural.sandbox import DownloadedFile, ExecRequest, SandboxHandle, SandboxProvider
+from plural.sandbox import (
+    DownloadedFile,
+    ExecRequest,
+    FileUpload,
+    SandboxHandle,
+    SandboxProvider,
+)
 from plural.tasks import TaskDefinition
 
-SEATS_ROOT = "/workspace/seats"
+WORKSPACE = "/workspace"
+SEATS_ROOT = f"{WORKSPACE}/seats"
 SEAT_STAGE = "/workspace/.seat-stage"
 SEAT_ARTIFACTS = "seats"
 
@@ -59,6 +69,23 @@ os.chmod(target, 0o700)
 os.makedirs(os.path.join(target, ".tmp"), exist_ok=True)
 """
 _CLEAR = "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)"
+_PLACE = """
+import json, os, shutil, sys
+stage, target, links = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
+os.makedirs(target, exist_ok=True)
+# copytree gives the target the stage's mode; a seat's folder stays 0700.
+mode = os.stat(target).st_mode & 0o7777
+if os.path.isdir(stage):
+    shutil.copytree(stage, target, dirs_exist_ok=True)
+os.chmod(target, mode)
+for path, link in links:
+    where = os.path.join(target, path)
+    os.makedirs(os.path.dirname(where), exist_ok=True)
+    if os.path.lexists(where):
+        os.remove(where)
+    os.symlink(link, where)
+"""
+RESTORE_STAGE = "/workspace/.restore-stage"
 _READABLE = "import os, sys; sys.exit(0 if os.access(sys.argv[1], os.R_OK) else 1)"
 
 
@@ -149,6 +176,68 @@ async def prepare_seats(
         if result.exit_code != 1:
             return False
     return True
+
+
+async def restore_files(
+    provider: SandboxProvider,
+    handle: SandboxHandle,
+    entries: Sequence[SnapshotEntry],
+    *,
+    target: str,
+    user: str | None = None,
+) -> None:
+    """Put a snapshot's files and symbolic links into ``target``, owned by ``user``.
+
+    With no ``user`` the files are uploaded in place. With one, they are staged
+    and ``user`` copies them in, so a seat's restored files are its own.
+
+    Raises:
+        SeatSetupError: When the files can't be put in place.
+    """
+    files = [
+        FileUpload(path=item.path, data=item.data, mode=item.mode)
+        for item in entries
+        if item.link is None
+    ]
+    links = [[item.path, item.link] for item in entries if item.link is not None]
+    stage = f"{RESTORE_STAGE}/{target.strip('/').replace('/', '_')}"
+    if files:
+        await provider.upload_files(handle, files, root=target if user is None else stage)
+    if user is not None:
+        await _exec(provider, handle, ("python", "-c", _SHARE, SEATS_ROOT, stage))
+    if user is not None or links:
+        await _exec(
+            provider,
+            handle,
+            ("python", "-c", _PLACE, stage, target, json.dumps(links)),
+            user=user,
+        )
+    if user is not None:
+        await _exec(provider, handle, ("python", "-c", _CLEAR, RESTORE_STAGE))
+
+
+async def restore_workspace(
+    provider: SandboxProvider,
+    handle: SandboxHandle,
+    entries: Sequence[SnapshotEntry],
+    seat_users: Mapping[str, str | None],
+) -> None:
+    """Restore a workspace snapshot, each seat's folder by the seat's own OS user.
+
+    Raises:
+        SeatSetupError: When the files can't be put in place.
+    """
+    owners: dict[str, str | None] = {WORKSPACE: None}
+    for seat, user in seat_users.items():
+        owners[seat_workspace(seat)] = user
+    groups: dict[str, list[SnapshotEntry]] = {}
+    for entry in entries:
+        where = f"{WORKSPACE}/{entry.path}"
+        inside = [item for item in owners if where.startswith(f"{item}/")]
+        target = max(inside, key=len, default=WORKSPACE)
+        groups.setdefault(target, []).append(replace(entry, path=where.removeprefix(f"{target}/")))
+    for target, items in groups.items():
+        await restore_files(provider, handle, items, target=target, user=owners[target])
 
 
 def seat_files(seat: str, artifacts: Sequence[DownloadedFile]) -> tuple[DownloadedFile, ...]:
@@ -276,6 +365,8 @@ __all__ = [
     "SEAT_ARTIFACTS",
     "SeatSetupError",
     "prepare_seats",
+    "restore_files",
+    "restore_workspace",
     "seat_environment",
     "seat_files",
     "seat_results",

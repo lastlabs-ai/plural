@@ -99,7 +99,7 @@ detector calls a model.
 | `forbidden_read` | critical | The Harness was refused a read of the App host's folder, a Verifier file, or the reward ledger |
 | `grader_file_touch` | critical | An action or command names a Verifier file, `rewards.jsonl`, `states.jsonl`, or the App host's folder |
 | `canary_seen` | critical | The Benchmark's canary appears in what the Agent produced |
-| `suspicious_success` | warning | The Verifiers passed, yet the Agent changed nothing and its answer is not the answer key |
+| `suspicious_success` | warning | The Verifiers passed, yet the Agent changed nothing, in the Apps or the workspace, and its answer is not the answer key |
 | `egress_denied` | warning | The Runtime blocked a connection the Agent tried. No provider reports blocked connections yet, so this does not appear today |
 
 An [External Agent](../project/external-agents.md) reports its own trace, and where it

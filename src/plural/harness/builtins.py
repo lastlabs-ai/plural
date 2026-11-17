@@ -336,8 +336,9 @@ def package_tools(package: HarnessPackage) -> tuple[tuple[str, ...], bool]:
             spec = BUILTIN_HARNESSES[name]
             return spec.tools, spec.supports_resume
     if definition.command[:2] == ("python", "native_runner.py"):
-        # The native loop brings no tools of its own, and replays any history it is given.
-        return (), True
+        # The native loop replays any history it is given. It brings tools of its own
+        # only in an Environment with no Apps.
+        return tuple(item.name for item in definition.tools), True
     return tuple(item.name for item in definition.tools), definition.supports_resume
 
 

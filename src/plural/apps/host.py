@@ -250,7 +250,7 @@ class AppHost:
         self._rng_recorded: dict[str, Any] = {}
         self._base_step = 0
         self.restored_from: int | None = None
-        self.oracles: dict[str, str] = {}
+        self.oracles: dict[str, dict[str, str]] = {}
         """Diagnostic tools a fork added, by name, with the answer each returns."""
         self.snapshots = (
             WorkspaceSnapshots(
@@ -328,17 +328,35 @@ class AppHost:
     ) -> dict[str, Any]:
         """Answer a diagnostic fork's added tool, and record the call as a Harness tool step.
 
-        The answer is the text the fork's ``oracle_tool`` change was given, never
-        read from an App's State.
+        The answer is the one value of App State the fork's ``oracle_tool``
+        change named, read now.
 
         Returns:
             What the Agent sees: the answer as the observation, and the step number.
         """
-        answer = self.oracles.get(name)
-        if answer is None:
+        wanted = self.oracles.get(name)
+        app = self.apps.get(wanted["app"]) if wanted is not None else None
+        if wanted is None or app is None:
             return self.agent_view(
                 {"observation": None, "rendered": "", "info": {"error": f"no tool {name!r}"}}
             )
+        value: Any = self._snapshot(app)
+        found = True
+        for part in wanted["path"].split("."):
+            if isinstance(value, dict) and part in value:
+                value = value[part]
+            elif isinstance(value, list) and part.isdigit() and int(part) < len(value):
+                value = value[int(part)]
+            else:
+                found = False
+                break
+        answer = (
+            f"There is no {wanted['path']}."
+            if not found
+            else value
+            if isinstance(value, str)
+            else json.dumps(value, sort_keys=True)
+        )
         recorded = self.tool(name, dict(arguments), output=answer, seat=seat)
         return self.agent_view(
             {

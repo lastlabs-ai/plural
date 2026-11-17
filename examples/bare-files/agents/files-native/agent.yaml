@@ -1,5 +1,5 @@
-# Agent: Plural's native loop. It has no tools of its own, so in a bare Environment it
-# can only answer.
+# Agent: Plural's native loop. In an Environment with no Apps it brings its own tools:
+# read_file, write_file, list_files and run.
 name: files-native
 version: 1.0.0
 model: openai/gpt-5.6-luna

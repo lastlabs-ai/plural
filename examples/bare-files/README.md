@@ -9,8 +9,8 @@ in the Trial (`kind: harness_tool`). The Verifier checks two things: the final a
 plural benchmark validate bare-files
 plural run -b bare-files -a files-claude   # Claude Code: Read, Write, Bash
 plural run -b bare-files -a files-codex    # Codex: shell, apply_patch
-plural run -b bare-files -a files-native   # the native loop: no tools, so no file
+plural run -b bare-files -a files-native   # the native loop: read_file, write_file, list_files, run
 ```
 
-The native loop has no tools of its own, so it can give the right answer but can't write
-`march-total.txt`: it passes `answer_correct` and fails the `file_correct` gate.
+The native loop brings tools of its own only in an Environment with no Apps, like this one.
+In an Environment with Apps, it uses the Apps' actions instead.

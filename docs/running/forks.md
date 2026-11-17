@@ -52,9 +52,11 @@ its forks.
 ### Fork from the web app
 
 On a finished Trial's page, **Fork from here** builds the command for you. Run it
-in the project folder that recorded the Trial: a fork needs the Trial's local
-record. When you name a recorded Trial by its hosted id, Plural finds the local
-Trial it came from.
+in any folder linked to the Trial's hosted project. When this folder recorded the
+Trial, Plural uses its local record. Otherwise it restores the exact Task and Agent
+revisions the Trial ran into `.plural/versions/`, downloads the Trial's step, State
+and workspace records into `.plural/hosted-trials/`, and forks from those. Anyone
+who can read the Trial can fork it. `plural trial checkpoint` works the same way.
 
 ## How the history reaches the Agent
 
@@ -97,10 +99,18 @@ changes are built in:
 | `action` | `{action, arguments}` | Takes this action as the next step, recorded as an intervention. |
 | `tool_description` | `{tool, description}` | Rewrites one tool's description. |
 | `context` | `{mode: trim, keep}`, `{mode: summarize, summary}`, or `{mode: fresh}` | Keeps only the last messages, replaces the history with a summary, or drops it. |
-| `oracle_tool` | `{name, description, answer}` | Offers one more tool that returns the answer you give. |
+| `oracle_tool` | `{name, description, path}`, and `app` when there are several | Offers one more tool that returns one value from an App's State. |
 
-An oracle tool's answer is what you type in the payload. Plural never fills it in
-from an App's State or a Task's answer key.
+An oracle tool answers with the value at `path` in the App's State when the Agent
+calls it, such as `secret` or `quote.unit_price`, with `.` between keys and list
+indexes. That one value is all of the State it shows, and it is shown only to the
+candidates of a diagnostic fork, which is never shipped. It never reads the Task's
+answer key.
+
+```bash
+plural trial fork TRIAL --step 2 --change oracle_tool \
+  --payload '{"name": "peek", "description": "The secret word.", "path": "secret"}'
+```
 
 ## Forks of a Trial several Agents share
 
@@ -128,8 +138,8 @@ so.
   a snapshot after every step. A `live` App never can.
   [Environments](../project/environments.md) shows whether an Environment is
   forkable, and why not.
-- **A local record.** The Trial's steps, App States, and workspace snapshots, which
-  every local run keeps.
+- **Step records.** The Trial's steps, App States, and workspace snapshots. Every
+  local run keeps them, and a recorded run uploads them.
 - **A Trial that isn't held out.** A Benchmark's held-out Tasks are kept back for
   confirmation, so their Trials can't be forked.
 

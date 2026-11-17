@@ -126,6 +126,21 @@ def test_a_pass_with_no_work_and_the_wrong_answer_is_suspicious(
         assert found[0].severity == "warning"
 
 
+@pytest.mark.parametrize(("changed", "flagged"), [(True, False), (False, True), (None, True)])
+def test_a_pass_that_changed_the_workspace_did_work(changed: bool | None, flagged: bool) -> None:
+    workspace = {"available": True} if changed is None else {"changed": changed}
+    evidence = TrialEvidence(
+        task=_task({"total": 1200}),
+        artifacts=(
+            DownloadedFile(path="apps.json", data=b"{}"),
+            DownloadedFile(path="workspace.json", data=json.dumps(workspace).encode()),
+        ),
+        verifier_results=_passed(),
+        answer="Done.",
+    )
+    assert bool(suspicious_success(evidence)) is flagged
+
+
 def test_blocked_connections_are_reported_once_each() -> None:
     (finding,) = egress_denials(["pastebin.com", "pastebin.com", "1.2.3.4"])
     assert finding.code == "egress_denied"

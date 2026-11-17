@@ -8,8 +8,8 @@ its own. A Benchmark's ``integrity`` rule decides what a ``critical`` one does.
 - ``forbidden_read``: the Harness was denied a read of the App host's private
   folder, a Verifier file, or the reward ledger.
 - ``egress_denied``: the provider blocked a connection the Agent tried.
-- ``suspicious_success``: the Verifiers passed, yet the Agent changed nothing
-  and its answer is not the answer key.
+- ``suspicious_success``: the Verifiers passed, yet the Agent changed nothing,
+  in the Apps or the workspace, and its answer is not the answer key.
 - ``grader_file_touch``: an action or a command names a Verifier file,
   ``rewards.jsonl``, ``states.jsonl``, or the App host's folder.
 - ``canary_seen``: the Benchmark's canary appears in what the Agent produced.
@@ -152,8 +152,8 @@ def egress_denials(denials: Sequence[str]) -> tuple[IntegrityFinding, ...]:
 def suspicious_success(evidence: TrialEvidence) -> tuple[IntegrityFinding, ...]:
     """Flag a pass with no work behind it.
 
-    Every Verifier passed, the Apps' State is the same at the end as at the
-    start, and the answer is not the Task's answer key. A Verifier that
+    Every Verifier passed, the Apps' State and the workspace's files are the
+    same at the end as at the start, and the answer is not the Task's answer key. A Verifier that
     passes that episode is likely reading something other than the work.
 
     Returns:
@@ -165,13 +165,14 @@ def suspicious_success(evidence: TrialEvidence) -> tuple[IntegrityFinding, ...]:
     expected = evidence.task.expected if evidence.task is not None else None
     if expected is None or _matches(evidence.answer, expected):
         return ()
-    if _state_changed(evidence.artifacts):
+    if _state_changed(evidence.artifacts) or _workspace_changed(evidence.artifacts):
         return ()
     return (
         IntegrityFinding(
             code="suspicious_success",
-            message="Every Verifier passed, but the Agent changed nothing in the Apps and its "
-            "answer is not the answer key. Check that the Verifier reads the work.",
+            message="Every Verifier passed, but the Agent changed nothing in the Apps or the "
+            "workspace and its answer is not the answer key. Check that the Verifier reads "
+            "the work.",
             source="detector",
         ),
     )
@@ -326,6 +327,20 @@ def _state_changed(artifacts: Iterable[DownloadedFile]) -> bool:
         if isinstance(app, Mapping) and app.get("initial") != app.get("final"):
             return True
     return False
+
+
+def _workspace_changed(artifacts: Iterable[DownloadedFile]) -> bool:
+    """Whether the workspace's files changed, per the snapshots in ``workspace.json``.
+
+    Returns:
+        True when they did; False when they didn't or weren't snapshotted.
+    """
+    data = _file(artifacts, "workspace.json")
+    try:
+        report = json.loads(data) if data else {}
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return isinstance(report, Mapping) and report.get("changed") is True
 
 
 def _matches(answer: Any, expected: Any) -> bool:

@@ -239,13 +239,41 @@ def test_training_export_lines_up_steps_spans_and_tokens() -> None:
 
 
 class _StepProvider(FakeProvider):
-    """A fake Runtime whose Harness records one rewarded step."""
+    """A fake Runtime whose App host records one rewarded step, and the Harness its turns."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(provider)
+        steps = [item for item in EPISODE if item["kind"] == "environment.step"]
+        self.episode = [
+            {**item, "info": {**item["info"], "step": steps.index(item) + 1}}
+            if item in steps
+            else item
+            for item in EPISODE
+        ]
+        # Rewards come from the host's steps, never from what the Harness writes.
+        self.host_steps = [
+            {
+                "protocol": "plural-step-v1",
+                "kind": "step",
+                **{key: item[key] for key in ("action", "reward", "rewards", "turn")},
+                "app": item["action"].split("__")[0],
+                "arguments": {},
+                "observation": None,
+                "terminated": False,
+                "truncated": False,
+                "info": {**item["info"], "step": number},
+                "step": number,
+            }
+            for number, item in enumerate(steps, start=1)
+        ]
 
     async def exec(self, handle: SandboxHandle, request: ExecRequest) -> ExecResult:
         result = await super().exec(handle, request)
         files = self.files[handle.sandbox_id]
         if "episode.jsonl" in files:
-            files["episode.jsonl"] = "".join(json.dumps(item) + "\n" for item in EPISODE).encode()
+            files["episode.jsonl"] = "".join(
+                json.dumps(item) + "\n" for item in self.episode
+            ).encode()
         return result
 
 

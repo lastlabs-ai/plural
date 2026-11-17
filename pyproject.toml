@@ -186,6 +186,7 @@ addopts = [
   "--ignore=docs",
   "--ignore=examples",
   "--ignore=tests/typing",
+  "--ignore=tests/live/harness_smoke",
 ]
 markers = [
   "live: tests that call real provider APIs (deselect with -m 'not live')",

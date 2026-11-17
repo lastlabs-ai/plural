@@ -3101,6 +3101,26 @@ Raises:
     FileNotFoundError: When a declared path is not a regular file inside ``root``.
 ```
 
+### plural.sandbox.DaytonaProvider.read_private_file
+
+```python
+read_private_file(self, handle: 'SandboxHandle', path: 'str') -> 'bytes'
+```
+
+Read a file the App host's user owns, such as its workspace bundle.
+
+```text
+Daytona's file API reads as the sandbox's default user, which can't open the
+host's folder, so the file is copied out with ``sudo`` into a folder only that
+user can read. A path that resolves through a link is refused.
+
+Returns:
+    The file's bytes.
+
+Raises:
+    FileNotFoundError: When the path is not a regular file, or resolves elsewhere.
+```
+
 ### plural.sandbox.DaytonaProvider.stop_user_processes
 
 ```python

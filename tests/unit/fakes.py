@@ -218,7 +218,7 @@ class FakeProvider(SandboxProvider):
                 "steps": list(self.host_steps),
                 "states": [{"step": 0, "state": {"game": {"step": 0}}}],
                 "observation": {"text": "board"},
-                "view": {},
+                "view": {"kind": "text", "text": "board"},
             }
         elif op == "query":
             result = {"app": sent["app"], "action": sent["action"], **sent["arguments"]}

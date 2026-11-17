@@ -170,9 +170,23 @@ def wrote_total(episode: Episode) -> VerifierOutput:
 
 `list(pattern)` matches glob patterns, `exists(path)` and `read(path)` read one
 file, and `read_bytes(path)` reads it as bytes. `available` is false when snapshots
-were off or `git` was missing, and reading then raises an error that says why. The
-workspace is read by `check` in the Job's process; a Verifier that runs as a command
-in its own sandbox gets the snapshots as the `workspace.bundle` artifact instead.
+were off or `git` was missing, and reading then raises an error that says why.
+Symbolic links are left out, so a link never reads a file outside the workspace.
+
+Every kind of Verifier sees the same workspace. A Verifier that runs as a command in
+its own sandbox finds the Episode in `.plural/verifier-input.json` and the files
+beside it; `Episode.from_input()` reads both, so its `episode.workspace` works as
+above:
+
+```python
+from plural.verifiers import Episode
+
+episode = Episode.from_input()
+text = episode.workspace.read("environment/march-total.txt")
+```
+
+An [AgentVerifier](#agentverifier) is shown the workspace's text files as evidence,
+each cut to the same length as other evidence.
 
 The function must live in a Python file. In a project, each Verifier is a folder under
 `verifiers/`, named after it. This command creates

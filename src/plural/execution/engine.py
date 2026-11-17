@@ -81,6 +81,7 @@ from plural.execution.seats import (
     SEAT_ARTIFACTS,
     SeatSetupError,
     prepare_seats,
+    restore_workspace,
     seat_environment,
     seat_files,
     seat_results,
@@ -106,6 +107,7 @@ from plural.harness.packages import (
     external_v1,
     native_actions_v1,
     native_chat_v1,
+    native_workspace_v1,
 )
 from plural.harness.protocol import HarnessProtocolError, HarnessResume, HarnessRunRequest
 from plural.harness.retrieval import (
@@ -187,7 +189,9 @@ from plural.trajectory import normalize_trajectory
 from plural.transcript import TRAJECTORY_FILE, episode_to_messages
 from plural.trust import ConformanceStatus, TrustAssessment, TrustFacts, trust_tier
 from plural.verifiers import (
+    EPISODE_WORKSPACE,
     STOP_REASONS,
+    VERIFIER_INPUT,
     AgentVerifier,
     DeterministicVerifier,
     Episode,
@@ -239,6 +243,9 @@ def _package_for(agent: AgentBinding, task: TaskDefinition) -> HarnessPackage:
     if agent.harness_package is not None:
         return agent.harness_package
     if agent.harness is None:
+        if not task.environment.apps:
+            # A bare Environment: the native loop brings its own workspace tools.
+            return native_workspace_v1()
         return native_actions_v1() if task.environment.actions else native_chat_v1()
     factory = BUILTIN_PROFILES.get(agent.harness.name)
     if factory is None:
@@ -557,6 +564,32 @@ def _bounded_artifact_evidence(
             row["readable"] = False
         output.append(row)
     return tuple(output)
+
+
+def _verifier_workspace(
+    workspace: EpisodeWorkspace,
+) -> tuple[dict[str, Any], tuple[DownloadedFile, ...]]:
+    """What a Verifier in its own sandbox is told of the workspace, and its files.
+
+    Returns:
+        ``episode.workspace`` as the Verifier's input describes it, and the
+        files to put beside the input.
+    """
+    files: dict[str, bytes] = {}
+    problem = workspace.problem
+    available = workspace.available
+    if available:
+        try:
+            files = workspace.files()
+        except (OSError, RuntimeError) as exc:
+            available, problem = False, f"the workspace snapshot could not be read: {exc}"
+    described = {
+        "available": available,
+        "problem": problem,
+        "skipped": list(workspace.skipped),
+        "folder": EPISODE_WORKSPACE,
+    }
+    return described, tuple(DownloadedFile(path=name, data=data) for name, data in files.items())
 
 
 def _final_evidence(artifacts: Sequence[DownloadedFile]) -> dict[str, Any] | None:
@@ -896,17 +929,12 @@ class TrialRunner:
             path = self.task.checkpoint_bundle
         return Path(path) if path and Path(path).is_file() else None
 
-    def _wants_host(self, provider: SandboxProvider, package: HarnessPackage) -> bool:
-        """Whether an App host runs: always with Apps, and for a bare Environment
-
-        whenever the Runtime has Plural, so Harness tools and workspace snapshots are
-        recorded. An External Agent's tools are its own, so its bare episode has none.
+    def _wants_host(self) -> bool:
+        """Whether an App host runs: always with Apps, and for a bare Environment on
+        every Runtime, so Harness tools and workspace snapshots are recorded and signed.
+        An External Agent's tools are its own, so its bare episode has none.
         """
-        if self.task.environment.apps:
-            return True
-        if self.agent.external is not None:
-            return False
-        return provider.name == "local" or needs_plural(self.task, package)
+        return bool(self.task.environment.apps) or self.agent.external is None
 
     def _fork_point(self) -> ForkPoint | None:
         """A diagnostic fork's change, made once, or ``None`` for a fork that changes the Agent.
@@ -1039,8 +1067,16 @@ class TrialRunner:
         _, record = self._history(player)
         return {"tools_offered": self._tools_offered(player), "fork": record}
 
-    async def _restore_workspace(self, provider: SandboxProvider, handle: SandboxHandle) -> None:
+    async def _restore_workspace(
+        self,
+        provider: SandboxProvider,
+        handle: SandboxHandle,
+        seat_users: Mapping[str, str | None] | None = None,
+    ) -> None:
         """Put the checkpoint's workspace snapshot back, before the App host restores the Apps.
+
+        A seat's folder is restored by the seat's own OS user, named in
+        ``seat_users``, so the files in it are the seat's.
 
         Raises:
             ExecutionFailure: When the snapshot can't be read.
@@ -1063,12 +1099,12 @@ class TrialRunner:
                 ErrorCode.ENVIRONMENT_FAILED,
                 f"Could not read the checkpoint's workspace snapshot: {exc}",
             ) from exc
-        if entries:
-            await provider.upload_files(
-                handle,
-                [FileUpload(path=path, data=data, mode=mode) for path, data, mode in entries],
-                root="/workspace",
-            )
+        try:
+            await restore_workspace(provider, handle, entries, seat_users or {})
+        except SeatSetupError as exc:
+            raise ExecutionFailure(
+                ErrorCode.ENVIRONMENT_FAILED, f"Could not restore the workspace: {exc}"
+            ) from exc
 
     def _snapshot_ignore(self, players: Sequence[_Player]) -> list[str]:
         """What a workspace snapshot leaves out.
@@ -1111,13 +1147,19 @@ class TrialRunner:
         self._workspace_report = snapshots
         if bundle_path:
             folder, _, name = bundle_path.rpartition("/")
+            # The bundle is in the App host's own folder; a Runtime whose file API
+            # can't open it reads it as its privileged user instead.
+            private = getattr(provider, "read_private_file", None)
             try:
-                downloaded = await provider.download_files(handle, [name], root=folder or "/")
-            except (OSError, RuntimeError, ValueError) as exc:
+                if private is not None:
+                    data = await private(handle, bundle_path)
+                else:
+                    downloaded = await provider.download_files(handle, [name], root=folder or "/")
+                    data = downloaded[0].data
+            except Exception as exc:  # noqa: BLE001 - a Runtime's SDK raises its own errors
                 snapshots["available"] = False
                 snapshots["problem"] = f"the workspace bundle could not be collected: {exc}"
             else:
-                data = downloaded[0].data
                 artifacts = _with_artifact(artifacts, DownloadedFile(path=BUNDLE_FILE, data=data))
                 if self._scratch is None:
                     self._scratch = Path(tempfile.mkdtemp(prefix="plural-trial-"))
@@ -1328,7 +1370,7 @@ class TrialRunner:
             )
             sandbox_requirements = requirements
             distribution = self._plural_distribution(provider, package)
-            self._hosted = self._wants_host(provider, package)
+            self._hosted = self._wants_host()
             checkpoint = self.checkpoint
             if checkpoint is not None:
                 problem = task.environment.fork_problem or (
@@ -1430,7 +1472,13 @@ class TrialRunner:
                             seat_isolation = "os_user" if isolated else "none"
                         else:
                             players[0].user = isolation.agent_user
-                        await self._restore_workspace(provider, handle)
+                        await self._restore_workspace(
+                            provider,
+                            handle,
+                            {str(item.seat): item.user for item in players}
+                            if self.seat_names
+                            else None,
+                        )
                         host = AppHostSession(
                             provider,
                             handle,
@@ -2238,7 +2286,9 @@ class TrialRunner:
         """The Plural a non-local sandbox needs for this Trial, and the
         Environment's packages, if it runs Plural code or installs any."""
         packages = self.task.environment.runtime.packages.python
-        if provider.name == "local" or not (packages or needs_plural(self.task, package)):
+        if provider.name == "local" or not (
+            packages or needs_plural(self.task, package) or self._wants_host()
+        ):
             return None
         return resolve_distribution(
             self.environ.get(RUNTIME_VERSION_VARIABLE), needed_extras(self.task), packages
@@ -2675,11 +2725,12 @@ class TrialRunner:
                 apps=apps,
                 verifier=verifier.name if verifier is not None else None,
             )
+            workspace, workspace_files = _verifier_workspace(episode.workspace)
             payload: dict[str, Any] = {
                 "task": self.task.public_payload,
                 "trace_id": trace_id,
                 "artifacts": [item.path for item in artifacts],
-                "episode": episode.model_dump(mode="json"),
+                "episode": {**episode.model_dump(mode="json"), "workspace": workspace},
                 "environment_view": {
                     "observation": episode.observation,
                     "state": episode.state,
@@ -2697,10 +2748,20 @@ class TrialRunner:
                         artifacts,
                         tuple(item.path for item in artifacts),
                     ),
+                    "workspace": _bounded_artifact_evidence(
+                        workspace_files, tuple(item.path for item in workspace_files)
+                    ),
                 }
             uploads = [
-                FileUpload(path=".plural/verifier-input.json", data=json.dumps(payload).encode()),
+                FileUpload(path=VERIFIER_INPUT, data=json.dumps(payload).encode()),
                 *(FileUpload(path=f"artifacts/{item.path}", data=item.data) for item in artifacts),
+                *(
+                    FileUpload(
+                        path=f"{Path(VERIFIER_INPUT).parent}/{EPISODE_WORKSPACE}/{item.path}",
+                        data=item.data,
+                    )
+                    for item in workspace_files
+                ),
             ]
             await provider.upload_files(handle, uploads)
             verifier_env = {**self._verifier_env(verifier), **plural_env}

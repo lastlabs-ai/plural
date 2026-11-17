@@ -750,6 +750,21 @@ class JobSpec(FrozenModel):
             return self.attempts * 2
         return self.attempts
 
+    @property
+    def agent_attempts(self) -> dict[str, int]:
+        """Agents whose Trials stop short of :attr:`max_attempt`, with their highest attempt.
+
+        Empty except in a diagnostic fork whose controls follow its candidates:
+        there the original Agent runs to twice ``attempts`` and the others to
+        ``attempts``.
+        """
+        if self.fork is None or not self.fork.controls_follow:
+            return {}
+        highest: dict[str, int] = {}
+        for trial in self.plan().trials:
+            highest[trial.agent_id] = max(highest.get(trial.agent_id, 0), trial.attempt)
+        return {key: value for key, value in highest.items() if value < self.max_attempt}
+
     def plan(self, catalog: ModelCatalog | None = None) -> JobPlan:
         """Expand Agent x Task x attempt and freeze per-Trial compatibility.
 

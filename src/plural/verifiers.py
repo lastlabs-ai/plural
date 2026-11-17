@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import math
 import re
 import shlex
@@ -187,6 +188,12 @@ class AppSnapshot(FrozenModel):
         return self._query(action, arguments)
 
 
+VERIFIER_INPUT = ".plural/verifier-input.json"
+"""Where a command Verifier finds its Episode, relative to its working folder."""
+EPISODE_WORKSPACE = "episode-workspace"
+"""Beside the Episode: the Agent's final workspace, for ``episode.workspace``."""
+
+
 class EpisodeWorkspace(FrozenModel):
     """The Agent's workspace as it was when the episode ended, read-only.
 
@@ -201,6 +208,7 @@ class EpisodeWorkspace(FrozenModel):
     skipped: tuple[str, ...] = ()
     _bundle: Path | None = PrivateAttr(default=None)
     _commit: str | None = PrivateAttr(default=None)
+    _folder: Path | None = PrivateAttr(default=None)
     _files: dict[str, bytes] | None = PrivateAttr(default=None)
 
     @classmethod
@@ -231,15 +239,49 @@ class EpisodeWorkspace(FrozenModel):
         workspace._commit = commit
         return workspace
 
+    @classmethod
+    def from_folder(
+        cls,
+        folder: Path,
+        *,
+        available: bool = True,
+        problem: str | None = None,
+        skipped: Sequence[str] = (),
+    ) -> EpisodeWorkspace:
+        """The workspace as a folder holds it, as a Verifier in its own sandbox gets it.
+
+        Returns:
+            The workspace; its files are read on first use, never through a link.
+        """
+        workspace = cls(available=available, problem=problem, skipped=tuple(skipped))
+        workspace._folder = Path(folder)
+        return workspace
+
     def _all(self) -> dict[str, bytes]:
         if self._files is None:
-            if self._bundle is None or self._commit is None:
+            if self._folder is not None:
+                root = self._folder
+                self._files = {
+                    path.relative_to(root).as_posix(): path.read_bytes()
+                    for path in sorted(root.rglob("*"))
+                    if not path.is_symlink() and path.is_file()
+                }
+            elif self._bundle is None or self._commit is None:
                 self._files = {}
             else:
                 from plural.apps.workspace import snapshot_files
 
                 self._files = snapshot_files(self._bundle, self._commit)
         return self._files
+
+    def files(self) -> dict[str, bytes]:
+        """Every file in the workspace, by path.
+
+        Returns:
+            Each path with its bytes.
+        """
+        self._require()
+        return dict(self._all())
 
     def _require(self) -> None:
         if not self.available:
@@ -360,6 +402,33 @@ class Episode(FrozenModel):
     Verifier's ``measure`` hook, so ``check`` can use them."""
     workspace: EpisodeWorkspace = Field(default_factory=EpisodeWorkspace, exclude=True)
     """The Agent's workspace as the episode left it, read-only."""
+
+    @classmethod
+    def from_input(cls, path: str | Path = VERIFIER_INPUT) -> Episode:
+        """The Episode a Verifier that runs as a command is given, with its workspace.
+
+        A command Verifier runs in its own sandbox, where Plural writes the
+        Episode to ``.plural/verifier-input.json`` and the Agent's final
+        workspace beside it, so ``episode.workspace`` reads the same files a
+        function Verifier's does.
+
+        Returns:
+            The Episode.
+        """
+        source = Path(path)
+        data = json.loads(source.read_text(encoding="utf-8"))
+        fields = dict(data.get("episode") or {})
+        given = fields.pop("workspace", None)
+        episode = cls.model_validate(fields)
+        if not isinstance(given, Mapping):
+            return episode
+        workspace = EpisodeWorkspace.from_folder(
+            source.parent / str(given.get("folder") or EPISODE_WORKSPACE),
+            available=bool(given.get("available")),
+            problem=given.get("problem"),
+            skipped=tuple(given.get("skipped") or ()),
+        )
+        return episode.model_copy(update={"workspace": workspace})
 
     @classmethod
     def from_apps(cls, report: Mapping[str, Any], **fields: Any) -> Episode:
@@ -1244,6 +1313,8 @@ class WeightedVerifier(FrozenModel):
 
 
 __all__ = [
+    "EPISODE_WORKSPACE",
+    "VERIFIER_INPUT",
     "AgentVerifier",
     "AppSnapshot",
     "DeterministicVerifier",

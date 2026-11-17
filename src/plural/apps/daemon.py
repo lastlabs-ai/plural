@@ -597,7 +597,11 @@ def serve(root: Path, private: Path | None = None) -> None:
     host.redact_values(values.values())
     oracles = (inputs or {}).get("oracles")
     if isinstance(oracles, dict):
-        host.oracles = {str(key): str(value) for key, value in oracles.items()}
+        host.oracles = {
+            str(key): {"app": str(value.get("app")), "path": str(value.get("path"))}
+            for key, value in oracles.items()
+            if isinstance(value, dict)
+        }
     restore = _restore_inputs(inputs)
     if token and restore is not None:
         # A fork: the Apps as they stood at the checkpoint, never a reset.

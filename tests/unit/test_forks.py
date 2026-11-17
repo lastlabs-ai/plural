@@ -154,13 +154,30 @@ class _WordleModel(BaseHTTPRequestHandler):
     """Guesses GUESSES in order, one per tool result it has seen; records what it was sent."""
 
     seen: list[dict[str, Any]] = []
+    oracle: str | None = None
 
     def do_POST(self) -> None:
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         type(self).seen.append(body)
-        played = sum(message["role"] == "tool" for message in body["messages"])
+        asked = any(item.get("tool_call_id") == "call_oracle" for item in body["messages"])
+        offered = any(
+            tool["function"]["name"] == type(self).oracle for tool in body.get("tools") or ()
+        )
+        played = sum(message["role"] == "tool" for message in body["messages"]) - asked
         message: dict[str, object] = {"role": "assistant", "content": "Out of words."}
-        if played < len(GUESSES):
+        if offered and not asked:
+            message = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_oracle",
+                        "type": "function",
+                        "function": {"name": type(self).oracle, "arguments": "{}"},
+                    }
+                ],
+            }
+        elif played < len(GUESSES):
             message = {
                 "role": "assistant",
                 "content": "",
@@ -361,6 +378,61 @@ def test_a_diagnostic_fork_changes_only_the_candidates(
     assert steps[2]["source"] == "intervention" and steps[2]["arguments"] == {"word": "storm"}
 
 
+def test_an_oracle_tool_answers_from_app_state_in_the_candidates_only(
+    wordle: tuple[Path, dict[str, str]],
+) -> None:
+    project, env = wordle
+    original = _plural(project, env, "run", "-t", "storm", "-a", "scripted", "--yes")["trials"][0][
+        "trial_id"
+    ]
+    _WordleModel.seen, _WordleModel.oracle = [], "peek"
+    try:
+        fork = _plural(
+            project,
+            env,
+            "trial",
+            "fork",
+            original,
+            "--step",
+            "2",
+            "--change",
+            "oracle_tool",
+            "--payload",
+            '{"name": "peek", "description": "The secret word.", "path": "secret"}',
+            "--attempts",
+            "1",
+        )
+    finally:
+        _WordleModel.oracle = None
+    answers = [
+        json.loads(message["content"])["rendered"]
+        for body in _WordleModel.seen
+        for message in body["messages"]
+        if message.get("tool_call_id") == "call_oracle"
+    ]
+    assert answers and set(answers) == {"storm"}
+    trials = _plural(project, env, "job", "show", fork["job_id"])["trials"]
+    roles = {item["trial_id"]: item["fork"]["role"] for item in trials}
+    for trial_id, role in roles.items():
+        tools = [step for step in _steps(project, trial_id) if step["kind"] == "harness_tool"]
+        assert [step["action"] for step in tools] == (["peek"] if role == "candidate" else [])
+
+    with pytest.raises(AssertionError, match="needs 'app'"):
+        _plural(
+            project,
+            env,
+            "trial",
+            "fork",
+            original,
+            "--step",
+            "2",
+            "--change",
+            "oracle_tool",
+            "--payload",
+            '{"name": "peek", "description": "x", "path": "secret", "app": "nowhere"}',
+        )
+
+
 def test_a_task_from_a_checkpoint_runs_and_scores_in_a_benchmark(
     wordle: tuple[Path, dict[str, str]],
 ) -> None:
@@ -392,6 +464,13 @@ def test_a_task_from_a_checkpoint_runs_and_scores_in_a_benchmark(
     )
     assert result["fork"]["from_checkpoint"] == f"{original}/two"
     assert result["fork"]["history"] == "native"
+    # A rerun finds the checkpoint's workspace snapshots again.
+    assert result["fork"]["checkpoint_digest"]
+    again = _plural(project, env, "job", "rerun", run["job_id"])
+    [repeat] = again["trials"]
+    assert (again["status"], repeat["score"]) == ("succeeded", 1.0)
+    repeated = _steps(project, repeat["trial_id"])
+    assert [step.get("inherited", False) for step in repeated][:2] == [True, True]
 
 
 def test_forking_a_held_out_trial_is_refused() -> None:
@@ -449,3 +528,155 @@ def test_a_checkpoint_warns_about_a_background_process() -> None:
     ]
     warnings = background_warnings([*started, *quiet])
     assert [warning.split(" started")[0] for warning in warnings] == ["Step 1", "Step 2", "Step 3"]
+
+
+def test_a_hosted_trial_forks_from_a_folder_without_its_record(
+    wordle: tuple[Path, dict[str, str]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from plural.project import Project, Workspace, forks
+    from plural.project.layout import AGENT
+    from plural.project.manifests import ProjectBinding
+
+    project, env = wordle
+    run = _plural(project, env, "run", "-t", "storm", "-a", "scripted", "--yes")
+    original = run["trials"][0]["trial_id"]
+    recorded = next((project / ".plural" / "jobs").glob(f"*/trials/{original}/executions/0"))
+    files = sorted((recorded / "artifacts").iterdir())
+    # Another person's folder: the same project's files, and none of its Job records.
+    elsewhere = tmp_path / "elsewhere"
+    shutil.copytree(project, elsewhere, ignore=shutil.ignore_patterns(".plural"))
+    space = Workspace(Project.at(elsewhere))
+    agent = space.load(forks.ResourceRef(AGENT.name, "scripted")).value
+
+    class _Trials:
+        def get(self, trial_id: str) -> dict[str, Any]:
+            return {
+                "id": trial_id,
+                "job_id": "hosted-job",
+                "execution_id": "exec-1",
+                "attempt": 1,
+                "seats": [],
+                "agent_revision_id": "rev-agent",
+                "agent_name": "scripted",
+                "score": 0.0,
+                "heldout": False,
+                "pins": {
+                    "task": {"name": "storm", "content_hash": "sha256:" + "a" * 64},
+                    "agent": agent.content_hash,
+                },
+            }
+
+        def metrics(self, trial_id: str) -> dict[str, Any]:
+            return {"passed": False}
+
+        def artifacts(self, trial_id: str) -> dict[str, Any]:
+            listed = [
+                {"id": str(index), "path": path.name, "execution_id": "exec-1"}
+                for index, path in enumerate(files)
+            ]
+            return {"records": listed, "outputs": [], "inputs": []}
+
+        def artifact(self, artifact_id: str) -> bytes:
+            return files[int(artifact_id)].read_bytes()
+
+    restored: list[dict[Any, str]] = []
+
+    def version_workspace(
+        workspace: Workspace, studio: Any, binding: Any, versions: Any, *, carry: Any = ()
+    ) -> Workspace:
+        restored.append(dict(versions))
+        return workspace
+
+    monkeypatch.setattr(forks, "version_workspace", version_workspace)
+    monkeypatch.setattr(
+        forks,
+        "_hosted_agent",
+        lambda studio, revision_id, title: (
+            forks.ResourceRef(AGENT.name, "scripted"),
+            SimpleNamespace(content_hash=agent.content_hash),
+        ),
+    )
+    studio: Any = SimpleNamespace(trials=_Trials())
+    binding = ProjectBinding(project_id="p", api_url="http://127.0.0.1:1", project_slug="wordle")
+    shadow, source = forks.hosted_trial_source(space, studio, binding, "hosted-1")
+    assert restored == [
+        {
+            forks.ResourceRef("task", "storm"): "sha256:" + "a" * 64,
+            forks.ResourceRef(AGENT.name, "scripted"): agent.content_hash,
+        }
+    ]
+    assert source.job_id == "hosted-job" and source.passed is False
+    downloaded = sorted(item.name for item in source.artifacts.iterdir())
+    assert downloaded and set(downloaded) <= forks._CHECKPOINT_RECORDS
+    assert "steps.jsonl" in downloaded and "result.json" not in downloaded
+
+    forks.save_trial_checkpoint(shadow, "hosted-1", step=2, name="two", source=source)
+    checkpoint, _ = forks.resolve_from_checkpoint(shadow, "hosted-1/two")
+    assert (checkpoint.trial_id, checkpoint.step, checkpoint.job_id) == (
+        "hosted-1",
+        2,
+        "hosted-job",
+    )
+
+    _WordleModel.seen = []
+    request = forks.ForkRequest(
+        trial_id="hosted-1",
+        step=2,
+        agents=("careful",),
+        attempts=1,
+        hosted_trial_id="hosted-1",
+    )
+    _job_id, result, spec = forks.fork_local_trial(shadow, request, environ=env, source=source)
+    assert spec.fork is not None and spec.fork.trial_id == "hosted-1"
+    assert spec.fork.hosted_trial_id == "hosted-1"
+    outcome = forks.fork_results(spec, result, source.passed)
+    assert outcome["history"] == {"native": 2}
+    for trial in result.trials:
+        steps = _steps(elsewhere, trial.receipt.trial_id)
+        assert [step.get("inherited", False) for step in steps] == [True, True, False, False, False]
+        assert [step["arguments"]["word"] for step in steps] == list(GUESSES[:5])
+
+
+def test_a_diagnostic_fork_naming_other_agents_records_only_their_own_attempts() -> None:
+    from plural.checkpoints import Checkpoint
+    from plural.jobs import JobSpec
+    from plural.project import Project, Workspace
+    from plural.studio import JobsAPI
+
+    space = Workspace(Project.at(ROOT / "examples" / "wordle"))
+    original = Agent(name="original", model="openai/gpt-5.6-luna")
+    other = Agent(name="other", model="openai/gpt-5.6-luna", instructions="Think first.")
+    job = Job(space.get("task", "storm"), agents=[original, other], attempts=3)
+    first, second = job.spec.agents
+    fork = ForkSpec(
+        trial_id="trl_x",
+        checkpoint=Checkpoint(trial_id="trl_x", step=1),
+        control_agent_id=first.agent_id,
+        candidate_agent_ids=(first.agent_id, second.agent_id),
+        change=ForkChange(name="message", payload={"text": "x"}),
+    )
+    fields = {name: getattr(job.spec, name) for name in JobSpec.model_fields}
+    spec = JobSpec.model_validate({**fields, "purpose": "fork", "fork": fork})
+    planned = {(trial.agent_id, trial.attempt) for trial in spec.plan().trials}
+    assert {attempt for agent, attempt in planned if agent == first.agent_id} == {1, 2, 3, 4, 5, 6}
+    assert {attempt for agent, attempt in planned if agent == second.agent_id} == {1, 2, 3}
+    assert spec.max_attempt == 6 and spec.agent_attempts == {second.agent_id: 3}
+
+    sent: list[dict[str, Any]] = []
+
+    class _Studio:
+        def request(self, method: str, path: str, *, json: dict[str, Any]) -> dict[str, Any]:
+            sent.append(json)
+            return {}
+
+    JobsAPI(_Studio()).submit(  # type: ignore[arg-type]
+        spec,
+        source_revision_id="task-rev",
+        agent_revision_ids=["rev-original", "rev-other"],
+        idempotency_key="k",
+        client_job_id="job_x",
+    )
+    assert sent[0]["attempts"] == 6
+    assert sent[0]["agent_attempts"] == {"rev-other": 3}

@@ -1,0 +1,6 @@
+name: smoke-codex
+version: 1.0.0
+model: openai/gpt-5.6-luna
+harness: codex
+harness_config:
+  sandbox: workspace-write

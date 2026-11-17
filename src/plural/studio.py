@@ -823,6 +823,12 @@ class JobsAPI:
             extra["heldout"] = True
         if spec.purpose != "eval":
             extra["purpose"] = spec.purpose
+        revisions = dict(
+            zip((item.agent_id for item in spec.agents), agent_revision_ids, strict=True)
+        )
+        fewer = {revisions[key]: value for key, value in spec.agent_attempts.items()}
+        if fewer:
+            extra["agent_attempts"] = fewer
         return cast(
             JsonObject,
             self._studio.request(
@@ -925,12 +931,35 @@ class TrialsAPI:
         )
         return int(cast(JsonObject, response)["calls"])
 
+    def gateway_usage(self, execution_id: str) -> JsonObject:
+        """Model calls the gateway saw on this execution's own key, with their tokens.
+
+        Returns:
+            ``calls``, ``prompt_tokens`` and ``completion_tokens``.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request("GET", f"/trial-executions/{quote(execution_id)}/gateway-calls"),
+        )
+
     def watch(self, trial_id: str, *, cursor: int = 0) -> Iterator[JsonObject]:
         return self._studio.watch(f"/trials/{quote(trial_id)}/events", cursor=cursor)
 
     def rewards(self, trial_id: str) -> JsonObject:
         """The Trial's reward ledger and each verifier's total."""
         return cast(JsonObject, self._studio.request("GET", f"/trials/{quote(trial_id)}/rewards"))
+
+    def metrics(self, trial_id: str) -> JsonObject:
+        """The Trial's metric values, its gates, and whether it passed them."""
+        return cast(JsonObject, self._studio.request("GET", f"/trials/{quote(trial_id)}/metrics"))
+
+    def artifacts(self, trial_id: str) -> JsonObject:
+        """The Trial's files: ``outputs``, ``records``, and ``inputs``, each a list."""
+        return cast(JsonObject, self._studio.request("GET", f"/trials/{quote(trial_id)}/artifacts"))
+
+    def artifact(self, artifact_id: str) -> bytes:
+        """One Trial file's bytes."""
+        return self._studio.request_bytes("GET", f"/trial-artifacts/{quote(artifact_id)}/content")
 
     def add_rewards(
         self,

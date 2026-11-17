@@ -38,6 +38,8 @@ def _local_command(command: list[Any]) -> list[str]:
 
 _CHAT_PROFILES = {"chat", "native.chat.v1"}
 _ACTION_PROFILES = {"actions", "native.actions.v1"}
+# An Environment with no Apps: the loop brings its own tools for the workspace.
+_WORKSPACE_PROFILES = {"workspace", "native.workspace.v1"}
 
 # Budgets cut an episode short without the Environment declaring completion.
 _BUDGET_STOPS = {"max_turns", "max_seconds", "max_cost"}
@@ -292,7 +294,7 @@ def main() -> None:
 def _run(
     profile: str, request: dict[str, Any], episode: _Episode | None = None
 ) -> tuple[dict[str, Any], _Episode, str]:
-    if profile not in _CHAT_PROFILES | _ACTION_PROFILES:
+    if profile not in _CHAT_PROFILES | _ACTION_PROFILES | _WORKSPACE_PROFILES:
         raise ValueError(f"unknown native profile {profile!r}")
     agent = _mapping(request.get("agent"), "agent")
     environment = _mapping(request.get("environment"), "environment")
@@ -366,6 +368,9 @@ def _run(
     ]
     if profile in _ACTION_PROFILES and _FINISH not in actions:
         tools.append(_FINISH_TOOL)
+    workspace = _WorkspaceTools(environment, denials) if profile in _WORKSPACE_PROFILES else None
+    if workspace is not None:
+        tools = workspace.declarations()
     catalog_model = str(agent.get("model") or "")
     execution_model = _execution_model(request, catalog_model)
     total_cost: float | None = None
@@ -406,7 +411,7 @@ def _run(
         if remaining <= 0:
             stop_reason = "max_seconds"
             break
-        offered = tools if profile in _ACTION_PROFILES else []
+        offered = tools if profile not in _CHAT_PROFILES else []
         started = _started()
         try:
             response, paused = _model_call(
@@ -451,6 +456,12 @@ def _run(
             break
         for call in calls:
             started = _started()
+            if workspace is not None:
+                outcome = workspace.dispatch(call, deadline, turn)
+                if outcome.transition is not None:
+                    _record_outcome(episode, started, turn, call, outcome)
+                messages.append(outcome.message)
+                continue
             outcome = _dispatch_tool(call, actions, environment, denials, deadline, turn)
             _record_outcome(episode, started, turn, call, outcome)
             messages.append(outcome.message)
@@ -795,6 +806,229 @@ def _parse_envelope(text: str) -> dict[str, Any] | None:
     }
 
 
+# Keep in sync with the tools plural.harness.packages declares for native.workspace.v1;
+# test_native_workspace.py asserts they match.
+WORKSPACE_TOOLS: dict[str, dict[str, Any]] = {
+    "read_file": {
+        "description": "Read a text file. Paths are relative to your working folder.",
+        "capability": "file_read",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+    "write_file": {
+        "description": (
+            "Write a text file, replacing it if it exists and creating its folders. "
+            "Paths are relative to your working folder."
+        ),
+        "capability": "file_edit",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["path", "content"],
+        },
+    },
+    "list_files": {
+        "description": (
+            "List files under a folder, to any depth. Paths are relative to your working "
+            "folder; the default is the working folder itself."
+        ),
+        "capability": "file_read",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": [],
+        },
+    },
+    "run": {
+        "description": "Run a shell command in your working folder and see its output.",
+        "capability": "shell",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"},
+                "timeout_seconds": {"type": "number"},
+            },
+            "required": ["command"],
+        },
+    },
+}
+_WORKSPACE_OUTPUT_CHARS = 20_000
+_WORKSPACE_LIST_LIMIT = 500
+_RUN_TIMEOUT_SECONDS = 120.0
+
+
+class _WorkspaceTools:
+    """The native loop's own tools in an Environment with no Apps.
+
+    They act on the sandbox workspace directly, as another Harness's tools do, and
+    each call is reported to the App host, when there is one, as a Harness tool step.
+    """
+
+    def __init__(self, environment: dict[str, Any], denials: list[dict[str, str]]) -> None:
+        self.environment = environment
+        self.cwd = Path(
+            _workspace_path(str(environment.get("workspace") or "/workspace/environment"))
+        )
+        self.root = Path(_workspace_path("/workspace")).resolve()
+        denied = {item["capability"] for item in denials}
+        self.offered = {
+            name: spec for name, spec in WORKSPACE_TOOLS.items() if spec["capability"] not in denied
+        }
+
+    def declarations(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": spec["description"],
+                    "parameters": spec["parameters"],
+                },
+            }
+            for name, spec in self.offered.items()
+        ]
+
+    def dispatch(self, call: Any, deadline: float, turn: int) -> _ToolOutcome:
+        """Run one call and report it; the model sees the output, or the error.
+
+        Returns:
+            The tool message, and the step the host numbered it, once it has.
+        """
+        if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
+            raise ValueError("model emitted an invalid tool call")
+        name = str(call["function"].get("name") or "")
+        try:
+            arguments = _arguments(call["function"])
+        except (TypeError, ValueError):
+            arguments = {}
+        output: Any = None
+        error: str | None = None
+        background = False
+        if name not in self.offered:
+            error = f"unknown tool {name!r}"
+        else:
+            try:
+                output, background = getattr(self, f"_{name}")(arguments, deadline)
+            except (OSError, ValueError, UnicodeDecodeError, subprocess.SubprocessError) as exc:
+                error = str(exc) or type(exc).__name__
+        number = self._report(name, arguments, output, error, background)
+        visible = f"Error: {error}" if error else output
+        text = visible if isinstance(visible, str) else json.dumps(visible)
+        message = _tool_observation(call, name, text)
+        if number is None:
+            return _ToolOutcome(message=message)
+        return _ToolOutcome(
+            message=message,
+            transition={
+                "type": "step",
+                "turn": turn,
+                "action": name,
+                "arguments": arguments,
+                "observation": None if output is None else {"text": text},
+                "info": {"step": number, **({"error": error} if error else {})},
+            },
+        )
+
+    def _path(self, arguments: dict[str, Any], default: str | None = None) -> Path:
+        raw = arguments.get("path", default)
+        if not isinstance(raw, str) or not raw:
+            raise ValueError("path is required")
+        path = (self.cwd / raw).resolve()
+        if path != self.root and not path.is_relative_to(self.root):
+            raise ValueError(f"{raw} is outside the workspace")
+        if any(part.startswith(".plural") for part in path.relative_to(self.root).parts):
+            raise ValueError(f"{raw} is not readable")
+        return path
+
+    def _read_file(self, arguments: dict[str, Any], deadline: float) -> tuple[str, bool]:
+        text = self._path(arguments).read_text(encoding="utf-8")
+        if len(text) > _WORKSPACE_OUTPUT_CHARS:
+            text = text[:_WORKSPACE_OUTPUT_CHARS] + "\n[truncated]"
+        return text, False
+
+    def _write_file(self, arguments: dict[str, Any], deadline: float) -> tuple[str, bool]:
+        content = arguments.get("content")
+        if not isinstance(content, str):
+            raise ValueError("content must be a string")
+        path = self._path(arguments)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return f"Wrote {len(content.encode())} bytes to {arguments['path']}.", False
+
+    def _list_files(self, arguments: dict[str, Any], deadline: float) -> tuple[str, bool]:
+        folder = self._path(arguments, ".")
+        found = []
+        for path in sorted(folder.rglob("*")):
+            relative = path.relative_to(self.root)
+            if any(part.startswith(".plural") for part in relative.parts) or not path.is_file():
+                continue
+            found.append(os.path.relpath(path, self.cwd))
+            if len(found) >= _WORKSPACE_LIST_LIMIT:
+                found.append("[more files not shown]")
+                break
+        return "\n".join(found) or "(no files)", False
+
+    def _run(self, arguments: dict[str, Any], deadline: float) -> tuple[str, bool]:
+        command = arguments.get("command")
+        if not isinstance(command, str) or not command.strip():
+            raise ValueError("command is required")
+        requested = arguments.get("timeout_seconds")
+        limit = float(requested) if isinstance(requested, (int, float)) and requested > 0 else None
+        timeout = min(
+            limit or _RUN_TIMEOUT_SECONDS, _RUN_TIMEOUT_SECONDS, deadline - time.monotonic()
+        )
+        if timeout <= 0:
+            raise TimeoutError("episode deadline expired")
+        try:
+            completed = subprocess.run(
+                ["sh", "-c", command],
+                cwd=self.cwd,
+                env=_action_environment(self.environment),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return f"Timed out after {timeout:.0f} seconds.", False
+        text = (completed.stdout + completed.stderr).decode(errors="replace")
+        if len(text) > _WORKSPACE_OUTPUT_CHARS:
+            text = text[-_WORKSPACE_OUTPUT_CHARS:]
+        return f"exit code {completed.returncode}\n{text}", False
+
+    def _report(
+        self, name: str, arguments: dict[str, Any], output: Any, error: str | None, background: bool
+    ) -> int | None:
+        command = self.environment.get("tool_command")
+        if not command:
+            return None
+        payload = {
+            "arguments": arguments,
+            "output": output,
+            "error": error,
+            "background": background,
+        }
+        try:
+            completed = subprocess.run(
+                [*_local_command(list(command)), name],
+                input=json.dumps(payload).encode(),
+                cwd=self.cwd,
+                env=_action_environment(self.environment),
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            answer = json.loads(completed.stdout or b"null")
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+            # A missing report loses the step, never the episode.
+            return None
+        number = answer.get("step") if isinstance(answer, dict) else None
+        return number if isinstance(number, int) and not isinstance(number, bool) else None
+
+
 def _dispatch_tool(
     call: Any,
     actions: dict[str, dict[str, Any]],
@@ -860,7 +1094,7 @@ def _run_action(
     declaration = actions[name]
     arguments = _arguments(call["function"])
     remaining = deadline - time.monotonic()
-    timeout = min(float(declaration.get("timeout_seconds", 30)), remaining)
+    timeout = min(float(declaration.get("timeout_seconds") or 30), remaining)
     if timeout <= 0:
         raise TimeoutError("environment action deadline expired")
     command = declaration.get("command") or []

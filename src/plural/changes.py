@@ -43,7 +43,8 @@ class ForkPoint:
             their descriptions.
         note: A message added after the history.
         forced: Actions the App host runs first, as the Agent's next actions.
-        oracles: Added tools, by name, with the answer each returns.
+        oracles: Added tools, by name, with the App and the path in its State
+            each one answers from.
         fresh: Whether the Agent starts with no history at all.
     """
 
@@ -54,7 +55,7 @@ class ForkPoint:
     environment: dict[str, Any]
     note: str = ""
     forced: list[dict[str, Any]] = field(default_factory=list)
-    oracles: dict[str, str] = field(default_factory=dict)
+    oracles: dict[str, dict[str, str]] = field(default_factory=dict)
     fresh: bool = False
 
     def text(self, key: str) -> str:
@@ -207,12 +208,27 @@ def _context(point: ForkPoint) -> None:
 
 @change("oracle_tool")
 def _oracle_tool(point: ForkPoint) -> None:
-    """Add one tool that returns a fact: ``{"name", "description", "answer"}``.
+    """Add one tool that returns a fact from App State: ``{"name", "description", "path"}``.
 
-    The answer is the text you give it. It is never read from an App's State,
-    which never reaches the Agent.
+    ``path`` names one value in the App's State, with ``.`` between keys and
+    list indexes, such as ``quote.unit_price``. ``app`` names the App when the
+    Environment has several. The App host reads the value when the Agent calls
+    the tool, and only that value reaches the Agent, in this diagnostic fork.
     """
     name = point.text("name")
+    path = point.text("path")
+    apps = sorted(
+        {
+            str(item["app"])
+            for item in point.environment.get("actions") or ()
+            if isinstance(item, dict) and item.get("app")
+        }
+    )
+    app = point.payload.get("app")
+    if app is None and len(apps) == 1:
+        app = apps[0]
+    if not isinstance(app, str) or app not in apps:
+        raise ValueError(f"needs 'app' to be one of the Environment's Apps: {', '.join(apps)}")
     if any(item.get("name") == name for item in point.environment.get("actions") or ()):
         raise ValueError(f"can't add {name!r}: the Environment already has an action by that name")
     point.environment.setdefault("actions", []).append(
@@ -226,7 +242,7 @@ def _oracle_tool(point: ForkPoint) -> None:
             "command": [*HOST_COMMAND, "oracle", name],
         }
     )
-    point.oracles[name] = point.text("answer")
+    point.oracles[name] = {"app": app, "path": path}
 
 
 __all__ = ["ChangeFunction", "ForkPoint", "apply_change", "change", "registered"]

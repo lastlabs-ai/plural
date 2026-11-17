@@ -693,11 +693,38 @@ def trial_rerun(
     raise ProjectError(_not_here("Trial", trial_id))
 
 
+def _fork_source(
+    space: Workspace, given: str, *, carry: Sequence[ResourceRef] = ()
+) -> tuple[Workspace, str, Any, str | None]:
+    """The Trial a checkpoint or fork starts from, and the workspace to run it in.
+
+    A local Trial, or the local run a hosted Trial recorded, is used as it is.
+    Any other hosted Trial is rebuilt from the hosted project, so a Trial can be
+    forked from any folder linked to its project.
+
+    Returns:
+        The workspace, the Trial's id there, the Trial, and its hosted id when known.
+    """
+    from plural.project.forks import hosted_trial_source, local_trial_id, trial_source
+
+    try:
+        trial_id = local_trial_id(space, given, lambda: project_studio(space, session())[0])
+    except ProjectError:
+        if given.startswith("trl_"):
+            raise
+        studio = _hosted_studio(space, required=True)
+        binding = space.project.read_binding()
+        assert studio is not None and binding is not None
+        shadow, source = hosted_trial_source(space, studio, binding, given, carry=carry)
+        return shadow, given, source, given
+    return space, trial_id, trial_source(space, trial_id), given if given != trial_id else None
+
+
 @trial_app.command("checkpoint")
 @handled
 def trial_checkpoint(
     trial_id: str = typer.Argument(
-        help="Trial to take the checkpoint from: a local Trial, or one this folder recorded."
+        help="Trial to take the checkpoint from: a local Trial, or a hosted one by its id."
     ),
     step: int = typer.Option(..., "--step", help="The step the checkpoint is after."),
     name: str = typer.Option(
@@ -707,11 +734,10 @@ def trial_checkpoint(
 ) -> None:
     """Name the moment after one step of a Trial, to fork from it or start a Task there."""
     from plural.checkpoints import load_checkpoint
-    from plural.project.forks import local_trial_id, save_trial_checkpoint
+    from plural.project.forks import save_trial_checkpoint
 
-    space = workspace()
-    trial_id = local_trial_id(space, trial_id, lambda: project_studio(space, session())[0])
-    path = save_trial_checkpoint(space, trial_id, step=step, name=name)
+    space, trial_id, source, _hosted = _fork_source(workspace(), trial_id)
+    path = save_trial_checkpoint(space, trial_id, step=step, name=name, source=source)
     checkpoint = load_checkpoint(path)
     payload = {
         "trial_id": trial_id,
@@ -736,7 +762,7 @@ def trial_checkpoint(
 @handled
 def trial_fork(
     trial_id: str = typer.Argument(
-        help="Trial to continue: a local Trial, or one this folder recorded."
+        help="Trial to continue: a local Trial, or a hosted one by its id."
     ),
     step: int | None = typer.Option(None, "--step", help="Continue after this step."),
     checkpoint: str | None = typer.Option(
@@ -774,26 +800,16 @@ def trial_fork(
     """
     import json as json_module
 
-    from plural.project.forks import (
-        ForkRequest,
-        fork_local_trial,
-        fork_results,
-        hosted_trial_id,
-        local_trial_id,
-        trial_source,
-    )
+    from plural.project.forks import ForkRequest, fork_local_trial, fork_results, hosted_trial_id
 
-    space = workspace()
-    given = trial_id
-    trial_id = local_trial_id(space, trial_id, lambda: project_studio(space, session())[0])
+    here = workspace()
+    carry = [ResourceRef(AGENT.name, name) for name in agent]
+    if harness and here.project.has(ResourceRef(HARNESS.name, harness)):
+        carry.append(ResourceRef(HARNESS.name, harness))
+    space, trial_id, source, hosted = _fork_source(here, trial_id, carry=carry)
     recording = _recording(record, track)
-    hosted = (
-        given
-        if given != trial_id
-        else hosted_trial_id(space, project_studio(space, session())[0], trial_id)
-        if recording
-        else None
-    )
+    if hosted is None and recording:
+        hosted = hosted_trial_id(space, project_studio(space, session())[0], trial_id)
     try:
         payload_value = json_module.loads(payload) if payload is not None else None
     except json_module.JSONDecodeError as exc:
@@ -813,9 +829,8 @@ def trial_fork(
         payload=payload_value,
         hosted_trial_id=hosted,
     )
-    source = trial_source(space, trial_id)
-    tracking = _tracking(space, session()) if recording else None
-    environ = _project_secrets(space, source.spec, _run_environ(session()), err=as_json)
+    tracking = _tracking(here, session()) if recording else None
+    environ = _project_secrets(here, source.spec, _run_environ(session()), err=as_json)
     with _credit_watch(session(), environ, err=as_json):
         job_id, result, spec = fork_local_trial(
             space,
@@ -824,8 +839,9 @@ def trial_fork(
             progress=_progress(as_json),
             tracking=tracking,
             credential_source=_stored_credentials(as_json),
+            source=source,
         )
-    outcome = fork_results(spec, result, source.result)
+    outcome = fork_results(spec, result, source.passed)
     view = {"job_id": job_id, "of_trial_id": trial_id, **outcome}
 
     def text() -> None:

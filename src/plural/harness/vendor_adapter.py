@@ -75,6 +75,10 @@ def main() -> None:
     )
 
 
+HERMES_USAGE = Path(".plural/hermes-usage.json")
+"""Where Hermes reports its usage, beside the adapter and outside the Agent's workspace."""
+
+
 def run_vendor(
     vendor: str,
     task: HarnessTask,
@@ -128,6 +132,7 @@ def run_vendor(
         detail = "\n".join(part.strip() for part in output if part.strip())
         raise SystemExit(f"{vendor} exited with code {completed.returncode}: {detail[-1500:]}")
     response = _response(vendor, completed.stdout)
+    usage = _hermes_usage() if vendor == "hermes" else None
     return HarnessResult(
         response=response,
         metadata={"vendor": vendor, "model": model},
@@ -137,6 +142,7 @@ def run_vendor(
                 "model": model,
                 "stdout": completed.stdout,
                 "stderr": completed.stderr,
+                **({"usage": usage} if usage is not None else {}),
             },
         ),
         logs=tuple(item for item in (completed.stderr or "", completed.stdout or "") if item),
@@ -457,8 +463,37 @@ def _command(
         # The Runtime workspace is never a git repository Codex has been told to trust.
         return ("codex", "exec", "--json", "--skip-git-repo-check", *model_args, *extra, prompt)
     if vendor == "hermes":
-        return ("hermes", "chat", *model_args, "--prompt", prompt)
+        # A named custom provider: with "auto" and a vendor/model name, Hermes calls
+        # OpenRouter itself. Its own config, rules and memory never apply.
+        return (
+            "hermes",
+            "-z",
+            prompt,
+            *model_args,
+            "--provider",
+            "custom",
+            "--usage-file",
+            str(HERMES_USAGE.resolve()),
+            "--yolo",
+            "--ignore-user-config",
+            "--ignore-rules",
+        )
     raise SystemExit(f"unknown vendor adapter {vendor!r}")
+
+
+def _hermes_usage() -> dict[str, Any] | None:
+    """The usage report Hermes wrote: its model calls, tokens, and the provider it used."""
+    try:
+        value = json.loads(HERMES_USAGE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _hermes_home() -> Path:
+    folder = Path(".plural/hermes").resolve()
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
 
 
 def _codex_home() -> Path:
@@ -558,8 +593,12 @@ def _map_credentials(vendor: str, deadline: float) -> None:
         os.environ["OPENAI_API_KEY"] = key or "plural"
         os.environ["PLURAL_CODEX_BASE_URL"] = _start_responses_bridge(deadline)
         return
-    os.environ["OPENAI_API_KEY"] = key or "plural"
-    os.environ["OPENAI_BASE_URL"] = gateway
+    # Hermes: its own home, and the bridge as its only endpoint. The bridge holds the
+    # key, so no provider variable Hermes might send elsewhere carries it.
+    os.environ["HERMES_HOME"] = str(_hermes_home())
+    os.environ["CUSTOM_BASE_URL"] = _start_responses_bridge(deadline)
+    for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"):
+        os.environ.pop(name, None)
 
 
 def _response(vendor: str, stdout: str) -> str:

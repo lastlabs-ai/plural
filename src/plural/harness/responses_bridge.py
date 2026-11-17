@@ -1,7 +1,9 @@
 """Serve OpenAI Responses requests, as Codex sends them, from Plural's chat completions gateway.
 
 Codex speaks only the Responses API; the gateway serves chat completions. The bridge
-translates one turn at a time and streams the answer back as Responses events.
+translates one turn at a time and streams the answer back as Responses events. It also
+passes chat completions through as they are, for a CLI such as Hermes that speaks them
+but can't be given the gateway's key, which only the bridge holds.
 """
 
 from __future__ import annotations
@@ -53,10 +55,16 @@ class _Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._json(400, {"error": {"message": "invalid JSON"}})
             return
-        if not self.path.rstrip("/").endswith("/responses") or not isinstance(payload, dict):
-            self._json(404, {"error": {"message": "not found"}})
+        if not isinstance(payload, dict):
+            self._json(400, {"error": {"message": "the request is not a JSON object"}})
             return
         timeout = call_timeout(getattr(self.server, "deadline", episode_deadline()))
+        if self.path.rstrip("/").endswith("/chat/completions"):
+            self._chat(payload, timeout)
+            return
+        if not self.path.rstrip("/").endswith("/responses"):
+            self._json(404, {"error": {"message": "not found"}})
+            return
         try:
             request, tools = to_chat(payload)
             response = from_chat(_gateway_request(request, timeout), tools)
@@ -75,6 +83,35 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(f"event: {event['type']}\ndata: {data}\n\n".encode())
         self.wfile.flush()
 
+    def _chat(self, payload: dict[str, Any], timeout: float) -> None:
+        stream = bool(payload.pop("stream", False))
+        payload.pop("stream_options", None)
+        messages = payload.get("messages")
+        if isinstance(messages, list):
+            # OpenAI's newer name for a system message, which the gateway doesn't take.
+            payload["messages"] = [
+                {**item, "role": "system"}
+                if isinstance(item, dict) and item.get("role") == "developer"
+                else item
+                for item in messages
+            ]
+        try:
+            response = _gateway_request(payload, timeout)
+        except Exception as exc:  # noqa: BLE001 - return a usable vendor error
+            self._json(502, {"error": {"message": str(exc)}})
+            return
+        if not stream:
+            self._json(200, response)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        for chunk in chat_chunks(response):
+            self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
     def _json(self, status: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload).encode()
         self.send_response(status)
@@ -82,6 +119,42 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def chat_chunks(response: dict[str, Any]) -> list[dict[str, Any]]:
+    """One chat completion as the chunks a streaming client reads.
+
+    Returns:
+        A chunk with each choice's message, one with its finish reason, and one
+        with the usage, if the gateway reported it.
+    """
+    base = {
+        "id": response.get("id") or f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion.chunk",
+        "created": response.get("created") or 0,
+        "model": response.get("model") or "",
+    }
+    chunks: list[dict[str, Any]] = []
+    for choice in response.get("choices") or ():
+        index = choice.get("index", 0)
+        message = choice.get("message") or {}
+        delta: dict[str, Any] = {"role": "assistant"}
+        if message.get("content") is not None:
+            delta["content"] = message["content"]
+        calls = [
+            {**call, "index": position}
+            for position, call in enumerate(message.get("tool_calls") or ())
+        ]
+        if calls:
+            delta["tool_calls"] = calls
+        chunks.append(
+            {**base, "choices": [{"index": index, "delta": delta, "finish_reason": None}]}
+        )
+        finish = choice.get("finish_reason") or ("tool_calls" if calls else "stop")
+        chunks.append({**base, "choices": [{"index": index, "delta": {}, "finish_reason": finish}]})
+    if response.get("usage"):
+        chunks.append({**base, "choices": [], "usage": response["usage"]})
+    return chunks
 
 
 @dataclass

@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +109,7 @@ class WorkspaceSnapshots:
         self.snapshots: dict[int, str] = {}
         self.skipped: dict[str, tuple[int, str]] = {}
         self._indexed: set[str] = set()
+        self._trees: list[str] = []
         self.problem: str | None = None
         if self.cap_bytes == 0:
             self.problem = "workspace snapshots are off (limits.workspace_snapshot_mib is 0)"
@@ -216,8 +218,9 @@ class WorkspaceSnapshots:
                 )
             self._indexed = set(kept)
             tree = _git(self.git_dir, "write-tree", work_tree=self.workspace, index=index)
+            self._trees.append(tree.decode().strip())
             commit = (
-                _git(self.git_dir, "commit-tree", tree.decode().strip(), "-m", f"step {step}")
+                _git(self.git_dir, "commit-tree", self._trees[-1], "-m", f"step {step}")
                 .decode()
                 .strip()
             )
@@ -243,13 +246,15 @@ class WorkspaceSnapshots:
         """What the Job keeps about the snapshots.
 
         Returns:
-            Whether they were taken, each step's commit, the skipped files, and
+            Whether they were taken, each step's commit, whether the files
+            changed from the first snapshot to the last, the skipped files, and
             why there are none, if so.
         """
         return {
             "available": self.available,
             "cap_mib": self.cap_bytes // (1024 * 1024),
             "snapshots": {str(step): commit for step, commit in sorted(self.snapshots.items())},
+            **({"changed": self._trees[0] != self._trees[-1]} if self._trees else {}),
             "skipped": [
                 {"path": path, "step": step, "reason": reason}
                 for path, (step, reason) in sorted(self.skipped.items())
@@ -297,14 +302,32 @@ def snapshot_files(bundle: Path, commit: str) -> dict[str, bytes]:
     with tempfile.TemporaryDirectory(prefix="plural-snapshot-") as folder:
         target = Path(folder) / "files"
         names = checkout(bundle, commit, target)
-        return {name: (target / name).read_bytes() for name in names if (target / name).is_file()}
+        # A symbolic link is never followed: it could name a file on this machine.
+        return {
+            name: (target / name).read_bytes()
+            for name in names
+            if not (target / name).is_symlink() and (target / name).is_file()
+        }
 
 
-def snapshot_entries(bundle: Path, commit: str) -> list[tuple[str, bytes, int]]:
-    """Read every regular file of one snapshot, with the mode to restore it with.
+@dataclass(frozen=True)
+class SnapshotEntry:
+    """One file of a snapshot, as it is restored."""
+
+    path: str
+    """Relative to the workspace."""
+    data: bytes = b""
+    mode: int = 0o644
+    """``0o755`` for an executable file, else ``0o644``."""
+    link: str | None = None
+    """For a symbolic link, what it points to; it has no data then."""
+
+
+def snapshot_entries(bundle: Path, commit: str) -> list[SnapshotEntry]:
+    """Read every file and symbolic link of one snapshot, as it is restored.
 
     Returns:
-        ``(path, bytes, mode)``: ``0o755`` for an executable file, else ``0o644``.
+        One entry per file or link.
     """
     import tempfile
 
@@ -313,10 +336,11 @@ def snapshot_entries(bundle: Path, commit: str) -> list[tuple[str, bytes, int]]:
         entries = []
         for name in checkout(bundle, commit, target):
             path = target / name
-            if path.is_symlink() or not path.is_file():
-                continue
-            mode = 0o755 if os.stat(path).st_mode & 0o111 else 0o644
-            entries.append((name, path.read_bytes(), mode))
+            if path.is_symlink():
+                entries.append(SnapshotEntry(path=name, link=os.readlink(path)))
+            elif path.is_file():
+                mode = 0o755 if os.stat(path).st_mode & 0o111 else 0o644
+                entries.append(SnapshotEntry(path=name, data=path.read_bytes(), mode=mode))
         return entries
 
 
@@ -352,6 +376,7 @@ __all__ = [
     "FINAL_REF",
     "IGNORED",
     "STEP_REF",
+    "SnapshotEntry",
     "WorkspaceSnapshots",
     "checkout",
     "commit_for",

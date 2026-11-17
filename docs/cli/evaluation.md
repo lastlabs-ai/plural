@@ -2921,8 +2921,8 @@ This section is generated from the Typer application. Run `uv run python scripts
  Name the moment after one step of a Trial, to fork from it or start a Task there.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    trial_id      <str>  Trial to take the checkpoint from: a local Trial, or one this folder   │
-│                           recorded.                                                              │
+│ *    trial_id      <str>  Trial to take the checkpoint from: a local Trial, or a hosted one by   │
+│                           its id.                                                                │
 │                           [required]                                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
@@ -2947,7 +2947,7 @@ This section is generated from the Typer application. Run `uv run python scripts
  at all when it can't accept one. Each case but the first prints why.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    trial_id      <str>  Trial to continue: a local Trial, or one this folder recorded.         │
+│ *    trial_id      <str>  Trial to continue: a local Trial, or a hosted one by its id.           │
 │                           [required]                                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮

@@ -1,0 +1,9 @@
+# No Apps: the only way to pass is to write a file with the Harness's own tools.
+name: workspace
+version: 1.0.0
+description: An empty workspace and no Apps.
+runtime:
+  provider: local
+limits:
+  max_turns: 8
+  max_seconds: 300

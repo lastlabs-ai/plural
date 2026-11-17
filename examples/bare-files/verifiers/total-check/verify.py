@@ -19,6 +19,7 @@ def check(episode: Episode) -> VerifierOutput:
     return VerifierOutput(
         score=(float(answered) + float(written)) / 2,
         metrics={"answer_correct": float(answered), "file_correct": float(written)},
+        evidence=[f"answered {answer!r}", f"{name} found at {', '.join(found) or 'no path'}"],
         feedback=(
             f"answer {'gives' if answered else 'lacks'} {total}; "
             + (

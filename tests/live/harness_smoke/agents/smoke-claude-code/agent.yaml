@@ -1,0 +1,6 @@
+name: smoke-claude-code
+version: 1.0.0
+model: anthropic/claude-haiku-4-5
+harness: claude-code
+harness_config:
+  permission_mode: acceptEdits

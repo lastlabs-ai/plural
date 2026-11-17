@@ -1473,7 +1473,10 @@ def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
 
     def task(definition: TaskDefinition) -> TaskDefinition:
         return definition.model_copy(
-            update={"verifiers": tuple(rebind(item) for item in definition.verifiers)}
+            update={
+                "verifiers": tuple(rebind(item) for item in definition.verifiers),
+                "checkpoint_bundle": _checkpoint_bundle(workspace, definition),
+            }
         )
 
     if isinstance(spec.source, TaskJobSource):
@@ -1488,6 +1491,32 @@ def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
             )
         }
     )
+
+
+def _checkpoint_bundle(workspace: Workspace, task: TaskDefinition) -> str | None:
+    """Where a saved Task's starting checkpoint keeps its workspace snapshots.
+
+    A saved Job keeps the checkpoint but not this machine's path to its
+    snapshots, so a rerun finds them again by the Task's ``from_checkpoint``,
+    and uses them only when they belong to the very checkpoint the Job ran.
+
+    Returns:
+        The snapshots' path, or ``None`` when there are none to use; a run then
+        says the workspace can't be restored.
+    """
+    from plural.project.forks import resolve_from_checkpoint
+
+    if task.checkpoint is None or task.from_checkpoint is None:
+        return task.checkpoint_bundle
+    if not task.checkpoint.workspace.commit:
+        return None
+    try:
+        checkpoint, bundle = resolve_from_checkpoint(workspace, task.from_checkpoint)
+    except ProjectError:
+        return None
+    if checkpoint.digest != task.checkpoint.digest or bundle is None:
+        return None
+    return str(bundle)
 
 
 def _trial_summary(result: TrialResult) -> dict[str, Any]:

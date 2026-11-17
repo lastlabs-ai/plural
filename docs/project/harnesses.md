@@ -167,15 +167,19 @@ Runtime. Setup happens in the fresh Runtime, not on your laptop.
    the value. You do not put model keys on `Agent.secrets` for a built-in
    Harness. A custom Harness lists the names it reads in `secrets`, and the Agent
    requires that subset.
-4. Environment actions are offered to the tool as tools.
+4. Environment actions are offered to the tool as tools, except to Hermes, which
+   works only in the workspace for now.
 5. `PLURAL_STOP_SECONDS` is how many seconds the Harness has before it is killed. A
    Harness that stops before then and writes its outputs is verified; one that is
    killed fails with the stop reason `harness_timeout`.
 6. Claude Code and Codex each talk to a local compatibility service that forwards
    their requests, tool calls included, to the Job's OpenAI-compatible model gateway:
-   Claude Code's Messages requests, and Codex's Responses requests. Hermes calls that
-   gateway directly. Codex runs with its own `CODEX_HOME`, and Claude Code with its own
-   configuration folder, so neither uses a login or settings from the machine it runs on.
+   Claude Code's Messages requests, Codex's Responses requests, and Hermes's chat
+   completions, which Hermes sends as a custom provider. Codex runs with its own
+   `CODEX_HOME`, Claude Code with its own configuration folder, and Hermes with its
+   own `HERMES_HOME` and without its rules files, so none uses a login, provider key,
+   or settings from the machine it runs on. Hermes's own usage report, its model
+   calls and tokens, is kept in the Trial's `trajectory.jsonl`.
 7. Claude Code asks before it edits a file, and Codex runs read-only, unless the Agent
    says otherwise. An Agent whose work is writing files sets
    `permission_mode: acceptEdits` or `sandbox: workspace-write`.
@@ -467,9 +471,12 @@ Every call to either kind is a step in the Trial's one timeline. An action is
 recorded by the App host as it runs. A Harness tool, such as Claude Code's `Write`,
 is reported to the host by the Harness: Claude Code through a hook, Codex from its
 event stream, and a custom Harness with `environment.record_tool(name, arguments,
-output=...)`. Plural's native loop brings no tools of its own, so in an Environment
-with no Apps it can answer but not write files. Each Trial records every tool its
-Agent was offered.
+output=...)`. Plural's native loop reports its own tools the same way. In an
+Environment with Apps it uses only their actions. In one with no Apps it brings four
+tools for the workspace: `read_file`, `write_file`, `list_files` and `run`, a shell
+command in the working folder. The three file tools can't reach outside `/workspace`
+or into the App host's private folder; `run` is a shell with the Agent's own access,
+like any Harness's shell. Each Trial records every tool its Agent was offered.
 
 Declare the tools a Harness brings with `tools` in `harness.yaml`, by name or as
 `{name, description}`. Built-in Harnesses declare theirs. A fork compares them with

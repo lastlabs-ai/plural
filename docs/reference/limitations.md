@@ -81,20 +81,18 @@ separately and can add their own provider requirements.
 
 ## Checkpoints and forks
 
-- A fork needs the forked Trial's local record. Run `plural trial fork` in the
-  project folder that ran or recorded the Trial; a Trial run elsewhere can't be
-  forked from a hosted copy alone.
 - Workspace snapshots restore file contents with ordinary file modes: executable
-  files stay executable, other modes are not kept, and symbolic links are not
-  restored. Running processes are never restored; a checkpoint after one warns.
+  files stay executable and other modes are not kept. Symbolic links are restored
+  as links, but a Verifier's `episode.workspace` leaves them out, so a link never
+  reads a file outside the workspace. Running processes are never restored; a
+  checkpoint after one warns.
 - Codex can't continue a history as its own session, so a fork into Codex always
   gets a transcript. Claude Code continues one natively from a session file Plural
   writes from the history.
-- An Environment with no Apps keeps a timeline and workspace snapshots on the local
-  Runtime, and on a remote Runtime when Plural is installed there.
-- `plural job rerun` of a Job whose Task starts from a checkpoint with workspace
-  snapshots stops with an error, because a rerun reads the saved Job and not the
-  checkpoint's snapshots. Run the Task or Benchmark again with `plural run`.
+- An Environment with no Apps has an App host on every Runtime, Docker and Daytona
+  included, so its Trials keep a timeline and workspace snapshots and can reach the
+  `verified` trust tier. An External Agent in one has no App host.
+- Hermes isn't offered the Environment's actions; it works only in the workspace.
 
 ## Training
 
