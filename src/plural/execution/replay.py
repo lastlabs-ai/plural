@@ -164,6 +164,7 @@ def _step_rewards(
             previous_state=previous,
             current_state=current.get(app),
             apps={name: _RecordedApp(name, state) for name, state in current.items()},
+            harness_tool=record.get("harness_tool") or None,
         )
         try:
             value = fn(step)

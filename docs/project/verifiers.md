@@ -230,6 +230,12 @@ def reply_matches_crm(step: Step) -> float | None:
     return 1.0 if customer["name"] in step.arguments["text"] else 0.0
 ```
 
+- `harness_tool`: the [Harness tool](harnesses.md#offer-the-model-your-own-tools) that
+  took this step, or `None` when the model asked for the action itself. A tool's steps
+  are its code, not the model's choices, so a reward that credits the model's decisions
+  returns `None` for them. The Harness reports this, so it is not proof of who chose
+  the action.
+
 Return a number, or `None` when this step gives no signal. A `reward` function that
 raises, or returns a value that isn't a finite number, never fails the Agent's action.
 The step earns that Verifier no reward, and the error, with the line that raised it,

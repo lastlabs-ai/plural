@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> None:
         recorder=recorder,
         deadline=episode_deadline(limits if isinstance(limits, dict) else None),
     )
-    environment = HarnessEnvironment(environment_payload, recorder=recorder)
+    environment = HarnessEnvironment(environment_payload, recorder=recorder, harness=harness)
     try:
         value = harness.run(task, agent, environment)
         if inspect.isawaitable(value):

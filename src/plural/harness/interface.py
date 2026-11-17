@@ -202,7 +202,15 @@ class SeatTurn(BaseModel):
 class HarnessEnvironment:
     """Environment controls supplied to ``Harness.run``."""
 
-    def __init__(self, payload: dict[str, Any], *, recorder: EpisodeRecorder | None = None) -> None:
+    def __init__(
+        self,
+        payload: dict[str, Any],
+        *,
+        recorder: EpisodeRecorder | None = None,
+        harness: object | None = None,
+    ) -> None:
+        from plural.harness.tools import harness_tools
+
         self._recorder = recorder
         self.raw = dict(payload)
         self.name = str(payload.get("name") or "")
@@ -218,6 +226,20 @@ class HarnessEnvironment:
         self.turns = 0
         self.terminated = False
         self.truncated = False
+        self._harness_tools = (
+            {item.name: item for item in harness_tools(harness)} if harness else {}
+        )
+        names = {str(item.get("name") or "") for item in self.actions}
+        for item in self._harness_tools.values():
+            if item.wraps is not None and item.wraps not in names:
+                raise ValueError(f"Harness tool {item.name!r} wraps no Environment action")
+            if item.wraps is None and item.name in names:
+                raise ValueError(
+                    f"Harness tool {item.name!r} has an Environment action's name; "
+                    f"use @tool(wraps={item.name!r}) to stand in for it"
+                )
+        self._running_tool: tuple[str, str] | None = None
+        self._tool_runs = 0
 
     @property
     def observation(self) -> Any:
@@ -235,7 +257,10 @@ class HarnessEnvironment:
         return isinstance(command, list) and bool(command)
 
     def tools(self) -> list[dict[str, Any]]:
-        """Return Environment actions as OpenAI-compatible tools."""
+        """Return Environment actions and the Harness's own tools as OpenAI-compatible tools.
+
+        A tool that wraps an action is listed as that action.
+        """
         tools: list[dict[str, Any]] = []
         for action in self.actions:
             name = action.get("name")
@@ -256,6 +281,18 @@ class HarnessEnvironment:
                     },
                 }
             )
+        for item in self._harness_tools.values():
+            if item.wraps is None:
+                tools.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": item.name,
+                            "description": item.description or item.name,
+                            "parameters": item.parameters,
+                        },
+                    }
+                )
         return tools
 
     def reset(self) -> Any:
@@ -276,11 +313,17 @@ class HarnessEnvironment:
         return self._observation
 
     def step(self, action: str, /, **arguments: Any) -> HarnessStep:
-        """Run one named Environment action.
+        """Run one named Environment action, or one of the Harness's tools.
+
+        Inside a Harness tool, every step goes to the Environment, so a tool that
+        wraps an action reaches the action itself.
 
         Returns:
-            The transition: observation, terminated, truncated, info.
+            The transition: observation, terminated, truncated, info. For a Harness
+            tool, the observation is what the tool returned.
         """
+        if self._running_tool is None and action in self._harness_tools:
+            return self._run_tool(action, arguments)
         declaration = next(
             (item for item in self.actions if str(item.get("name") or "") == action),
             None,
@@ -303,7 +346,13 @@ class HarnessEnvironment:
             )
         except Exception as exc:
             if self._recorder and started:
-                self._recorder.step(started, action=action, arguments=arguments, error=str(exc))
+                self._recorder.step(
+                    started,
+                    action=action,
+                    arguments=arguments,
+                    error=str(exc),
+                    harness_tool=self._running_tool,
+                )
             raise
         self._observation = step.observation
         self.turns += 1
@@ -320,6 +369,44 @@ class HarnessEnvironment:
                 truncated=step.truncated,
                 info=step.info,
                 view=view,
+                harness_tool=self._running_tool,
+            )
+        return step
+
+    def _run_tool(self, name: str, arguments: dict[str, Any]) -> HarnessStep:
+        """Answer a call to a Harness tool, recording the steps it runs inside it.
+
+        Returns:
+            The tool's result as the observation, with the Environment's outcome after it.
+        """
+        self._tool_runs += 1
+        self._running_tool = (name, f"t{self._tool_runs}")
+        started = self._recorder.tool_started() if self._recorder else None
+        try:
+            value = self._harness_tools[name].run(self, **arguments)
+        except Exception as exc:
+            if self._recorder and started:
+                self._recorder.harness_tool(
+                    started, self._running_tool, arguments=arguments, error=str(exc)
+                )
+            raise
+        finally:
+            running, self._running_tool = self._running_tool, None
+        step = (
+            value
+            if isinstance(value, HarnessStep)
+            else HarnessStep(
+                observation=value, terminated=self.terminated, truncated=self.truncated
+            )
+        )
+        if self._recorder and started:
+            self._recorder.harness_tool(
+                started,
+                running,
+                arguments=arguments,
+                observation=step.observation,
+                terminated=step.terminated,
+                truncated=step.truncated,
             )
         return step
 
@@ -372,6 +459,7 @@ class HarnessEnvironment:
     def _exec(
         self, command: tuple[str, ...], stdin: bytes | None = None
     ) -> tuple[HarnessStep, dict[str, Any] | None, list[dict[str, Any]]]:
+        from plural.apps.daemon import HARNESS_TOOL
         from plural.harness.native_runner import (
             STEP_PROTOCOL,
             _action_environment,
@@ -379,10 +467,13 @@ class HarnessEnvironment:
             _workspace_path,
         )
 
+        environment = _action_environment(self.raw)
+        if self._running_tool is not None:
+            environment = {**environment, HARNESS_TOOL: self._running_tool[0]}
         completed = subprocess.run(
             _local_command(list(command)),
             cwd=_workspace_path(self.workspace),
-            env=_action_environment(self.raw),
+            env=environment,
             input=stdin,
             capture_output=True,
             check=False,

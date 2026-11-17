@@ -265,6 +265,12 @@ class Step:
     ``seats`` lists them all. A number a ``reward`` hook returns credits the
     acting seat; a mapping of seat to number credits each seat named, as in a
     zero-sum game.
+
+    ``harness_tool`` names the Harness tool that took this step, when the model
+    asked for that tool rather than for this action. Its steps are the tool's
+    code, not the model's choices, so a ``reward`` that credits the model's
+    decisions can return 0 for them. The Harness reports it, so it is not proof
+    of who chose the action.
     """
 
     task: StepTask
@@ -279,6 +285,7 @@ class Step:
     apps: Mapping[str, Any] = field(default_factory=dict)
     seat: str | None = None
     seats: tuple[str, ...] = ()
+    harness_tool: str | None = None
 
 
 class VerifierOutput(FrozenModel):

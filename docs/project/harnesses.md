@@ -288,6 +288,55 @@ events, logs, metadata, and a trace ID. Plural always writes `result.json`; it w
 `trajectory.jsonl` and `logs.txt` when those values are present. The Harness does not
 write files or emit runner events itself.
 
+### Offer the model your own tools
+
+A Harness can give the model tools of its own, written in the Harness rather than
+in an App. Mark a method with `@tool`. It takes the Environment first, then its
+parameters, which become the tool's schema the way an App action's do; the docstring
+is its description:
+
+```python
+from plural import Harness
+from plural.harness import tool
+
+
+class SourcingHarness(Harness):
+    @tool
+    def find_sourcing_options(self, environment, material: str, tons: float) -> dict:
+        """Every plant that can fill one line, cheapest on-time option first."""
+        stock = environment.step("get_stock", material=material).observation
+        ...
+        return {"cheapest_on_time": best, "options": options}
+```
+
+The model sees a Harness tool exactly as it sees an Environment action:
+`environment.tools()` lists it, and `environment.step("find_sourcing_options", ...)`
+runs it and returns what it returned as the observation. The loop above needs no
+change.
+
+A tool is ordinary code, so calling it is the only decision the model makes. Every
+Environment step the tool runs is recorded inside that call, so the trajectory shows
+the call, the steps it ran, and the one result the model got back.
+
+`@tool(wraps="submit_quote")` stands in for an Environment action. The model sees
+`submit_quote` as the Environment declares it, and the method receives the call's
+arguments. Inside it, `environment.step("submit_quote", ...)` runs the real action,
+so the Harness can check a call before letting it through:
+
+```python
+class CheckedHarness(Harness):
+    @tool(wraps="submit_quote")
+    def checked_submit(self, environment, **quote):
+        problems = check(environment, quote)
+        if problems:
+            return {"status": "not submitted", "issues": problems}
+        return environment.step("submit_quote", **quote)
+```
+
+A Verifier's `reward` sees which tool took a step as `step.harness_tool`. Those steps
+are the tool's code, not the model's choices, so a reward that credits the model's
+decisions usually gives them nothing. See [Verifiers](verifiers.md).
+
 ### Attach the custom Harness
 
 ```python
@@ -445,6 +494,9 @@ There are two kinds of tools in play:
 
 - **Environment actions** are the moves available in the world, like `guess` in
   Wordle.
+- **Harness tools** are tools a custom Harness writes with `@tool` and answers itself,
+  usually by running several Environment actions. See
+  [Offer the model your own tools](#offer-the-model-your-own-tools).
 - **Harness capabilities** are extra tools the loop itself brings, such as file access
   or web search.
 
@@ -474,5 +526,31 @@ built-in loops, Plural derives `atif-trajectory.json` from `episode.jsonl` itsel
 `trajectory.json`, the same turns as plain chat messages. A
 command-based Harness spec (`HarnessDefinition`) that writes ATIF sets its
 `trajectory` field to `atif-trajectory.json`.
+
+A turn's `observation.results` are exactly what the model received. For a call to a
+[Harness tool](#offer-the-model-your-own-tools), that is the tool's return value, and
+the call's `extra.harness_tool` is `true`. The Environment steps the tool ran are
+nested in the call's `extra` in ATIF's own shape: `extra.tool_calls`, one per step,
+and `extra.observation.results`, each naming its step by `source_call_id`:
+
+```json
+{
+  "tool_call_id": "call_7",
+  "function_name": "find_sourcing_options",
+  "arguments": {"material": "A36-PL-050", "tons": 40},
+  "extra": {
+    "harness_tool": true,
+    "tool_calls": [
+      {"tool_call_id": "e14", "function_name": "get_stock", "arguments": {"material": "A36-PL-050"}}
+    ],
+    "observation": {"results": [{"source_call_id": "e14", "content": "{\"on_hand_tons\": ...}"}]}
+  }
+}
+```
+
+An episode recorded before Harness tools existed does not say which call a step
+served. Such a step is nested in a call only when exactly one of the turn's calls was
+still waiting for an answer, with `extra.inferred` set; otherwise it goes in the
+step's `extra.unlinked`.
 
 Next, choose a model and instructions in [Agents](agents.md).

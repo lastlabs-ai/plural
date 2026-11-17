@@ -78,16 +78,21 @@ def iter_env_actions(env_cls: type) -> Iterable[tuple[str, Callable[..., Any]]]:
             yield str(getattr(value, _ACTION_ATTR, attr)), value
 
 
-def function_schema(fn: Callable[..., Any]) -> dict[str, Any]:
+def function_schema(fn: Callable[..., Any], *, skip: Iterable[str] = ()) -> dict[str, Any]:
     """Build a JSON-schema object from an action callable's signature.
 
     Constraints such as ``min_length`` and nested models are kept, so a
     five-letter word or a dictionary parameter stays visible to the model
     and to the Actions tab.
 
+    Args:
+        fn: The callable.
+        skip: Parameters the caller supplies itself, left out of the schema.
+
     Returns:
         A JSON Schema object describing the callable's parameters.
     """
+    skipped = {"self", "cls", *skip}
     sig = inspect.signature(fn)
     try:
         hints = get_type_hints(fn, include_extras=True)
@@ -99,7 +104,7 @@ def function_schema(fn: Callable[..., Any]) -> dict[str, Any]:
     for param in sig.parameters.values():
         if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
             continue
-        if param.name in {"self", "cls"}:
+        if param.name in skipped:
             continue
         ann = hints.get(param.name, param.annotation)
         if ann is inspect.Parameter.empty:

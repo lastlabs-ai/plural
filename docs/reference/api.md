@@ -1692,10 +1692,16 @@ When several Agents share the episode, ``seat`` is the one that acted and
 ``seats`` lists them all. A number a ``reward`` hook returns credits the
 acting seat; a mapping of seat to number credits each seat named, as in a
 zero-sum game.
+
+``harness_tool`` names the Harness tool that took this step, when the model
+asked for that tool rather than for this action. Its steps are the tool's
+code, not the model's choices, so a ``reward`` that credits the model's
+decisions can return 0 for them. The Harness reports it, so it is not proof
+of who chose the action.
 ```
 
 ```python
-plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = ()) -> None
+plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = (), harness_tool: 'str | None' = None) -> None
 ```
 
 ## plural.environments.types.Observation

@@ -238,6 +238,27 @@ def test_training_export_lines_up_steps_spans_and_tokens() -> None:
     assert kept["turns"][1]["reward"] == -1.0
 
 
+def test_training_credits_a_harness_step_to_the_model_call_it_served() -> None:
+    episode = [
+        {"sequence": 1, "event_id": "e1", "kind": "model.call", "turn": 1},
+        {
+            "sequence": 2,
+            "event_id": "e2",
+            "kind": "environment.step",
+            "turn": 1,
+            "action": "get_stock",
+            "harness_tool": "find_options",
+            "harness_tool_id": "t1",
+            "rewards": [{"name": "reads", "value": 0.05}],
+        },
+        {"sequence": 3, "event_id": "e3", "kind": "model.call", "turn": 2},
+    ]
+
+    exported = training_export(episode, online_records(episode))
+
+    assert [turn["reward"] for turn in exported["turns"]] == [0.05, 0.0]
+
+
 class _StepProvider(FakeProvider):
     """A fake Runtime whose Harness records one rewarded step."""
 

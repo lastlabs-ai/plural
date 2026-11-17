@@ -29,6 +29,7 @@ _HOST_FIELDS = (
     "error",
     "app",
     "seat",
+    "harness_tool",
     "action",
     "arguments",
     "sequence",
@@ -49,8 +50,10 @@ def _step_number(record: Mapping[str, Any]) -> int | None:
 def _host_fields(step: Mapping[str, Any]) -> dict[str, Any]:
     info = dict(step.get("info") or {}) if isinstance(step.get("info"), Mapping) else {}
     seat = {"seat": step["seat"]} if step.get("seat") else {}
+    tool = {"harness_tool": step["harness_tool"]} if step.get("harness_tool") else {}
     return {
         **seat,
+        **tool,
         "observation": step.get("observation"),
         "reward": float(step.get("reward") or 0.0),
         "rewards": list(step.get("rewards") or []),

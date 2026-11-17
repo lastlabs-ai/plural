@@ -213,7 +213,11 @@ def episode_to_messages(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             requested = [*requested[:offset], *delta]
             last_call = record
             tail = []
-        elif kind in {"environment.step", "agent.finish"} and last_call is not None:
+        elif (
+            kind in {"environment.step", "agent.finish", "harness.tool"}
+            and last_call is not None
+            and not (kind == "environment.step" and record.get("harness_tool_id"))
+        ):
             tail.append(record)
     names: dict[str, str] = {}
     messages: list[dict[str, Any]] = []
@@ -233,10 +237,29 @@ def episode_to_messages(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
                 last_call.get("text"), last_call.get("reasoning"), last_call.get("tool_calls")
             )
         )
+        last_calls = [
+            (item["id"], item["function"]["name"]) for item in messages[-1].get("tool_calls") or []
+        ]
+        answered: set[str] = set()
         for record in tail:
-            call_id = str(record.get("tool_call_id") or "")
             finish = "finish" if record.get("kind") == "agent.finish" else ""
-            name = str(record.get("action") or finish) or names.get(call_id, "")
+            name = str(record.get("action") or finish)
+            call_id = str(
+                record.get("tool_call_id")
+                or next(
+                    (
+                        item_id
+                        for item_id, item_name in last_calls
+                        if item_id not in answered and item_name in {name, "finish"}
+                    ),
+                    "",
+                )
+            )
+            if not call_id and not finish:
+                # No call asked for this step: the Harness took it, and the model never saw it.
+                continue
+            answered.add(call_id)
+            name = name or names.get(call_id, "")
             message: dict[str, Any] = {"role": "tool", "tool_call_id": call_id}
             if name:
                 message["name"] = name

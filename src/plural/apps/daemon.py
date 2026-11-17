@@ -75,6 +75,8 @@ MANAGED = "PLURAL_APPS_MANAGED"
 """Set in the Harness's environment by a Job: never start a host, one is running."""
 SEAT_TOKEN = "PLURAL_SEAT_TOKEN"
 """Set in one seat's Harness environment: the token that says which seat it acts for."""
+HARNESS_TOOL = "PLURAL_HARNESS_TOOL"
+"""Set by the Harness while one of its own tools runs: the steps it takes are the tool's."""
 SOCKET_NAME = "host.sock"
 _MAX_MESSAGE = 64 * 1024 * 1024
 _BOOTSTRAP_STDIN = "PLURAL_APPS_BOOTSTRAP_STDIN"
@@ -370,7 +372,12 @@ def _handle(
         if not isinstance(arguments, dict):
             return {"ok": True, "result": host.agent_argument_error(request.get("action"))}, False
         seat = control.seat(request) if host.seats else None
-        envelope = host.step(str(request.get("action")), arguments, seat=seat)
+        envelope = host.step(
+            str(request.get("action")),
+            arguments,
+            seat=seat,
+            harness_tool=str(request.get("harness_tool") or "") or None,
+        )
         return {"ok": True, "result": host.agent_view(envelope)}, False
     if operation == "turn":
         if not host.seats:
@@ -698,6 +705,9 @@ def call(
     seat_token = os.environ.get(SEAT_TOKEN)
     if seat_token and operation in {"step", "turn"}:
         fields = {**fields, "seat_token": seat_token}
+    harness_tool = os.environ.get(HARNESS_TOOL)
+    if harness_tool and operation == "step":
+        fields = {**fields, "harness_tool": harness_tool}
     request = signed_request(token, operation, **fields) if token else {"op": operation, **fields}
     try:
         response = _request(base, request, timeout=timeout)

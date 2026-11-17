@@ -130,10 +130,20 @@ class EpisodeRecorder:
         info: dict[str, Any] | None = None,
         view: dict[str, Any] | None = None,
         error: str | None = None,
+        harness_tool: tuple[str, str] | None = None,
     ) -> None:
-        """Record one Environment step, with each verifier's signal in ``rewards``."""
-        if not self._model_turn_open:
+        """Record one Environment step, with each verifier's signal in ``rewards``.
+
+        ``harness_tool`` is the name and run id of the Harness tool that took the
+        step, which its ``harness.tool`` record shares.
+        """
+        if not self._model_turn_open and harness_tool is None:
             self._turn += 1
+        extra = (
+            {"harness_tool": harness_tool[0], "harness_tool_id": harness_tool[1]}
+            if harness_tool
+            else {}
+        )
         self._record(
             "environment.step",
             started_at=started[0],
@@ -147,6 +157,47 @@ class EpisodeRecorder:
             truncated=truncated,
             info=info or {},
             view=view or None,
+            error=error,
+            **extra,
+        )
+
+    def tool_started(self) -> tuple[str, float]:
+        """Mark the start of a Harness tool, which the steps it runs share a turn with.
+
+        Returns:
+            The start, for :meth:`harness_tool`.
+        """
+        if not self._model_turn_open:
+            self._turn += 1
+        return self.start()
+
+    def harness_tool(
+        self,
+        started: tuple[str, float],
+        tool: tuple[str, str],
+        *,
+        arguments: dict[str, Any],
+        observation: Any = None,
+        terminated: bool | None = None,
+        truncated: bool | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Record one call to a Harness tool and the result the model got.
+
+        It is written after the steps the tool ran, which carry its
+        ``harness_tool_id``.
+        """
+        self._record(
+            "harness.tool",
+            started_at=started[0],
+            started_clock=started[1],
+            turn=self._turn,
+            action=tool[0],
+            harness_tool_id=tool[1],
+            arguments=arguments,
+            observation=observation,
+            terminated=terminated,
+            truncated=truncated,
             error=error,
         )
 

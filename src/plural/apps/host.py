@@ -224,6 +224,7 @@ class AppHost:
         self._last_view: dict[str, Any] | None = None
         self._hidden: tuple[str, ...] = ()
         self._acting: str | None = None
+        self._harness_tool: str | None = None
 
     # Episode operations.
 
@@ -386,7 +387,12 @@ class AppHost:
         )
 
     def step(
-        self, name: str, arguments: Mapping[str, Any], *, seat: str | None = None
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        seat: str | None = None,
+        harness_tool: str | None = None,
     ) -> dict[str, Any]:
         """Run one exposed action and return its envelope.
 
@@ -397,6 +403,9 @@ class AppHost:
 
         With seats, ``seat`` is the one acting. An action from a seat that may
         not act now is refused before it runs, and is not a step.
+
+        ``harness_tool`` is the Harness tool that took the step, as the Harness
+        reports it, when the model did not ask for this action itself.
 
         Returns:
             A ``step`` envelope.
@@ -411,12 +420,14 @@ class AppHost:
                 "step", action=name, observation=None, rendered="", info={"error": refusal}
             )
         self._acting = seat
+        self._harness_tool = harness_tool
         for item in self.apps.values():
             item.seat = seat
         try:
             return self._run(name, arguments)
         finally:
             self._acting = None
+            self._harness_tool = None
             for item in self.apps.values():
                 item.seat = None
 
@@ -701,6 +712,7 @@ class AppHost:
             apps={name: AppView(self, item) for name, item in self.apps.items()},
             seat=seat,
             seats=self.seats,
+            harness_tool=self._harness_tool,
         )
         total = 0.0
         signals: list[dict[str, Any]] = []
@@ -764,6 +776,11 @@ class AppHost:
                     "turn": self.turns,
                     "at": time.time(),
                     **({"seat": self._acting} if self._acting is not None else {}),
+                    **(
+                        {"harness_tool": self._harness_tool}
+                        if self._harness_tool is not None
+                        else {}
+                    ),
                 }
             )
         )

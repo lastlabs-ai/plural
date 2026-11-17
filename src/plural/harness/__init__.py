@@ -10,6 +10,7 @@ from plural.harness.interface import (
     SeatTurn,
 )
 from plural.harness.models import Harness, HarnessDefinition
+from plural.harness.tools import tool
 
 __all__ = [
     "Harness",
@@ -21,4 +22,5 @@ __all__ = [
     "HarnessStep",
     "HarnessTask",
     "SeatTurn",
+    "tool",
 ]

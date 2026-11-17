@@ -672,6 +672,31 @@ def test_app_host_in_process_query() -> None:
     assert host.query("wordle", "remaining", {}) == 6
 
 
+def test_a_reward_sees_which_harness_tool_took_a_step(tmp_path: Path) -> None:
+    from plural.apps.host import RewardHook
+
+    seen: list[str | None] = []
+
+    def reward(step: Step) -> float:
+        seen.append(step.harness_tool)
+        return 0.0 if step.harness_tool else 1.0
+
+    host = AppHost(
+        Environment(apps=[Wordle()], runtime=Runtime.local()),
+        verifiers=[RewardHook(name="mine", version="1", fn=reward)],
+    )
+    host.reset(initial_state={"wordle": {"secret": "slate"}})
+    control = daemon._Control(None)
+    request = {"op": "step", "action": "remaining", "arguments": {}}
+    daemon._handle(host, tmp_path, {**request, "harness_tool": "hint"}, control)
+    daemon._handle(host, tmp_path, request, control)
+
+    assert seen == ["hint", None]
+    steps = host.report()["steps"]
+    assert [item.get("harness_tool") for item in steps] == ["hint", None]
+    assert [item["rewards"][0]["value"] for item in steps] == [0.0, 1.0]
+
+
 def test_app_host_numbers_steps_and_records_the_state_each_one_left(tmp_path: Path) -> None:
     host = AppHost(Environment(apps=[Wordle()], runtime=Runtime.local()), workspace=tmp_path)
     host.reset(initial_state={"wordle": {"secret": "slate"}})

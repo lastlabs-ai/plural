@@ -9,6 +9,15 @@ results the Agent saw, and that call's tokens and cost. See the
 Only what reached the Agent is written as step content. Reward, termination,
 and Verifier scores are episode bookkeeping and stay in ``episode.jsonl`` and
 the Trial result, so a trajectory loaded back as context cannot leak them.
+
+A call to a Harness tool (:func:`~plural.harness.tools.tool`) is answered by the
+Harness, so its result is the tool's return value, and its ``extra.harness_tool``
+is true. The Environment steps the tool ran never reached the Agent, so they are
+not observation results either: they are nested in that call's ``extra``, as ATIF
+``tool_calls`` and ``observation.results`` of their own. An episode recorded
+before Harness tools has no record of which call a step served; such a step is
+nested in a call only when exactly one was still open, with ``extra.inferred``
+set, and otherwise in the step's ``extra.unlinked``.
 """
 
 from __future__ import annotations
@@ -109,6 +118,19 @@ def _result(record: Mapping[str, Any], call_id: str | None) -> dict[str, Any]:
     return result
 
 
+def _nest(holder: dict[str, Any], record: Mapping[str, Any]) -> None:
+    """File a step the model never saw in ``holder``, as an ATIF tool call and its result."""
+    call_id = str(record.get("event_id") or f"e{record.get('sequence')}")
+    holder.setdefault("tool_calls", []).append(
+        {
+            "tool_call_id": call_id,
+            "function_name": str(record.get("action") or ""),
+            "arguments": _arguments(record.get("arguments")),
+        }
+    )
+    holder.setdefault("observation", {"results": []})["results"].append(_result(record, call_id))
+
+
 def episode_to_atif(
     records: Iterable[Mapping[str, Any]],
     *,
@@ -137,14 +159,23 @@ def episode_to_atif(
         (dict(item) for item in records if isinstance(item, Mapping)),
         key=lambda item: int(item.get("sequence") or 0),
     )
+    # A Harness tool's own steps are written before the tool's record, which ends after them.
+    inside: dict[str, list[dict[str, Any]]] = {}
+    for record in ordered:
+        if record.get("kind") == "environment.step" and record.get("harness_tool_id"):
+            inside.setdefault(str(record["harness_tool_id"]), []).append(record)
     steps: list[dict[str, Any]] = []
     agent_steps: dict[int, dict[str, Any]] = {}
+    call_owners: dict[str, dict[str, Any]] = {}
     seen_messages = 0
 
     def add(step: dict[str, Any]) -> dict[str, Any]:
         step["step_id"] = len(steps) + 1
         steps.append(step)
         return step
+
+    def results_of(owner: Mapping[str, Any]) -> list[Any]:
+        return _list(_mapping(owner.get("observation")).get("results"))
 
     for record in ordered:
         kind = record.get("kind")
@@ -156,7 +187,28 @@ def episode_to_atif(
                 if offset + index < seen_messages or not isinstance(message, Mapping):
                     continue
                 role = message.get("role")
-                if role in {"system", "developer", "user"}:
+                if role == "tool":
+                    # A call no Environment step answered was answered by the Harness
+                    # itself; this message is the only record of what the model got.
+                    source_call = str(message.get("tool_call_id") or "")
+                    owner = call_owners.get(source_call)
+                    if owner is None or any(
+                        _mapping(item).get("source_call_id") == source_call
+                        for item in results_of(owner)
+                    ):
+                        continue
+                    answered_call = next(
+                        item for item in owner["tool_calls"] if item["tool_call_id"] == source_call
+                    )
+                    answered_call.setdefault("extra", {})["harness_tool"] = True
+                    owner.setdefault("observation", {"results": []})["results"].append(
+                        {
+                            "content": _text(message.get("content")),
+                            "source_call_id": source_call,
+                            "extra": {"action": answered_call["function_name"]},
+                        }
+                    )
+                elif role in {"system", "developer", "user"}:
                     add(
                         {
                             "timestamp": record.get("started_at"),
@@ -189,9 +241,13 @@ def episode_to_atif(
             if record.get("error"):
                 step["extra"] = {"error": record["error"]}
             added = add({key: value for key, value in step.items() if value is not None})
+            for item in added.get("tool_calls") or []:
+                call_owners[item["tool_call_id"]] = added
             if isinstance(turn, int):
                 agent_steps[turn] = added
-        elif kind in {"environment.step", "agent.finish"}:
+        elif kind in {"environment.step", "agent.finish", "harness.tool"}:
+            if kind == "environment.step" and record.get("harness_tool_id"):
+                continue
             owner = agent_steps.get(turn) if isinstance(turn, int) else None
             if owner is None:
                 # A Harness stepped the Environment without a model call.
@@ -215,10 +271,7 @@ def episode_to_atif(
                     agent_steps[turn] = owner
                 record = {**record, "tool_call_id": synthetic}
             calls = owner.get("tool_calls") or []
-            answered = {
-                item.get("source_call_id")
-                for item in _list(_mapping(owner.get("observation")).get("results"))
-            }
+            answered = {_mapping(item).get("source_call_id") for item in results_of(owner)}
             call_id: str | None = record.get("tool_call_id") or next(
                 (
                     item["tool_call_id"]
@@ -228,9 +281,44 @@ def episode_to_atif(
                 ),
                 None,
             )
-            owner.setdefault("observation", {"results": []})["results"].append(
-                _result(record, call_id)
+            called = next((item for item in calls if item["tool_call_id"] == call_id), None)
+            if kind == "harness.tool":
+                # The model called a tool the Harness answers; the steps it ran are nested
+                # in that call, since the model saw only the tool's result.
+                tool_steps = inside.get(str(record.get("harness_tool_id") or ""), [])
+                if called is None:
+                    holder = owner.setdefault("extra", {}).setdefault("unlinked", {})
+                    _nest(holder, record)
+                else:
+                    holder = called.setdefault("extra", {})
+                    holder["harness_tool"] = True
+                    owner.setdefault("observation", {"results": []})["results"].append(
+                        _result(record, call_id)
+                    )
+                for item in tool_steps:
+                    _nest(holder, item)
+                continue
+            if call_id is not None or kind != "environment.step":
+                owner.setdefault("observation", {"results": []})["results"].append(
+                    _result(record, call_id)
+                )
+                continue
+            # Recorded before Harness tools: a step no call asked for, which the model never
+            # saw. It belongs to a call only when exactly one is still open, since nothing
+            # marks where one call's steps end.
+            last = max(
+                (i for i, item in enumerate(calls) if item["tool_call_id"] in answered),
+                default=-1,
             )
+            open_calls = [
+                item for item in calls[last + 1 :] if item["tool_call_id"] not in answered
+            ]
+            if len(open_calls) == 1:
+                holder = open_calls[0].setdefault("extra", {})
+                holder.update(harness_tool=True, inferred=True)
+            else:
+                holder = owner.setdefault("extra", {}).setdefault("unlinked", {})
+            _nest(holder, record)
     return {
         "schema_version": ATIF_VERSION,
         **({"session_id": session_id} if session_id else {}),
