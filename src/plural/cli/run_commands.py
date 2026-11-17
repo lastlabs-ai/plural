@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import uuid
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
@@ -44,7 +45,15 @@ from plural.cli.runtime_commands import _project_studio
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.execution.episode_server import EpisodeServerOptions
-from plural.jobs import JobResult, JobSpec, TrialResult, TrialSpec
+from plural.heldout import peeks
+from plural.jobs import (
+    AgentAggregate,
+    BenchmarkJobSource,
+    JobResult,
+    JobSpec,
+    TrialResult,
+    TrialSpec,
+)
 from plural.local_models import (
     LocalModelError,
     LocalModelIdentity,
@@ -90,7 +99,7 @@ from plural.sandbox.hosted_daytona import HostedDaytonaAdapter
 from plural.studio import Studio
 
 job_app = typer.Typer(help="List, inspect, and rerun Jobs.", no_args_is_help=True)
-trial_app = typer.Typer(help="Inspect and rerun Trials.", no_args_is_help=True)
+trial_app = typer.Typer(help="Inspect, rerun, checkpoint, and fork Trials.", no_args_is_help=True)
 review_app = typer.Typer(help="List and submit human reviews.", no_args_is_help=True)
 
 HOSTED_RUNS = (
@@ -150,6 +159,11 @@ def run(
     ),
     attempts: int | None = typer.Option(
         None, "--attempts", min=1, help="Advanced: Trials per Task (default 1)."
+    ),
+    heldout: bool = typer.Option(
+        False,
+        "--heldout",
+        help="Run the Benchmark's held-out Tasks too. Each such run is a peek, and is counted.",
     ),
     concurrency: str = typer.Option(
         "auto",
@@ -238,6 +252,7 @@ def run(
         attempts=attempts,
         concurrency=_concurrency(concurrency),
         evaluation_track=evaluation_track,
+        heldout=heldout,
     )
     requested = {
         ResourceRef(kind.name, name): version
@@ -296,6 +311,7 @@ def run(
         + (" Recording it in the hosted project as it runs." if tracking else ""),
         err=as_json,
     )
+    _heldout_notice(space, plan, err=as_json)
     _runtime_credentials(space, plan, err=as_json)
     _project_secrets(space, plan.spec, environ, err=as_json)
     identities = _review_local_models(plan.spec.agents, environ, yes=yes, err=as_json)
@@ -311,6 +327,29 @@ def run(
             model_identities=identities,
         )
     _finish_local(space, job_id, result, tracking, as_json=as_json)
+
+
+def _heldout_notice(space: Workspace, plan: RunPlan, *, err: bool) -> None:
+    """Say what a Benchmark run leaves out, and count a run that peeks at held-out Tasks."""
+    source = plan.spec.source
+    if not isinstance(source, BenchmarkJobSource) or not source.benchmark.heldout:
+        return
+    held = source.benchmark.heldout
+    if not plan.peek:
+        typer.echo(
+            f"Running the {len(source.benchmark.dev_tasks)} dev Tasks; "
+            f"{counted(len(held), 'held-out Task')} stay hidden. "
+            "--heldout runs them too, as a counted peek.",
+            err=err,
+        )
+        return
+    count = len(peeks(space.project.state_dir, source.benchmark.name)) + 1
+    typer.echo(
+        f"PEEK: this run includes {counted(len(held), 'held-out Task')} of "
+        f"{source.benchmark.name}. It is peek {count}; every peek makes the held-out "
+        "result a little less of a test.",
+        err=err,
+    )
 
 
 def _interactive() -> bool:
@@ -652,6 +691,179 @@ def trial_rerun(
         _finish_local(space, new_id, result, tracking, as_json=as_json)
         return
     raise ProjectError(_not_here("Trial", trial_id))
+
+
+def _fork_source(
+    space: Workspace, given: str, *, carry: Sequence[ResourceRef] = ()
+) -> tuple[Workspace, str, Any, str | None]:
+    """The Trial a checkpoint or fork starts from, and the workspace to run it in.
+
+    A local Trial, or the local run a hosted Trial recorded, is used as it is.
+    Any other hosted Trial is rebuilt from the hosted project, so a Trial can be
+    forked from any folder linked to its project.
+
+    Returns:
+        The workspace, the Trial's id there, the Trial, and its hosted id when known.
+    """
+    from plural.project.forks import hosted_trial_source, local_trial_id, trial_source
+
+    try:
+        trial_id = local_trial_id(space, given, lambda: project_studio(space, session())[0])
+    except ProjectError:
+        if given.startswith("trl_"):
+            raise
+        studio = _hosted_studio(space, required=True)
+        binding = space.project.read_binding()
+        assert studio is not None and binding is not None
+        shadow, source = hosted_trial_source(space, studio, binding, given, carry=carry)
+        return shadow, given, source, given
+    return space, trial_id, trial_source(space, trial_id), given if given != trial_id else None
+
+
+@trial_app.command("checkpoint")
+@handled
+def trial_checkpoint(
+    trial_id: str = typer.Argument(
+        help="Trial to take the checkpoint from: a local Trial, or a hosted one by its id."
+    ),
+    step: int = typer.Option(..., "--step", help="The step the checkpoint is after."),
+    name: str = typer.Option(
+        ..., "--name", help="A lowercase name; a Task names it as TRIAL/NAME."
+    ),
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Name the moment after one step of a Trial, to fork from it or start a Task there."""
+    from plural.checkpoints import load_checkpoint
+    from plural.project.forks import save_trial_checkpoint
+
+    space, trial_id, source, _hosted = _fork_source(workspace(), trial_id)
+    path = save_trial_checkpoint(space, trial_id, step=step, name=name, source=source)
+    checkpoint = load_checkpoint(path)
+    payload = {
+        "trial_id": trial_id,
+        "step": step,
+        "name": name,
+        "reference": f"{trial_id}/{name}",
+        "digest": checkpoint.digest,
+        "path": str(path),
+        "warnings": list(checkpoint.warnings),
+    }
+
+    def text() -> None:
+        typer.echo(f"Saved checkpoint {trial_id}/{name}, after step {step}.")
+        for warning in checkpoint.warnings:
+            typer.echo(f"! {warning}", err=True)
+        typer.echo(f"Start a Task there with from_checkpoint: {trial_id}/{name}")
+
+    emit(payload, as_json=as_json, text=text)
+
+
+@trial_app.command("fork")
+@handled
+def trial_fork(
+    trial_id: str = typer.Argument(
+        help="Trial to continue: a local Trial, or a hosted one by its id."
+    ),
+    step: int | None = typer.Option(None, "--step", help="Continue after this step."),
+    checkpoint: str | None = typer.Option(
+        None, "--checkpoint", help="Continue from this Trial's checkpoint, by name."
+    ),
+    agent: list[str] = typer.Option(
+        [], "--agent", help="A saved Agent to fork into. Repeat for several."
+    ),
+    model: list[str] = typer.Option(
+        [], "--model", help="A model to fork into, with --harness. Repeat for several."
+    ),
+    harness: str | None = typer.Option(None, "--harness", help="Harness for --model."),
+    attempts: int = typer.Option(
+        3, "--attempts", min=1, help="Forks per Agent, and as many controls."
+    ),
+    seat: str | None = typer.Option(
+        None, "--seat", help="For a Trial several Agents share: the seat to replace."
+    ),
+    change: str | None = typer.Option(
+        None, "--change", help="Change one thing at the fork point: a diagnostic fork."
+    ),
+    payload: str | None = typer.Option(None, "--payload", help="The change's JSON payload."),
+    record: bool = typer.Option(
+        False, "--record", help="Record the fork Job in the hosted project as it runs."
+    ),
+    track: bool = TRACK_OPTION,
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Continue a Trial from step k with other Agents, beside controls that rerun the original.
+
+    The world (App State and workspace) is restored exactly. How the history
+    reaches each Agent follows one rule: as its own conversation when it has
+    every tool the history used, as a transcript when it lacks some, and not
+    at all when it can't accept one. Each case but the first prints why.
+    """
+    import json as json_module
+
+    from plural.project.forks import ForkRequest, fork_local_trial, fork_results, hosted_trial_id
+
+    here = workspace()
+    carry = [ResourceRef(AGENT.name, name) for name in agent]
+    if harness and here.project.has(ResourceRef(HARNESS.name, harness)):
+        carry.append(ResourceRef(HARNESS.name, harness))
+    space, trial_id, source, hosted = _fork_source(here, trial_id, carry=carry)
+    recording = _recording(record, track)
+    if hosted is None and recording:
+        hosted = hosted_trial_id(space, project_studio(space, session())[0], trial_id)
+    try:
+        payload_value = json_module.loads(payload) if payload is not None else None
+    except json_module.JSONDecodeError as exc:
+        raise ProjectError(f"--payload is not JSON: {exc}") from None
+    if payload is not None and change is None:
+        raise ProjectError("--payload goes with --change.")
+    request = ForkRequest(
+        trial_id=trial_id,
+        step=step,
+        checkpoint=checkpoint,
+        agents=tuple(agent),
+        models=tuple(model),
+        harness=harness,
+        attempts=attempts,
+        seat=seat,
+        change=change,
+        payload=payload_value,
+        hosted_trial_id=hosted,
+    )
+    tracking = _tracking(here, session()) if recording else None
+    environ = _project_secrets(here, source.spec, _run_environ(session()), err=as_json)
+    with _credit_watch(session(), environ, err=as_json):
+        job_id, result, spec = fork_local_trial(
+            space,
+            request,
+            environ=environ,
+            progress=_progress(as_json),
+            tracking=tracking,
+            credential_source=_stored_credentials(as_json),
+            source=source,
+        )
+    outcome = fork_results(spec, result, source.passed)
+    view = {"job_id": job_id, "of_trial_id": trial_id, **outcome}
+
+    def text() -> None:
+        for warning in outcome["warnings"]:
+            typer.echo(f"! {warning}", err=True)
+        kind = "Diagnostic fork" if outcome["diagnostic"] else "Fork"
+        typer.echo(f"{kind} {job_id} of Trial {trial_id} after step {outcome['step']}:")
+        for name, summary in outcome["summaries"].items():
+            typer.echo(f"  {name}: {summary}")
+        reproduced = outcome["controls_reproduced"]
+        if reproduced is not None:
+            typer.echo(
+                f"  controls repeated the original outcome in {reproduced:.0%} of "
+                f"{outcome['controls']}"
+            )
+        histories = ", ".join(f"{count} {kind}" for kind, count in outcome["history"].items())
+        if histories:
+            typer.echo(f"  history: {histories}")
+
+    emit(view, as_json=as_json, text=text)
+    if result.status in {"failed", "cancelled"}:
+        raise typer.Exit(1)
 
 
 @review_app.command("list")
@@ -1035,7 +1247,14 @@ def _finish_local(
         payload["recording_retryable"] = tracking.retryable
 
     def text() -> None:
-        _print_result(job_id, result)
+        _print_result(job_id, result, payload.get("summaries") or ())
+        if result.stopped:
+            typer.echo(result.stopped, err=True)
+            typer.echo(
+                "Next: plural auth login, or export a current PLURAL_API_KEY, then run "
+                f"plural job rerun {job_id}",
+                err=True,
+            )
         if tracking is None:
             return
         if not tracking.errors:
@@ -1142,18 +1361,57 @@ def _agent_label(agent: str | None) -> str:
     return agent.removeprefix("agent/")
 
 
-def _print_result(job_id: str, result: JobResult) -> None:
+def _print_result(
+    job_id: str, result: JobResult, summaries: Sequence[Mapping[str, Any]] = ()
+) -> None:
     typer.echo(f"Job {job_id} {result.status}.")
-    for aggregate in result.aggregates:
-        mean = "-" if aggregate.mean_score is None else f"{aggregate.mean_score:.3f}"
-        typer.echo(
-            f"  {aggregate.agent_name}: mean score {mean} over "
-            f"{counted(aggregate.count, 'Trial')}, "
-            f"{aggregate.successes} succeeded, coverage {aggregate.coverage:.0%}"
+    texts = {item["agent_name"]: item["text"] for item in summaries}
+    for aggregate in ranked(result.aggregates):
+        primary = aggregate.metrics.get(aggregate.primary_metric)
+        ranked_on = (
+            f"{aggregate.primary_metric} "
+            + ("-" if primary is None or primary.mean is None else f"{primary.mean:,.3f}")
+            + ("" if primary is None else f" (over {primary.n} of {primary.total})")
+            if aggregate.primary_metric != "score"
+            else ""
         )
+        if aggregate.agent_name in texts:
+            line = ", ".join(item for item in (ranked_on, texts[aggregate.agent_name]) if item)
+        else:
+            mean = "-" if aggregate.mean_score is None else f"{aggregate.mean_score:.3f}"
+            line = (
+                f"{ranked_on}{', ' if ranked_on else ''}mean score {mean} over "
+                f"{counted(aggregate.count, 'Trial')}, "
+                f"{aggregate.successes} finished without an error, "
+                f"coverage {aggregate.coverage:.0%}"
+            )
+        if aggregate.pass_rate is not None:
+            line += f"; pass rate {aggregate.pass_rate:.0%} (passed every gate)"
+        typer.echo(f"  {aggregate.agent_name}: {line}")
+    tiers = Counter(trial.trust.tier for trial in result.trials if trial.trust is not None)
+    if tiers:
+        typer.echo("  trust: " + ", ".join(f"{count} {tier}" for tier, count in tiers.items()))
     for line in _reward_warnings(result.trials):
         typer.echo(f"! {line}", err=True)
     typer.echo(f"Details: plural job show {job_id}")
+
+
+def ranked(aggregates: Iterable[AgentAggregate]) -> list[AgentAggregate]:
+    """Leaderboard order: best on the primary metric first, Agents without a value last.
+
+    Returns:
+        The aggregates, ranked.
+    """
+    items = list(aggregates)
+
+    def key(item: AgentAggregate) -> tuple[bool, float]:
+        if item.primary is None:
+            return (True, 0.0)
+        spec = item.metrics.get(item.primary_metric)
+        lower = spec is not None and spec.direction == "lower"
+        return (False, item.primary if lower else -item.primary)
+
+    return sorted(items, key=key)
 
 
 def _reward_warnings(trials: Iterable[TrialResult]) -> list[str]:
@@ -1199,8 +1457,16 @@ def _print_job(payload: dict[str, Any]) -> None:
             f"{progress['running']} running, {progress['succeeded']} succeeded, "
             f"{progress['failed']} failed"
         )
+    texts = {
+        item["agent_name"]: item["text"]
+        for item in payload.get("summaries") or []
+        if isinstance(item, dict) and "agent_name" in item
+    }
     for aggregate in payload.get("aggregates") or []:
         if not isinstance(aggregate, dict) or "agent_name" not in aggregate:
+            continue
+        if aggregate["agent_name"] in texts:
+            typer.echo(f"  {aggregate['agent_name']}: {texts[aggregate['agent_name']]}")
             continue
         mean = aggregate.get("mean_score")
         typer.echo(
@@ -1248,6 +1514,10 @@ def _print_trial(payload: dict[str, Any]) -> None:
     ):
         if payload.get(key) is not None:
             typer.echo(f"  {label + ':':<15} {payload[key]}")
+    trust = payload.get("trust") or {}
+    if trust.get("tier"):
+        reasons = "; ".join(trust.get("reasons") or [])
+        typer.echo(f"  {'Trust:':<15} {trust['tier']}" + (f" ({reasons})" if reasons else ""))
     for verifier in payload.get("verifiers") or []:
         typer.echo(
             f"  Verifier {verifier.get('verifier_name')}: {verifier.get('status')} "

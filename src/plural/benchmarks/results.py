@@ -1,10 +1,15 @@
 """Combine the attempts of one configuration into a release result.
 
 The order is fixed. Each attempt is first classified: scored by a Verifier, an
-Agent failure, an infrastructure error, cancelled, or still pending. Repeated
-attempts of a Task are averaged. Tasks are then combined with the release's
-declared weights. Nothing here picks a best attempt, and step rewards never
-enter: only the Verifier score recorded on each attempt is read.
+Agent failure, an infrastructure error, excluded for a critical integrity
+finding, cancelled, or still pending. Repeated attempts of a Task are averaged.
+Tasks are then combined with the release's declared weights. Nothing here picks
+a best attempt, and step rewards never enter: only the Verifier score recorded
+on each attempt is read.
+
+The interval around a score is a clustered bootstrap (:mod:`plural.stats`):
+Tasks are resampled, then attempts within each Task, so both kinds of variation
+reach it.
 """
 
 from __future__ import annotations
@@ -17,8 +22,16 @@ from pydantic import Field
 
 from plural.benchmarks.rules import BenchmarkCategory, BenchmarkScoring
 from plural.common import FrozenModel
+from plural.stats import BOOTSTRAP_METHOD, clustered_bootstrap, pass_at_k, pass_hat_k, seed_for
 
-AttemptOutcome = Literal["scored", "agent_failure", "infrastructure_error", "cancelled", "pending"]
+AttemptOutcome = Literal[
+    "scored",
+    "agent_failure",
+    "infrastructure_error",
+    "integrity_excluded",
+    "cancelled",
+    "pending",
+]
 
 _PENDING = {"queued", "provisioning", "running", "verifying", "awaiting_review"}
 _BUDGET_STOPS = {"max_turns", "max_seconds", "max_cost"}
@@ -26,7 +39,8 @@ _BUDGET_STOPS = {"max_turns", "max_seconds", "max_cost"}
 # is part of that system, so its failures count against it.
 _AGENT_ERRORS = {"harness_failed", "protocol_failed", "evidence_missing"}
 
-INTERVAL_METHOD = (
+INTERVAL_METHOD = BOOTSTRAP_METHOD
+NORMAL_INTERVAL_METHOD = (
     "95% normal-approximation interval over Task scores, treating the release's "
     "Tasks as a sample. Attempt-to-attempt variation within a Task is not included."
 )
@@ -46,6 +60,8 @@ class AttemptEvidence(FrozenModel):
         latency_seconds: Measured wall time of the attempt in seconds.
         trial_id: Trial identifier, for evidence links.
         evaluation_id: Job identifier the attempt belongs to.
+        integrity_critical: Whether the attempt has a ``critical`` integrity
+            finding. The release's ``integrity`` rule decides what that does.
     """
 
     task: str
@@ -58,6 +74,7 @@ class AttemptEvidence(FrozenModel):
     latency_seconds: float | None = None
     trial_id: str | None = None
     evaluation_id: str | None = None
+    integrity_critical: bool = False
 
 
 class TaskSpec(FrozenModel):
@@ -136,6 +153,9 @@ class TaskResult(FrozenModel):
         score_max: Highest valid score.
         complete: Whether the Task has the attempts the track requires.
         trial_ids: Trials behind this result, in attempt order.
+        attempt_scores: Each valid attempt's score, the values the interval
+            and paired comparisons resample.
+        integrity_excluded: Attempts dropped for a critical integrity finding.
     """
 
     task: str
@@ -155,6 +175,8 @@ class TaskResult(FrozenModel):
     score_max: float | None = None
     complete: bool = False
     trial_ids: tuple[str, ...] = ()
+    attempt_scores: tuple[float, ...] = ()
+    integrity_excluded: int = 0
 
     @property
     def covered(self) -> bool:
@@ -206,6 +228,14 @@ class ConfigurationResult(FrozenModel):
         categories: Per-category results, in release order.
         eligible: Whether the result may be ranked officially.
         ineligible_reasons: Why it may not be ranked, when it may not.
+        pass_hat_k: Share of Tasks where every valid attempt succeeded, when a
+            success threshold is declared: the reliability number.
+        pass_at_k: Share of Tasks where at least one valid attempt succeeded.
+        attempts_per_task: The most valid attempts any Task has, the ``k``.
+        integrity_flagged: Attempts with a critical integrity finding.
+        raw_score: The score before the release's integrity rule, when the
+            rule changed something. ``score`` is then the adjusted number.
+        raw_uncertainty: The interval around ``raw_score``.
     """
 
     score: float | None = None
@@ -223,6 +253,12 @@ class ConfigurationResult(FrozenModel):
     categories: tuple[CategoryResult, ...] = ()
     eligible: bool = False
     ineligible_reasons: tuple[str, ...] = ()
+    pass_hat_k: float | None = None
+    pass_at_k: float | None = None
+    attempts_per_task: int = 0
+    integrity_flagged: int = 0
+    raw_score: float | None = None
+    raw_uncertainty: Uncertainty | None = None
 
 
 def classify_attempt(
@@ -236,7 +272,8 @@ def classify_attempt(
     system caused it (a budget ran out, or the harness produced no valid
     answer) and an infrastructure error when the runtime, provider, or
     Verifier did. A Harness killed for running past its time follows the
-    release's ``harness_timeout`` rule.
+    release's ``harness_timeout`` rule. Under the ``exclude_critical`` integrity
+    rule, an attempt with a critical finding is ``"integrity_excluded"``.
 
     Args:
         attempt: The attempt to classify.
@@ -248,6 +285,13 @@ def classify_attempt(
     """
     if attempt.status in _PENDING:
         return "pending"
+    if (
+        attempt.integrity_critical
+        and scoring is not None
+        and scoring.integrity == "exclude_critical"
+        and attempt.status != "cancelled"
+    ):
+        return "integrity_excluded"
     if attempt.score is not None and math.isfinite(attempt.score):
         if scoring is not None:
             low, high = scoring.score_range
@@ -288,11 +332,13 @@ def _task_result(
     low, _ = scoring.score_range
     counts: dict[str, int] = {}
     values: list[float] = []
-    for attempt in attempts:
+    zero_critical = rules is not None and rules.integrity == "zero_critical"
+    for attempt in sorted(attempts, key=lambda item: item.attempt):
         outcome = classify_attempt(attempt, rules)
         counts[outcome] = counts.get(outcome, 0) + 1
         if outcome == "scored" and attempt.score is not None:
-            values.append(float(attempt.score))
+            critical = zero_critical and attempt.integrity_critical
+            values.append(low if critical else float(attempt.score))
         elif outcome == "agent_failure" and scoring.agent_failure == "zero":
             values.append(low)
     threshold = scoring.success_threshold
@@ -319,11 +365,18 @@ def _task_result(
             for attempt in sorted(attempts, key=lambda item: item.attempt)
             if attempt.trial_id
         ),
+        attempt_scores=tuple(values),
+        integrity_excluded=counts.get("integrity_excluded", 0),
     )
 
 
 def _uncertainty(
-    tasks: Sequence[TaskResult], score: float | None, scoring: BenchmarkScoring
+    tasks: Sequence[TaskResult],
+    score: float | None,
+    scoring: BenchmarkScoring,
+    *,
+    seed: int,
+    method: Literal["bootstrap", "normal"] = "bootstrap",
 ) -> Uncertainty:
     scored = [task for task in tasks if task.score is not None]
     n = len(scored)
@@ -335,6 +388,19 @@ def _uncertainty(
                 f"this result has {n}."
             ),
         )
+    if method == "bootstrap" and all(task.attempt_scores for task in scored):
+        interval = clustered_bootstrap(
+            [(task.weight, task.attempt_scores) for task in scored], seed=seed
+        )
+        if interval is not None:
+            low, high = scoring.score_range
+            return Uncertainty(
+                low=max(low, interval.low),
+                high=min(high, interval.high),
+                standard_error=interval.standard_error,
+                sample_size=n,
+                method=INTERVAL_METHOD,
+            )
     total = sum(task.weight for task in scored)
     variance = (
         n
@@ -348,7 +414,7 @@ def _uncertainty(
         high=min(high, score + 1.96 * error),
         standard_error=error,
         sample_size=n,
-        method=INTERVAL_METHOD,
+        method=NORMAL_INTERVAL_METHOD,
     )
 
 
@@ -371,6 +437,8 @@ def aggregate_configuration(
     required_attempts: int = 1,
     blocking_issues: Sequence[str] = (),
     declared: bool = True,
+    seed: int | None = None,
+    interval: Literal["bootstrap", "normal"] = "bootstrap",
 ) -> ConfigurationResult:
     """Combine one configuration's attempts on one release and track.
 
@@ -389,10 +457,67 @@ def aggregate_configuration(
             problem or missing provenance, that prevent official ranking.
         declared: Whether a Benchmark declared ``scoring``. Default rules
             neither bound scores nor change how a killed Harness counts.
+        seed: Seed for the bootstrap interval. Left out, it is derived from
+            the Jobs the attempts belong to, so a result's interval is stable.
+        interval: ``"bootstrap"`` (the default) or the older ``"normal"``
+            approximation, which ignores attempt-to-attempt variation.
 
     Returns:
-        The combined result, with per-Task and per-category evidence.
+        The combined result, with per-Task and per-category evidence. When the
+        release's integrity rule changed the score, ``raw_score`` holds the
+        number before it.
     """
+    if seed is None:
+        jobs = sorted({item.evaluation_id for item in attempts if item.evaluation_id})
+        seed = seed_for(*(jobs or task_names))
+    result = _aggregate(
+        task_names,
+        attempts,
+        scoring=scoring,
+        categories=categories,
+        required_attempts=required_attempts,
+        blocking_issues=blocking_issues,
+        declared=declared,
+        seed=seed,
+        interval=interval,
+    )
+    flagged = sum(1 for item in attempts if item.integrity_critical and item.task in task_names)
+    if not flagged:
+        return result
+    if not declared or scoring.integrity == "report":
+        return result.model_copy(update={"integrity_flagged": flagged})
+    raw = _aggregate(
+        task_names,
+        attempts,
+        scoring=scoring.model_copy(update={"integrity": "report"}),
+        categories=categories,
+        required_attempts=required_attempts,
+        blocking_issues=blocking_issues,
+        declared=declared,
+        seed=seed,
+        interval=interval,
+    )
+    return result.model_copy(
+        update={
+            "integrity_flagged": flagged,
+            "raw_score": raw.score,
+            "raw_uncertainty": raw.uncertainty,
+        }
+    )
+
+
+def _aggregate(
+    task_names: Sequence[str],
+    attempts: Sequence[AttemptEvidence],
+    *,
+    scoring: BenchmarkScoring,
+    categories: Sequence[BenchmarkCategory],
+    required_attempts: int,
+    blocking_issues: Sequence[str],
+    declared: bool,
+    seed: int,
+    interval: Literal["bootstrap", "normal"],
+) -> ConfigurationResult:
     rules = scoring if declared else None
     tasks = task_specs(task_names, scoring, categories)
     by_task: dict[str, list[AttemptEvidence]] = {spec.name: [] for spec in tasks}
@@ -458,6 +583,12 @@ def aggregate_configuration(
             )
         )
 
+    threshold = scoring.success_threshold
+    passes = [
+        [value >= threshold for value in task.attempt_scores]
+        for task in task_results
+        if threshold is not None
+    ]
     reasons = list(blocking_issues)
     if complete_coverage + 1e-9 < scoring.coverage_required:
         missing = [task.task for task in task_results if not task.complete]
@@ -482,7 +613,7 @@ def aggregate_configuration(
             successes / valid if valid and scoring.success_threshold is not None else None
         ),
         completion_rate=(outcomes.get("scored", 0) / finished) if finished else None,
-        uncertainty=_uncertainty(task_results, score, scoring),
+        uncertainty=_uncertainty(task_results, score, scoring, seed=seed, method=interval),
         cost=_measured([item.cost_usd for item in counted], ran, "USD per attempt"),
         latency=_measured([item.latency_seconds for item in counted], ran, "seconds per attempt"),
         outcomes=outcomes,
@@ -490,6 +621,9 @@ def aggregate_configuration(
         categories=tuple(category_results),
         eligible=not reasons,
         ineligible_reasons=tuple(reasons),
+        pass_hat_k=pass_hat_k(passes) if threshold is not None else None,
+        pass_at_k=pass_at_k(passes) if threshold is not None else None,
+        attempts_per_task=max((len(task.attempt_scores) for task in task_results), default=0),
     )
 
 
@@ -515,6 +649,7 @@ def task_specs(
 
 __all__ = [
     "INTERVAL_METHOD",
+    "NORMAL_INTERVAL_METHOD",
     "AttemptEvidence",
     "AttemptOutcome",
     "CategoryResult",

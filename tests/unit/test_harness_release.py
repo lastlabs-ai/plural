@@ -394,10 +394,12 @@ def test_every_harness_is_told_when_it_will_be_killed() -> None:
     assert _harness_timeout(short, vendor, {}) == 120
     assert _stop_env(short, vendor, {})[native_runner.STOP_VARIABLE] == "120"
 
+    # The Runtime's timeout_seconds governs other commands, never the episode.
     long = task(1800, 300)
-    assert _harness_timeout(long, native, {}) == 300
-    assert _stop_env(long, native, {})[native_runner.STOP_VARIABLE] == "270"
-    assert _stop_env(long, vendor, {})[native_runner.STOP_VARIABLE] == "300"
+    assert _harness_timeout(long, native, {}) == 1800 + STOP_GRACE_SECONDS
+    assert _harness_timeout(long, vendor, {}) == 1800
+    assert _stop_env(long, native, {})[native_runner.STOP_VARIABLE] == "1800"
+    assert _stop_env(long, vendor, {})[native_runner.STOP_VARIABLE] == "1800"
 
 
 def _gateway(monkeypatch: pytest.MonkeyPatch, responses: list[object]) -> list[float]:

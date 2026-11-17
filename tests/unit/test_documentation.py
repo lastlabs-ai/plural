@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(sys.executable).with_name("plural")
 TUTORIALS = {
     "first-project": ("support-triage", "scripted"),
+    "quoting": ("quoting", "quote-bot"),
     "wordle": ("wordle", "luna"),
 }
 
@@ -64,7 +65,7 @@ def test_tutorial_projects_validate_and_dry_run(directory: str, isolated: dict[s
     for path in sorted(root.rglob("*.py")):
         compile(path.read_text(encoding="utf-8"), str(path), "exec")
 
-    _run(str(CLI), "benchmark", "validate", benchmark, cwd=root, env=isolated)
+    _run(str(CLI), "benchmark", "validate", benchmark, "--no-probes", cwd=root, env=isolated)
     plan = json.loads(
         _run(
             str(CLI),

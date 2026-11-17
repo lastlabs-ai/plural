@@ -80,11 +80,13 @@ def action_command(name: str) -> tuple[str, ...]:
     return (*HOST_COMMAND, "step", name)
 
 
-def environment_payload(task: TaskDefinition) -> dict[str, Any]:
+def environment_payload(task: TaskDefinition, *, hosted: bool | None = None) -> dict[str, Any]:
     """What a Harness learns about the Environment.
 
     It lists each exposed action with the command that runs it, and nothing
-    about App state, verifiers, or secrets.
+    about App state, verifiers, or secrets. With an App host running
+    (``hosted``, by default when there are Apps), it also names the command
+    that reports a Harness tool call as a step.
 
     Returns:
         The ``environment`` field of the Harness run request.
@@ -117,6 +119,11 @@ def environment_payload(task: TaskDefinition) -> dict[str, Any]:
         **(
             {"turn_command": list((*HOST_COMMAND, "turn"))}
             if task.party is not None and environment.apps
+            else {}
+        ),
+        **(
+            {"tool_command": list((*HOST_COMMAND, "tool"))}
+            if (bool(environment.apps) if hosted is None else hosted)
             else {}
         ),
     }
@@ -185,8 +192,8 @@ HOST_READABLE = 0o644
 copied them, before the Harness starts."""
 
 
-def reward_hook_files(task: TaskDefinition) -> tuple[list[dict[str, str]], list[FileUpload]]:
-    """The Task's ``reward`` hooks, and their source, for the App host to import.
+def reward_hook_files(task: TaskDefinition) -> tuple[list[dict[str, Any]], list[FileUpload]]:
+    """The Task's ``reward`` and ``measure`` hooks, and their source, for the App host to import.
 
     A project Verifier ships its whole folder; a function defined elsewhere
     ships the one file it is defined in. The files are staged only until the
@@ -198,43 +205,60 @@ def reward_hook_files(task: TaskDefinition) -> tuple[list[dict[str, str]], list[
     Raises:
         ValueError: When a hook was never imported, so its code is not here.
     """
-    entries: list[dict[str, str]] = []
+    entries: list[dict[str, Any]] = []
     uploads: list[FileUpload] = []
     for index, binding in enumerate(task.verifiers):
         verifier = binding.verifier
-        if not isinstance(verifier, DeterministicVerifier) or verifier.reward is None:
+        if not isinstance(verifier, DeterministicVerifier):
             continue
-        hook = verifier.reward_fn
-        if hook is None:
-            raise ValueError(
-                f"Verifier {verifier.name!r} names its reward hook {verifier.reward_ref!r}, but "
-                "it was never imported, so there is no code to run. Load the Task from its "
-                "project, or pass the function itself."
+        hooks = [
+            (kind, function, reference)
+            for kind, declared, function, reference in (
+                ("reward", verifier.reward, verifier.reward_fn, verifier.reward_ref),
+                ("measure", verifier.measure, verifier.measure_fn, verifier.measure_ref),
             )
-        source = inspect.getsourcefile(hook)
-        if source is None:
-            raise ValueError(f"Verifier {verifier.name!r}: cannot find the reward hook's source.")
-        path = Path(source).resolve()
-        folder = verifier.source_dir.resolve() if verifier.source_dir else path.parent
-        files = _source_files(folder) if verifier.source_dir else [path]
+            if declared is not None
+        ]
+        if not hooks:
+            continue
         # By position, not name: a name is free text and must not shape a path.
         stage = f"{VERIFIER_STAGE}/{index}"
-        uploads.extend(
-            FileUpload(
-                path=f"{stage}/{item.relative_to(folder).as_posix()}",
-                data=item.read_bytes(),
-                mode=HOST_READABLE,
-            )
-            for item in files
-        )
-        entries.append(
-            {
+        staged: set[str] = set()
+        for kind, hook, reference in hooks:
+            if hook is None:
+                raise ValueError(
+                    f"Verifier {verifier.name!r} names its {kind} hook {reference!r}, but it "
+                    "was never imported, so there is no code to run. Load the Task from its "
+                    "project, or pass the function itself."
+                )
+            source = inspect.getsourcefile(hook)
+            if source is None:
+                raise ValueError(
+                    f"Verifier {verifier.name!r}: cannot find the {kind} hook's source."
+                )
+            path = Path(source).resolve()
+            folder = verifier.source_dir.resolve() if verifier.source_dir else path.parent
+            files = _source_files(folder) if verifier.source_dir else [path]
+            for item in files:
+                relative = f"{stage}/{item.relative_to(folder).as_posix()}"
+                if relative in staged:
+                    continue
+                staged.add(relative)
+                uploads.append(
+                    FileUpload(path=relative, data=item.read_bytes(), mode=HOST_READABLE)
+                )
+            entry: dict[str, Any] = {
                 "name": verifier.name,
                 "version": verifier.version,
                 "dir": stage,
                 "python": f"{path.relative_to(folder).as_posix()}:{hook.__qualname__}",
             }
-        )
+            if kind == "measure":
+                entry["hook"] = "measure"
+                entry["metrics"] = [
+                    spec.name for spec in verifier.metrics if spec.kind == "running"
+                ]
+            entries.append(entry)
     return entries, uploads
 
 
@@ -255,7 +279,12 @@ def verifier_sources(task: TaskDefinition) -> list[Path]:
         if verifier.source_dir is not None:
             paths.append(verifier.source_dir.resolve())
             continue
-        for hook in (verifier.check_fn, verifier.reward_fn, verifier.hindsight_fn):
+        for hook in (
+            verifier.check_fn,
+            verifier.reward_fn,
+            verifier.hindsight_fn,
+            verifier.measure_fn,
+        ):
             if hook is None:
                 continue
             try:
@@ -363,7 +392,10 @@ class HostReport:
     ``apps`` maps each App to its control level and ``initial``/``final``
     snapshots. ``steps`` holds every action the Harness took, in order, with
     its observation, rewards, and info. ``states`` holds the App State after
-    each step. ``observation`` and ``view`` are the last ones.
+    each step. ``observation`` and ``view`` are the last ones. ``metrics``
+    holds every running metric point the Verifiers' ``measure`` hooks gave, and
+    ``metric_failures`` each hook call that raised or returned something
+    invalid; neither ever fails the Trial.
     """
 
     apps: dict[str, Any] = field(default_factory=dict)
@@ -371,6 +403,10 @@ class HostReport:
     states: list[dict[str, Any]] = field(default_factory=list)
     observation: dict[str, Any] = field(default_factory=dict)
     view: dict[str, Any] = field(default_factory=dict)
+    metrics: list[dict[str, Any]] = field(default_factory=list)
+    metric_failures: list[dict[str, Any]] = field(default_factory=list)
+    workspace: dict[str, Any] = field(default_factory=dict)
+    """The workspace snapshots: each step's commit, skipped files, and the bundle."""
 
     @classmethod
     def parse(cls, value: Any) -> HostReport:
@@ -398,6 +434,9 @@ class HostReport:
             states=rows("states"),
             observation=mapping("observation"),
             view=mapping("view"),
+            metrics=rows("metrics"),
+            metric_failures=rows("metric_failures"),
+            workspace=mapping("workspace"),
         )
 
 

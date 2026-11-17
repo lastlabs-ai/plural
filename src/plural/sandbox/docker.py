@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import shutil
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
@@ -27,7 +28,9 @@ from plural.sandbox.models import (
     ProviderUnavailableError,
     SandboxCapability,
     SandboxHandle,
+    SandboxLifetime,
     SandboxRequirements,
+    SandboxSummary,
     safe_relative_path,
 )
 
@@ -278,7 +281,15 @@ class DockerProvider(SandboxProvider):
             args.extend(["--memory", f"{requirements.resources.memory_mb}m"])
         if requirements.read_only_root:
             args.append("--read-only")
-        args.extend([image, "sleep", "infinity"])
+        for key, value in sorted(requirements.labels.items()):
+            args.extend(["--label", f"{key}={value}"])
+        lifetime = "infinity"
+        if requirements.lifetime_seconds is not None:
+            # The container's only long-lived process sleeps for the lifetime, so it
+            # stops on its own, and --rm then deletes it, if nothing destroys it first.
+            lifetime = str(math.ceil(requirements.lifetime_seconds))
+            args.append("--rm")
+        args.extend([image, "sleep", lifetime])
         _code, stdout, _stderr = await self._run(*args)
         container_id = stdout.decode().strip()
         self._containers.add(container_id)
@@ -492,6 +503,77 @@ class DockerProvider(SandboxProvider):
             await self._run("rm", "--force", container, check=False)
             self._containers.discard(container)
             self._active_exec.pop(container, None)
+
+    async def version(self) -> str:
+        """The Docker Engine's version, which keys its conformance report."""
+        code, stdout, _stderr = await self._run(
+            "version", "--format", "{{.Server.Version}}", check=False
+        )
+        text = stdout.decode(errors="replace").strip()
+        return f"docker-{text}" if code == 0 and text else "docker"
+
+    async def lifetime(self, handle: SandboxHandle) -> SandboxLifetime | None:
+        """Read the container's sleep and auto-remove setting back from Docker.
+
+        Returns:
+            How long the container lives and whether it is removed once it
+            stops, or ``None`` when it was created to live until destroyed.
+        """
+        container = self._validate(handle)
+        code, stdout, _stderr = await self._run(
+            "inspect",
+            "--format",
+            "{{json .Config.Cmd}} {{.HostConfig.AutoRemove}}",
+            container,
+            check=False,
+        )
+        if code != 0:
+            return None
+        command, _, remove = stdout.decode(errors="replace").strip().rpartition(" ")
+        try:
+            argv = json.loads(command)
+            seconds = float(argv[-1])
+        except (ValueError, IndexError, TypeError):
+            return None
+        return SandboxLifetime(stop_after_seconds=seconds, delete_after_stop=remove == "true")
+
+    async def list_sandboxes(self, labels: Mapping[str, str]) -> tuple[SandboxSummary, ...]:
+        """List Plural's containers that carry every label given.
+
+        Returns:
+            One summary per container, running or stopped.
+        """
+        filters = ["--filter", "label=dev.plural.execution=true"]
+        for key, value in sorted(labels.items()):
+            filters.extend(["--filter", f"label={key}={value}"])
+        code, stdout, _stderr = await self._run(
+            "ps", "--all", "--no-trunc", *filters, "--format", "{{json .}}", check=False
+        )
+        if code != 0:
+            return ()
+        found = []
+        for line in stdout.decode(errors="replace").splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            pairs = (item.partition("=") for item in str(row.get("Labels", "")).split(","))
+            found.append(
+                SandboxSummary(
+                    sandbox_id=str(row.get("ID", "")),
+                    provider=self.name,
+                    labels={key: value for key, _, value in pairs if key},
+                    state=str(row.get("State", "")),
+                    created_at=str(row.get("CreatedAt", "")) or None,
+                )
+            )
+        return tuple(found)
+
+    async def delete_sandbox(self, sandbox_id: str) -> None:
+        """Force-remove a container by id, even one another process created."""
+        await self._run("rm", "--force", sandbox_id, check=False)
+        self._containers.discard(sandbox_id)
+        self._active_exec.pop(sandbox_id, None)
 
 
 __all__ = ["DockerProvider"]

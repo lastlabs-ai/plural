@@ -133,6 +133,18 @@
           "additionalProperties": true,
           "title": "State Schema",
           "type": "object"
+        },
+        "unrestorable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unrestorable"
         }
       },
       "required": [
@@ -387,9 +399,34 @@
           "default": null,
           "title": "Image"
         },
+        "isolation": {
+          "anyOf": [
+            {
+              "enum": [
+                "required",
+                "best_effort"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether a Trial may run when the sandbox cannot keep the Agent away from the App host and Verifiers. Unset, it is required everywhere but the local Runtime. best_effort runs anyway and marks the Trial unverified.",
+          "title": "Isolation"
+        },
         "network": {
-          "$ref": "#/$defs/NetworkMode",
-          "default": "public"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Egress during the episode. Unset, Plural chooses: a recorded run on a provider that enforces an allowlist gets one with the gateway's hosts, and any other run is public. Set public explicitly to keep the open internet."
         },
         "packages": {
           "$ref": "#/$defs/RuntimePackages",
@@ -508,6 +545,13 @@
           "default": null,
           "description": "Turns the Agent may take. Null, the default, means no cap. Set any positive number to stop the run after that many actions.",
           "title": "Max Turns"
+        },
+        "workspace_snapshot_mib": {
+          "default": 512,
+          "description": "MiB of the workspace the App host snapshots after each step, so a Trial can be forked from any step. Files past the cap are recorded as skipped. 0 turns snapshots off.",
+          "minimum": 0,
+          "title": "Workspace Snapshot Mib",
+          "type": "integer"
         }
       },
       "title": "ExecutionLimits",

@@ -100,6 +100,11 @@ class BenchmarkScoring(FrozenModel):
             Harness stops itself before it.
         min_tasks_for_interval: Fewest scored Tasks before an uncertainty
             interval is reported. Below this, uncertainty is shown as unknown.
+        integrity: What a ``critical`` integrity finding does to its attempt.
+            ``"report"`` shows it and changes nothing; ``"exclude_critical"``
+            drops the attempt like an infrastructure error;
+            ``"zero_critical"`` scores it at the bottom of the range. Results
+            carry the raw and the adjusted numbers whenever a rule applies.
     """
 
     metric: str = "Score"
@@ -113,6 +118,7 @@ class BenchmarkScoring(FrozenModel):
     infrastructure_error: Literal["exclude"] = "exclude"
     harness_timeout: Literal["infrastructure_error", "agent_failure"] = "infrastructure_error"
     min_tasks_for_interval: int = Field(default=5, ge=2)
+    integrity: Literal["report", "exclude_critical", "zero_critical"] = "report"
 
     @model_validator(mode="before")
     @classmethod

@@ -129,8 +129,18 @@ class LocalProvider(SandboxProvider):
         env = {
             **inherited,
             "PLURAL_SANDBOX_ROOT": str(root),
+            # Background processes, such as the App host, exit when this process does.
+            "PLURAL_SANDBOX_OWNER": str(os.getpid()),
             **request.env,
         }
+        if "PATH" in env:
+            # A Runtime path on PATH, such as a Harness's installed tools, lives under root.
+            env["PATH"] = os.pathsep.join(
+                str(root / entry.removeprefix("/"))
+                if entry == "/workspace" or entry.startswith("/workspace/")
+                else entry
+                for entry in env["PATH"].split(os.pathsep)
+            )
         command = resolve_local_command(request.command)
         if request.user and request.user not in {"root", ""}:
             command = ["sudo", "-n", "-u", request.user, "--", *command]

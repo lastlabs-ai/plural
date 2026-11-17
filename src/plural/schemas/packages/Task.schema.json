@@ -1,5 +1,72 @@
 {
   "$defs": {
+    "AgentContext": {
+      "additionalProperties": false,
+      "description": "What one Agent had seen through observation *k*, in a Harness-neutral form.",
+      "properties": {
+        "compaction": {
+          "anyOf": [
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compaction"
+        },
+        "memory": {
+          "default": null,
+          "title": "Memory"
+        },
+        "messages": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Messages",
+          "type": "array"
+        },
+        "source": {
+          "default": "steps",
+          "enum": [
+            "recorded",
+            "steps",
+            "reported"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        },
+        "tools_used": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools Used",
+          "type": "array"
+        },
+        "turn": {
+          "default": 0,
+          "title": "Turn",
+          "type": "integer"
+        }
+      },
+      "title": "AgentContext",
+      "type": "object"
+    },
     "AgentVerifier": {
       "additionalProperties": false,
       "description": "Model-judge verifier with its own runtime and connectivity policy.",
@@ -39,6 +106,14 @@
           "additionalProperties": true,
           "title": "Metadata",
           "type": "object"
+        },
+        "metrics": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MetricSpec"
+          },
+          "title": "Metrics",
+          "type": "array"
         },
         "model": {
           "minLength": 1,
@@ -92,6 +167,178 @@
         "instructions"
       ],
       "title": "AgentVerifier",
+      "type": "object"
+    },
+    "Checkpoint": {
+      "additionalProperties": false,
+      "description": "Everything needed to continue a Trial from after step ``step``.\n\n``apps`` and ``rng`` are private to the Job: they restore the App host and\nnever reach a Harness. ``contexts`` is keyed by seat, with ``\"\"`` for a\nTrial one Agent works alone.",
+      "properties": {
+        "agent_digest": {
+          "default": "",
+          "title": "Agent Digest",
+          "type": "string"
+        },
+        "apps": {
+          "additionalProperties": true,
+          "title": "Apps",
+          "type": "object"
+        },
+        "contexts": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AgentContext"
+          },
+          "title": "Contexts",
+          "type": "object"
+        },
+        "elapsed": {
+          "default": 0.0,
+          "title": "Elapsed",
+          "type": "number"
+        },
+        "heldout": {
+          "default": false,
+          "title": "Heldout",
+          "type": "boolean"
+        },
+        "initial": {
+          "additionalProperties": true,
+          "title": "Initial",
+          "type": "object"
+        },
+        "job_id": {
+          "default": "",
+          "title": "Job Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "observation": {
+          "default": null,
+          "title": "Observation"
+        },
+        "prefix_metrics": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Prefix Metrics",
+          "type": "array"
+        },
+        "prefix_states": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Prefix States",
+          "type": "array"
+        },
+        "prefix_steps": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Prefix Steps",
+          "type": "array"
+        },
+        "rendered": {
+          "default": "",
+          "title": "Rendered",
+          "type": "string"
+        },
+        "rng": {
+          "additionalProperties": true,
+          "title": "Rng",
+          "type": "object"
+        },
+        "step": {
+          "minimum": 0,
+          "title": "Step",
+          "type": "integer"
+        },
+        "task_digest": {
+          "default": "",
+          "title": "Task Digest",
+          "type": "string"
+        },
+        "trial_id": {
+          "title": "Trial Id",
+          "type": "string"
+        },
+        "turns": {
+          "default": 0,
+          "title": "Turns",
+          "type": "integer"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "workspace": {
+          "$ref": "#/$defs/CheckpointWorkspace"
+        }
+      },
+      "required": [
+        "trial_id",
+        "step"
+      ],
+      "title": "Checkpoint",
+      "type": "object"
+    },
+    "CheckpointWorkspace": {
+      "additionalProperties": false,
+      "description": "The workspace snapshot a checkpoint restores.",
+      "properties": {
+        "available": {
+          "default": false,
+          "title": "Available",
+          "type": "boolean"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commit"
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Problem"
+        },
+        "skipped": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skipped",
+          "type": "array"
+        }
+      },
+      "title": "CheckpointWorkspace",
       "type": "object"
     },
     "DeterministicVerifier": {
@@ -151,10 +398,22 @@
           "title": "Kind",
           "type": "string"
         },
+        "measure": {
+          "default": null,
+          "title": "Measure"
+        },
         "metadata": {
           "additionalProperties": true,
           "title": "Metadata",
           "type": "object"
+        },
+        "metrics": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MetricSpec"
+          },
+          "title": "Metrics",
+          "type": "array"
         },
         "name": {
           "minLength": 1,
@@ -345,6 +604,14 @@
           "title": "Metadata",
           "type": "object"
         },
+        "metrics": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MetricSpec"
+          },
+          "title": "Metrics",
+          "type": "array"
+        },
         "name": {
           "minLength": 1,
           "title": "Name",
@@ -375,6 +642,132 @@
         "criteria"
       ],
       "title": "HumanVerifier",
+      "type": "object"
+    },
+    "MetricSpec": {
+      "additionalProperties": false,
+      "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+      "properties": {
+        "aggregate": {
+          "anyOf": [
+            {
+              "enum": [
+                "final",
+                "mean",
+                "min",
+                "max",
+                "auc",
+                "time_to"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aggregate"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "direction": {
+          "default": "higher",
+          "enum": [
+            "higher",
+            "lower"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "gate": {
+          "default": false,
+          "title": "Gate",
+          "type": "boolean"
+        },
+        "kind": {
+          "default": "score",
+          "enum": [
+            "binary",
+            "score",
+            "number",
+            "rating",
+            "running"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "range": {
+          "anyOf": [
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Range"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "MetricSpec",
       "type": "object"
     },
     "NetworkMode": {
@@ -584,14 +977,49 @@
     }
   },
   "additionalProperties": false,
-  "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.\n\n``name`` is the Task's identity, and what Benchmarks, Jobs, and results\ncall it. ``title`` is only the display name in the hosted project.",
+  "description": "One versioned unit of work in a Python-authored Environment.\n\nIn an Environment with a party, several Agents share each episode, one\nper seat. Each gets ``instructions``, and then its seat's entry in\n``seat_instructions``, keyed ``seat_1``, ``seat_2``, and so on.\n\n``expected`` is the answer key: what a correct episode produces. Verifiers\nread it as ``episode.expected``; it never reaches the Agent, unlike ``info``\nand ``metadata``.\n\n``name`` is the Task's identity, and what Benchmarks, Jobs, and results\ncall it. ``title`` is only the display name in the hosted project.\n\n``from_checkpoint`` (``TRIAL/NAME``) starts each episode from a saved\ncheckpoint instead of a reset: the moment an Agent once reached, as a test\nof its own. A project resolves it to ``checkpoint``.",
   "properties": {
+    "checkpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Checkpoint"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "checkpoint_bundle": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Checkpoint Bundle"
+    },
     "environment": {
       "title": "Environment"
     },
     "expected": {
       "default": null,
       "title": "Expected"
+    },
+    "from_checkpoint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "From Checkpoint"
     },
     "goals": {
       "default": [],

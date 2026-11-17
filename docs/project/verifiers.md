@@ -151,6 +151,43 @@ One Verifier then scores every Task that lists it, each against its own answer. 
 `reward` hook reads the same answer key as `step.task.expected`, and an
 [AgentVerifier](#agentverifier) is shown it as the reference answer.
 
+### Check the files the Agent wrote
+
+`episode.workspace` holds the files the Agent left in its workspace when the episode
+ended, read from Plural's last [workspace snapshot](environments.md#workspace-snapshots).
+Paths are relative to the workspace, so a file the Agent wrote in its own folder
+reads as `harness/report.txt`:
+
+```python
+def wrote_total(episode: Episode) -> VerifierOutput:
+    found = episode.workspace.list("**/march-total.txt")
+    text = episode.workspace.read(found[0]).strip() if found else ""
+    return VerifierOutput(
+        metrics={"file_correct": float(text == episode.expected["total_usd"])},
+        feedback=f"wrote {text!r}" if found else "no march-total.txt",
+    )
+```
+
+`list(pattern)` matches glob patterns, `exists(path)` and `read(path)` read one
+file, and `read_bytes(path)` reads it as bytes. `available` is false when snapshots
+were off or `git` was missing, and reading then raises an error that says why.
+Symbolic links are left out, so a link never reads a file outside the workspace.
+
+Every kind of Verifier sees the same workspace. A Verifier that runs as a command in
+its own sandbox finds the Episode in `.plural/verifier-input.json` and the files
+beside it; `Episode.from_input()` reads both, so its `episode.workspace` works as
+above:
+
+```python
+from plural.verifiers import Episode
+
+episode = Episode.from_input()
+text = episode.workspace.read("environment/march-total.txt")
+```
+
+An [AgentVerifier](#agentverifier) is shown the workspace's text files as evidence,
+each cut to the same length as other evidence.
+
 The function must live in a Python file. In a project, each Verifier is a folder under
 `verifiers/`, named after it. This command creates
 `verifiers/correct-resolution/verifier.yaml` and `verify.py`:
@@ -339,6 +376,146 @@ episode ends: `terminated()` on an App, or the Environment's limits. The same `r
 function scores a short episode or a long one, so an Agent playing one poker hand and an
 Agent playing a whole match are each scored by the points earned over their own episode.
 Choose the horizon in the Environment and Task; the Verifier does not change.
+
+### Declare metrics
+
+A score says how good an attempt was, in one number. **Metrics** say why: they are
+named measurements a Verifier declares, such as "was the price right?" or "how much
+margin did the quote make?". A Benchmark can rank on any of them, and any of them can
+be a [gate](#gates-and-targets) that every attempt must pass.
+
+List the metrics in `verifier.yaml`, and return their values from `check`:
+
+```yaml
+name: quote-check
+kind: deterministic
+check: verify.py:check
+metrics:
+  - name: decision_correct
+    kind: binary
+  - name: price_correct
+    kind: binary
+  - name: margin_usd
+    kind: number
+    unit: USD
+```
+
+```python
+def check(episode: Episode) -> VerifierOutput:
+    quote = episode.state.get("quote")
+    metrics = {
+        "decision_correct": float(decided(episode) == episode.expected["decision"]),
+        "price_correct": None,
+        "margin_usd": None,
+    }
+    if quote:
+        metrics.update(price_correct=price_ok(quote), margin_usd=margin(quote))
+    return VerifierOutput(score=score(metrics), metrics=metrics)
+```
+
+Each metric has a **kind**:
+
+| Kind | Values | Example |
+| --- | --- | --- |
+| `binary` | 0 or 1 | `price_correct` |
+| `score` | Within `range`, 0 to 1 by default | `coverage` |
+| `number` | Any number, with an optional `unit` | `margin_usd` |
+| `rating` | Within `range`, which it needs | `tone`, 1 to 5 |
+| `running` | Sampled after every step, then reduced to one number | `cash_on_hand` |
+
+`direction` says which way is better, `higher` (the default) or `lower`. A metric
+name is lowercase letters, digits, and underscores.
+
+**`None` means not applicable.** Return `None` when a metric doesn't apply to this
+attempt, rather than 0. A correct handoff has no quote, so it has no price to check:
+`price_correct` is `None` there, not a failure. A `None` is left out of every average,
+and each average says how many Trials it covers.
+
+#### Gates and targets
+
+Mark a metric `gate: true` when an attempt must pass it to count as done. A `binary`
+gate passes at 1. Any other kind needs a `target`, a comparison such as `">= 150"` or
+`"<= 30"`; a plain number means equal to it:
+
+```yaml
+metrics:
+  - name: price_correct
+    kind: binary
+    gate: true
+  - name: margin_usd
+    kind: number
+    unit: USD
+    target: ">= 150"
+```
+
+A Trial **passes** when every gate that applies to it passes. A gate whose value is
+`None` does not apply, so a correct handoff passes on `decision_correct` alone. A Trial
+with no gate that applies is **not judged**: it neither passes nor fails, and it is
+left out of the pass rate. A `target` on a metric that is not a gate is reported as
+met or not, and never decides a pass.
+
+Two rates follow, and they are different numbers:
+
+- The **success rate** is the share of attempts whose score reached the Benchmark's
+  success threshold.
+- The **pass rate** is the share of judged attempts that passed every gate.
+
+The run summary shows both, and `TrialResult.gates` and `TrialResult.passed` hold each
+Trial's verdicts.
+
+Every Trial also records five **built-in** metrics with no Verifier at all:
+`cost_usd`, `latency_seconds`, `turns`, `total_tokens`, and `succeeded`, which is 1
+when the episode ended on its own, without an error or hitting a limit. An [AgentVerifier](#agentverifier) declares
+one `rating` metric per rubric criterion, named after the criterion; two criteria whose
+names would collide get `_2`, `_3`, and so on, in order.
+
+Metrics are measurements, not credit. They never enter the reward ledger, a reward is
+never a metric, and the Agent never sees either.
+
+### Measure while the episode runs
+
+Some work has no single finished answer to check. A shop is open all season, and what
+matters is how its cash moves. A **running metric** is sampled after every action by
+the Verifier's `measure` hook:
+
+```yaml
+measure: verify.py:measure
+metrics:
+  - name: cash_on_hand
+    kind: running
+    unit: USD
+    aggregate: final
+```
+
+```python
+from plural import Step
+
+
+def measure(step: Step) -> dict[str, float]:
+    books = step.current_state or {}
+    return {"cash_on_hand": float(books["cash"])} if "cash" in books else {}
+```
+
+`measure` runs in the App host, like `reward`, and sees the same `Step`. Its points go
+to the Trial's metric series, never to the reward ledger. The `aggregate` turns the
+series into the Trial's value:
+
+| Aggregate | Trial value |
+| --- | --- |
+| `final` | The last point |
+| `mean`, `min`, `max` | Over every point |
+| `auc` | The area under the series, by step |
+| `time_to` | Steps until the value first crosses `threshold` in the good direction |
+
+`check` reads the whole series as `episode.metric_series`, a list of `(step, value)`
+pairs per metric, so the score can depend on the path, not only the end. The Trial
+page charts each running metric over the episode.
+
+Each point records whether an Agent action or the Environment itself produced it,
+and, when an App runs its own clock, the simulated time. An App reports its clock
+by overriding `sim_time()` to return a number or an ISO-8601 timestamp. The chart can
+then use simulated time instead of steps. The
+[shopkeeper tutorial](../tutorials/shopkeeper.md) builds this end to end.
 
 ## AgentVerifier
 

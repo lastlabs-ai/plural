@@ -85,44 +85,138 @@ def _to_openai(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(system, str) and system.strip():
         messages.append({"role": "system", "content": system})
     elif isinstance(system, list):
-        text = "".join(
-            item.get("text", "")
-            for item in system
-            if isinstance(item, dict) and item.get("type") == "text"
-        )
+        text = _text(system)
         if text:
             messages.append({"role": "system", "content": text})
     for item in payload.get("messages") or []:
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get("role") or "user")
-        content = item.get("content")
-        if isinstance(content, str):
-            messages.append({"role": role, "content": content})
-            continue
-        if isinstance(content, list):
-            text = "".join(
-                part.get("text", "")
-                for part in content
-                if isinstance(part, dict) and part.get("type") == "text"
-            )
-            messages.append({"role": role, "content": text})
-    return {
+        if isinstance(item, dict):
+            messages.extend(_message(item))
+    request: dict[str, Any] = {
         "model": payload.get("model") or os.environ.get("PLURAL_MODEL") or "model",
         "messages": messages,
         "max_tokens": payload.get("max_tokens"),
         "temperature": payload.get("temperature"),
+        "stop": payload.get("stop_sequences"),
         "stream": False,
     }
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": tool["name"],
+                "description": tool.get("description") or "",
+                "parameters": tool.get("input_schema") or {"type": "object"},
+            },
+        }
+        for tool in payload.get("tools") or []
+        if isinstance(tool, dict) and tool.get("name") and "input_schema" in tool
+    ]
+    if tools:
+        request["tools"] = tools
+        request["tool_choice"] = _tool_choice(payload.get("tool_choice"))
+    return request
+
+
+def _text(blocks: list[Any]) -> str:
+    return "".join(
+        str(block.get("text", ""))
+        for block in blocks
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
+def _message(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """One Messages turn as OpenAI messages: tool results become ``tool`` messages."""
+    role = str(item.get("role") or "user")
+    content = item.get("content")
+    if isinstance(content, str):
+        return [{"role": role, "content": content}]
+    if not isinstance(content, list):
+        return []
+    blocks = [block for block in content if isinstance(block, dict)]
+    text = _text(blocks)
+    if role == "assistant":
+        calls = [
+            {
+                "id": str(block.get("id") or ""),
+                "type": "function",
+                "function": {
+                    "name": str(block.get("name") or ""),
+                    "arguments": json.dumps(block.get("input") or {}),
+                },
+            }
+            for block in blocks
+            if block.get("type") == "tool_use"
+        ]
+        message: dict[str, Any] = {"role": "assistant", "content": text or None}
+        if calls:
+            message["tool_calls"] = calls
+        return [message] if text or calls else []
+    out = [
+        {
+            "role": "tool",
+            "tool_call_id": str(block.get("tool_use_id") or ""),
+            "content": _result_text(block),
+        }
+        for block in blocks
+        if block.get("type") == "tool_result"
+    ]
+    if text:
+        out.append({"role": role, "content": text})
+    return out
+
+
+def _result_text(block: dict[str, Any]) -> str:
+    content = block.get("content")
+    text = content if isinstance(content, str) else _text(content or [])
+    return f"Error: {text}" if block.get("is_error") else text
+
+
+def _tool_choice(choice: Any) -> Any:
+    kind = choice.get("type") if isinstance(choice, dict) else None
+    if kind == "any":
+        return "required"
+    if kind == "none":
+        return "none"
+    if kind == "tool" and isinstance(choice, dict) and choice.get("name"):
+        return {"type": "function", "function": {"name": choice["name"]}}
+    return "auto"
 
 
 def _from_openai(payload: dict[str, Any], *, model: str) -> dict[str, Any]:
     choices = payload.get("choices") or []
-    message = choices[0].get("message") if choices and isinstance(choices[0], dict) else {}
-    text = ""
+    first = choices[0] if choices and isinstance(choices[0], dict) else {}
+    message = first.get("message")
+    content: list[dict[str, Any]] = []
+    calls: list[Any] = []
     if isinstance(message, dict):
-        content = message.get("content")
-        text = content if isinstance(content, str) else ""
+        text = message.get("content")
+        if isinstance(text, str) and text:
+            content.append({"type": "text", "text": text})
+        calls = message.get("tool_calls") or []
+    for index, call in enumerate(calls):
+        if not isinstance(call, dict):
+            continue
+        function = call.get("function") or {}
+        try:
+            arguments = json.loads(function.get("arguments") or "{}")
+        except json.JSONDecodeError:
+            arguments = {}
+        content.append(
+            {
+                "type": "tool_use",
+                "id": str(call.get("id") or f"toolu_plural_{index}"),
+                "name": str(function.get("name") or ""),
+                "input": arguments if isinstance(arguments, dict) else {},
+            }
+        )
+    if not content:
+        content.append({"type": "text", "text": ""})
+    stop_reason = "end_turn"
+    if any(block["type"] == "tool_use" for block in content):
+        stop_reason = "tool_use"
+    elif first.get("finish_reason") == "length":
+        stop_reason = "max_tokens"
     raw_usage = payload.get("usage")
     usage = raw_usage if isinstance(raw_usage, dict) else {}
     return {
@@ -130,8 +224,8 @@ def _from_openai(payload: dict[str, Any], *, model: str) -> dict[str, Any]:
         "type": "message",
         "role": "assistant",
         "model": model,
-        "content": [{"type": "text", "text": text}],
-        "stop_reason": "end_turn",
+        "content": content,
+        "stop_reason": stop_reason,
         "usage": {
             "input_tokens": usage.get("prompt_tokens") or 0,
             "output_tokens": usage.get("completion_tokens") or 0,
@@ -142,7 +236,7 @@ def _from_openai(payload: dict[str, Any], *, model: str) -> dict[str, Any]:
 def _gateway_request(payload: dict[str, Any], timeout: float) -> dict[str, Any]:
     base = (os.environ.get("PLURAL_GATEWAY_URL") or "").rstrip("/")
     if not base:
-        raise RuntimeError("Claude Code needs PLURAL_GATEWAY_URL from Job(client=...)")
+        raise RuntimeError("the bridge needs PLURAL_GATEWAY_URL from Job(client=...)")
     key = os.environ.get("PLURAL_API_KEY") or ""
     request = urllib.request.Request(
         f"{base}/chat/completions",
@@ -163,7 +257,7 @@ def _gateway_request(payload: dict[str, Any], timeout: float) -> dict[str, Any]:
         return payload
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"gateway rejected Claude Code request: {detail[:1000]}") from exc
+        raise RuntimeError(f"the gateway rejected the request: {detail[:1000]}") from exc
 
 
 if __name__ == "__main__":

@@ -410,6 +410,20 @@ class TasksAPI(RevisionResourceAPI[Task]):
         payload["verifier_revision_ids"] = ids
         return payload
 
+    def record_check(self, task_id: str, revision_id: str, check: Mapping[str, Any]) -> JsonObject:
+        """Store ``plural task validate`` on the pushed revision it checked.
+
+        The server refuses a check whose ``content_hash`` is not the revision's.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "PUT",
+                f"/tasks/{quote(task_id)}/revisions/{quote(revision_id)}/check",
+                json=dict(check),
+            ),
+        )
+
 
 class VerifiersAPI(RevisionResourceAPI[Any]):
     collection = "verifiers"
@@ -469,6 +483,8 @@ class BenchmarksAPI(RevisionResourceAPI[Benchmark]):
         if len(ids) != len(value.tasks):
             raise InvalidRequestError("task_revision_ids must align with Benchmark tasks")
         payload = _dump(value, exclude={"tasks"})
+        if not payload.get("heldout"):
+            payload.pop("heldout", None)
         payload["task_revision_ids"] = ids
         return payload
 
@@ -649,6 +665,17 @@ class RuntimesAPI:
     def providers(self) -> JsonList:
         return cast(JsonList, self._studio.request("GET", "/runtime-providers", project=False))
 
+    def record_conformance(self, report: Mapping[str, Any]) -> JsonObject:
+        """Store a conformance report so the web app can show it beside the provider."""
+        return cast(
+            JsonObject,
+            self._studio.request("POST", "/runtime-conformance", json=dict(report), project=False),
+        )
+
+    def conformance(self) -> JsonList:
+        """The latest conformance report for each provider version this account ran."""
+        return cast(JsonList, self._studio.request("GET", "/runtime-conformance", project=False))
+
     def policy(self) -> JsonObject:
         return cast(JsonObject, self._studio.request("GET", "/runtime-policy", project=False))
 
@@ -792,6 +819,16 @@ class JobsAPI:
         extra: dict[str, Any] = {"executor": "client", "client_job_id": client_job_id}
         if evaluation_track is not None:
             extra["track"] = evaluation_track
+        if getattr(spec.source, "include_heldout", False):
+            extra["heldout"] = True
+        if spec.purpose != "eval":
+            extra["purpose"] = spec.purpose
+        revisions = dict(
+            zip((item.agent_id for item in spec.agents), agent_revision_ids, strict=True)
+        )
+        fewer = {revisions[key]: value for key, value in spec.agent_attempts.items()}
+        if fewer:
+            extra["agent_attempts"] = fewer
         return cast(
             JsonObject,
             self._studio.request(
@@ -805,7 +842,7 @@ class JobsAPI:
                         "revision_id": source_revision_id,
                     },
                     "agent_revision_ids": list(agent_revision_ids),
-                    "attempts": spec.attempts,
+                    "attempts": spec.max_attempt,
                     "concurrency": spec.concurrency,
                     "per_runtime_concurrency": spec.per_runtime_concurrency,
                     "priority": spec.priority,
@@ -887,12 +924,42 @@ class TrialsAPI:
         )
         return str(cast(JsonObject, response)["key"])
 
+    def gateway_calls(self, execution_id: str) -> int:
+        """Model calls the gateway saw on this execution's own key."""
+        response = self._studio.request(
+            "GET", f"/trial-executions/{quote(execution_id)}/gateway-calls"
+        )
+        return int(cast(JsonObject, response)["calls"])
+
+    def gateway_usage(self, execution_id: str) -> JsonObject:
+        """Model calls the gateway saw on this execution's own key, with their tokens.
+
+        Returns:
+            ``calls``, ``prompt_tokens`` and ``completion_tokens``.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request("GET", f"/trial-executions/{quote(execution_id)}/gateway-calls"),
+        )
+
     def watch(self, trial_id: str, *, cursor: int = 0) -> Iterator[JsonObject]:
         return self._studio.watch(f"/trials/{quote(trial_id)}/events", cursor=cursor)
 
     def rewards(self, trial_id: str) -> JsonObject:
         """The Trial's reward ledger and each verifier's total."""
         return cast(JsonObject, self._studio.request("GET", f"/trials/{quote(trial_id)}/rewards"))
+
+    def metrics(self, trial_id: str) -> JsonObject:
+        """The Trial's metric values, its gates, and whether it passed them."""
+        return cast(JsonObject, self._studio.request("GET", f"/trials/{quote(trial_id)}/metrics"))
+
+    def artifacts(self, trial_id: str) -> JsonObject:
+        """The Trial's files: ``outputs``, ``records``, and ``inputs``, each a list."""
+        return cast(JsonObject, self._studio.request("GET", f"/trials/{quote(trial_id)}/artifacts"))
+
+    def artifact(self, artifact_id: str) -> bytes:
+        """One Trial file's bytes."""
+        return self._studio.request_bytes("GET", f"/trial-artifacts/{quote(artifact_id)}/content")
 
     def add_rewards(
         self,
@@ -911,6 +978,34 @@ class TrialsAPI:
                 "POST",
                 f"/trials/{quote(trial_id)}/rewards",
                 json={"records": list(records), "execution_id": execution_id},
+            ),
+        )
+
+    def add_metric_points(
+        self,
+        trial_id: str,
+        points: Sequence[JsonObject],
+        *,
+        verifier: str,
+        version: str,
+        execution_id: str | None = None,
+    ) -> JsonObject:
+        """Store one Verifier version's running metric points on the Trial.
+
+        They replace that Verifier's series in the Trial's metrics. A version
+        the Trial already has is kept as it is.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST",
+                f"/trials/{quote(trial_id)}/metric-points",
+                json={
+                    "verifier": verifier,
+                    "version": version,
+                    "points": list(points),
+                    "execution_id": execution_id,
+                },
             ),
         )
 

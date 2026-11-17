@@ -27,6 +27,7 @@ from plural.common import (
     HarnessCapability,
     HarnessPackage,
     HarnessProtocol,
+    HarnessTool,
     PackageSource,
     semantic_version,
 )
@@ -70,6 +71,20 @@ class HarnessDefinition(FrozenModel):
     trajectory: str | None = None
     tito: str | None = None
     readme: str = Field(default="", description="Markdown overview shown on the Harness page.")
+    tools: tuple[HarnessTool, ...] = Field(
+        default=(),
+        description=(
+            "The tools the Harness brings itself, such as bash or edit, by name or "
+            "{name, description}. A fork compares them with the tools a history used."
+        ),
+    )
+    supports_resume: bool = Field(
+        default=False,
+        description=(
+            "Whether the Harness reads HarnessEnvironment.resume and continues a history "
+            "as its own conversation."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -159,6 +174,8 @@ class HarnessDefinition(FrozenModel):
             supports_tito=self.tito is not None,
             tito_path=self.tito,
             readme=self.readme,
+            tools=self.tools,
+            supports_resume=self.supports_resume,
         )
 
     @classmethod
@@ -195,6 +212,8 @@ class HarnessDefinition(FrozenModel):
             trajectory=protocol.trajectory_path,
             tito=protocol.tito_path,
             readme=protocol.readme,
+            tools=protocol.tools,
+            supports_resume=protocol.supports_resume,
         )
 
     def _source(self) -> PackageSource:
@@ -240,6 +259,9 @@ class Harness(BaseModel, ABC):
     environment: ClassVar[tuple[str, ...]] = ()
     """Deprecated: use ``env_vars``."""
     supports_tito: ClassVar[bool] = False
+    supports_resume: ClassVar[bool] = False
+    """Whether :meth:`run` reads ``environment.resume`` and continues the history
+    it holds as its own conversation, when a fork starts it mid-episode."""
     _bound_python_source: ClassVar[Path | None] = None
     _bound_python_object: ClassVar[str | None] = None
 
@@ -265,6 +287,19 @@ class Harness(BaseModel, ABC):
         semantic_version(type(self).version)
         if type(self) is not Harness:
             self._bind_source()
+
+    @classmethod
+    def tools(cls) -> tuple[HarnessTool | str, ...]:
+        """The tools this Harness brings itself, such as ``bash`` or ``edit``.
+
+        Override to declare them, by name or as :class:`~plural.common.HarnessTool`.
+        Each Trial records them, with the Environment's actions, as the tools its
+        Agent was offered; a fork compares them with the tools a history used.
+
+        Returns:
+            The tools; none by default.
+        """
+        return ()
 
     @abstractmethod
     def run(
@@ -376,6 +411,8 @@ class Harness(BaseModel, ABC):
             supports_tito=type(self).supports_tito,
             tito_path="tito.jsonl" if type(self).supports_tito else None,
             readme=type(self).readme,
+            tools=tuple(HarnessTool.model_validate(item) for item in type(self).tools()),
+            supports_resume=type(self).supports_resume,
         )
         source = PackageSource(
             kind="local", uri=str(self._package_root), digest=digest, trusted=True

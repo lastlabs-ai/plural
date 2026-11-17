@@ -26,6 +26,7 @@ from plural import (
 )
 from plural.cli.main import app
 from plural.local_models import (
+    PROBES,
     KnownModels,
     LocalModelError,
     claimed_size,
@@ -192,9 +193,7 @@ def test_vllm_refuses_a_name_it_does_not_serve() -> None:
 
 def test_a_server_that_reports_nothing_is_fingerprinted_by_its_answers() -> None:
     def answers(text: str) -> Any:
-        return lambda body: _reply(
-            body["model"], choices=[{"message": {"role": "assistant", "content": text}}]
-        )
+        return lambda body: _reply(choices=[{"message": {"role": "assistant", "content": text}}])
 
     first = inspect_local_model("http://box/v1", "mystery", http=_client({}, answers("one")))
     same = inspect_local_model("http://box/v1", "mystery", http=_client({}, answers("one")))
@@ -529,9 +528,9 @@ def test_a_server_answering_one_name_with_another_model_is_caught(mlx: str, tmp_
     _Mlx.serves[SMALL] = LARGE
     lying = inspect_local_model(mlx, SMALL)
 
-    # The cache still says 8B; the answers are the 27B's.
+    # The cache still says 8B; the answers, which are evidence, are the 27B's.
     assert lying.weights == honest.weights
-    assert lying.fingerprint != honest.fingerprint
+    assert lying.behavior != honest.behavior
     status, record = store.lookup(lying)
     assert status == "answers_like"
     assert record is not None and record["requested"] == LARGE
@@ -562,20 +561,86 @@ def test_a_new_server_version_that_answers_differently_is_serving_changed(
     assert record is not None and record["server_version"] == "0.31.3"
 
 
-def test_a_remote_endpoint_is_identified_by_its_answers_alone(tmp_path: Path) -> None:
+def test_a_remote_endpoint_is_identified_by_the_model_it_reports(tmp_path: Path) -> None:
     _cache(tmp_path, SMALL, [[8_000, 1_024_000]], bits=4)
 
     identity = inspect_local_model(
         "http://gpu-box.lan:2080/v1", SMALL, http=_mlx(tmp_path), hf_hub=tmp_path
     )
 
-    assert identity.method == "behavior"
+    assert identity.method == "reported"
     assert identity.weights is None
+    assert identity.served == SMALL
     assert identity.behavior is not None
+    assert any("model name and headers" in line for line in identity.describe())
+
+
+def test_a_remote_endpoint_that_reports_nothing_is_identified_by_its_answers() -> None:
+    client = _client({}, chat=lambda _body: _reply())
+
+    identity = inspect_local_model("http://gpu-box.lan:2080/v1", SMALL, http=client)
+
+    assert identity.method == "behavior"
     assert any("not on this machine" in line for line in identity.describe())
 
 
-def test_an_mlx_model_swapped_mid_job_fails_the_next_trial(mlx: str) -> None:
+def test_a_hosted_model_is_fingerprinted_by_its_reported_id_and_headers() -> None:
+    calls = 0
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        if request.method == "GET":
+            if request.url.path != "/v1/models":
+                return httpx.Response(404)
+            return httpx.Response(200, json={"data": [{"id": "gpt-x", "owned_by": "openai"}]})
+        calls += 1
+        reply = _reply("gpt-x-2026-01-01", choices=[{"message": {"content": f"answer {calls}"}}])
+        return httpx.Response(200, json=reply, headers={"openai-model": "gpt-x-2026-01-01"})
+
+    def inspect() -> Any:
+        return inspect_local_model(
+            "https://api.hosted.example/v1",
+            "gpt-x",
+            http=httpx.Client(transport=httpx.MockTransport(handle)),
+        )
+
+    first, again = inspect(), inspect()
+
+    assert first.method == "reported"
+    assert first.reported == {"openai-model": "gpt-x-2026-01-01"}
+    assert first.behavior != again.behavior
+    assert first.fingerprint == again.fingerprint
+
+
+def test_the_probe_drops_sampling_parameters_a_model_refuses() -> None:
+    bodies: list[dict[str, Any]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            if request.url.path != "/v1/models":
+                return httpx.Response(404)
+            return httpx.Response(200, json={"data": [{"id": "gpt-new"}]})
+        body = json.loads(request.content)
+        bodies.append(body)
+        if "max_tokens" in body or "temperature" in body:
+            error = {"message": "Unsupported parameter: 'max_tokens' is not supported"}
+            return httpx.Response(400, json={"error": error})
+        return httpx.Response(200, json=_reply("gpt-new"))
+
+    identity = inspect_local_model(
+        "https://refuses.example/v1",
+        "gpt-new",
+        http=httpx.Client(transport=httpx.MockTransport(handle)),
+    )
+
+    assert identity.served == "gpt-new"
+    assert "max_tokens" in bodies[0]
+    # Refused once, then never sent again to the same endpoint.
+    assert all(set(body) == {"model", "messages"} for body in bodies[1:])
+    assert len(bodies) == 1 + 1 + len(PROBES)
+
+
+def test_an_mlx_model_whose_answers_change_mid_job_is_flagged_not_failed(mlx: str) -> None:
     _Mlx.swap_after, _Mlx.swap_to = 1, LARGE
     agent = Agent(name="small-local", model=SMALL, endpoint=mlx)
 
@@ -583,8 +648,89 @@ def test_an_mlx_model_swapped_mid_job_fails_the_next_trial(mlx: str) -> None:
 
     first, second = result.trials
     assert first.score == 1.0, first.error_message
-    assert second.error_message is not None
-    assert "changed after the Job started" in second.error_message
+    assert second.score == 1.0, second.error_message
+    assert not any(item.code == "model_answers_changed" for item in first.integrity)
+    flagged = [item for item in second.integrity if item.code == "model_answers_changed"]
+    assert flagged and flagged[0].severity == "warning"
+
+
+class _Hosted(BaseHTTPRequestHandler):
+    """A hosted endpoint whose answers vary by request and whose model ID can change."""
+
+    model_id = "gpt-x-2026-01-01"
+    swap_after: int | None = None
+    answered = 0
+
+    def _send(self, body: dict[str, Any]) -> None:
+        payload = json.dumps(body).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self) -> None:
+        if self.path != "/v1/models":
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._send({"data": [{"id": "gpt-x", "owned_by": "openai"}]})
+
+    def do_POST(self) -> None:
+        cls = type(self)
+        json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        cls.answered += 1
+        if cls.swap_after is not None and cls.answered > cls.swap_after:
+            cls.model_id = "gpt-y-2026-02-02"
+        content = f"PAID, said differently each time ({cls.answered})"
+        message = {"role": "assistant", "content": content}
+        self._send(_reply(cls.model_id, choices=[{"message": message}]))
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+@pytest.fixture
+def hosted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[str]:
+    _Hosted.model_id, _Hosted.swap_after, _Hosted.answered = "gpt-x-2026-01-01", None, 0
+    # Treat it as a server Plural cannot look inside, as a hosted API is.
+    monkeypatch.setattr("plural.execution.engine.on_this_machine", lambda _endpoint: False)
+    monkeypatch.delenv("PLURAL_API_KEY", raising=False)
+    monkeypatch.delenv("PLURAL_GATEWAY_URL", raising=False)
+    monkeypatch.setenv("PLURAL_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.chdir(tmp_path)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Hosted)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/v1"
+    finally:
+        server.shutdown()
+
+
+def test_a_hosted_model_with_varying_answers_runs_every_trial(hosted: str) -> None:
+    agent = Agent(name="hosted", model="gpt-x", endpoint=hosted)
+
+    result = Job(_task(), agents=[agent], attempts=3, allow_local_models=True).run()
+
+    assert [trial.score for trial in result.trials] == [1.0, 1.0, 1.0], [
+        trial.error_message for trial in result.trials
+    ]
+    assert all(trial.model_identity is not None for trial in result.trials)
+    assert result.trials[0].model_identity.method == "reported"  # type: ignore[union-attr]
+
+
+def test_a_hosted_model_whose_reported_id_changes_fails_the_trial(hosted: str) -> None:
+    agent = Agent(name="hosted", model="gpt-x", endpoint=hosted)
+    # Every answer after the Job's own review reports another model.
+    _Hosted.swap_after = 1 + len(PROBES)
+
+    result = Job(_task(), agents=[agent], allow_local_models=True).run()
+
+    trial = result.trials[0]
+    assert trial.score is None
+    assert "changed after the Job started" in (trial.error_message or "")
 
 
 def test_plural_run_refuses_a_model_that_answers_like_another(

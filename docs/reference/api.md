@@ -857,10 +857,16 @@ fingerprint nobody has accepted, naming what it found. ``plural run``
 asks once and remembers the answer; ``allow_local_models=True`` goes
 ahead without one. Each Trial records the identity either way, as
 ``TrialResult.model_identity``.
+
+A Benchmark Job runs its dev Tasks. ``heldout=True`` runs the held-out
+Tasks too; each such run is a peek, and ``plural run`` counts it.
+``purpose`` says why the Job runs; ``diagnose`` and ``fork`` Jobs refuse
+held-out Tasks. Each Trial records its ``gates``, from the
+metrics its Task's Verifiers mark ``gate: true``, and whether it ``passed``.
 ```
 
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None, episode_server: 'Any' = None, allow_local_models: 'bool' = False) -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None, episode_server: 'Any' = None, allow_local_models: 'bool' = False, heldout: 'bool' = False, purpose: 'JobPurpose' = 'eval') -> 'None'
 ```
 
 ### plural.Job.run_async
@@ -1695,7 +1701,7 @@ zero-sum game.
 ```
 
 ```python
-plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = ()) -> None
+plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = (), source: "Literal['agent', 'environment']" = 'agent') -> None
 ```
 
 ## plural.environments.types.Observation
@@ -1837,6 +1843,23 @@ model_post_init(self, context: 'Any', /) -> 'None'
 ```
 
 Bind the subclass source immediately after validation.
+
+### plural.Harness.tools
+
+```python
+tools() -> 'tuple[HarnessTool | str, ...]'
+```
+
+The tools this Harness brings itself, such as ``bash`` or ``edit``.
+
+```text
+Override to declare them, by name or as :class:`~plural.common.HarnessTool`.
+Each Trial records them, with the Environment's actions, as the tools its
+Agent was offered; a fork compares them with the tools a history used.
+
+Returns:
+    The tools; none by default.
+```
 
 ### plural.Harness.run
 
@@ -1990,6 +2013,15 @@ The Job refused a request, such as an action after the episode ended.
 
 ```python
 plural.external.client.EpisodeError
+```
+
+## plural.external.protocol.EpisodeResume
+
+An episode under way: what a fork tells an agent that declares ``supports_resume``.
+
+```text
+Its tools are its own, so the history is always a readable transcript of
+what happened before ``step``. The Apps and files are already as they were then.
 ```
 
 ## plural.external.protocol.EpisodeStart
@@ -2570,6 +2602,53 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 
 Idempotently delete the sandbox and scoped data.
 
+### plural.sandbox.SandboxProvider.version
+
+```python
+version(self) -> 'str'
+```
+
+The provider's version, which keys its conformance report.
+
+```text
+Returns:
+    A version string; the provider's name when it has none.
+```
+
+### plural.sandbox.SandboxProvider.lifetime
+
+```python
+lifetime(self, handle: 'SandboxHandle') -> 'SandboxLifetime | None'
+```
+
+Read back what stops this sandbox if its Trial never destroys it.
+
+```text
+Returns:
+    The limit the provider applied, or ``None`` when it has none.
+```
+
+### plural.sandbox.SandboxProvider.list_sandboxes
+
+```python
+list_sandboxes(self, labels: 'Mapping[str, str]') -> 'tuple[SandboxSummary, ...]'
+```
+
+List this account's sandboxes that carry every label given.
+
+```text
+Returns:
+    One summary per sandbox; empty when the provider cannot list them.
+```
+
+### plural.sandbox.SandboxProvider.delete_sandbox
+
+```python
+delete_sandbox(self, sandbox_id: 'str') -> 'None'
+```
+
+Delete a sandbox by id, including one this process did not create.
+
 ## plural.sandbox.SandboxRequirements
 
 Controls required for one sandbox before it may launch.
@@ -2847,6 +2926,49 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 
 Force-remove the container idempotently.
 
+### plural.sandbox.DockerProvider.version
+
+```python
+version(self) -> 'str'
+```
+
+The Docker Engine's version, which keys its conformance report.
+
+### plural.sandbox.DockerProvider.lifetime
+
+```python
+lifetime(self, handle: 'SandboxHandle') -> 'SandboxLifetime | None'
+```
+
+Read the container's sleep and auto-remove setting back from Docker.
+
+```text
+Returns:
+    How long the container lives and whether it is removed once it
+    stops, or ``None`` when it was created to live until destroyed.
+```
+
+### plural.sandbox.DockerProvider.list_sandboxes
+
+```python
+list_sandboxes(self, labels: 'Mapping[str, str]') -> 'tuple[SandboxSummary, ...]'
+```
+
+List Plural's containers that carry every label given.
+
+```text
+Returns:
+    One summary per container, running or stopped.
+```
+
+### plural.sandbox.DockerProvider.delete_sandbox
+
+```python
+delete_sandbox(self, sandbox_id: 'str') -> 'None'
+```
+
+Force-remove a container by id, even one another process created.
+
 ## plural.sandbox.DaytonaProvider
 
 Execute in Daytona while keeping its SDK an optional import.
@@ -2949,8 +3071,8 @@ exec(self, handle: 'SandboxHandle', request: 'ExecRequest') -> 'ExecResult'
 Execute through ``sandbox.process.exec``.
 
 ```text
-A ``user`` other than ``root`` runs through ``sudo -n -E -u``, which
-fails rather than falling back to the default user.
+A ``user``, ``root`` included, runs through ``sudo -n -E``, which fails
+rather than falling back to the default user.
 ```
 
 ### plural.sandbox.DaytonaProvider.download_files
@@ -2977,6 +3099,26 @@ the resolved file is what is read.
 
 Raises:
     FileNotFoundError: When a declared path is not a regular file inside ``root``.
+```
+
+### plural.sandbox.DaytonaProvider.read_private_file
+
+```python
+read_private_file(self, handle: 'SandboxHandle', path: 'str') -> 'bytes'
+```
+
+Read a file the App host's user owns, such as its workspace bundle.
+
+```text
+Daytona's file API reads as the sandbox's default user, which can't open the
+host's folder, so the file is copied out with ``sudo`` into a folder only that
+user can read. A path that resolves through a link is refused.
+
+Returns:
+    The file's bytes.
+
+Raises:
+    FileNotFoundError: When the path is not a regular file, or resolves elsewhere.
 ```
 
 ### plural.sandbox.DaytonaProvider.stop_user_processes
@@ -3006,6 +3148,53 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 ```
 
 Idempotently delete the remote sandbox.
+
+### plural.sandbox.DaytonaProvider.version
+
+```python
+version(self) -> 'str'
+```
+
+The installed Daytona SDK's version, which keys the conformance report.
+
+### plural.sandbox.DaytonaProvider.lifetime
+
+```python
+lifetime(self, handle: 'SandboxHandle') -> 'SandboxLifetime | None'
+```
+
+Read the sandbox's time to live back from Daytona.
+
+```text
+Returns:
+    The limit Daytona applied, or ``None`` when it reports none.
+```
+
+### plural.sandbox.DaytonaProvider.list_sandboxes
+
+```python
+list_sandboxes(self, labels: 'Mapping[str, str]') -> 'tuple[SandboxSummary, ...]'
+```
+
+This account's Daytona sandboxes that carry every label given.
+
+```text
+Returns:
+    One summary per sandbox; empty when the client cannot list.
+```
+
+### plural.sandbox.DaytonaProvider.delete_sandbox
+
+```python
+delete_sandbox(self, sandbox_id: 'str') -> 'None'
+```
+
+Delete a Daytona sandbox by id, even one another process created.
+
+```text
+Raises:
+    CapabilityError: When this client cannot delete by id.
+```
 
 ## plural.routing.policies.Explicit
 

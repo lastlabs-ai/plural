@@ -27,11 +27,14 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HumanVerifier](#humanverifier)
 - [Agent](#agent)
 - [Benchmark](#benchmark)
+- [AgentContext](#agentcontext)
 - [AgentCredential](#agentcredential)
 - [AppAction](#appaction)
 - [AppDefinition](#appdefinition)
 - [BenchmarkCategory](#benchmarkcategory)
 - [BenchmarkScoring](#benchmarkscoring)
+- [Checkpoint](#checkpoint)
+- [CheckpointWorkspace](#checkpointworkspace)
 - [DeclarativeImage](#declarativeimage)
 - [Resource](#resource)
 - [Runtime](#runtime)
@@ -44,6 +47,8 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HarnessCapability](#harnesscapability)
 - [HarnessDefinition](#harnessdefinition)
 - [HarnessPolicy](#harnesspolicy)
+- [HarnessTool](#harnesstool)
+- [MetricSpec](#metricspec)
 - [NetworkMode](#networkmode)
 - [Party](#party)
 - [ResourceRequirements](#resourcerequirements)
@@ -96,6 +101,9 @@ One versioned unit of work in a Python-authored Environment.
 - **`initial_state`** — `object`; optional.
 - **`seat_instructions`** — `object`; optional.
 - **`expected`** — `JSON value`; optional. Default: `null`.
+- **`from_checkpoint`** — `string | null`; optional. Default: `null`.
+- **`checkpoint`** — `Checkpoint | null`; optional. Default: `null`.
+- **`checkpoint_bundle`** — `string | null`; optional. Default: `null`.
 
 ## DeterministicVerifier
 
@@ -108,10 +116,12 @@ Code that verifies an episode: it scores the end, rewards actions, or both.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
 - **`secrets`** — `array of Secret`; optional. Default: `[]`.
+- **`metrics`** — `array of MetricSpec`; optional. Default: `[]`.
 - **`kind`** — `"deterministic"`; optional. Default: `"deterministic"`.
 - **`check`** — `JSON value`; optional. Default: `null`.
 - **`reward`** — `JSON value`; optional. Default: `null`.
 - **`hindsight`** — `JSON value`; optional. Default: `null`.
+- **`measure`** — `JSON value`; optional. Default: `null`.
 - **`runtime`** — `VerifierRuntime`; optional.
 - **`result_path`** — `string`; optional. Default: `"verifier-result.json"`.
 - **`evidence_required`** — `boolean`; optional. Default: `true`.
@@ -127,6 +137,7 @@ Model-judge verifier with its own runtime and connectivity policy.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
 - **`secrets`** — `array of Secret`; optional. Default: `[]`.
+- **`metrics`** — `array of MetricSpec`; optional. Default: `[]`.
 - **`kind`** — `"agent"`; optional. Default: `"agent"`.
 - **`model`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`instructions`** — `string`; required. Constraints: `{"minLength": 1}`.
@@ -145,6 +156,7 @@ Human review verifier.
 - **`weight`** — `number`; optional. Default: `1`. Constraints: `{"exclusiveMinimum": 0}`.
 - **`metadata`** — `object`; optional.
 - **`secrets`** — `array of Secret`; optional. Default: `[]`.
+- **`metrics`** — `array of MetricSpec`; optional. Default: `[]`.
 - **`kind`** — `"human"`; optional. Default: `"human"`.
 - **`instructions`** — `string`; optional. Default: `""`.
 
@@ -184,13 +196,27 @@ A semantic version that pins an ordered set of Tasks.
 - **`limitations`** — `array of string`; optional. Default: `[]`.
 - **`license`** — `string`; optional. Default: `""`.
 - **`forked_from`** — `string | null`; optional. Default: `null`.
+- **`canary`** — `string | null`; optional. Default: `null`.
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`title`** — `string | null`; optional. Default: `null`. Display name in the hosted project. Defaults to name.
 - **`version`** — `string`; required.
 - **`tasks`** — `array of Task`; required. Constraints: `{"minItems": 1}`.
-- **`primary_metric`** — `"score"`; optional. Default: `"score"`.
+- **`primary_metric`** — `string`; optional. Default: `"score"`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`metadata`** — `object`; optional.
+- **`heldout`** — `array of string`; optional. Default: `[]`.
+
+## AgentContext
+
+What one Agent had seen through observation *k*, in a Harness-neutral form.
+
+- **`messages`** — `array of object`; optional.
+- **`turn`** — `integer`; optional. Default: `0`.
+- **`tools_used`** — `array of string`; optional.
+- **`source`** — `"recorded" | "steps" | "reported"`; optional. Default: `"steps"`.
+- **`summary`** — `string | null`; optional. Default: `null`.
+- **`memory`** — `JSON value`; optional. Default: `null`.
+- **`compaction`** — `array of JSON value | null`; optional. Default: `null`.
 
 ## AgentCredential
 
@@ -226,6 +252,7 @@ One App inside an Environment.
 - **`has_reset`** — `boolean`; optional. Default: `false`.
 - **`has_snapshot`** — `boolean`; optional. Default: `false`.
 - **`control`** — `"owned" | "sandboxed" | "live" | "replayed"`; optional. Default: `"owned"`.
+- **`unrestorable`** — `string | null`; optional. Default: `null`.
 
 ## BenchmarkCategory
 
@@ -252,6 +279,41 @@ How a release turns attempts into one score per configuration.
 - **`infrastructure_error`** — `"exclude"`; optional. Default: `"exclude"`.
 - **`harness_timeout`** — `"infrastructure_error" | "agent_failure"`; optional. Default: `"infrastructure_error"`.
 - **`min_tasks_for_interval`** — `integer`; optional. Default: `5`. Constraints: `{"minimum": 2}`.
+- **`integrity`** — `"report" | "exclude_critical" | "zero_critical"`; optional. Default: `"report"`.
+
+## Checkpoint
+
+Everything needed to continue a Trial from after step ``step``.
+
+- **`trial_id`** — `string`; required.
+- **`job_id`** — `string`; optional. Default: `""`.
+- **`step`** — `integer`; required. Constraints: `{"minimum": 0}`.
+- **`name`** — `string | null`; optional. Default: `null`.
+- **`task_digest`** — `string`; optional. Default: `""`.
+- **`agent_digest`** — `string`; optional. Default: `""`.
+- **`apps`** — `object`; optional.
+- **`rng`** — `object`; optional.
+- **`initial`** — `object`; optional.
+- **`turns`** — `integer`; optional. Default: `0`.
+- **`elapsed`** — `number`; optional. Default: `0.0`.
+- **`observation`** — `JSON value`; optional. Default: `null`.
+- **`rendered`** — `string`; optional. Default: `""`.
+- **`workspace`** — `CheckpointWorkspace`; optional.
+- **`contexts`** — `object`; optional.
+- **`warnings`** — `array of string`; optional.
+- **`heldout`** — `boolean`; optional. Default: `false`.
+- **`prefix_steps`** — `array of object`; optional.
+- **`prefix_states`** — `array of object`; optional.
+- **`prefix_metrics`** — `array of object`; optional.
+
+## CheckpointWorkspace
+
+The workspace snapshot a checkpoint restores.
+
+- **`available`** — `boolean`; optional. Default: `false`.
+- **`commit`** — `string | null`; optional. Default: `null`.
+- **`skipped`** — `array of string`; optional.
+- **`problem`** — `string | null`; optional. Default: `null`.
 
 ## DeclarativeImage
 
@@ -291,7 +353,8 @@ Where an Environment runs: Docker, a trusted local process, or a remote sandbox.
 - **`declarative_image`** — `DeclarativeImage | null`; optional. Default: `null`.
 - **`build_context`** — `string | null`; optional. Default: `null`.
 - **`dockerfile`** — `string | null`; optional. Default: `null`.
-- **`network`** — `NetworkMode`; optional. Default: `"public"`.
+- **`network`** — `NetworkMode | null`; optional. Default: `null`. Egress during the episode. Unset, Plural chooses: a recorded run on a provider that enforces an allowlist gets one with the gateway's hosts, and any other run is public. Set public explicitly to keep the open internet.
+- **`isolation`** — `"required" | "best_effort" | null`; optional. Default: `null`. Whether a Trial may run when the sandbox cannot keep the Agent away from the App host and Verifiers. Unset, it is required everywhere but the local Runtime. best_effort runs anyway and marks the Trial unverified.
 - **`allowed_hosts`** — `array of string`; optional. Default: `[]`. Hosts the Runtime may reach when network is 'allowlist'.
 - **`compute`** — `ResourceRequirements`; optional. CPU, memory, storage, and process limits for the Runtime.
 - **`packages`** — `RuntimePackages`; optional. Packages installed in the Runtime before an episode. In environment.yaml, list Python ones under python_packages. On the local Runtime they must already be installed.
@@ -331,6 +394,7 @@ How long one episode may run.
 - **`max_turns`** — `integer | null`; optional. Default: `null`. Turns the Agent may take. Null, the default, means no cap. Set any positive number to stop the run after that many actions.
 - **`max_seconds`** — `number`; optional. Default: `600`. Constraints: `{"exclusiveMinimum": 0}`. Seconds the episode may run. The default is 600, ten minutes.
 - **`max_cost_usd`** — `number | null`; optional. Default: `null`. Optional spending cap, in USD. Unset means no cost cap.
+- **`workspace_snapshot_mib`** — `integer`; optional. Default: `512`. Constraints: `{"minimum": 0}`. MiB of the workspace the App host snapshots after each step, so a Trial can be forked from any step. Files past the cap are recorded as skipped. 0 turns snapshots off.
 
 ## ExecutionTarget
 
@@ -347,6 +411,7 @@ An agent that already runs as a service of its own.
 - **`signing_key`** — `string`; required.
 - **`version`** — `string`; optional. Default: `""`.
 - **`ca_bundle`** — `string | null`; optional. Default: `null`.
+- **`supports_resume`** — `boolean`; optional. Default: `false`.
 
 ## FileDeclaration
 
@@ -392,6 +457,8 @@ A declared executable Agent interaction strategy.
 - **`trajectory`** — `string | null`; optional. Default: `null`.
 - **`tito`** — `string | null`; optional. Default: `null`.
 - **`readme`** — `string`; optional. Default: `""`. Markdown overview shown on the Harness page.
+- **`tools`** — `array of HarnessTool`; optional. Default: `[]`. The tools the Harness brings itself, such as bash or edit, by name or {name, description}. A fork compares them with the tools a history used.
+- **`supports_resume`** — `boolean`; optional. Default: `false`. Whether the Harness reads HarnessEnvironment.resume and continues a history as its own conversation.
 
 ## HarnessPolicy
 
@@ -401,6 +468,28 @@ Environment ceiling for a Trial's optional Agent harness.
 - **`allowed_harnesses`** — `array of string`; optional. Default: `[]`.
 - **`allowed_capabilities`** — `array of HarnessCapability | null`; optional. Default: `null`.
 - **`denied_capabilities`** — `array of HarnessCapability`; optional. Default: `[]`. Constraints: `{"uniqueItems": true}`.
+
+## HarnessTool
+
+One tool a Harness brings itself, such as ``Bash`` or ``apply_patch``.
+
+- **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
+- **`description`** — `string`; optional. Default: `""`.
+
+## MetricSpec
+
+One metric a Verifier declares: what it measures and which way is better.
+
+- **`name`** — `string`; required. Constraints: `{"maxLength": 64, "minLength": 1}`.
+- **`kind`** — `"binary" | "score" | "number" | "rating" | "running"`; optional. Default: `"score"`.
+- **`unit`** — `string | null`; optional. Default: `null`.
+- **`direction`** — `"higher" | "lower"`; optional. Default: `"higher"`.
+- **`range`** — `array of JSON value | null`; optional. Default: `null`.
+- **`aggregate`** — `"final" | "mean" | "min" | "max" | "auc" | "time_to" | null`; optional. Default: `null`.
+- **`threshold`** — `number | null`; optional. Default: `null`.
+- **`gate`** — `boolean`; optional. Default: `false`.
+- **`target`** — `string | null`; optional. Default: `null`.
+- **`description`** — `string`; optional. Default: `""`.
 
 ## NetworkMode
 

@@ -17,6 +17,7 @@ Each action the Harness runs is a short client call::
     python -m plural.apps.daemon reset            # the opening observation
     python -m plural.apps.daemon step <action>    # arguments as JSON on stdin
     python -m plural.apps.daemon turn             # with seats: may this seat act, and its view
+    python -m plural.apps.daemon tool <name>      # report a Harness tool call, JSON on stdin
 
 It prints only what the Agent may see: the observation, and the error when the
 action rejected its input. Rewards, App State, views, and step info stay in
@@ -67,6 +68,8 @@ if TYPE_CHECKING:
 ENVIRONMENT_FILE = ".plural/apps/environment.json"
 TASK_FILE = ".plural/apps/task.json"
 BOOTSTRAP_FILE = ".plural/apps/bootstrap.json"
+# In the host's private folder: the Agent workspace's snapshots, out of the Harness's reach.
+SNAPSHOT_FOLDER = ".plural-snapshots"
 LOG_FILE = ".plural/apps/host.log"
 IDLE_SECONDS = float(os.environ.get("PLURAL_APPS_IDLE_SECONDS") or 3600)
 START_SECONDS = float(os.environ.get("PLURAL_APPS_START_SECONDS") or 120)
@@ -115,6 +118,20 @@ def sandbox_path(path: str | Path) -> Path:
     if root and text.startswith("/") and not text.startswith(root):
         return (Path(root) / text.removeprefix("/")).resolve()
     return Path(text).resolve()
+
+
+def runtime_path(path: str | Path) -> str:
+    """The inverse of :func:`sandbox_path`: this machine's path as the Runtime names it.
+
+    Returns:
+        A path such as ``/workspace/.plural-apps-x/workspace.bundle``.
+    """
+    resolved = Path(path).resolve()
+    root = os.environ.get("PLURAL_SANDBOX_ROOT")
+    if root:
+        with contextlib.suppress(ValueError):
+            return "/" + resolved.relative_to(Path(root).resolve()).as_posix()
+    return str(resolved)
 
 
 def workspace() -> Path:
@@ -248,6 +265,8 @@ def _load_host(
     info = _task_inputs(root, inputs)["info"]
     # Only the bootstrap carries the answer key; task.json sits where the Harness can read it.
     expected = inputs.get("expected") if inputs is not None else None
+    agent_workspace = inputs.get("workspace") if inputs is not None else None
+    snapshot_mib = inputs.get("snapshot_mib") if inputs is not None else None
     return AppHost(
         environment,
         workspace=root,
@@ -260,7 +279,40 @@ def _load_host(
         ),
         private_state=private_state,
         seats=seats,
+        agent_workspace=sandbox_path(agent_workspace) if isinstance(agent_workspace, str) else None,
+        snapshot_store=root / SNAPSHOT_FOLDER if isinstance(agent_workspace, str) else None,
+        snapshot_mib=snapshot_mib if isinstance(snapshot_mib, int) else 512,
+        snapshot_ignore=[
+            str(item)
+            for item in (inputs or {}).get("snapshot_ignore") or []
+            if isinstance(item, str)
+        ],
     )
+
+
+def _restore_inputs(inputs: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The checkpoint a fork starts from, as :meth:`AppHost.restore` takes it.
+
+    Returns:
+        Keyword arguments, or ``None`` when the episode starts from a reset.
+    """
+    given = inputs.get("restore") if inputs is not None else None
+    if not isinstance(given, dict):
+        return None
+    seed = inputs.get("seed") if inputs is not None else None
+    return {
+        "states": dict(given.get("states") or {}),
+        "rng": dict(given.get("rng") or {}),
+        "initial": given.get("initial") if isinstance(given.get("initial"), dict) else None,
+        "step": int(given.get("step") or 0),
+        "turns": int(given.get("turns") or 0),
+        "forced": [dict(item) for item in given.get("forced") or () if isinstance(item, dict)],
+        "elapsed": float(given.get("elapsed") or 0.0),
+        "observation": given.get("observation"),
+        "rendered": str(given.get("rendered") or ""),
+        "info": inputs.get("info") if inputs is not None else None,
+        "seed": seed if isinstance(seed, int) else None,
+    }
 
 
 def _task_file(root: Path) -> dict[str, Any]:
@@ -354,7 +406,7 @@ def _handle(
             "error": f"Only the Job may {operation} the Apps.",
             "kind": "PermissionError",
         }, False
-    if operation in {"reset", "step", "turn"} and host.finished:
+    if operation in {"reset", "step", "turn", "tool", "oracle"} and host.finished:
         from plural.apps.host import EPISODE_OVER
 
         # The Job has read the episode back; a Harness process still running may not act.
@@ -372,6 +424,29 @@ def _handle(
         seat = control.seat(request) if host.seats else None
         envelope = host.step(str(request.get("action")), arguments, seat=seat)
         return {"ok": True, "result": host.agent_view(envelope)}, False
+    if operation == "tool":
+        arguments = request.get("arguments")
+        seat = control.seat(request) if host.seats else None
+        result = host.tool(
+            str(request.get("name") or "tool"),
+            arguments if isinstance(arguments, dict) else {"input": arguments},
+            output=request.get("output"),
+            error=str(request.get("error")) if request.get("error") else None,
+            seat=seat,
+            background=bool(request.get("background")),
+        )
+        return {"ok": True, "result": result}, False
+    if operation == "oracle":
+        arguments = request.get("arguments")
+        seat = control.seat(request) if host.seats else None
+        return {
+            "ok": True,
+            "result": host.oracle(
+                str(request.get("name")),
+                arguments if isinstance(arguments, dict) else {},
+                seat=seat,
+            ),
+        }, False
     if operation == "turn":
         if not host.seats:
             return {"ok": True, "result": {"seat": None, "your_turn": True}}, False
@@ -399,7 +474,11 @@ def _handle(
         return {"ok": True, "result": result}, False
     if operation == "finish":
         # Outside a Job, a laptop's host keeps serving after a look at its report.
-        return {"ok": True, "result": host.finish() if control.token else host.report()}, False
+        report = host.finish() if control.token else host.report()
+        snapshots = report.get("workspace")
+        if isinstance(snapshots, dict) and snapshots.get("bundle"):
+            report["workspace"] = {**snapshots, "bundle": runtime_path(snapshots["bundle"])}
+        return {"ok": True, "result": report}, False
     if operation == "stop":
         return {"ok": True, "result": "stopped"}, True
     return {"ok": False, "error": f"unknown App host operation {operation!r}"}, False
@@ -465,9 +544,34 @@ def _ensure_home(private: Path) -> None:
     os.environ["HOME"] = str(folder)
 
 
+def _abandoned(owner: int | None, sandbox: Path | None) -> bool:
+    """Whether the local sandbox this host serves is gone, or the run that owns it died.
+
+    A run that crashes, or is killed, never sends the stop, and the host runs
+    in its own session, so nothing else would end it. Only the local Runtime
+    names an owner and a sandbox folder; elsewhere the sandbox is the boundary,
+    and the host ends with it.
+
+    Returns:
+        True when the host should exit.
+    """
+    if owner is not None:
+        try:
+            os.kill(owner, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            pass
+    return sandbox is not None and not sandbox.exists()
+
+
 def serve(root: Path, private: Path | None = None) -> None:
-    """Run the App host for one workspace until stopped or idle."""
+    """Run the App host for one workspace until stopped, idle, or abandoned."""
     not_dumpable()
+    owner_pid = os.environ.get("PLURAL_SANDBOX_OWNER", "")
+    owner = int(owner_pid) if owner_pid.isdigit() else None
+    sandbox_root = os.environ.get("PLURAL_SANDBOX_ROOT")
+    sandbox = Path(sandbox_root) if sandbox_root else None
     private = private or root
     # The workspace is not on the import path: a Harness could write modules there.
     unsafe = {"", str(root)} | ({os.getcwd()} if Path.cwd().resolve() != private else set())
@@ -491,7 +595,18 @@ def serve(root: Path, private: Path | None = None) -> None:
     control = _Control(token, seats)
     host = _load_host(private, private_state=bool(token), inputs=inputs, seats=tuple(seats))
     host.redact_values(values.values())
-    if token:
+    oracles = (inputs or {}).get("oracles")
+    if isinstance(oracles, dict):
+        host.oracles = {
+            str(key): {"app": str(value.get("app")), "path": str(value.get("path"))}
+            for key, value in oracles.items()
+            if isinstance(value, dict)
+        }
+    restore = _restore_inputs(inputs)
+    if token and restore is not None:
+        # A fork: the Apps as they stood at the checkpoint, never a reset.
+        host.restore(**restore)
+    elif token:
         # The Job's own reset, from the Task's state, before the Harness can act.
         host.start(**_task_inputs(private, inputs))
     server = _bind(root)
@@ -533,8 +648,9 @@ def serve(root: Path, private: Path | None = None) -> None:
             not stopping.is_set()
             and time.monotonic() - activity[0] < IDLE_SECONDS
             # Under a Job the Harness can delete or move any shared path, so only the
-            # signed stop or the idle timer ends the host.
+            # signed stop, the idle timer, or the end of the run's sandbox ends the host.
             and (token is not None or root.exists())
+            and not _abandoned(owner, sandbox)
         ):
             try:
                 connection, _ = server.accept()
@@ -696,7 +812,7 @@ def call(
             raise RuntimeError("The Environment's App host is not running.")
         start(base)
     seat_token = os.environ.get(SEAT_TOKEN)
-    if seat_token and operation in {"step", "turn"}:
+    if seat_token and operation in {"step", "turn", "tool", "oracle"}:
         fields = {**fields, "seat_token": seat_token}
     request = signed_request(token, operation, **fields) if token else {"op": operation, **fields}
     try:
@@ -730,6 +846,69 @@ def _relay(root: Path, raw: str) -> None:
     except (OSError, ValueError, ConnectionError) as exc:
         response = {"ok": False, "error": f"App host unreachable: {exc}", "kind": "Unreachable"}
     print(json.dumps(response, default=str))
+
+
+def _report_tool(root: Path, rest: list[str], timeout: float | None) -> Any:
+    """Report one Harness tool call read from stdin; a hook never fails the Harness.
+
+    ``tool NAME`` reads ``{"arguments", "output", "error"}``. ``tool --claude-hook``
+    reads Claude Code's PostToolUse hook payload.
+
+    Returns:
+        The host's answer, or ``None`` when there was nothing to report.
+    """
+    raw = sys.stdin.read().strip()
+    try:
+        payload = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        payload = {"output": raw}
+    if not isinstance(payload, dict):
+        payload = {"output": payload}
+    if rest[:1] == ["--claude-hook"]:
+        fields = claude_hook_fields(payload)
+    elif rest:
+        fields = {
+            "name": rest[0],
+            "arguments": payload.get("arguments") or {},
+            "output": payload.get("output"),
+            "error": payload.get("error"),
+            "background": bool(payload.get("background")),
+        }
+    else:
+        raise SystemExit("usage: python -m plural.apps.daemon tool <name> | --claude-hook")
+    if fields is None:
+        return None
+    try:
+        return call("tool", root=root, timeout=timeout, **fields)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        return None
+
+
+def claude_hook_fields(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The tool call a Claude Code PostToolUse hook describes.
+
+    Calls of the Environment's own MCP tools are left out: the host recorded
+    those as actions already.
+
+    Returns:
+        Fields for the ``tool`` operation, or ``None`` to skip this call.
+    """
+    name = str(payload.get("tool_name") or "")
+    if not name or name.startswith("mcp__plural-environment__"):
+        return None
+    arguments = payload.get("tool_input")
+    response = payload.get("tool_response")
+    error = None
+    if isinstance(response, dict) and response.get("is_error"):
+        error = str(response.get("error") or response.get("content") or "tool failed")
+    return {
+        "name": name,
+        "arguments": arguments if isinstance(arguments, dict) else {"input": arguments},
+        "output": response,
+        "error": error,
+        "background": bool(isinstance(arguments, dict) and arguments.get("run_in_background")),
+    }
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -800,6 +979,19 @@ def main(argv: list[str] | None = None) -> None:
             action=rest[1],
             arguments=json.loads(raw) if raw else {},
         )
+    elif operation == "tool":
+        result = _report_tool(root, rest, timeout)
+        if result is None:
+            return
+    elif operation == "oracle":
+        if len(rest) != 1:
+            raise SystemExit("usage: python -m plural.apps.daemon oracle <tool>")
+        raw = sys.stdin.read().strip()
+        try:
+            arguments = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            arguments = {"input": raw}
+        result = call("oracle", root=root, timeout=timeout, name=rest[0], arguments=arguments)
     elif operation == "turn":
         result = call("turn", root=root, timeout=timeout)
     elif operation in {"reset", "finish", "stop"}:

@@ -17,6 +17,29 @@ class ProtocolModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+class HarnessResume(ProtocolModel):
+    """Where a fork starts a Harness: the history before step ``step``, as the Agent saw it.
+
+    ``history`` says how it arrives. ``native``: ``messages`` is the
+    conversation to continue as the Agent's own. ``transcript``: ``transcript``
+    is the history as readable text for the first message. ``none``: only the
+    restored world, whose current observation is ``observation``. Only what the
+    Agent saw is here: never a reward, State, or the answer key.
+    """
+
+    history: Literal["native", "transcript", "none"]
+    step: int = Field(ge=0)
+    turn: int = Field(default=0, ge=0)
+    messages: tuple[dict[str, Any], ...] = ()
+    transcript: str = ""
+    observation: Any = None
+    rendered: str = ""
+    summary: str | None = None
+    memory: Any = None
+    note: str = ""
+    """A message a diagnostic fork adds after the history."""
+
+
 class HarnessRunRequest(ProtocolModel):
     """Public-only task request sent as one JSON line."""
 
@@ -33,6 +56,8 @@ class HarnessRunRequest(ProtocolModel):
     granted_capabilities: tuple[str, ...] = ()
     denied_capabilities: tuple[str, ...] = ()
     capability_denials: tuple[dict[str, str], ...] = ()
+    resume: HarnessResume | None = None
+    """Set when the episode continues from a checkpoint rather than a reset."""
 
 
 class HarnessEvent(ProtocolModel):

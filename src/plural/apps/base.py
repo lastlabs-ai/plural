@@ -67,6 +67,12 @@ class App(Generic[StateT]):
     credentials: Sequence[str | SecretReference] = ()
     control: ClassVar[AppControl | None] = None
     snapshot_on_step: ClassVar[bool] = True
+    restorable: ClassVar[bool] = True
+    """Whether :meth:`restore` puts the App back exactly as a snapshot found it.
+
+    The default :meth:`restore` loads ``self.state``. An App that keeps facts
+    outside ``self.state`` overrides :meth:`restore` or sets this to ``False``,
+    and a fork from one of its Trials is refused."""
 
     _init_config: dict[str, Any]
     _source_file: ClassVar[Path | None] = None
@@ -187,6 +193,33 @@ class App(Generic[StateT]):
         """
         return self.state.model_dump(mode="json")
 
+    def restore(self, snapshot: Any) -> None:
+        """Put the App back as :meth:`snapshot` found it, without a reset.
+
+        A fork or a Task that starts from a checkpoint calls this instead of
+        :meth:`reset`. The default loads ``snapshot`` into ``self.state``.
+
+        Args:
+            snapshot: What :meth:`snapshot` returned at the checkpoint.
+        """
+        self.state = cast(StateT, self._state_type().model_validate(snapshot or {}))
+
+    def restore_status(self) -> tuple[bool, str | None]:
+        """Whether this App can be restored from a checkpoint, and why not.
+
+        Returns:
+            ``(True, None)``, or ``(False, reason)``.
+        """
+        if self.resolved_control() == "live":
+            return False, f"App {self.name!r} is live; its state cannot be put back"
+        if not type(self).restorable:
+            return False, f"App {self.name!r} sets restorable = False"
+        if not self.has_snapshot():
+            return False, f"App {self.name!r} reports no snapshot to restore from"
+        if not self.snapshot_on_step:
+            return False, f"App {self.name!r} sets snapshot_on_step = False; no step has its State"
+        return True, None
+
     def terminated(self) -> bool:
         """Return whether this App ended the episode."""
         return False
@@ -230,6 +263,25 @@ class App(Generic[StateT]):
             A JSON-safe mapping, empty by default.
         """
         return {}
+
+    def sim_time(self) -> float | str | None:
+        """The simulated time now, for an App that runs its own clock.
+
+        A shop that advances a day per ``wait`` returns the day number, so
+        running metrics can be charted against simulated time as well as
+        steps. Return a number (simulated seconds, or the App's own unit) or
+        an ISO-8601 timestamp, the same kind every time. It is recorded beside
+        each metric point and never shown to the Agent.
+
+        Returns:
+            The simulated time, or ``None``, the default, for an App without a clock.
+
+        Examples:
+            >>> from plural import App
+            >>> App.sim_time(object()) is None
+            True
+        """
+        return None
 
     def view(self) -> dict[str, Any]:
         """Return an optional render document for the run viewer.
@@ -396,6 +448,7 @@ class App(Generic[StateT]):
             has_reset=self.has_reset(),
             has_snapshot=self.has_snapshot(),
             control=self.resolved_control(),
+            unrestorable=self.restore_status()[1],
         )
 
 

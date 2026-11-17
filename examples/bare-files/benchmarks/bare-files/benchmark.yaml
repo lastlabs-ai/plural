@@ -1,0 +1,17 @@
+# Benchmark: one bare-Environment Task, to compare Harnesses on the same files.
+name: bare-files
+version: 1.0.0
+description: Total a month's invoices into a file, with only a workspace.
+purpose: >-
+  Compares Harnesses on a Task with no Apps: each works with its own tools, and the
+  Verifier checks both the file it wrote and its final answer.
+tasks:
+  - march-total
+scoring:
+  metric: Totals right
+  description: Share of runs whose answer and file both give the March total.
+  aggregation: weighted_mean
+  score_range: [0.0, 1.0]
+  success_threshold: 1.0
+  agent_failure: zero
+  infrastructure_error: exclude

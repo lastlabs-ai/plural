@@ -92,7 +92,9 @@ def test_partial_settings_skip_required_fields_for_template_overrides() -> None:
 
 
 def test_resolved_settings_fill_defaults_and_check_the_network() -> None:
-    assert resolved_settings("daytona", {})["image"] == "python:3.12-slim"
+    assert "image" not in resolved_settings("daytona", {})
+    assert "network" not in resolved_settings("daytona", {})
+    assert resolved_settings("docker", {})["image"] == "python:3.12-slim"
     assert "image" not in resolved_settings("daytona", {"snapshot": "warm"})
     with pytest.raises(RuntimeSettingsError, match="at least one allowed host"):
         resolved_settings("daytona", {"network": "allowlist"})
@@ -183,12 +185,15 @@ def test_an_unset_ref_leaves_environment_hashes_unchanged(tmp_path: Path) -> Non
     assert referenced.content_hash != definition.content_hash
     del payload["runtime"]["ref"]
     del payload["runtime"]["packages"]
+    del payload["limits"]["workspace_snapshot_mib"]
     from plural.identity import revision_hash
     from plural.sandbox.models import runtime_hash_payload
 
     for item in payload["apps"]:
         if not item["credentials"]:
             del item["credentials"]
+        if item["unrestorable"] is None:
+            del item["unrestorable"]
     payload["source_digest"] = definition.source.digest if definition.source else None
     # Renamed Runtime fields hash under their original names.
     payload["runtime"] = runtime_hash_payload(payload["runtime"])

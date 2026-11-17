@@ -62,3 +62,55 @@ def test_seats_share_one_thread_and_nothing_else(tmp_path: Path) -> None:
             "seat_1",
             "seat_2",
         ]
+
+
+async def test_a_seats_restored_files_belong_to_the_seats_user() -> None:
+    from plural.apps.workspace import SnapshotEntry
+    from plural.execution.policy import sandbox_requirements_for
+    from plural.execution.seats import prepare_seats, restore_workspace, seat_workspace
+    from plural.sandbox import DockerProvider, ExecRequest, FileUpload
+
+    table = Environment(
+        name="thread",
+        apps=[Thread()],
+        runtime=Runtime.docker(image="python:3.12-slim"),
+        party=Party(min=2, max=2),
+    )
+    provider = DockerProvider()
+    handle = await provider.create(sandbox_requirements_for(table.definition()))
+    try:
+        await provider.isolate_apps(handle)
+        await provider.upload_files(
+            handle, [FileUpload(path="task.json", data=b"{}")], root="/workspace"
+        )
+        users = await provider.isolate_seats(handle, ["north", "south"])
+        assert await prepare_seats(provider, handle, users, shared=("/workspace/environment",))
+        entries = [
+            SnapshotEntry(path="seats/north/plan.md", data=b"north's plan\n"),
+            SnapshotEntry(path="seats/north/current", link="plan.md"),
+            SnapshotEntry(path="notes.txt", data=b"shared\n"),
+        ]
+        await restore_workspace(provider, handle, entries, users)
+        north = seat_workspace("north")
+
+        async def run(command: str, user: str | None = None) -> str:
+            result = await provider.exec(
+                handle,
+                ExecRequest(command=("sh", "-c", command), timeout_seconds=30, user=user),
+            )
+            assert result.exit_code == 0, result.stderr
+            return result.stdout.decode().strip()
+
+        assert await run(f"stat -c %u:%g {north}/plan.md", users["north"]) == users["north"]
+        assert await run(f"stat -c %u:%g {north}/current", users["north"]) == users["north"]
+        assert await run(f"readlink {north}/current", users["north"]) == "plan.md"
+        await run(f"echo more >> {north}/plan.md", user=users["north"])
+        denied = await provider.exec(
+            handle,
+            ExecRequest(
+                command=("cat", f"{north}/plan.md"), timeout_seconds=30, user=users["south"]
+            ),
+        )
+        assert denied.exit_code != 0
+    finally:
+        await provider.destroy(handle)

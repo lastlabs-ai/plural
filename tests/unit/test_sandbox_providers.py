@@ -163,7 +163,7 @@ async def test_daytona_provider_uses_adapter_without_importing_sdk() -> None:
     assert result.stdout == b"ok"
     assert files[0].data == b"a"
     assert client.requirements == requirements
-    assert client.sandbox.commands[0][0] == ("python", "agent.py")
+    assert client.sandbox.commands[-1][0] == ("python", "agent.py")
     assert len(client.deleted) == 1
 
 
@@ -243,3 +243,29 @@ async def test_daytona_sends_whole_seconds_and_reports_timeouts() -> None:
         result = await provider.exec(handle, ExecRequest(command=("sleep", "5"), timeout_seconds=2))
         assert result.timed_out
         assert result.exit_code == -1
+
+
+def test_a_daytona_provider_makes_a_client_for_each_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import plural.sandbox.daytona as daytona
+
+    made: list[asyncio.AbstractEventLoop] = []
+
+    class Client:
+        def __init__(self) -> None:
+            made.append(asyncio.get_running_loop())
+
+        async def list(self, labels: Mapping[str, str]) -> tuple[()]:
+            return ()
+
+    monkeypatch.setattr(daytona, "OfficialDaytonaAdapter", Client)
+    provider = DaytonaProvider(environ={})
+
+    async def twice() -> None:
+        await provider.list_sandboxes({})
+        await provider.list_sandboxes({})
+
+    asyncio.run(twice())
+    asyncio.run(provider.list_sandboxes({}))
+    assert len(made) == 2 and made[0] is not made[1]

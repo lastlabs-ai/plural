@@ -23,6 +23,7 @@ from plural.external.client import KEY_VARIABLE, Episode, EpisodeError, Ping, pi
 from plural.external.config import AgentConfig, Capture, FlushPolicy
 from plural.external.protocol import (
     EpisodeAction,
+    EpisodeResume,
     EpisodeStart,
     EpisodeTask,
     SignatureError,
@@ -40,6 +41,7 @@ __all__ = [
     "Episode",
     "EpisodeAction",
     "EpisodeError",
+    "EpisodeResume",
     "EpisodeStart",
     "EpisodeTask",
     "FlushPolicy",

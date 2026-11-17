@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import math
+import re
 import shlex
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -27,6 +29,7 @@ from plural.apps.definition import SecretReference
 from plural.catalog import ModelCatalog
 from plural.common import FrozenModel, RoutingSpec, described
 from plural.identity import revision_hash
+from plural.metrics import MetricSpec, default_score
 from plural.rewards import HindsightVerifier
 from plural.sandbox.models import (
     RUNTIME_RENAMES,
@@ -185,6 +188,180 @@ class AppSnapshot(FrozenModel):
         return self._query(action, arguments)
 
 
+VERIFIER_INPUT = ".plural/verifier-input.json"
+"""Where a command Verifier finds its Episode, relative to its working folder."""
+EPISODE_WORKSPACE = "episode-workspace"
+"""Beside the Episode: the Agent's final workspace, for ``episode.workspace``."""
+
+
+class EpisodeWorkspace(FrozenModel):
+    """The Agent's workspace as it was when the episode ended, read-only.
+
+    The App host snapshots the workspace after the Harness stops, so the Agent
+    cannot change it afterwards. Paths are relative to the workspace, with
+    ``/`` separators. Files over the snapshot cap are not there; ``skipped``
+    names them.
+    """
+
+    available: bool = False
+    problem: str | None = None
+    skipped: tuple[str, ...] = ()
+    _bundle: Path | None = PrivateAttr(default=None)
+    _commit: str | None = PrivateAttr(default=None)
+    _folder: Path | None = PrivateAttr(default=None)
+    _files: dict[str, bytes] | None = PrivateAttr(default=None)
+
+    @classmethod
+    def from_files(cls, files: Mapping[str, bytes | str]) -> EpisodeWorkspace:
+        """A workspace holding exactly these files, as for a Verifier's own tests.
+
+        Returns:
+            The workspace.
+        """
+        workspace = cls(available=True)
+        workspace._files = {
+            str(path): value.encode() if isinstance(value, str) else bytes(value)
+            for path, value in files.items()
+        }
+        return workspace
+
+    @classmethod
+    def from_bundle(
+        cls, bundle: Path, commit: str, *, skipped: Sequence[str] = ()
+    ) -> EpisodeWorkspace:
+        """The workspace in one commit of a Trial's ``workspace.bundle``.
+
+        Returns:
+            The workspace; its files are read on first use.
+        """
+        workspace = cls(available=True, skipped=tuple(skipped))
+        workspace._bundle = bundle
+        workspace._commit = commit
+        return workspace
+
+    @classmethod
+    def from_folder(
+        cls,
+        folder: Path,
+        *,
+        available: bool = True,
+        problem: str | None = None,
+        skipped: Sequence[str] = (),
+    ) -> EpisodeWorkspace:
+        """The workspace as a folder holds it, as a Verifier in its own sandbox gets it.
+
+        Returns:
+            The workspace; its files are read on first use, never through a link.
+        """
+        workspace = cls(available=available, problem=problem, skipped=tuple(skipped))
+        workspace._folder = Path(folder)
+        return workspace
+
+    def _all(self) -> dict[str, bytes]:
+        if self._files is None:
+            if self._folder is not None:
+                root = self._folder
+                self._files = {
+                    path.relative_to(root).as_posix(): path.read_bytes()
+                    for path in sorted(root.rglob("*"))
+                    if not path.is_symlink() and path.is_file()
+                }
+            elif self._bundle is None or self._commit is None:
+                self._files = {}
+            else:
+                from plural.apps.workspace import snapshot_files
+
+                self._files = snapshot_files(self._bundle, self._commit)
+        return self._files
+
+    def files(self) -> dict[str, bytes]:
+        """Every file in the workspace, by path.
+
+        Returns:
+            Each path with its bytes.
+        """
+        self._require()
+        return dict(self._all())
+
+    def _require(self) -> None:
+        if not self.available:
+            raise FileNotFoundError(
+                f"The workspace was not captured: {self.problem or 'no snapshot'}."
+            )
+
+    def exists(self, path: str) -> bool:
+        """Whether a file is in the workspace.
+
+        Returns:
+            True when the file was there when the episode ended.
+        """
+        self._require()
+        return _relative(path) in self._all()
+
+    def read_bytes(self, path: str) -> bytes:
+        """One file's bytes.
+
+        Returns:
+            The file's content.
+
+        Raises:
+            FileNotFoundError: When the file was not in the workspace.
+        """
+        self._require()
+        key = _relative(path)
+        files = self._all()
+        if key not in files:
+            raise FileNotFoundError(f"{path} was not in the workspace when the episode ended.")
+        return files[key]
+
+    def read(self, path: str, encoding: str = "utf-8") -> str:
+        """One file's text.
+
+        Returns:
+            The decoded content.
+        """
+        return self.read_bytes(path).decode(encoding, errors="replace")
+
+    def list(self, pattern: str = "**/*") -> list[str]:
+        """The files matching a glob: ``*`` stays in one folder, ``**/`` spans folders.
+
+        Returns:
+            Matching paths, sorted.
+        """
+        self._require()
+        matcher = _glob(pattern)
+        return [name for name in sorted(self._all()) if matcher.fullmatch(name)]
+
+
+def _relative(path: str) -> str:
+    while path.startswith("./"):
+        path = path[2:]
+    return path.lstrip("/")
+
+
+def _glob(pattern: str) -> re.Pattern[str]:
+    parts: list[str] = []
+    index = 0
+    pattern = _relative(pattern)
+    while index < len(pattern):
+        if pattern.startswith("**/", index):
+            parts.append("(?:.*/)?")
+            index += 3
+        elif pattern.startswith("**", index):
+            parts.append(".*")
+            index += 2
+        elif pattern[index] == "*":
+            parts.append("[^/]*")
+            index += 1
+        elif pattern[index] == "?":
+            parts.append("[^/]")
+            index += 1
+        else:
+            parts.append(re.escape(pattern[index]))
+            index += 1
+    return re.compile("".join(parts))
+
+
 class Episode(FrozenModel):
     """Completed Agent episode handed to a Verifier.
 
@@ -195,8 +372,12 @@ class Episode(FrozenModel):
     ``observation`` is what the Agent last saw, and ``answer`` is the final
     answer it gave, which is all there is to check in an Environment with no
     Apps. ``expected`` is the Task's answer key, which the Agent never sees.
-    ``rewards`` are the values this Verifier's ``reward`` gave each step, in
-    order; :func:`total_reward` sums them.
+    ``workspace`` reads the Agent's workspace as it was at the end
+    (``read``, ``list``, ``exists``). ``rewards`` are the values this
+    Verifier's ``reward`` gave each step, in order; :func:`total_reward` sums
+    them. ``metric_series`` holds each running metric's points, and ``answer``
+    may be ``None``: an episode that runs a business for a simulated year has
+    no final answer to check.
 
     When several Agents share the episode, ``seats`` names them, each step in
     ``trajectory`` carries the ``seat`` that took it, and ``seat_rewards`` holds
@@ -216,6 +397,38 @@ class Episode(FrozenModel):
     rewards: tuple[float, ...] = ()
     seats: tuple[str, ...] = ()
     seat_rewards: dict[str, tuple[float, ...]] = Field(default_factory=dict)
+    metric_series: dict[str, tuple[tuple[int, float], ...]] = Field(default_factory=dict)
+    """Each running metric's points so far, ``(step, value)``, from every
+    Verifier's ``measure`` hook, so ``check`` can use them."""
+    workspace: EpisodeWorkspace = Field(default_factory=EpisodeWorkspace, exclude=True)
+    """The Agent's workspace as the episode left it, read-only."""
+
+    @classmethod
+    def from_input(cls, path: str | Path = VERIFIER_INPUT) -> Episode:
+        """The Episode a Verifier that runs as a command is given, with its workspace.
+
+        A command Verifier runs in its own sandbox, where Plural writes the
+        Episode to ``.plural/verifier-input.json`` and the Agent's final
+        workspace beside it, so ``episode.workspace`` reads the same files a
+        function Verifier's does.
+
+        Returns:
+            The Episode.
+        """
+        source = Path(path)
+        data = json.loads(source.read_text(encoding="utf-8"))
+        fields = dict(data.get("episode") or {})
+        given = fields.pop("workspace", None)
+        episode = cls.model_validate(fields)
+        if not isinstance(given, Mapping):
+            return episode
+        workspace = EpisodeWorkspace.from_folder(
+            source.parent / str(given.get("folder") or EPISODE_WORKSPACE),
+            available=bool(given.get("available")),
+            problem=given.get("problem"),
+            skipped=tuple(given.get("skipped") or ()),
+        )
+        return episode.model_copy(update={"workspace": workspace})
 
     @classmethod
     def from_apps(cls, report: Mapping[str, Any], **fields: Any) -> Episode:
@@ -279,6 +492,8 @@ class Step:
     apps: Mapping[str, Any] = field(default_factory=dict)
     seat: str | None = None
     seats: tuple[str, ...] = ()
+    source: Literal["agent", "environment"] = "agent"
+    """What changed the State: the Agent's action, or the Environment itself."""
 
 
 class VerifierOutput(FrozenModel):
@@ -291,13 +506,28 @@ class VerifierOutput(FrozenModel):
 
     For a Task with seats, ``seats`` gives each seat's score, and ``score`` the
     episode's, such as their mean. Each Agent is ranked by its seats' scores.
+
+    ``metrics`` gives the value of each metric the Verifier declares, or
+    ``None`` for one that does not apply to this episode, such as a price check
+    on a correct handoff. A Verifier that declares metrics may leave ``score``
+    out: it is the mean of its applicable ``binary`` and ``score`` metrics, or
+    1.0 when it has none (see :func:`plural.metrics.default_score`).
     """
 
-    score: float
+    score: float | None = None
     scores: dict[str, float] = Field(default_factory=dict)
+    metrics: dict[str, float | None] = Field(default_factory=dict)
     evidence: tuple[str, ...] = ()
     feedback: str = ""
     seats: dict[str, float] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _scored(self) -> VerifierOutput:
+        if self.score is None and not self.metrics:
+            raise ValueError(
+                "a Verifier result needs a score, or metrics when the Verifier declares them"
+            )
+        return self
 
     def validated_finite(self) -> VerifierOutput:
         """Reject non-finite scores.
@@ -305,7 +535,12 @@ class VerifierOutput(FrozenModel):
         Returns:
             This output when all scores are finite.
         """
-        values = (self.score, *self.scores.values(), *self.seats.values())
+        values = (
+            *(() if self.score is None else (self.score,)),
+            *self.scores.values(),
+            *self.seats.values(),
+            *(value for value in self.metrics.values() if value is not None),
+        )
         if any(not math.isfinite(item) for item in values):
             raise ValueError("Verifier emitted non-finite scores")
         return self
@@ -363,25 +598,157 @@ def _bundled_catalog() -> ModelCatalog:
     return ModelCatalog()
 
 
-def coerce_verifier_output(value: Any, *, verifier_name: str) -> VerifierOutput:
-    """Accept a VerifierOutput, mapping, or object with the same fields.
+def criterion_metric(name: str) -> str:
+    """The rating metric a rubric criterion becomes: its name as a metric slug.
 
     Returns:
-        A validated VerifierOutput.
+        Lowercase letters, digits, and underscores.
+
+    Examples:
+        >>> criterion_metric("Tone of voice")
+        'tone_of_voice'
+    """
+    slug = "".join(char if char.isalnum() else "_" for char in name.strip().lower())
+    slug = "_".join(part for part in slug.split("_") if part) or "criterion"
+    return slug if slug[0].isalpha() else f"m_{slug}"
+
+
+def criterion_metric_names(
+    criteria: Sequence[RubricCriterion], declared: Iterable[str] = ()
+) -> dict[str, str]:
+    """Each rubric criterion's rating metric name, unique within its Verifier.
+
+    A criterion whose slug a declared metric already has is that metric.
+    Criteria whose names slug the same, such as ``Tone`` and ``tone!``, get
+    ``_2``, ``_3`` and so on, in the order they are listed.
+
+    Returns:
+        The metric name by criterion name.
+
+    Examples:
+        >>> rubric = [RubricCriterion(name=n, description="d") for n in ("Tone", "tone!")]
+        >>> criterion_metric_names(rubric)
+        {'Tone': 'tone', 'tone!': 'tone_2'}
+    """
+    own = set(declared)
+    taken = set(own)
+    names: dict[str, str] = {}
+    for item in criteria:
+        base = criterion_metric(item.name)
+        if base in own and base not in names.values():
+            names[item.name] = base
+            continue
+        name, number = base, 1
+        while name in taken:
+            number += 1
+            name = f"{base}_{number}"
+        taken.add(name)
+        names[item.name] = name
+    return names
+
+
+def criterion_metrics(
+    verifier: AgentVerifier | HumanVerifier, scores: Mapping[str, float]
+) -> dict[str, float | None]:
+    """A rubric's scores as rating metrics, one per criterion, named by :func:`criterion_metric`.
+
+    A criterion with no score is ``None``.
+
+    Returns:
+        Each criterion's rating by metric name.
+    """
+    declared = {spec.name for spec in verifier.metrics}
+    names = criterion_metric_names(verifier.criteria, declared)
+    return {
+        names[item.name]: (float(scores[item.name]) if scores.get(item.name) is not None else None)
+        for item in verifier.criteria
+    }
+
+
+def resolve_metrics(
+    output: VerifierOutput, specs: Sequence[MetricSpec], *, verifier_name: str
+) -> VerifierOutput:
+    """Check an output's metrics against what its Verifier declares, and fill in its score.
+
+    With declared metrics, ``scores`` is an alias for ``metrics`` and is merged
+    into it; a key in both is an error. Every value must be a declared metric
+    that is not ``running`` (those come from ``measure``), within its range.
+    A Verifier that declares nothing keeps today's behavior.
+
+    Returns:
+        The output, with ``metrics`` complete and ``score`` set.
+
+    Raises:
+        ValueError: When a metric is undeclared or invalid, or the output has
+            no score and declares nothing to derive one from.
+    """
+    if not specs:
+        if output.metrics:
+            raise ValueError(
+                f"Verifier {verifier_name!r} returned metrics "
+                f"({', '.join(sorted(output.metrics))}) but declares none. Declare them in "
+                "its metrics list."
+            )
+        return output
+    declared = {spec.name: spec for spec in specs}
+    metrics: dict[str, float | None] = dict(output.metrics)
+    for key, number in output.scores.items():
+        if key in declared:
+            if key in metrics:
+                raise ValueError(
+                    f"Verifier {verifier_name!r} returned {key!r} in both scores and metrics."
+                )
+            metrics[key] = number
+    for key, value in metrics.items():
+        spec = declared.get(key)
+        if spec is None or spec.kind == "running":
+            known = ", ".join(sorted(n for n, s in declared.items() if s.kind != "running"))
+            raise ValueError(
+                f"Verifier {verifier_name!r} returned metric {key!r}, which it does not "
+                + ("declare" if spec is None else "measure at the end: it is a running metric")
+                + f". Its end-of-episode metrics are: {known or 'none'}."
+            )
+        metrics[key] = spec.check_value(value)
+    scores = {key: number for key, number in output.scores.items() if key not in declared}
+    score = output.score
+    if score is None:
+        score = default_score(specs, metrics)
+    return output.model_copy(update={"metrics": metrics, "scores": scores, "score": score})
+
+
+def coerce_verifier_output(
+    value: Any, *, verifier_name: str, metrics: Sequence[MetricSpec] = ()
+) -> VerifierOutput:
+    """Accept a VerifierOutput, mapping, or object with the same fields.
+
+    Args:
+        value: What ``check`` returned.
+        verifier_name: For error messages.
+        metrics: The metrics the Verifier declares, to check its values against
+            and to derive a missing score from.
+
+    Returns:
+        A validated VerifierOutput with a score.
     """
     if isinstance(value, VerifierOutput):
-        return value
+        return resolve_metrics(value, metrics, verifier_name=verifier_name)
     if isinstance(value, Mapping):
+        declared = {spec.name for spec in metrics}
+        if declared and value and all(key in declared for key in value):
+            # A check that returns only its declared metrics, such as {"margin_usd": 12.5}.
+            value = {"metrics": dict(value)}
         try:
-            return VerifierOutput.model_validate(value)
+            parsed = VerifierOutput.model_validate(value)
         except Exception as exc:
             raise ValueError(
                 f"Verifier {verifier_name!r} returned an invalid result.\n"
                 "Return VerifierOutput or a mapping with a finite 'score' and optional "
-                "'scores', 'evidence', and 'feedback'.\n"
+                "'scores', 'metrics', 'evidence', and 'feedback'. A Verifier that declares "
+                "metrics may return just {metric: value}, and leave out the score.\n"
                 f"Got: {value!r}\n"
                 f"Cause: {exc}"
             ) from exc
+        return resolve_metrics(parsed, metrics, verifier_name=verifier_name)
     raise ValueError(
         f"Verifier {verifier_name!r} must return VerifierOutput or a mapping.\n"
         f"Got {type(value).__name__}."
@@ -426,6 +793,8 @@ class Verifier(FrozenModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     secrets: tuple[SecretReference, ...] = ()
     """Names the Job supplies to this Verifier, such as a key for a system it checks."""
+    metrics: tuple[MetricSpec, ...] = ()
+    """The metrics this Verifier produces, each optionally a ``gate`` with a ``target``."""
 
     @model_validator(mode="before")
     @classmethod
@@ -465,8 +834,40 @@ class Verifier(FrozenModel):
         """Compatibility name used by the execution engine."""
         return self.criteria
 
+    @model_validator(mode="after")
+    def _unique_metrics(self) -> Verifier:
+        names = [spec.name for spec in self.metric_specs]
+        repeated = sorted({name for name in names if names.count(name) > 1})
+        if repeated:
+            raise ValueError(
+                f"Verifier {self.name!r} declares metric {', '.join(repeated)} more than once"
+            )
+        return self
+
+    @property
+    def metric_specs(self) -> tuple[MetricSpec, ...]:
+        """Every metric this Verifier produces.
+
+        Those it declares, then one ``rating`` per rubric criterion it does not
+        already declare.
+        """
+        declared = {spec.name for spec in self.metrics}
+        criteria = getattr(self, "criteria", ())
+        names = criterion_metric_names(criteria, declared)
+        rated = tuple(
+            MetricSpec(
+                name=names[item.name],
+                kind="rating",
+                range=(item.min_score, item.max_score),
+                description=item.description,
+            )
+            for item in criteria
+            if names[item.name] not in declared
+        )
+        return (*self.metrics, *rated)
+
     def _hash_payload(self) -> dict[str, Any]:
-        return _legacy_runtime_keys(self.model_dump(mode="json"))
+        return _without_empty_metrics(_legacy_runtime_keys(self.model_dump(mode="json")))
 
     @property
     def content_hash(self) -> str:
@@ -511,6 +912,11 @@ class DeterministicVerifier(Verifier):
     check: Any = None
     reward: Any = None
     hindsight: Any = None
+    measure: Any = None
+    """Running metrics after each action: a function of one :class:`Step`
+    returning ``{metric: value}`` for metrics declared ``running``, or a
+    ``{"python": "verify.py:measure"}`` reference. It runs in the App host,
+    like ``reward``."""
     runtime: VerifierRuntime = Field(default_factory=VerifierRuntime)
     result_path: str = "verifier-result.json"
     evidence_required: bool = True
@@ -543,7 +949,7 @@ class DeterministicVerifier(Verifier):
             )
         elif isinstance(check, list):
             payload["check"] = tuple(str(item) for item in check)
-        for hook in ("reward", "hindsight"):
+        for hook in ("reward", "hindsight", "measure"):
             if isinstance(payload.get(hook), str):
                 payload[hook] = {"python": payload[hook]}
         payload.pop("required_artifacts", None)
@@ -552,7 +958,12 @@ class DeterministicVerifier(Verifier):
 
     @model_validator(mode="after")
     def _valid_hooks(self) -> DeterministicVerifier:
-        if self.check is None and self.reward is None and self.hindsight is None:
+        if (
+            self.check is None
+            and self.reward is None
+            and self.hindsight is None
+            and self.measure is None
+        ):
             raise ValueError(
                 f"Cannot create DeterministicVerifier {self.name!r}.\n"
                 "Give it check, to score the finished episode, reward, to reward each "
@@ -591,6 +1002,24 @@ class DeterministicVerifier(Verifier):
                 "  def reward(step: Step) -> float | None: ...\n"
                 f"Got {type(reward).__name__}: {reward!r}."
             )
+        measure = self.measure
+        if measure is not None and not (
+            (callable(measure) and _accepts_episode(measure))
+            or (isinstance(measure, dict) and measure.get("python"))
+        ):
+            raise ValueError(
+                f"Cannot create DeterministicVerifier {self.name!r}.\n"
+                "measure must be a function that accepts one Step, or a "
+                "'verify.py:measure' reference. Define it like:\n"
+                "  def measure(step: Step) -> dict[str, float]: ...\n"
+                f"Got {type(measure).__name__}: {measure!r}."
+            )
+        if measure is not None and not any(spec.kind == "running" for spec in self.metrics):
+            raise ValueError(
+                f"Cannot create DeterministicVerifier {self.name!r}.\n"
+                "measure samples running metrics, so declare at least one:\n"
+                "  metrics: [{name: cash_on_hand, kind: running, aggregate: final}]"
+            )
         hindsight = self.hindsight
         if hindsight is not None and not (
             (callable(hindsight) and _accepts_episode(hindsight))
@@ -605,7 +1034,7 @@ class DeterministicVerifier(Verifier):
             )
         return self
 
-    @field_serializer("check", "reward", "hindsight")
+    @field_serializer("check", "reward", "hindsight", "measure")
     def _serialize_hook(self, hook: Any) -> Any:
         if hook is total_reward:
             return {"builtin": TOTAL_REWARD}
@@ -618,10 +1047,10 @@ class DeterministicVerifier(Verifier):
     def _hash_payload(self) -> dict[str, Any]:
         payload = _legacy_runtime_keys(self.model_dump(mode="json"))
         # A Verifier without a hook hashes as it did before that hook existed.
-        for hook in ("reward", "hindsight"):
+        for hook in ("reward", "hindsight", "measure"):
             if payload.get(hook) is None:
                 payload.pop(hook, None)
-        return payload
+        return _without_empty_metrics(payload)
 
     def _callable_reference(self, hook: Callable[..., Any]) -> dict[str, str]:
         """Name a callable hook and fingerprint the code behind it.
@@ -663,6 +1092,16 @@ class DeterministicVerifier(Verifier):
     def reward_ref(self) -> str | None:
         """``reward`` as a ``file.py:function`` reference, if it is one."""
         return _reference(self.reward)
+
+    @property
+    def measure_ref(self) -> str | None:
+        """``measure`` as a ``file.py:function`` reference, if it is one."""
+        return _reference(self.measure)
+
+    @property
+    def measure_fn(self) -> Callable[..., Any] | None:
+        """``measure`` as an in-process function, if it is one."""
+        return self.measure if callable(self.measure) else None
 
     @property
     def hindsight_ref(self) -> str | None:
@@ -714,7 +1153,7 @@ class DeterministicVerifier(Verifier):
             output = fn(episode)
         except Exception as exc:
             raise ValueError(f"Verifier {self.name!r} check raised {described(exc)}") from exc
-        return coerce_verifier_output(output, verifier_name=self.name)
+        return coerce_verifier_output(output, verifier_name=self.name, metrics=self.metric_specs)
 
 
 def hindsight_hooks(verifiers: Iterable[Any]) -> list[HindsightVerifier]:
@@ -740,6 +1179,24 @@ def hindsight_hooks(verifiers: Iterable[Any]) -> list[HindsightVerifier]:
 
 
 TOTAL_REWARD = "total_reward"
+
+
+def _without_empty_metrics(payload: dict[str, Any]) -> dict[str, Any]:
+    # A Verifier with no metrics hashes as it did before metrics existed, and a
+    # metric with no gate or target as it did before those fields existed.
+    if not payload.get("metrics"):
+        payload.pop("metrics", None)
+        return payload
+    metrics = []
+    for item in payload["metrics"]:
+        item = dict(item)
+        if not item.get("gate"):
+            item.pop("gate", None)
+        if item.get("target") is None:
+            item.pop("target", None)
+        metrics.append(item)
+    payload["metrics"] = metrics
+    return payload
 
 
 def total_reward(episode: Episode) -> VerifierOutput:
@@ -856,6 +1313,8 @@ class WeightedVerifier(FrozenModel):
 
 
 __all__ = [
+    "EPISODE_WORKSPACE",
+    "VERIFIER_INPUT",
     "AgentVerifier",
     "AppSnapshot",
     "DeterministicVerifier",
@@ -872,4 +1331,8 @@ __all__ = [
     "VerifierRuntime",
     "WeightedVerifier",
     "coerce_verifier_output",
+    "criterion_metric",
+    "criterion_metric_names",
+    "criterion_metrics",
+    "resolve_metrics",
 ]

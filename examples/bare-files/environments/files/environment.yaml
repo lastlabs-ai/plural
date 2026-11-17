@@ -1,0 +1,21 @@
+# Environment: no Apps, only a workspace, the Task's files, and a Runtime. The Agent
+# works with its Harness's own tools (Claude Code's Read and Write, Codex's shell), and
+# a Verifier reads what it left in the workspace.
+name: files
+version: 1.0.0
+description: A workspace with one month of invoices, and no Apps.
+overview: Read invoices.csv in the resources folder and write what the Task asks for.
+readme: README.md
+# What a careful person would do; plural task validate checks that it passes.
+reference: reference.py:solve
+
+# Copied to /workspace/resources, where every Harness can read it.
+resources:
+  - invoices.csv
+
+runtime:
+  provider: local
+
+limits:
+  max_turns: 12
+  max_seconds: 300

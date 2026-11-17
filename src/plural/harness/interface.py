@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
 import time
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,6 +18,9 @@ from plural.common import FrozenModel
 from plural.harness.deadline import call_timeout, episode_deadline
 from plural.harness.episode import EpisodeRecorder
 from plural.usage import normalize_usage, price_own_hardware
+
+if TYPE_CHECKING:
+    from plural.harness.protocol import HarnessResume
 
 
 class HarnessTask(FrozenModel):
@@ -202,9 +206,16 @@ class SeatTurn(BaseModel):
 class HarnessEnvironment:
     """Environment controls supplied to ``Harness.run``."""
 
-    def __init__(self, payload: dict[str, Any], *, recorder: EpisodeRecorder | None = None) -> None:
+    def __init__(
+        self,
+        payload: dict[str, Any],
+        *,
+        recorder: EpisodeRecorder | None = None,
+        resume: dict[str, Any] | None = None,
+    ) -> None:
         self._recorder = recorder
         self.raw = dict(payload)
+        self._resume = resume
         self.name = str(payload.get("name") or "")
         self.overview = str(payload.get("overview") or "")
         self.workspace = str(payload.get("workspace") or "/workspace/environment")
@@ -223,6 +234,81 @@ class HarnessEnvironment:
     def observation(self) -> Any:
         """Return the latest observation seen by this Harness."""
         return self._observation
+
+    @property
+    def resume(self) -> HarnessResume | None:
+        """Where a fork starts this episode, or ``None`` for one that starts from reset.
+
+        A Harness that declares ``supports_resume`` continues
+        ``resume.messages`` as its own conversation when ``resume.history`` is
+        ``native``. With ``transcript``, it puts ``resume.transcript`` in its
+        first message. Either way the world is already restored: :meth:`reset`
+        returns the observation at the fork point, and the turn count starts at
+        ``resume.turn``.
+        """
+        if self._resume is None:
+            return None
+        from plural.harness.protocol import HarnessResume
+
+        return HarnessResume.model_validate(self._resume)
+
+    def record_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        output: Any = None,
+        *,
+        error: str | None = None,
+        background: bool = False,
+    ) -> int | None:
+        """Report one call of the Harness's own tool, such as a shell, as a step.
+
+        The App host gives it the next step number, so it sits in one timeline
+        with the Environment's actions, and snapshots the workspace after it.
+        Call it after the tool ran. ``background`` marks a call that left a
+        process running, which a checkpoint can't restore.
+
+        Returns:
+            The step number, or ``None`` when no App host is running.
+        """
+        from plural.harness.native_runner import (
+            _action_environment,
+            _local_command,
+            _workspace_path,
+        )
+
+        raw_command = self.raw.get("tool_command")
+        if not isinstance(raw_command, list) or not raw_command:
+            return None
+        payload = {
+            "arguments": arguments or {},
+            "output": output,
+            "error": error,
+            "background": background,
+        }
+        started = self._recorder.start() if self._recorder else None
+        completed = subprocess.run(
+            _local_command([*(str(item) for item in raw_command), name]),
+            cwd=_workspace_path(self.workspace),
+            env=_action_environment(self.raw),
+            input=json.dumps(payload, default=str).encode(),
+            capture_output=True,
+            check=False,
+        )
+        number: int | None = None
+        with contextlib.suppress(ValueError, TypeError):
+            answer = json.loads(completed.stdout or b"null")
+            if isinstance(answer, dict) and isinstance(answer.get("step"), int):
+                number = int(answer["step"])
+        if self._recorder and started and number is not None:
+            self._recorder.step(
+                started,
+                action=name,
+                arguments=arguments or {},
+                observation=output,
+                info={"step": number},
+            )
+        return number
 
     @property
     def seated(self) -> bool:

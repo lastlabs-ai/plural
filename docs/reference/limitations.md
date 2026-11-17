@@ -48,8 +48,15 @@ These apply to where code runs and what a run can see or measure.
 - Use the named `local`, `docker`, or `daytona` Runtime provider. Other providers
   require a separately installed `SandboxProvider`, and the provider extension
   API is in alpha.
-- Receipts are unsigned integrity records, and local runs report
-  `self_reported` trust.
+- Receipts are unsigned integrity records. A Trial's
+  [trust tier](../project/runtimes.md#trust-tiers) comes from facts the machine that
+  ran the Job reports, including its provider's conformance result. pluralintel.com
+  recomputes the tier from those facts but cannot re-observe them.
+- An episode may run as long as its `max_seconds`, but a recorded Trial's gateway key
+  lives at most 7 days, and a sandbox on Plural's Daytona account is ended after 6
+  hours. Use your own Daytona key for longer episodes.
+- The `egress_denied` integrity check exists, but no provider reports blocked
+  connections yet.
 - Redaction matches exact secret values in captured logs. It cannot catch a
   secret that code has encoded or transformed, and it does not apply to custom
   artifacts or external logs.
@@ -71,6 +78,21 @@ Plural rejects a run before it starts when the selected provider cannot enforce 
 requested control and it can detect that. Every Trial uses the Runtime of its
 Task's Environment. A Verifier's Runtime and network access are configured
 separately and can add their own provider requirements.
+
+## Checkpoints and forks
+
+- Workspace snapshots restore file contents with ordinary file modes: executable
+  files stay executable and other modes are not kept. Symbolic links are restored
+  as links, but a Verifier's `episode.workspace` leaves them out, so a link never
+  reads a file outside the workspace. Running processes are never restored; a
+  checkpoint after one warns.
+- Codex can't continue a history as its own session, so a fork into Codex always
+  gets a transcript. Claude Code continues one natively from a session file Plural
+  writes from the history.
+- An Environment with no Apps has an App host on every Runtime, Docker and Daytona
+  included, so its Trials keep a timeline and workspace snapshots and can reach the
+  `verified` trust tier. An External Agent in one has no App host.
+- Hermes isn't offered the Environment's actions; it works only in the workspace.
 
 ## Training
 

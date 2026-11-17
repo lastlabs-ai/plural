@@ -28,6 +28,7 @@ from plural.execution.episode_server import EpisodeRefused, EpisodeServer, Episo
 from plural.external.protocol import (
     EpisodeAction,
     EpisodeGateway,
+    EpisodeResume,
     EpisodeStart,
     EpisodeTask,
     sign,
@@ -187,6 +188,7 @@ class ExternalAgentRunner:
             deadline=datetime.fromtimestamp(deadline, timezone.utc).isoformat(),
             max_turns=max_turns,
             gateway=gateway,
+            resume=_resume(request),
         )
         body = start.model_dump_json(exclude_none=True).encode()
         sending = asyncio.create_task(
@@ -336,3 +338,21 @@ def _transition(stdout: bytes) -> dict[str, Any]:
 
 
 __all__ = ["AGENT_TRACE_FILE", "ExternalAgentRunner", "ExternalRun"]
+
+
+def _resume(request: HarnessRunRequest) -> EpisodeResume | None:
+    """What a fork tells an External Agent: the history as a transcript, or nothing.
+
+    Returns:
+        The resume, or ``None`` when the episode starts from a reset or the
+        agent can't take a history.
+    """
+    resume = request.resume
+    if resume is None or resume.history != "transcript":
+        return None
+    return EpisodeResume(
+        step=resume.step,
+        transcript=resume.transcript,
+        observation=resume.observation,
+        note=resume.note,
+    )

@@ -23,6 +23,7 @@ from pydantic import (
 
 from plural.agents import Agent, AgentBinding, AgentDefinition
 from plural.catalog import ModelCatalog
+from plural.checkpoints import Checkpoint, History
 from plural.common import (
     SHA256_PATTERN,
     ErrorCode,
@@ -41,9 +42,11 @@ from plural.environments.definition import (
     party_seats,
 )
 from plural.local_models import LocalModelError, LocalModelIdentity, Status
+from plural.metrics import MetricAggregate, MetricFailure
 from plural.rewards import RewardFailure
 from plural.sandbox.models import NetworkMode
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
+from plural.trust import TrustAssessment
 
 
 class RetryPolicy(FrozenModel):
@@ -80,15 +83,35 @@ class TaskJobSource(FrozenModel):
 
 
 class BenchmarkJobSource(FrozenModel):
-    """A Job selecting one Benchmark revision."""
+    """A Job selecting one Benchmark revision.
+
+    It runs the Benchmark's dev Tasks: held-out Tasks only with
+    ``include_heldout``, and each such run is a peek, and is counted.
+    """
 
     kind: Literal["benchmark"] = "benchmark"
     benchmark: BenchmarkDefinition
+    include_heldout: bool = False
+
+    @model_serializer(mode="wrap")
+    def _omit_dev_only(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        # A dev-only run serializes, and so hashes, as every run did before held-out Tasks.
+        if isinstance(data, dict) and not self.include_heldout:
+            data.pop("include_heldout", None)
+        return data
 
     @property
     def tasks(self) -> tuple[TaskDefinition, ...]:
-        """Selected Tasks."""
-        return self.benchmark.tasks
+        """Selected Tasks: the dev Tasks, and the held-out ones only when included."""
+        if self.include_heldout:
+            return self.benchmark.tasks
+        return self.benchmark.dev_tasks
+
+    @property
+    def heldout_tasks(self) -> tuple[str, ...]:
+        """The held-out Tasks this Job runs, by name: none unless included."""
+        return self.benchmark.heldout if self.include_heldout else ()
 
 
 JobSource = Annotated[TaskJobSource | BenchmarkJobSource, Field(discriminator="kind")]
@@ -370,12 +393,18 @@ class VerifierResult(FrozenModel):
     feedback: str = ""
     seats: dict[str, float] = Field(default_factory=dict)
     """Each seat's score, for a Task several Agents share."""
+    metrics: dict[str, float | None] = Field(default_factory=dict)
+    """The metrics its ``check`` returned; ``None`` where one does not apply."""
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
     @model_validator(mode="after")
     def _finite(self) -> VerifierResult:
-        values = [*self.scores.values(), *self.seats.values()]
+        values = [
+            *self.scores.values(),
+            *self.seats.values(),
+            *(item for item in self.metrics.values() if item is not None),
+        ]
         if self.score is not None:
             values.append(self.score)
         if any(not math.isfinite(item) for item in values):
@@ -453,6 +482,92 @@ def resolve_trial_harness_grant(
     )
 
 
+JobPurpose = Literal["eval", "diagnose", "fork", "confirm"]
+REFUSE_HELDOUT: frozenset[str] = frozenset({"diagnose", "fork"})
+"""Job purposes that may never run, or read, a held-out Task."""
+
+ForkRole = Literal["candidate", "control"]
+
+
+class ForkChange(FrozenModel):
+    """One change applied at the fork point, which makes the fork diagnostic."""
+
+    name: str = Field(min_length=1)
+    payload: Any = None
+
+
+class ForkSpec(FrozenModel):
+    """A fork Job: Trials that continue one Trial from its checkpoint after ``step``.
+
+    Each candidate Agent gets ``attempts`` forks, and the original Agent, the
+    control, as many again. With ``seat``, only that seat's Agent is replaced;
+    the other seats continue with their original Agents.
+    """
+
+    trial_id: str
+    job_id: str = ""
+    checkpoint: Checkpoint
+    control_agent_id: str
+    candidate_agent_ids: tuple[str, ...] = Field(min_length=1)
+    seat: str | None = None
+    change: ForkChange | None = None
+    bundle: str | None = Field(
+        default=None,
+        description="Path of the original Trial's workspace.bundle, read by the Job only.",
+    )
+    hosted_trial_id: str | None = Field(
+        default=None,
+        description="The original Trial's id in the hosted project, when it was recorded.",
+    )
+
+    @property
+    def step(self) -> int:
+        """The step the fork continues after."""
+        return self.checkpoint.step
+
+    @property
+    def controls_follow(self) -> bool:
+        """Whether the controls' attempts follow the candidates'.
+
+        A diagnostic fork of the original Agent runs it twice per attempt, with
+        the change and without, so the two can't share attempt numbers.
+        """
+        return self.change is not None and self.control_agent_id in self.candidate_agent_ids
+
+    @property
+    def diagnostic(self) -> bool:
+        """Whether a change makes this fork a diagnosis rather than something to ship."""
+        return self.change is not None
+
+
+class TrialFork(FrozenModel):
+    """A Trial's place in a fork Job."""
+
+    trial_id: str
+    step: int = Field(ge=0)
+    role: ForkRole
+    checkpoint_digest: str
+    seat: str | None = None
+    change: str | None = None
+
+
+class ForkRecord(FrozenModel):
+    """What a fork Trial records: where it started and how the history reached its Agent."""
+
+    of_trial_id: str
+    step: int = Field(ge=0)
+    role: ForkRole | None = None
+    history: History
+    checkpoint_digest: str
+    warnings: tuple[str, ...] = ()
+    seat: str | None = None
+    change: str | None = None
+    from_checkpoint: str | None = None
+    """``TRIAL/NAME`` when the Task, not a fork Job, named the checkpoint."""
+    of_hosted_trial_id: str | None = None
+    """The original Trial's id in the hosted project, when it was recorded."""
+
+
 class JobSpec(FrozenModel):
     """Complete schema-v2 Job orchestration input."""
 
@@ -480,13 +595,30 @@ class JobSpec(FrozenModel):
             "Empty, every Agent of the Job plays, once each."
         ),
     )
+    purpose: JobPurpose = Field(
+        default="eval",
+        description=(
+            "Why the Job runs: eval, diagnose, fork, or confirm. Diagnosis and "
+            "forks never run held-out Tasks."
+        ),
+    )
+    fork: ForkSpec | None = Field(
+        default=None,
+        description="For a fork Job: the checkpoint, the candidates, and the control.",
+    )
 
     @model_serializer(mode="wrap")
     def _omit_no_party(self, handler: SerializerFunctionWrapHandler) -> Any:
         data = handler(self)
-        # A Job without a party serializes, and so hashes, as it did before parties.
-        if isinstance(data, dict) and not self.party:
-            data.pop("party", None)
+        # A Job without a party or a purpose serializes, and so hashes, as it did
+        # before each existed.
+        if isinstance(data, dict):
+            if not self.party:
+                data.pop("party", None)
+            if self.purpose == "eval":
+                data.pop("purpose", None)
+            if self.fork is None:
+                data.pop("fork", None)
         return data
 
     @model_validator(mode="after")
@@ -494,6 +626,16 @@ class JobSpec(FrozenModel):
         agent_ids = [agent.agent_id for agent in self.agents]
         if len(agent_ids) != len(set(agent_ids)):
             raise ValueError("agents must have unique identities")
+        heldout = self.source.heldout_tasks if isinstance(self.source, BenchmarkJobSource) else ()
+        if heldout and self.purpose in REFUSE_HELDOUT:
+            raise ValueError(
+                f"A {self.purpose} Job cannot run held-out Tasks ({', '.join(heldout)}): "
+                "held-out Tasks are kept for confirming a fix, so diagnosis never sees "
+                "them.\nNext: plural run --benchmark BENCHMARK --heldout runs them, as a "
+                "counted peek."
+            )
+        if self.fork is not None:
+            self._check_fork(self.fork)
         names = {agent.name for agent in self.agents}
         unknown = sorted(set(self.party) - names)
         if unknown:
@@ -530,6 +672,28 @@ class JobSpec(FrozenModel):
                     _check_external_agent(self.mode, task, agent)
         return self
 
+    def _check_fork(self, fork: ForkSpec) -> None:
+        if self.purpose != "fork":
+            raise ValueError("A Job with a fork must have purpose fork.")
+        if fork.checkpoint.heldout:
+            raise ValueError(
+                f"Trial {fork.trial_id} ran a held-out Task, so it cannot be forked: held-out "
+                "Tasks are kept for confirming a fix."
+            )
+        if len(self.tasks) != 1:
+            raise ValueError("A fork Job continues one Trial, so it has exactly one Task.")
+        ids = {agent.agent_id for agent in self.agents}
+        named = {fork.control_agent_id, *fork.candidate_agent_ids}
+        if not named <= ids:
+            raise ValueError("A fork names Agents that are not in the Job.")
+        if fork.control_agent_id in fork.candidate_agent_ids and fork.change is None:
+            raise ValueError(
+                "A fork's candidate is the original Agent, which already runs as the control. "
+                "Change the Agent, or use --change for a diagnostic fork."
+            )
+        if self.tasks[0].party is not None and fork.seat is None:
+            raise ValueError("A fork of a Trial several Agents share must name a --seat.")
+
     @property
     def tasks(self) -> tuple[TaskDefinition, ...]:
         """Selected Tasks in deterministic order."""
@@ -563,7 +727,43 @@ class JobSpec(FrozenModel):
             identity["run_id"] = self.run_id
         if self.party:
             identity["party"] = self.party
+        if self.purpose != "eval":
+            identity["purpose"] = self.purpose
+        if self.fork is not None:
+            identity["fork"] = {
+                "trial": self.fork.trial_id,
+                "checkpoint": self.fork.checkpoint.digest,
+                "candidates": self.fork.candidate_agent_ids,
+                "seat": self.fork.seat,
+                "change": self.fork.change,
+            }
         return stable_id("job", identity)
+
+    @property
+    def max_attempt(self) -> int:
+        """The highest attempt number the plan uses.
+
+        That is ``attempts``, or twice it when a diagnostic fork's controls follow
+        its candidates.
+        """
+        if self.fork is not None and self.fork.controls_follow:
+            return self.attempts * 2
+        return self.attempts
+
+    @property
+    def agent_attempts(self) -> dict[str, int]:
+        """Agents whose Trials stop short of :attr:`max_attempt`, with their highest attempt.
+
+        Empty except in a diagnostic fork whose controls follow its candidates:
+        there the original Agent runs to twice ``attempts`` and the others to
+        ``attempts``.
+        """
+        if self.fork is None or not self.fork.controls_follow:
+            return {}
+        highest: dict[str, int] = {}
+        for trial in self.plan().trials:
+            highest[trial.agent_id] = max(highest.get(trial.agent_id, 0), trial.attempt)
+        return {key: value for key, value in highest.items() if value < self.max_attempt}
 
     def plan(self, catalog: ModelCatalog | None = None) -> JobPlan:
         """Expand Agent x Task x attempt and freeze per-Trial compatibility.
@@ -578,7 +778,12 @@ class JobSpec(FrozenModel):
             agent.agent_id: _resolve_model(agent, effective_catalog) for agent in self.agents
         }
 
-        def trial(task: TaskDefinition, attempt: int, party: Sequence[AgentBinding]) -> TrialSpec:
+        def trial(
+            task: TaskDefinition,
+            attempt: int,
+            party: Sequence[AgentBinding],
+            role: ForkRole | None = None,
+        ) -> TrialSpec:
             agent = party[0]
             seats = tuple(
                 SeatAssignment(
@@ -610,20 +815,37 @@ class JobSpec(FrozenModel):
                 runtime_provider=task.environment.runtime.provider,
                 placement=task.environment.runtime.placement,
                 seats=seats,
+                fork=(
+                    TrialFork(
+                        trial_id=self.fork.trial_id,
+                        step=self.fork.step,
+                        role=role,
+                        checkpoint_digest=self.fork.checkpoint.digest,
+                        seat=self.fork.seat,
+                        change=self.fork.change.name
+                        if self.fork.change is not None and role == "candidate"
+                        else None,
+                    )
+                    if self.fork is not None and role is not None
+                    else None
+                ),
             )
 
         solo = [task for task in self.tasks if task.party is None]
         shared = [task for task in self.tasks if task.party is not None]
-        trials = tuple(
-            trial(task, attempt, (agent,))
-            for agent in self.agents
-            for task in solo
-            for attempt in range(1, self.attempts + 1)
-        ) + tuple(
-            trial(task, attempt, self.party_agents)
-            for task in shared
-            for attempt in range(1, self.attempts + 1)
-        )
+        if self.fork is not None:
+            trials = self._fork_trials(trial)
+        else:
+            trials = tuple(
+                trial(task, attempt, (agent,))
+                for agent in self.agents
+                for task in solo
+                for attempt in range(1, self.attempts + 1)
+            ) + tuple(
+                trial(task, attempt, self.party_agents)
+                for task in shared
+                for attempt in range(1, self.attempts + 1)
+            )
         lock = JobLock(
             job_id=self.job_id,
             spec_hash=self.content_hash,
@@ -647,6 +869,45 @@ class JobSpec(FrozenModel):
             mode=self.mode,
         )
         return JobPlan(job_id=self.job_id, spec_hash=self.content_hash, lock=lock, trials=trials)
+
+    def _fork_trials(self, trial: Any) -> tuple[TrialSpec, ...]:
+        """Each candidate's forks, then the controls: the original Agent from the same point.
+
+        Returns:
+            The Trials, in order.
+        """
+        fork = self.fork
+        assert fork is not None
+        task = self.tasks[0]
+        by_id = {agent.agent_id: agent for agent in self.agents}
+        attempts = range(1, self.attempts + 1)
+
+        def seated(agent: AgentBinding) -> tuple[AgentBinding, ...]:
+            if task.party is None:
+                return (agent,)
+            seats = party_seats(len(self.party_agents))
+            index = seats.index(str(fork.seat))
+            party = list(self.party_agents)
+            party[index] = agent
+            return tuple(party)
+
+        candidates = tuple(
+            trial(task, attempt, seated(by_id[agent_id]), "candidate")
+            for agent_id in fork.candidate_agent_ids
+            for attempt in attempts
+        )
+        control = by_id[fork.control_agent_id]
+        shift = self.attempts if fork.controls_follow else 0
+        controls = tuple(
+            trial(
+                task,
+                attempt + shift,
+                seated(control) if task.party is None else self.party_agents,
+                "control",
+            )
+            for attempt in attempts
+        )
+        return candidates + controls
 
 
 class SeatAssignment(FrozenModel):
@@ -686,8 +947,16 @@ class TrialSpec(FrozenModel):
     runtime_provider: str
     placement: dict[str, str] = Field(default_factory=dict)
     seats: tuple[SeatAssignment, ...] = ()
+    fork: TrialFork | None = None
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+    @model_serializer(mode="wrap")
+    def _omit_no_fork(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        if isinstance(data, dict) and self.fork is None:
+            data.pop("fork", None)
+        return data
 
     @property
     def trial_id(self) -> str:
@@ -700,6 +969,8 @@ class TrialSpec(FrozenModel):
         }
         if self.seats:
             identity["seats"] = [[item.seat, item.agent_id] for item in self.seats]
+        if self.fork is not None:
+            identity["fork"] = self.fork.role
         return stable_id("trl", identity)
 
     @property
@@ -875,17 +1146,46 @@ IntegrityCode = Literal[
     "actions_not_traced",
     "answer_differs",
     "trace_outside_episode",
+    "model_calls_differ",
+    "forbidden_read",
+    "egress_denied",
+    "suspicious_success",
+    "grader_file_touch",
+    "canary_seen",
+    "solution_lookup",
+    "grader_special_casing",
+    "false_claim",
+    "instruction_violation",
+    "model_answers_changed",
 ]
+
+IntegritySeverity = Literal["info", "warning", "critical"]
+IntegritySource = Literal["external_trace", "detector", "judge"]
 
 
 class IntegrityFinding(FrozenModel):
-    """One way an External Agent's own trace departs from what Plural observed.
+    """One sign that a Trial's result may not mean what its score says.
 
-    Evidence for a person to read. It never changes a score.
+    Findings cover every Agent: an External Agent's self-reported trace
+    departing from what Plural observed, a deterministic detector over the
+    recorded episode, or the hack judge. Evidence for a person to read; a
+    finding never changes a score on its own. A Benchmark's ``integrity``
+    rule decides whether ``critical`` findings exclude or zero a Trial, and
+    results then carry both the raw and the adjusted numbers.
+
+    Attributes:
+        code: What kind of problem this is.
+        message: One line a person can act on.
+        severity: ``info``, ``warning`` (the default), or ``critical``.
+        steps: Step indexes, from 1, that show the problem.
+        source: What found it: ``external_trace``, ``detector``, or ``judge``.
     """
 
     code: IntegrityCode
     message: str
+    severity: IntegritySeverity = "warning"
+    steps: tuple[int, ...] = ()
+    source: IntegritySource = "external_trace"
 
 
 class TrialResult(FrozenModel):
@@ -926,11 +1226,34 @@ class TrialResult(FrozenModel):
     turns: int = Field(default=0, ge=0)
     """Model turns the Harness reported taking."""
     integrity: tuple[IntegrityFinding, ...] = ()
-    """For an External Agent, where its self-reported trace departs from the
-    actions Plural observed and the answer it submitted. Never a score."""
+    """Signs the result may be gamed or leaked: an External Agent's trace that
+    departs from what Plural observed, and what the deterministic detectors
+    found in the recorded episode. Never a score."""
+    trust: TrustAssessment | None = None
+    """How far this result can be trusted, from how it ran: its tier and the
+    reasons it is not higher. ``None`` when the Trial never reached a sandbox."""
     model_identity: LocalModelIdentity | None = None
     """For an endpoint Agent, what its model server was running when the
     Trial started, its fingerprint, and how the run came to trust it."""
+    metrics: dict[str, float | None] = Field(default_factory=dict)
+    """Every metric's value on this Trial: the built-ins, what each Verifier's
+    ``check`` returned, and each running metric's aggregate. ``None`` means it
+    does not apply here, and is left out of every aggregate."""
+    metric_failures: tuple[MetricFailure, ...] = ()
+    """Each Verifier whose ``measure`` hook failed, on how many steps. Never fatal."""
+    gates: dict[str, bool] = Field(default_factory=dict)
+    """Each applicable gate's verdict, for the metrics the Task's Verifiers mark
+    ``gate: true``. A gate whose value is ``None`` does not apply and is left out."""
+    passed: bool | None = None
+    """Whether every applicable gate passed. ``None`` when no gate applies (the
+    Trial is not judged) or while a Verifier awaits review; ``False`` for a
+    Trial that failed and has gates."""
+    tools_offered: tuple[str, ...] = ()
+    """Every tool the Agent was offered: the Environment's actions and its
+    Harness's own tools."""
+    fork: ForkRecord | None = None
+    """For a Trial that started from a checkpoint: where, and how the history
+    reached its Agent."""
 
     @model_validator(mode="after")
     def _shape(self) -> TrialResult:
@@ -963,6 +1286,17 @@ class AgentAggregate(FrozenModel):
     coverage: float = 0
     total_cost: float | None = None
     mean_latency_seconds: float | None = None
+    metrics: dict[str, MetricAggregate] = Field(default_factory=dict)
+    """Every metric across this Agent's Trials, by name, with how many it applied to."""
+    primary_metric: str = "score"
+    """What the leaderboard ranks on: ``score``, or a metric the Benchmark names."""
+    primary: float | None = None
+    """This Agent's value of ``primary_metric``: ``mean_score`` for ``score``, else
+    the metric's mean (the share of 1s, for a binary metric)."""
+    pass_rate: float | None = None
+    """The pass rate: the share of this Agent's judged Trials that passed every
+    applicable gate. ``None`` when no Trial was judged. The success rate, which
+    counts scores at the success threshold, is separate."""
 
 
 class JobResult(FrozenModel):
@@ -974,6 +1308,9 @@ class JobResult(FrozenModel):
     trials: tuple[TrialResult, ...]
     benchmark: BenchmarkPin | None = None
     aggregates: tuple[AgentAggregate, ...] = ()
+    stopped: str | None = None
+    """Why the Job stopped before every Trial ran, such as a rejected API key,
+    which would fail every Trial alike. ``None`` when it ran to the end."""
 
 
 class Job:
@@ -998,6 +1335,12 @@ class Job:
     asks once and remembers the answer; ``allow_local_models=True`` goes
     ahead without one. Each Trial records the identity either way, as
     ``TrialResult.model_identity``.
+
+    A Benchmark Job runs its dev Tasks. ``heldout=True`` runs the held-out
+    Tasks too; each such run is a peek, and ``plural run`` counts it.
+    ``purpose`` says why the Job runs; ``diagnose`` and ``fork`` Jobs refuse
+    held-out Tasks. Each Trial records its ``gates``, from the
+    metrics its Task's Verifiers mark ``gate: true``, and whether it ``passed``.
     """
 
     def __init__(
@@ -1026,6 +1369,8 @@ class Job:
         credentials: Mapping[str, Mapping[str, str]] | None = None,
         episode_server: Any = None,
         allow_local_models: bool = False,
+        heldout: bool = False,
+        purpose: JobPurpose = "eval",
     ) -> None:
         if not isinstance(source, (Task, Benchmark)):
             raise TypeError(
@@ -1055,9 +1400,11 @@ class Job:
         self.api_key = api_key
         job_source: JobSource
         if isinstance(source, Task):
+            if heldout:
+                raise ValueError("Cannot create Job.\nheldout applies to a Benchmark, not a Task.")
             job_source = TaskJobSource(task=source._definition())
         else:
-            job_source = BenchmarkJobSource(benchmark=source._definition())
+            job_source = BenchmarkJobSource(benchmark=source._definition(), include_heldout=heldout)
         bindings = tuple(AgentBinding(agent=agent._definition()) for agent in self.agents)
         members: list[str] = []
         for member in party or ():
@@ -1073,6 +1420,7 @@ class Job:
             attempts=attempts,
             priority=priority,
             retry=retry or RetryPolicy(),
+            purpose=purpose,
         )
         self.catalog = catalog or ModelCatalog()
         self.plan = self.spec.plan(self.catalog)
@@ -1247,28 +1595,35 @@ __all__ = [
     "ArtifactManifest",
     "ArtifactManifestEntry",
     "ArtifactReference",
-    "BenchmarkPin",
     "BenchmarkJobSource",
+    "BenchmarkPin",
     "ExecutionStatus",
+    "ForkChange",
+    "ForkRecord",
+    "ForkRole",
+    "ForkSpec",
     "IntegrityFinding",
     "Job",
     "JobLock",
     "JobMode",
     "JobPlan",
+    "JobPurpose",
     "JobResult",
     "JobSource",
     "JobSpec",
     "ModelResolution",
+    "PhaseName",
+    "PhaseTiming",
     "ProgressEvent",
+    "REFUSE_HELDOUT",
     "RetryPolicy",
+    "SeatAssignment",
+    "SeatResult",
     "TITORecord",
     "TaskJobSource",
     "TrialExecution",
-    "PhaseName",
-    "PhaseTiming",
+    "TrialFork",
     "TrialReceipt",
-    "SeatAssignment",
-    "SeatResult",
     "TrialResult",
     "TrialSpec",
     "TrialStatus",

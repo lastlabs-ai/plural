@@ -192,3 +192,28 @@ def test_a_remote_installer_installs_system_wide_and_leaves_the_workspace_alone(
     install_main(["hermes", "0.19.0"])
     assert ran and "--prefix" not in ran[0]
     assert not (tmp_path / "tools").exists()
+
+
+def test_a_local_pip_cli_gets_its_own_environment_and_a_link_on_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ran: list[tuple[str, ...]] = []
+    tools = tmp_path / "tools"
+    venv = tools / "venvs" / "hermes-agent"
+
+    def run(command: tuple[str, ...]) -> None:
+        ran.append(command)
+        if command[1:3] == ("-m", "venv"):
+            (venv / "bin").mkdir(parents=True)
+            (venv / "bin" / "python").touch()
+            (venv / "bin" / "hermes").touch()
+
+    monkeypatch.setenv("PLURAL_RUNTIME_PROVIDER", "local")
+    monkeypatch.setenv("PLURAL_TOOLS_PREFIX", str(tools))
+    monkeypatch.setattr("plural.harness.install._run", run)
+    found = iter([None, str(tools / "bin" / "hermes")])
+    monkeypatch.setattr("plural.harness.install.shutil.which", lambda _name: next(found))
+    install_main(["hermes", "0.19.0"])
+    assert ran[0][1:] == ("-m", "venv", str(venv))
+    assert ran[1][0] == str(venv / "bin" / "python") and ran[1][-1] == "hermes-agent==0.19.0"
+    assert (tools / "bin" / "hermes").resolve() == (venv / "bin" / "hermes").resolve()

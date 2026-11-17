@@ -138,6 +138,23 @@ After `@`, give a revision number, a release version, or a content hash. The rev
 is restored under `.plural/versions` without touching your files; see
 [Calling a revision by name](../project/updating.md#calling-a-revision-by-name).
 
+### Check before you run
+
+Before you spend model calls on a Benchmark, check that its Tasks can be solved,
+that its graders don't reward doing nothing, and that the Agent can't read the
+answers:
+
+```bash
+plural benchmark validate support-triage   # every Task, its graders, leaks, and trust
+plural task validate ticket-1              # one Task
+```
+
+Each runs the Task's reference policy and a do-nothing player, scans what the Agent
+can read for the answers, and prints the problems it found and the next command to
+run. `plural benchmark validate` also reports the trust tier the default Runtime gives.
+Add `--no-probes` to check only the files. See
+[Integrity](../operations/integrity.md).
+
 ## Jobs, Trials, and reviews
 
 After a run, these commands let you look back at what happened, run it again, or add
@@ -149,6 +166,8 @@ plural job show JOB_ID
 plural job rerun JOB_ID
 plural trial show TRIAL_ID
 plural trial rerun TRIAL_ID
+plural trial checkpoint TRIAL_ID --step 4 --name before-rounding
+plural trial fork TRIAL_ID --step 4 --agent AGENT
 plural review list
 plural review submit TRIAL_ID --verifier policy-review --score 2 \
   --feedback "Meets policy."
@@ -162,6 +181,9 @@ plural review submit TRIAL_ID --verifier policy-review --score 2 \
   Job linked to the original. `trial rerun` runs one Trial again as a new one-Trial
   Job. Add `--record` to either to record a local rerun in the hosted project as it
   runs.
+- `trial checkpoint` saves the moment after one step of a Trial by name, and
+  `trial fork` continues a Trial from such a moment with other Agents, beside
+  controls that rerun the original. See [Checkpoints and forks](../running/forks.md).
 - `review list` shows Trials waiting for a HumanVerifier score, and `review submit`
   records one. Use one `--score criterion=value` per rubric criterion, or a bare value
   for a one-criterion rubric. Add `--hosted` to either for hosted review assignments.
@@ -343,7 +365,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ agent       Create, validate, push, pull, and inspect Agents.                                    │
 │ benchmark   Create, validate, push, pull, and inspect Benchmarks.                                │
 │ job         List, inspect, and rerun Jobs.                                                       │
-│ trial       Inspect and rerun Trials.                                                            │
+│ trial       Inspect, rerun, checkpoint, and fork Trials.                                         │
 │ review      List and submit human reviews.                                                       │
 │ reward      Show a Trial's rewards and export training data. Add rewards with `plural verifier   │
 │             apply`.                                                                              │
@@ -823,7 +845,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ init      Create a new Benchmark from the standard template.                                     │
-│ validate  Check a resource and everything it depends on, without uploading.                      │
+│ validate  Check a resource and everything it depends on, then prove its Tasks are fair.          │
 │ push      Validate and push an immutable, private revision to the bound project.                 │
 │ release   Label the revision matching your files with a release version, pushing it first.       │
 │ pull      Restore a hosted revision's editable files into this project.                          │
@@ -1031,14 +1053,29 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural benchmark validate [OPTIONS] [name]
 
- Check a resource and everything it depends on, without uploading.
+ Check a resource and everything it depends on, then prove its Tasks are fair.
+
+ Each Task runs its reference policy, which must pass, and a do-nothing
+ Agent and one that repeats the instructions, which must fail, in its
+ own Runtime. Everything the Agent can read is scanned for the answer
+ key, git history, solution files, Verifier code, and the Benchmark's
+ canary, and each default Runtime is checked for how far its results
+ can be trusted. A Task's probes are kept until the Task changes.
+ Problems exit 1.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --json          Print machine-readable JSON.                                                     │
-│ --help          Show this message and exit.                                                      │
+│ --probes    --no-probes                        Run the reference and the probe Agents.           │
+│                                                --no-probes checks the files only.                │
+│                                                [default: probes]                                 │
+│ --rerun                                        Run the probes again, even for unchanged Tasks.   │
+│ --random                   <int range> [x>=0]  Also run an Agent that takes this many random     │
+│                                                actions. A pass is a warning.                     │
+│                                                [default: 0]                                      │
+│ --json                                         Print machine-readable JSON.                      │
+│ --help                                         Show this message and exit.                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1975,6 +2012,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │                                                 tracks, by id, so the results can be published.  │
 │                                                 Implies --record, and uses the track's attempts. │
 │ --attempts                  <int range> [x>=1]  Advanced: Trials per Task (default 1).           │
+│ --heldout                                       Run the Benchmark's held-out Tasks too. Each     │
+│                                                 such run is a peek, and is counted.              │
 │ --concurrency       -n      <str>               Trials to run at once: a number, or auto to size │
 │                                                 it from this machine, the runtime, and where the │
 │                                                 model runs.                                      │
@@ -2024,6 +2063,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ edit       Change a project Runtime's settings or credentials.                                   │
 │ delete     Delete a project Runtime and its saved credentials.                                   │
 │ use        Run Environments on a project Runtime by copying its settings into environment.yaml.  │
+│ doctor     Check each sandbox provider, and the trust tier its Trials get.                       │
+│ sweep      Delete your sandboxes that no running Job is using.                                   │
 │ template   Runtime templates: an account's approved provider configurations. Admins only.        │
 │ policy     Which Runtimes an organization's members may create and run on.                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -2090,6 +2131,28 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --yes   -y        Do not ask for confirmation.                                                   │
 │ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime doctor`
+
+```text
+
+ Usage: plural runtime doctor [OPTIONS]
+
+ Check each sandbox provider, and the trust tier its Trials get.
+
+ With --conformance, run the suite and cache the report; the engine reads it
+ to give each Trial its tier.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --provider            <str>  Check only this provider. Repeat for more.                          │
+│ --conformance                Run the conformance suite: real probes in real sandboxes. Takes a   │
+│                              minute or two per provider and creates a few short-lived sandboxes. │
+│ --image               <str>  Image the conformance sandboxes start from.                         │
+│ --allowed-host        <str>  A public host the allowlist check may reach. [default: pypi.org]    │
+│ --json                       Print machine-readable JSON.                                        │
+│ --help                       Show this message and exit.                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2232,6 +2295,26 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural runtime sweep`
+
+```text
+
+ Usage: plural runtime sweep [OPTIONS]
+
+ Delete your sandboxes that no running Job is using.
+
+ Every sandbox a Trial creates is labeled with your owner name. A sandbox
+ whose Job is no longer running here is an orphan, left by a process that
+ died before it could clean up.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --provider        <str>  Provider to sweep. [default: daytona]                                   │
+│ --yes                    Delete without asking.                                                  │
+│ --json                   Print machine-readable JSON.                                            │
+│ --help                   Show this message and exit.                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2589,7 +2672,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ init      Create a Task with instructions, one Environment, and its Verifiers.                   │
-│ validate  Check a resource and everything it depends on, without uploading.                      │
+│ validate  Check a resource and everything it depends on, then prove its Tasks are fair.          │
 │ push      Validate and push an immutable, private revision to the bound project.                 │
 │ release   Label the revision matching your files with a release version, pushing it first.       │
 │ pull      Restore a hosted revision's editable files into this project.                          │
@@ -2783,14 +2866,29 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural task validate [OPTIONS] [name]
 
- Check a resource and everything it depends on, without uploading.
+ Check a resource and everything it depends on, then prove its Tasks are fair.
+
+ Each Task runs its reference policy, which must pass, and a do-nothing
+ Agent and one that repeats the instructions, which must fail, in its
+ own Runtime. Everything the Agent can read is scanned for the answer
+ key, git history, solution files, Verifier code, and the Benchmark's
+ canary, and each default Runtime is checked for how far its results
+ can be trusted. A Task's probes are kept until the Task changes.
+ Problems exit 1.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │   name      <str>  Resource name. Defaults to the resource directory you are in.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --json          Print machine-readable JSON.                                                     │
-│ --help          Show this message and exit.                                                      │
+│ --probes    --no-probes                        Run the reference and the probe Agents.           │
+│                                                --no-probes checks the files only.                │
+│                                                [default: probes]                                 │
+│ --rerun                                        Run the probes again, even for unchanged Tasks.   │
+│ --random                   <int range> [x>=0]  Also run an Agent that takes this many random     │
+│                                                actions. A pass is a warning.                     │
+│                                                [default: 0]                                      │
+│ --json                                         Print machine-readable JSON.                      │
+│ --help                                         Show this message and exit.                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2800,14 +2898,72 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural trial [OPTIONS] COMMAND [ARGS]...
 
- Inspect and rerun Trials.
+ Inspect, rerun, checkpoint, and fork Trials.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ show   Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted).       │
-│ rerun  Run one Trial again with its pinned inputs, as a new one-Trial Job.                       │
+│ show        Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted).  │
+│ rerun       Run one Trial again with its pinned inputs, as a new one-Trial Job.                  │
+│ checkpoint  Name the moment after one step of a Trial, to fork from it or start a Task there.    │
+│ fork        Continue a Trial from step k with other Agents, beside controls that rerun the       │
+│             original.                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural trial checkpoint`
+
+```text
+
+ Usage: plural trial checkpoint [OPTIONS] {trial_id}
+
+ Name the moment after one step of a Trial, to fork from it or start a Task there.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    trial_id      <str>  Trial to take the checkpoint from: a local Trial, or a hosted one by   │
+│                           its id.                                                                │
+│                           [required]                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --step        <int>  The step the checkpoint is after. [required]                             │
+│ *  --name        <str>  A lowercase name; a Task names it as TRIAL/NAME. [required]              │
+│    --json               Print machine-readable JSON.                                             │
+│    --help               Show this message and exit.                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural trial fork`
+
+```text
+
+ Usage: plural trial fork [OPTIONS] {trial_id}
+
+ Continue a Trial from step k with other Agents, beside controls that rerun the original.
+
+ The world (App State and workspace) is restored exactly. How the history
+ reaches each Agent follows one rule: as its own conversation when it has
+ every tool the history used, as a transcript when it lacks some, and not
+ at all when it can't accept one. Each case but the first prints why.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    trial_id      <str>  Trial to continue: a local Trial, or a hosted one by its id.           │
+│                           [required]                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --step              <int>               Continue after this step.                                │
+│ --checkpoint        <str>               Continue from this Trial's checkpoint, by name.          │
+│ --agent             <str>               A saved Agent to fork into. Repeat for several.          │
+│ --model             <str>               A model to fork into, with --harness. Repeat for         │
+│                                         several.                                                 │
+│ --harness           <str>               Harness for --model.                                     │
+│ --attempts          <int range> [x>=1]  Forks per Agent, and as many controls. [default: 3]      │
+│ --seat              <str>               For a Trial several Agents share: the seat to replace.   │
+│ --change            <str>               Change one thing at the fork point: a diagnostic fork.   │
+│ --payload           <str>               The change's JSON payload.                               │
+│ --record                                Record the fork Job in the hosted project as it runs.    │
+│ --json                                  Print machine-readable JSON.                             │
+│ --help                                  Show this message and exit.                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2868,7 +3024,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ list      List resources of this kind, labeled local or hosted.                                  │
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
 │ try       Run a Verifier on stored Trials and print what it gives, without saving anything.      │
-│ apply     Run a Verifier on stored Trials and add its rewards to their ledgers.                  │
+│ apply     Run a Verifier on stored Trials, add its rewards, and store its metric points.         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2878,12 +3034,15 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural verifier apply [OPTIONS] {name}
 
- Run a Verifier on stored Trials and add its rewards to their ledgers.
+ Run a Verifier on stored Trials, add its rewards, and store its metric points.
 
  Records are kept under the Verifier's name and version. A Trial that already
  has rewards from this version is left as it is: bump the Verifier's version
- when its logic changes, so an export can choose which labels to use. Pushed
- Jobs get the new records in the hosted project too.
+ when its logic changes, so an export can choose which labels to use. Running
+ metric points from ``measure`` replace the Verifier's earlier points in the
+ Trial's metric series, unless this version's are already there. The Trial's
+ score and metric values stay as the run recorded them. Pushed Jobs get the
+ new records and points in the hosted project too.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    name      <str>  The Verifier, by name. [required]                                          │
@@ -3058,8 +3217,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Run a Verifier on stored Trials and print what it gives, without saving anything.
 
- Its reward runs again on each recorded step, its hindsight on the finished
- trajectory, and a Python check on the stored episode. Edit the Verifier and
+ Its reward and measure run again on each recorded step, its hindsight on
+ the finished trajectory, and a Python check on the stored episode. Edit the Verifier and
  run this again to see the difference; the Agent is not run.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮

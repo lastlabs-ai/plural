@@ -26,7 +26,7 @@ import shutil
 import sys
 import tempfile
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +44,7 @@ from plural.execution.capacity import recommend_concurrency
 from plural.execution.episode_server import EpisodeServerOptions
 from plural.harness.retrieval import source_digest
 from plural.jobs import (
+    AgentAggregate,
     BenchmarkJobSource,
     Job,
     JobResult,
@@ -104,6 +105,8 @@ class RunRequest:
     hosted: bool = False
     evaluation_track: str | None = None
     """The Benchmark evaluation track the hosted Job is bound to, by id."""
+    heldout: bool = False
+    """Run the Benchmark's held-out Tasks too. Each such run is a counted peek."""
 
 
 @dataclass
@@ -119,6 +122,8 @@ class RunPlan:
     concurrency_reason: str | None = None
     """Why ``auto`` chose the Job's concurrency; ``None`` when a number was given."""
     evaluation_track: str | None = None
+    peek: tuple[str, ...] = ()
+    """The held-out Tasks this run touches; a run with any is a peek."""
 
     @property
     def spec(self) -> JobSpec:
@@ -253,12 +258,20 @@ def plan_run(
         )
     attempts = _track_attempts(loaded.value, request) or request.attempts or 1
     auto = request.concurrency == "auto"
+    is_benchmark = source.kind == BENCHMARK.name
+    if request.heldout and not (is_benchmark and loaded.value.heldout):
+        raise ProjectError(
+            "--heldout runs a Benchmark's held-out Tasks, and "
+            + (f"Benchmark {source.name} has none." if is_benchmark else "this is a Task.")
+            + "\nNext: list some of the Benchmark's Tasks under heldout: in benchmark.yaml."
+        )
     job = Job(
         loaded.value,
         agents=[agent],
         attempts=attempts,
         concurrency=1 if auto else request.concurrency,
         catalog=workspace.catalog,
+        heldout=request.heldout,
     )
     update: dict[str, Any] = {"run_id": uuid.uuid4().hex}
     reason = None
@@ -276,18 +289,7 @@ def plan_run(
     inputs = workspace.dependency_order(
         [source, *([agent_ref] if agent_ref else []), *([harness_ref] if harness_ref else [])]
     )
-    locked = workspace.project.read_lock().resources
-    pins = {}
-    for item in inputs:
-        digest = workspace.load(item).content_hash
-        entry = locked.get(str(item))
-        pushed = entry is not None and entry.content_hash == digest
-        pins[str(item)] = {
-            "revision": revision_label(entry.number, entry.version, "pushed")
-            if pushed and entry is not None
-            else "local",
-            "content_hash": digest,
-        }
+    pins = pinned_inputs(workspace, inputs)
     return RunPlan(
         source=source,
         agent=agent,
@@ -297,6 +299,7 @@ def plan_run(
         pins=pins,
         concurrency_reason=reason,
         evaluation_track=request.evaluation_track,
+        peek=tuple(loaded.value.heldout) if request.heldout else (),
     )
 
 
@@ -841,12 +844,16 @@ def local_job(workspace: Workspace, job_id: str) -> dict[str, Any]:
         if result_path.is_file()
         else None
     )
+    threshold = _success_threshold(workspace, record.get("source"))
     if result is not None:
         return {
             **record,
             "status": result.status,
             "trials": [_trial_summary(item) for item in result.trials],
             "aggregates": [item.model_dump(mode="json") for item in result.aggregates],
+            "summaries": job_summaries(
+                result.trials, job_id, threshold=threshold, names=_names(result.aggregates)
+            ),
             "directory": str(directory),
         }
     from plural.execution.engine import job_progress
@@ -865,8 +872,80 @@ def local_job(workspace: Workspace, job_id: str) -> dict[str, Any]:
         },
         "trials": [_trial_summary(item) for item in progress.trials],
         "aggregates": [item.model_dump(mode="json") for item in progress.aggregates],
+        "summaries": job_summaries(
+            progress.trials, job_id, threshold=threshold, names=_names(progress.aggregates)
+        ),
         "directory": str(directory),
     }
+
+
+def job_summaries(
+    trials: Sequence[TrialResult],
+    job_id: str,
+    *,
+    threshold: float = 1.0,
+    names: Mapping[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Each Agent's headline score with its interval, pass^k, and trust tiers.
+
+    Args:
+        trials: The Job's Trials.
+        job_id: The Job, which seeds the interval.
+        threshold: The score that counts as passing.
+        names: Agent names by Agent digest, from the Job's aggregates.
+
+    Returns:
+        One summary per Agent, in the order its first Trial appears: its name,
+        the :class:`~plural.stats.ScoreSummary` as JSON (``None`` before any
+        score), a one-line ``text``, and how many Trials reached each tier.
+    """
+    from plural.stats import score_summary, seed_for
+
+    by_agent: dict[str, dict[str, list[float | None]]] = {}
+    seen: dict[str, str] = {}
+    tiers: dict[str, dict[str, int]] = {}
+    for trial in trials:
+        digest = trial.receipt.agent_digest
+        seen.setdefault(digest, (names or {}).get(digest) or trial.receipt.model.catalog_model_id)
+        if trial.status == "succeeded":
+            by_agent.setdefault(digest, {}).setdefault(trial.receipt.task_pin.name, []).append(
+                trial.score
+            )
+        tier = trial.trust.tier if trial.trust is not None else "unknown"
+        counts = tiers.setdefault(digest, {})
+        counts[tier] = counts.get(tier, 0) + 1
+    output = []
+    for digest, name in seen.items():
+        summary = score_summary(
+            by_agent.get(digest, {}), threshold=threshold, seed=seed_for(job_id, digest)
+        )
+        mix = tiers.get(digest, {})
+        trust = ", ".join(f"{count} {tier}" for tier, count in sorted(mix.items()))
+        output.append(
+            {
+                "agent_name": name,
+                "summary": summary.model_dump(mode="json") if summary is not None else None,
+                "text": (summary.summary if summary is not None else "no score yet")
+                + (f"; trust: {trust}" if trust else ""),
+                "trust": mix,
+            }
+        )
+    return output
+
+
+def _names(aggregates: Sequence[AgentAggregate]) -> dict[str, str]:
+    return {item.agent_digest: item.agent_name for item in aggregates}
+
+
+def _success_threshold(workspace: Workspace, source: Any) -> float:
+    kind, _, name = str(source or "").partition("/")
+    if kind != BENCHMARK.name or not name:
+        return 1.0
+    try:
+        benchmark = workspace.load(ResourceRef(BENCHMARK.name, name)).value
+    except (ProjectError, ValueError):
+        return 1.0
+    return float(benchmark.scoring.success_threshold)
 
 
 def local_job_spec(workspace: Workspace, job_id: str) -> JobSpec:
@@ -879,6 +958,27 @@ def local_job_spec(workspace: Workspace, job_id: str) -> JobSpec:
         ProjectError: When there is no such local Job.
     """
     return _load_local(workspace, job_id)[0]
+
+
+def pinned_inputs(workspace: Workspace, inputs: Sequence[ResourceRef]) -> dict[str, dict[str, str]]:
+    """Each input's content hash, and the pushed revision that holds it, if any.
+
+    Returns:
+        A pin for each input, by reference.
+    """
+    locked = workspace.project.read_lock().resources
+    pins = {}
+    for item in inputs:
+        digest = workspace.load(item).content_hash
+        entry = locked.get(str(item))
+        pushed = entry is not None and entry.content_hash == digest
+        pins[str(item)] = {
+            "revision": revision_label(entry.number, entry.version, "pushed")
+            if pushed and entry is not None
+            else "local",
+            "content_hash": digest,
+        }
+    return pins
 
 
 def find_local_trial(workspace: Workspace, trial_id: str) -> tuple[str, Path]:
@@ -931,6 +1031,11 @@ def local_trial(workspace: Workspace, trial_id: str) -> dict[str, Any]:
         ),
         "credentials": (
             [item.model_dump(mode="json") for item in result.credentials] if result else []
+        ),
+        "trust": (
+            result.trust.model_dump(mode="json", include={"tier", "reasons"})
+            if result and result.trust
+            else None
         ),
         "artifacts": str(latest / "artifacts") if latest else None,
         "logs": str(latest / "logs") if latest else None,
@@ -1036,6 +1141,16 @@ def _execute(
             missing[app].extend(name for name in names if name not in missing[app])
     if missing:
         raise ProjectError(describe_missing(missing))
+    if isinstance(spec.source, BenchmarkJobSource) and spec.source.heldout_tasks:
+        from plural.heldout import record_peek
+
+        record_peek(
+            workspace.project.state_dir,
+            benchmark=spec.source.benchmark.name,
+            job_id=spec.job_id,
+            purpose=spec.purpose,
+            tasks=spec.source.heldout_tasks,
+        )
     hosted_agent = (
         record.agent.removeprefix(f"{AGENT.name}/")
         if record.agent.startswith(f"{AGENT.name}/")
@@ -1109,6 +1224,7 @@ def _execute(
     }
     if tracker is not None:
         options["gateway_keys"] = tracker.gateway_key
+        options["gateway_calls"] = tracker.gateway_calls
     if progress is not None:
         options["progress"] = progress
     try:
@@ -1246,10 +1362,12 @@ def _snapshot_sources(workspace: Workspace, spec: JobSpec) -> JobSpec:
         source: TaskJobSource | BenchmarkJobSource = TaskJobSource(task=task(spec.source.task))
     else:
         benchmark = spec.source.benchmark
-        source = BenchmarkJobSource(
-            benchmark=benchmark.model_copy(
-                update={"tasks": tuple(task(item) for item in benchmark.tasks)}
-            )
+        source = spec.source.model_copy(
+            update={
+                "benchmark": benchmark.model_copy(
+                    update={"tasks": tuple(task(item) for item in benchmark.tasks)}
+                )
+            }
         )
     agents = []
     for binding in spec.agents:
@@ -1327,6 +1445,7 @@ def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
                 ("check", verifier.check),
                 ("reward", verifier.reward),
                 ("hindsight", verifier.hindsight),
+                ("measure", verifier.measure),
             )
             if isinstance(hook, dict) and hook.get("python")
         }
@@ -1354,7 +1473,10 @@ def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
 
     def task(definition: TaskDefinition) -> TaskDefinition:
         return definition.model_copy(
-            update={"verifiers": tuple(rebind(item) for item in definition.verifiers)}
+            update={
+                "verifiers": tuple(rebind(item) for item in definition.verifiers),
+                "checkpoint_bundle": _checkpoint_bundle(workspace, definition),
+            }
         )
 
     if isinstance(spec.source, TaskJobSource):
@@ -1369,6 +1491,32 @@ def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
             )
         }
     )
+
+
+def _checkpoint_bundle(workspace: Workspace, task: TaskDefinition) -> str | None:
+    """Where a saved Task's starting checkpoint keeps its workspace snapshots.
+
+    A saved Job keeps the checkpoint but not this machine's path to its
+    snapshots, so a rerun finds them again by the Task's ``from_checkpoint``,
+    and uses them only when they belong to the very checkpoint the Job ran.
+
+    Returns:
+        The snapshots' path, or ``None`` when there are none to use; a run then
+        says the workspace can't be restored.
+    """
+    from plural.project.forks import resolve_from_checkpoint
+
+    if task.checkpoint is None or task.from_checkpoint is None:
+        return task.checkpoint_bundle
+    if not task.checkpoint.workspace.commit:
+        return None
+    try:
+        checkpoint, bundle = resolve_from_checkpoint(workspace, task.from_checkpoint)
+    except ProjectError:
+        return None
+    if checkpoint.digest != task.checkpoint.digest or bundle is None:
+        return None
+    return str(bundle)
 
 
 def _trial_summary(result: TrialResult) -> dict[str, Any]:
@@ -1386,6 +1534,10 @@ def _trial_summary(result: TrialResult) -> dict[str, Any]:
         "error": result.error_message,
         "reward_failures": [item.model_dump(mode="json") for item in result.reward_failures],
         "integrity": [item.model_dump(mode="json") for item in result.integrity],
+        "trust": result.trust.tier if result.trust is not None else None,
+        "metrics": dict(result.metrics),
+        "passed": result.passed,
+        **({"fork": result.fork.model_dump(mode="json")} if result.fork is not None else {}),
     }
 
 

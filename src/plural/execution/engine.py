@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import fnmatch
 import functools
 import json
@@ -11,22 +12,29 @@ import math
 import os
 import secrets as token_source
 import shlex
+import shutil
 import sys
+import tempfile
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import urlsplit
 
 from plural._deprecation import module_getattr
 from plural.agents import AgentBinding
 from plural.apps.daemon import MANAGED
 from plural.apps.host import STATES_FILE
+from plural.apps.workspace import BUNDLE_FILE, snapshot_entries
 from plural.atif import ATIF_FILE, episode_to_atif
+from plural.auth import AuthHTTPError, check_gateway_key
 from plural.benchmarks.results import AttemptEvidence, aggregate_configuration
 from plural.benchmarks.rules import BenchmarkScoring
 from plural.catalog import ModelCatalog
+from plural.changes import ForkPoint, apply_change
+from plural.checkpoints import Checkpoint, history_rule, transcript_text
 from plural.common import ErrorCode, HarnessPackage, HarnessProtocol, content_hash
 from plural.config import resolve_gateway_url
 from plural.credentials import CredentialError, CredentialUse, CredentialValue
@@ -73,6 +81,7 @@ from plural.execution.seats import (
     SEAT_ARTIFACTS,
     SeatSetupError,
     prepare_seats,
+    restore_workspace,
     seat_environment,
     seat_files,
     seat_results,
@@ -84,7 +93,9 @@ from plural.execution.seats import (
 )
 from plural.execution.steps import STEPS_FILE, dump_jsonl, episode_terminated, merge_host_steps
 from plural.execution.store import JobStore
+from plural.execution.trial_metrics import metric_lines, task_metric_specs, trial_metrics
 from plural.external.protocol import EpisodeGateway, signing_key
+from plural.harness.builtins import package_tools
 from plural.harness.episode import EPISODE_FILE
 from plural.harness.native_runner import (
     CREDIT_PAUSE_VARIABLE,
@@ -96,19 +107,27 @@ from plural.harness.packages import (
     external_v1,
     native_actions_v1,
     native_chat_v1,
+    native_workspace_v1,
 )
-from plural.harness.protocol import HarnessProtocolError, HarnessRunRequest
-from plural.harness.retrieval import materialize_package, retrieve_archive, source_digest
+from plural.harness.protocol import HarnessProtocolError, HarnessResume, HarnessRunRequest
+from plural.harness.retrieval import (
+    materialize_package,
+    reference_files,
+    retrieve_archive,
+    source_digest,
+)
 from plural.harness.runner import (
     HarnessExecution,
     HarnessExecutionError,
     HarnessRunner,
     is_native_runner,
 )
+from plural.integrity.detectors import TrialEvidence, detect
 from plural.jobs import (
     AgentAggregate,
     ArtifactReference,
     BenchmarkJobSource,
+    ForkRecord,
     IntegrityFinding,
     JobMode,
     JobResult,
@@ -122,7 +141,22 @@ from plural.jobs import (
     TrialSpec,
     VerifierResult,
 )
-from plural.local_models import LocalModelError, LocalModelIdentity, inspect_local_model
+from plural.local_models import (
+    LocalModelError,
+    LocalModelIdentity,
+    inspect_local_model,
+    on_this_machine,
+)
+from plural.metrics import (
+    BUILTIN_METRICS,
+    METRICS_FILE,
+    MetricAggregate,
+    MetricSpec,
+    aggregate_metric,
+    judge,
+    metric_failures,
+    series_by_metric,
+)
 from plural.rewards import (
     LEDGER_FILE,
     HindsightTrial,
@@ -139,28 +173,38 @@ from plural.sandbox import (
     DownloadedFile,
     ExecRequest,
     FileUpload,
+    NetworkMode,
     ProviderRegistry,
+    SandboxCapability,
     SandboxError,
     SandboxHandle,
     SandboxProvider,
     SandboxRequirements,
     default_registry,
 )
+from plural.sandbox.conformance import conformance_status
+from plural.sandbox.sweep import trial_labels
 from plural.tasks import TaskDefinition, validate_task_state
 from plural.trajectory import normalize_trajectory
 from plural.transcript import TRAJECTORY_FILE, episode_to_messages
+from plural.trust import ConformanceStatus, TrustAssessment, TrustFacts, trust_tier
 from plural.verifiers import (
+    EPISODE_WORKSPACE,
     STOP_REASONS,
+    VERIFIER_INPUT,
     AgentVerifier,
     DeterministicVerifier,
     Episode,
     EpisodeOutcome,
     EpisodeUsage,
+    EpisodeWorkspace,
     HumanVerifier,
     VerifierDefinition,
     VerifierOutput,
     VerifierRuntime,
+    criterion_metrics,
     hindsight_hooks,
+    resolve_metrics,
     rubric_score,
 )
 
@@ -199,6 +243,9 @@ def _package_for(agent: AgentBinding, task: TaskDefinition) -> HarnessPackage:
     if agent.harness_package is not None:
         return agent.harness_package
     if agent.harness is None:
+        if not task.environment.apps:
+            # A bare Environment: the native loop brings its own workspace tools.
+            return native_workspace_v1()
         return native_actions_v1() if task.environment.actions else native_chat_v1()
     factory = BUILTIN_PROFILES.get(agent.harness.name)
     if factory is None:
@@ -324,6 +371,49 @@ def _requirements(task: TaskDefinition, package: HarnessPackage) -> SandboxRequi
     return requirements.model_copy(update={"image": reference})
 
 
+def sandbox_lifetime(task: TaskDefinition) -> float:
+    """The longest a Trial's sandbox may live: its budgets plus a margin.
+
+    Setup, the episode, and verification each have their own limit, so the
+    sandbox outlives none of them, and a provider that can stop a sandbox on
+    its own stops one whose Job died.
+
+    Returns:
+        Seconds.
+    """
+    runtime = task.environment.runtime
+    return (
+        task.environment.limits.max_seconds
+        + runtime.timeout_seconds
+        + runtime.build_timeout_seconds
+        + LIFETIME_MARGIN_SECONDS
+    )
+
+
+def default_allowlist(environ: Mapping[str, str], declared: Sequence[str]) -> tuple[str, ...]:
+    """The hosts a recorded run may reach when its Environment leaves ``network`` unset.
+
+    The gateway's host, so the Agent can call models, the Python package
+    index, so setup can install Plural in an image without it, and the hosts
+    the Environment declares in ``allowed_hosts``.
+
+    Returns:
+        Host names, without duplicates.
+    """
+    hosts = []
+    for name in ("PLURAL_GATEWAY_URL", "PLURAL_BASE_URL"):
+        value = environ.get(name)
+        if value:
+            host = urlsplit(value).hostname
+            if host:
+                hosts.append(host)
+    if not hosts:
+        host = urlsplit(resolve_gateway_url(None, environ)).hostname
+        if host:
+            hosts.append(host)
+    return tuple(dict.fromkeys((*hosts, *PACKAGE_INDEX_HOSTS, *declared)))
+
+
 def _artifact_reference(file: DownloadedFile, media_type: str) -> ArtifactReference:
     return ArtifactReference(
         name=file.path,
@@ -347,10 +437,35 @@ def _with_artifact(
     return (*tuple(item for item in artifacts if item.path != artifact.path), artifact)
 
 
-_JOB_ARTIFACTS = frozenset({LEDGER_FILE, STATES_FILE, STEPS_FILE, "apps.json"})
+_JOB_ARTIFACTS = frozenset(
+    {
+        LEDGER_FILE,
+        METRICS_FILE,
+        STATES_FILE,
+        STEPS_FILE,
+        "apps.json",
+        "workspace.json",
+        BUNDLE_FILE,
+    }
+)
 RESULT_FILES = ("result.json", "final-result.json", "output.json")
 GatewayKeys = Callable[[str, int, int], "str | None"]
 """Mints a gateway key for a local Trial's execution, given its time to live in seconds."""
+GatewayCalls = Callable[[str, int], "int | None"]
+"""Counts the model calls the gateway saw on a local Trial execution's key, or None."""
+ISOLATION_REQUIRED = (
+    "This Trial did not run: the sandbox could not keep the agent away from the graders.\n"
+    "The image needs passwordless sudo and useradd, or start from Plural's base image:\n"
+    "  image: ghcr.io/lastlabs-ai/plural-sandbox:py3.12\n"
+    "To run anyway for a quick local check, set isolation: best_effort (results will be "
+    "marked unverified)."
+)
+GATEWAY_KEY_MAX_SECONDS = 7 * 86_400
+"""Longest a Trial's gateway key lives; the backend refuses a longer one."""
+PACKAGE_INDEX_HOSTS = ("pypi.org", "files.pythonhosted.org")
+"""Reached during setup to install Plural when the image does not already have it."""
+LIFETIME_MARGIN_SECONDS = 1_800
+"""Added to a Trial's own budgets to get the longest its sandbox may live."""
 _HOST_VIEWS = frozenset(
     {"state.json", "final-state.json", "observation.json", "final-observation.json", "view.json"}
 )
@@ -394,13 +509,18 @@ def _with_host_steps(
     """Take every App step from the App host's report rather than the Harness.
 
     Returns:
-        The artifacts with the host's ``steps.jsonl`` and ``states.jsonl``, and
+        The artifacts with the host's ``steps.jsonl``, ``states.jsonl``, and
+        ``metrics.jsonl``, and
         ``episode.jsonl`` rebuilt so each App step carries the host's account.
     """
     result = tuple(artifacts)
     if report.states:
         result = _with_artifact(
             result, DownloadedFile(path=STATES_FILE, data=dump_jsonl(report.states))
+        )
+    if report.metrics:
+        result = _with_artifact(
+            result, DownloadedFile(path=METRICS_FILE, data=dump_jsonl(report.metrics))
         )
     # Even empty: without it, readers fall back to the Harness's own result.json.
     result = _with_artifact(result, DownloadedFile(path=STEPS_FILE, data=dump_jsonl(report.steps)))
@@ -444,6 +564,32 @@ def _bounded_artifact_evidence(
             row["readable"] = False
         output.append(row)
     return tuple(output)
+
+
+def _verifier_workspace(
+    workspace: EpisodeWorkspace,
+) -> tuple[dict[str, Any], tuple[DownloadedFile, ...]]:
+    """What a Verifier in its own sandbox is told of the workspace, and its files.
+
+    Returns:
+        ``episode.workspace`` as the Verifier's input describes it, and the
+        files to put beside the input.
+    """
+    files: dict[str, bytes] = {}
+    problem = workspace.problem
+    available = workspace.available
+    if available:
+        try:
+            files = workspace.files()
+        except (OSError, RuntimeError) as exc:
+            available, problem = False, f"the workspace snapshot could not be read: {exc}"
+    described = {
+        "available": available,
+        "problem": problem,
+        "skipped": list(workspace.skipped),
+        "folder": EPISODE_WORKSPACE,
+    }
+    return described, tuple(DownloadedFile(path=name, data=data) for name, data in files.items())
 
 
 def _final_evidence(artifacts: Sequence[DownloadedFile]) -> dict[str, Any] | None:
@@ -541,14 +687,62 @@ def _episode_outcome(artifacts: Sequence[DownloadedFile]) -> EpisodeOutcome:
 
 
 def _integrity(
-    player: _Player, artifacts: Sequence[DownloadedFile]
+    player: _Player, artifacts: Sequence[DownloadedFile], *, gateway_calls: int | None = None
 ) -> tuple[IntegrityFinding, ...]:
     """An External Agent's trace set beside what the App host observed; empty otherwise."""
     run = player.run
     if run is None or run.started_at is None or run.finished_at is None:
         return ()
     return audit_external(
-        artifacts, actions=run.actions, started_at=run.started_at, finished_at=run.finished_at
+        artifacts,
+        actions=run.actions,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        gateway_calls=gateway_calls,
+    )
+
+
+def _answer(artifacts: Sequence[DownloadedFile]) -> Any:
+    for name in RESULT_FILES:
+        data = next((item.data for item in artifacts if item.path == name), None)
+        if data is None:
+            continue
+        try:
+            value = json.loads(data)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(value, Mapping):
+            return value.get("answer", value.get("response"))
+    return None
+
+
+def _trust(
+    provider: str,
+    handle: SandboxHandle | None,
+    requirements: SandboxRequirements | None,
+    app_isolation: Literal["os_user", "none"] | None,
+    host_signed: bool | None,
+    conformance: tuple[str, tuple[str, ...]],
+) -> TrustAssessment | None:
+    """The Trial's trust tier from what the engine observed.
+
+    None when no episode started: before a sandbox, or before the App host.
+    """
+    if handle is None or requirements is None or app_isolation is None:
+        return None
+    status, failures = conformance
+    return trust_tier(
+        TrustFacts(
+            provider=provider,
+            app_isolation=app_isolation,
+            network=requirements.network.value,
+            image_identity=handle.image_identity,
+            image_pinned=handle.image_pinned,
+            snapshot=handle.metadata.get("snapshot"),
+            conformance=cast(ConformanceStatus, status),
+            conformance_failures=failures,
+            host_report_signed=host_signed,
+        )
     )
 
 
@@ -678,14 +872,17 @@ class TrialRunner:
         credentials: Mapping[str, CredentialValue | str] | None = None,
         episode_server: EpisodeServer | None = None,
         gateway_keys: GatewayKeys | None = None,
+        gateway_calls: GatewayCalls | None = None,
         model_identity: LocalModelIdentity | None = None,
     ) -> None:
         self.spec = spec
         self.job_spec = job_spec
         self.model_identity = model_identity
+        self.identity_findings: list[IntegrityFinding] = []
         self.credentials = dict(credentials or {})
         self.episode_server = episode_server
         self.gateway_keys = gateway_keys
+        self.gateway_calls = gateway_calls
         self._gateway_key: str | None = None
         self._job_environ = environ
         self._resource_files: dict[str, bytes] = {}
@@ -700,6 +897,10 @@ class TrialRunner:
         self.harness_killed = False
         """Whether the last execution's Harness was killed for running past its time."""
         self._cost_usd: float | None = None
+        self._hosted = bool(self.task.environment.apps)
+        self._scratch: Path | None = None
+        self._workspace_report: dict[str, Any] = {}
+        self._point: ForkPoint | None = None
 
     @property
     def task(self) -> TaskDefinition:
@@ -713,28 +914,337 @@ class TrialRunner:
         """Pinned Agent selected by this Trial."""
         return next(item for item in self.job_spec.agents if item.agent_id == self.spec.agent_id)
 
+    @property
+    def checkpoint(self) -> Checkpoint | None:
+        """The checkpoint this Trial starts from: its fork's, or its Task's, or none."""
+        if self.job_spec.fork is not None:
+            return self.job_spec.fork.checkpoint
+        return self.task.checkpoint
+
+    def _checkpoint_bundle(self) -> Path | None:
+        """Where the starting checkpoint's workspace snapshots are, on the Job's side."""
+        if self.job_spec.fork is not None:
+            path = self.job_spec.fork.bundle
+        else:
+            path = self.task.checkpoint_bundle
+        return Path(path) if path and Path(path).is_file() else None
+
+    def _wants_host(self) -> bool:
+        """Whether an App host runs: always with Apps, and for a bare Environment on
+        every Runtime, so Harness tools and workspace snapshots are recorded and signed.
+        An External Agent's tools are its own, so its bare episode has none.
+        """
+        return bool(self.task.environment.apps) or self.agent.external is None
+
+    def _fork_point(self) -> ForkPoint | None:
+        """A diagnostic fork's change, made once, or ``None`` for a fork that changes the Agent.
+
+        Raises:
+            ExecutionFailure: When the change is unknown or its payload doesn't fit.
+        """
+        fork = self.spec.fork
+        job_fork = self.job_spec.fork
+        checkpoint = self.checkpoint
+        if fork is None or fork.change is None or job_fork is None or job_fork.change is None:
+            return None
+        if checkpoint is None:
+            return None
+        if self._point is None:
+            context = checkpoint.context(fork.seat)
+            given = job_fork.change.payload
+            point = ForkPoint(
+                payload=dict(given) if isinstance(given, dict) else {"text": given},
+                messages=[dict(item) for item in context.messages],
+                observation=checkpoint.observation,
+                rendered=checkpoint.rendered,
+                environment=environment_payload(self.task, hosted=self._hosted),
+            )
+            try:
+                self._point = apply_change(job_fork.change.name, point)
+            except ValueError as exc:
+                raise ExecutionFailure(ErrorCode.CONFIGURATION, str(exc)) from None
+        return self._point
+
+    def _restore_inputs(self) -> dict[str, Any]:
+        """What the App host restores, with a diagnostic change's edits to step *k*."""
+        checkpoint = self.checkpoint
+        if checkpoint is None:
+            return {}
+        restore = checkpoint.restore_inputs()
+        point = self._fork_point()
+        if point is None:
+            return {"restore": restore}
+        return {
+            "restore": {
+                **restore,
+                "observation": point.observation,
+                "rendered": point.rendered,
+                "forced": point.forced,
+            },
+            "oracles": point.oracles,
+        }
+
+    def _tools_offered(self, player: _Player) -> tuple[str, ...]:
+        """Every tool a player's Agent is offered: the Environment's actions and its Harness's."""
+        actions = {item.name for item in self.task.environment.actions}
+        point = self._fork_point()
+        if point is not None:
+            actions |= set(point.oracles)
+        if player.binding.external is not None:
+            return tuple(sorted(actions))
+        own, _ = package_tools(player.package)
+        return tuple(sorted({*actions, *own}))
+
+    def _history(self, player: _Player) -> tuple[HarnessResume | None, ForkRecord | None]:
+        """How the starting checkpoint's history reaches one player, by §4.2's rule.
+
+        Returns:
+            What its Harness is told, and what the Trial records; ``None`` for both
+            when the episode starts from a reset.
+        """
+        checkpoint = self.checkpoint
+        if checkpoint is None:
+            return None, None
+        context = checkpoint.context(player.seat)
+        fork = self.spec.fork
+        point = self._fork_point() if fork is not None and fork.seat == player.seat else None
+        if point is not None:
+            context = context.model_copy(update={"messages": tuple(point.messages)})
+        external = player.binding.external is not None
+        supports = (
+            player.binding.external.supports_resume
+            if player.binding.external is not None
+            else package_tools(player.package)[1]
+        )
+        history, warnings = history_rule(
+            context,
+            self._tools_offered(player),
+            supports_resume=supports,
+            external=external,
+            agent_name=player.binding.name,
+            step=checkpoint.step,
+        )
+        if point is not None and point.fresh:
+            history = "none"
+            warnings = [
+                *warnings,
+                f"The context change started {player.binding.name} with no history.",
+            ]
+        resume = HarnessResume(
+            history=history,
+            step=checkpoint.step,
+            turn=context.turn,
+            messages=tuple(context.messages) if history == "native" else (),
+            transcript=transcript_text(context) if history == "transcript" else "",
+            observation=point.observation if point is not None else checkpoint.observation,
+            rendered=point.rendered if point is not None else checkpoint.rendered,
+            summary=context.summary,
+            memory=context.memory,
+            note=point.note if point is not None else "",
+        )
+        record = ForkRecord(
+            of_trial_id=checkpoint.trial_id,
+            step=checkpoint.step,
+            role=fork.role if fork is not None else None,
+            history=history,
+            checkpoint_digest=checkpoint.digest,
+            warnings=tuple(dict.fromkeys([*warnings, *checkpoint.warnings])),
+            seat=fork.seat if fork is not None else None,
+            change=fork.change if fork is not None else None,
+            from_checkpoint=None if fork is not None else self.task.from_checkpoint,
+            of_hosted_trial_id=self.job_spec.fork.hosted_trial_id
+            if self.job_spec.fork is not None
+            else None,
+        )
+        return resume, record
+
+    def _fork_fields(self, players: Sequence[_Player]) -> dict[str, Any]:
+        """The Trial's ``tools_offered`` and, from a checkpoint, its ``fork`` record."""
+        if not players:
+            return {}
+        seat = self.spec.fork.seat if self.spec.fork is not None else None
+        player = next((item for item in players if item.seat == seat), players[0])
+        _, record = self._history(player)
+        return {"tools_offered": self._tools_offered(player), "fork": record}
+
+    async def _restore_workspace(
+        self,
+        provider: SandboxProvider,
+        handle: SandboxHandle,
+        seat_users: Mapping[str, str | None] | None = None,
+    ) -> None:
+        """Put the checkpoint's workspace snapshot back, before the App host restores the Apps.
+
+        A seat's folder is restored by the seat's own OS user, named in
+        ``seat_users``, so the files in it are the seat's.
+
+        Raises:
+            ExecutionFailure: When the snapshot can't be read.
+        """
+        checkpoint = self.checkpoint
+        if checkpoint is None or not checkpoint.workspace.commit:
+            return
+        bundle = self._checkpoint_bundle()
+        if bundle is None:
+            raise ExecutionFailure(
+                ErrorCode.CONFIGURATION,
+                f"The checkpoint after step {checkpoint.step} of Trial {checkpoint.trial_id} "
+                "has a workspace snapshot, but its workspace.bundle is not on this machine, so "
+                "the workspace can't be restored. Run it from the project that holds the Trial.",
+            )
+        try:
+            entries = await asyncio.to_thread(snapshot_entries, bundle, checkpoint.workspace.commit)
+        except (OSError, RuntimeError) as exc:
+            raise ExecutionFailure(
+                ErrorCode.ENVIRONMENT_FAILED,
+                f"Could not read the checkpoint's workspace snapshot: {exc}",
+            ) from exc
+        try:
+            await restore_workspace(provider, handle, entries, seat_users or {})
+        except SeatSetupError as exc:
+            raise ExecutionFailure(
+                ErrorCode.ENVIRONMENT_FAILED, f"Could not restore the workspace: {exc}"
+            ) from exc
+
+    def _snapshot_ignore(self, players: Sequence[_Player]) -> list[str]:
+        """What a workspace snapshot leaves out.
+
+        The Job's resources, the Harnesses' own files, and the Apps' private
+        files, which the host can read and the Agent never may.
+        """
+        ignored: list[str] = ["resources/"]
+        for name in app_private_files(self.task.environment):
+            # A recordings entry may name a folder.
+            ignored.extend((f"environment/{name}", f"environment/{name}/"))
+        for player in players:
+            source = player.source
+            if source is None or not Path(source).is_dir():
+                continue
+            prefix = player.stage.removeprefix("/workspace/").strip("/")
+            # Python's bytecode for the Harness's own modules, written as it loads.
+            ignored.append(f"{prefix}/__pycache__/")
+            for path in Path(source).rglob("*"):
+                if path.is_file():
+                    ignored.append(f"{prefix}/{path.relative_to(source).as_posix()}")
+        return ignored
+
+    async def _collect_workspace(
+        self,
+        provider: SandboxProvider,
+        handle: SandboxHandle,
+        report: HostReport,
+        artifacts: tuple[DownloadedFile, ...],
+    ) -> tuple[DownloadedFile, ...]:
+        """Download the workspace snapshots the host bundled, for checkpoints and Verifiers.
+
+        Returns:
+            The artifacts, with ``workspace.json`` and ``workspace.bundle``.
+        """
+        snapshots = dict(report.workspace or {})
+        if not snapshots:
+            return artifacts
+        bundle_path = str(snapshots.pop("bundle", "") or "")
+        self._workspace_report = snapshots
+        if bundle_path:
+            folder, _, name = bundle_path.rpartition("/")
+            # The bundle is in the App host's own folder; a Runtime whose file API
+            # can't open it reads it as its privileged user instead.
+            private = getattr(provider, "read_private_file", None)
+            try:
+                if private is not None:
+                    data = await private(handle, bundle_path)
+                else:
+                    downloaded = await provider.download_files(handle, [name], root=folder or "/")
+                    data = downloaded[0].data
+            except Exception as exc:  # noqa: BLE001 - a Runtime's SDK raises its own errors
+                snapshots["available"] = False
+                snapshots["problem"] = f"the workspace bundle could not be collected: {exc}"
+            else:
+                artifacts = _with_artifact(artifacts, DownloadedFile(path=BUNDLE_FILE, data=data))
+                if self._scratch is None:
+                    self._scratch = Path(tempfile.mkdtemp(prefix="plural-trial-"))
+                (self._scratch / BUNDLE_FILE).write_bytes(data)
+        return _with_artifact(artifacts, _json_artifact("workspace.json", snapshots))
+
+    def _episode_workspace(self) -> EpisodeWorkspace:
+        """The final workspace for Verifiers, from the snapshot taken after the Harness stopped."""
+        report = self._workspace_report
+        bundle = self._scratch / BUNDLE_FILE if self._scratch is not None else None
+        final = report.get("final") if report else None
+        if not report or bundle is None or not bundle.is_file() or not final:
+            problem = (report or {}).get("problem") or "the Trial took no workspace snapshot"
+            return EpisodeWorkspace(available=False, problem=str(problem))
+        skipped = [str(item.get("path")) for item in report.get("skipped") or ()]
+        return EpisodeWorkspace.from_bundle(bundle, str(final), skipped=skipped)
+
+    def _with_prefix(self, report: HostReport) -> HostReport:
+        """A fork's host report with the original's steps before the checkpoint, inherited.
+
+        The host recorded only the fork's own steps; the prefix's rewards and metric
+        points are copied, and ``reward`` / ``measure`` never ran on them again.
+        """
+        checkpoint = self.checkpoint
+        if checkpoint is None or not checkpoint.prefix_steps:
+            return report
+        inherited = [{**item, "inherited": True} for item in checkpoint.prefix_steps]
+        states = [{**item, "inherited": True} for item in checkpoint.prefix_states]
+        metrics = [{**item, "inherited": True} for item in checkpoint.prefix_metrics]
+        return HostReport(
+            apps=report.apps,
+            steps=[*inherited, *report.steps],
+            states=[*states, *report.states],
+            observation=report.observation,
+            view=report.view,
+            metrics=[*metrics, *report.metrics],
+            metric_failures=report.metric_failures,
+            workspace=report.workspace,
+        )
+
     async def _check_model_identity(self, agent: AgentBinding) -> None:
         """Refuse to start when the endpoint now serves another model than the Job accepted.
 
+        Answers are evidence, never grounds to fail: a model whose answers to
+        the fixed prompts changed is recorded as an ``model_answers_changed``
+        integrity finding on the Trial, and the Trial runs.
+
         Raises:
-            ExecutionFailure: When the model's fingerprint changed, or its
-                server cannot be reached.
+            ExecutionFailure: When what the server reports about the model
+                changed, or the server cannot be reached.
         """
         accepted = self.model_identity
         if accepted is None or (accepted.method == "behavior" and accepted.behavior is None):
             return
         key_name = agent.agent.endpoint_key
+        # Hosted answers vary by request, so only a local server's are worth re-asking.
+        answers = accepted.behavior is not None and (
+            accepted.method == "behavior" or on_this_machine(accepted.endpoint)
+        )
         try:
             current = await asyncio.to_thread(
                 inspect_local_model,
                 accepted.endpoint,
                 accepted.requested,
                 api_key=self.environ.get(key_name) if key_name else None,
-                # Answers are what show a swap on a server that reports nothing.
-                probe=accepted.behavior is not None,
+                probe=accepted.method in {"reported", "behavior"} or answers,
+                answers=answers,
             )
         except LocalModelError as exc:
             raise ExecutionFailure(ErrorCode.PROVIDER_UNAVAILABLE, str(exc)) from None
+        if answers and current.behavior != accepted.behavior:
+            self.identity_findings.append(
+                IntegrityFinding(
+                    code="model_answers_changed",
+                    message=(
+                        f"The model at {accepted.endpoint} answered the fixed identity prompts "
+                        "differently than when the Job started. It reports the same model, so "
+                        "the Trial ran; check the server if you did not expect a change."
+                    ),
+                    severity="warning",
+                    source="detector",
+                )
+            )
+        if accepted.method == "behavior":
+            return
         if current.fingerprint != accepted.fingerprint:
             raise ExecutionFailure(
                 ErrorCode.CONFIGURATION,
@@ -784,6 +1294,10 @@ class TrialRunner:
         tito: ArtifactReference | None = None
         cost_usd: float | None = None
         phases: list[PhaseTiming] = []
+        sandbox: SandboxHandle | None = None
+        sandbox_requirements: SandboxRequirements | None = None
+        conformance: tuple[str, tuple[str, ...]] = ("missing", ())
+        host_signed: bool | None = None
 
         @contextlib.asynccontextmanager
         async def phase(name: PhaseName) -> AsyncIterator[None]:
@@ -800,6 +1314,7 @@ class TrialRunner:
         self.episode_recorded = False
         self.harness_killed = False
         self._cost_usd = None
+        self.identity_findings = []
         heartbeat = asyncio.create_task(self._heartbeat(execution_id))
         self.store.emit(
             self.spec.job_id,
@@ -850,12 +1365,32 @@ class TrialRunner:
                         "of a Trial runs in one Runtime. Give their Agents Harnesses that "
                         "share one.",
                     )
+            requirements = await self._execution_requirements(
+                provider, task, requirements, execution_id
+            )
+            sandbox_requirements = requirements
             distribution = self._plural_distribution(provider, package)
+            self._hosted = self._wants_host()
+            checkpoint = self.checkpoint
+            if checkpoint is not None:
+                problem = task.environment.fork_problem or (
+                    None
+                    if self._hosted
+                    else "its Agent runs as its own service, with no App host to restore"
+                )
+                if problem:
+                    raise ExecutionFailure(
+                        ErrorCode.CONFIGURATION,
+                        f"This Trial starts from step {checkpoint.step} of Trial "
+                        f"{checkpoint.trial_id}, but its Environment can't be restored: {problem}.",
+                    )
             async with phase("environment_setup"):
                 if distribution is not None:
                     requirements = await prepare_requirements(provider, requirements, distribution)
                 handle = await provider.create(requirements)
             self._active[(provider.name, handle.sandbox_id)] = handle
+            sandbox = handle
+            conformance = await conformance_status(provider)
             self.store.emit(
                 self.spec.job_id,
                 "environment_ready",
@@ -891,18 +1426,17 @@ class TrialRunner:
                                 update={"workspace": player.stage}
                             ),
                             env=player.env,
-                            timeout_seconds=min(
-                                task.environment.runtime.timeout_seconds,
-                                task.environment.limits.max_seconds,
-                            ),
+                            timeout_seconds=task.environment.limits.max_seconds,
                         )
                 async with phase("environment_setup"):
-                    if task.environment.apps:
+                    if self._hosted:
                         try:
                             staged = host_files(task)
                         except ValueError as exc:
                             raise ExecutionFailure(ErrorCode.CONFIGURATION, str(exc)) from exc
                         isolation = await provider.isolate_apps(handle)
+                        if isolation.app_user is None and requirements.isolation == "required":
+                            raise ExecutionFailure(ErrorCode.ENVIRONMENT_FAILED, ISOLATION_REQUIRED)
                         await provider.upload_files(handle, staged, root=WORKSPACE)
                         isolated = self._seats_isolated(task)
                         if self.seat_names:
@@ -938,6 +1472,13 @@ class TrialRunner:
                             seat_isolation = "os_user" if isolated else "none"
                         else:
                             players[0].user = isolation.agent_user
+                        await self._restore_workspace(
+                            provider,
+                            handle,
+                            {str(item.seat): item.user for item in players}
+                            if self.seat_names
+                            else None,
+                        )
                         host = AppHostSession(
                             provider,
                             handle,
@@ -948,12 +1489,20 @@ class TrialRunner:
                         )
                         await host.start(
                             secrets=app_secrets,
-                            inputs=host_inputs(task, seed=seed),
+                            inputs={
+                                **host_inputs(task, seed=seed),
+                                "workspace": "/workspace",
+                                "snapshot_mib": task.environment.limits.workspace_snapshot_mib,
+                                "snapshot_ignore": self._snapshot_ignore(players),
+                                **self._restore_inputs(),
+                            },
                             seats={
                                 str(item.seat): str(item.token) for item in players if item.seat
                             },
                         )
                         app_isolation = "os_user" if host.isolated else "none"
+                        if not host.isolated and requirements.isolation == "required":
+                            raise ExecutionFailure(ErrorCode.ENVIRONMENT_FAILED, ISOLATION_REQUIRED)
                         if not self.seat_names:
                             await provider.open_workspace(
                                 handle,
@@ -1033,7 +1582,7 @@ class TrialRunner:
                     (item.execution.trace_id for item in players if item.execution is not None),
                     None,
                 )
-                job_only = _JOB_ARTIFACTS | (_HOST_VIEWS if task.environment.apps else frozenset())
+                job_only = _JOB_ARTIFACTS | (_HOST_VIEWS if self._hosted else frozenset())
                 for player in players:
                     if player.execution is None:
                         continue
@@ -1058,7 +1607,10 @@ class TrialRunner:
                     try:
                         host_report = await host.finish()
                     except AppHostTampered as exc:
+                        host_signed = False
                         raise ExecutionFailure(ErrorCode.ENVIRONMENT_FAILED, str(exc)) from exc
+                    host_signed = True
+                    host_report = self._with_prefix(host_report)
                     app_report = host_report.apps
                     environment_observation = host_report.observation
                     environment_view_doc = host_report.view
@@ -1066,6 +1618,9 @@ class TrialRunner:
                     # is stored is masked, while the Verifiers below read the live report.
                     stored = HostReport.parse(_redact_json(asdict(host_report), secrets))
                     artifacts = _with_host_steps(artifacts, stored)
+                    artifacts = await self._collect_workspace(
+                        provider, handle, host_report, artifacts
+                    )
                     if self.seat_names:
                         for player in players:
                             artifacts = (
@@ -1157,9 +1712,11 @@ class TrialRunner:
             finally:
                 self._active.pop((provider.name, handle.sandbox_id), None)
                 async with phase("cleanup"):
-                    if host is not None:
-                        await host.stop()
-                    await provider.destroy(handle)
+                    try:
+                        if host is not None:
+                            await host.stop()
+                    finally:
+                        await provider.destroy(handle)
             awaiting = any(item.status == "awaiting_review" for item in verifier_results)
             score, scores = _aggregate(task, verifier_results)
             artifacts = self._with_ledger(
@@ -1175,10 +1732,28 @@ class TrialRunner:
                     host_report,
                     artifacts,
                 )
-            integrity = _integrity(players[0], artifacts)
+            integrity = (
+                *self.identity_findings,
+                *_integrity(
+                    players[0],
+                    artifacts,
+                    gateway_calls=await self._gateway_call_count(execution_id),
+                ),
+                *detect(
+                    TrialEvidence(
+                        task=task,
+                        artifacts=artifacts,
+                        logs=stdout + stderr,
+                        verifier_results=verifier_results,
+                        answer=_answer(artifacts),
+                        canary=self._canary(),
+                    )
+                ),
+            )
             status: Literal["succeeded", "awaiting_review"] = (
                 "awaiting_review" if awaiting else "succeeded"
             )
+            totals = _episode_totals(artifacts, failed=False)
             receipt = self._receipt(
                 execution_id=execution_id,
                 retry=retry,
@@ -1189,6 +1764,16 @@ class TrialRunner:
                 timings={"total_seconds": time.monotonic() - clock},
                 phases=phases,
                 cost_usd=cost_usd,
+            )
+            metrics = trial_metrics(
+                task,
+                verifier_results,
+                artifacts,
+                cost_usd=cost_usd,
+                latency_seconds=receipt.timings.get("total_seconds"),
+                turns=totals["turns"],
+                stop_reason=totals["stop_reason"],
+                succeeded=True,
             )
             result = TrialResult(
                 status=status,
@@ -1203,8 +1788,20 @@ class TrialRunner:
                 seat_isolation=seat_isolation,
                 seed=seed,
                 integrity=integrity,
+                trust=_trust(
+                    provider.name,
+                    sandbox,
+                    sandbox_requirements,
+                    app_isolation,
+                    host_signed,
+                    conformance,
+                ),
                 model_identity=self.model_identity,
-                **_episode_totals(artifacts, failed=False),
+                metrics=metrics,
+                metric_failures=metric_failures(host_report.metric_failures),
+                **self._gates(metrics, awaiting=awaiting),
+                **self._fork_fields(players),
+                **totals,
             )
         except BaseException as exc:
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
@@ -1213,6 +1810,11 @@ class TrialRunner:
                 stdout = _redact_bytes(exc.stdout, secrets)
                 stderr = _redact_bytes(exc.stderr, secrets)
             code = _classify(exc)
+            if code is not ErrorCode.AUTHENTICATION and self.store.cancel_requested(
+                self.spec.job_id
+            ):
+                # Killed by the cancel, so its failure is the cancel's, not its own.
+                code = ErrorCode.CANCELLED
             if host_report.steps and not any(item.path == LEDGER_FILE for item in artifacts):
                 # The episode ran, so its step rewards stand even when a check failed.
                 with contextlib.suppress(Exception):
@@ -1243,7 +1845,31 @@ class TrialRunner:
                 else (),
                 seat_isolation=seat_isolation,
                 seed=seed,
+                trust=_trust(
+                    provider.name,
+                    sandbox,
+                    sandbox_requirements,
+                    app_isolation,
+                    host_signed,
+                    conformance,
+                ),
                 model_identity=self.model_identity,
+                metrics=trial_metrics(
+                    self.task,
+                    (),
+                    artifacts,
+                    cost_usd=cost_usd,
+                    latency_seconds=receipt.timings.get("total_seconds"),
+                    turns=totals["turns"],
+                    stop_reason=totals["stop_reason"],
+                    succeeded=False,
+                    checked=False,
+                ),
+                metric_failures=metric_failures(host_report.metric_failures),
+                passed=False
+                if any(spec.gate for spec in task_metric_specs(self.task).values())
+                else None,
+                **self._fork_fields(players),
                 **totals,
                 error_code=None if code is ErrorCode.CANCELLED else code,
                 error_message=_redact_bytes(str(exc).encode(), secrets).decode(errors="replace")[
@@ -1260,6 +1886,10 @@ class TrialRunner:
             verifier_stdout=_redact_bytes(verifier_stdout, secrets),
             verifier_stderr=_redact_bytes(verifier_stderr, secrets),
         )
+        if self._scratch is not None:
+            shutil.rmtree(self._scratch, ignore_errors=True)
+            self._scratch = None
+        self._workspace_report = {}
         for stream, payload in (("stdout", stdout), ("stderr", stderr)):
             if payload:
                 self.store.emit(
@@ -1297,6 +1927,61 @@ class TrialRunner:
         await asyncio.gather(heartbeat, return_exceptions=True)
         return result
 
+    async def _execution_requirements(
+        self,
+        provider: SandboxProvider,
+        task: TaskDefinition,
+        requirements: SandboxRequirements,
+        execution_id: int,
+    ) -> SandboxRequirements:
+        """Stamp what the Runtime does not say: labels, a lifetime, isolation, and network.
+
+        A recorded run on a provider that enforces an allowlist, in an
+        Environment that leaves ``network`` unset, gets an allowlist with the
+        gateway's hosts. Any other unset network stays public.
+
+        Returns:
+            The requirements this execution's sandbox is created with.
+        """
+        runtime = task.environment.runtime
+        update: dict[str, Any] = {
+            "isolation": runtime.isolation_policy,
+            "labels": {
+                **requirements.labels,
+                **trial_labels(
+                    job=self.spec.job_id,
+                    trial=self.spec.trial_id,
+                    execution=str(execution_id),
+                    environ=self._job_environ,
+                ),
+            },
+            "lifetime_seconds": sandbox_lifetime(task),
+        }
+        if runtime.network is None and self._gateway_key is not None:
+            capabilities = await provider.capabilities()
+            if SandboxCapability.NETWORK_ALLOWLIST in capabilities.capabilities:
+                update["network"] = NetworkMode.ALLOWLIST
+                update["network_allowlist"] = default_allowlist(
+                    self._job_environ, runtime.allowed_hosts
+                )
+        return requirements.model_copy(update=update)
+
+    async def _gateway_call_count(self, execution_id: int) -> int | None:
+        """Model calls the gateway saw on this execution's key, for an External Agent."""
+        if self.gateway_calls is None or self._gateway_key is None:
+            return None
+        if self.agent.external is None:
+            return None
+        try:
+            return await asyncio.to_thread(self.gateway_calls, self.spec.trial_id, execution_id)
+        except Exception:  # noqa: BLE001 - a missing count is no finding, not a failed Trial
+            return None
+
+    def _canary(self) -> str | None:
+        source = self.job_spec.source
+        benchmark = getattr(source, "benchmark", None)
+        return getattr(benchmark, "canary", None)
+
     async def _execution_environ(
         self, task: TaskDefinition, execution_id: int
     ) -> Mapping[str, str]:
@@ -1309,7 +1994,7 @@ class TrialRunner:
         needed = self.agent.external is not None or bool(self._job_environ.get("PLURAL_API_KEY"))
         if self.gateway_keys is None or not needed:
             return self._job_environ
-        ttl = min(max(int(task.environment.limits.max_seconds) + 900, 600), 86_400)
+        ttl = min(max(math.ceil(sandbox_lifetime(task)), 600), GATEWAY_KEY_MAX_SECONDS)
         key = await asyncio.to_thread(self.gateway_keys, self.spec.trial_id, execution_id, ttl)
         if not key:
             return self._job_environ
@@ -1413,6 +2098,13 @@ class TrialRunner:
         party = task.environment.party
         return party is None or party.isolation == "isolated"
 
+    def _environment_payload(self, task: TaskDefinition) -> dict[str, Any]:
+        """The Environment as a Harness is told it, with a diagnostic change's edits."""
+        point = self._fork_point()
+        if point is not None:
+            return copy.deepcopy(point.environment)
+        return environment_payload(task, hosted=self._hosted)
+
     def _run_request(self, task: TaskDefinition, player: _Player) -> HarnessRunRequest:
         """What one Harness is told: the Task as its seat sees it, and its own Agent."""
         binding = player.binding
@@ -1436,8 +2128,9 @@ class TrialRunner:
                 "harness_config": binding.harness_config,
             },
             model_resolution=model.model_dump(mode="json"),
-            environment=environment_payload(task),
+            environment=self._environment_payload(task),
             mode=self.job_spec.mode.value,
+            resume=self._history(player)[0],
             capture_tito=self.job_spec.mode is JobMode.TRAIN,
             workspace=player.workspace,
             granted_capabilities=tuple(sorted(item.value for item in grant.granted))
@@ -1488,6 +2181,18 @@ class TrialRunner:
         )
         player.artifacts = own
         return own
+
+    def _gates(self, metrics: Mapping[str, float | None], *, awaiting: bool) -> dict[str, Any]:
+        """The Trial's gates, from the metrics its Verifiers mark ``gate: true``.
+
+        Returns:
+            ``gates`` and ``passed`` as ``TrialResult`` fields; no verdict while a
+            Verifier awaits review.
+        """
+        if awaiting:
+            return {}
+        verdict = judge(task_metric_specs(self.task).values(), metrics)
+        return {"gates": verdict.gates, "passed": verdict.passed}
 
     def _seat_results(
         self,
@@ -1581,7 +2286,9 @@ class TrialRunner:
         """The Plural a non-local sandbox needs for this Trial, and the
         Environment's packages, if it runs Plural code or installs any."""
         packages = self.task.environment.runtime.packages.python
-        if provider.name == "local" or not (packages or needs_plural(self.task, package)):
+        if provider.name == "local" or not (
+            packages or needs_plural(self.task, package) or self._wants_host()
+        ):
             return None
         return resolve_distribution(
             self.environ.get(RUNTIME_VERSION_VARIABLE), needed_extras(self.task), packages
@@ -1629,10 +2336,10 @@ class TrialRunner:
         return uploads
 
     def _environment_uploads(self, root: Path) -> list[FileUpload]:
-        """The Environment's source files, without any Verifier's code.
+        """The Environment's source files, without any Verifier's code or reference.
 
-        The Agent can read the Environment's workspace, so a Verifier kept in
-        the same folder is left out.
+        The Agent can read the Environment's workspace, so a Verifier or a
+        reference policy kept in the same folder is left out.
 
         Returns:
             The files to upload.
@@ -1643,6 +2350,7 @@ class TrialRunner:
         """
         root = root.resolve()
         hidden = [path for path in verifier_sources(self.task) if path.is_relative_to(root)]
+        hidden.extend(root / name for name in reference_files(root))
         _refuse_shared_files(self.task, root)
         uploads: list[FileUpload] = []
         for path in sorted(root.rglob("*")):
@@ -1838,6 +2546,7 @@ class TrialRunner:
                         status="succeeded",
                         score=parsed.score,
                         scores=parsed.scores,
+                        metrics=parsed.metrics,
                         evidence=parsed.evidence,
                         feedback=parsed.feedback,
                         seats=parsed.seats,
@@ -1961,6 +2670,11 @@ class TrialRunner:
             rewards=rewards,
             seats=self.seat_names,
             seat_rewards=seat_rewards,
+            metric_series={
+                key: tuple(points)
+                for key, points in series_by_metric(metric_lines(artifacts)).items()
+            },
+            workspace=self._episode_workspace(),
         )
         if not hosted and not episode.apps and not episode.state:
             fallback = first_json_mapping(artifacts, ("final-state.json", "state.json"))
@@ -2011,11 +2725,12 @@ class TrialRunner:
                 apps=apps,
                 verifier=verifier.name if verifier is not None else None,
             )
+            workspace, workspace_files = _verifier_workspace(episode.workspace)
             payload: dict[str, Any] = {
                 "task": self.task.public_payload,
                 "trace_id": trace_id,
                 "artifacts": [item.path for item in artifacts],
-                "episode": episode.model_dump(mode="json"),
+                "episode": {**episode.model_dump(mode="json"), "workspace": workspace},
                 "environment_view": {
                     "observation": episode.observation,
                     "state": episode.state,
@@ -2033,10 +2748,20 @@ class TrialRunner:
                         artifacts,
                         tuple(item.path for item in artifacts),
                     ),
+                    "workspace": _bounded_artifact_evidence(
+                        workspace_files, tuple(item.path for item in workspace_files)
+                    ),
                 }
             uploads = [
-                FileUpload(path=".plural/verifier-input.json", data=json.dumps(payload).encode()),
+                FileUpload(path=VERIFIER_INPUT, data=json.dumps(payload).encode()),
                 *(FileUpload(path=f"artifacts/{item.path}", data=item.data) for item in artifacts),
+                *(
+                    FileUpload(
+                        path=f"{Path(VERIFIER_INPUT).parent}/{EPISODE_WORKSPACE}/{item.path}",
+                        data=item.data,
+                    )
+                    for item in workspace_files
+                ),
             ]
             await provider.upload_files(handle, uploads)
             verifier_env = {**self._verifier_env(verifier), **plural_env}
@@ -2071,15 +2796,22 @@ class TrialRunner:
                 raise ExecutionFailure(
                     ErrorCode.EVIDENCE_MISSING, f"Verifier {name!r} result is missing"
                 )
-            output = VerifierOutput.model_validate_json(files[0].data).validated_finite()
-            if isinstance(verifier, AgentVerifier):
-                try:
+            try:
+                output = VerifierOutput.model_validate_json(files[0].data).validated_finite()
+                if isinstance(verifier, AgentVerifier):
                     judged = rubric_score(verifier.criteria, output.scores)
-                except ValueError as exc:
-                    raise ExecutionFailure(
-                        ErrorCode.VERIFIER_FAILED, f"Verifier {name!r} judge {exc}"
-                    ) from exc
-                output = output.model_copy(update={"score": judged})
+                    rated = criterion_metrics(verifier, output.scores)
+                    output = output.model_copy(
+                        update={"score": judged, "metrics": {**rated, **output.metrics}}
+                    )
+                elif verifier is not None:
+                    output = resolve_metrics(
+                        output, verifier.metric_specs, verifier_name=verifier.name
+                    )
+            except ValueError as exc:
+                raise ExecutionFailure(
+                    ErrorCode.VERIFIER_FAILED, f"Verifier {name!r}: {exc}"
+                ) from exc
             self._check_seats(name, output.seats)
             if evidence_required and not output.evidence:
                 raise ExecutionFailure(
@@ -2093,6 +2825,7 @@ class TrialRunner:
                     status="succeeded",
                     score=output.score,
                     scores=output.scores,
+                    metrics=output.metrics,
                     evidence=output.evidence,
                     feedback=output.feedback,
                     seats=output.seats,
@@ -2281,6 +3014,16 @@ def _agent_aggregates(
             required_attempts=spec.attempts,
             declared=release is not None,
         )
+        metrics = _metric_aggregates(spec, selected)
+        primary_metric = release.primary_metric if release is not None else "score"
+        verdicts = [item.passed for item in selected if item.passed is not None]
+        primary = (
+            combined.score
+            if primary_metric == "score"
+            else metrics[primary_metric].mean
+            if primary_metric in metrics
+            else None
+        )
         rows.append(
             AgentAggregate(
                 agent_name=agent.name,
@@ -2292,9 +3035,36 @@ def _agent_aggregates(
                 coverage=combined.coverage,
                 total_cost=sum(costs) if costs else None,
                 mean_latency_seconds=sum(latencies) / len(latencies) if latencies else None,
+                metrics=metrics,
+                primary_metric=primary_metric,
+                primary=primary,
+                pass_rate=sum(verdicts) / len(verdicts) if verdicts else None,
             )
         )
     return tuple(rows)
+
+
+def _metric_aggregates(spec: JobSpec, trials: Sequence[TrialResult]) -> dict[str, MetricAggregate]:
+    """Each metric across one Agent's Trials, grouped by Task for pass^k and pass@k.
+
+    A Trial without a value, because the metric did not apply or the Trial
+    failed before its checks, counts toward the total and not toward ``n``.
+
+    Returns:
+        Each metric's aggregate, the built-ins first.
+    """
+    specs: dict[str, MetricSpec] = dict(BUILTIN_METRICS)
+    for task in spec.tasks:
+        for name, item in task_metric_specs(task).items():
+            specs.setdefault(name, item)
+    rows: dict[str, MetricAggregate] = {}
+    for name, item in specs.items():
+        by_task: dict[str, list[float | None]] = {}
+        for trial in trials:
+            by_task.setdefault(trial.receipt.task_pin.name, []).append(trial.metrics.get(name))
+        if any(value is not None for values in by_task.values() for value in values):
+            rows[name] = aggregate_metric(item, by_task)
+    return rows
 
 
 @dataclass(frozen=True)
@@ -2359,29 +3129,27 @@ def _harness_timeout(
 ) -> float:
     """Seconds a Harness may run before it is killed.
 
-    Another Harness is killed at the episode's max_seconds. The native runner
-    stops itself at that deadline, timed from when it starts, so it gets a
-    grace period to end the episode and write its files; a Trial it ends that
-    way is still verified.
+    The episode's ``max_seconds`` governs the Harness, however long it is; the
+    Runtime's ``timeout_seconds`` governs every other command. Another Harness
+    is killed at ``max_seconds``. The native runner stops itself at that
+    deadline, timed from when it starts, so it gets a grace period to end the
+    episode and write its files; a Trial it ends that way is still verified.
     """
-    runtime, limits = task.environment.runtime, task.environment.limits
+    limits = task.environment.limits
     allowed = limits.max_seconds + (STOP_GRACE_SECONDS if is_native_runner(definition) else 0.0)
-    return min(runtime.timeout_seconds, allowed) + _credit_pause(definition, env)
+    return allowed + _credit_pause(definition, env)
 
 
 def _stop_env(
     task: TaskDefinition, definition: HarnessProtocol, env: Mapping[str, str]
 ) -> dict[str, str]:
-    """A Harness's environment, told how many seconds it has before it is killed.
+    """A Harness's environment, told how many seconds the episode has.
 
-    The native runner is told to stop a grace period early, so the Runtime's
-    own limit never cuts it off mid-episode.
+    The native runner stops at that deadline and is killed a grace period
+    later, so the kill never cuts it off mid-episode.
     """
-    runtime, limits = task.environment.runtime, task.environment.limits
-    if is_native_runner(definition):
-        stop = max(1.0, min(limits.max_seconds, runtime.timeout_seconds - STOP_GRACE_SECONDS))
-    else:
-        stop = min(limits.max_seconds, runtime.timeout_seconds)
+    del definition
+    stop = max(1.0, task.environment.limits.max_seconds)
     return {**env, STOP_VARIABLE: f"{stop:g}"}
 
 
@@ -2471,12 +3239,16 @@ class JobRunner:
         credentials: Mapping[str, Mapping[str, CredentialValue | str]] | None = None,
         episode_server: EpisodeServerOptions | None = None,
         gateway_keys: GatewayKeys | None = None,
+        gateway_calls: GatewayCalls | None = None,
         model_identities: Mapping[str, LocalModelIdentity] | None = None,
+        key_check: Callable[[str, str], None] | None = check_gateway_key,
     ) -> None:
         self.spec = spec
+        self.key_check = key_check
         self.model_identities = dict(model_identities or {})
         self.credentials = dict(credentials or {})
         self.gateway_keys = gateway_keys
+        self.gateway_calls = gateway_calls
         self.episode_server_options = episode_server
         self._episode_server: EpisodeServer | None = None
         self.catalog = catalog or ModelCatalog()
@@ -2493,6 +3265,8 @@ class JobRunner:
             allow_unsafe_local=allow_local
         )
         self._trials: set[TrialRunner] = set()
+        self.stopped: str | None = None
+        """Why the Job stopped early, when a Trial's failure means every Trial would fail."""
 
     def _model_identity(self, trial: TrialSpec) -> LocalModelIdentity | None:
         agent = next(item for item in self.spec.agents if item.agent_id == trial.agent_id)
@@ -2531,6 +3305,7 @@ class JobRunner:
                 missing[app].extend(name for name in names if name not in missing[app])
         if missing:
             raise ExecutionFailure(ErrorCode.AUTHENTICATION, describe_missing(missing))
+        await self._check_gateway_key()
         for agent in self.spec.agents:
             if agent.external is not None:
                 _check_external(agent, self.environ)
@@ -2585,6 +3360,33 @@ class JobRunner:
                 provider = self._provider_for(provider_name)
                 await provider.preflight(requirements)
 
+    async def _check_gateway_key(self) -> None:
+        """Check the Plural key once, before any Trial, when the Job calls the gateway.
+
+        Raises:
+            ExecutionFailure: When the gateway rejects the key or has locked
+                this address out.
+        """
+        key = self.environ.get("PLURAL_API_KEY")
+        if not key or self.key_check is None:
+            return
+        judged = any(
+            binding.verifier.kind == "agent"
+            for task in self.spec.tasks
+            for binding in task.verifiers
+        )
+        native = any(
+            agent.external is None and agent.agent.endpoint is None and agent.auth != "none"
+            for agent in self.spec.agents
+        )
+        if not (judged or native):
+            return
+        gateway = resolve_gateway_url(None, self.environ)
+        try:
+            await asyncio.to_thread(self.key_check, gateway, key)
+        except AuthHTTPError as exc:
+            raise ExecutionFailure(ErrorCode.AUTHENTICATION, str(exc)) from None
+
     async def run(self, *, resume: bool = False) -> JobResult:
         """Execute all ready Trials with global and per-runtime bounds."""
         self.store.initialize(self.spec, self.plan)
@@ -2637,6 +3439,7 @@ class JobRunner:
                         credentials=self._agent_credentials(trial_spec),
                         episode_server=self._episode_server,
                         gateway_keys=self.gateway_keys,
+                        gateway_calls=self.gateway_calls,
                         model_identity=self._model_identity(trial_spec),
                     )
                     self._trials.add(trial)
@@ -2647,6 +3450,22 @@ class JobRunner:
                 results[trial_spec.trial_id] = result
                 if self.progress:
                     self.progress(trial_spec, result)
+            if result.error_code is ErrorCode.AUTHENTICATION and self.stopped is None:
+                # A rejected key fails every Trial alike, and each retry from the same
+                # address counts toward the gateway's lockout, so stop them all now.
+                self.stopped = (
+                    f"Stopped the Job: Trial {trial_spec.trial_id} failed to authenticate, "
+                    "so the others were cancelled rather than fail the same way. "
+                    f"{(result.error_message or '').strip()[:500]}"
+                ).strip()
+                self.store.emit(
+                    self.plan.job_id,
+                    "cancelled",
+                    "cancelled",
+                    message=self.stopped,
+                    data={"reason": "authentication", "trial_id": trial_spec.trial_id},
+                )
+                await self.cancel()
 
         async with contextlib.AsyncExitStack() as stack:
             if any(agent.external is not None for agent in self.spec.agents):
@@ -2672,6 +3491,7 @@ class JobRunner:
             trials=ordered,
             benchmark=self.plan.lock.benchmark,
             aggregates=_agent_aggregates(self.spec, ordered),
+            stopped=self.stopped,
         )
         self.store.write_job_result(result)
         self.store.emit(

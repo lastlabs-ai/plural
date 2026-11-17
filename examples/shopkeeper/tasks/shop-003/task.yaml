@@ -1,0 +1,16 @@
+# Task: one season at the shop. expected holds the starting cash and the profit that
+# scores 1; the Agent never sees it.
+name: shop-003
+version: 1.0.0
+instructions: instruction.md
+environment: shop
+verifiers:
+  - shop-books
+expected:
+  starting_cash: 150
+  target_profit: 450
+initial_state:
+  days: 21
+  cash: 150
+  rent: 35
+  elasticity: 1.2

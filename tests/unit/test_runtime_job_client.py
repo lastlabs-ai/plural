@@ -50,13 +50,16 @@ def test_runtime_presets() -> None:
     docker = Runtime.docker()
     assert docker.provider == "docker"
     assert docker.image == "python:3.12-slim"
-    assert docker.network is NetworkMode.PUBLIC
+    assert docker.network is None
+    assert docker.network_mode is NetworkMode.PUBLIC
     local = Runtime.local()
     assert local.provider == "local"
     assert local.allow_unsafe_local is True
     daytona = Runtime.daytona()
     assert daytona.provider == "daytona"
-    assert daytona.image == "python:3.12-slim"
+    assert daytona.image is None
+    assert daytona.isolation_policy == "required"
+    assert local.isolation_policy == "best_effort"
 
 
 def test_runtime_allowlist_requires_hosts() -> None:

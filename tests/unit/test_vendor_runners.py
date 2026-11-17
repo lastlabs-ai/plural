@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from plural.harness import mcp_bridge, messages_bridge, vendor_adapter
+from plural.harness import mcp_bridge, messages_bridge, responses_bridge, vendor_adapter
 
 
 def _request(**overrides: object) -> dict[str, object]:
@@ -49,6 +49,9 @@ def test_vendor_adapter_maps_job_credentials_and_normalizes(
     monkeypatch.setenv("PLURAL_GATEWAY_URL", "https://gateway.example/v1")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    # Set, so the test restores them; the adapter replaces both.
+    monkeypatch.setenv("CODEX_HOME", "/home/user/.codex")
+    monkeypatch.setenv("PLURAL_CODEX_BASE_URL", "unset")
     monkeypatch.setattr(vendor_adapter.sys, "argv", ["vendor_adapter.py", "codex"])
     monkeypatch.setattr(vendor_adapter.sys, "stdin", io.StringIO(request))
     monkeypatch.setattr(vendor_adapter.shutil, "which", lambda _name: "/usr/bin/codex")
@@ -68,7 +71,13 @@ def test_vendor_adapter_maps_job_credentials_and_normalizes(
     command, environ = seen[0]
     assert command[0] == "codex"
     assert environ["OPENAI_API_KEY"] == "job-key"
-    assert environ["OPENAI_BASE_URL"] == "https://gateway.example/v1"
+    # Codex has its own home, never the machine's login, and calls models only via the bridge.
+    assert environ["CODEX_HOME"] == str((tmp_path / ".plural" / "codex").resolve())
+    bridge = environ["PLURAL_CODEX_BASE_URL"]
+    assert bridge.startswith("http://127.0.0.1:")
+    assert "model_provider=plural" in command
+    assert f"model_providers.plural.base_url={json.dumps(bridge)}" in command
+    assert "--skip-git-repo-check" in command
     result = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
     assert result["response"] == "done"
     assert (tmp_path / "trajectory.jsonl").is_file()
@@ -186,3 +195,284 @@ def test_messages_bridge_translates_to_openai_gateway(monkeypatch: pytest.Monkey
     assert body["messages"][0] == {"role": "system", "content": "Be brief."}
     assert translated["content"][0]["text"] == "hello from gateway"
     assert translated["usage"]["output_tokens"] == 3
+
+
+def test_messages_bridge_carries_tools_both_ways() -> None:
+    request = messages_bridge._to_openai(
+        {
+            "model": "anthropic/claude-haiku-4-5",
+            "tools": [
+                {"name": "Write", "description": "Write a file", "input_schema": {"type": "object"}}
+            ],
+            "tool_choice": {"type": "any"},
+            "messages": [
+                {"role": "user", "content": "Write it."},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "Writing."},
+                        {"type": "tool_use", "id": "t1", "name": "Write", "input": {"path": "a"}},
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": "denied",
+                            "is_error": True,
+                        },
+                        {"type": "text", "text": "Try again."},
+                    ],
+                },
+            ],
+        }
+    )
+    assert request["tools"][0]["function"]["name"] == "Write"
+    assert request["tool_choice"] == "required"
+    assistant, result, follow_up = request["messages"][1:]
+    assert assistant["tool_calls"][0]["function"] == {"name": "Write", "arguments": '{"path": "a"}'}
+    assert result == {"role": "tool", "tool_call_id": "t1", "content": "Error: denied"}
+    assert follow_up == {"role": "user", "content": "Try again."}
+
+    response = messages_bridge._from_openai(
+        {
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "c1",
+                                "function": {"name": "Write", "arguments": '{"path": "b"}'},
+                            }
+                        ],
+                    },
+                }
+            ]
+        },
+        model="anthropic/claude-haiku-4-5",
+    )
+    assert response["stop_reason"] == "tool_use"
+    assert response["content"] == [
+        {"type": "tool_use", "id": "c1", "name": "Write", "input": {"path": "b"}}
+    ]
+
+
+def test_responses_bridge_reads_codex_tools_and_answers_in_kind() -> None:
+    request, tools = responses_bridge.to_chat(
+        {
+            "model": "openai/gpt-5.6-luna",
+            "instructions": "Be careful.",
+            "input": [
+                {
+                    "type": "additional_tools",
+                    "tools": [
+                        {
+                            "type": "namespace",
+                            "name": "functions",
+                            "tools": [
+                                {"type": "custom", "name": "exec", "format": {"type": "grammar"}},
+                                {"type": "function", "name": "wait", "parameters": {}},
+                            ],
+                        },
+                        {
+                            "type": "namespace",
+                            "name": "mcp__files",
+                            "tools": [{"type": "function", "name": "read", "parameters": {}}],
+                        },
+                    ],
+                },
+                {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": "Rules."}],
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Go."}],
+                },
+                {"type": "custom_tool_call", "name": "exec", "call_id": "c1", "input": "text(1)"},
+                {"type": "custom_tool_call_output", "call_id": "c1", "output": "1"},
+            ],
+        }
+    )
+    names = [tool["function"]["name"] for tool in request["tools"]]
+    assert names == ["exec", "wait", "mcp__files__read"]
+    assert tools.custom == {"exec"} and tools.namespaces == {"mcp__files"}
+    assert [message["role"] for message in request["messages"]] == [
+        "system",
+        "system",
+        "user",
+        "assistant",
+        "tool",
+    ]
+    assert (
+        request["messages"][3]["tool_calls"][0]["function"]["arguments"] == '{"input": "text(1)"}'
+    )
+
+    response = responses_bridge.from_chat(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Working.",
+                        "tool_calls": [
+                            {
+                                "id": "a",
+                                "function": {"name": "exec", "arguments": '{"input": "x()"}'},
+                            },
+                            {
+                                "id": "b",
+                                "function": {"name": "mcp__files__read", "arguments": "{}"},
+                            },
+                        ],
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+        },
+        tools,
+    )
+    message, freeform, function = response["output"]
+    assert message["content"][0]["text"] == "Working."
+    assert (freeform["type"], freeform["name"], freeform["input"]) == (
+        "custom_tool_call",
+        "exec",
+        "x()",
+    )
+    assert (function["type"], function["namespace"], function["name"]) == (
+        "function_call",
+        "mcp__files",
+        "read",
+    )
+    assert response["usage"]["total_tokens"] == 7
+    events = responses_bridge.stream_events(response)
+    assert events[0]["type"] == "response.created"
+    assert events[-1] == {**events[-1], "type": "response.completed", "response": response}
+    done = [event["item"] for event in events if event["type"] == "response.output_item.done"]
+    assert done == response["output"]
+
+
+def test_claude_code_never_reads_this_machines_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent = {"name": "agent", "model": "anthropic/claude-haiku-4-5", "harness": "claude-code"}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PLURAL_API_KEY", "job-key")
+    monkeypatch.setenv("PLURAL_GATEWAY_URL", "https://gateway.example/v1")
+    for name in ("CLAUDE_CONFIG_DIR", "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"):
+        monkeypatch.setenv(name, "from-this-machine")
+    monkeypatch.setattr(vendor_adapter.sys, "argv", ["vendor_adapter.py", "claude-code"])
+    monkeypatch.setattr(
+        vendor_adapter.sys, "stdin", io.StringIO(json.dumps(_request(agent=agent)) + "\n")
+    )
+    monkeypatch.setattr(vendor_adapter.shutil, "which", lambda _name: "/usr/bin/claude")
+    seen: list[dict[str, str]] = []
+
+    def _run(command: tuple[str, ...], **kwargs: object) -> SimpleNamespace:
+        del command, kwargs
+        seen.append(dict(vendor_adapter.os.environ))
+        return SimpleNamespace(returncode=0, stdout='{"result": "done"}', stderr="")
+
+    monkeypatch.setattr(vendor_adapter.subprocess, "run", _run)
+    vendor_adapter.main()
+    assert seen[0]["CLAUDE_CONFIG_DIR"] == str((tmp_path / ".plural" / "claude").resolve())
+    assert seen[0]["ANTHROPIC_BASE_URL"].startswith("http://127.0.0.1:")
+    assert seen[0]["ANTHROPIC_API_KEY"] == "job-key"
+
+
+def test_hermes_calls_only_the_bridge_and_never_holds_a_provider_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = json.dumps(_request()) + "\n"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PLURAL_API_KEY", "job-key")
+    monkeypatch.setenv("PLURAL_GATEWAY_URL", "https://gateway.example/v1")
+    # Set, so the test restores them; the adapter removes or replaces each.
+    for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "HERMES_HOME"):
+        monkeypatch.setenv(name, "this-machine")
+    monkeypatch.setenv("CUSTOM_BASE_URL", "unset")
+    monkeypatch.setattr(vendor_adapter.sys, "argv", ["vendor_adapter.py", "hermes"])
+    monkeypatch.setattr(vendor_adapter.sys, "stdin", io.StringIO(request))
+    monkeypatch.setattr(vendor_adapter.shutil, "which", lambda _name: "/usr/bin/hermes")
+    seen: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+    def _run(command: tuple[str, ...], **kwargs: object) -> SimpleNamespace:
+        del kwargs
+        seen.append((tuple(command), dict(vendor_adapter.os.environ)))
+        return SimpleNamespace(returncode=0, stdout="done\n", stderr="")
+
+    monkeypatch.setattr(vendor_adapter.subprocess, "run", _run)
+    vendor_adapter.main()
+    command, environ = seen[0]
+    assert command[:2] == ("hermes", "-z")
+    assert command[command.index("--provider") + 1] == "custom"
+    assert "--ignore-user-config" in command and "--ignore-rules" in command
+    assert environ["CUSTOM_BASE_URL"].startswith("http://127.0.0.1:")
+    assert environ["HERMES_HOME"] == str((tmp_path / ".plural" / "hermes").resolve())
+    assert not {"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY"} & set(environ)
+    assert "job-key" not in json.dumps(command)
+
+
+def test_the_bridge_passes_chat_completions_through_and_streams_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import urllib.request
+
+    sent: list[dict[str, object]] = []
+    answer = {
+        "id": "chatcmpl-1",
+        "model": "openai/gpt-5.6-luna",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "write_file", "arguments": "{}"},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {"prompt_tokens": 9, "completion_tokens": 3},
+    }
+
+    def gateway(payload: dict[str, object], timeout: float) -> dict[str, object]:
+        del timeout
+        sent.append(payload)
+        return answer
+
+    monkeypatch.setattr(responses_bridge, "_gateway_request", gateway)
+    server, url = responses_bridge.start(deadline=10**12)
+    try:
+        messages = [{"role": "developer", "content": "Be brief."}]
+        body = {"model": "openai/gpt-5.6-luna", "messages": messages, "stream": True}
+        request = urllib.request.Request(
+            f"{url}/chat/completions",
+            data=json.dumps({**body, "stream_options": {"include_usage": True}}).encode(),
+            headers={"Content-Type": "application/json", "Authorization": "Bearer ignored"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            lines = response.read().decode().split("\n\n")
+    finally:
+        server.shutdown()
+    assert sent == [
+        {"model": "openai/gpt-5.6-luna", "messages": [{"role": "system", "content": "Be brief."}]}
+    ]
+    chunks = [
+        json.loads(line.removeprefix("data: ")) for line in lines if line.startswith("data: {")
+    ]
+    assert chunks[0]["choices"][0]["delta"]["tool_calls"][0]["index"] == 0
+    assert chunks[1]["choices"][0]["finish_reason"] == "tool_calls"
+    assert chunks[-1]["usage"] == answer["usage"]
+    assert "data: [DONE]" in lines

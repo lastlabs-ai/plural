@@ -50,6 +50,7 @@ PACKAGE_NAV = [
     ("Build", "/docs/project/multi-agent", "project/multi-agent.md"),
     ("Run", "/docs/running/jobs", "running/jobs.md"),
     ("Run", "/docs/running/trials", "running/trials.md"),
+    ("Run", "/docs/running/forks", "running/forks.md"),
     ("Run", "/docs/running/sessions", "running/sessions.md"),
     ("Run", "/docs/running/artifacts", "running/artifacts.md"),
     ("Run", "/docs/running/reviews", "running/reviews.md"),
@@ -62,6 +63,7 @@ PACKAGE_NAV = [
     ("Interfaces", "/docs/interfaces/yaml", "interfaces/yaml.md"),
     ("Tutorials", "/docs/tutorials/support-queue", "tutorials/support-queue.md"),
     ("Tutorials", "/docs/tutorials/wordle", "tutorials/wordle.md"),
+    ("Tutorials", "/docs/tutorials/shopkeeper", "tutorials/shopkeeper.md"),
     ("Operations", "/docs/reference/integrations", "reference/integrations.md"),
 ]
 FENCE = re.compile(r"^```(?P<language>[^\n]*)\n(?P<body>.*?)^```\s*$", re.MULTILINE | re.DOTALL)

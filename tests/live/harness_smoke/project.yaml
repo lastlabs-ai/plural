@@ -1,0 +1,4 @@
+# The nightly Harness smoke test: each built-in Harness writes one file through the gateway.
+schema_version: 1
+name: harness-smoke
+description: Each built-in Harness must write one file, with every model call through the gateway.

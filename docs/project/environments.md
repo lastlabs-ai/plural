@@ -474,19 +474,21 @@ model judges also need to reach their endpoint.
 
 ### Compute, timeouts, and persistence
 
-`cpus` and `memory_mb` request compute limits on providers that support them. The
-Runtime's `timeout_seconds` defaults to 900 seconds for execution and upload
-operations, above the 10 minute episode limit, so the Runtime does not cut a
-default run off first. Environment limits separately bound the episode.
+`cpus` and `memory_mb` request compute limits on providers that support them.
 
-The two meet at the end of an episode. Plural's built-in Harness ends the episode
-itself at `max_seconds`, with the stop reason `max_seconds`, and its Trial is
-verified like any other; the Runtime allows it 30 seconds past that to finish. When
-`timeout_seconds` is the shorter of the two, it wins: the Harness stops 30 seconds
-before it. So raise `timeout_seconds` along with a `max_seconds` above 270. A
-Harness of your own is killed at `max_seconds` (or `timeout_seconds`, if shorter),
-and is told that deadline, in seconds, in `PLURAL_STOP_SECONDS`. A Trial killed that
-way fails with the stop reason `harness_timeout`; a Benchmark's
+Two limits bound time, and each governs different commands:
+
+- The Environment's `max_seconds` governs the Harness, however long it is. An
+  episode can run for hours or days; the sandbox's lifetime is set from it.
+- The Runtime's `timeout_seconds`, 900 seconds by default, governs every other
+  command: setup, uploads, the App host's start, and downloads. It never cuts an
+  episode short.
+
+Plural's built-in Harness ends the episode itself at `max_seconds`, with the stop
+reason `max_seconds`, and its Trial is verified like any other; the Runtime allows it
+30 seconds past that to finish. A Harness of your own is killed at `max_seconds`, and
+is told that deadline, in seconds, in `PLURAL_STOP_SECONDS`. A Trial killed that way
+fails with the stop reason `harness_timeout`; a Benchmark's
 [`harness_timeout` rule](benchmarks.md#how-failures-are-scored) decides whether it
 counts against the Agent.
 
@@ -520,6 +522,45 @@ measure.
 
 Local, Docker, and the bundled remote provider do not keep workspaces between Trials.
 Recreate the data each Trial needs in `reset`.
+
+### Workspace snapshots
+
+After every step, Plural snapshots the Agent's workspace files, so a Verifier can
+read the files the Agent left as `episode.workspace` and a fork can put the files
+back exactly as they were after any step. Snapshots never hold the Environment's
+resources, a Harness's own files, or an App's private files. `workspace_snapshot_mib`
+in `limits`, 512 by default, caps the snapshot's size per Trial; files past the cap
+are listed as skipped, and `0` turns snapshots off. Snapshots need `git` in the
+Runtime.
+
+## An Environment with no Apps
+
+An Environment needs no Apps when the work is answering a question or editing files.
+Give it resources and a Runtime, and Verifiers check the Agent's final answer and
+the files it wrote:
+
+```yaml
+name: files
+resources:
+  - invoices.csv
+runtime:
+  provider: local
+```
+
+The Agent works with its Harness's own tools, such as Claude Code's `Read` and
+`Write`. Every tool call is a step in the Trial's timeline. The
+`examples/bare-files` project in the [Plural repository](https://github.com/lastlabs-ai/plural)
+totals a CSV file and checks the total in both the answer and a file.
+
+## Forkable Environments
+
+A fork continues a Trial from the moment after one step, with every App's State put
+back. An Environment is **forkable** when every App can do that. A Python App can,
+unless its class sets `restorable = False`; override `restore(snapshot)` when
+loading the snapshot into `self.state` isn't enough. An MCP or OpenAPI App can when
+it has `snapshot` and `restore` commands and snapshots after every step. A `live`
+App never can. `plural env validate` and the Environment's page say whether an
+Environment is forkable, and why not. See [Checkpoints and forks](../running/forks.md).
 
 ## Resources
 

@@ -15,6 +15,7 @@ from plural.benchmarks.rules import (
     check_track_limits,
     validate_release_rules,
 )
+from plural.checkpoints import Checkpoint
 from plural.common import (
     FrozenModel,
     content_hash,
@@ -146,7 +147,14 @@ def _validate_app_state(
             continue
         expected = _schema_types(spec)
         actual = _json_type_name(value)
-        if expected and actual not in expected and not (value is None and "null" in expected):
+        # JSON Schema counts every integer as a number, so ``cash: 150`` fits a float field.
+        integral = actual == "integer" and "number" in expected
+        if (
+            expected
+            and actual not in expected
+            and not integral
+            and not (value is None and "null" in expected)
+        ):
             errors.append(
                 f"{prefix} {key!r} expected {' or '.join(sorted(expected))}, got {actual}."
             )
@@ -394,6 +402,10 @@ class Task(FrozenModel):
 
     ``name`` is the Task's identity, and what Benchmarks, Jobs, and results
     call it. ``title`` is only the display name in the hosted project.
+
+    ``from_checkpoint`` (``TRIAL/NAME``) starts each episode from a saved
+    checkpoint instead of a reset: the moment an Agent once reached, as a test
+    of its own. A project resolves it to ``checkpoint``.
     """
 
     name: str = Field(min_length=1)
@@ -413,10 +425,16 @@ class Task(FrozenModel):
     initial_state: dict[str, Any] = Field(default_factory=dict)
     seat_instructions: dict[str, str] = Field(default_factory=dict)
     expected: Any = None
+    from_checkpoint: str | None = None
+    checkpoint: Checkpoint | None = Field(default=None, exclude=True)
+    checkpoint_bundle: str | None = Field(default=None, exclude=True)
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
-        return _serialized_as_before(handler(self), self.seat_instructions, self.expected)
+        data = _serialized_as_before(handler(self), self.seat_instructions, self.expected)
+        if isinstance(data, dict) and self.from_checkpoint is None:
+            data.pop("from_checkpoint", None)
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -504,6 +522,14 @@ class Task(FrozenModel):
                 # keeps its hash.
                 **({"seat_instructions": self.seat_instructions} if self.seat_instructions else {}),
                 **({"expected": self.expected} if self.expected is not None else {}),
+                **(
+                    {
+                        "from_checkpoint": self.from_checkpoint,
+                        "checkpoint": self.checkpoint.digest if self.checkpoint else None,
+                    }
+                    if self.from_checkpoint is not None
+                    else {}
+                ),
             },
         )
 
@@ -541,6 +567,9 @@ class Task(FrozenModel):
             state=self.initial_state,
             seat_instructions=self.seat_instructions,
             expected=self.expected,
+            from_checkpoint=self.from_checkpoint,
+            checkpoint=self.checkpoint,
+            checkpoint_bundle=self.checkpoint_bundle,
         )
 
     def _definition(self) -> TaskDefinition:
@@ -570,10 +599,23 @@ class TaskDefinition(FrozenModel):
     seat_instructions: dict[str, str] = Field(default_factory=dict)
     expected: Any = None
     """The answer key, for Verifiers only; never in :attr:`public_payload`."""
+    from_checkpoint: str | None = None
+    """``TRIAL/NAME``: the saved checkpoint the episode starts from instead of a reset."""
+    checkpoint: Checkpoint | None = None
+    """The resolved ``from_checkpoint``. Its App State stays with the Job."""
+    checkpoint_bundle: str | None = Field(default=None, exclude=True)
+    """Where the checkpoint's workspace snapshot is on this machine; never hashed."""
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
-        return _serialized_as_before(handler(self), self.seat_instructions, self.expected)
+        data = _serialized_as_before(handler(self), self.seat_instructions, self.expected)
+        if isinstance(data, dict):
+            # A Task that starts from a reset keeps the hash it had before checkpoints.
+            if self.from_checkpoint is None:
+                data.pop("from_checkpoint", None)
+            if self.checkpoint is None:
+                data.pop("checkpoint", None)
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -600,11 +642,44 @@ class TaskDefinition(FrozenModel):
                 f"Task {self.task_id!r} has more than one Verifier named "
                 f"{', '.join(map(repr, repeated))}. Give each a name of its own."
             )
+        # Declared metrics only: two judges that share a criterion name predate metrics,
+        # and the first one's rating keeps the name.
+        owners: dict[str, str] = {}
+        for binding in self.verifiers:
+            for spec in binding.verifier.metrics:
+                owner = owners.setdefault(spec.name, binding.verifier.name)
+                if owner != binding.verifier.name:
+                    raise ValueError(
+                        f"Task {self.task_id!r}: Verifiers {owner!r} and "
+                        f"{binding.verifier.name!r} both produce metric {spec.name!r}. A "
+                        "metric's name must be unique across a Task's Verifiers."
+                    )
         if not any(binding.verifier.scores for binding in self.verifiers):
             raise ValueError(
                 f"Task {self.task_id!r} needs at least one Verifier with a check, to score "
                 "the finished episode."
             )
+        if self.from_checkpoint is not None and self.checkpoint is None:
+            raise ValueError(
+                f"Task {self.task_id!r} starts from checkpoint {self.from_checkpoint!r}, which "
+                "was not found. Save it with plural trial checkpoint TRIAL --step N --name NAME."
+            )
+        if self.checkpoint is not None:
+            problem = self.environment.fork_problem
+            if problem:
+                raise ValueError(
+                    f"Task {self.task_id!r} starts from a checkpoint, but its Environment "
+                    f"can't be restored: {problem}."
+                )
+            unknown = sorted(
+                set(self.checkpoint.apps) - {app.name for app in self.environment.apps}
+            )
+            if unknown:
+                raise ValueError(
+                    f"Task {self.task_id!r} starts from checkpoint {self.from_checkpoint!r}, "
+                    f"which holds Apps its Environment doesn't have ({', '.join(unknown)}). "
+                    "Take the checkpoint from a Trial in the same Environment."
+                )
         return self
 
     @property
@@ -658,12 +733,13 @@ RELEASE_FIELDS = (
     "limitations",
     "license",
     "forked_from",
+    "canary",
 )
 
 
 # Scoring rules added after Benchmarks were first saved. At their default they
 # are left out of the digest, so an older Benchmark keeps its identity.
-_LATER_SCORING_FIELDS = ("harness_timeout",)
+_LATER_SCORING_FIELDS = ("harness_timeout", "integrity")
 
 
 class BenchmarkRelease(FrozenModel):
@@ -683,6 +759,9 @@ class BenchmarkRelease(FrozenModel):
         limitations: What results do not show.
         license: License for the Benchmark and its published results.
         forked_from: Immutable reference of the release this was derived from.
+        canary: A GUID kept out of every agent-visible file and placed beside
+            the Verifiers and answer keys. An Agent that writes it saw a grader
+            file, or its model was trained on this Benchmark.
     """
 
     categories: tuple[BenchmarkCategory, ...] = ()
@@ -694,6 +773,7 @@ class BenchmarkRelease(FrozenModel):
     limitations: tuple[str, ...] = ()
     license: str = ""
     forked_from: str | None = None
+    canary: str | None = Field(default=None, pattern=r"^[A-Za-z0-9-]{16,64}$")
 
     def _release_payload(self) -> dict[str, Any]:
         """Release fields that differ from their defaults.
@@ -738,6 +818,52 @@ class BenchmarkRelease(FrozenModel):
             raise ValueError(f"Cannot create Benchmark {name!r}.\n" + "\n".join(issues))
 
 
+def _check_ranking(
+    name: str,
+    primary_metric: str,
+    heldout: Sequence[str],
+    verifiers: Mapping[str, Sequence[Any]],
+) -> None:
+    """Check what a Benchmark ranks on, and that its held-out Tasks are its own.
+
+    ``primary_metric`` must be ``score``, a built-in, or a metric some Task's
+    Verifier declares.
+
+    Raises:
+        ValueError: When the metric or a held-out Task is unknown, or every Task
+            is held out.
+    """
+    from plural.metrics import BUILTIN_METRICS
+
+    if primary_metric != "score":
+        known = set(BUILTIN_METRICS) | {
+            spec.name
+            for items in verifiers.values()
+            for verifier in items
+            for spec in getattr(verifier, "metric_specs", ())
+        }
+        if primary_metric not in known:
+            raise ValueError(
+                f"Cannot create Benchmark {name!r}.\nprimary_metric {primary_metric!r} is "
+                "not score, a built-in metric, or a metric its Tasks' Verifiers declare. "
+                f"Known metrics: {', '.join(sorted(known)) or 'none'}."
+            )
+    unknown = sorted(set(heldout) - set(verifiers))
+    if unknown:
+        raise ValueError(
+            f"Cannot create Benchmark {name!r}.\nheldout names Tasks it does not have: "
+            + ", ".join(unknown)
+        )
+    if len(set(heldout)) != len(heldout):
+        raise ValueError(f"Cannot create Benchmark {name!r}.\nheldout lists a Task twice")
+    if heldout and set(heldout) >= set(verifiers):
+        raise ValueError(
+            f"Cannot create Benchmark {name!r}.\nEvery Task is held out, so a plain run "
+            "would have nothing to run. List only some Tasks under heldout:, such as "
+            "a third."
+        )
+
+
 class BenchmarkDefinition(BenchmarkRelease):
     """A revisioned ordered selection of Tasks across Environments."""
 
@@ -749,6 +875,8 @@ class BenchmarkDefinition(BenchmarkRelease):
     primary_metric: str = "score"
     description: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
+    heldout: tuple[str, ...] = ()
+    """Task names kept back for confirmation; a plain run leaves them out."""
 
     @model_validator(mode="after")
     def _unique_tasks(self) -> BenchmarkDefinition:
@@ -765,7 +893,22 @@ class BenchmarkDefinition(BenchmarkRelease):
         self._validate_release(
             self.name, [(task.task_id, task.environment.limits) for task in self.tasks]
         )
+        _check_ranking(
+            self.name,
+            self.primary_metric,
+            self.heldout,
+            {
+                task.task_id: tuple(binding.verifier for binding in task.verifiers)
+                for task in self.tasks
+            },
+        )
         return self
+
+    @property
+    def dev_tasks(self) -> tuple[TaskDefinition, ...]:
+        """The Tasks a plain run uses: every Task that is not held out."""
+        kept = set(self.heldout)
+        return tuple(task for task in self.tasks if task.task_id not in kept)
 
     @property
     def reproducible(self) -> bool:
@@ -778,6 +921,9 @@ class BenchmarkDefinition(BenchmarkRelease):
         if self.source_hash:
             return self.source_hash
         payload = self.model_dump(exclude={"source_hash", *RELEASE_FIELDS})
+        # A Benchmark without held-out Tasks hashes as it did before them.
+        if not payload.get("heldout"):
+            payload.pop("heldout", None)
         return content_hash({**payload, **self._release_payload()})
 
     @property
@@ -838,9 +984,14 @@ class Benchmark(BenchmarkRelease):
     )
     version: str
     tasks: tuple[Task, ...] = Field(min_length=1)
-    primary_metric: Literal["score"] = "score"
+    primary_metric: str = "score"
+    """What the leaderboard ranks on: ``score``, a built-in metric such as
+    ``cost_usd``, or a metric a Task's Verifier declares."""
     description: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
+    heldout: tuple[str, ...] = ()
+    """Tasks kept back for confirmation. A plain run leaves them out; each run
+    that includes them is a peek, and is counted."""
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
@@ -864,6 +1015,12 @@ class Benchmark(BenchmarkRelease):
             [(task.name, task._environment_definition().limits) for task in self.tasks]
             if self.tracks
             else [(name, ExecutionLimits()) for name in names],
+        )
+        _check_ranking(
+            self.name,
+            self.primary_metric,
+            self.heldout,
+            {task.name: tuple(task.verifiers) for task in self.tasks},
         )
         return self
 
@@ -893,6 +1050,7 @@ class Benchmark(BenchmarkRelease):
                 "description": self.description,
                 "metadata": self.metadata,
                 **release,
+                **({"heldout": sorted(self.heldout)} if self.heldout else {}),
             },
         )
 
@@ -918,7 +1076,7 @@ class Benchmark(BenchmarkRelease):
         after_release = other.model_dump(mode="json", include=set(RELEASE_FIELDS))
         configuration_changes = {
             field: (getattr(self, field), getattr(other, field))
-            for field in ("primary_metric", "description", "metadata")
+            for field in ("primary_metric", "description", "metadata", "heldout")
             if getattr(self, field) != getattr(other, field)
         }
         configuration_changes.update(
@@ -991,6 +1149,7 @@ class Benchmark(BenchmarkRelease):
             primary_metric=self.primary_metric,
             description=self.description,
             metadata=self.metadata,
+            heldout=self.heldout,
             **{field: getattr(self, field) for field in RELEASE_FIELDS},
         )
 

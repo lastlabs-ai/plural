@@ -186,11 +186,13 @@ addopts = [
   "--ignore=docs",
   "--ignore=examples",
   "--ignore=tests/typing",
+  "--ignore=tests/live/harness_smoke",
 ]
 markers = [
   "live: tests that call real provider APIs (deselect with -m 'not live')",
   "docker: opt-in tests that use the local Docker daemon",
   "daytona: opt-in tests that use Daytona credentials",
+  "slow: full end-to-end runs that CI leaves to the nightly job (deselect with -m 'not slow')",
 ]
 filterwarnings = [
   "error",

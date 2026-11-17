@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from plural.cli.common import (
     deprecated,
     emit,
     handled,
+    muted,
     project_studio,
     relative,
     rows,
@@ -188,21 +190,24 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
 
         add_generators(app)
 
-    @app.command("validate")
-    @handled
-    def validate(
-        name: str | None = typer.Argument(None, help=NAME_HELP),
-        as_json: bool = JSON_OPTION,
+    def validate_files(
+        name: str | None, as_json: bool, checks: Callable[[Any, ResourceRef], Any] | None = None
     ) -> None:
-        """Check a resource and everything it depends on, without uploading."""
         space = workspace()
         ref = _ref(space, kind, name)
         resource = space.load(ref)
         payload = _local_payload(space, resource)
         apps = _app_summary(resource.value) if kind is ENVIRONMENT else None
         tools = _agent_tools(resource.value) if kind is ENVIRONMENT else []
+        fork_problem = resource.value.definition().fork_problem if kind is ENVIRONMENT else None
         if apps is not None:
-            payload = {**payload, "apps": apps, "tools": tools}
+            payload = {
+                **payload,
+                "apps": apps,
+                "tools": tools,
+                "forkable": fork_problem is None,
+                "fork_problem": fork_problem,
+            }
         credentials = _agent_credentials(resource.value) if kind is AGENT else []
         if kind is AGENT:
             payload = {**payload, "credentials": credentials}
@@ -256,6 +261,12 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                     else f"NOT SET: run `plural credential set {credential['name']}`"
                 )
                 typer.echo(f"  credential {credential['name']} ({scopes}): {status}")
+            if kind is ENVIRONMENT:
+                typer.echo(
+                    f"\nNot forkable: {fork_problem}."
+                    if fork_problem
+                    else "\nForkable: a checkpoint puts every App back after any step."
+                )
             if live:
                 one = len(live) == 1
                 typer.echo(
@@ -264,7 +275,92 @@ def resource_app(kind: ResourceKind) -> typer.Typer:
                     ", so results can change as the data behind them changes."
                 )
 
-        emit(payload, as_json=as_json, text=text)
+        report = None
+        if checks is not None and unfinished:
+            payload = {**payload, "checks": None}
+        elif checks is not None:
+            report = checks(space, ref)
+            payload = {**payload, "checks": report.model_dump(mode="json")}
+
+        def full_text() -> None:
+            text()
+            if checks is not None and unfinished:
+                typer.echo("\nThe probes run once the unfinished places are done.")
+            if report is not None:
+                _print_report(report)
+
+        emit(payload, as_json=as_json, text=full_text)
+        if report is not None and report.problems:
+            raise typer.Exit(1)
+
+    if kind in (TASK, BENCHMARK):
+
+        @app.command("validate")
+        @handled
+        def validate_checked(
+            name: str | None = typer.Argument(None, help=NAME_HELP),
+            probes: bool = typer.Option(
+                True,
+                "--probes/--no-probes",
+                help="Run the reference and the probe Agents. --no-probes checks the files only.",
+            ),
+            rerun: bool = typer.Option(
+                False, "--rerun", help="Run the probes again, even for unchanged Tasks."
+            ),
+            random_steps: int = typer.Option(
+                0,
+                "--random",
+                min=0,
+                help="Also run an Agent that takes this many random actions. A pass is a warning.",
+            ),
+            as_json: bool = JSON_OPTION,
+        ) -> None:
+            """Check a resource and everything it depends on, then prove its Tasks are fair.
+
+            Each Task runs its reference policy, which must pass, and a do-nothing
+            Agent and one that repeats the instructions, which must fail, in its
+            own Runtime. Everything the Agent can read is scanned for the answer
+            key, git history, solution files, Verifier code, and the Benchmark's
+            canary, and each default Runtime is checked for how far its results
+            can be trusted. A Task's probes are kept until the Task changes.
+            Problems exit 1.
+            """
+
+            def checks(space: Any, ref: ResourceRef) -> Any:
+                from plural.project.checks import check_report
+
+                def progress(line: str) -> None:
+                    if not as_json:
+                        typer.echo(muted(line), err=True)
+
+                report, ran = check_report(
+                    space,
+                    (ref.name,) if kind is TASK else (),
+                    benchmark=ref.name if kind is BENCHMARK else None,
+                    rerun=rerun,
+                    random_steps=random_steps,
+                    progress=progress,
+                )
+                shared = _share_checks(ran)
+                if shared and not as_json:
+                    typer.echo(
+                        muted(f"Recorded {counted(shared, 'check')} on the pushed Task revisions."),
+                        err=True,
+                    )
+                return report
+
+            validate_files(name, as_json, checks if probes else None)
+
+    else:
+
+        @app.command("validate")
+        @handled
+        def validate(
+            name: str | None = typer.Argument(None, help=NAME_HELP),
+            as_json: bool = JSON_OPTION,
+        ) -> None:
+            """Check a resource and everything it depends on, without uploading."""
+            validate_files(name, as_json)
 
     @app.command("push")
     @handled
@@ -956,6 +1052,69 @@ def _benchmark_membership(app: typer.Typer) -> None:
         removed = remove_tasks(space.project, ref.name, tasks)
         typer.echo(f"Removed {_task_list(removed)} from Benchmark {ref.name}.")
         _maybe_push(space, ref, push_after, changed=True)
+
+
+_CHECK_MARKS = {
+    "ok": typer.style("✓", fg="green", bold=True),
+    "problem": typer.style("✗", fg="red", bold=True),
+    "warning": typer.style("!", fg="yellow", bold=True),
+}
+
+
+def _print_report(report: Any) -> None:
+    for section in report.sections:
+        typer.echo(f"\n{section.title}")
+        for line in section.lines:
+            typer.echo(f"  {_CHECK_MARKS[line.mark]} {line.text}")
+            if line.detail:
+                typer.echo(f"      {muted(line.detail)}")
+    if report.problems:
+        typer.echo(
+            f"\n{counted(report.problems, 'problem')} to fix before you baseline. "
+            f"Next: {report.next_command}"
+        )
+
+
+def _share_checks(checks: list[Any]) -> int:
+    """Record each check on its pushed Task revision, when signed in. Never fails the command.
+
+    Returns:
+        How many checks were recorded.
+    """
+    from plural.studio import slugify
+
+    if not checks:
+        return 0
+    try:
+        current = session()
+        if current.token is None:
+            return 0
+        tasks = current.studio().tasks
+    except Exception:  # noqa: BLE001 - recording is a convenience, never a failure
+        return 0
+    recorded = 0
+    for check in checks:
+        try:
+            parent = tasks.find(slugify(check.task))
+            if parent is None:
+                continue
+            revision = next(
+                (
+                    item
+                    for item in tasks.revisions(str(parent["id"]))
+                    if item.get("content_hash") == check.content_hash
+                ),
+                None,
+            )
+            if revision is None:
+                continue
+            tasks.record_check(
+                str(parent["id"]), str(revision["id"]), check.model_dump(mode="json")
+            )
+            recorded += 1
+        except Exception:  # noqa: BLE001
+            continue
+    return recorded
 
 
 def _task_list(names: list[str]) -> str:

@@ -1,0 +1,9 @@
+name: write-file
+version: 1.0.0
+instructions: instruction.md
+environment: workspace
+verifiers:
+  - file-written
+expected:
+  file: smoke.txt
+  text: plural-smoke-ok

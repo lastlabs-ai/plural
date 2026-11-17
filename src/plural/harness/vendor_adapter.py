@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -31,6 +35,7 @@ def main() -> None:
     task_payload = request.get("task") or {}
     agent_payload = request.get("agent") or {}
     environment_payload = request.get("environment") or {}
+    resume = request.get("resume")
     result = run_vendor(
         vendor,
         HarnessTask.from_payload(task_payload),
@@ -38,7 +43,9 @@ def main() -> None:
             agent_payload,
             model_resolution=request.get("model_resolution") or {},
         ),
-        HarnessEnvironment(environment_payload),
+        HarnessEnvironment(
+            environment_payload, resume=resume if isinstance(resume, dict) else None
+        ),
     )
     trace_id = result.trace_id or str(uuid4())
     Path("result.json").write_text(
@@ -68,6 +75,10 @@ def main() -> None:
     )
 
 
+HERMES_USAGE = Path(".plural/hermes-usage.json")
+"""Where Hermes reports its usage, beside the adapter and outside the Agent's workspace."""
+
+
 def run_vendor(
     vendor: str,
     task: HarnessTask,
@@ -82,29 +93,46 @@ def run_vendor(
     if model:
         os.environ.setdefault("PLURAL_MODEL", model)
     _write_environment(environment.raw)
-    _write_config(vendor, kwargs.get("config"), root=Path(environment.workspace))
+    _write_config(vendor, kwargs.get("config"), root=Path(_host_workspace(environment)))
     _map_credentials(vendor, deadline)
     mcp_config = Path(".plural/mcp.json").resolve()
+    resume = environment.resume
+    if resume is not None and environment.raw.get("reset_command"):
+        # The host's opening: observation k, or a diagnostic fork's forced action's result.
+        environment.reset()
     prompt = _prompt(task, agent, environment)
-    command = _command(vendor, model, prompt, kwargs, mcp_config)
+    session: str | None = None
+    if vendor == "claude-code":
+        _write_claude_settings(environment)
+        if resume is not None and resume.history == "native" and resume.messages:
+            session = _write_claude_session(
+                resume.messages, Path(_host_workspace(environment)), model
+            )
+            prompt = _continue_prompt(environment)
+    command = _command(vendor, model, prompt, kwargs, mcp_config, session=session)
     if shutil.which(command[0]) is None:
         raise SystemExit(
             f"{vendor} requires installed executable {command[0]!r} on PATH. "
             "Plural installs it during Runtime setup; check network policy and the image tools."
         )
-    completed = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=call_timeout(deadline),
-        check=False,
-        cwd=environment.workspace,
-    )
-    if completed.returncode != 0:
-        raise SystemExit(
-            f"{vendor} exited with code {completed.returncode}: {(completed.stderr or '')[:1000]}"
+    if vendor == "codex" and environment.raw.get("tool_command"):
+        completed = _run_reporting(command, environment, deadline)
+    else:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=call_timeout(deadline),
+            check=False,
+            stdin=subprocess.DEVNULL,
+            cwd=_host_workspace(environment),
         )
+    if completed.returncode != 0:
+        output = (completed.stderr or "", completed.stdout or "")
+        detail = "\n".join(part.strip() for part in output if part.strip())
+        raise SystemExit(f"{vendor} exited with code {completed.returncode}: {detail[-1500:]}")
     response = _response(vendor, completed.stdout)
+    usage = _hermes_usage() if vendor == "hermes" else None
     return HarnessResult(
         response=response,
         metadata={"vendor": vendor, "model": model},
@@ -114,6 +142,7 @@ def run_vendor(
                 "model": model,
                 "stdout": completed.stdout,
                 "stderr": completed.stderr,
+                **({"usage": usage} if usage is not None else {}),
             },
         ),
         logs=tuple(item for item in (completed.stderr or "", completed.stdout or "") if item),
@@ -126,14 +155,253 @@ def _prompt(
     agent: HarnessAgent,
     environment: HarnessEnvironment,
 ) -> str:
-    return json.dumps(
-        {
-            "task": task.raw,
-            "agent": agent.raw,
-            "observation": environment.observation,
-        },
-        sort_keys=True,
+    payload: dict[str, Any] = {
+        "task": task.raw,
+        "agent": agent.raw,
+        "observation": environment.observation,
+    }
+    resume = environment.resume
+    if resume is not None:
+        if environment.observation is None:
+            payload["observation"] = resume.observation
+        if resume.history == "transcript" and resume.transcript:
+            payload["history"] = resume.transcript
+        else:
+            payload["history"] = "This episode is already under way; earlier steps are not shown."
+        if resume.note:
+            payload["note"] = resume.note
+    return json.dumps(payload, sort_keys=True)
+
+
+def _continue_prompt(environment: HarnessEnvironment) -> str:
+    """The message that continues a resumed Claude Code session."""
+    resume = environment.resume
+    current = environment.observation
+    if current is not None:
+        now = current if isinstance(current, str) else json.dumps(current, sort_keys=True)
+    else:
+        now = resume.rendered if resume is not None else ""
+    text = "Continue the task from where you left off."
+    parts = [f"{text}\n\nWhere things stand now:\n{now}" if now else text]
+    if resume is not None and resume.note:
+        parts.append(resume.note)
+    return "\n\n".join(parts)
+
+
+def _host_workspace(environment: HarnessEnvironment) -> str:
+    from plural.harness.native_runner import _workspace_path
+
+    return _workspace_path(environment.workspace)
+
+
+def _write_claude_settings(environment: HarnessEnvironment) -> None:
+    """A PostToolUse hook that reports each of Claude Code's own tool calls as a step."""
+    if not environment.raw.get("tool_command"):
+        return
+    hook = (
+        f"PLURAL_APPS_WORKSPACE={shlex.quote(_host_workspace(environment))} "
+        f"{shlex.quote(sys.executable)} -m plural.apps.daemon tool --claude-hook"
     )
+    settings = {
+        "hooks": {
+            "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": hook}]}]
+        }
+    }
+    path = Path(".plural/claude-settings.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(settings, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _claude_config_dir() -> Path:
+    folder = Path(".plural/claude").resolve()
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _write_claude_session(messages: Any, workspace: Path, model: str | None) -> str:
+    """Write a history as a Claude Code session, so ``--resume`` continues it natively.
+
+    Returns:
+        The session id.
+    """
+    session = str(uuid4())
+    cwd = str(workspace.resolve())
+    folder = (
+        _claude_config_dir() / "projects" / "".join(char if char.isalnum() else "-" for char in cwd)
+    )
+    folder.mkdir(parents=True, exist_ok=True)
+    lines: list[dict[str, Any]] = []
+    parent: str | None = None
+    stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def add(kind: str, message: dict[str, Any], **extra: Any) -> None:
+        nonlocal parent
+        uuid = str(uuid4())
+        lines.append(
+            {
+                "parentUuid": parent,
+                "isSidechain": False,
+                "userType": "external",
+                "cwd": cwd,
+                "sessionId": session,
+                "version": "2.1.236",
+                "type": kind,
+                "message": message,
+                "uuid": uuid,
+                "timestamp": stamp,
+                **extra,
+            }
+        )
+        parent = uuid
+
+    for item in messages:
+        if not isinstance(item, Mapping):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        text = content if isinstance(content, str) else json.dumps(content, default=str)
+        if role == "user":
+            add("user", {"role": "user", "content": text or "(empty)"})
+        elif role == "assistant":
+            blocks: list[dict[str, Any]] = []
+            if text and text != "null":
+                blocks.append({"type": "text", "text": text})
+            for call in item.get("tool_calls") or ():
+                function = call.get("function") or {}
+                arguments = function.get("arguments")
+                with contextlib.suppress(TypeError, ValueError):
+                    arguments = json.loads(arguments) if isinstance(arguments, str) else arguments
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": _tool_id(str(call.get("id") or "")),
+                        "name": str(function.get("name") or "tool"),
+                        "input": arguments if isinstance(arguments, dict) else {"input": arguments},
+                    }
+                )
+            if not blocks:
+                continue
+            add(
+                "assistant",
+                {
+                    "id": f"msg_{uuid4().hex[:24]}",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": model or "claude",
+                    "content": blocks,
+                    "stop_reason": "tool_use"
+                    if len(blocks) > 1 or blocks[0]["type"] == "tool_use"
+                    else "end_turn",
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
+            )
+        elif role == "tool":
+            add(
+                "user",
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": _tool_id(str(item.get("tool_call_id") or "")),
+                            "content": text,
+                        }
+                    ],
+                },
+            )
+    (folder / f"{session}.jsonl").write_text(
+        "".join(json.dumps(line, sort_keys=True) + "\n" for line in lines), encoding="utf-8"
+    )
+    return session
+
+
+def _tool_id(value: str) -> str:
+    cleaned = "".join(char for char in value if char.isalnum() or char in "_-")
+    return cleaned if cleaned.startswith("toolu_") else f"toolu_{cleaned or uuid4().hex[:24]}"
+
+
+_CODEX_TOOLS = {
+    "command_execution": "shell",
+    "file_change": "apply_patch",
+    "todo_list": "update_plan",
+    "web_search": "web_search",
+}
+
+
+def codex_tool_fields(event: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The tool call a finished Codex ``--json`` item describes, if it is one of Codex's own.
+
+    Calls of the Environment's MCP tools are left out: the host ran those as actions.
+
+    Returns:
+        Fields for the App host's ``tool`` operation, or ``None``.
+    """
+    if event.get("type") != "item.completed":
+        return None
+    item = event.get("item")
+    if not isinstance(item, Mapping):
+        return None
+    name = _CODEX_TOOLS.get(str(item.get("type") or item.get("item_type") or ""))
+    if name is None:
+        return None
+    if name == "shell":
+        command = item.get("command")
+        arguments: dict[str, Any] = {"command": command}
+        output: Any = item.get("aggregated_output")
+        failed = item.get("exit_code") not in (None, 0)
+        error = f"exit code {item.get('exit_code')}" if failed else None
+    else:
+        arguments = {
+            key: value for key, value in item.items() if key not in {"id", "type", "item_type"}
+        }
+        output, error = None, None
+    return {"name": name, "arguments": arguments, "output": output, "error": error}
+
+
+def _run_reporting(
+    command: tuple[str, ...], environment: HarnessEnvironment, deadline: float
+) -> subprocess.CompletedProcess[str]:
+    """Run Codex, reporting each of its own tool calls to the App host as it finishes."""
+    import threading
+
+    from plural.apps.daemon import call
+
+    reporting = bool(environment.raw.get("tool_command"))
+    root = Path(_host_workspace(environment))
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=_host_workspace(environment),
+    )
+    errors: list[str] = []
+    reader = threading.Thread(
+        target=lambda: errors.append(process.stderr.read() if process.stderr else ""),
+        daemon=True,
+    )
+    reader.start()
+    lines: list[str] = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        lines.append(line)
+        if not reporting:
+            continue
+        with contextlib.suppress(ValueError):
+            event = json.loads(line)
+            fields = codex_tool_fields(event) if isinstance(event, dict) else None
+            if fields is not None:
+                with contextlib.suppress(OSError, RuntimeError, ValueError):
+                    call("tool", root=root, timeout=30, **fields)
+    try:
+        process.wait(timeout=max(1.0, call_timeout(deadline)))
+    except subprocess.TimeoutExpired:
+        process.kill()
+        raise
+    reader.join(timeout=5)
+    return subprocess.CompletedProcess(command, process.returncode, "".join(lines), "".join(errors))
 
 
 def _command(
@@ -142,6 +410,8 @@ def _command(
     prompt: str,
     kwargs: dict[str, Any],
     mcp_config: Path,
+    *,
+    session: str | None = None,
 ) -> tuple[str, ...]:
     model_args = ("--model", model) if model else ()
     if vendor == "claude-code":
@@ -157,6 +427,11 @@ def _command(
             extra.extend(["--max-turns", str(max_turns)])
         if mcp_config.is_file():
             extra.extend(["--mcp-config", str(mcp_config)])
+        settings = Path(".plural/claude-settings.json")
+        if settings.is_file():
+            extra.extend(["--settings", str(settings.resolve())])
+        if session is not None:
+            extra.extend(["--resume", session])
         return (
             "claude",
             "--print",
@@ -174,10 +449,64 @@ def _command(
         sandbox = kwargs.get("sandbox")
         if sandbox:
             extra.extend(["--sandbox", str(sandbox)])
-        return ("codex", "exec", "--json", *model_args, *extra, prompt)
+        base = os.environ.get("PLURAL_CODEX_BASE_URL")
+        if base:
+            provider = {
+                "name": "Plural",
+                "base_url": base,
+                "env_key": "OPENAI_API_KEY",
+                "wire_api": "responses",
+            }
+            extra.extend(["-c", "model_provider=plural"])
+            for field, value in provider.items():
+                extra.extend(["-c", f"model_providers.plural.{field}={json.dumps(value)}"])
+        # The Runtime workspace is never a git repository Codex has been told to trust.
+        return ("codex", "exec", "--json", "--skip-git-repo-check", *model_args, *extra, prompt)
     if vendor == "hermes":
-        return ("hermes", "chat", *model_args, "--prompt", prompt)
+        # A named custom provider: with "auto" and a vendor/model name, Hermes calls
+        # OpenRouter itself. Its own config, rules and memory never apply.
+        return (
+            "hermes",
+            "-z",
+            prompt,
+            *model_args,
+            "--provider",
+            "custom",
+            "--usage-file",
+            str(HERMES_USAGE.resolve()),
+            "--yolo",
+            "--ignore-user-config",
+            "--ignore-rules",
+        )
     raise SystemExit(f"unknown vendor adapter {vendor!r}")
+
+
+def _hermes_usage() -> dict[str, Any] | None:
+    """The usage report Hermes wrote: its model calls, tokens, and the provider it used."""
+    try:
+        value = json.loads(HERMES_USAGE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _hermes_home() -> Path:
+    folder = Path(".plural/hermes").resolve()
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _codex_home() -> Path:
+    folder = Path(".plural/codex").resolve()
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _start_responses_bridge(deadline: float) -> str:
+    from plural.harness import responses_bridge
+
+    _server, url = responses_bridge.start(deadline=deadline)
+    return url
 
 
 def _start_messages_bridge(deadline: float) -> str:
@@ -253,11 +582,23 @@ def _map_credentials(vendor: str, deadline: float) -> None:
             "Job(client=...) and `plural run` set it."
         )
     if vendor == "claude-code":
+        # Its own configuration, so no login, hook, or instruction on this machine applies.
+        os.environ["CLAUDE_CONFIG_DIR"] = str(_claude_config_dir())
         os.environ["ANTHROPIC_BASE_URL"] = _start_messages_bridge(deadline)
         os.environ["ANTHROPIC_API_KEY"] = key or "plural"
         return
-    os.environ["OPENAI_API_KEY"] = key or "plural"
-    os.environ["OPENAI_BASE_URL"] = gateway
+    if vendor == "codex":
+        # Its own home, so Codex never falls back to a login on this machine.
+        os.environ["CODEX_HOME"] = str(_codex_home())
+        os.environ["OPENAI_API_KEY"] = key or "plural"
+        os.environ["PLURAL_CODEX_BASE_URL"] = _start_responses_bridge(deadline)
+        return
+    # Hermes: its own home, and the bridge as its only endpoint. The bridge holds the
+    # key, so no provider variable Hermes might send elsewhere carries it.
+    os.environ["HERMES_HOME"] = str(_hermes_home())
+    os.environ["CUSTOM_BASE_URL"] = _start_responses_bridge(deadline)
+    for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"):
+        os.environ.pop(name, None)
 
 
 def _response(vendor: str, stdout: str) -> str:

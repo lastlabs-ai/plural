@@ -31,12 +31,12 @@ def main(argv: list[str] | None = None) -> None:
     if name not in BINARIES:
         raise SystemExit(f"unknown built-in Harness {name!r}")
     provider = os.environ.get("PLURAL_RUNTIME_PROVIDER", "local")
-    prefix = Path(
-        os.environ.get(
-            "PLURAL_TOOLS_PREFIX",
-            str(Path.cwd() / ".plural" / "tools"),
-        )
-    )
+    given = os.environ.get("PLURAL_TOOLS_PREFIX", str(Path.cwd() / ".plural" / "tools"))
+    root = os.environ.get("PLURAL_SANDBOX_ROOT")
+    if root and (given == "/workspace" or given.startswith("/workspace/")):
+        # The local Runtime keeps /workspace under its own folder.
+        given = str(Path(root) / given.removeprefix("/"))
+    prefix = Path(given)
     if provider == "local":
         # Elsewhere setup installs system-wide; the workspace is not root's to write.
         prefix.mkdir(parents=True, exist_ok=True)
@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> None:
         if name in NPM_PACKAGES:
             _install_npm(NPM_PACKAGES[name], version, provider, prefix)
         else:
-            _install_pip(PIP_PACKAGES[name], version, provider, prefix)
+            _install_pip(PIP_PACKAGES[name], version, provider, prefix, binary)
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or b"").decode("utf-8", errors="replace")
         raise SystemExit(
@@ -86,18 +86,27 @@ def _install_npm(package: str, version: str, provider: str, prefix: Path) -> Non
             )
     spec = f"{package}@{version}"
     if provider == "local":
-        _run((npm, "install", "--prefix", str(prefix), spec))
+        _run((npm, "install", "--global", "--prefix", str(prefix), spec))
         return
     _run((npm, "install", "--global", spec))
 
 
-def _install_pip(package: str, version: str, provider: str, prefix: Path) -> None:
+def _install_pip(package: str, version: str, provider: str, prefix: Path, binary: str) -> None:
     python = sys.executable
     spec = f"{package}=={version}"
-    if provider == "local":
-        _run((python, "-m", "pip", "install", "--prefix", str(prefix), spec))
+    if provider != "local":
+        _run((python, "-m", "pip", "install", spec))
         return
-    _run((python, "-m", "pip", "install", spec))
+    # Its own environment: Plural's may have no pip (uv makes none), and the CLI's
+    # dependencies stay out of it.
+    venv = prefix / "venvs" / package
+    if not (venv / "bin" / "python").exists():
+        _run((python, "-m", "venv", str(venv)))
+    _run((str(venv / "bin" / "python"), "-m", "pip", "install", "--quiet", spec))
+    (prefix / "bin").mkdir(parents=True, exist_ok=True)
+    link = prefix / "bin" / binary
+    if not link.exists():
+        link.symlink_to(venv / "bin" / binary)
 
 
 def _ensure_node() -> None:

@@ -20,6 +20,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from plural.common import HarnessTool
 from plural.environments.definition import (
     EnvironmentResource,
     ExecutionLimits,
@@ -118,6 +119,16 @@ class EnvironmentManifest(ManifestModel):
     )
     guardrails: list[Guardrail] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    reference: str | None = Field(
+        default=None,
+        pattern=r"^[\w./-]+\.py:[A-Za-z_]\w*$",
+        description=(
+            "A policy that solves every Task in this Environment, such as "
+            "reference.py:solve. `plural task validate` runs it as the reference probe, "
+            "calling it with the Task and the episode. It never reaches the Agent and is "
+            "not part of the Environment's identity."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -160,11 +171,26 @@ class TaskManifest(ManifestModel):
         description="The answer key Verifiers read as episode.expected. Never shown to the "
         "Agent, unlike info and metadata.",
     )
+    from_checkpoint: str | None = Field(
+        default=None,
+        description="TRIAL/NAME: start each episode from a checkpoint saved with plural trial "
+        "checkpoint, instead of from a reset.",
+    )
     seat_instructions: dict[str, str] = Field(
         default_factory=dict,
         description=(
             "For an Environment with a party: what one seat alone is told after the Task's "
             "instructions, keyed seat_1, seat_2, and so on."
+        ),
+    )
+    reference: str | None = Field(
+        default=None,
+        pattern=r"^[\w./-]+\.py:[A-Za-z_]\w*$",
+        description=(
+            "A policy that solves this Task, such as reference.py:solve, in place of the "
+            "Environment's. `plural task validate` runs it as the reference probe, calling it "
+            "with the Task and the episode. It never reaches the Agent and is not part of "
+            "the Task's identity."
         ),
     )
 
@@ -199,13 +225,23 @@ class HarnessManifest(ManifestModel):
         description="A Markdown file in this folder shown as the Harness overview. Left "
         "at the default, a missing file is skipped.",
     )
+    tools: list[HarnessTool] = Field(
+        default_factory=list,
+        description="The tools the loop brings itself, such as bash or edit: a name, or "
+        "{name, description}. Overrides the class's tools().",
+    )
+    supports_resume: bool = Field(
+        default=False,
+        description="Whether the loop reads environment.resume and continues a history "
+        "as its own conversation, when a fork starts it mid-episode.",
+    )
 
 
 class BenchmarkManifest(BenchmarkRelease):
     """``benchmark.yaml``: Task references plus release and scoring rules.
 
     ``purpose`` is the Benchmark's motivation. It ranks on the Verifier-derived
-    ``score`` only; step rewards never contribute.
+    ``score`` unless ``primary_metric`` names a metric; step rewards never contribute.
     """
 
     name: str = Field(min_length=1)
@@ -217,7 +253,12 @@ class BenchmarkManifest(BenchmarkRelease):
     version: str = "0.1.0"
     description: str = ""
     tasks: list[str] = Field(default_factory=list)
-    primary_metric: Literal["score"] = "score"
+    primary_metric: str = "score"
+    """What the leaderboard ranks on: ``score``, a built-in metric, or a metric a
+    Task's Verifier declares."""
+    heldout: list[str] = Field(default_factory=list)
+    """Tasks kept back for confirmation. ``plural run --benchmark`` leaves them out,
+    and every run that includes them is counted as a peek."""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

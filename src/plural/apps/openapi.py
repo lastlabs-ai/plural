@@ -204,6 +204,10 @@ class OpenAPIApp(App[State]):
         reset: Command run at the start of each episode, from the workspace,
             with the App's initial state as JSON on stdin.
         snapshot: Command that prints the App's state as JSON, for Verifiers.
+        restore: Command that puts the API back as ``snapshot`` printed it, with
+            that JSON on stdin, so a Trial can be forked from any step.
+        snapshot_on_step: Snapshot after each action, so every step's State is
+            recorded. A fork needs it, with ``snapshot`` and ``restore``.
         local: Set when the API runs inside the Runtime, so a fresh Runtime is
             a fresh API.
         actions: Operation declarations to use instead of reading ``spec``.
@@ -226,6 +230,8 @@ class OpenAPIApp(App[State]):
         exclude: Sequence[str] = (),
         reset: str | Sequence[str] | None = None,
         snapshot: str | Sequence[str] | None = None,
+        restore: str | Sequence[str] | None = None,
+        snapshot_on_step: bool = False,
         local: bool = False,
         actions: Sequence[Mapping[str, Any] | AppAction] | None = None,
         secrets: Iterable[str | SecretReference] | None = None,
@@ -248,6 +254,8 @@ class OpenAPIApp(App[State]):
         self.exclude = tuple(exclude)
         self.reset_command = argv(reset)
         self.snapshot_command = argv(snapshot)
+        self.restore_command = argv(restore)
+        self.snapshot_on_step = snapshot_on_step  # type: ignore[misc]
         self.local = local
         self.timeout_seconds = timeout_seconds
         self._pinned = (
@@ -442,6 +450,39 @@ class OpenAPIApp(App[State]):
             env=self._hook_environ(),
         )
         return snapshot_output(self.name, output)
+
+    def restore(self, snapshot: Any) -> None:
+        """Run the ``restore`` command with the snapshot as JSON on stdin.
+
+        Raises:
+            ValueError: When the App has no ``restore`` command.
+        """
+        if not self.restore_command:
+            raise ValueError(f"OpenAPI App {self.name!r} has no restore command")
+        run_hook(
+            self.name,
+            self.restore_command,
+            stdin=json.dumps(snapshot),
+            cwd=self.workspace,
+            timeout=self.timeout_seconds,
+            env=self._hook_environ(),
+        )
+
+    def restore_status(self) -> tuple[bool, str | None]:
+        """Whether a fork can put this API back: snapshot, restore, and snapshot_on_step.
+
+        Returns:
+            ``(True, None)``, or ``(False, reason)``.
+        """
+        restorable, reason = super().restore_status()
+        if not restorable:
+            return restorable, reason
+        overridden = type(self).restore is not OpenAPIApp.restore
+        if not (self.restore_command or overridden):
+            return False, f"OpenAPI App {self.name!r} has no restore command"
+        if not self.snapshot_on_step:
+            return False, f"OpenAPI App {self.name!r} needs snapshot_on_step: true to be restored"
+        return True, None
 
     def _hook_environ(self) -> dict[str, str]:
         """The hook's environment: this App's setup secrets, never any credential.

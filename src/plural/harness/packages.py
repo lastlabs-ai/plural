@@ -10,6 +10,7 @@ from plural.common import (
     HarnessCapability,
     HarnessPackage,
     HarnessProtocol,
+    HarnessTool,
     PackageSource,
 )
 from plural.harness.builtins import (
@@ -23,7 +24,11 @@ from plural.harness.builtins import (
 from plural.harness.retrieval import source_digest
 
 
-def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> HarnessPackage:
+def _builtin(
+    profile: str,
+    capabilities: frozenset[HarnessCapability],
+    tools: tuple[HarnessTool, ...] = (),
+) -> HarnessPackage:
     definition = HarnessProtocol(
         name=profile,
         revision="1.0.0",
@@ -35,6 +40,7 @@ def _builtin(profile: str, capabilities: frozenset[HarnessCapability]) -> Harnes
             "PLURAL_API_KEY unless explicitly unauthenticated",
         ),
         capabilities=capabilities,
+        tools=tools,
         secret_names=("PLURAL_API_KEY",),
         environment_names=(
             "PLURAL_GATEWAY_URL",
@@ -75,6 +81,26 @@ def native_actions_v1() -> HarnessPackage:
     )
 
 
+WORKSPACE_TOOLS = (
+    HarnessTool(name="read_file", description="Read a text file in the workspace."),
+    HarnessTool(name="write_file", description="Write a text file in the workspace."),
+    HarnessTool(name="list_files", description="List the files under a workspace folder."),
+    HarnessTool(name="run", description="Run a shell command in the workspace."),
+)
+"""The native loop's own tools, offered only in an Environment with no Apps."""
+
+
+def native_workspace_v1() -> HarnessPackage:
+    """Return the native loop for an Environment with no Apps, with its own workspace tools."""
+    return _builtin(
+        "native.workspace.v1",
+        frozenset(
+            {HarnessCapability.SHELL, HarnessCapability.FILE_READ, HarnessCapability.FILE_EDIT}
+        ),
+        WORKSPACE_TOOLS,
+    )
+
+
 EXTERNAL_PROFILE = "external.v1"
 
 
@@ -103,6 +129,7 @@ def external_v1() -> HarnessPackage:
 BUILTIN_PROFILES = {
     "native.chat.v1": native_chat_v1,
     "native.actions.v1": native_actions_v1,
+    "native.workspace.v1": native_workspace_v1,
 }
 
 
@@ -117,5 +144,6 @@ __all__ = [
     "list_builtin_harnesses",
     "native_actions_v1",
     "native_chat_v1",
+    "native_workspace_v1",
     "resolve_builtin_package",
 ]

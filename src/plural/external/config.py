@@ -68,6 +68,8 @@ class AgentSection(_Section):
     the same key from ``PLURAL_SIGNING_KEY``."""
     ca_bundle: str | None = None
     """A PEM CA file that Jobs trust for this service's certificate, when it is private."""
+    supports_resume: bool = False
+    """Whether this service continues an episode under way from ``EpisodeStart.resume``."""
 
     @model_validator(mode="before")
     @classmethod

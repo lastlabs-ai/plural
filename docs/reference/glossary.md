@@ -95,6 +95,29 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
   integrity information.
 - **Review:** a score a person gives when the grader is human. *Precisely:* a person's
   scoring submission for a pending human Verifier.
+- **Trust tier:** how far an attempt's result can be trusted, from how it ran.
+  *Precisely:* `verified`, `standard`, or `unverified`, computed for every Trial from its
+  isolation, network enforcement, pinned image, sandbox provider conformance, and signed
+  host report.
+- **Conformance:** a check that a sandbox provider really keeps the promises a
+  `verified` result depends on. *Precisely:* 14 probes run in real sandboxes, covering
+  isolation, network enforcement, and lifetime, cached per provider version. See
+  [Runtimes](../project/runtimes.md#conformance).
+- **Integrity finding:** a sign that an attempt may have won by a shortcut instead of
+  doing the Task, such as reading a grader file. *Precisely:* a coded finding on a
+  Trial with a severity (`info`, `warning`, or `critical`) and the steps it points to.
+  It never changes a score unless a Benchmark's `scoring.integrity` rule says so. See
+  [Integrity](../operations/integrity.md).
+- **Reference policy:** code that solves a Task the way a careful person would, used to
+  prove the Task can be solved. *Precisely:* a `reference:` function on a Task or its
+  Environment, run by `plural task validate`; it never reaches the Agent.
+- **Canary:** a random ID hidden beside a Benchmark's graders. An Agent that writes it
+  read a grader or was trained on the Benchmark. *Precisely:* a Benchmark's `canary`,
+  kept out of every Agent-visible file and flagged as `canary_seen` when it appears in
+  an Agent's output.
+- **Verdict:** whether one result is really better than another, or only looks it.
+  *Precisely:* `better`, `worse`, `within_noise`, or `not_enough_data`, from a paired
+  bootstrap of the difference over the Tasks both results share.
 
 ## Scores, rewards, and training
 
@@ -125,6 +148,65 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
 - **TITO:** an exact copy of the text sent to and received from the model, kept so a
   training system can learn from it. Short for "tokens in, tokens out". *Precisely:*
   exact tokens in and tokens out, with aligned provenance for training.
+
+## Evaluating and improving an Agent
+
+These words name how Plural measures an Agent, and how it finds out why one fails.
+Score and reward keep the meanings above. The Inspector is being built now: its
+entries say what each word will mean, so that it means one thing from the start.
+
+- **Metric:** one thing you measure about an attempt, such as "price correct" or
+  "margin in dollars". *Precisely:* a named measurement a Verifier declares, with a
+  kind (`binary`, `score`, `number`, `rating`, or `running`), a direction, and an
+  optional unit. A Verifier's `check` produces values at the end of the episode; `None`
+  means it does not apply. A metric is never a reward and never enters the reward
+  ledger. See [Declare metrics](../project/verifiers.md#declare-metrics).
+- **Gate:** a metric an attempt must pass to count as done. *Precisely:* a Verifier
+  metric with `gate: true`; a `binary` gate passes at 1, and any other kind passes when
+  its value meets its `target`, such as `">= 150"`.
+- **Pass:** an attempt passes when every gate that applies to it passes. *Precisely:*
+  `TrialResult.passed`; with no gate that applies, the Trial is **not judged** and
+  `passed` is `None`.
+- **Success rate, pass rate:** two different shares of attempts. *Precisely:* the
+  success rate is the share whose score reached the Benchmark's success threshold; the
+  pass rate is the share of judged Trials that passed every gate.
+- **Running metric:** a metric measured after every move, like the money in the till
+  as a simulated business runs. *Precisely:* a metric of kind `running`, produced by a
+  Verifier's `measure` hook after each step and reduced to one value by its aggregate,
+  such as the final or the lowest value.
+- **Held-out set:** Tasks kept back to confirm an improvement on work the Agent was
+  never tuned on. *Precisely:* the Tasks under a Benchmark's `heldout:`, which diagnosis
+  never looks at. Each run against them, and each reveal of their results, is a
+  **peek**, and is counted.
+- **Checkpoint:** a saved moment of an attempt that it can be restarted from.
+  *Precisely:* everything needed to restart a Trial exactly as it stood after step *k*:
+  each App's State and random-number state, the workspace, the step counters, the
+  Environment's clock, and the Agent's context. Save one by name with
+  `plural trial checkpoint`. See [Checkpoints and forks](../running/forks.md).
+- **Fork:** rerunning the rest of an attempt from a Checkpoint, to see whether a
+  different Agent would have done better. *Precisely:* a Trial started from another
+  Trial's Checkpoint, by another Agent or, as a **control**, by the original one.
+  Run with `plural trial fork`.
+- **History:** how a Fork's Agent learns what happened before the fork point.
+  *Precisely:* `native` (as its own conversation, when it has every tool the history
+  used), `transcript` (as text in its first message), or `none`; each Fork Trial
+  records which.
+- **Forkable:** an Environment whose Apps can all be put back from a Checkpoint.
+  A `live` App never can.
+- **Harness tool:** a tool a Harness brings itself, such as a shell or a file editor,
+  as opposed to an Environment's actions. Each call is a step in the same timeline.
+- **Change:** one thing a Fork alters at the fork point, other than the Agent, such as
+  an observation, to find a cause. *Precisely:* a plugin registered with
+  `@change("name")`. A Fork with a change is **diagnostic**: it explains a cause and is
+  never shipped.
+- **Inspector:** Plural's agent for finding out why an Agent fails. *Precisely:* an
+  Agent built on Plural, with read-only evidence tools over a Job, that runs Forks as
+  experiments.
+- **Finding:** the Inspector's explanation of one failed attempt. *Precisely:* the
+  critical step, a cause dimension (model, context, tools, instructions, Harness,
+  environment, grader, task, integrity, or one a project adds), the cause, the evidence
+  and the Forks that tested it, and a status (`confirmed`, `inferred`, `refuted`, or
+  `inconclusive`).
 
 ## Versions and sharing
 

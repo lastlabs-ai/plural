@@ -496,7 +496,9 @@ def test_the_cli_writes_keys_and_tests_an_external_agent(
     assert insecure.exit_code != 0 and "Use https" in insecure.output
 
 
-def _audit(trace: dict[str, Any] | None, *, response: str = "12 doors") -> list[str]:
+def _audit(
+    trace: dict[str, Any] | None, *, response: str = "12 doors", gateway_calls: int | None = None
+) -> list[str]:
     began = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
     files = [
         DownloadedFile(path="result.json", data=json.dumps({"response": response}).encode()),
@@ -505,7 +507,11 @@ def _audit(trace: dict[str, Any] | None, *, response: str = "12 doors") -> list[
     if trace is not None:
         files.append(DownloadedFile(path="agent-trace.json", data=json.dumps(trace).encode()))
     findings = audit_external(
-        files, actions=["submit"], started_at=began, finished_at=began + timedelta(minutes=5)
+        files,
+        actions=["submit"],
+        started_at=began,
+        finished_at=began + timedelta(minutes=5),
+        gateway_calls=gateway_calls,
     )
     return [item.code for item in findings]
 
@@ -532,3 +538,25 @@ def test_the_audit_sets_the_trace_beside_what_plural_observed() -> None:
     assert _audit(None) == ["no_trace"]
     assert _audit(padded) == ["actions_not_observed", "answer_differs", "trace_outside_episode"]
     assert _audit({"steps": []}) == ["actions_not_traced"]
+
+
+def test_the_audit_counts_model_calls_against_the_gateway() -> None:
+    trace = {
+        "steps": [
+            {
+                "source": "agent",
+                "message": "",
+                "llm_call_count": 2,
+                "tool_calls": [{"function_name": "submit", "arguments": {"doors": 12}}],
+            },
+            {"source": "agent", "message": "12 doors", "llm_call_count": 1},
+        ]
+    }
+
+    assert _audit(trace) == []
+    assert _audit(trace, gateway_calls=3) == []
+    assert _audit(trace, gateway_calls=5) == ["model_calls_differ"]
+    assert _audit({**trace, "steps": trace["steps"][1:]}, gateway_calls=0) == [
+        "actions_not_traced",
+        "model_calls_differ",
+    ]

@@ -111,6 +111,7 @@ def register(config_path: Path | None = CONFIG_OPTION, as_json: bool = JSON_OPTI
             signing_key=agent.signing_key,
             version=agent.version,
             ca_bundle=agent.ca_bundle,
+            supports_resume=agent.supports_resume,
         ),
     )
     revision = _studio(config).agents.push(definition)

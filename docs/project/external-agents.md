@@ -124,6 +124,11 @@ external:
   identity, so a new release, or a new address, is a new revision on the leaderboard.
   The key and the CA bundle are not part of it.
 - `ca_bundle` is optional: a CA file for a service with a private certificate.
+- `supports_resume` is optional, and `false` by default. Set it to `true` when the
+  service can continue an episode under way: a [fork](../running/forks.md) then
+  sends `episode.start.resume`, with the step it continues after, a transcript of
+  what happened before, and the observation at that point. Without it, a fork starts
+  the service from the restored world with no history, and says so.
 - `model` is the name the results show. It isn't checked against the catalog.
 
 An External Agent takes no Harness, endpoint, provider, sampling settings, or secrets.

@@ -167,6 +167,7 @@ def sandbox_requirements_for(
 ) -> SandboxRequirements:
     """Build sandbox requirements from an environment runtime."""
     runtime = environment.runtime
+    effective = network if network is not None else runtime.network_mode
     identity = environment.identity.digest
     if harness_digest:
         identity = f"{identity}:{harness_digest}"
@@ -194,8 +195,8 @@ def sandbox_requirements_for(
         build_context=runtime.build_context,
         dockerfile=runtime.dockerfile,
         resources=resources or runtime.compute,
-        network=network if network is not None else runtime.network,
-        network_allowlist=() if network is NetworkMode.NONE else runtime.allowed_hosts,
+        network=effective,
+        network_allowlist=runtime.allowed_hosts if effective is NetworkMode.ALLOWLIST else (),
         timeout_seconds=runtime.timeout_seconds,
         persistent=runtime.persistent,
         compose=runtime.compose,
@@ -251,7 +252,7 @@ def resolve_effective_policy(
             f"environment '{environment.name}'"
         )
 
-    env_network = environment.runtime.network
+    env_network = environment.runtime.network_mode
     effective_network = _narrower_network(env_network, project.network_ceiling)
     if _NETWORK_RANK[env_network] > _NETWORK_RANK[project.network_ceiling]:
         denials.append(

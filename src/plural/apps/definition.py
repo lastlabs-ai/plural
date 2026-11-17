@@ -113,6 +113,8 @@ class AppDefinition(FrozenModel):
     has_reset: bool = False
     has_snapshot: bool = False
     control: AppControl = "owned"
+    unrestorable: str | None = None
+    """Why a checkpoint cannot put this App back, or ``None`` when it can."""
 
     @model_validator(mode="before")
     @classmethod
@@ -166,6 +168,13 @@ class AppDefinition(FrozenModel):
     def reproducible(self) -> bool:
         """Whether every Trial starts this App from the same state."""
         return self.control != "live"
+
+    @property
+    def restore_problem(self) -> str | None:
+        """Why a checkpoint cannot put this App back, or ``None`` when it can."""
+        if self.control == "live":
+            return f"App {self.name!r} is live; its state cannot be put back"
+        return self.unrestorable
 
     @property
     def read_only(self) -> bool:

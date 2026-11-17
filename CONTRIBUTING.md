@@ -44,6 +44,11 @@ or external-service behavior. Do not describe a placeholder as live.
 - `tests/unit` — pure logic, no network
 - `tests/contract` — provider adapters against `respx` fixtures
 - `tests/live` — real keys only; marked `@pytest.mark.live`
+- `scripts/harness_smoke.sh` — runs every built-in Harness (native, Claude Code,
+  Codex, Hermes) on a Task only writing a file can pass, through the real gateway,
+  and fails if a Harness reports more model calls or output tokens than the gateway
+  saw. It needs `PLURAL_API_KEY`, `PLURAL_SMOKE_PROJECT` (the hosted project it
+  records into), and Node.js 22 or later; schedule it nightly.
 
 ## Model catalog
 

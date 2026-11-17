@@ -1,0 +1,31 @@
+# Verifier: what counts as good work for the Tasks that list it.
+# check scores the answered request: 1 when the Agent made the right call and every check
+# on its quote passes. Its metrics are the checks behind the score. A handoff has no
+# quote, so the price, delivery, cost, and margin checks are None there: not applicable.
+# The four binary checks are gates: a Trial passes when every one that applies passes.
+name: quote-check
+version: 1.2.0
+kind: deterministic
+check: verify.py:check
+metrics:
+  - name: decision_correct
+    kind: binary
+    gate: true
+    description: Quoted a request that should be quoted, or handed off one that should not.
+  - name: price_correct
+    kind: binary
+    gate: true
+    description: The quote's price per ton and total match today's looked-up price for the order.
+  - name: delivery_feasible
+    kind: binary
+    gate: true
+    description: The promised date is no earlier than the mill can deliver.
+  - name: above_cost
+    kind: binary
+    gate: true
+    description: The price per ton is at or above the mill's cost.
+  - name: margin_usd
+    kind: number
+    unit: USD
+    target: ">= 150"
+    description: Price minus cost, times the tons quoted.

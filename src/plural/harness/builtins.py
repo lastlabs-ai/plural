@@ -116,6 +116,10 @@ class BuiltinHarnessSpec:
         "Network access so the Runtime can install the pinned CLI",
         "Job(client=...) or Job(api_key=...) for model authentication",
     )
+    tools: tuple[str, ...] = ()
+    """The CLI's own tools at ``pinned_version``, by the names its hooks report."""
+    supports_resume: bool = False
+    """Whether Plural can hand the CLI a history as its own session."""
 
 
 BUILTIN_HARNESSES: dict[str, BuiltinHarnessSpec] = {
@@ -136,6 +140,22 @@ BUILTIN_HARNESSES: dict[str, BuiltinHarnessSpec] = {
         supported_models=("anthropic/*",),
         capabilities=_CODE_CAPABILITIES,
         npm_package="@anthropic-ai/claude-code",
+        tools=(
+            "Bash",
+            "BashOutput",
+            "Edit",
+            "Glob",
+            "Grep",
+            "KillShell",
+            "NotebookEdit",
+            "Read",
+            "Task",
+            "TodoWrite",
+            "WebFetch",
+            "WebSearch",
+            "Write",
+        ),
+        supports_resume=True,
     ),
     "codex": BuiltinHarnessSpec(
         name="codex",
@@ -145,6 +165,7 @@ BUILTIN_HARNESSES: dict[str, BuiltinHarnessSpec] = {
         supported_models=("openai/*",),
         capabilities=_CODE_CAPABILITIES,
         npm_package="@openai/codex",
+        tools=("apply_patch", "shell", "update_plan", "view_image", "web_search"),
     ),
 }
 _BUILTIN_CLASSES = {
@@ -299,6 +320,28 @@ def resolve_builtin_package(name: str, kwargs: dict[str, Any] | None = None) -> 
     )
 
 
+def package_tools(package: HarnessPackage) -> tuple[tuple[str, ...], bool]:
+    """The tools a Harness brings itself, and whether it continues a history natively.
+
+    A built-in's come from its pinned list, so its package hash stays the same;
+    every other Harness declares them on its protocol.
+
+    Returns:
+        ``(tool names, supports_resume)``.
+    """
+    definition = package.definition
+    command = " ".join(definition.command)
+    for name, class_name in _BUILTIN_CLASSES.items():
+        if f"vendor_harnesses.py:{class_name}" in command:
+            spec = BUILTIN_HARNESSES[name]
+            return spec.tools, spec.supports_resume
+    if definition.command[:2] == ("python", "native_runner.py"):
+        # The native loop replays any history it is given. It brings tools of its own
+        # only in an Environment with no Apps.
+        return tuple(item.name for item in definition.tools), True
+    return tuple(item.name for item in definition.tools), definition.supports_resume
+
+
 def legacy_declared_harness_error(name: str) -> ValueError:
     """Return the migration error for an old declared-only vendor Harness."""
     if name in BUILTIN_HARNESSES:
@@ -341,6 +384,7 @@ __all__ = [
     "model_supported",
     "normalize_config",
     "normalize_kwargs",
+    "package_tools",
     "resolve_builtin_package",
     "summarize_builtin",
 ]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from plural.sandbox.models import (
@@ -17,7 +17,9 @@ from plural.sandbox.models import (
     ProviderCapabilities,
     ProviderDoctor,
     SandboxHandle,
+    SandboxLifetime,
     SandboxRequirements,
+    SandboxSummary,
 )
 
 KILL_USER_PROCESSES = """uids=""
@@ -169,6 +171,34 @@ class SandboxProvider(ABC):
     @abstractmethod
     async def destroy(self, handle: SandboxHandle) -> None:
         """Idempotently delete the sandbox and scoped data."""
+
+    async def version(self) -> str:
+        """The provider's version, which keys its conformance report.
+
+        Returns:
+            A version string; the provider's name when it has none.
+        """
+        return self.name
+
+    async def lifetime(self, handle: SandboxHandle) -> SandboxLifetime | None:
+        """Read back what stops this sandbox if its Trial never destroys it.
+
+        Returns:
+            The limit the provider applied, or ``None`` when it has none.
+        """
+        return None
+
+    async def list_sandboxes(self, labels: Mapping[str, str]) -> tuple[SandboxSummary, ...]:
+        """List this account's sandboxes that carry every label given.
+
+        Returns:
+            One summary per sandbox; empty when the provider cannot list them.
+        """
+        return ()
+
+    async def delete_sandbox(self, sandbox_id: str) -> None:
+        """Delete a sandbox by id, including one this process did not create."""
+        raise CapabilityError(f"{self.name} cannot delete sandboxes it did not create")
 
 
 __all__ = ["SandboxProvider"]

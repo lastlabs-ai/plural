@@ -1,0 +1,9 @@
+# Agent: Claude Code, with its own tools (Read, Write, Bash, ...).
+name: files-claude
+version: 1.0.0
+model: anthropic/claude-haiku-4-5
+harness: claude-code
+# Claude Code asks before it writes a file; accept its edits, so it can write one.
+harness_config:
+  permission_mode: acceptEdits
+instructions: Work carefully and give the exact figure the Task asks for.

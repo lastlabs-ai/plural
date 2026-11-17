@@ -52,6 +52,7 @@ plugins:
         Run:
           - running/jobs.md
           - running/trials.md
+          - running/forks.md
           - running/artifacts.md
           - running/reviews.md
           - running/training.md
@@ -66,6 +67,7 @@ plugins:
         Tutorials:
           - tutorials/support-queue.md
           - tutorials/wordle.md
+          - tutorials/shopkeeper.md
         Operations:
           - reference/integrations.md
   - mkdocstrings:
@@ -121,6 +123,7 @@ nav:
   - Run:
       - Jobs: running/jobs.md
       - Trials and trajectories: running/trials.md
+      - Checkpoints and forks: running/forks.md
       - Sessions: running/sessions.md
       - Artifacts and evidence: running/artifacts.md
       - Reviews: running/reviews.md
@@ -136,5 +139,6 @@ nav:
   - Tutorials:
       - Support queue: tutorials/support-queue.md
       - Wordle: tutorials/wordle.md
+      - Shopkeeper: tutorials/shopkeeper.md
   - Operations:
       - Providers and integrations: reference/integrations.md
