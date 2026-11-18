@@ -57,7 +57,7 @@ def test_top_level_commands_are_the_documented_set() -> None:
 def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
     root = _root()
     extras = {
-        "agent": {"key", "test"},
+        "agent": {"key", "test", "revise"},
         "benchmark": {"add", "remove"},
         "env": {"serve"},
         "task": {"cases"},
@@ -77,8 +77,8 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
         ("auth", {"login", "logout", "status", "scope"}),
         ("project", {"init", "push", "show"}),
         ("app", {"add", "list", "remove"}),
-        ("job", {"show", "list", "rerun", "record"}),
-        ("trial", {"show", "rerun", "checkpoint", "fork"}),
+        ("job", {"show", "list", "rerun", "record", "inspect", "report"}),
+        ("trial", {"show", "rerun", "checkpoint", "fork", "ask"}),
         ("reward", {"show", "export"}),
         ("model", {"list"}),
         ("secret", {"list", "set", "delete"}),

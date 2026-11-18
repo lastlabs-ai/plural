@@ -10,7 +10,7 @@ tasks/quote-001 ... 060/      sixty requests for quote, each with its answer key
 verifiers/quote-check/        decides whether the quote or handoff was right
 verifiers/tone/               a model judge of the customer note (1-5); no Task uses it yet
 agents/quote-bot/             the Agent under test, with two planted weaknesses
-benchmarks/quoting/           the sixty Tasks in four categories
+benchmarks/quoting/           the sixty Tasks in four categories, 14 of them held out
 traps.py                      plants a grader bug and integrity traps in a copy
 ```
 
@@ -108,6 +108,11 @@ the three attempts, the pass rate, and how many Trials ran at each trust tier. O
 `local` Runtime every Trial is `unverified`. Set `runtime: {provider: daytona}` in
 `environments/quoting/environment.yaml` for `verified` results.
 
+A plain run covers the 46 dev Tasks. The Benchmark holds back 14, a quarter of each
+category, under `heldout:`, to confirm a fix on requests nobody tuned the Agent
+against. `plural run -b quoting -a quote-bot --heldout` runs them too, and each such
+run is a counted peek.
+
 ## quote-bot's planted weaknesses
 
 quote-bot is the Agent "you run today". It has two weaknesses on purpose, so later
@@ -131,6 +136,31 @@ those followed a schedule check. quote-bot also handed off 6 of the 24 simple re
 because their wording ("1018 cold-finished bar", "304 stainless sheet") didn't match
 the price book's grade names. That third failure was not planted. The mean score was
 0.33: only the ambiguous and out-of-stock requests, where a handoff is right, passed.
+
+## 4. Find out why, and prove the fix
+
+```bash
+python traps.py --enable unit-bug        # plant the grader bug too
+plural run -b quoting -a quote-bot
+plural job inspect JOB
+plural agent revise quote-bot --from-finding F1
+plural agent revise quote-bot --from-finding F23
+plural run -b quoting -a quote-bot --heldout --attempts 2
+plural job report NEW_JOB --compare OLD_JOB --findings
+```
+
+Measured on November 18, 2026, with the planted grader bug on. The Inspector explained
+all 30 failed dev Trials for $4.15. It put the 15 rounding failures under
+`instructions` (14 confirmed by forks), the skipped schedule under `tools` (quote-036
+confirmed, quote-037 not), and quote-016 and quote-020 under `grader`; it put
+quote-053, the third Task the bug touches, under `instructions`. Revising quote-bot
+from F1 and F23 made version 1.2.0. On the 14 held-out Tasks, two attempts each, its
+pass rate rose from 36% (10 of 28) to 82% (23 of 28), a `better` verdict with a 95%
+interval of +21% to +71% for the change. What still fails is the unplanted weakness:
+grade names like "304 stainless sheet". See [Find out why an Agent fails](../../docs/running/inspector.md).
+
+`inspector-bench.json` holds the Inspector's accuracy on inspector-bench, built from
+this example.
 
 ## Tests
 

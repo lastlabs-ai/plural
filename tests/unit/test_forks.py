@@ -717,3 +717,38 @@ def test_a_diagnostic_fork_naming_other_agents_records_only_their_own_attempts()
     )
     assert sent[0]["attempts"] == 6
     assert sent[0]["agent_attempts"] == {"rev-other": 3}
+
+
+def test_fork_results_can_judge_each_side_on_named_gates() -> None:
+    from types import SimpleNamespace
+
+    from plural.project import forks
+
+    def trial(role: str, gates: dict[str, bool | None]) -> Any:
+        return SimpleNamespace(
+            fork=SimpleNamespace(role=role, history="native", warnings=()),
+            status="succeeded",
+            gates=gates,
+            passed=all(value is not False for value in gates.values()),
+            score=None,
+            receipt=SimpleNamespace(agent_digest="sha256:candidate"),
+        )
+
+    both = {"price_correct": False, "delivery_feasible": False}
+    fixed = {"price_correct": False, "delivery_feasible": True}
+    spec: Any = SimpleNamespace(
+        fork=SimpleNamespace(seat=None, step=4, diagnostic=False),
+        agents=[SimpleNamespace(agent_id="a1", name="bot-x1", content_hash="sha256:candidate")],
+    )
+    result: Any = SimpleNamespace(
+        job_id="job_f",
+        trials=[trial("candidate", fixed) for _ in range(4)]
+        + [trial("control", both) for _ in range(4)],
+    )
+    whole = forks.fork_results(spec, result, False)["candidates"]["bot-x1"]
+    assert whole["verdict"] == "no_clear_effect"
+    outcome = forks.fork_results(spec, result, False, ("delivery_feasible",))
+    judged = outcome["candidates"]["bot-x1"]
+    assert judged["verdict"] == "likely_matters"
+    assert judged["metric"] == "gates: delivery_feasible"
+    assert outcome["controls_reproduced"] == 1.0

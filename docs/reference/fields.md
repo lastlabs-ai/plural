@@ -57,6 +57,7 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [RuntimeVariable](#runtimevariable)
 - [SandboxCapability](#sandboxcapability)
 - [Secret](#secret)
+- [ToolOverride](#tooloverride)
 - [VerifierRuntime](#verifierruntime)
 - [VolumeVersion](#volumeversion)
 
@@ -182,6 +183,7 @@ A catalog-backed model and its optional execution harness.
 - **`endpoint_key`** — `string | null`; optional. Default: `null`.
 - **`external`** — `ExternalAgent | null`; optional. Default: `null`.
 - **`credentials`** — `object`; optional.
+- **`tool_overrides`** — `object`; optional. How the Environment's tools are described to the model, by tool name: a new description, or hidden: true. The Environment itself is unchanged.
 - **`metadata`** — `object`; optional.
 
 ## Benchmark
@@ -559,6 +561,13 @@ A named value an App needs, which it never stores itself.
 - **`required`** — `boolean`; optional. Default: `true`.
 - **`description`** — `string`; optional. Default: `""`.
 - **`scopes`** — `array of string`; optional. Default: `[]`.
+
+## ToolOverride
+
+How one tool is described to the model.
+
+- **`description`** — `string | null`; optional. Default: `null`.
+- **`hidden`** — `boolean`; optional. Default: `false`.
 
 ## VerifierRuntime
 

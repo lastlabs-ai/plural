@@ -27,6 +27,8 @@ from uuid import uuid4
 STEP_PROTOCOL = "plural-step-v1"
 EPISODE_SCHEMA = "plural.episode/v1"
 EPISODE_FILE = "episode.jsonl"
+MAX_UNKNOWN_NAME = 128
+"""Longest name of a tool that doesn't exist that is still sent on to be recorded."""
 
 
 def _local_command(command: list[Any]) -> list[str]:
@@ -1053,6 +1055,11 @@ def _dispatch_tool(
             )
         )
     action_name = name.removeprefix("environment.") if name.startswith("environment.") else name
+    host = environment.get("reset_command") or []
+    if action_name not in actions and host and 0 < len(action_name) <= MAX_UNKNOWN_NAME:
+        # The App host records the call as an unknown_action step, and answers it.
+        unknown = {"command": [*host[:-1], "unknown", action_name]}
+        return _run_action(call, action_name, {action_name: unknown}, environment, deadline, turn)
     if action_name not in actions:
         return _ToolOutcome(
             message=_tool_observation(

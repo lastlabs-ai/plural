@@ -152,8 +152,7 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
 ## Evaluating and improving an Agent
 
 These words name how Plural measures an Agent, and how it finds out why one fails.
-Score and reward keep the meanings above. The Inspector is being built now: its
-entries say what each word will mean, so that it means one thing from the start.
+Score and reward keep the meanings above.
 
 - **Metric:** one thing you measure about an attempt, such as "price correct" or
   "margin in dollars". *Precisely:* a named measurement a Verifier declares, with a
@@ -201,12 +200,16 @@ entries say what each word will mean, so that it means one thing from the start.
   never shipped.
 - **Inspector:** Plural's agent for finding out why an Agent fails. *Precisely:* an
   Agent built on Plural, with read-only evidence tools over a Job, that runs Forks as
-  experiments.
+  experiments. Run with `plural job inspect` and `plural trial ask`. See
+  [Find out why an Agent fails](../running/inspector.md).
 - **Finding:** the Inspector's explanation of one failed attempt. *Precisely:* the
   critical step, a cause dimension (model, context, tools, instructions, Harness,
   environment, grader, task, integrity, or one a project adds), the cause, the evidence
   and the Forks that tested it, and a status (`confirmed`, `inferred`, `refuted`, or
-  `inconclusive`).
+  `inconclusive`). `plural agent revise` turns a confirmed one into a new Agent version.
+- **Signal:** a check over a failed Trial that points the Inspector at what looks wrong,
+  such as a call to a tool that doesn't exist. *Precisely:* a function registered with
+  `@signal("name")`, built in or in a project's `inspector/signals.py`.
 
 ## Versions and sharing
 

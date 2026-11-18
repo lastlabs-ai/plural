@@ -1,0 +1,17 @@
+# Environment: one Job's evidence as read-only tools, forks within a budget, and
+# record_finding. Each Task's initial State names the Job and the failed Trial.
+name: inspector
+version: 1.0.0
+description: One Job's evidence, read-only, with forks to test a cause.
+overview: >-
+  The evidence tools read the files a finished Job wrote. Forks continue the failed
+  Trial with one thing changed, beside controls, and spend from a budget.
+python: environment.py:Inspector
+
+# The evidence is on this machine, beside the inspected project.
+runtime:
+  provider: local
+
+limits:
+  max_turns: 40
+  max_seconds: 3600

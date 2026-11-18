@@ -66,6 +66,23 @@ tasks:
   - quote-058
   - quote-059
   - quote-060
+# Kept back for confirmation: a quarter of each category. A plain run never includes
+# them; `plural run --benchmark quoting --heldout` does, and is counted as a peek.
+heldout:
+  - quote-049
+  - quote-051
+  - quote-052
+  - quote-057
+  - quote-060
+  - quote-047
+  - quote-048
+  - quote-054
+  - quote-056
+  - quote-040
+  - quote-059
+  - quote-050
+  - quote-055
+  - quote-058
 categories:
   - id: simple
     name: Simple

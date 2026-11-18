@@ -1,0 +1,5 @@
+# The Inspector, as a Plural project. plural job inspect copies it into the inspected
+# project's .plural/inspector folder and adds one Task per failed Trial.
+schema_version: 1
+name: inspector
+description: Plural's failure analyst, an Agent built on Plural.

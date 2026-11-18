@@ -3652,6 +3652,32 @@
         ],
         "title": "HarnessTool",
         "type": "object"
+      },
+      "ToolOverride": {
+        "additionalProperties": false,
+        "description": "How one tool is described to the model.\n\nAttributes:\n    description: The description the model reads instead of the action's own.\n    hidden: Leave the tool out of what the model is offered.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "hidden": {
+            "default": false,
+            "title": "Hidden",
+            "type": "boolean"
+          }
+        },
+        "title": "ToolOverride",
+        "type": "object"
       }
     },
     "additionalProperties": false,
@@ -3821,6 +3847,14 @@
           "$ref": "#/$defs/AgentCredential"
         },
         "title": "Credentials",
+        "type": "object"
+      },
+      "tool_overrides": {
+        "additionalProperties": {
+          "$ref": "#/$defs/ToolOverride"
+        },
+        "description": "How the Environment's tools are described to the model, by tool name: a new description, or hidden: true. The Environment itself is unchanged.",
+        "title": "Tool Overrides",
         "type": "object"
       },
       "metadata": {

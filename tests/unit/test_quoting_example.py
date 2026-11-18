@@ -155,13 +155,15 @@ def model() -> Iterator[str]:
 def _run(project: Path, model: str, tasks: tuple[str, ...] | None) -> dict[str, dict[str, Any]]:
     """Run the Benchmark once per policy, and return each Trial's scores by policy and Task."""
     shutil.copytree(EXAMPLE, project, ignore=shutil.ignore_patterns(".plural", "__pycache__"))
+    # The grading is under test, not the split, so every Task runs as a dev Task.
+    path = project / "benchmarks/quoting/benchmark.yaml"
+    benchmark = yaml.safe_load(path.read_text())
+    benchmark.pop("heldout", None)
     if tasks is not None:
-        path = project / "benchmarks/quoting/benchmark.yaml"
-        benchmark = yaml.safe_load(path.read_text())
         benchmark["tasks"] = [name for name in benchmark["tasks"] if name in tasks]
         for category in benchmark["categories"]:
             category["tasks"] = [name for name in category["tasks"] if name in tasks]
-        path.write_text(yaml.safe_dump(benchmark, sort_keys=False), encoding="utf-8")
+    path.write_text(yaml.safe_dump(benchmark, sort_keys=False), encoding="utf-8")
     env = {
         key: value
         for key, value in os.environ.items()

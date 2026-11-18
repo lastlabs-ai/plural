@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 
 from plural._deprecation import module_getattr
 from plural.agents import AgentBinding
+from plural.agents.tool_overrides import apply_tool_overrides
 from plural.apps.daemon import MANAGED
 from plural.apps.host import STATES_FILE
 from plural.apps.workspace import BUNDLE_FILE
@@ -2107,12 +2108,25 @@ class TrialRunner:
         party = task.environment.party
         return party is None or party.isolation == "isolated"
 
-    def _environment_payload(self, task: TaskDefinition) -> dict[str, Any]:
-        """The Environment as a Harness is told it, with a diagnostic change's edits."""
+    def _environment_payload(
+        self, task: TaskDefinition, binding: AgentBinding | None = None
+    ) -> dict[str, Any]:
+        """The Environment as a Harness is told it.
+
+        A diagnostic change's edits come first, then the Agent's own tool
+        overrides, so a candidate Agent's descriptions hold in a fork too.
+        """
         point = self._fork_point()
-        if point is not None:
-            return copy.deepcopy(point.environment)
-        return environment_payload(task, hosted=self._hosted)
+        payload = (
+            copy.deepcopy(point.environment)
+            if point is not None
+            else environment_payload(task, hosted=self._hosted)
+        )
+        if binding is not None and binding.agent.tool_overrides:
+            payload["actions"] = apply_tool_overrides(
+                payload.get("actions") or [], binding.agent.tool_overrides
+            )
+        return payload
 
     def _run_request(self, task: TaskDefinition, player: _Player) -> HarnessRunRequest:
         """What one Harness is told: the Task as its seat sees it, and its own Agent."""
@@ -2137,7 +2151,7 @@ class TrialRunner:
                 "harness_config": binding.harness_config,
             },
             model_resolution=model.model_dump(mode="json"),
-            environment=self._environment_payload(task),
+            environment=self._environment_payload(task, binding),
             mode=self.job_spec.mode.value,
             resume=self._history(player)[0],
             capture_tito=self.job_spec.mode is JobMode.TRAIN,

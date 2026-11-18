@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 from plural._deprecation import renamed_attribute, renamed_keys
+from plural.agents.tool_overrides import ToolOverride, tool_override_map
 from plural.catalog import ModelCatalog
 from plural.common import (
     FrozenModel,
@@ -201,10 +202,18 @@ class Agent(FrozenModel):
     endpoint_key: str | None = None
     external: ExternalAgent | None = None
     credentials: dict[str, AgentCredential] = Field(default_factory=dict)
+    tool_overrides: dict[str, ToolOverride] = Field(
+        default_factory=dict,
+        description=(
+            "How the Environment's tools are described to the model, by tool name: a new "
+            "description, or hidden: true. The Environment itself is unchanged."
+        ),
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     _credential_map = field_validator("credentials", mode="before")(_credential_map)
     _credential_names = field_validator("credentials")(_credential_names)
+    _tool_override_map = field_validator("tool_overrides", mode="before")(tool_override_map)
 
     harness_kwargs = renamed_attribute("harness_kwargs", "harness_config")
     auth_mode = renamed_attribute("auth_mode", "auth")
@@ -212,7 +221,10 @@ class Agent(FrozenModel):
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
-        return without_unset_title(handler(self))
+        data = without_unset_title(handler(self))
+        if isinstance(data, dict) and not self.tool_overrides:
+            data.pop("tool_overrides", None)
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -325,6 +337,7 @@ class Agent(FrozenModel):
                 ("temperature", self.temperature is not None),
                 ("max_tokens", self.max_tokens is not None),
                 ("secrets", bool(self.secrets)),
+                ("tool_overrides", bool(self.tool_overrides)),
             )
             if given
         ]
@@ -440,6 +453,7 @@ class Agent(FrozenModel):
             endpoint_key=self.endpoint_key,
             external=self.external,
             credentials=self.credentials,
+            tool_overrides=self.tool_overrides,
             metadata=self.metadata,
         )
 
@@ -473,10 +487,21 @@ class AgentDefinition(FrozenModel):
     """The service a Job calls for each episode, for an Agent that runs elsewhere."""
     credentials: dict[str, AgentCredential] = Field(default_factory=dict)
     """The credentials this Agent supplies to Apps, by name. Never their values."""
+    tool_overrides: dict[str, ToolOverride] = Field(default_factory=dict)
+    """How the Environment's tools are described to the model, by tool name."""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     _credential_map = field_validator("credentials", mode="before")(_credential_map)
     _credential_names = field_validator("credentials")(_credential_names)
+    _tool_override_map = field_validator("tool_overrides", mode="before")(tool_override_map)
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        # Agents with no overrides keep the identity and wire form they had before them.
+        if isinstance(data, dict) and not self.tool_overrides:
+            data.pop("tool_overrides", None)
+        return data
 
     harness_kwargs = renamed_attribute("harness_kwargs", "harness_config")
     auth_mode = renamed_attribute("auth_mode", "auth")
@@ -493,6 +518,8 @@ class AgentDefinition(FrozenModel):
             raise ValueError("harness_package requires a harness binding")
         if self.external is not None and (self.harness is not None or self.endpoint is not None):
             raise ValueError("an external Agent has no harness or endpoint")
+        if self.external is not None and self.tool_overrides:
+            raise ValueError("an external Agent describes its own tools; it has no tool_overrides")
         if (
             self.harness is not None
             and self.harness_package is not None

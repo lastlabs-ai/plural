@@ -1484,10 +1484,12 @@ def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
     benchmark = spec.source.benchmark
     return spec.model_copy(
         update={
-            "source": BenchmarkJobSource(
-                benchmark=benchmark.model_copy(
-                    update={"tasks": tuple(task(item) for item in benchmark.tasks)}
-                )
+            "source": spec.source.model_copy(
+                update={
+                    "benchmark": benchmark.model_copy(
+                        update={"tasks": tuple(task(item) for item in benchmark.tasks)}
+                    )
+                }
             )
         }
     )

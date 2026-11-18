@@ -1,0 +1,130 @@
+{
+  "measured_on": "2026-11-18",
+  "inspector_model": "openai/gpt-5.6",
+  "depth": "standard",
+  "fork_budget_usd_per_case": 0.5,
+  "subject_model": "openai/gpt-5.6-luna",
+  "cases": 28,
+  "faults": {
+    "hidden-schedule": {
+      "cause": "tools",
+      "description": "check_schedule is hidden from the Agent"
+    },
+    "vague-schedule": {
+      "cause": "tools",
+      "description": "check_schedule is described as optional"
+    },
+    "rounding": {
+      "cause": "instructions",
+      "description": "the instructions round the price per ton"
+    },
+    "requested-date": {
+      "cause": "instructions",
+      "description": "the instructions demand the customer's date"
+    },
+    "never-handoff": {
+      "cause": "instructions",
+      "description": "the instructions forbid handing off"
+    },
+    "padding": {
+      "cause": "context",
+      "description": "the instructions are buried under irrelevant text"
+    },
+    "list-price-grader": {
+      "cause": "grader",
+      "description": "the Verifier checks the quote against the list price"
+    },
+    "doubled-answer-key": {
+      "cause": "grader",
+      "description": "the answer key doubles the tons"
+    },
+    "missing-quantity": {
+      "cause": "task",
+      "description": "the request leaves out the quantity the answer key quotes"
+    }
+  },
+  "accuracy": {
+    "rate": 0.75,
+    "passed": 21,
+    "of": 28
+  },
+  "cause_accuracy": {
+    "rate": 0.75,
+    "passed": 21,
+    "of": 28
+  },
+  "step_accuracy": {
+    "rate": 0.8,
+    "passed": 16,
+    "of": 20
+  },
+  "cause_named": {
+    "rate": 0.9643,
+    "passed": 27,
+    "of": 28
+  },
+  "by_fault": {
+    "doubled-answer-key": {
+      "rate": 1.0,
+      "passed": 4,
+      "of": 4
+    },
+    "hidden-schedule": {
+      "rate": 0.75,
+      "passed": 3,
+      "of": 4
+    },
+    "list-price-grader": {
+      "rate": 1.0,
+      "passed": 4,
+      "of": 4
+    },
+    "missing-quantity": {
+      "rate": 0.0,
+      "passed": 0,
+      "of": 4
+    },
+    "never-handoff": {
+      "rate": 1.0,
+      "passed": 4,
+      "of": 4
+    },
+    "requested-date": {
+      "rate": 0.5,
+      "passed": 2,
+      "of": 4
+    },
+    "rounding": {
+      "rate": 1.0,
+      "passed": 4,
+      "of": 4
+    }
+  },
+  "by_cause": {
+    "grader": {
+      "rate": 1.0,
+      "passed": 8,
+      "of": 8
+    },
+    "instructions": {
+      "rate": 0.8333,
+      "passed": 10,
+      "of": 12
+    },
+    "task": {
+      "rate": 0.0,
+      "passed": 0,
+      "of": 4
+    },
+    "tools": {
+      "rate": 0.75,
+      "passed": 3,
+      "of": 4
+    }
+  },
+  "inspector_model_cost_usd": 3.1587,
+  "faults_that_broke_nothing": [
+    "padding",
+    "vague-schedule"
+  ]
+}

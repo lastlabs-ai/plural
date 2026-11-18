@@ -168,6 +168,10 @@ plural trial show TRIAL_ID
 plural trial rerun TRIAL_ID
 plural trial checkpoint TRIAL_ID --step 4 --name before-rounding
 plural trial fork TRIAL_ID --step 4 --agent AGENT
+plural job inspect JOB_ID
+plural trial ask TRIAL_ID "Why did it hand off?"
+plural agent revise AGENT --from-finding F1
+plural job report JOB_ID --compare OLD_JOB_ID
 plural review list
 plural review submit TRIAL_ID --verifier policy-review --score 2 \
   --feedback "Meets policy."
@@ -184,6 +188,11 @@ plural review submit TRIAL_ID --verifier policy-review --score 2 \
 - `trial checkpoint` saves the moment after one step of a Trial by name, and
   `trial fork` continues a Trial from such a moment with other Agents, beside
   controls that rerun the original. See [Checkpoints and forks](../running/forks.md).
+- `job inspect` runs the Inspector over a Job's failed dev Trials and prints a
+  Finding for each, with its cause and the forks that tested it. `trial ask` asks it
+  one question about one Trial. `agent revise` turns a confirmed Finding into a new
+  Agent version, and `job report` writes the numbers, each traced to its Trials. See
+  [Find out why an Agent fails](../running/inspector.md).
 - `review list` shows Trials waiting for a HumanVerifier score, and `review submit`
   records one. Use one `--score criterion=value` per rubric criterion, or a bare value
   for a one-criterion rubric. Add `--hosted` to either for hosted review assignments.
@@ -399,6 +408,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
 │ key       Print a new signing key for an external Agent.                                         │
 │ test      Send an external Agent a signed ping, and report how it answered.                      │
+│ revise    Apply a confirmed Finding's change to an Agent, as a new version.                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -551,6 +561,31 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --json          Print machine-readable JSON.                                                     │
 │ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural agent revise`
+
+```text
+
+ Usage: plural agent revise [OPTIONS] {name}
+
+ Apply a confirmed Finding's change to an Agent, as a new version.
+
+ The minor version goes up and CHANGELOG.md beside agent.yaml records the
+ Finding and the forks that confirmed it. For an External Agent, whose code
+ Plural can't change, fixes/F1.md is written for its team instead. Prove it
+ with a Job on the dev Tasks, then the held-out Tasks, and
+ plural job report NEW --compare OLD.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name      <str>  The Agent, by name. [required]                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --from-finding        <str>  A confirmed Finding, such as F1. [required]                      │
+│    --job                 <str>  The inspected Job; the latest one with the Finding by default.   │
+│    --json                       Print machine-readable JSON.                                     │
+│    --help                       Show this message and exit.                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1651,10 +1686,42 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ list    List Jobs, newest first, labeled local or hosted.                                        │
-│ show    Show a Job and its Trials (local first, then hosted).                                    │
-│ record  Record a finished local Job in the hosted project, with every Trial execution.           │
-│ rerun   Run a Job again with the exact inputs it used. Creates a new, linked Job.                │
+│ list     List Jobs, newest first, labeled local or hosted.                                       │
+│ show     Show a Job and its Trials (local first, then hosted).                                   │
+│ record   Record a finished local Job in the hosted project, with every Trial execution.          │
+│ rerun    Run a Job again with the exact inputs it used. Creates a new, linked Job.               │
+│ inspect  Find out why a Job's Trials failed: one Finding per failed dev Trial.                   │
+│ report   How an Agent performs, why it fails, what changed, and why to trust the numbers.        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural job inspect`
+
+```text
+
+ Usage: plural job inspect [OPTIONS] {job_id}
+
+ Find out why a Job's Trials failed: one Finding per failed dev Trial.
+
+ The Inspector reads each failed Trial's evidence, names its critical step and
+ a cause (model, context, tools, instructions, Harness, environment, grader,
+ task, integrity), and tests an Agent cause by forking the Trial with the
+ cause removed. Held-out Trials are never looked at. Findings are saved beside
+ the Job, and on the hosted Job when it was recorded.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    job_id      <str>  A finished local Job. [required]                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --depth              <str>                 quick: no forks. standard: a fork or two per Agent    │
+│                                            cause. deep: fork every cause.                        │
+│                                            [default: standard]                                   │
+│ --budget-usd         <float range> [x>=0]  What forks may spend in all, in USD. [default: 2.0]   │
+│ --model              <str>                 The Inspector's model.                                │
+│ --trial              <str>                 Inspect only this failed Trial. Repeatable.           │
+│ --concurrency        <int range> [x>=1]    Trials inspected at once. [default: 4]                │
+│ --json                                     Print machine-readable JSON.                          │
+│ --help                                     Show this message and exit.                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -1696,6 +1763,31 @@ This section is generated from the Typer application. Run `uv run python scripts
 │                        Your files are not touched.                                               │
 │ --json                 Print machine-readable JSON.                                              │
 │ --help                 Show this message and exit.                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural job report`
+
+```text
+
+ Usage: plural job report [OPTIONS] {job_id}
+
+ How an Agent performs, why it fails, what changed, and why to trust the numbers.
+
+ Code computes every number, each with the Trials it came from. A summary,
+ when asked for, may only cite those numbers; one that writes its own is
+ rejected. Writes report.md and report.json beside the Job.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    job_id      <str>  A finished local Job. [required]                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --compare         <str>  A Job to compare with: paired, on dev and held-out Tasks.               │
+│ --findings               List each Finding, not only the breakdown by cause.                     │
+│ --summary                Have a model write a summary that cites the computed numbers.           │
+│ --model           <str>  The summary's model. [default: openai/gpt-5.6-terra]                    │
+│ --json                   Print machine-readable JSON.                                            │
+│ --help                   Show this message and exit.                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -2909,6 +3001,26 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ checkpoint  Name the moment after one step of a Trial, to fork from it or start a Task there.    │
 │ fork        Continue a Trial from step k with other Agents, beside controls that rerun the       │
 │             original.                                                                            │
+│ ask         Ask the Inspector one question about a Trial, answered from its evidence.            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural trial ask`
+
+```text
+
+ Usage: plural trial ask [OPTIONS] {trial_id} {question}
+
+ Ask the Inspector one question about a Trial, answered from its evidence.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    trial_id      <str>  A local Trial. [required]                                              │
+│ *    question      <str>  What to ask about it. [required]                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --model        <str>  The Inspector's model.                                                     │
+│ --json                Print machine-readable JSON.                                               │
+│ --help                Show this message and exit.                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

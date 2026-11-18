@@ -78,7 +78,7 @@ async def test_local_cancel_terminates_descendant_processes(tmp_path: Path) -> N
             files = await provider.download_files(handle, ("child.pid",))
             child_pid = int(files[0].data)
             break
-        except FileNotFoundError:
+        except (FileNotFoundError, ValueError):
             await asyncio.sleep(0.01)
     assert child_pid is not None
 

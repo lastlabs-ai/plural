@@ -154,6 +154,8 @@ convention = "google"
 "src/plural/project/templates.py" = ["E501"]
 # A tool's docstring is what the Agent reads, so it describes the tool, not its return.
 "src/plural/mcp/files.py" = ["DOC201"]
+"src/plural/inspector/app.py" = ["DOC201", "D205"]
+"src/plural/inspector/project/**" = ["D", "DOC", "E501"]
 "src/plural/sandbox/**" = ["D", "DOC"]
 "src/plural/harness/**" = ["D", "DOC"]
 "src/plural/execution/**" = ["D", "DOC"]

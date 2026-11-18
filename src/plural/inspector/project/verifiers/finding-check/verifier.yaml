@@ -1,0 +1,23 @@
+# Verifier: did the Inspector record a Finding, and, on inspector-bench, is it right?
+# A Task of plural job inspect has no answer key, so only recorded applies there.
+name: finding-check
+version: 1.0.0
+kind: deterministic
+check: verify.py:check
+metrics:
+  - name: recorded
+    kind: binary
+    gate: true
+    description: Recorded a Finding, or answered the question.
+  - name: cause_correct
+    kind: binary
+    gate: true
+    description: Named the cause dimension the answer key holds.
+  - name: step_correct
+    kind: binary
+    gate: true
+    description: Named one of the critical steps the answer key accepts.
+  - name: cause_named
+    kind: binary
+    gate: true
+    description: Said what the cause is, in words the answer key expects.

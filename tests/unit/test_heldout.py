@@ -100,6 +100,11 @@ def test_a_heldout_run_executes_every_task_and_counts_its_own_job(
         run_local(space, plan_run(space, request, environ=environ), environ=environ)
     (spec,) = executed
     assert len(spec.tasks) == 60
+    from plural.jobs import JobSpec
+    from plural.project.runs import _rebind_checks
+
+    saved = _rebind_checks(space, JobSpec.model_validate_json(spec.model_dump_json()))
+    assert saved.source.include_heldout and len(saved.tasks) == 60
     (peek,) = peeks(space.project.state_dir, "quoting")
     assert peek["job_id"] == spec.job_id
     assert len(peek["tasks"]) == 18

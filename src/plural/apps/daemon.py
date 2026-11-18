@@ -419,10 +419,16 @@ def _handle(
         if not host.started:
             host.start(**_task_inputs(private))
         arguments = request.get("arguments")
+        unknown = bool(request.get("unknown"))
         if not isinstance(arguments, dict):
-            return {"ok": True, "result": host.agent_argument_error(request.get("action"))}, False
+            if not unknown:
+                return {
+                    "ok": True,
+                    "result": host.agent_argument_error(request.get("action")),
+                }, False
+            arguments = {}
         seat = control.seat(request) if host.seats else None
-        envelope = host.step(str(request.get("action")), arguments, seat=seat)
+        envelope = host.step(str(request.get("action")), arguments, seat=seat, unknown=unknown)
         return {"ok": True, "result": host.agent_view(envelope)}, False
     if operation == "tool":
         arguments = request.get("arguments")
@@ -967,6 +973,17 @@ def main(argv: list[str] | None = None) -> None:
         except json.JSONDecodeError:
             arguments = None
         result = call("step", root=root, timeout=timeout, action=rest[0], arguments=arguments)
+    elif operation == "unknown":
+        if len(rest) != 1:
+            raise SystemExit("usage: python -m plural.apps.daemon unknown <tool>")
+        raw = sys.stdin.read().strip()
+        try:
+            arguments = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            arguments = None
+        result = call(
+            "step", root=root, timeout=timeout, action=rest[0], arguments=arguments, unknown=True
+        )
     elif operation == "query":
         if len(rest) != 2:
             raise SystemExit("usage: python -m plural.apps.daemon query <app> <action>")
