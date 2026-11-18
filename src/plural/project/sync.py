@@ -13,10 +13,11 @@ with no upload. Resources are then pushed dependencies first, so a parent is
 never saved pointing at a dependency that is missing. A push never edits
 local files.
 
-A push never overwrites or deletes. Each new revision names the revision it
-was based on, and a push refuses to add a revision on top of a hosted change
-this checkout has not synced, the way git refuses a non-fast-forward push,
-unless the caller forces it.
+A push never overwrites or deletes, and is idempotent by content hash. Each
+new revision names the revision it was based on, and a push refuses to add a
+revision on top of a hosted change made after the one this checkout last
+synced, the way git refuses a non-fast-forward push, unless the caller forces
+it. A fresh checkout has synced nothing, so it needs no force.
 
 Each revision also stores the resource's exact source package, addressed by
 the SHA-256 of its archive, so ``pull`` restores the editable files.
@@ -967,6 +968,10 @@ def _diverged(
 ) -> list[str]:
     """Why a new revision would land on hosted changes this checkout never synced.
 
+    A checkout that never synced ``ref`` edited no hosted revision, so it has
+    nothing to diverge from: its push adds a revision on top, as a push of the
+    same content would reuse one. Only a stale pin is a conflict.
+
     Returns:
         One message per divergence, or an empty list when the push is fast-forward.
     """
@@ -976,12 +981,8 @@ def _diverged(
     pinned = pins.get(str(ref))
     pull = f"`plural {ref.info.cli} pull {ref.name}`"
     if pinned is None or pinned.revision_id is None:
-        return [
-            f"{ref} already exists in the hosted project at {current.label}, but this "
-            f"checkout has never pushed or pulled it. Pull it with {pull} to start from the "
-            "hosted copy, or pass --force to add your revision on top."
-        ]
-    if pinned.revision_id != current.revision_id:
+        return []
+    if pinned.revision_id != current.revision_id and not current.holds(pinned.content_hash):
         synced = revision_label(pinned.number, pinned.version, pinned.revision_id)
         return [
             f"{ref} changed in the hosted project since this checkout last synced it "

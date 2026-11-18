@@ -38,7 +38,8 @@ from plural.local_models import (
 
 
 def answered_paid(episode: Episode) -> VerifierOutput:
-    return VerifierOutput(score=1.0 if "PAID" in json.dumps(episode.trajectory) else 0.0)
+    paid = "PAID" in json.dumps(episode.trajectory)
+    return VerifierOutput(score=float(paid), evidence=(f"PAID in the trajectory: {paid}",))
 
 
 def _reply(model: str | None = None, **extra: Any) -> dict[str, Any]:

@@ -64,6 +64,12 @@ def test_a_plain_benchmark_job_runs_only_dev_tasks(split_project: Path) -> None:
     # Diagnosis never sees a held-out Task, and the refusal names the confirm command.
     with pytest.raises(ValueError, match="plural run --benchmark BENCHMARK --heldout"):
         Job(benchmark, agents=[agent], heldout=True, purpose="diagnose")
+    # Nor does a learn Job: an Agent that learned from a held-out Task can't be confirmed on it.
+    with pytest.raises(ValueError, match="A learn Job cannot run held-out Tasks"):
+        Job(benchmark, agents=[agent], heldout=True, purpose="learn")
+    learn = Job(benchmark, agents=[agent], purpose="learn")
+    assert len(learn.plan.trials) == 42
+    assert learn.spec.job_id != plain.spec.job_id
     # A dev-only run hashes as runs did before held-out Tasks existed.
     assert "include_heldout" not in plain.spec.model_dump(mode="json")["source"]
 

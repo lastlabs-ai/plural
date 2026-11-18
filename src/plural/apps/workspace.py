@@ -19,9 +19,10 @@ import os
 import shutil
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from plural.snapshots import SnapshotEntry
 
 BUNDLE_FILE = "workspace.bundle"
 STEP_REF = "refs/plural/steps/"
@@ -87,6 +88,9 @@ def _git(
 
 class WorkspaceSnapshots:
     """One Trial's workspace snapshots, kept where only the App host can read them.
+
+    The :class:`plural.snapshots.Snapshotter` for the workspace; its archive is
+    read back with :class:`plural.snapshots.GitBundle`.
 
     Args:
         workspace: The Agent's workspace, such as ``/workspace``.
@@ -156,7 +160,7 @@ class WorkspaceSnapshots:
                         found.append((relative, path.lstat().st_size))
         return found
 
-    def take(self, step: int) -> str | None:
+    def snapshot(self, step: int) -> str | None:
         """Commit the workspace as it stands now as step ``step``'s snapshot.
 
         Returns:
@@ -167,7 +171,7 @@ class WorkspaceSnapshots:
             self.snapshots[step] = commit
         return commit
 
-    def take_final(self) -> str | None:
+    def snapshot_final(self) -> str | None:
         """Commit the workspace as the Harness left it, after its last step.
 
         Returns:
@@ -230,7 +234,7 @@ class WorkspaceSnapshots:
             return None
         return commit
 
-    def bundle(self, destination: Path) -> Path | None:
+    def export(self, destination: Path) -> Path | None:
         """Write every snapshot to one git bundle.
 
         Returns:
@@ -291,77 +295,6 @@ def checkout(bundle: Path, commit: str, destination: Path) -> list[str]:
     return [item for item in listed.decode().split("\0") if item]
 
 
-def snapshot_files(bundle: Path, commit: str) -> dict[str, bytes]:
-    """Read every file of one snapshot from a bundle.
-
-    Returns:
-        Each path, relative to the workspace, with its bytes.
-    """
-    import tempfile
-
-    with tempfile.TemporaryDirectory(prefix="plural-snapshot-") as folder:
-        target = Path(folder) / "files"
-        names = checkout(bundle, commit, target)
-        # A symbolic link is never followed: it could name a file on this machine.
-        return {
-            name: (target / name).read_bytes()
-            for name in names
-            if not (target / name).is_symlink() and (target / name).is_file()
-        }
-
-
-@dataclass(frozen=True)
-class SnapshotEntry:
-    """One file of a snapshot, as it is restored."""
-
-    path: str
-    """Relative to the workspace."""
-    data: bytes = b""
-    mode: int = 0o644
-    """``0o755`` for an executable file, else ``0o644``."""
-    link: str | None = None
-    """For a symbolic link, what it points to; it has no data then."""
-
-
-def snapshot_entries(bundle: Path, commit: str) -> list[SnapshotEntry]:
-    """Read every file and symbolic link of one snapshot, as it is restored.
-
-    Returns:
-        One entry per file or link.
-    """
-    import tempfile
-
-    with tempfile.TemporaryDirectory(prefix="plural-snapshot-") as folder:
-        target = Path(folder) / "files"
-        entries = []
-        for name in checkout(bundle, commit, target):
-            path = target / name
-            if path.is_symlink():
-                entries.append(SnapshotEntry(path=name, link=os.readlink(path)))
-            elif path.is_file():
-                mode = 0o755 if os.stat(path).st_mode & 0o111 else 0o644
-                entries.append(SnapshotEntry(path=name, data=path.read_bytes(), mode=mode))
-        return entries
-
-
-def commit_for(report: Mapping[str, Any], step: int) -> str | None:
-    """The snapshot commit for ``step``, from a host report's ``workspace``.
-
-    A step that changed nothing in the workspace still has its own snapshot,
-    so this is exact; older reports fall back to the latest earlier step.
-
-    Returns:
-        The commit, or ``None`` when no snapshot covers the step.
-    """
-    snapshots = {
-        int(key): str(value)
-        for key, value in dict(report.get("snapshots") or {}).items()
-        if str(key).isdigit()
-    }
-    earlier = [key for key in snapshots if key <= step]
-    return snapshots[max(earlier)] if earlier else None
-
-
 def same_files(first: Mapping[str, bytes], second: Iterable[tuple[str, bytes]]) -> bool:
     """Whether two snapshots hold exactly the same files with the same bytes.
 
@@ -379,9 +312,6 @@ __all__ = [
     "SnapshotEntry",
     "WorkspaceSnapshots",
     "checkout",
-    "commit_for",
     "git_available",
     "same_files",
-    "snapshot_entries",
-    "snapshot_files",
 ]

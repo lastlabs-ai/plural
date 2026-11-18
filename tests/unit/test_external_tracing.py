@@ -490,7 +490,10 @@ def test_a_served_agent_in_a_bare_environment_is_scored_on_its_answer(
     monkeypatch.chdir(tmp_path)
 
     def matches(episode: Any) -> VerifierOutput:
-        return VerifierOutput(score=float(episode.answer == episode.expected))
+        return VerifierOutput(
+            score=float(episode.answer == episode.expected),
+            evidence=(f"answer: {episode.answer!r}",),
+        )
 
     task = Task(
         name="count-doors",

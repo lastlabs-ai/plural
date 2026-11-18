@@ -254,7 +254,8 @@ From then on:
   **peek**. Plural counts each one, in `.plural/heldout.jsonl` and in the hosted
   project, and tells you which peek it is. Every peek makes the held-out Tasks a little
   less independent.
-- A Job run to diagnose failures refuses held-out Tasks.
+- A Job run to diagnose failures, or one that lets an Agent learn (`purpose: learn`),
+  refuses held-out Tasks.
 - The hosted leaderboard ranks on the development Tasks only.
 - In a hosted Job, a held-out Trial's score, metrics, and outcome stay hidden until you
   reveal them from the Benchmark's **Tasks** tab. Revealing is per person, and counts

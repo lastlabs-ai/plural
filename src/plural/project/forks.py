@@ -413,6 +413,7 @@ def trial_checkpoint(
             task_digest=source.task.content_hash,
             agent_digest=source.agent.content_hash,
             heldout=source.heldout,
+            volume=source.result.volume_in if source.result is not None else None,
         )
     except ValueError as exc:
         raise ProjectError(str(exc)) from None

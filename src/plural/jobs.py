@@ -47,6 +47,7 @@ from plural.rewards import RewardFailure
 from plural.sandbox.models import NetworkMode
 from plural.tasks import Benchmark, BenchmarkDefinition, Task, TaskDefinition, TaskPin
 from plural.trust import TrustAssessment
+from plural.volumes import VolumeVersion
 
 
 class RetryPolicy(FrozenModel):
@@ -482,9 +483,13 @@ def resolve_trial_harness_grant(
     )
 
 
-JobPurpose = Literal["eval", "diagnose", "fork", "confirm"]
-REFUSE_HELDOUT: frozenset[str] = frozenset({"diagnose", "fork"})
-"""Job purposes that may never run, or read, a held-out Task."""
+JobPurpose = Literal["eval", "diagnose", "fork", "confirm", "learn"]
+REFUSE_HELDOUT: frozenset[str] = frozenset({"diagnose", "fork", "learn"})
+"""Job purposes that may never run, or read, a held-out Task.
+
+A ``learn`` Job lets an Agent keep what it learns across episodes, so a
+held-out Task it learned from could no longer confirm anything.
+"""
 
 ForkRole = Literal["candidate", "control"]
 
@@ -566,6 +571,8 @@ class ForkRecord(FrozenModel):
     """``TRIAL/NAME`` when the Task, not a fork Job, named the checkpoint."""
     of_hosted_trial_id: str | None = None
     """The original Trial's id in the hosted project, when it was recorded."""
+    volume: VolumeVersion | None = None
+    """The Volume version restored at the fork point, once Volumes exist."""
 
 
 class JobSpec(FrozenModel):
@@ -598,8 +605,8 @@ class JobSpec(FrozenModel):
     purpose: JobPurpose = Field(
         default="eval",
         description=(
-            "Why the Job runs: eval, diagnose, fork, or confirm. Diagnosis and "
-            "forks never run held-out Tasks."
+            "Why the Job runs: eval, diagnose, fork, confirm, or learn. Diagnosis, "
+            "forks, and learning never run held-out Tasks."
         ),
     )
     fork: ForkSpec | None = Field(
@@ -628,11 +635,15 @@ class JobSpec(FrozenModel):
             raise ValueError("agents must have unique identities")
         heldout = self.source.heldout_tasks if isinstance(self.source, BenchmarkJobSource) else ()
         if heldout and self.purpose in REFUSE_HELDOUT:
+            why = (
+                "an Agent that learned from them could no longer be confirmed on them"
+                if self.purpose == "learn"
+                else "diagnosis never sees them"
+            )
             raise ValueError(
                 f"A {self.purpose} Job cannot run held-out Tasks ({', '.join(heldout)}): "
-                "held-out Tasks are kept for confirming a fix, so diagnosis never sees "
-                "them.\nNext: plural run --benchmark BENCHMARK --heldout runs them, as a "
-                "counted peek."
+                f"held-out Tasks are kept for confirming a fix, so {why}.\nNext: "
+                "plural run --benchmark BENCHMARK --heldout runs them, as a counted peek."
             )
         if self.fork is not None:
             self._check_fork(self.fork)
@@ -1254,6 +1265,10 @@ class TrialResult(FrozenModel):
     fork: ForkRecord | None = None
     """For a Trial that started from a checkpoint: where, and how the history
     reached its Agent."""
+    volume_in: VolumeVersion | None = None
+    """The Volume version the Agent started from. ``None`` until Volumes exist."""
+    volume_out: VolumeVersion | None = None
+    """The Volume version a ``learn`` Trial wrote. ``None`` for every other Trial."""
 
     @model_validator(mode="after")
     def _shape(self) -> TrialResult:

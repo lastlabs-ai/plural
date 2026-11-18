@@ -150,7 +150,8 @@ def _task(root: Path, *, max_seconds: float = 20, info: dict[str, Any] | None = 
     )
 
     def doors(episode: Any) -> VerifierOutput:
-        return VerifierOutput(score=float(episode.state.get("doors") == 12))
+        doors = episode.state.get("doors")
+        return VerifierOutput(score=float(doors == 12), evidence=(f"doors: {doors}",))
 
     return Task(
         name="count-doors",

@@ -1247,6 +1247,17 @@
           "workspace": {
             "$ref": "#/$defs/CheckpointWorkspace"
           },
+          "volume": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VolumeVersion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "contexts": {
             "additionalProperties": {
               "$ref": "#/$defs/AgentContext"
@@ -1974,6 +1985,37 @@
           }
         },
         "title": "VerifierRuntime",
+        "type": "object"
+      },
+      "VolumeVersion": {
+        "additionalProperties": false,
+        "description": "One immutable version of one Volume, as a memory provider names it.",
+        "properties": {
+          "provider": {
+            "description": "The memory provider, such as plural.",
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "volume_id": {
+            "description": "The Volume, as the provider names it.",
+            "minLength": 1,
+            "title": "Volume Id",
+            "type": "string"
+          },
+          "version": {
+            "description": "The version, as the provider names it.",
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "volume_id",
+          "version"
+        ],
+        "title": "VolumeVersion",
         "type": "object"
       }
     },
@@ -4196,6 +4238,17 @@
           "workspace": {
             "$ref": "#/$defs/CheckpointWorkspace"
           },
+          "volume": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VolumeVersion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "contexts": {
             "additionalProperties": {
               "$ref": "#/$defs/AgentContext"
@@ -5211,6 +5264,37 @@
           }
         },
         "title": "VerifierRuntime",
+        "type": "object"
+      },
+      "VolumeVersion": {
+        "additionalProperties": false,
+        "description": "One immutable version of one Volume, as a memory provider names it.",
+        "properties": {
+          "provider": {
+            "description": "The memory provider, such as plural.",
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "volume_id": {
+            "description": "The Volume, as the provider names it.",
+            "minLength": 1,
+            "title": "Volume Id",
+            "type": "string"
+          },
+          "version": {
+            "description": "The version, as the provider names it.",
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "volume_id",
+          "version"
+        ],
+        "title": "VolumeVersion",
         "type": "object"
       }
     },

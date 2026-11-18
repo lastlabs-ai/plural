@@ -381,9 +381,14 @@ Attributes:
         Anthropic and Bedrock reject a thinking block replayed without it,
         so it has to survive a round trip.
 
+OpenAI's ``developer`` role is read as ``system``: it is the same
+instruction slot, and other providers know only ``system``.
+
 Examples:
     >>> Message(role="user", content="Hello").role
     'user'
+    >>> Message(role="developer", content="Be brief.").role
+    'system'
 ```
 
 ## plural.types.ProviderPreferences
@@ -1664,6 +1669,10 @@ Run ``check`` in-process on the finished Episode.
 ```text
 Returns:
     A validated VerifierOutput.
+
+Raises:
+    EvidenceMissing: When the result gives no evidence and the Verifier
+        requires it, as a hosted project would refuse it.
 ```
 
 ### plural.DeterministicVerifier.model_post_init
@@ -3008,6 +3017,11 @@ create(self, requirements: 'SandboxRequirements') -> 'SandboxHandle'
 ```
 
 Create a Daytona sandbox from image, snapshot, or defaults.
+
+```text
+A create that fails can still leave a sandbox behind, such as one whose
+image failed to build; it is found by its execution's labels and deleted.
+```
 
 ### plural.sandbox.DaytonaProvider.upload_files
 

@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from plural.apps.base import App, observation_payload
 from plural.apps.workspace import BUNDLE_FILE, WorkspaceSnapshots
 from plural.common import described
+from plural.snapshots import Snapshotter
 from plural.verifiers import Step, StepTask
 
 if TYPE_CHECKING:
@@ -252,7 +253,8 @@ class AppHost:
         self.restored_from: int | None = None
         self.oracles: dict[str, dict[str, str]] = {}
         """Diagnostic tools a fork added, by name, with the answer each returns."""
-        self.snapshots = (
+        self._snapshot_store = Path(snapshot_store or ".")
+        self.snapshots: Snapshotter | None = (
             WorkspaceSnapshots(
                 Path(agent_workspace),
                 Path(snapshot_store),
@@ -427,11 +429,11 @@ class AppHost:
         report = self.report()
         if self.snapshots is not None and self.snapshots.available:
             # What the Harness left behind, for Verifiers that read the workspace.
-            final = self.snapshots.take_final()
+            final = self.snapshots.snapshot_final()
             bundle = None
             if final is not None:
                 with contextlib.suppress(OSError, RuntimeError):
-                    bundle = self.snapshots.bundle(self.snapshots.git_dir.parent / BUNDLE_FILE)
+                    bundle = self.snapshots.export(self._snapshot_store / BUNDLE_FILE)
             report["workspace"] = {
                 **self.snapshots.report(),
                 "final": final,
@@ -1191,7 +1193,7 @@ class AppHost:
 
     def _snapshot_workspace(self, step: int) -> None:
         if self.snapshots is not None:
-            self.snapshots.take(step)
+            self.snapshots.snapshot(step)
 
     def _snapshot(self, app: App[Any]) -> Any:
         if not app.has_snapshot():

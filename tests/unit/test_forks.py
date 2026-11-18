@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ from plural import Agent, Job
 from plural.agents import AgentBinding
 from plural.checkpoints import AgentContext, build_checkpoint, history_rule
 from plural.jobs import ForkChange, ForkSpec, JobResult, TaskJobSource
+from plural.volumes import VolumeVersion
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(sys.executable).with_name("plural")
@@ -72,12 +74,17 @@ def _submit(episode: Any) -> None:
 
 
 def _fork(
-    tmp_path: Path, first: JobResult, task: Any, original: Agent, candidate: Agent
+    tmp_path: Path,
+    first: JobResult,
+    task: Any,
+    original: Agent,
+    candidate: Agent,
+    volume: VolumeVersion | None = None,
 ) -> JobResult:
     trial = first.trials[0]
     artifacts = next((tmp_path / ".plural" / "jobs").glob(f"*/trials/{trial.receipt.trial_id}"))
     artifacts = artifacts / "executions" / "0" / "artifacts"
-    checkpoint = build_checkpoint(artifacts, 1, trial_id=trial.receipt.trial_id)
+    checkpoint = build_checkpoint(artifacts, 1, trial_id=trial.receipt.trial_id, volume=volume)
     job = Job(task, agents=[candidate])
     control = AgentBinding(agent=original._definition())
     binding = AgentBinding(agent=candidate._definition())
@@ -148,6 +155,36 @@ def test_a_fork_into_an_external_agent_follows_its_resume_support(
     ]
     assert steps[0]["inherited"] is True and steps[0]["action"] == "submit"
     assert KEY not in json.dumps(steps)
+
+
+def test_a_fork_restores_the_volume_version_its_checkpoint_held(
+    service: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    task = _task(tmp_path)
+    original = _external(service, version="1")
+    _Service.work = _submit
+    first = Job(task, agents=[original]).run()
+    assert first.trials[0].volume_in is None and first.trials[0].volume_out is None
+
+    trial = first.trials[0]
+    artifacts = next((tmp_path / ".plural" / "jobs").glob(f"*/trials/{trial.receipt.trial_id}"))
+    artifacts = artifacts / "executions" / "0" / "artifacts"
+    plain = build_checkpoint(artifacts, 1, trial_id=trial.receipt.trial_id)
+    memory = VolumeVersion(provider="plural", volume_id="vol_acme", version="7")
+    held = build_checkpoint(artifacts, 1, trial_id=trial.receipt.trial_id, volume=memory)
+    # An empty slot changes no digest; a filled one names what a fork restores.
+    payload = plain.model_dump(mode="json", exclude={"name", "warnings", "heldout", "volume"})
+    payload["workspace"] = {"commit": plain.workspace.commit}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    assert plain.digest == "sha256:" + hashlib.sha256(encoded.encode()).hexdigest()
+    assert held.digest != plain.digest
+
+    _Service.work = _finish_only
+    result = _fork(tmp_path, first, task, original, _external(service, version="2"), memory)
+    for item in result.trials:
+        assert item.fork is not None and item.fork.volume == memory
+        assert item.volume_in == memory and item.volume_out is None
 
 
 class _WordleModel(BaseHTTPRequestHandler):

@@ -58,6 +58,7 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [SandboxCapability](#sandboxcapability)
 - [Secret](#secret)
 - [VerifierRuntime](#verifierruntime)
+- [VolumeVersion](#volumeversion)
 
 ## Environment
 
@@ -299,6 +300,7 @@ Everything needed to continue a Trial from after step ``step``.
 - **`observation`** — `JSON value`; optional. Default: `null`.
 - **`rendered`** — `string`; optional. Default: `""`.
 - **`workspace`** — `CheckpointWorkspace`; optional.
+- **`volume`** — `VolumeVersion | null`; optional. Default: `null`.
 - **`contexts`** — `object`; optional.
 - **`warnings`** — `array of string`; optional.
 - **`heldout`** — `boolean`; optional. Default: `false`.
@@ -568,3 +570,11 @@ Machine for a verifier that needs its own sandbox.
 - **`allowed_hosts`** — `array of string`; optional. Default: `[]`.
 - **`compute`** — `ResourceRequirements`; optional.
 - **`timeout_seconds`** — `number`; optional. Default: `60`. Constraints: `{"exclusiveMinimum": 0}`.
+
+## VolumeVersion
+
+One immutable version of one Volume, as a memory provider names it.
+
+- **`provider`** — `string`; required. Constraints: `{"minLength": 1}`. The memory provider, such as plural.
+- **`volume_id`** — `string`; required. Constraints: `{"minLength": 1}`. The Volume, as the provider names it.
+- **`version`** — `string`; required. Constraints: `{"minLength": 1}`. The version, as the provider names it.

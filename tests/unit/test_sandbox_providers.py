@@ -269,3 +269,115 @@ def test_a_daytona_provider_makes_a_client_for_each_event_loop(
     asyncio.run(twice())
     asyncio.run(provider.list_sandboxes({}))
     assert len(made) == 2 and made[0] is not made[1]
+
+
+class _LeavesFailedBuilds(FakeDaytonaClient):
+    """A client whose create fails after Daytona made the sandbox, as a failed build does."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.left: dict[str, dict[str, str]] = {"other": {"plural.owner": "someone-else"}}
+        self.deleted_ids: list[str] = []
+
+    async def create(self, requirements: SandboxRequirements) -> DaytonaSandboxAdapter:
+        self.left["failed-1"] = dict(requirements.labels)
+        raise RuntimeError("Failed to create sandbox: build failed")
+
+    async def list(self, labels: Mapping[str, str]) -> tuple[Any, ...]:
+        from plural.sandbox.models import SandboxSummary
+
+        return tuple(
+            SandboxSummary(sandbox_id=key, provider="daytona", labels=value, state="build_failed")
+            for key, value in self.left.items()
+            if labels.items() <= value.items()
+        )
+
+    async def delete_by_id(self, sandbox_id: str) -> None:
+        self.deleted_ids.append(sandbox_id)
+        self.left.pop(sandbox_id, None)
+
+
+async def test_a_failed_daytona_create_deletes_the_sandbox_it_left_behind() -> None:
+    from plural.sandbox.sweep import trial_labels
+
+    client = _LeavesFailedBuilds()
+    provider = DaytonaProvider(adapter=client, environ={})
+    labels = trial_labels(
+        job="job-1", trial="trl-1", execution="0", environ={"PLURAL_SANDBOX_OWNER": "me"}
+    )
+    with pytest.raises(RuntimeError, match="build failed"):
+        await provider.create(SandboxRequirements(image="python:3.12", labels=labels))
+    assert client.deleted_ids == ["failed-1"]
+    assert list(client.left) == ["other"]
+
+    # Without an execution's own labels nothing is deleted: they could be anyone's.
+    with pytest.raises(RuntimeError):
+        await provider.create(SandboxRequirements(image="python:3.12"))
+    assert client.deleted_ids == ["failed-1"]
+
+
+async def test_a_daytona_sandbox_whose_workspace_setup_fails_is_deleted() -> None:
+    client = FakeDaytonaClient()
+
+    async def refuse(*args: Any, **kwargs: Any) -> tuple[int, str, str]:
+        raise ConnectionError("toolbox unreachable")
+
+    client.sandbox.exec = refuse  # type: ignore[method-assign]
+    provider = DaytonaProvider(adapter=client, environ={})
+    with pytest.raises(ConnectionError):
+        await provider.create(SandboxRequirements(image="python:3.12"))
+    assert client.deleted == [client.sandbox]
+
+
+async def test_the_daytona_listing_asks_for_failed_builds_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dataclasses
+    import enum
+    import sys
+    import types
+
+    from plural.sandbox.daytona import FAILED_STATES, OfficialDaytonaAdapter
+
+    class SandboxState(enum.Enum):
+        STARTED = "started"
+        BUILD_FAILED = "build_failed"
+        ERROR = "error"
+
+    @dataclasses.dataclass
+    class ListSandboxesQuery:
+        labels: dict[str, str]
+        states: list[Any] | None = None
+
+    sandboxes = [
+        types.SimpleNamespace(id="ok-1", state=SandboxState.STARTED, labels={"plural.owner": "me"}),
+        types.SimpleNamespace(
+            id="failed-1", state=SandboxState.BUILD_FAILED, labels={"plural.owner": "me"}
+        ),
+    ]
+    queries: list[ListSandboxesQuery] = []
+
+    class Client:
+        async def list(self, query: ListSandboxesQuery) -> Any:
+            queries.append(query)
+            for item in sandboxes:
+                # Like an API whose default listing leaves failed builds out.
+                failed = item.state is not SandboxState.STARTED
+                if failed == bool(query.states) and (
+                    not query.states or item.state in query.states
+                ):
+                    yield item
+
+    monkeypatch.setitem(
+        sys.modules,
+        "daytona",
+        types.SimpleNamespace(ListSandboxesQuery=ListSandboxesQuery, SandboxState=SandboxState),
+    )
+    adapter = object.__new__(OfficialDaytonaAdapter)
+    adapter._client = Client()  # type: ignore[attr-defined]
+    found = await adapter.list({"plural.owner": "me"})
+    assert {(item.sandbox_id, item.state) for item in found} == {
+        ("ok-1", "started"),
+        ("failed-1", "build_failed"),
+    }
+    assert [state.value for state in queries[1].states or ()] == list(FAILED_STATES)

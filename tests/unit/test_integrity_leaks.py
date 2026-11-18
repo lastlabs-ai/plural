@@ -4,8 +4,20 @@ from __future__ import annotations
 
 import io
 import zipfile
+from pathlib import Path
 
-from plural.integrity.leaks import AgentFile, answer_needles, extract_text, scan_task
+import pytest
+
+from plural.apps.workspace import WorkspaceSnapshots, git_available
+from plural.integrity.leaks import (
+    AgentFile,
+    answer_needles,
+    extract_text,
+    scan_directory,
+    scan_snapshot,
+    scan_task,
+)
+from plural.snapshots import GitBundle
 
 KEY = {"decision": "quote", "grade": "A572-50", "total": "22800.00"}
 
@@ -112,3 +124,49 @@ def test_git_history_in_the_sandbox_is_critical() -> None:
         ("not_scanned", "/src", "info"),
     ]
     assert "3 commits, 1 tag(s)" in found[0].message
+
+
+def _memory(root: Path) -> Path:
+    (root / "lessons").mkdir(parents=True)
+    (root / "lessons" / "rounding.md").write_text("Round each line to the cent.\n")
+    (root / "lessons" / "quote-051.md").write_text("Last time the total was 22800.00.\n")
+    (root / "canary.txt").write_text("plural-canary-7f3a\n")
+    (root / "diagram.png").write_bytes(b"\x89PNG")
+    (root / ".git").mkdir()
+    (root / ".git" / "HEAD").write_text("22800.00\n")
+    return root
+
+
+def test_a_folder_is_scanned_for_every_tasks_answer_key_and_the_canary(tmp_path: Path) -> None:
+    found = scan_directory(
+        _memory(tmp_path / "memory"),
+        answers={"quote-051": KEY, "quote-052": {"total": "1140.00"}},
+        questions={"quote-051": "Quote 75 tons of A572-50."},
+        canary="plural-canary-7f3a",
+    )
+    assert _kinds(found) == [
+        ("canary", "canary.txt", "critical"),
+        ("answer_key", "lessons/quote-051.md", "critical"),
+        ("not_scanned", "diagram.png", "info"),
+    ]
+    assert "of Task quote-051" in found[1].message
+    lessons = tmp_path / "memory" / "lessons"
+    assert scan_directory(lessons, answers={"quote-052": {"total": "99.99"}}) == ()
+
+
+@pytest.mark.skipif(not git_available(), reason="git is not installed")
+def test_a_snapshot_version_is_scanned_like_a_folder(tmp_path: Path) -> None:
+    folder = _memory(tmp_path / "memory")
+    snapshots = WorkspaceSnapshots(folder, tmp_path / "store")
+    before = snapshots.snapshot(1)
+    (folder / "lessons" / "quote-051.md").write_text("Totals vary.\n")
+    after = snapshots.snapshot(2)
+    archive = GitBundle(snapshots.export(tmp_path / "memory.bundle") or tmp_path)
+    assert before is not None and after is not None
+    leaked = scan_snapshot(archive, before, answers={"quote-051": KEY})
+    assert ("answer_key", "lessons/quote-051.md", "critical") in _kinds(leaked)
+    assert not [
+        item
+        for item in scan_snapshot(archive, after, answers={"quote-051": KEY})
+        if item.kind == "answer_key"
+    ]
