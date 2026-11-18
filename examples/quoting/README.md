@@ -6,11 +6,11 @@ result.
 
 ```text
 environments/quoting/         the mill: prices, stock, the schedule, and a reference policy
-tasks/quote-001 ... 060/      sixty requests for quote, each with its answer key
+tasks/quote-001 ... 080/      eighty requests for quote, each with its answer key
 verifiers/quote-check/        decides whether the quote or handoff was right
 verifiers/tone/               a model judge of the customer note (1-5); no Task uses it yet
 agents/quote-bot/             the Agent under test, with two planted weaknesses
-benchmarks/quoting/           the sixty Tasks in four categories, 14 of them held out
+benchmarks/quoting/           the eighty Tasks in four categories, 20 of them held out
 traps.py                      plants a grader bug and integrity traps in a copy
 ```
 
@@ -59,13 +59,13 @@ plural benchmark validate quoting
 
 ```text
 Graders
-  ✓ reference solution passes every gate         57/60
+  ✓ reference solution passes every gate         77/80
   ✗ quote-016, quote-020, quote-053: reference fails price_correct
       quoted 15 t of 1018, but the request was for 300 t of 1018
-  ✓ do-nothing agent fails                       59/60
+  ✓ do-nothing agent fails                       79/80
   ✗ quote-024: noop passes: the graders gave 1.00 to an Agent that did nothing
       expected a handoff, but the Agent sent nothing
-  ✓ copy-the-instructions agent fails            59/60
+  ✓ copy-the-instructions agent fails            79/80
   ✗ quote-024: echo passes: the graders gave 1.00 to an Agent that repeated the instructions
       expected a handoff, but the Agent sent nothing
 
@@ -108,10 +108,11 @@ the three attempts, the pass rate, and how many Trials ran at each trust tier. O
 `local` Runtime every Trial is `unverified`. Set `runtime: {provider: daytona}` in
 `environments/quoting/environment.yaml` for `verified` results.
 
-A plain run covers the 46 dev Tasks. The Benchmark holds back 14, a quarter of each
-category, under `heldout:`, to confirm a fix on requests nobody tuned the Agent
-against. `plural run -b quoting -a quote-bot --heldout` runs them too, and each such
-run is a counted peek.
+A plain run covers the 60 dev Tasks. The Benchmark holds back 20, quote-061 to
+quote-080, under `heldout:`, to confirm a fix on requests nobody tuned the Agent
+against. They were written after every run, inspection, and fork below, so nothing
+has touched them; a Task that has run can't be held out. `plural run -b quoting -a
+quote-bot --heldout` runs them too, and each such run is a counted peek.
 
 ## quote-bot's planted weaknesses
 
@@ -124,7 +125,7 @@ steps have causes to find:
   mill bookings", so it skips the schedule and promises dates the mill can't meet.
 
 Measured on the real model (`openai/gpt-5.6-luna` through Plural's gateway), one
-attempt at each of the 60 Tasks, on November 16, 2026:
+attempt at each of the first 60 Tasks, on November 16, 2026:
 
 | Weakness | Tasks it affects | Failed because of it |
 | --- | --- | --- |
@@ -149,14 +150,16 @@ plural run -b quoting -a quote-bot --heldout --attempts 2
 plural job report NEW_JOB --compare OLD_JOB --findings
 ```
 
-Measured on November 18, 2026, with the planted grader bug on. The Inspector explained
-all 30 failed dev Trials for $4.15. It put the 15 rounding failures under
+Measured on November 18, 2026, with the planted grader bug on, when the Benchmark had
+60 Tasks. The Inspector explained all 30 failed dev Trials for $4.15. It put the 15 rounding failures under
 `instructions` (14 confirmed by forks), the skipped schedule under `tools` (quote-036
 confirmed, quote-037 not), and quote-016 and quote-020 under `grader`; it put
 quote-053, the third Task the bug touches, under `instructions`. Revising quote-bot
-from F1 and F23 made version 1.2.0. On the 14 held-out Tasks, two attempts each, its
-pass rate rose from 36% (10 of 28) to 82% (23 of 28), a `better` verdict with a 95%
-interval of +21% to +71% for the change. What still fails is the unplanted weakness:
+from F1 and F23 made version 1.2.0. On the 14 Tasks then held out, two attempts each,
+its pass rate rose from 36% (10 of 28) to 82% (23 of 28), a `better` verdict with a
+95% interval of +21% to +71% for the change. Those Tasks had already been run and
+inspected, so they weren't held out in the sense that counts: they are dev Tasks now,
+and quote-061 to quote-080 replace them. What still fails is the unplanted weakness:
 grade names like "304 stainless sheet". See [Find out why an Agent fails](../../docs/running/inspector.md).
 
 `inspector-bench.json` holds the Inspector's accuracy on inspector-bench, built from
@@ -166,5 +169,5 @@ this example.
 
 `tests/unit/test_quoting_example.py` in the SDK repository runs the reference policy
 and a scripted quote-bot on a fixed, stratified subset of 10 Tasks, at least two per
-category, covering every weakness and trap. The run over all 60 Tasks is marked
+category, covering every weakness and trap. The run over all 80 Tasks is marked
 `slow` and runs nightly.

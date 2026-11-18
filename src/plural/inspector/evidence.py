@@ -687,6 +687,43 @@ class TrialEvidence:
             same = None
         return {"verifier": name, "files": files, "same_as_trial": same}
 
+    def reference_check(self) -> dict[str, Any]:
+        """Play the Task's reference solution through its Environment and Verifiers.
+
+        The reference never sees the answer key and calls no model. A saved check
+        of the Task's current version is reused; otherwise the reference runs now
+        and its check is saved, as ``plural task validate`` would.
+
+        Returns:
+            Whether the reference passed, the gates it failed, and the Verifiers'
+            feedback, or why there is no reference to play.
+        """
+        from plural.project.checks import load_check, plan_checks, run_checks
+
+        name = self.task.task_id
+        workspace = self.job.workspace
+        check = load_check(workspace, name)
+        probe = next((p for p in check.probes if p.probe == "reference"), None) if check else None
+        if probe is None:
+            plan = plan_checks(workspace, [name])
+            if name not in plan.references:
+                return {
+                    "reference": None,
+                    "note": "This Task has no reference solution. Decide grader or task from "
+                    "the request, the answer key, and the Verifier's code.",
+                }
+            (check,) = run_checks(workspace, plan, probes=("reference",))
+            probe = next(p for p in check.probes if p.probe == "reference")
+        assert check is not None
+        return {
+            "reference": "passed" if probe.status == "passed" else "failed",
+            "score": probe.score,
+            "failed_gates": list(probe.failed_checks),
+            "feedback": clip(probe.feedback, 2000),
+            "detail": probe.detail,
+            "task_changed_since_trial": check.content_hash != self.task.content_hash,
+        }
+
     def integrity(self) -> dict[str, Any]:
         """The Trial's trust tier and any integrity findings.
 

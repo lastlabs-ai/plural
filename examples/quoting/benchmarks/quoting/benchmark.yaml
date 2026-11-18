@@ -1,7 +1,7 @@
 # Benchmark: a fixed set of Tasks and the rules for ranking results.
 name: quoting
 version: 1.0.0
-description: Sixty requests for quote to a steel mill, across four kinds of request.
+description: Eighty requests for quote to a steel mill, across four kinds of request.
 purpose: >-
   Checks that an Agent prices an order from the mill's live figures, promises only a
   delivery date the mill can meet, and hands off a request it can't quote safely.
@@ -66,23 +66,50 @@ tasks:
   - quote-058
   - quote-059
   - quote-060
-# Kept back for confirmation: a quarter of each category. A plain run never includes
-# them; `plural run --benchmark quoting --heldout` does, and is counted as a peek.
+  - quote-061
+  - quote-062
+  - quote-063
+  - quote-064
+  - quote-065
+  - quote-066
+  - quote-067
+  - quote-068
+  - quote-069
+  - quote-070
+  - quote-071
+  - quote-072
+  - quote-073
+  - quote-074
+  - quote-075
+  - quote-076
+  - quote-077
+  - quote-078
+  - quote-079
+  - quote-080
+# Kept back for confirmation: requests no run, inspection, fork or revision has used.
+# A plain run never includes them; `plural run --benchmark quoting --heldout` does,
+# and is counted as a reveal.
 heldout:
-  - quote-049
-  - quote-051
-  - quote-052
-  - quote-057
-  - quote-060
-  - quote-047
-  - quote-048
-  - quote-054
-  - quote-056
-  - quote-040
-  - quote-059
-  - quote-050
-  - quote-055
-  - quote-058
+  - quote-061
+  - quote-062
+  - quote-063
+  - quote-064
+  - quote-065
+  - quote-066
+  - quote-067
+  - quote-068
+  - quote-069
+  - quote-070
+  - quote-071
+  - quote-072
+  - quote-073
+  - quote-074
+  - quote-075
+  - quote-076
+  - quote-077
+  - quote-078
+  - quote-079
+  - quote-080
 categories:
   - id: simple
     name: Simple
@@ -112,6 +139,14 @@ categories:
       - quote-053
       - quote-057
       - quote-060
+      - quote-061
+      - quote-062
+      - quote-063
+      - quote-064
+      - quote-065
+      - quote-066
+      - quote-067
+      - quote-068
   - id: rush
     name: Rush
     description: "In stock, but the mill is booked: the requested date is too early, so quote the earliest date it can meet."
@@ -132,6 +167,12 @@ categories:
       - quote-048
       - quote-054
       - quote-056
+      - quote-069
+      - quote-070
+      - quote-071
+      - quote-072
+      - quote-073
+      - quote-074
   - id: ambiguous
     name: Ambiguous
     description: "The grade or the quantity isn't settled, so the right answer is to hand off and ask."
@@ -146,6 +187,9 @@ categories:
       - quote-035
       - quote-040
       - quote-059
+      - quote-075
+      - quote-076
+      - quote-077
   - id: out-of-stock
     name: Out of stock
     description: "Not enough on hand, or a grade the mill doesn't sell, so the right answer is to hand off."
@@ -160,6 +204,9 @@ categories:
       - quote-050
       - quote-055
       - quote-058
+      - quote-078
+      - quote-079
+      - quote-080
 scoring:
   metric: Requests answered right
   description: Share of requests answered right, as quote-check scores them.

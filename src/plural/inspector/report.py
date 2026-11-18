@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from pydantic import Field
+
 from plural.common import FrozenModel
 from plural.inspector.evidence import JobEvidence
 from plural.inspector.findings import breakdown, load_findings
@@ -56,6 +58,176 @@ class Fact(FrozenModel):
     trial_ids: tuple[str, ...] = ()
 
 
+FactId = str
+"""A fact's id, such as ``N3``: the number is in the report's ``facts``."""
+
+
+class FactInterval(FrozenModel):
+    """An estimate and its 95% interval, as fact ids."""
+
+    estimate: FactId
+    interval: FactId
+
+
+class MetricRow(FrozenModel):
+    """One metric of one Agent.
+
+    Attributes:
+        name: The metric.
+        kind: Its kind, such as ``binary``.
+        unit: Its unit, if it has one.
+        gate: Whether it is a gate.
+        applicable: How many Trials it applies to.
+        mean: Its mean and interval, over the Trials it applies to.
+        gate_pass_rate: For a gate, the share of those Trials that passed it.
+    """
+
+    name: str
+    kind: str
+    unit: str | None = None
+    gate: bool = False
+    applicable: FactId
+    mean: FactInterval | None = None
+    gate_pass_rate: FactId | None = None
+
+
+class PerformanceRow(FrozenModel):
+    """How one Agent performed.
+
+    Attributes:
+        agent: The Agent.
+        trials: How many Trials finished.
+        pass_rate: The share of judged Trials that passed every gate.
+        success_rate: The share of Trials whose score reached the threshold.
+        score: The mean score and its interval.
+        splits: The pass rate on ``dev`` and on ``heldout`` Tasks.
+        metrics: Every metric the Task's Verifiers declare.
+    """
+
+    agent: str
+    trials: FactId
+    pass_rate: FactId | None = None
+    success_rate: FactId | None = None
+    score: FactInterval | None = None
+    splits: dict[str, FactId | None] = Field(default_factory=dict)
+    metrics: list[MetricRow] = Field(default_factory=list)
+
+
+class CauseCount(FrozenModel):
+    """How many failed Trials one cause explains, and how many Findings confirm it."""
+
+    cause: str
+    count: FactId
+    confirmed: FactId
+
+
+class FindingRow(FrozenModel):
+    """One Finding, as the report lists it."""
+
+    finding_id: str
+    trial_id: str
+    task: str
+    cause: str
+    status: str
+    critical_step: int | None = None
+    summary: str
+    evidence: list[str] = Field(default_factory=list)
+    forks: list[str] = Field(default_factory=list)
+
+
+class FailuresSection(FrozenModel):
+    """Why the Job's Trials failed, from its inspection.
+
+    Attributes:
+        failed: How many dev Trials failed.
+        inspected_at: When the Job was inspected.
+        depth: How deep the inspection went.
+        breakdown: Failed Trials by cause.
+        findings: Every Finding; empty when the report leaves them out.
+    """
+
+    failed: FactId
+    inspected_at: datetime
+    depth: str
+    breakdown: list[CauseCount] = Field(default_factory=list)
+    findings: list[FindingRow] = Field(default_factory=list)
+
+
+class MeasureChange(FrozenModel):
+    """One measure compared between two Jobs on one split.
+
+    Attributes:
+        verdict: What the paired comparison concluded.
+        shared_tasks: How many Tasks both Jobs ran.
+        new: The measure in the new Job.
+        old: The measure in the old Job.
+        delta: The change, when there is one.
+        interval: The change's 95% interval, when there is one.
+    """
+
+    verdict: str
+    shared_tasks: FactId
+    new: FactId
+    old: FactId
+    delta: FactId | None = None
+    interval: FactId | None = None
+
+
+class ChangesSection(FrozenModel):
+    """The paired comparison with another Job.
+
+    Attributes:
+        new: The Job reported on.
+        old: The Job it is compared with.
+        new_agents: The Agents in the new Job.
+        old_agents: The Agents in the old Job.
+        splits: By split (``dev``, ``heldout``), each measure's change.
+    """
+
+    new: str
+    old: str
+    new_agents: list[str] = Field(default_factory=list)
+    old_agents: list[str] = Field(default_factory=list)
+    splits: dict[str, dict[str, MeasureChange]] = Field(default_factory=dict)
+
+
+class IntegritySection(FrozenModel):
+    """Trials with an integrity finding, and how often each code appeared."""
+
+    flagged: FactId
+    codes: dict[str, int] = Field(default_factory=dict)
+
+
+class ValidationSection(FrozenModel):
+    """The Job's Tasks' saved checks.
+
+    Attributes:
+        tasks: How many Tasks the Job ran.
+        checked: How many have a saved check.
+        clean: How many checked Tasks have no problems.
+        problems: Each problem Task's problems.
+    """
+
+    tasks: int
+    checked: FactId
+    clean: FactId
+    problems: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class TrustSection(FrozenModel):
+    """How far the numbers can be trusted.
+
+    Attributes:
+        tiers: How many Trials ran at each trust tier.
+        integrity: Integrity findings.
+        validation: Task checks.
+    """
+
+    tiers: dict[str, FactId] = Field(default_factory=dict)
+    integrity: IntegritySection
+    validation: ValidationSection
+
+
 class JobReport(FrozenModel):
     """A Job's report: its sections, the facts they cite, and an optional summary.
 
@@ -75,10 +247,10 @@ class JobReport(FrozenModel):
     job_id: str
     compare_job_id: str | None = None
     generated_at: datetime
-    performance: list[dict[str, Any]]
-    failures: dict[str, Any] | None = None
-    changes: dict[str, Any] | None = None
-    trust: dict[str, Any]
+    performance: list[PerformanceRow]
+    failures: FailuresSection | None = None
+    changes: ChangesSection | None = None
+    trust: TrustSection
     facts: tuple[Fact, ...]
     summary: str | None = None
     summary_problems: tuple[str, ...] = ()
@@ -192,7 +364,7 @@ def _by_agent(job: _Loaded, trials: Iterable[TrialResult]) -> dict[str, list[Tri
 
 def _performance(
     job: _Loaded, agent: str, trials: list[TrialResult], facts: _Facts
-) -> dict[str, Any]:
+) -> PerformanceRow:
     ids = [item.receipt.trial_id for item in trials]
     judged = [item for item in trials if item.passed is not None]
     passed = [item.receipt.trial_id for item in judged if item.passed]
@@ -256,7 +428,7 @@ def _performance(
             hits = [item.receipt.trial_id for item in trials if item.gates.get(name) is True]
             entry["gate_pass_rate"] = facts.rate(f"{agent}: gate {name} passed", hits, contributing)
         row["metrics"].append(entry)
-    return row
+    return PerformanceRow.model_validate(row)
 
 
 def _grouped(job: _Loaded, trials: Iterable[TrialResult], read: Any) -> dict[str, list[float]]:
@@ -285,7 +457,7 @@ def _interval(
     }
 
 
-def _failures(job: _Loaded, facts: _Facts, *, include: bool) -> dict[str, Any] | None:
+def _failures(job: _Loaded, facts: _Facts, *, include: bool) -> FailuresSection | None:
     record = load_findings(job.directory)
     if record is None:
         return None
@@ -309,35 +481,37 @@ def _failures(job: _Loaded, facts: _Facts, *, include: bool) -> dict[str, Any] |
             }
         )
     failed_ids = [item.trial_id for item in JobEvidence(job.root, job.job_id).failed()]
-    return {
-        "failed": facts.add("failed dev Trials", record.failed, str(record.failed), failed_ids),
-        "inspected_at": record.inspected_at.isoformat(),
-        "depth": record.depth,
-        "breakdown": rows,
-        "findings": [
-            {
-                "finding_id": item.finding_id,
-                "trial_id": item.trial_id,
-                "task": item.task,
-                "cause": item.cause,
-                "status": item.status,
-                "critical_step": item.critical_step,
-                "summary": item.summary,
-                "evidence": list(item.evidence),
-                "forks": [test.test_id for test in item.forks],
-            }
-            for item in record.findings
-        ]
-        if include
-        else [],
-    }
+    return FailuresSection.model_validate(
+        {
+            "failed": facts.add("failed dev Trials", record.failed, str(record.failed), failed_ids),
+            "inspected_at": record.inspected_at.isoformat(),
+            "depth": record.depth,
+            "breakdown": rows,
+            "findings": [
+                {
+                    "finding_id": item.finding_id,
+                    "trial_id": item.trial_id,
+                    "task": item.task,
+                    "cause": item.cause,
+                    "status": item.status,
+                    "critical_step": item.critical_step,
+                    "summary": item.summary,
+                    "evidence": list(item.evidence),
+                    "forks": [test.test_id for test in item.forks],
+                }
+                for item in record.findings
+            ]
+            if include
+            else [],
+        }
+    )
 
 
 MEASURES = {"pass_rate": "pass rate", "success_rate": "success rate"}
 """What a comparison is on: never one word for the other."""
 
 
-def _changes(job: _Loaded, other: _Loaded, facts: _Facts) -> dict[str, Any]:
+def _changes(job: _Loaded, other: _Loaded, facts: _Facts) -> ChangesSection:
     splits: dict[str, Any] = {}
     for name in ("dev", "heldout"):
         measures: dict[str, Any] = {}
@@ -383,13 +557,15 @@ def _changes(job: _Loaded, other: _Loaded, facts: _Facts) -> dict[str, Any]:
             measures[measure] = entry
         if measures:
             splits[name] = measures
-    return {
-        "new": job.job_id,
-        "old": other.job_id,
-        "new_agents": sorted({job.agent(item) for item in job.result.trials}),
-        "old_agents": sorted({other.agent(item) for item in other.result.trials}),
-        "splits": splits,
-    }
+    return ChangesSection.model_validate(
+        {
+            "new": job.job_id,
+            "old": other.job_id,
+            "new_agents": sorted({job.agent(item) for item in job.result.trials}),
+            "old_agents": sorted({other.agent(item) for item in other.result.trials}),
+            "splits": splits,
+        }
+    )
 
 
 def _outcomes(job: _Loaded, split: str, measure: str) -> dict[str, tuple[list[float], list[str]]]:
@@ -425,7 +601,7 @@ def _rate_of(
     return facts.add(label, rate, f"{rate:.0%} ({hits} of {len(values)})", ids)
 
 
-def _trust(workspace: Workspace, job: _Loaded, facts: _Facts) -> dict[str, Any]:
+def _trust(workspace: Workspace, job: _Loaded, facts: _Facts) -> TrustSection:
     tiers: dict[str, list[str]] = defaultdict(list)
     for item in job.result.trials:
         tier = item.trust.tier if item.trust is not None else "unknown"
@@ -436,32 +612,37 @@ def _trust(workspace: Workspace, job: _Loaded, facts: _Facts) -> dict[str, Any]:
     checks = saved_checks(workspace, tasks)
     checked = [name for name, check in checks.items() if check is not None]
     clean = [name for name in checked if not checks[name].problems]  # type: ignore[union-attr]
-    return {
-        "tiers": {
-            tier: facts.add(f"Trials at trust tier {tier}", len(ids), str(len(ids)), ids)
-            for tier, ids in sorted(tiers.items())
-        },
-        "integrity": {
-            "flagged": facts.add(
-                "Trials with an integrity finding", len(flagged), str(len(flagged)), flagged
-            ),
-            "codes": dict(sorted(codes.items())),
-        },
-        "validation": {
-            "tasks": len(tasks),
-            "checked": facts.add(
-                "Tasks with a saved check", len(checked), f"{len(checked)} of {len(tasks)}", []
-            ),
-            "clean": facts.add(
-                "checked Tasks with no problems", len(clean), f"{len(clean)} of {len(checked)}", []
-            ),
-            "problems": {
-                name: list(checks[name].problems)  # type: ignore[union-attr]
-                for name in checked
-                if name not in clean
+    return TrustSection.model_validate(
+        {
+            "tiers": {
+                tier: facts.add(f"Trials at trust tier {tier}", len(ids), str(len(ids)), ids)
+                for tier, ids in sorted(tiers.items())
             },
-        },
-    }
+            "integrity": {
+                "flagged": facts.add(
+                    "Trials with an integrity finding", len(flagged), str(len(flagged)), flagged
+                ),
+                "codes": dict(sorted(codes.items())),
+            },
+            "validation": {
+                "tasks": len(tasks),
+                "checked": facts.add(
+                    "Tasks with a saved check", len(checked), f"{len(checked)} of {len(tasks)}", []
+                ),
+                "clean": facts.add(
+                    "checked Tasks with no problems",
+                    len(clean),
+                    f"{len(clean)} of {len(checked)}",
+                    [],
+                ),
+                "problems": {
+                    name: list(checks[name].problems)  # type: ignore[union-attr]
+                    for name in checked
+                    if name not in clean
+                },
+            },
+        }
+    )
 
 
 def validate_summary(text: str, facts: Sequence[Fact]) -> list[str]:
@@ -585,6 +766,7 @@ def render_markdown(report: JobReport) -> str:
         Markdown, with every number from a fact and a table of the facts at the end.
     """
     values = {item.fact_id: item.display for item in report.facts}
+    data = report.model_dump(mode="json")
 
     def v(fact_id: str | None) -> str:
         return values.get(fact_id or "", "n/a")
@@ -595,7 +777,7 @@ def render_markdown(report: JobReport) -> str:
     elif report.summary_problems:
         lines += ["## Summary", "", "No summary: " + "; ".join(report.summary_problems) + ".", ""]
     lines += ["## How the Agent performs", ""]
-    for row in report.performance:
+    for row in data["performance"]:
         score = row["score"] or {}
         lines += [
             f"### {row['agent']}",
@@ -618,7 +800,7 @@ def render_markdown(report: JobReport) -> str:
             )
         lines.append("")
     lines += ["## Why it fails", ""]
-    failures = report.failures
+    failures = data["failures"]
     if failures is None:
         lines += ["Not inspected yet. Next: `plural job inspect " + report.job_id + "`.", ""]
     else:
@@ -648,7 +830,7 @@ def render_markdown(report: JobReport) -> str:
         if failures["findings"]:
             lines.append("")
     lines += ["## What changed", ""]
-    changes = report.changes
+    changes = data["changes"]
     if changes is None:
         lines += ["No comparison. Add `--compare OTHER_JOB`.", ""]
     else:
@@ -669,7 +851,7 @@ def render_markdown(report: JobReport) -> str:
         if not changes["splits"]:
             lines.append("- The two Jobs share no Tasks.")
         lines.append("")
-    trust = report.trust
+    trust = data["trust"]
     lines += [
         "## Why the numbers can be trusted",
         "",
@@ -744,8 +926,19 @@ __all__ = [
     "REPORT_DATA",
     "REPORT_FILE",
     "SUMMARY_MODEL",
+    "CauseCount",
+    "MeasureChange",
+    "ChangesSection",
     "Fact",
+    "FailuresSection",
+    "FindingRow",
+    "IntegritySection",
+    "FactInterval",
     "JobReport",
+    "MetricRow",
+    "PerformanceRow",
+    "TrustSection",
+    "ValidationSection",
     "build_report",
     "render_markdown",
     "render_summary",

@@ -175,7 +175,8 @@ Score and reward keep the meanings above.
   such as the final or the lowest value.
 - **Held-out set:** Tasks kept back to confirm an improvement on work the Agent was
   never tuned on. *Precisely:* the Tasks under a Benchmark's `heldout:`, which diagnosis
-  never looks at. Each run against them, and each reveal of their results, is a
+  never looks at. Held out means untouched: a Task that any Trial has run can't be
+  newly held out. Each run against them, and each reveal of their results, is a
   **peek**, and is counted.
 - **Checkpoint:** a saved moment of an attempt that it can be restarted from.
   *Precisely:* everything needed to restart a Trial exactly as it stood after step *k*:
@@ -206,7 +207,9 @@ Score and reward keep the meanings above.
   critical step, a cause dimension (model, context, tools, instructions, Harness,
   environment, grader, task, integrity, or one a project adds), the cause, the evidence
   and the Forks that tested it, and a status (`confirmed`, `inferred`, `refuted`, or
-  `inconclusive`). `plural agent revise` turns a confirmed one into a new Agent version.
+  `inconclusive`). A `grader` cause is Verifier code judging wrongly against a right
+  answer key; a `task` cause is a wrong answer key, or a request missing what the key
+  needs. `plural agent revise` turns a confirmed one into a new Agent version.
 - **Signal:** a check over a failed Trial that points the Inspector at what looks wrong,
   such as a call to a tool that doesn't exist. *Precisely:* a function registered with
   `@signal("name")`, built in or in a project's `inspector/signals.py`.

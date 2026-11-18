@@ -330,6 +330,16 @@ def test_a_fork_continues_from_the_restored_world_with_its_own_history(
     saved = _plural(project, env, "trial", "checkpoint", original, "--step", "2", "--name", "two")
     assert saved["reference"] == f"{original}/two" and saved["digest"].startswith("sha256:")
 
+    # --gate names gates the Trial has; Wordle declares none, so it is refused before any run.
+    refused = subprocess.run(
+        [str(CLI), "trial", "fork", original, "--step", "2", "--agent", "careful", "--gate", "x"],
+        cwd=project,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    assert refused.returncode != 0 and "has no gate x" in refused.stdout + refused.stderr
+
     _WordleModel.seen = []
     fork = _plural(
         project,
@@ -344,7 +354,7 @@ def test_a_fork_continues_from_the_restored_world_with_its_own_history(
         "--attempts",
         "1",
     )
-    assert fork["history"] == {"native": 2}
+    assert fork["history"] == {"native": 2} and fork["gates"] == []
     assert fork["controls_reproduced"] == 1.0
     assert fork["candidates"]["careful"]["verdict"] == "too_few"
     trials = _plural(project, env, "job", "show", fork["job_id"])["trials"]

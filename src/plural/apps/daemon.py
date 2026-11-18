@@ -885,29 +885,67 @@ def _report_tool(root: Path, rest: list[str], timeout: float | None) -> Any:
     if fields is None:
         return None
     try:
+        if fields.pop("unknown", False):
+            return call(
+                "step",
+                root=root,
+                timeout=timeout,
+                action=fields["name"],
+                arguments=fields["arguments"],
+                unknown=True,
+            )
         return call("tool", root=root, timeout=timeout, **fields)
     except (OSError, RuntimeError, ValueError) as exc:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)
         return None
 
 
+_ENVIRONMENT_TOOL = "mcp__plural-environment__"
+_NO_SUCH_TOOL = "No such tool available"
+
+
 def claude_hook_fields(payload: Mapping[str, Any]) -> dict[str, Any] | None:
-    """The tool call a Claude Code PostToolUse hook describes.
+    """The tool call a Claude Code PostToolUse or PostToolUseFailure hook describes.
 
     Calls of the Environment's own MCP tools are left out: the host recorded
-    those as actions already.
+    those as actions already. A call to a tool that doesn't exist never reached
+    the host, so it is marked ``unknown``, for the host to record as an
+    ``unknown_action`` step.
 
     Returns:
         Fields for the ``tool`` operation, or ``None`` to skip this call.
+
+    Examples:
+        >>> claude_hook_fields(
+        ...     {
+        ...         "hook_event_name": "PostToolUseFailure",
+        ...         "tool_name": "mcp__plural-environment__quote",
+        ...         "tool_input": {"tons": 3},
+        ...         "error": "Error: No such tool available: quote",
+        ...     }
+        ... )
+        {'name': 'quote', 'arguments': {'tons': 3}, 'unknown': True}
     """
     name = str(payload.get("tool_name") or "")
-    if not name or name.startswith("mcp__plural-environment__"):
+    if not name:
         return None
     arguments = payload.get("tool_input")
     response = payload.get("tool_response")
     error = None
     if isinstance(response, dict) and response.get("is_error"):
         error = str(response.get("error") or response.get("content") or "tool failed")
+    elif isinstance(response, str) and _NO_SUCH_TOOL in response:
+        error = response
+    if payload.get("hook_event_name") == "PostToolUseFailure":
+        error = str(payload.get("error") or error or "tool failed")
+    if error is not None and _NO_SUCH_TOOL in error:
+        return {
+            "name": name.removeprefix(_ENVIRONMENT_TOOL),
+            "arguments": arguments if isinstance(arguments, dict) else {"input": arguments},
+            "unknown": True,
+        }
+    if name.startswith(_ENVIRONMENT_TOOL):
+        return None
     return {
         "name": name,
         "arguments": arguments if isinstance(arguments, dict) else {"input": arguments},

@@ -898,6 +898,23 @@ class JobsAPI:
     def report(self, job_id: str) -> JsonObject:
         return cast(JsonObject, self._studio.request("GET", f"/jobs/{quote(job_id)}/report"))
 
+    def inspection_key(self, job_id: str, *, ttl_seconds: int = 3600) -> JsonObject:
+        """Mint the gateway key one inspection's forks of a Job call models with.
+
+        ``job_id`` is the hosted Job, or the local Job id when it was never
+        recorded. The key calls chat completions only.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST", "/inspection-keys", json={"job_id": job_id, "ttl_seconds": ttl_seconds}
+            ),
+        )
+
+    def end_inspection_key(self, job_id: str) -> None:
+        """Revoke the inspection's key, when it finishes or stops."""
+        self._studio.request("DELETE", f"/inspection-keys/{quote(job_id)}")
+
 
 class TrialsAPI:
     """Hosted Trial and TrialExecution operations."""

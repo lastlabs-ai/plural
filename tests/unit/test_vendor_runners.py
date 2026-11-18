@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -476,3 +477,41 @@ def test_the_bridge_passes_chat_completions_through_and_streams_them(
     assert chunks[1]["choices"][0]["finish_reason"] == "tool_calls"
     assert chunks[-1]["usage"] == answer["usage"]
     assert "data: [DONE]" in lines
+
+
+def test_claude_code_reports_a_call_to_a_missing_tool_as_unknown_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from plural.apps import daemon
+
+    monkeypatch.chdir(tmp_path)
+    from plural.harness.interface import HarnessEnvironment
+
+    environment = HarnessEnvironment({"tool_command": ["tool"], "workspace": str(tmp_path)})
+    vendor_adapter._write_claude_settings(environment)
+    hooks = json.loads((tmp_path / ".plural/claude-settings.json").read_text())["hooks"]
+    assert hooks["PostToolUse"] == hooks["PostToolUseFailure"]
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(daemon, "call", lambda op, **fields: calls.append((op, fields)) or {})
+    missing = {
+        "hook_event_name": "PostToolUseFailure",
+        "tool_name": "lookup_prices",
+        "tool_input": {"grade": "A36"},
+        "error": "<tool_use_error>Error: No such tool available: lookup_prices</tool_use_error>",
+    }
+    environment_call = {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "mcp__plural-environment__quote",
+        "tool_input": {},
+        "tool_response": {"content": "ok"},
+    }
+    own = {"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}
+    for payload in (missing, environment_call, own):
+        monkeypatch.setattr(daemon.sys, "stdin", io.StringIO(json.dumps(payload)))
+        daemon._report_tool(tmp_path, ["--claude-hook"], None)
+    assert [op for op, _ in calls] == ["step", "tool"]
+    step = calls[0][1]
+    assert step["action"] == "lookup_prices" and step["unknown"] is True
+    assert step["arguments"] == {"grade": "A36"}
+    assert calls[1][1]["name"] == "Bash"

@@ -118,7 +118,7 @@ def revise_agent(
         raise ProjectError(
             f"Finding {finding_id} blames {finding.cause}, which a change to the Agent doesn't "
             "fix. Fix the "
-            + {"grader": "Verifier or the answer key", "task": "Task"}.get(
+            + {"grader": "Verifier's code", "task": "Task or its answer key"}.get(
                 finding.cause, finding.cause
             )
             + " instead."

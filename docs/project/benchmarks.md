@@ -246,6 +246,13 @@ List some of the Benchmark's Tasks under `heldout`, such as a third of them, wit
 about the same share from each category. The rest are the **development** Tasks. A
 Benchmark whose every Task is held out is refused.
 
+Held out means untouched. Hold out Tasks no run, inspection, fork, or revision has
+seen, usually new ones. A Task that has already run can't become held out: the hosted
+project refuses a Benchmark revision that newly holds out a Task with any Trial on it,
+and names the Tasks, so you keep them as development Tasks and write new ones to hold
+out. A run that confirms a fix on held-out Tasks should be recorded (`--record`), so
+its peek is counted in the hosted project too.
+
 From then on:
 
 - `plural run --benchmark support-triage` runs only the development Tasks, and says how

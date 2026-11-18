@@ -1,12 +1,15 @@
 """inspector-bench: plant known faults, keep the Trials they break, and score the Inspector.
 
 A healthy Agent runs the quoting Tasks. Each fault then changes one thing, the
-Agent (its instructions, a tool's description, or which tools it sees) or the
-project (its Verifier, an answer key, or a Task's request), and the same Tasks
-run again. A Trial joins the bench only when the healthy Agent passed its Task
-and the faulty run failed it, so its cause is known. Each becomes one Inspector
-Task whose answer key is the planted cause; the Inspector's accuracy is the
-pass rate of ``finding-check`` over them.
+Agent (its instructions, a tool's description, which tools it sees, its model, or
+how much it must read) or the project (its Verifier, an answer key, or a Task's
+request), and the same Tasks run again. A Trial joins the bench only when the
+healthy Agent passed its Task and the faulty run failed it, so its cause is
+known. A fault with levels, such as padding, escalates until it breaks a Task or
+runs out of levels. A fault that broke nothing is kept out of the bench and
+reported in ``bench.json``, as is every cause the faults claim that has no case.
+Each case becomes one Inspector Task whose answer key is the planted cause; the
+Inspector's accuracy is the pass rate of ``finding-check`` over them.
 
 Agents get neutral names (``agent-3``), so a name never gives the fault away.
 
@@ -23,7 +26,8 @@ import re
 import shutil
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from contextlib import suppress
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -33,14 +37,16 @@ from plural.inspector.evidence import JobEvidence, TrialEvidence
 from plural.inspector.run import (
     TEMPLATE,
     Depth,
+    fork_environ,
+    fork_key,
     instructions_for,
-    with_credential,
     write_benchmark,
     write_task,
 )
 from plural.project.layout import Project
 from plural.project.resources import Workspace
 from plural.project.runs import RunRequest, local_job_spec, plan_run, run_local
+from plural.studio import Studio
 
 BENCH = "inspector-bench"
 BENCH_FILE = "bench.json"
@@ -66,6 +72,10 @@ SCHEDULE = (
     "Check it before every quote and never promise an earlier date: quote the customer's "
     "date when the mill can meet it, and this one otherwise."
 )
+WEAK_MODELS = ("anthropic/claude-haiku-4-5", "google/gemini-3.7-flash")
+"""The weaker gateway models the model fault tries, in turn, until one breaks a Task."""
+PADDING_LINES = (1_200, 6_000, 24_000)
+"""How many padding lines the context fault tries, in turn: about 40k, 200k, and 800k tokens."""
 PADDING_LINE = (
     "Reference: mill {n} keeps archived order ledgers, shift rosters, safety bulletins, "
     "and maintenance logs for the {n}th rolling line; none of them bear on quoting."
@@ -82,10 +92,13 @@ class Fault:
         description: What was planted.
         categories: The quoting categories it is run on.
         terms: Words, one of which a correct Finding's summary or evidence uses.
-        agent: Changes the healthy Agent's manifest; ``None`` for a project fault.
+        agent: Changes the healthy Agent's manifest, given the level;
+            ``None`` for a project fault.
         project: Changes a copy of the project; ``None`` for an Agent fault.
         step_known: Whether the critical step is the Agent's answer. A grader
-            fault breaks no step, so any step is accepted.
+            or answer-key fault breaks no step, so any step is accepted.
+        levels: The strengths an Agent fault tries, in turn, until one breaks a
+            Task the healthy Agent passed.
     """
 
     name: str
@@ -93,9 +106,10 @@ class Fault:
     description: str
     categories: tuple[str, ...]
     terms: tuple[str, ...]
-    agent: Callable[[dict[str, Any]], None] | None = None
+    agent: Callable[[dict[str, Any], Any], None] | None = None
     project: Callable[[Path], None] | None = None
     step_known: bool = True
+    levels: tuple[Any, ...] = (None,)
 
 
 @dataclass
@@ -128,19 +142,19 @@ def healthy_agent(source: Mapping[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _hide_schedule(agent: dict[str, Any]) -> None:
+def _hide_schedule(agent: dict[str, Any], _level: Any = None) -> None:
     agent["tool_overrides"] = {"check_schedule": {"hidden": True}}
 
 
-def _vague_schedule(agent: dict[str, Any]) -> None:
+def _vague_schedule(agent: dict[str, Any], _level: Any = None) -> None:
     agent["tool_overrides"] = {"check_schedule": "Optional: view mill bookings."}
 
 
-def _rounding(agent: dict[str, Any]) -> None:
+def _rounding(agent: dict[str, Any], _level: Any = None) -> None:
     agent["instructions"] = str(agent["instructions"]).replace(EXACT, ROUNDING)
 
 
-def _requested_date(agent: dict[str, Any]) -> None:
+def _requested_date(agent: dict[str, Any], _level: Any = None) -> None:
     agent["instructions"] = (
         str(agent["instructions"]).rstrip()
         + " Always promise the delivery date the customer asked for; customers walk away "
@@ -148,7 +162,7 @@ def _requested_date(agent: dict[str, Any]) -> None:
     )
 
 
-def _never_handoff(agent: dict[str, Any]) -> None:
+def _never_handoff(agent: dict[str, Any], _level: Any = None) -> None:
     agent["instructions"] = (
         str(agent["instructions"]).rstrip()
         + " The sales team is fully booked this week, so never hand off: always send a "
@@ -156,9 +170,13 @@ def _never_handoff(agent: dict[str, Any]) -> None:
     )
 
 
-def _padding(agent: dict[str, Any]) -> None:
-    filler = "\n".join(PADDING_LINE.format(n=n) for n in range(1, 1201))
+def _padding(agent: dict[str, Any], lines: int) -> None:
+    filler = "\n".join(PADDING_LINE.format(n=n) for n in range(1, lines + 1))
     agent["instructions"] = filler + "\n\n" + str(agent["instructions"])
+
+
+def _weaker_model(agent: dict[str, Any], model: str) -> None:
+    agent["model"] = model
 
 
 def _list_price_grader(root: Path) -> None:
@@ -232,6 +250,16 @@ QUOTING_FAULTS = (
         ("simple", "rush"),
         ("context", "long", "padding", "irrelevant", "buried"),
         agent=_padding,
+        levels=PADDING_LINES,
+    ),
+    Fault(
+        "weaker-model",
+        "model",
+        "the Agent runs on a weaker model",
+        ("simple", "rush", "ambiguous", "out-of-stock"),
+        ("model", "weaker", "capab", "stronger"),
+        agent=_weaker_model,
+        levels=WEAK_MODELS,
     ),
     Fault(
         "list-price-grader",
@@ -244,7 +272,7 @@ QUOTING_FAULTS = (
     ),
     Fault(
         "doubled-answer-key",
-        "grader",
+        "task",
         "the answer key doubles the tons",
         ("simple",),
         ("answer key", "expected", "tons"),
@@ -294,41 +322,61 @@ def build_bench(
     baseline = _run(clean, "bench-all", HEALTHY, environ, concurrency)
     passed = {trial.task.task_id: trial for trial in baseline.trials.values() if trial.passed}
     cases: list[Case] = []
+    outcomes: dict[str, dict[str, Any]] = {}
     for index, fault in enumerate(faults, start=1):
         tasks = sorted(
             task for name in fault.categories for task in categories.get(name, ()) if task in passed
         )
+        outcome: dict[str, Any] = {
+            "cause": fault.cause,
+            "description": fault.description,
+            "tasks": len(tasks),
+            "tried": [],
+            "level": None,
+            "broke": 0,
+        }
+        outcomes[fault.name] = outcome
         if not tasks:
+            outcome["note"] = "The healthy Agent passed none of its Tasks."
             continue
         bench = f"bench-{index}"
-        if fault.agent is not None:
-            root, name = clean, f"agent-{index}"
-            variant = json.loads(json.dumps(healthy))
-            variant["name"] = name
-            fault.agent(variant)
-            _write_agent(root, variant)
-        else:
+        if fault.agent is None:
             assert fault.project is not None
-            root, name = out / "subjects" / f"s{index}", HEALTHY
+            root = out / "subjects" / f"s{index}"
             if not root.is_dir():
                 shutil.copytree(clean, root, ignore=IGNORED)
                 fault.project(root)
-        _write_bench(root, bench, tasks)
-        log(f"fault {index} on {len(tasks)} Tasks")
-        evidence = _run(root, bench, name, environ, concurrency)
-        broke = sorted(
-            (trial for trial in evidence.trials.values() if trial.passed is False),
-            key=lambda trial: trial.task.task_id,
-        )
+            _write_bench(root, bench, tasks)
+            log(f"fault {index} on {len(tasks)} Tasks")
+            evidence = _run(root, bench, HEALTHY, environ, concurrency)
+            broke = _broke(evidence)
+        else:
+            for step, level in enumerate(fault.levels, start=1):
+                root, name = clean, f"agent-{index}" + (f"-{step}" if len(fault.levels) > 1 else "")
+                variant = json.loads(json.dumps(healthy))
+                variant["name"] = name
+                fault.agent(variant, level)
+                _write_agent(root, variant)
+                _write_bench(root, bench, tasks)
+                log(f"fault {index} level {step} on {len(tasks)} Tasks")
+                evidence = _run(root, bench, name, environ, concurrency)
+                broke = _broke(evidence)
+                outcome["tried"].append({"level": level, "broke": len(broke)})
+                if broke:
+                    outcome["level"] = level
+                    break
+        outcome["broke"] = len(broke)
         for trial in broke[:per_fault]:
             cases.append(_case(fault, root, evidence, trial, passed[trial.task.task_id]))
     _write_inspector(out, cases, depth=depth, budget_usd=budget_usd, environ=environ)
+    claimed = sorted({fault.cause for fault in faults})
+    covered = {case.expected["cause"] for case in cases}
     (out / BENCH_FILE).write_text(
         json.dumps(
             {
-                "faults": {
-                    f.name: {"cause": f.cause, "description": f.description} for f in faults
-                },
+                "faults": outcomes,
+                "ineffective": sorted(name for name, item in outcomes.items() if not item["broke"]),
+                "causes_without_cases": [cause for cause in claimed if cause not in covered],
                 "cases": [case.__dict__ for case in cases],
             },
             indent=2,
@@ -345,8 +393,12 @@ def run_bench(
     environ: Mapping[str, str],
     model: str | None = None,
     concurrency: int = 4,
+    studio: Studio | None = None,
 ) -> dict[str, Any]:
     """Run the Inspector on the bench and score it.
+
+    The cases are grouped by the Job they came from, and each group runs with a
+    fork key minted for that Job alone; without ``studio`` the forks are off.
 
     Returns:
         Accuracy overall and per fault, and each check's rate.
@@ -361,37 +413,54 @@ def run_bench(
         payload = yaml.safe_load(path.read_text("utf-8"))
         payload["model"] = model
         path.write_text(yaml.safe_dump(payload, sort_keys=False), "utf-8")
-    space = Workspace(Project.at(root))
-    plan = plan_run(
-        space,
-        RunRequest(benchmark=BENCH, agent="inspector", concurrency=concurrency),
-        environ=environ,
-    )
-    job_id, result = run_local(space, plan, environ=environ)
     bench = json.loads((out / BENCH_FILE).read_text("utf-8"))
     by_task = {f"case-{n:02d}": case for n, case in enumerate(bench["cases"], start=1)}
-    spec_tasks = {item.content_hash: item.task_id for item in local_job_spec(space, job_id).tasks}
+    groups: dict[str, list[str]] = {}
+    for name, case in by_task.items():
+        groups.setdefault(str(case["job_id"]), []).append(name)
+    space = Workspace(Project.at(root))
     rows = []
-    for trial in result.trials:
-        task = spec_tasks.get(trial.receipt.task_digest, "")
-        case = by_task.get(task, {})
-        rows.append(
-            {
-                "task": task,
-                "fault": case.get("fault"),
-                "cause": (case.get("expected") or {}).get("cause"),
-                "trial_id": trial.receipt.trial_id,
-                "passed": bool(trial.passed),
-                "metrics": dict(trial.metrics),
-                "cost_usd": trial.metrics.get("cost_usd"),
-            }
-        )
+    jobs = []
+    for number, (subject, names) in enumerate(sorted(groups.items()), start=1):
+        name = f"{BENCH}-{number}"
+        write_benchmark(root, name, names, f"The bench's failed Trials from Job {subject}.")
+        with fork_key(studio, subject) as key:
+            plan = plan_run(
+                space,
+                RunRequest(benchmark=name, agent="inspector", concurrency=concurrency),
+                environ=fork_environ(environ, key),
+            )
+            job_id, result = run_local(space, plan, environ=fork_environ(environ, key))
+        jobs.append(job_id)
+        spec_tasks = {
+            item.content_hash: item.task_id for item in local_job_spec(space, job_id).tasks
+        }
+        for trial in result.trials:
+            task = spec_tasks.get(trial.receipt.task_digest, "")
+            case = by_task.get(task, {})
+            rows.append(
+                {
+                    "task": task,
+                    "fault": case.get("fault"),
+                    "cause": (case.get("expected") or {}).get("cause"),
+                    "trial_id": trial.receipt.trial_id,
+                    "passed": bool(trial.passed),
+                    "metrics": dict(trial.metrics),
+                    "cost_usd": trial.metrics.get("cost_usd"),
+                    "forks": key is not None,
+                }
+            )
     summary = score_rows(rows)
     summary.update(
         {
-            "job_id": job_id,
-            "model": plan.agent.model,
-            "rows": rows,
+            "job_ids": jobs,
+            "model": model
+            or yaml.safe_load((root / "agents" / "inspector" / "agent.yaml").read_text("utf-8"))[
+                "model"
+            ],
+            "ineffective": bench.get("ineffective", []),
+            "causes_without_cases": bench.get("causes_without_cases", []),
+            "rows": sorted(rows, key=lambda row: row["task"]),
         }
     )
     (out / RESULTS_FILE).write_text(json.dumps(summary, indent=2) + "\n", "utf-8")
@@ -448,6 +517,13 @@ def score_rows(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             name: rate(items, "cause_correct") for name, items in sorted(groups["cause"].items())
         },
     }
+
+
+def _broke(evidence: JobEvidence) -> list[TrialEvidence]:
+    return sorted(
+        (trial for trial in evidence.trials.values() if trial.passed is False),
+        key=lambda trial: trial.task.task_id,
+    )
 
 
 def _case(
@@ -568,12 +644,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     build.add_argument("--depth", choices=("quick", "standard", "deep"), default="standard")
     build.add_argument("--budget-usd", type=float, default=0.5)
     build.add_argument("--concurrency", type=int, default=8)
+    build.add_argument(
+        "--weak-model",
+        action="append",
+        help="A weaker gateway model for the model fault; repeat to try several in turn.",
+    )
     run = commands.add_parser("run", help="Run the Inspector on a built bench.")
     run.add_argument("out", type=Path)
     run.add_argument("--model")
     run.add_argument("--concurrency", type=int, default=4)
+    run.add_argument(
+        "--project", default=os.environ.get("PLURAL_PROJECT"), help="Hosted project for fork keys."
+    )
     args = parser.parse_args(argv)
-    environ = with_credential(os.environ)
+    environ = fork_environ(os.environ, None)
     if args.command == "build":
         cases = build_bench(
             args.source,
@@ -583,12 +667,41 @@ def main(argv: Sequence[str] | None = None) -> int:
             depth=args.depth,
             budget_usd=args.budget_usd,
             concurrency=args.concurrency,
+            faults=_with_weak_models(QUOTING_FAULTS, args.weak_model),
         )
         print(f"{len(cases)} cases written to {args.out / 'inspector'}")
         return 0
-    summary = run_bench(args.out, environ=environ, model=args.model, concurrency=args.concurrency)
+    summary = run_bench(
+        args.out,
+        environ=environ,
+        model=args.model,
+        concurrency=args.concurrency,
+        studio=_studio(args.project),
+    )
     print(json.dumps({key: summary[key] for key in summary if key != "rows"}, indent=2))
     return 0
+
+
+def _with_weak_models(faults: Sequence[Fault], models: Sequence[str] | None) -> tuple[Fault, ...]:
+    if not models:
+        return tuple(faults)
+    return tuple(
+        replace(fault, levels=tuple(models)) if fault.cause == "model" else fault
+        for fault in faults
+    )
+
+
+def _studio(project: str | None) -> Studio | None:
+    from plural.auth import resolve_session
+
+    current = resolve_session()
+    if current.token is None and not current.api_key:
+        print("Forks are off: sign in, or set PLURAL_API_KEY, to mint fork keys.", file=sys.stderr)
+        return None
+    with suppress(Exception):
+        return current.studio(project=project)
+    print("Forks are off: no hosted project to mint fork keys in.", file=sys.stderr)
+    return None
 
 
 __all__ = [

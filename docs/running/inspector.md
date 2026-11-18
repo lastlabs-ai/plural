@@ -63,8 +63,26 @@ what it learns can't leak into the set you confirm a fix on.
 
 The **cause dimensions** are `model`, `context`, `tools`, `instructions`, and
 `harness`, which a change to the Agent can fix, and `environment`, `grader`, `task`,
-and `integrity`, which it can't. A wrong answer key is `grader`: the Agent's work was
-right and the grading wasn't. A request that can't be answered as written is `task`.
+and `integrity`, which it can't.
+
+`grader` and `task` both mean no Agent could have passed, and they are told apart by
+what is wrong:
+
+- **`grader`**: the answer key (the Task's `expected`) is right, but the Verifier's
+  code judges a correct answer wrong, or a wrong one right.
+- **`task`**: the answer key is wrong, or the request and its files leave out
+  something needed to reach it.
+
+To decide, the Inspector plays the Task's reference solution, which never sees the
+answer key, through the same Environment and Verifiers, reusing the check `plural
+task validate` saved when there is one. If the reference passes, the grading works
+and the cause is the Agent's. If it fails too, the Inspector compares the request with
+the answer key: a key that contradicts the request, or a request missing what the key
+needs, is `task`; a right key judged wrongly is `grader`.
+
+One cause can hide another. An Agent that failed early never reached the step where a
+second weakness would show, so when a fork removes the first cause, the Inspector
+checks the forked Trials for a second, and records it as its own Finding.
 
 A fork is judged on the gates its Finding explains, so a fix for one of two failures
 shows its effect even though the Trial still fails the other. Each fork also reports,
@@ -97,10 +115,15 @@ breakdown and each Finding.
 Trials; the Inspector is refused a fork it can't afford. `--trial` inspects only the
 Trials named, `--model` picks the Inspector's model, and `--json` prints everything.
 
-The forks run with your Plural key, which reaches only the process that holds the
-Inspector's App. Neither the Inspector's model nor your Agent's Harness ever sees it.
-Nothing the Inspector reads (rewards, State, the answer key, Verifier code, or other
-Findings) ever reaches the Agent being tested.
+The forks never run with your own key. Each inspection mints a key of its own: it can
+only call models through the gateway, for forks of the Job being inspected; it is
+stored as a hash, never listed with your keys, and revoked when the inspection ends
+(or after three hours, if it never does). It reaches only the process that holds the
+Inspector's App, never the Inspector's model or your Agent's Harness. Minting it needs
+hosted access: sign in and bind the project, or scope your key with `plural auth scope
+--project`. Without it, `--depth standard` and `deep` still run, with forks off, and
+every Finding is `inferred`. Nothing the Inspector reads (rewards, State, the answer
+key, Verifier code, or other Findings) ever reaches the Agent being tested.
 
 ## Ask about one Trial
 
@@ -143,6 +166,12 @@ When a model calls a tool the Agent wasn't offered, such as one it made up or on
 info, never run, and the model is told the action doesn't exist. It never names the
 other actions, so a hidden one stays hidden. The `unknown_action` signal points the
 Inspector at these steps.
+
+This holds for every Harness. The native loop and the engine record the call
+themselves. A vendor Harness, such as Claude Code or Codex, reports it the way it
+reports its other tool calls: Claude Code's tool hooks report a call to a tool that
+doesn't exist, and the Environment's MCP server sends a call to an action it doesn't
+have to the App host instead of refusing it.
 
 ## Turn a Finding into a new Agent version
 
@@ -201,20 +230,31 @@ hosted Job's **Report** tab for a recorded Job.
 
 inspector-bench measures the Inspector on failures whose cause is known. It starts
 from a healthy quoting Agent, plants one fault at a time (a hidden or vaguely
-described tool, a wrong or contradictory instruction, padded context, a broken
-Verifier, a wrong answer key, or a request missing its quantity), and keeps each
-Trial the healthy Agent passed and the faulty one failed. The Inspector passes a bench
-Task when its Finding names the planted cause, a critical step the answer key
-accepts, and words that name the fault.
+described tool, a wrong or contradictory instruction, a weaker model, padded context,
+a broken Verifier, a wrong answer key, or a request missing its quantity), and keeps
+each Trial the healthy Agent passed and the faulty one failed. A fault that breaks
+nothing the healthy Agent passed has no cases, and `bench.json` lists it under
+`ineffective`, beside any cause the faults claim that ended up with no cases. Two
+faults escalate until they break something: the model fault tries weaker gateway
+models in turn (`--weak-model` picks them), and the context fault pads the
+instructions with about 40k, 200k, then 800k tokens. The Inspector passes a bench Task
+when its Finding names the planted cause, a critical step the answer key accepts, and
+words that name the fault.
 
 ```bash
 python -m plural.inspector.faults build examples/quoting /tmp/inspector-bench
 python -m plural.inspector.faults run /tmp/inspector-bench
 ```
 
-Measured on November 18, 2026, with the Inspector on `openai/gpt-5.6` at standard
-depth and a $0.50 fork budget per case, against quote-bot's model
-`openai/gpt-5.6-luna`. The full result is
+The injector is a development tool, not a command. Each group of cases runs with a
+fork key minted for the Job its Trials came from, so `run` needs hosted access
+(`PLURAL_API_KEY` and `--project`); without it, forks are off.
+
+Measured on November 18, 2026, before the model and context faults and before the
+rule for telling `grader` from `task`, with the Inspector on `openai/gpt-5.6` at
+standard depth and a $0.50 fork budget per case, against quote-bot's model
+`openai/gpt-5.6-luna`. Under the rule, the doubled answer key is a `task` fault; this
+measurement counted it as `grader`. The full result is
 [`examples/quoting/inspector-bench.json`](https://github.com/lastlabs-ai/plural/blob/main/examples/quoting/inspector-bench.json).
 
 | Fault | Cause | Cases | Right |

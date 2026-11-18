@@ -195,18 +195,15 @@ def _host_workspace(environment: HarnessEnvironment) -> str:
 
 
 def _write_claude_settings(environment: HarnessEnvironment) -> None:
-    """A PostToolUse hook that reports each of Claude Code's own tool calls as a step."""
+    """Hooks that report each of Claude Code's own tool calls, failed ones included."""
     if not environment.raw.get("tool_command"):
         return
     hook = (
         f"PLURAL_APPS_WORKSPACE={shlex.quote(_host_workspace(environment))} "
         f"{shlex.quote(sys.executable)} -m plural.apps.daemon tool --claude-hook"
     )
-    settings = {
-        "hooks": {
-            "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": hook}]}]
-        }
-    }
+    entry = [{"matcher": "*", "hooks": [{"type": "command", "command": hook}]}]
+    settings = {"hooks": {"PostToolUse": entry, "PostToolUseFailure": entry}}
     path = Path(".plural/claude-settings.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, sort_keys=True) + "\n", encoding="utf-8")

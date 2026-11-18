@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -30,6 +31,7 @@ from plural.inspector.findings import (
     restatus,
     save_findings,
 )
+from plural.inspector.hosted import hosted_job_id
 from plural.jobs import JobResult
 from plural.project.layout import Project, ProjectError
 from plural.project.resources import Workspace
@@ -40,6 +42,7 @@ from plural.project.runs import (
     plan_run,
     run_local,
 )
+from plural.studio import Studio
 
 Depth = Literal["quick", "standard", "deep"]
 
@@ -94,15 +97,42 @@ def inspector_workspace(project: Workspace, *, model: str | None = None) -> Work
     return Workspace(Project.at(root), catalog=project.catalog)
 
 
-def with_credential(environ: Mapping[str, str]) -> dict[str, str]:
-    """The run's environment, with the user's key offered as the Inspector's credential.
+FORK_KEY_SECONDS = 3 * 3600
+"""How long an inspection's fork key lasts if the inspection never ends."""
+
+
+@contextmanager
+def fork_key(
+    studio: Studio | None, job_id: str, *, ttl_seconds: int = FORK_KEY_SECONDS
+) -> Iterator[str | None]:
+    """A gateway key for one inspection's forks of a Job, revoked on the way out.
+
+    ``job_id`` is the hosted Job, or the local Job id when it was never
+    recorded. Without hosted access there is no key, and forks are off.
+
+    Yields:
+        The key, or ``None``.
+    """
+    if studio is None:
+        yield None
+        return
+    minted = studio.jobs.inspection_key(job_id, ttl_seconds=ttl_seconds)
+    try:
+        yield str(minted["key"])
+    finally:
+        with suppress(Exception):
+            studio.jobs.end_inspection_key(job_id)
+
+
+def fork_environ(environ: Mapping[str, str], key: str | None) -> dict[str, str]:
+    """The run's environment, with this inspection's fork key as the only fork credential.
 
     Returns:
-        A copy of ``environ``.
+        A copy of ``environ``; any fork credential already in it is dropped.
     """
-    copy = dict(environ)
-    if copy.get("PLURAL_API_KEY"):
-        copy.setdefault(CREDENTIAL, copy["PLURAL_API_KEY"])
+    copy = {name: value for name, value in environ.items() if name != CREDENTIAL}
+    if key:
+        copy[CREDENTIAL] = key
     return copy
 
 
@@ -212,7 +242,6 @@ def run_inspector(
     """
     if not trials:
         raise ProjectError("There are no failed dev Trials to inspect.")
-    environ = with_credential(environ)
     space = inspector_workspace(project, model=model)
     root = space.project.root
     each = budget_usd / len(trials)
@@ -296,25 +325,31 @@ def inspect_job(
     trial_ids: Sequence[str] = (),
     concurrency: int = 4,
     progress: Any = None,
+    studio: Studio | None = None,
 ) -> InspectionRecord:
     """Run the Inspector on a local Job's failed dev Trials and save its Findings.
+
+    With ``studio``, forks call models with a key minted for this inspection
+    alone and revoked when it ends; without it, forks are off.
 
     Returns:
         The inspection: a Finding for each cause of each failed Trial it concluded on.
     """
     evidence = JobEvidence(project.project.root, job_id)
     trials = failed_trials(evidence, trial_ids)
-    run = run_inspector(
-        project,
-        trials,
-        mode="inspect",
-        depth=depth,
-        budget_usd=budget_usd,
-        environ=environ,
-        model=model,
-        concurrency=concurrency,
-        progress=progress,
-    )
+    reference = hosted_job_id(project, job_id) or job_id
+    with fork_key(studio if depth != "quick" else None, reference) as key:
+        run = run_inspector(
+            project,
+            trials,
+            mode="inspect",
+            depth=depth,
+            budget_usd=budget_usd,
+            environ=fork_environ(environ, key),
+            model=model,
+            concurrency=concurrency,
+            progress=progress,
+        )
     drafts: list[dict[str, Any]] = []
     concluded: set[str] = set()
     spent = sum(float(item.metrics.get("cost_usd") or 0.0) for item in run.result.trials)
@@ -372,7 +407,7 @@ def ask_trial(
         mode="ask",
         depth="quick",
         budget_usd=0.0,
-        environ=environ,
+        environ=fork_environ(environ, None),
         model=model,
         question=question,
         concurrency=1,
@@ -405,18 +440,20 @@ def findings_for(project: Workspace, job_id: str) -> InspectionRecord | None:
 
 __all__ = [
     "DEFAULT_BUDGET_USD",
+    "FORK_KEY_SECONDS",
     "INSPECTOR_FOLDER",
     "Depth",
     "InspectorRun",
     "ask_trial",
     "findings_for",
     "final_states",
+    "fork_environ",
+    "fork_key",
     "inspect_job",
     "inspector_workspace",
     "instructions_for",
     "run_inspector",
     "task_name",
-    "with_credential",
     "write_benchmark",
     "write_task",
 ]

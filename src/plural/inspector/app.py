@@ -19,6 +19,7 @@ from pydantic import Field
 
 from plural.agents.tool_overrides import ToolOverride
 from plural.apps.base import App
+from plural.apps.definition import SecretReference
 from plural.environments.action_registry import action
 from plural.environments.types import State, initial
 from plural.inspector.causes import load_causes
@@ -29,8 +30,12 @@ from plural.inspector.signals import load_project_signals, run_signals
 PATTERNS_FILE = "patterns.yaml"
 """In a project's ``inspector`` folder: known failure patterns, written by people."""
 
-CREDENTIAL = "INSPECTOR_API_KEY"
-"""The Plural key forks run with. It reaches only the App host: never the Inspector's model."""
+CREDENTIAL = "INSPECTOR_FORK_KEY"
+"""The key forks call models with, minted for one inspection of one Job.
+
+It calls the gateway and nothing else, is revoked when the inspection ends, and
+reaches only the App host: never the Inspector's model, and never the user's own key.
+"""
 
 ATTEMPTS = {"quick": 0, "standard": 4, "deep": 6}
 """Forks per side for each depth. A quick inspection runs no forks."""
@@ -64,7 +69,14 @@ class InspectorState(State):
 class InspectorApp(App[InspectorState]):
     """A Job's evidence, read-only, plus forks within a budget and record_finding."""
 
-    credentials = (CREDENTIAL,)
+    credentials = (
+        SecretReference(
+            name=CREDENTIAL,
+            required=False,
+            scopes=("gateway",),
+            description="This inspection's own key, for forks. Without it, forks are off.",
+        ),
+    )
     restorable = False
 
     def reset(self, initial_state: Any) -> str:
@@ -115,7 +127,7 @@ class InspectorApp(App[InspectorState]):
             "signals": [item.as_dict() for item in run_signals(trial)],
             "known_patterns": _patterns(self._root),
             "fork_budget_usd": round(self.state.budget_usd - self.state.spent_usd, 4),
-            "forks_allowed": ATTEMPTS[self.state.depth] > 0,
+            "forks_allowed": ATTEMPTS[self.state.depth] > 0 and bool(os.environ.get(CREDENTIAL)),
         }
 
     @_tool()
@@ -173,6 +185,15 @@ class InspectorApp(App[InspectorState]):
     def verifier_code(self, name: str) -> dict[str, Any]:
         """A Verifier's code in the project, and whether it is the code the Trial ran."""
         return self._trial().verifier_code(name)
+
+    @_tool(timeout_seconds=600)
+    def reference_check(self) -> dict[str, Any]:
+        """Play the Task's reference solution, which never sees the answer key, through the
+        same Environment and Verifiers, with no model. If it passes, the grading works and
+        the cause is the Agent's. If it fails too, the cause is grader or task: compare the
+        request with the answer key to tell which.
+        """
+        return self._trial().reference_check()
 
     @_tool()
     def integrity(self) -> dict[str, Any]:
@@ -267,6 +288,11 @@ class InspectorApp(App[InspectorState]):
         attempts = ATTEMPTS[self.state.depth]
         if attempts == 0:
             raise ValueError("A quick inspection runs no forks. Record what you inferred.")
+        if not os.environ.get(CREDENTIAL):
+            raise ValueError(
+                "Forks are off for this inspection: it has no key of its own to run them "
+                "with. Record what you inferred."
+            )
         remedy = Remedy(
             instructions=instructions,
             tool_overrides={

@@ -303,6 +303,6 @@ def test_quote_checks_gates_decide_which_trials_pass(
 @pytest.mark.slow
 def test_the_whole_benchmark_holds(full_results: dict[str, dict[str, Any]]) -> None:
     trials = full_results["reference"]
-    assert len(trials) == 60
+    assert len(trials) == 80
     assert {name: trial["score"] for name, trial in trials.items() if trial["score"] != 1.0} == {}
-    assert _assert_weaknesses(full_results) == 40
+    assert _assert_weaknesses(full_results) == 54

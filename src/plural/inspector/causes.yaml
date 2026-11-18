@@ -34,12 +34,13 @@
 - name: grader
   agent: false
   description: >-
-    The Verifier or the Task's answer key marked acceptable work as wrong.
+    The answer key is right, but the Verifier's code judges a correct answer
+    wrong, or a wrong one right.
 - name: task
   agent: false
   description: >-
-    The Task's request was ambiguous, impossible, or misleading, so no Agent could
-    have known what counted.
+    The Task's answer key (expected) is wrong, or its request and files leave out
+    something needed to reach it, so no Agent could have known what counted.
 - name: integrity
   agent: false
   description: >-

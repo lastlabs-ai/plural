@@ -57,9 +57,9 @@ def test_a_plain_benchmark_job_runs_only_dev_tasks(split_project: Path) -> None:
     agent = Agent(name="a", model="openai/gpt-5.6-luna")
     plain = Job(benchmark, agents=[agent])
     assert {task.task_id for task in plain.spec.tasks}.isdisjoint(benchmark.heldout)
-    assert len(plain.plan.trials) == 42
+    assert len(plain.plan.trials) == 62
     peek = Job(benchmark, agents=[agent], heldout=True)
-    assert len(peek.plan.trials) == 60
+    assert len(peek.plan.trials) == 80
     assert peek.spec.job_id != plain.spec.job_id
     # Diagnosis never sees a held-out Task, and the refusal names the confirm command.
     with pytest.raises(ValueError, match="plural run --benchmark BENCHMARK --heldout"):
@@ -68,7 +68,7 @@ def test_a_plain_benchmark_job_runs_only_dev_tasks(split_project: Path) -> None:
     with pytest.raises(ValueError, match="A learn Job cannot run held-out Tasks"):
         Job(benchmark, agents=[agent], heldout=True, purpose="learn")
     learn = Job(benchmark, agents=[agent], purpose="learn")
-    assert len(learn.plan.trials) == 42
+    assert len(learn.plan.trials) == 62
     assert learn.spec.job_id != plain.spec.job_id
     # A dev-only run hashes as runs did before held-out Tasks existed.
     assert "include_heldout" not in plain.spec.model_dump(mode="json")["source"]
@@ -99,12 +99,12 @@ def test_a_heldout_run_executes_every_task_and_counts_its_own_job(
     with pytest.raises(_Ran):
         run_local(space, plan_run(space, request, environ=environ), environ=environ)
     (spec,) = executed
-    assert len(spec.tasks) == 60
+    assert len(spec.tasks) == 80
     from plural.jobs import JobSpec
     from plural.project.runs import _rebind_checks
 
     saved = _rebind_checks(space, JobSpec.model_validate_json(spec.model_dump_json()))
-    assert saved.source.include_heldout and len(saved.tasks) == 60
+    assert saved.source.include_heldout and len(saved.tasks) == 80
     (peek,) = peeks(space.project.state_dir, "quoting")
     assert peek["job_id"] == spec.job_id
     assert len(peek["tasks"]) == 18

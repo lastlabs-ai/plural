@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
@@ -385,7 +386,7 @@ def test_revise_applies_a_confirmed_finding_as_a_new_version(
     with pytest.raises(ProjectError, match="not confirmed"):
         revise_agent(space, "scripted", "F1")
     _save(job, cause="grader")
-    with pytest.raises(ProjectError, match="Verifier or the answer key"):
+    with pytest.raises(ProjectError, match="Verifier's code"):
         revise_agent(space, "scripted", "F1")
     _save(job)
     revision = revise_agent(space, "scripted", "F1")
@@ -439,18 +440,18 @@ def test_the_report_computes_every_number_with_its_trials(failed_job: dict[str, 
     report = build_report(space, failed_job["job_id"], compare=failed_job["job_id"], findings=True)
     facts = {item.fact_id: item for item in report.facts}
     row = report.performance[0]
-    assert row["pass_rate"] is None, "Wordle's Verifier has no gates, so no Trial is judged"
-    assert facts[row["success_rate"]].display == "50% (1 of 2)"
-    assert set(facts[row["success_rate"]].trial_ids) == set(failed_job["trials"].values())
-    assert report.failures and report.failures["findings"][0]["cause"] == "instructions"
+    assert row.pass_rate is None, "Wordle's Verifier has no gates, so no Trial is judged"
+    assert facts[row.success_rate or ""].display == "50% (1 of 2)"
+    assert set(facts[row.success_rate or ""].trial_ids) == set(failed_job["trials"].values())
+    assert report.failures and report.failures.findings[0].cause == "instructions"
     assert report.changes is not None
-    dev = report.changes["splits"]["dev"]
-    assert "pass_rate" not in dev and dev["success_rate"]["verdict"] == "not_enough_data"
+    dev = report.changes.splits["dev"]
+    assert "pass_rate" not in dev and dev["success_rate"].verdict == "not_enough_data"
     assert all(item.trial_ids for item in report.facts if item.label.startswith("scripted"))
     text = render_markdown(report)
     for heading in ("performs", "Why it fails", "What changed", "trusted", "Facts"):
         assert heading in text
-    summary = f"The Agent passed {{{row['success_rate']}}}."
+    summary = f"The Agent passed {{{row.success_rate}}}."
     assert validate_summary(summary, report.facts) == []
     assert render_summary(summary, report.facts) == "The Agent passed 50% (1 of 2)."
     assert validate_summary("It passed 1 of 2.", report.facts)
@@ -469,7 +470,7 @@ def test_a_summary_that_writes_its_own_numbers_is_rejected(
     environ = {"PLURAL_GATEWAY_URL": "http://gateway", "PLURAL_API_KEY": "key"}
     rejected = module.write_summary(built, environ)
     assert rejected.summary is None and "number itself" in rejected.summary_problems[0]
-    first = built.performance[0]["success_rate"]
+    first = built.performance[0].success_rate
     monkeypatch.setattr(module, "_complete", lambda *_args: f"Half passed: {{{first}}}.")
     assert module.write_summary(built, environ).summary == "Half passed: 50% (1 of 2)."
 
@@ -509,10 +510,11 @@ def test_every_fault_applies_to_the_quoting_example(tmp_path: Path) -> None:
     for index, fault in enumerate(QUOTING_FAULTS):
         causes.add(fault.cause)
         if fault.agent is not None:
-            variant = json.loads(json.dumps(healthy))
-            fault.agent(variant)
-            assert variant != healthy, fault.name
-            Agent.model_validate(variant)
+            for level in fault.levels:
+                variant = json.loads(json.dumps(healthy))
+                fault.agent(variant, level)
+                assert variant != healthy, fault.name
+                Agent.model_validate(variant)
         else:
             assert fault.project is not None
             copy = tmp_path / str(index)
@@ -521,7 +523,7 @@ def test_every_fault_applies_to_the_quoting_example(tmp_path: Path) -> None:
             fault.project(copy)
             after = {p: p.read_bytes() for p in copy.rglob("*") if p.is_file()}
             assert before != after, fault.name
-    assert causes >= {"tools", "instructions", "context", "grader", "task"}
+    assert causes >= {"tools", "instructions", "context", "model", "grader", "task"}
 
 
 def test_uploads_translate_local_trial_ids() -> None:
@@ -533,3 +535,119 @@ def test_uploads_translate_local_trial_ids() -> None:
         "facts": [{"trial_ids": ["hosted-a", "trl_b"]}],
         "n": 2,
     }
+
+
+class _InspectorModel(BaseHTTPRequestHandler):
+    """Calls overview once, then stops; records every request it was sent."""
+
+    seen: list[dict[str, Any]] = []
+
+    def do_POST(self) -> None:
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        type(self).seen.append(body)
+        message: dict[str, Any] = {"role": "assistant", "content": "Done."}
+        if not any(item["role"] == "tool" for item in body["messages"]):
+            message = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_overview",
+                        "type": "function",
+                        "function": {"name": "overview", "arguments": "{}"},
+                    }
+                ],
+            }
+        payload = json.dumps(
+            {
+                "choices": [{"message": message}],
+                "usage": {"prompt_tokens": 9, "completion_tokens": 3},
+            }
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+class _Jobs:
+    def __init__(self, key: str) -> None:
+        self.key = key
+        self.calls: list[tuple[str, str]] = []
+
+    def inspection_key(self, job_id: str, *, ttl_seconds: int) -> dict[str, Any]:
+        self.calls.append(("mint", job_id))
+        return {"key": self.key, "expires_at": "2099-01-01T00:00:00Z"}
+
+    def end_inspection_key(self, job_id: str) -> None:
+        self.calls.append(("end", job_id))
+
+
+def test_the_fork_key_reaches_the_app_host_alone(
+    failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Job-scoped key is minted for this Job, reaches the Inspector App, and is never
+    written down, shown to the model, or kept past the inspection."""
+    import threading
+    from http.server import ThreadingHTTPServer
+    from types import SimpleNamespace
+
+    import plural.inspector.run as inspector_run
+    from plural.inspector.app import CREDENTIAL
+    from plural.project import Project, Workspace
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _InspectorModel)
+    _InspectorModel.seen = []
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    original = inspector_run.inspector_workspace
+
+    def scripted(project: Any, *, model: str | None = None) -> Any:
+        space = original(project, model="test/inspector")
+        path = space.project.root / "agents" / "inspector" / "agent.yaml"
+        manifest = yaml.safe_load(path.read_text("utf-8"))
+        manifest["endpoint"] = f"http://127.0.0.1:{server.server_address[1]}/v1"
+        manifest["endpoint_key"] = "INSPECTOR_MODEL_KEY"
+        path.write_text(yaml.safe_dump(manifest, sort_keys=False), "utf-8")
+        return space
+
+    monkeypatch.setattr(inspector_run, "inspector_workspace", scripted)
+    sentinel = "pk_live_fork_key_sentinel_7f3a9c"
+    jobs = _Jobs(sentinel)
+    project = failed_job["project"]
+    environ = {**failed_job["env"], "INSPECTOR_MODEL_KEY": "unused", CREDENTIAL: "stale-key"}
+    try:
+        record = inspector_run.inspect_job(
+            Workspace(Project.at(project)),
+            failed_job["job_id"],
+            depth="standard",
+            environ=environ,
+            studio=SimpleNamespace(jobs=jobs),  # type: ignore[arg-type]
+            trial_ids=[failed_job["trials"]["nymph"]],
+        )
+    finally:
+        server.shutdown()
+    # Minted for this Job alone, and ended when the inspection ended.
+    assert jobs.calls == [("mint", failed_job["job_id"]), ("end", failed_job["job_id"])]
+    # The Inspector App had it: its overview offered forks.
+    results = [
+        json.loads(message["content"])
+        for body in _InspectorModel.seen
+        for message in body["messages"]
+        if message["role"] == "tool"
+    ]
+    assert results and results[0]["forks_allowed"] is True
+    # The model never saw it, nor the stale key it replaced.
+    sent = json.dumps(_InspectorModel.seen)
+    assert sentinel not in sent and "stale-key" not in sent
+    # Nothing written down holds it: Tasks, State, traces, Findings, or the record.
+    assert sentinel not in record.model_dump_json()
+    leaked = [
+        path
+        for path in project.rglob("*")
+        if path.is_file() and sentinel.encode() in path.read_bytes()
+    ]
+    assert leaked == []

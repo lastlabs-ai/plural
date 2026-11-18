@@ -3073,6 +3073,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --seat              <str>               For a Trial several Agents share: the seat to replace.   │
 │ --change            <str>               Change one thing at the fork point: a diagnostic fork.   │
 │ --payload           <str>               The change's JSON payload.                               │
+│ --gate              <str>               Judge forks and controls on this gate, not the whole     │
+│                                         Trial. Repeat for several.                               │
 │ --record                                Record the fork Job in the hosted project as it runs.    │
 │ --json                                  Print machine-readable JSON.                             │
 │ --help                                  Show this message and exit.                              │

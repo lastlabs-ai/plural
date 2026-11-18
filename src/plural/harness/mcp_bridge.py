@@ -13,6 +13,8 @@ from typing import Any
 # This module runs as a standalone stdio server. Keep in sync with
 # plural.apps.host.STEP_PROTOCOL.
 STEP_PROTOCOL = "plural-step-v1"
+# Keep in sync with plural.harness.native_runner.MAX_UNKNOWN_NAME.
+MAX_UNKNOWN_NAME = 128
 
 
 def main() -> None:
@@ -95,6 +97,10 @@ def _call_action(
         if isinstance(item, dict)
     }
     action = actions.get(name)
+    reset = environment.get("reset_command") or []
+    if action is None and isinstance(reset, list) and reset and 0 < len(name) <= MAX_UNKNOWN_NAME:
+        # The App host records the call as an unknown_action step, and answers it.
+        action = {"command": [*reset[:-1], "unknown", name]}
     if action is None:
         raise ValueError(f"unknown Environment action {name!r}")
     command = action.get("command") or []

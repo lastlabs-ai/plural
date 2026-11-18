@@ -7,6 +7,7 @@ concluded, and turn a confirmed Finding into a new Agent version.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any, Literal
 
 import httpx
@@ -24,6 +25,7 @@ from plural.inspector.revise import revise_agent
 from plural.inspector.run import DEFAULT_BUDGET_USD, ask_trial, inspect_job
 from plural.project import ProjectError, Workspace
 from plural.project.runs import finished_local_job
+from plural.studio import Studio
 
 DEPTH_HELP = "quick: no forks. standard: a fork or two per Agent cause. deep: fork every cause."
 
@@ -55,6 +57,12 @@ def job_inspect(
     space = current_workspace()
     finished_local_job(space, job_id)
     environ = _run_environ(session())
+    studio = _fork_studio(space) if depth != "quick" else None
+    if depth != "quick" and studio is None:
+        note(
+            "Forks are off: they run with a key minted for this inspection alone, which "
+            "needs you signed in with a project selected (plural auth scope --project)."
+        )
     record = inspect_job(
         space,
         job_id,
@@ -65,6 +73,7 @@ def job_inspect(
         trial_ids=trial,
         concurrency=concurrency,
         progress=_progress(as_json),
+        studio=studio,
     )
     hosted = _upload(space, lambda studio: upload_inspection(space, studio, record), job_id)
     payload = _inspection_view(record) | {"hosted_job_id": hosted}
@@ -179,6 +188,18 @@ def _depth(value: str) -> Literal["quick", "standard", "deep"]:
     if value == "deep":
         return "deep"
     return "standard"
+
+
+def _fork_studio(space: Workspace) -> Studio | None:
+    """Hosted access to mint an inspection's fork key, or ``None`` when there is none."""
+    current = session()
+    if current.token is None and not current.api_key:
+        return None
+    if space.project.read_binding() is not None:
+        with suppress(PluralError, ProjectError):
+            return project_studio(space, current)[0]
+        return None
+    return current.studio() if current.project else None
 
 
 def _upload(space: Workspace, send: Any, job_id: str) -> str | None:

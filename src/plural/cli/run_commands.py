@@ -785,6 +785,11 @@ def trial_fork(
         None, "--change", help="Change one thing at the fork point: a diagnostic fork."
     ),
     payload: str | None = typer.Option(None, "--payload", help="The change's JSON payload."),
+    gate: list[str] = typer.Option(
+        [],
+        "--gate",
+        help="Judge forks and controls on this gate, not the whole Trial. Repeat for several.",
+    ),
     record: bool = typer.Option(
         False, "--record", help="Record the fork Job in the hosted project as it runs."
     ),
@@ -816,6 +821,13 @@ def trial_fork(
         raise ProjectError(f"--payload is not JSON: {exc}") from None
     if payload is not None and change is None:
         raise ProjectError("--payload goes with --change.")
+    if gate and source.result is not None:
+        unknown = sorted(set(gate) - set(source.result.gates))
+        if unknown:
+            known = ", ".join(sorted(source.result.gates)) or "none"
+            raise ProjectError(
+                f"--gate: Trial {trial_id} has no gate {', '.join(unknown)}. Its gates: {known}."
+            )
     request = ForkRequest(
         trial_id=trial_id,
         step=step,
@@ -841,14 +853,15 @@ def trial_fork(
             credential_source=_stored_credentials(as_json),
             source=source,
         )
-    outcome = fork_results(spec, result, source.passed)
-    view = {"job_id": job_id, "of_trial_id": trial_id, **outcome}
+    outcome = fork_results(spec, result, source.passed, gates=tuple(gate))
+    view = {"job_id": job_id, "of_trial_id": trial_id, "gates": list(gate), **outcome}
 
     def text() -> None:
         for warning in outcome["warnings"]:
             typer.echo(f"! {warning}", err=True)
         kind = "Diagnostic fork" if outcome["diagnostic"] else "Fork"
-        typer.echo(f"{kind} {job_id} of Trial {trial_id} after step {outcome['step']}:")
+        judged = f", judged on {', '.join(gate)}" if gate else ""
+        typer.echo(f"{kind} {job_id} of Trial {trial_id} after step {outcome['step']}{judged}:")
         for name, summary in outcome["summaries"].items():
             typer.echo(f"  {name}: {summary}")
         reproduced = outcome["controls_reproduced"]

@@ -44,6 +44,16 @@ A Trial passes when every gate on its Verifiers' metrics passes. Without gates, 
 score of 1 counts as a pass. Numbers in the summary are computed from the Trials;
 nothing in them is written by a model.
 
+To test a fix for one of several failures, judge both sides on the gates it should
+fix, so the Trial still failing another gate doesn't hide its effect:
+
+```bash
+plural trial fork trl_5adfefe943e4 --step 4 --agent quote-bot-v2 --gate price_correct
+```
+
+Repeat `--gate` for several. A side's Trial passes when each named gate passed. A
+name that isn't one of the original Trial's gates is refused before anything runs.
+
 Use `--checkpoint NAME` instead of `--step` to fork from a saved checkpoint, and
 `--json` for the full result. `--record` records the fork Job in your hosted
 project, where each fork Trial shows where it started and the original Trial lists
