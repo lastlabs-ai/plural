@@ -151,6 +151,8 @@ async def _tracked_run(
         environ=environ or {},
         gateway_keys=tracker.gateway_key,
         model_identities=model_identities,
+        # A stand-in key must not be sent to the real gateway.
+        key_check=lambda _gateway, _key: None,
     ).run()
     assert result.status == "succeeded"
     return store, tracker.close()
