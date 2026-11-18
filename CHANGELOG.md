@@ -7,10 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-11-17
+
+### Added
+
+- Declared Metrics. A Verifier's `check` reports metric values at the end of an episode, and its `measure` hook reports a running metric after each step. A metric has a kind, a direction, an optional unit, and a role: a gate must pass, an objective is ranked on, and a guardrail is reported only. A metric is a measurement, never a reward, and it never enters the reward ledger. `Trial.score` is unchanged.
+- Trust tiers. Every Trial is `verified`, `standard`, or `unverified` from how it ran: isolation, network enforcement, a pinned image, provider conformance, and a signed host report. `plural task validate` checks a Task can be solved and that its files don't leak the answer.
+- Integrity findings. Deterministic detectors run on every recorded Trial and never change a score. `suspicious_success` stays quiet when the Agent changed the workspace, so a pass in an Environment with no Apps is not flagged for leaving the Apps untouched.
+- Checkpoints and forks. `plural trial checkpoint` names the moment after one step, and `plural trial fork` continues from it: a control reruns the original Agent, and a candidate runs a changed Agent or one diagnostic change. A fork of a hosted Trial rebuilds the checkpoint from the hosted artifacts, so it works from any folder linked to the project. A Task can start `from_checkpoint`.
+- Bare Environments. An Environment with no Apps gets an App host on every Runtime, including Daytona, so its Trials keep a timeline and workspace snapshots and can reach `verified`. The native loop offers `read_file`, `write_file`, `list_files`, and `run` there, and each call is recorded where it happened, so a fork resumes after it.
+- `oracle_tool` answers from a path in an App's State, in a diagnostic fork only.
+- One workspace for every Verifier. A sandboxed Verifier and a judge Verifier read the same `episode.workspace` as the others. Files restored into a seat's workspace are owned by that seat's user, and symbolic links are restored as links.
+- `scripts/harness_smoke.sh` runs every built-in Harness on a Task only writing a file can pass, through the real gateway, and fails when a Harness reports more model calls or output tokens than the gateway saw.
+- Hermes calls the gateway. It runs as a custom provider through Plural's bridge, with its own `HERMES_HOME` and without a provider key from the machine, and its usage report is kept in the Trial's `trajectory.jsonl`.
+- Examples: `quoting`, `shopkeeper`, and `bare-files`.
+
 ### Fixed
 
 - `plural job record` sends each attempt's own run time, so the hosted time to solve is how long the Trial ran rather than how long the upload took.
 - `plural job record` matches a Job's results to its Agent when the Job ran under an earlier SDK version whose Agent hash differs.
+- An interrupted run leaves no App host behind, on cancel, on Ctrl-C, and on a crash.
+- Rerunning a Job that starts from a checkpoint works, and a diagnostic fork plans only the attempts each named Agent runs.
 
 ## [0.25.0] - 2026-10-29
 
