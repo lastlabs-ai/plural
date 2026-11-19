@@ -337,6 +337,8 @@ def push(
             if not force:
                 problems.extend(_diverged(item, parent, revisions, pins))
         problems.extend(_package_problems(resource, workspace))
+    if current:
+        problems.extend(_used_heldout(workspace, resources, to_push))
     if problems:
         hint = (
             f"\nPush the dependencies too with `plural {ref.info.cli} push {ref.name} --with-deps`."
@@ -361,6 +363,29 @@ def push(
         versioned=versioned,
     )
     return result
+
+
+def _used_heldout(
+    workspace: Workspace, resources: Mapping[ResourceRef, Any], to_push: Sequence[ResourceRef]
+) -> list[str]:
+    """A new Benchmark revision may hold out only Tasks no local Job has run as dev Tasks.
+
+    Returns:
+        One problem per held-out Task a local Job already ran.
+    """
+    from plural.heldout import local_uses
+
+    problems = []
+    for item in to_push:
+        if item.kind != BENCHMARK.name:
+            continue
+        heldout = tuple(getattr(resources[item].value, "heldout", ()) or ())
+        for name, job in sorted(local_uses(workspace.project.state_dir, heldout).items()):
+            problems.append(
+                f"{item} holds out {name}, which local Job {job} already ran; a held-out Task "
+                "must be one nothing has touched. Keep it as a dev Task and hold out new ones"
+            )
+    return problems
 
 
 def release(

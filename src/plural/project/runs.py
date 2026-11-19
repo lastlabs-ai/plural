@@ -265,6 +265,8 @@ def plan_run(
             + (f"Benchmark {source.name} has none." if is_benchmark else "this is a Task.")
             + "\nNext: list some of the Benchmark's Tasks under heldout: in benchmark.yaml."
         )
+    if is_benchmark and loaded.value.heldout:
+        refuse_used_heldout(workspace, source.name, loaded.value.heldout)
     job = Job(
         loaded.value,
         agents=[agent],
@@ -795,6 +797,24 @@ def _submit(
         evaluation_track=evaluation_track,
     )
     return ClientJob(record=record, agents={binding.content_hash: hosted})
+
+
+def refuse_used_heldout(workspace: Workspace, benchmark: str, heldout: Sequence[str]) -> None:
+    """Refuse held-out Tasks this project's local Jobs have already run as dev Tasks.
+
+    Raises:
+        ProjectError: Naming each used Task and a Job that used it.
+    """
+    from plural.heldout import local_uses
+
+    used = local_uses(workspace.project.state_dir, heldout)
+    if used:
+        lines = "\n".join(f"  {name}: ran in {job}" for name, job in sorted(used.items()))
+        raise ProjectError(
+            f"Benchmark {benchmark} holds out Tasks this project has already run, and a "
+            f"held-out Task must be one nothing has touched:\n{lines}\n"
+            "Next: keep them as dev Tasks, and hold out new ones."
+        )
 
 
 def local_jobs(workspace: Workspace) -> list[dict[str, Any]]:

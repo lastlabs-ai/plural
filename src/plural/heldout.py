@@ -19,7 +19,10 @@ import json
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from plural.jobs import TrialResult
 
 PEEKS_FILE = "heldout.jsonl"
 
@@ -62,8 +65,27 @@ def record_peek(
     return record
 
 
+def revealed_nothing(trials: Sequence[TrialResult]) -> bool | None:
+    """Whether a held-out run showed nothing: every Trial errored before a verdict.
+
+    Such a run still counts as a peek.
+
+    Returns:
+        ``True`` or ``False``, or ``None`` when there are no Trials.
+    """
+    if not trials:
+        return None
+    return all(
+        item.status != "succeeded" and item.score is None and item.stop_reason == "error"
+        for item in trials
+    )
+
+
 def peeks(state_dir: Path, benchmark: str | None = None) -> list[dict[str, Any]]:
     """Every counted peek, optionally for one Benchmark.
+
+    Each says whether its run ``revealed_nothing``, read from the Job's local
+    result; ``None`` while the Job has no result here.
 
     Returns:
         The records, oldest first.
@@ -74,7 +96,77 @@ def peeks(state_dir: Path, benchmark: str | None = None) -> list[dict[str, Any]]
     records = [
         json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
-    return [item for item in records if benchmark is None or item.get("benchmark") == benchmark]
+    return [
+        {**item, "revealed_nothing": _revealed_nothing(state_dir, item)}
+        for item in records
+        if benchmark is None or item.get("benchmark") == benchmark
+    ]
 
 
-__all__ = ["PEEKS_FILE", "peeks", "peeks_path", "record_peek"]
+def local_uses(state_dir: Path, names: Sequence[str]) -> dict[str, str]:
+    """Which of these Tasks a local Job has already run, other than as held out.
+
+    A held-out Task must be one nothing has touched. A local Job that ran it as
+    a dev Task, on its own, or as a fork has used it; a ``--heldout`` run that
+    held it out has only peeked. Read from each Job's ``config.json``.
+
+    Returns:
+        The first Job found to use each used Task, by Task name.
+    """
+    wanted = set(names)
+    used: dict[str, str] = {}
+    root = state_dir / "jobs"
+    if not wanted or not root.is_dir():
+        return used
+    for directory in sorted(root.iterdir()):
+        config = directory / "config.json"
+        if not config.is_file():
+            continue
+        try:
+            source = json.loads(config.read_text("utf-8")).get("source") or {}
+            ran = _ran(directory)
+        except ValueError:
+            continue
+        held = set()
+        if source.get("kind") == "benchmark" and source.get("include_heldout"):
+            held = set((source.get("benchmark") or {}).get("heldout") or ())
+        for name in ran - held:
+            if name in wanted:
+                used.setdefault(name, directory.name)
+    return used
+
+
+def _ran(directory: Path) -> set[str]:
+    """The Tasks a local Job ran Trials of, from its Trials' receipts.
+
+    Returns:
+        Their names.
+    """
+    result = directory / "result.json"
+    if result.is_file():
+        trials = json.loads(result.read_text("utf-8")).get("trials") or ()
+    else:
+        trials = [
+            json.loads(path.read_text("utf-8")) for path in directory.glob("trials/*/result.json")
+        ]
+    return {
+        str(pin["name"])
+        for item in trials
+        if isinstance(pin := (item.get("receipt") or {}).get("task_pin"), dict) and pin.get("name")
+    }
+
+
+def _revealed_nothing(state_dir: Path, record: dict[str, Any]) -> bool | None:
+    from plural.jobs import JobResult
+
+    result = state_dir / "jobs" / str(record.get("job_id")) / "result.json"
+    if not result.is_file():
+        return None
+    try:
+        trials = JobResult.model_validate_json(result.read_text("utf-8")).trials
+    except ValueError:
+        return None
+    return revealed_nothing(trials)
+
+
+__all__ = ["PEEKS_FILE", "local_uses", "peeks", "peeks_path", "record_peek", "revealed_nothing"]

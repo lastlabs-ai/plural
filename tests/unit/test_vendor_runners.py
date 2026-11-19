@@ -489,8 +489,10 @@ def test_claude_code_reports_a_call_to_a_missing_tool_as_unknown_action(
 
     environment = HarnessEnvironment({"tool_command": ["tool"], "workspace": str(tmp_path)})
     vendor_adapter._write_claude_settings(environment)
-    hooks = json.loads((tmp_path / ".plural/claude-settings.json").read_text())["hooks"]
+    settings = json.loads((tmp_path / ".plural/claude-settings.json").read_text())
+    hooks = settings["hooks"]
     assert hooks["PostToolUse"] == hooks["PostToolUseFailure"]
+    assert settings["permissions"]["allow"] == ["mcp__plural-environment"]
 
     calls: list[tuple[str, dict[str, Any]]] = []
     monkeypatch.setattr(daemon, "call", lambda op, **fields: calls.append((op, fields)) or {})
@@ -510,8 +512,85 @@ def test_claude_code_reports_a_call_to_a_missing_tool_as_unknown_action(
     for payload in (missing, environment_call, own):
         monkeypatch.setattr(daemon.sys, "stdin", io.StringIO(json.dumps(payload)))
         daemon._report_tool(tmp_path, ["--claude-hook"], None)
-    assert [op for op, _ in calls] == ["step", "tool"]
-    step = calls[0][1]
-    assert step["action"] == "lookup_prices" and step["unknown"] is True
-    assert step["arguments"] == {"grade": "A36"}
-    assert calls[1][1]["name"] == "Bash"
+    assert [(op, fields["name"]) for op, fields in calls] == [("tool", "Bash")]
+
+    read = vendor_adapter.ClaudeUnknownTools().event
+    use = {"type": "tool_use", "id": "t1", "name": "lookup_prices", "input": {"grade": "A36"}}
+    known = {"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "ls"}}
+    assert read({"type": "assistant", "message": {"content": [use, known]}}) == []
+    results = [
+        {"type": "tool_result", "tool_use_id": "t2", "content": "ok"},
+        {
+            "type": "tool_result",
+            "tool_use_id": "t1",
+            "is_error": True,
+            "content": [{"type": "text", "text": missing["error"]}],
+        },
+    ]
+    assert read({"type": "user", "message": {"content": results}}) == [
+        ("step", {"action": "lookup_prices", "arguments": {"grade": "A36"}, "unknown": True})
+    ]
+
+
+def test_claude_codes_answer_is_its_last_stream_result() -> None:
+    stream = "\n".join(
+        json.dumps(event)
+        for event in (
+            {"type": "system", "subtype": "init"},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "hm"}]}},
+            {"type": "result", "subtype": "success", "result": "Quoted."},
+        )
+    )
+    assert vendor_adapter._response("claude-code", stream) == "Quoted."
+    assert vendor_adapter._response("claude-code", json.dumps({"result": "Old."})) == "Old."
+
+
+def test_the_environment_bridge_starts_where_no_bare_python_is_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(vendor_adapter.shutil, "which", lambda _name: None)
+    vendor_adapter._write_environment({"workspace": str(tmp_path)})
+    config = json.loads((tmp_path / ".plural/mcp.json").read_text())
+    server = config["mcpServers"]["plural-environment"]
+    assert server["command"] == vendor_adapter.sys.executable
+
+
+def test_the_environment_bridge_finds_the_local_runtimes_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PLURAL_SANDBOX_ROOT", str(tmp_path))
+    environment = {"workspace": "/workspace/environment"}
+    assert mcp_bridge._workspace(environment) == str(tmp_path / "workspace/environment")
+    inside = {"workspace": str(tmp_path / "workspace/environment")}
+    assert mcp_bridge._workspace(inside) == str(tmp_path / "workspace/environment")
+    monkeypatch.delenv("PLURAL_SANDBOX_ROOT")
+    assert mcp_bridge._workspace(environment) == "/workspace/environment"
+
+
+def test_codex_is_given_the_environments_mcp_server(tmp_path: Path) -> None:
+    config = tmp_path / "mcp.json"
+    config.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "plural-environment": {
+                        "command": "/venv/bin/python",
+                        "args": ["/p/mcp_bridge.py"],
+                        "env": {"PLURAL_ENVIRONMENT_FILE": "/w/environment.json"},
+                    }
+                }
+            }
+        )
+    )
+    command = vendor_adapter._command("codex", "openai/gpt-5.6-luna", "go", {}, config)
+    overrides = [command[i + 1] for i, item in enumerate(command) if item == "-c"]
+    assert 'mcp_servers.plural-environment.command="/venv/bin/python"' in overrides
+    assert 'mcp_servers.plural-environment.args=["/p/mcp_bridge.py"]' in overrides
+    assert (
+        'mcp_servers.plural-environment.env={PLURAL_ENVIRONMENT_FILE="/w/environment.json"}'
+        in overrides
+    )
+    assert 'mcp_servers.plural-environment.default_tools_approval_mode="approve"' in overrides
+    assert command[-1] == "go"
+    assert vendor_adapter._codex_mcp_args(tmp_path / "missing.json") == []

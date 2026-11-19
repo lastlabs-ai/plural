@@ -298,12 +298,16 @@ def build_bench(
     faults: Sequence[Fault] = QUOTING_FAULTS,
     agent: str = "quote-bot",
     per_fault: int = 4,
+    max_tasks: int | None = None,
     depth: Depth = "standard",
     budget_usd: float = 0.5,
     concurrency: int = 8,
     log: Callable[[str], None] = print,
 ) -> list[Case]:
     """Run the healthy and faulty Agents, keep the Trials each fault broke, write the bench.
+
+    ``max_tasks`` caps the Tasks each fault runs on, an even spread of the ones the
+    healthy Agent passed, to bound what building the bench costs.
 
     Returns:
         The bench's cases.
@@ -324,8 +328,14 @@ def build_bench(
     cases: list[Case] = []
     outcomes: dict[str, dict[str, Any]] = {}
     for index, fault in enumerate(faults, start=1):
-        tasks = sorted(
-            task for name in fault.categories for task in categories.get(name, ()) if task in passed
+        tasks = _spread(
+            sorted(
+                task
+                for name in fault.categories
+                for task in categories.get(name, ())
+                if task in passed
+            ),
+            max_tasks,
         )
         outcome: dict[str, Any] = {
             "cause": fault.cause,
@@ -595,7 +605,27 @@ def _categories(root: Path) -> dict[str, list[str]]:
     payload = yaml.safe_load(
         (root / "benchmarks" / "quoting" / "benchmark.yaml").read_text("utf-8")
     )
-    return {item["id"]: list(item["tasks"]) for item in payload.get("categories") or ()}
+    # The bench is diagnosis, which never looks at held-out Tasks.
+    heldout = set(payload.get("heldout") or ())
+    return {
+        item["id"]: [task for task in item["tasks"] if task not in heldout]
+        for item in payload.get("categories") or ()
+    }
+
+
+def _spread(tasks: Sequence[str], limit: int | None) -> list[str]:
+    """At most ``limit`` of ``tasks``, evenly spaced, so every category stays in.
+
+    Returns:
+        The Tasks kept, in order.
+
+    Examples:
+        >>> _spread(["a", "b", "c", "d", "e", "f"], 3)
+        ['a', 'c', 'e']
+    """
+    if limit is None or len(tasks) <= limit:
+        return list(tasks)
+    return [tasks[index * len(tasks) // limit] for index in range(limit)]
 
 
 def _write_agent(root: Path, payload: Mapping[str, Any]) -> None:
@@ -641,6 +671,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     build.add_argument("source", type=Path)
     build.add_argument("out", type=Path)
     build.add_argument("--per-fault", type=int, default=4)
+    build.add_argument("--max-tasks", type=int, help="The most Tasks each fault runs on.")
     build.add_argument("--depth", choices=("quick", "standard", "deep"), default="standard")
     build.add_argument("--budget-usd", type=float, default=0.5)
     build.add_argument("--concurrency", type=int, default=8)
@@ -648,6 +679,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--weak-model",
         action="append",
         help="A weaker gateway model for the model fault; repeat to try several in turn.",
+    )
+    build.add_argument(
+        "--padding-lines",
+        action="append",
+        type=int,
+        help="Lines of padding for the context fault; repeat to try several in turn.",
     )
     run = commands.add_parser("run", help="Run the Inspector on a built bench.")
     run.add_argument("out", type=Path)
@@ -664,10 +701,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.out,
             environ=environ,
             per_fault=args.per_fault,
+            max_tasks=args.max_tasks,
             depth=args.depth,
             budget_usd=args.budget_usd,
             concurrency=args.concurrency,
-            faults=_with_weak_models(QUOTING_FAULTS, args.weak_model),
+            faults=_with_levels(QUOTING_FAULTS, model=args.weak_model, context=args.padding_lines),
         )
         print(f"{len(cases)} cases written to {args.out / 'inspector'}")
         return 0
@@ -682,11 +720,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _with_weak_models(faults: Sequence[Fault], models: Sequence[str] | None) -> tuple[Fault, ...]:
-    if not models:
-        return tuple(faults)
+def _with_levels(faults: Sequence[Fault], **levels: Sequence[Any] | None) -> tuple[Fault, ...]:
     return tuple(
-        replace(fault, levels=tuple(models)) if fault.cause == "model" else fault
+        replace(fault, levels=tuple(levels[fault.cause] or ()))
+        if levels.get(fault.cause)
+        else fault
         for fault in faults
     )
 

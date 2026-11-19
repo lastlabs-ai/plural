@@ -11,7 +11,7 @@ verifiers/quote-check/        decides whether the quote or handoff was right
 verifiers/tone/               a model judge of the customer note (1-5); no Task uses it yet
 agents/quote-bot/             the Agent under test, with two planted weaknesses
 benchmarks/quoting/           the eighty Tasks in four categories, 20 of them held out
-traps.py                      plants a grader bug and integrity traps in a copy
+traps.py                      plants wrong answer keys, grader bugs and integrity traps in a copy
 ```
 
 Each request either gets a quote, at today's price and for a date the mill can meet,
@@ -112,7 +112,7 @@ A plain run covers the 60 dev Tasks. The Benchmark holds back 20, quote-061 to
 quote-080, under `heldout:`, to confirm a fix on requests nobody tuned the Agent
 against. They were written after every run, inspection, and fork below, so nothing
 has touched them; a Task that has run can't be held out. `plural run -b quoting -a
-quote-bot --heldout` runs them too, and each such run is a counted peek.
+quote-bot --heldout` runs them alone, and each such run is a counted peek.
 
 ## quote-bot's planted weaknesses
 
@@ -141,7 +141,7 @@ the price book's grade names. That third failure was not planted. The mean score
 ## 4. Find out why, and prove the fix
 
 ```bash
-python traps.py --enable unit-bug        # plant the grader bug too
+python traps.py --enable unit-bug        # plant the wrong answer keys too
 plural run -b quoting -a quote-bot
 plural job inspect JOB
 plural agent revise quote-bot --from-finding F1
@@ -150,8 +150,11 @@ plural run -b quoting -a quote-bot --heldout --attempts 2
 plural job report NEW_JOB --compare OLD_JOB --findings
 ```
 
-Measured on November 18, 2026, with the planted grader bug on, when the Benchmark had
-60 Tasks. The Inspector explained all 30 failed dev Trials for $4.15. It put the 15 rounding failures under
+The unit bug is a wrong answer key, so the Inspector should put it under `task`: the
+Verifier's code is right, and the request contradicts the key.
+
+Measured on November 18, 2026, with the unit bug planted, when the Benchmark had 60
+Tasks and before the rule that a wrong answer key is `task`. The Inspector explained all 30 failed dev Trials for $4.15. It put the 15 rounding failures under
 `instructions` (14 confirmed by forks), the skipped schedule under `tools` (quote-036
 confirmed, quote-037 not), and quote-016 and quote-020 under `grader`; it put
 quote-053, the third Task the bug touches, under `instructions`. Revising quote-bot
@@ -161,6 +164,13 @@ its pass rate rose from 36% (10 of 28) to 82% (23 of 28), a `better` verdict wit
 inspected, so they weren't held out in the sense that counts: they are dev Tasks now,
 and quote-061 to quote-080 replace them. What still fails is the unplanted weakness:
 grade names like "304 stainless sheet". See [Find out why an Agent fails](../../docs/running/inspector.md).
+
+Measured again on November 19, 2026, on the 20 Tasks now held out (quote-061 to
+quote-080), which no dev run or inspection had used, two attempts each with
+`--heldout`, which runs only those Tasks: quote-bot 1.2.0 passed 73% (29 of 40)
+against 1.0.0's 28% (11 of 40), a `better` verdict, a change of +45% (95% interval
++22% to +65%). The two runs were peeks 4 and 5. Peek 3, an earlier run in which every
+Trial errored before a verdict, is flagged as having revealed nothing.
 
 `inspector-bench.json` holds the Inspector's accuracy on inspector-bench, built from
 this example.

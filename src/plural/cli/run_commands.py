@@ -163,7 +163,7 @@ def run(
     heldout: bool = typer.Option(
         False,
         "--heldout",
-        help="Run the Benchmark's held-out Tasks too. Each such run is a peek, and is counted.",
+        help="Run only the Benchmark's held-out Tasks. Each such run is a peek, and is counted.",
     ),
     concurrency: str = typer.Option(
         "auto",
@@ -339,13 +339,13 @@ def _heldout_notice(space: Workspace, plan: RunPlan, *, err: bool) -> None:
         typer.echo(
             f"Running the {len(source.benchmark.dev_tasks)} dev Tasks; "
             f"{counted(len(held), 'held-out Task')} stay hidden. "
-            "--heldout runs them too, as a counted peek.",
+            "--heldout runs them alone, as a counted peek.",
             err=err,
         )
         return
     count = len(peeks(space.project.state_dir, source.benchmark.name)) + 1
     typer.echo(
-        f"PEEK: this run includes {counted(len(held), 'held-out Task')} of "
+        f"PEEK: this run is the {counted(len(held), 'held-out Task')} of "
         f"{source.benchmark.name}. It is peek {count}; every peek makes the held-out "
         "result a little less of a test.",
         err=err,
@@ -1254,6 +1254,9 @@ def _finish_local(
     as_json: bool,
 ) -> None:
     payload = {"location": "local", **local_job(space, job_id)}
+    peek = next((item for item in peeks(space.project.state_dir) if item["job_id"] == job_id), None)
+    if peek is not None:
+        payload["peek_revealed_nothing"] = peek["revealed_nothing"]
     if tracking is not None:
         payload["hosted_job_id"] = tracking.hosted_job_id
         payload["recording_errors"] = tracking.errors
@@ -1261,6 +1264,12 @@ def _finish_local(
 
     def text() -> None:
         _print_result(job_id, result, payload.get("summaries") or ())
+        if payload.get("peek_revealed_nothing"):
+            typer.echo(
+                "This held-out run revealed nothing: every Trial errored before a verdict. "
+                "It still counts as a peek.",
+                err=True,
+            )
         if result.stopped:
             typer.echo(result.stopped, err=True)
             typer.echo(

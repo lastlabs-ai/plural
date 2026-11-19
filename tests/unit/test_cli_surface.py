@@ -229,9 +229,11 @@ def test_a_run_exits_nonzero_when_its_job_did_not_succeed(
     from plural.cli import run_commands
 
     monkeypatch.setattr(run_commands, "local_job", lambda space, job_id: {"job_id": job_id})
+    monkeypatch.setattr(run_commands, "peeks", lambda state_dir: [])
+    space = type("Space", (), {"project": type("Project", (), {"state_dir": None})()})()
     result = type("Result", (), {"status": status, "aggregates": ()})()
     try:
-        run_commands._finish_local(None, "job_1", result, None, as_json=True)  # type: ignore[arg-type]
+        run_commands._finish_local(space, "job_1", result, None, as_json=True)  # type: ignore[arg-type]
         exit_code = 0
     except typer.Exit as exc:
         exit_code = exc.exit_code

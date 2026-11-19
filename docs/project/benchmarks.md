@@ -257,7 +257,8 @@ From then on:
 
 - `plural run --benchmark support-triage` runs only the development Tasks, and says how
   many it left out.
-- `plural run --benchmark support-triage --heldout` runs every Task. That run is a
+- `plural run --benchmark support-triage --heldout` runs only the held-out Tasks; dev
+  results come from the ordinary run, so a proof doesn't pay for them twice. That run is a
   **peek**. Plural counts each one, in `.plural/heldout.jsonl` and in the hosted
   project, and tells you which peek it is. Every peek makes the held-out Tasks a little
   less independent.

@@ -2,7 +2,7 @@
 # and records a Finding for each cause. plural job inspect --model runs it with another model.
 name: inspector
 version: 1.0.0
-model: openai/gpt-5.6
+model: openai/gpt-5.6-luna
 # Forks call models through the gateway with a key minted for this one inspection of
 # one Job, revoked when it ends. It reaches only the App host, never the model or the
 # Harness, and it is never your own key.

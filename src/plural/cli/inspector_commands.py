@@ -20,7 +20,13 @@ from plural.cli.run_commands import _progress, _run_environ
 from plural.errors import PluralError
 from plural.inspector.findings import InspectionRecord, breakdown
 from plural.inspector.hosted import hosted_job_id, upload_inspection, upload_report
-from plural.inspector.report import SUMMARY_MODEL, build_report, save_report, write_summary
+from plural.inspector.report import (
+    SUMMARY_MODEL,
+    build_report,
+    percent,
+    save_report,
+    write_summary,
+)
 from plural.inspector.revise import revise_agent
 from plural.inspector.run import DEFAULT_BUDGET_USD, ask_trial, inspect_job
 from plural.project import ProjectError, Workspace
@@ -231,7 +237,7 @@ def _print_inspection(record: InspectionRecord) -> None:
         f"{record.job_id} ({record.depth}), ${record.cost_usd:.2f}:"
     )
     for row in breakdown(record):
-        share = f"{row.share:.0%}" if row.share is not None else "n/a"
+        share = percent(row.share) if row.share is not None else "n/a"
         typer.echo(
             f"  {row.cause:<13} {len(row.trial_ids):>3}  {share:>4}  {row.confirmed} confirmed"
         )

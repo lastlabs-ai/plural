@@ -15,6 +15,7 @@ import urllib.request
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,25 @@ SUMMARY_MODEL = "openai/gpt-5.6-terra"
 """The model that writes a report's summary, by default."""
 
 _PLACEHOLDER = re.compile(r"\{(N[0-9]+)\}")
+
+
+def percent(share: float, *, signed: bool = False) -> str:
+    """A share as a whole percent, a half rounded away from zero.
+
+    Rounding the share's decimal form, not its binary float, keeps 29 of 40 and
+    11 of 40 consistent.
+
+    Returns:
+        The percent, with a sign when ``signed``.
+
+    Examples:
+        >>> percent(29 / 40), percent(11 / 40), percent(0.45, signed=True)
+        ('73%', '28%', '+45%')
+    """
+    whole = int((Decimal(repr(share)) * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+    return f"{whole:+d}%" if signed else f"{whole}%"
+
+
 _DIGIT = re.compile(r"[0-9]")
 
 
@@ -277,7 +297,7 @@ class _Facts:
         if not total:
             return None
         value = len(hits) / len(total)
-        return self.add(label, value, f"{value:.0%} ({len(hits)} of {len(total)})", total)
+        return self.add(label, value, f"{percent(value)} ({len(hits)} of {len(total)})", total)
 
 
 class _Loaded:
@@ -544,14 +564,16 @@ def _changes(job: _Loaded, other: _Loaded, facts: _Facts) -> ChangesSection:
                 entry["delta"] = facts.add(
                     f"change in {words} ({name})",
                     comparison.delta,
-                    f"{comparison.delta:+.0%}",
+                    percent(comparison.delta, signed=True),
                     trials,
                 )
             if comparison.low is not None and comparison.high is not None:
                 entry["interval"] = facts.add(
                     f"change in {words} ({name}), 95% interval",
                     None,
-                    f"{comparison.low:+.0%} to {comparison.high:+.0%}",
+                    " to ".join(
+                        percent(end, signed=True) for end in (comparison.low, comparison.high)
+                    ),
                     trials,
                 )
             measures[measure] = entry
@@ -598,7 +620,7 @@ def _rate_of(
     ids = [trial for _, trials in grouped.values() for trial in trials]
     hits = sum(1 for value in values if value)
     rate = hits / len(values)
-    return facts.add(label, rate, f"{rate:.0%} ({hits} of {len(values)})", ids)
+    return facts.add(label, rate, f"{percent(rate)} ({hits} of {len(values)})", ids)
 
 
 def _trust(workspace: Workspace, job: _Loaded, facts: _Facts) -> TrustSection:
@@ -940,6 +962,7 @@ __all__ = [
     "TrustSection",
     "ValidationSection",
     "build_report",
+    "percent",
     "render_markdown",
     "render_summary",
     "save_report",

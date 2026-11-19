@@ -863,8 +863,8 @@ asks once and remembers the answer; ``allow_local_models=True`` goes
 ahead without one. Each Trial records the identity either way, as
 ``TrialResult.model_identity``.
 
-A Benchmark Job runs its dev Tasks. ``heldout=True`` runs the held-out
-Tasks too; each such run is a peek, and ``plural run`` counts it.
+A Benchmark Job runs its dev Tasks. ``heldout=True`` runs its held-out
+Tasks alone; each such run is a peek, and ``plural run`` counts it.
 ``purpose`` says why the Job runs; ``diagnose`` and ``fork`` Jobs refuse
 held-out Tasks. Each Trial records its ``gates``, from the
 metrics its Task's Verifiers mark ``gate: true``, and whether it ``passed``.

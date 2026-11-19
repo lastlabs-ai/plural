@@ -885,15 +885,6 @@ def _report_tool(root: Path, rest: list[str], timeout: float | None) -> Any:
     if fields is None:
         return None
     try:
-        if fields.pop("unknown", False):
-            return call(
-                "step",
-                root=root,
-                timeout=timeout,
-                action=fields["name"],
-                arguments=fields["arguments"],
-                unknown=True,
-            )
         return call("tool", root=root, timeout=timeout, **fields)
     except (OSError, RuntimeError, ValueError) as exc:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)
@@ -908,9 +899,9 @@ def claude_hook_fields(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     """The tool call a Claude Code PostToolUse or PostToolUseFailure hook describes.
 
     Calls of the Environment's own MCP tools are left out: the host recorded
-    those as actions already. A call to a tool that doesn't exist never reached
-    the host, so it is marked ``unknown``, for the host to record as an
-    ``unknown_action`` step.
+    those as actions already. So is a call to a tool that doesn't exist: Claude
+    Code fires no hook for one, and the vendor adapter reports it from Claude
+    Code's event stream as an ``unknown_action`` step.
 
     Returns:
         Fields for the ``tool`` operation, or ``None`` to skip this call.
@@ -923,8 +914,8 @@ def claude_hook_fields(payload: Mapping[str, Any]) -> dict[str, Any] | None:
         ...         "tool_input": {"tons": 3},
         ...         "error": "Error: No such tool available: quote",
         ...     }
-        ... )
-        {'name': 'quote', 'arguments': {'tons': 3}, 'unknown': True}
+        ... ) is None
+        True
     """
     name = str(payload.get("tool_name") or "")
     if not name:
@@ -938,13 +929,7 @@ def claude_hook_fields(payload: Mapping[str, Any]) -> dict[str, Any] | None:
         error = response
     if payload.get("hook_event_name") == "PostToolUseFailure":
         error = str(payload.get("error") or error or "tool failed")
-    if error is not None and _NO_SUCH_TOOL in error:
-        return {
-            "name": name.removeprefix(_ENVIRONMENT_TOOL),
-            "arguments": arguments if isinstance(arguments, dict) else {"input": arguments},
-            "unknown": True,
-        }
-    if name.startswith(_ENVIRONMENT_TOOL):
+    if (error is not None and _NO_SUCH_TOOL in error) or name.startswith(_ENVIRONMENT_TOOL):
         return None
     return {
         "name": name,

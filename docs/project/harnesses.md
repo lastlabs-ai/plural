@@ -167,8 +167,10 @@ Runtime. Setup happens in the fresh Runtime, not on your laptop.
    the value. You do not put model keys on `Agent.secrets` for a built-in
    Harness. A custom Harness lists the names it reads in `secrets`, and the Agent
    requires that subset.
-4. Environment actions are offered to the tool as tools, except to Hermes, which
-   works only in the workspace for now.
+4. Environment actions are offered to the tool as tools, through an MCP server Plural
+   starts, except to Hermes, which works only in the workspace for now. Claude Code is
+   allowed to call them and Codex has them approved, since neither can ask anyone
+   during a Trial.
 5. `PLURAL_STOP_SECONDS` is how many seconds the Harness has before it is killed. A
    Harness that stops before then and writes its outputs is verified; one that is
    killed fails with the stop reason `harness_timeout`.

@@ -651,3 +651,12 @@ def test_the_fork_key_reaches_the_app_host_alone(
         if path.is_file() and sentinel.encode() in path.read_bytes()
     ]
     assert leaked == []
+
+
+def test_the_bench_never_runs_a_held_out_task() -> None:
+    from plural.inspector.faults import _categories
+
+    source = ROOT / "examples" / "quoting"
+    manifest = yaml.safe_load((source / "benchmarks/quoting/benchmark.yaml").read_text("utf-8"))
+    picked = {task for tasks in _categories(source).values() for task in tasks}
+    assert picked and not picked & set(manifest["heldout"])

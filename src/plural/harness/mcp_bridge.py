@@ -160,11 +160,16 @@ def _load_environment() -> dict[str, Any]:
 
 
 def _workspace(environment: dict[str, Any]) -> str:
-    return str(
+    path = str(
         environment.get("workspace")
         or os.environ.get("PLURAL_ENVIRONMENT_WORKSPACE")
         or "/workspace/environment"
     )
+    # The local Runtime keeps /workspace under its own folder.
+    root = os.environ.get("PLURAL_SANDBOX_ROOT")
+    if root and path.startswith("/") and not path.startswith(root.rstrip("/") + "/"):
+        return os.path.join(root, path.removeprefix("/"))
+    return path
 
 
 def _local_command(command: tuple[str, ...]) -> list[str]:

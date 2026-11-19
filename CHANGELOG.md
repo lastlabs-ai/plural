@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `--heldout` runs only a Benchmark's held-out Tasks. A held-out run in which every Trial errored before a verdict still counts as a peek, and is flagged as having revealed nothing. A Task a local run already used can't be newly held out.
+- The Inspector runs on `openai/gpt-5.6-luna` by default.
+
+### Fixed
+
+- Claude Code and Codex can act on an Environment's Apps. On the local Runtime the Apps' MCP server now starts where no bare `python` is on PATH and finds the Runtime's workspace; Claude Code is allowed to call its tools in `--print` mode; Codex is given the server at all, with its tools approved.
+- A call Claude Code or Codex makes to a tool that doesn't exist is recorded as an `unknown_action` step. Neither fires a hook for one, so Plural reads it from their output.
+- inspector-bench never runs a held-out Task. `--max-tasks` caps the Tasks each fault runs on, and `--padding-lines` picks the context fault's lengths.
+- `plural job report` rounds every percent the same way, so 29 of 40 and 11 of 40 read 73% and 28%.
+
 ## [0.25.1] - 2026-11-17
 
 ### Added

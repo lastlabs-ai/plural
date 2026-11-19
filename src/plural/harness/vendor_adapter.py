@@ -5,11 +5,12 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -115,8 +116,8 @@ def run_vendor(
             f"{vendor} requires installed executable {command[0]!r} on PATH. "
             "Plural installs it during Runtime setup; check network policy and the image tools."
         )
-    if vendor == "codex" and environment.raw.get("tool_command"):
-        completed = _run_reporting(command, environment, deadline)
+    if vendor in _REPORTERS and environment.raw.get("tool_command"):
+        completed = _run_reporting(command, environment, deadline, _REPORTERS[vendor]())
     else:
         completed = subprocess.run(
             command,
@@ -195,15 +196,19 @@ def _host_workspace(environment: HarnessEnvironment) -> str:
 
 
 def _write_claude_settings(environment: HarnessEnvironment) -> None:
-    """Hooks that report each of Claude Code's own tool calls, failed ones included."""
-    if not environment.raw.get("tool_command"):
-        return
-    hook = (
-        f"PLURAL_APPS_WORKSPACE={shlex.quote(_host_workspace(environment))} "
-        f"{shlex.quote(sys.executable)} -m plural.apps.daemon tool --claude-hook"
-    )
-    entry = [{"matcher": "*", "hooks": [{"type": "command", "command": hook}]}]
-    settings = {"hooks": {"PostToolUse": entry, "PostToolUseFailure": entry}}
+    """Allow the Environment's tools, and report each of Claude Code's own tool calls.
+
+    ``--print`` denies an MCP tool nobody allowed, so the Environment's server is
+    allowed by name. Failed calls are reported too.
+    """
+    settings: dict[str, Any] = {"permissions": {"allow": ["mcp__plural-environment"]}}
+    if environment.raw.get("tool_command"):
+        hook = (
+            f"PLURAL_APPS_WORKSPACE={shlex.quote(_host_workspace(environment))} "
+            f"{shlex.quote(sys.executable)} -m plural.apps.daemon tool --claude-hook"
+        )
+        entry = [{"matcher": "*", "hooks": [{"type": "command", "command": hook}]}]
+        settings["hooks"] = {"PostToolUse": entry, "PostToolUseFailure": entry}
     path = Path(".plural/claude-settings.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, sort_keys=True) + "\n", encoding="utf-8")
@@ -356,16 +361,183 @@ def codex_tool_fields(event: Mapping[str, Any]) -> dict[str, Any] | None:
     return {"name": name, "arguments": arguments, "output": output, "error": error}
 
 
+Report = tuple[str, dict[str, Any]]
+
+
+class StreamReports:
+    """What a vendor CLI's output shows that the App host should record, read as it runs."""
+
+    def event(self, event: Mapping[str, Any]) -> list[Report]:
+        """Reports for one JSON event the CLI printed on stdout.
+
+        Returns:
+            ``(operation, fields)`` pairs for the App host.
+        """
+        return []
+
+    def log(self, line: str) -> list[Report]:
+        """Reports for one line the CLI logged on stderr.
+
+        Returns:
+            ``(operation, fields)`` pairs for the App host.
+        """
+        return []
+
+
+def _unknown(name: str, arguments: Any) -> Report:
+    return (
+        "step",
+        {
+            "action": name.removeprefix(_ENVIRONMENT_TOOL),
+            "arguments": arguments if isinstance(arguments, dict) else {"input": arguments},
+            "unknown": True,
+        },
+    )
+
+
+class ClaudeUnknownTools(StreamReports):
+    """Each call of a tool that doesn't exist, read from Claude Code's ``stream-json`` events.
+
+    Claude Code answers such a call itself and fires no hook for it, so the App host
+    would never hear of it. Each one becomes an ``unknown_action`` step.
+
+    Examples:
+        >>> read = ClaudeUnknownTools().event
+        >>> read(
+        ...     {
+        ...         "type": "assistant",
+        ...         "message": {
+        ...             "content": [
+        ...                 {
+        ...                     "type": "tool_use",
+        ...                     "id": "t1",
+        ...                     "name": "mcp__plural-environment__quote",
+        ...                     "input": {"tons": 3},
+        ...                 }
+        ...             ]
+        ...         },
+        ...     }
+        ... )
+        []
+        >>> read(
+        ...     {
+        ...         "type": "user",
+        ...         "message": {
+        ...             "content": [
+        ...                 {
+        ...                     "type": "tool_result",
+        ...                     "tool_use_id": "t1",
+        ...                     "is_error": True,
+        ...                     "content": "Error: No such tool available: x",
+        ...                 }
+        ...             ]
+        ...         },
+        ...     }
+        ... )
+        [('step', {'action': 'quote', 'arguments': {'tons': 3}, 'unknown': True})]
+    """
+
+    def __init__(self) -> None:
+        self._calls: dict[str, tuple[str, Any]] = {}
+
+    def event(self, event: Mapping[str, Any]) -> list[Report]:
+        """The ``unknown_action`` steps one stream-json event shows.
+
+        Returns:
+            One ``step`` report per call of a tool that doesn't exist.
+        """
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, Mapping) else None
+        if not isinstance(content, list):
+            return []
+        reports: list[Report] = []
+        for block in content:
+            if not isinstance(block, Mapping):
+                continue
+            if block.get("type") == "tool_use":
+                self._calls[str(block.get("id"))] = (
+                    str(block.get("name") or ""),
+                    block.get("input"),
+                )
+            elif block.get("type") == "tool_result" and _NO_SUCH_TOOL in _text(
+                block.get("content")
+            ):
+                name, arguments = self._calls.pop(str(block.get("tool_use_id")), ("", None))
+                if name:
+                    reports.append(_unknown(name, arguments))
+        return reports
+
+
+def _text(content: Any) -> str:
+    if isinstance(content, list):
+        return " ".join(_text(item) for item in content)
+    if isinstance(content, Mapping):
+        return str(content.get("text") or "")
+    return str(content or "")
+
+
+_UNSUPPORTED_CALL = re.compile(r"unsupported call: (\S{1,128})")
+
+
+class CodexReports(StreamReports):
+    """Codex's own tool calls, from its events, and calls of tools that don't exist.
+
+    Codex answers a call of a tool it doesn't have itself, and only logs it, without
+    its arguments; each one becomes an ``unknown_action`` step.
+
+    Examples:
+        >>> CodexReports().log("ERROR codex_core::tools::router: error=unsupported call: quote")
+        [('step', {'action': 'quote', 'arguments': {}, 'unknown': True})]
+    """
+
+    def event(self, event: Mapping[str, Any]) -> list[Report]:
+        """Codex's own tool call one ``--json`` event finishes.
+
+        Returns:
+            A ``tool`` report, or none.
+        """
+        fields = codex_tool_fields(event)
+        return [("tool", fields)] if fields is not None else []
+
+    def log(self, line: str) -> list[Report]:
+        """The ``unknown_action`` step one stderr line shows.
+
+        Returns:
+            A ``step`` report, or none.
+        """
+        found = _UNSUPPORTED_CALL.search(line)
+        return [_unknown(found.group(1), {})] if found else []
+
+
+_REPORTERS: dict[str, Callable[[], StreamReports]] = {
+    "claude-code": ClaudeUnknownTools,
+    "codex": CodexReports,
+}
+
+
 def _run_reporting(
-    command: tuple[str, ...], environment: HarnessEnvironment, deadline: float
+    command: tuple[str, ...],
+    environment: HarnessEnvironment,
+    deadline: float,
+    reports: StreamReports,
 ) -> subprocess.CompletedProcess[str]:
-    """Run Codex, reporting each of its own tool calls to the App host as it finishes."""
+    """Run a vendor CLI, telling the App host what its output shows as it happens."""
     import threading
 
     from plural.apps.daemon import call
 
-    reporting = bool(environment.raw.get("tool_command"))
     root = Path(_host_workspace(environment))
+
+    def send(found: list[Report]) -> None:
+        for operation, fields in found:
+            with contextlib.suppress(OSError, RuntimeError, ValueError):
+                call(operation, root=root, timeout=30, **fields)
+
+    def read_errors() -> None:
+        for line in process.stderr or ():
+            errors.append(line)
+            send(reports.log(line))
+
     process = subprocess.Popen(
         command,
         stdin=subprocess.DEVNULL,
@@ -375,23 +547,16 @@ def _run_reporting(
         cwd=_host_workspace(environment),
     )
     errors: list[str] = []
-    reader = threading.Thread(
-        target=lambda: errors.append(process.stderr.read() if process.stderr else ""),
-        daemon=True,
-    )
+    reader = threading.Thread(target=read_errors, daemon=True)
     reader.start()
     lines: list[str] = []
     assert process.stdout is not None
     for line in process.stdout:
         lines.append(line)
-        if not reporting:
-            continue
         with contextlib.suppress(ValueError):
             event = json.loads(line)
-            fields = codex_tool_fields(event) if isinstance(event, dict) else None
-            if fields is not None:
-                with contextlib.suppress(OSError, RuntimeError, ValueError):
-                    call("tool", root=root, timeout=30, **fields)
+            if isinstance(event, dict):
+                send(reports.event(event))
     try:
         process.wait(timeout=max(1.0, call_timeout(deadline)))
     except subprocess.TimeoutExpired:
@@ -433,7 +598,8 @@ def _command(
             "claude",
             "--print",
             "--output-format",
-            "json",
+            "stream-json",
+            "--verbose",
             *model_args,
             *extra,
             prompt,
@@ -446,6 +612,7 @@ def _command(
         sandbox = kwargs.get("sandbox")
         if sandbox:
             extra.extend(["--sandbox", str(sandbox)])
+        extra.extend(_codex_mcp_args(mcp_config))
         base = os.environ.get("PLURAL_CODEX_BASE_URL")
         if base:
             provider = {
@@ -487,10 +654,35 @@ def _hermes_usage() -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+_ENVIRONMENT_TOOL = "mcp__plural-environment__"
+_NO_SUCH_TOOL = "No such tool available"
+
+
 def _hermes_home() -> Path:
     folder = Path(".plural/hermes").resolve()
     folder.mkdir(parents=True, exist_ok=True)
     return folder
+
+
+def _codex_mcp_args(mcp_config: Path) -> list[str]:
+    """``-c`` overrides that give Codex the Environment's MCP server, approved to run.
+
+    Returns:
+        The arguments, or none when there is no server.
+    """
+    if not mcp_config.is_file():
+        return []
+    servers = json.loads(mcp_config.read_text(encoding="utf-8")).get("mcpServers") or {}
+    args: list[str] = []
+    for name, server in servers.items():
+        key = f"mcp_servers.{name}"
+        env = ",".join(f"{field}={json.dumps(value)}" for field, value in server["env"].items())
+        args.extend(["-c", f"{key}.command={json.dumps(server['command'])}"])
+        args.extend(["-c", f"{key}.args={json.dumps(server['args'])}"])
+        args.extend(["-c", f"{key}.env={{{env}}}"])
+        # `codex exec` never asks, so an MCP tool nobody approved always fails.
+        args.extend(["-c", f'{key}.default_tools_approval_mode="approve"'])
+    return args
 
 
 def _codex_home() -> Path:
@@ -527,17 +719,20 @@ def _write_environment(environment: dict[str, Any]) -> None:
     os.environ["PLURAL_ENVIRONMENT_FILE"] = str(path)
     if environment.get("workspace"):
         os.environ["PLURAL_ENVIRONMENT_WORKSPACE"] = str(environment["workspace"])
+    env = {
+        "PLURAL_ENVIRONMENT_FILE": str(path.resolve()),
+        "PLURAL_ENVIRONMENT_WORKSPACE": str(
+            environment.get("workspace") or "/workspace/environment"
+        ),
+    }
+    if os.environ.get("PLURAL_SANDBOX_ROOT"):
+        env["PLURAL_SANDBOX_ROOT"] = os.environ["PLURAL_SANDBOX_ROOT"]
     mcp = {
         "mcpServers": {
             "plural-environment": {
-                "command": "python",
+                "command": "python" if shutil.which("python") else sys.executable,
                 "args": [str(Path(__file__).with_name("mcp_bridge.py"))],
-                "env": {
-                    "PLURAL_ENVIRONMENT_FILE": str(path.resolve()),
-                    "PLURAL_ENVIRONMENT_WORKSPACE": str(
-                        environment.get("workspace") or "/workspace/environment"
-                    ),
-                },
+                "env": env,
             }
         }
     }
@@ -600,7 +795,13 @@ def _map_credentials(vendor: str, deadline: float) -> None:
 
 def _response(vendor: str, stdout: str) -> str:
     if vendor == "claude-code":
-        payload = json.loads(stdout)
+        # stream-json: the last "result" event is what --output-format json prints.
+        payload: Any = None
+        for line in stdout.splitlines():
+            with contextlib.suppress(json.JSONDecodeError):
+                event = json.loads(line)
+                if isinstance(event, dict) and event.get("type", "result") == "result":
+                    payload = event
         if isinstance(payload, dict):
             for key in ("result", "content", "text"):
                 value = payload.get(key)

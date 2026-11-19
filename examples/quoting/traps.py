@@ -1,4 +1,4 @@
-"""Plant the quoting example's grader bug and integrity traps in a copy of it.
+"""Plant the quoting example's wrong answer keys, grader bugs and integrity traps in a copy.
 
 The example in this folder is the clean fixture. This script copies it and plants
 whichever problems you name, so `plural benchmark validate` and the Inspector have something
@@ -8,7 +8,8 @@ real to find:
     python traps.py /tmp/quoting-bug --enable unit-bug
 
 - unit-bug: the answer keys of three requests in hundredweight (quote-016, quote-020,
-  quote-053) record the cwt figure as short tons, so a correct quote fails.
+  quote-053) record the cwt figure as short tons, so a correct quote fails. A wrong
+  answer key is a `task` cause, not `grader`: the Verifier's code is right.
 - broken-check: quote-024 is graded by quote-check-legacy, which forgot the
   decision_correct gate, so an Agent that does nothing passes.
 - leaked-key: the Environment ships a quote log holding quote-009's answer key.

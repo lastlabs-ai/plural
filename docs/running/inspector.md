@@ -113,12 +113,14 @@ breakdown and each Finding.
 
 `--budget-usd` caps what forks may spend across the Job, split evenly over the failed
 Trials; the Inspector is refused a fork it can't afford. `--trial` inspects only the
-Trials named, `--model` picks the Inspector's model, and `--json` prints everything.
+Trials named, `--model` picks the Inspector's model (by default `openai/gpt-5.6-luna`, a
+small, low-cost model), and `--json` prints everything.
 
 The forks never run with your own key. Each inspection mints a key of its own: it can
-only call models through the gateway, for forks of the Job being inspected; it is
-stored as a hash, never listed with your keys, and revoked when the inspection ends
-(or after three hours, if it never does). It reaches only the process that holds the
+only call models through the gateway, is tagged with the Job it inspects for audit, is
+stored as a hash, is never listed with your keys, and is revoked when the inspection
+ends (or after three hours, if it never does). The gateway can't tell a fork's model
+call from any other, so those are its limits: scope, expiry, and revocation. It reaches only the process that holds the
 Inspector's App, never the Inspector's model or your Agent's Harness. Minting it needs
 hosted access: sign in and bind the project, or scope your key with `plural auth scope
 --project`. Without it, `--depth standard` and `deep` still run, with forks off, and
@@ -168,10 +170,11 @@ other actions, so a hidden one stays hidden. The `unknown_action` signal points 
 Inspector at these steps.
 
 This holds for every Harness. The native loop and the engine record the call
-themselves. A vendor Harness, such as Claude Code or Codex, reports it the way it
-reports its other tool calls: Claude Code's tool hooks report a call to a tool that
-doesn't exist, and the Environment's MCP server sends a call to an action it doesn't
-have to the App host instead of refusing it.
+themselves. Claude Code and Codex answer such a call on their own and fire no hook
+for it, so Plural reads it from their output as they run: Claude Code's event stream
+names the tool and its arguments, and Codex's log names only the tool, so its step
+has no arguments. A call that does reach the Environment's MCP server with an action
+it doesn't have goes to the App host instead of being refused.
 
 ## Turn a Finding into a new Agent version
 
@@ -237,9 +240,11 @@ nothing the healthy Agent passed has no cases, and `bench.json` lists it under
 `ineffective`, beside any cause the faults claim that ended up with no cases. Two
 faults escalate until they break something: the model fault tries weaker gateway
 models in turn (`--weak-model` picks them), and the context fault pads the
-instructions with about 40k, 200k, then 800k tokens. The Inspector passes a bench Task
-when its Finding names the planted cause, a critical step the answer key accepts, and
-words that name the fault.
+instructions with about 40k, 200k, then 800k tokens (`--padding-lines` picks the
+lengths). `--max-tasks` caps the Tasks each fault runs on, to bound what building the
+bench costs. The bench is diagnosis, so it never runs a held-out Task. The Inspector
+passes a bench Task when its Finding names the planted cause, a critical step the
+answer key accepts, and words that name the fault.
 
 ```bash
 python -m plural.inspector.faults build examples/quoting /tmp/inspector-bench
@@ -250,30 +255,35 @@ The injector is a development tool, not a command. Each group of cases runs with
 fork key minted for the Job its Trials came from, so `run` needs hosted access
 (`PLURAL_API_KEY` and `--project`); without it, forks are off.
 
-Measured on November 18, 2026, before the model and context faults and before the
-rule for telling `grader` from `task`, with the Inspector on `openai/gpt-5.6` at
-standard depth and a $0.50 fork budget per case, against quote-bot's model
-`openai/gpt-5.6-luna`. Under the rule, the doubled answer key is a `task` fault; this
-measurement counted it as `grader`. The full result is
+Measured on November 19, 2026, with the Inspector on `openai/gpt-5.6-luna` at
+standard depth and a $0.25 fork budget per case, against quote-bot's model
+`openai/gpt-5.6-luna`, on dev Tasks only, at most 12 per fault (`--max-tasks 12`).
+The Inspector's own model calls cost $0.11 for all 35 cases. The full result is
 [`examples/quoting/inspector-bench.json`](https://github.com/lastlabs-ai/plural/blob/main/examples/quoting/inspector-bench.json).
+"Before" is the November 18 measurement, with the Inspector on `openai/gpt-5.6`, the
+doubled answer key counted as `grader`, and no model fault.
 
-| Fault | Cause | Cases | Right |
+| Fault | Cause | Right | Before |
 | --- | --- | --- | --- |
-| A tool hidden | tools | 4 | 3 |
-| Round the price | instructions | 4 | 4 |
-| Always promise the requested date | instructions | 4 | 2 |
-| Never hand off | instructions | 4 | 4 |
-| The Verifier checks the list price | grader | 4 | 4 |
-| The answer key doubles the tons | grader | 4 | 4 |
-| The request leaves out the quantity | task | 4 | 0 |
-| **All** | | **28** | **21 (75%)** |
+| A tool hidden | tools | 3 of 4 | 3 of 4 |
+| A tool described as optional | tools | 2 of 3 | no cases |
+| Round the price | instructions | 4 of 4 | 4 of 4 |
+| Always promise the requested date | instructions | 0 of 4 | 2 of 4 |
+| Never hand off | instructions | 3 of 4 | 4 of 4 |
+| A weaker model (Claude Haiku 4.5) | model | 2 of 4 | no cases |
+| The Verifier checks the list price | grader | 4 of 4 | 4 of 4 |
+| The answer key doubles the tons | task | 3 of 4 | 4 of 4 |
+| The request leaves out the quantity | task | 0 of 4 | 0 of 4 |
+| **All** | | **21 of 35 (60%)** | **21 of 28 (75%)** |
 
-It named a step the answer key accepts in 16 of 20 cases that have one, and named
-the fault in its own words in 27 of 28. Two faults broke nothing the healthy Agent
-passed, so they have no cases: a vague schedule-tool description, and 1,200 lines of
-padding in the instructions.
+It named the planted cause in 27 of 35 cases, a step the answer key accepts in 13
+of 25 cases that have one, and the fault in its own words in 31 of 35. Claude Haiku
+4.5 was enough for the model fault. Padding broke nothing at 1,200 or 6,000 lines
+(about 40k and 200k tokens), so the context fault has no cases; the 24,000-line level
+was not run.
 
-All four misses on the missing quantity recorded `grader`: the Agent rightly handed
-off a request with no quantity, and the answer key still wanted a quote. That fits
-the definitions above as well as `task` does; the line between a wrong answer key
-and a broken Task is not settled yet.
+On the small model, most misses recorded `model` at step 1: all four on the
+requested date, the misses on both tool faults, and the one on the doubled answer
+key. All four misses on the missing quantity named the right cause, `task`, and no
+critical step, since the Agent rightly handed off; the bench's answer key still asks
+for step 1.

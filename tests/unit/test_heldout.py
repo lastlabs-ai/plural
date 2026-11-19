@@ -3,6 +3,7 @@ peek at them counted."""
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -59,7 +60,9 @@ def test_a_plain_benchmark_job_runs_only_dev_tasks(split_project: Path) -> None:
     assert {task.task_id for task in plain.spec.tasks}.isdisjoint(benchmark.heldout)
     assert len(plain.plan.trials) == 62
     peek = Job(benchmark, agents=[agent], heldout=True)
-    assert len(peek.plan.trials) == 80
+    # --heldout runs the held-out Tasks alone: dev results come from the plain run.
+    assert {task.task_id for task in peek.spec.tasks} == set(benchmark.heldout)
+    assert len(peek.plan.trials) == 18
     assert peek.spec.job_id != plain.spec.job_id
     # Diagnosis never sees a held-out Task, and the refusal names the confirm command.
     with pytest.raises(ValueError, match="plural run --benchmark BENCHMARK --heldout"):
@@ -99,12 +102,12 @@ def test_a_heldout_run_executes_every_task_and_counts_its_own_job(
     with pytest.raises(_Ran):
         run_local(space, plan_run(space, request, environ=environ), environ=environ)
     (spec,) = executed
-    assert len(spec.tasks) == 80
+    assert len(spec.tasks) == 18
     from plural.jobs import JobSpec
     from plural.project.runs import _rebind_checks
 
     saved = _rebind_checks(space, JobSpec.model_validate_json(spec.model_dump_json()))
-    assert saved.source.include_heldout and len(saved.tasks) == 80
+    assert saved.source.include_heldout and len(saved.tasks) == 18
     (peek,) = peeks(space.project.state_dir, "quoting")
     assert peek["job_id"] == spec.job_id
     assert len(peek["tasks"]) == 18
@@ -120,3 +123,37 @@ def test_a_benchmark_without_heldout_tasks_keeps_its_hash() -> None:
     assert benchmark.content_hash == (
         "sha256:d34aa4716b050bcd1c8e62816c2761837e2352e63f2c0f8a5a6a3419b7517334"
     )
+
+
+def test_a_task_a_local_job_ran_cannot_be_held_out(tmp_path: Path) -> None:
+    """A held-out Task must be untouched: the CLI checks the project's own run records."""
+    from plural.heldout import local_uses
+
+    def job(name: str, tasks: list[str], *, heldout: list[str], peek: bool) -> None:
+        folder = tmp_path / "jobs" / name
+        folder.mkdir(parents=True)
+        source = {
+            "kind": "benchmark",
+            "benchmark": {"tasks": [{"task_id": t} for t in tasks], "heldout": heldout},
+            "include_heldout": peek,
+        }
+        (folder / "config.json").write_text(json.dumps({"source": source}))
+        trials = [{"receipt": {"task_pin": {"name": t}}} for t in tasks]
+        (folder / "result.json").write_text(json.dumps({"trials": trials}))
+
+    job("job_dev", ["q-1", "q-2"], heldout=["q-3"], peek=False)
+    job("job_peek", ["q-3"], heldout=["q-3"], peek=True)
+    # q-1 ran as a dev Task; q-3 was only ever held out; q-4 never ran.
+    assert local_uses(tmp_path, ["q-1", "q-3", "q-4"]) == {"q-1": "job_dev"}
+
+
+def test_a_held_out_run_where_every_trial_errored_revealed_nothing() -> None:
+    from types import SimpleNamespace
+
+    from plural.heldout import revealed_nothing
+
+    errored = SimpleNamespace(status="failed", score=None, stop_reason="error")
+    judged = SimpleNamespace(status="failed", score=0.0, stop_reason="submitted")
+    assert revealed_nothing([errored, errored]) is True  # type: ignore[list-item]
+    assert revealed_nothing([errored, judged]) is False  # type: ignore[list-item]
+    assert revealed_nothing([]) is None

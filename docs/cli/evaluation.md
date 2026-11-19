@@ -2104,7 +2104,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │                                                 tracks, by id, so the results can be published.  │
 │                                                 Implies --record, and uses the track's attempts. │
 │ --attempts                  <int range> [x>=1]  Advanced: Trials per Task (default 1).           │
-│ --heldout                                       Run the Benchmark's held-out Tasks too. Each     │
+│ --heldout                                       Run only the Benchmark's held-out Tasks. Each    │
 │                                                 such run is a peek, and is counted.              │
 │ --concurrency       -n      <str>               Trials to run at once: a number, or auto to size │
 │                                                 it from this machine, the runtime, and where the │
