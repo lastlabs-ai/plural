@@ -76,6 +76,8 @@ WEAK_MODELS = ("anthropic/claude-haiku-4-5", "google/gemini-3.7-flash")
 """The weaker gateway models the model fault tries, in turn, until one breaks a Task."""
 PADDING_LINES = (1_200, 6_000, 24_000)
 """How many padding lines the context fault tries, in turn: about 40k, 200k, and 800k tokens."""
+STEPLESS_CAUSES = ("grader", "task")
+"""Causes no Agent step brings about, so the bench never scores a critical step for them."""
 PADDING_LINE = (
     "Reference: mill {n} keeps archived order ledgers, shift rosters, safety bulletins, "
     "and maintenance logs for the {n}th rolling line; none of them bear on quoting."
@@ -95,8 +97,6 @@ class Fault:
         agent: Changes the healthy Agent's manifest, given the level;
             ``None`` for a project fault.
         project: Changes a copy of the project; ``None`` for an Agent fault.
-        step_known: Whether the critical step is the Agent's answer. A grader
-            or answer-key fault breaks no step, so any step is accepted.
         levels: The strengths an Agent fault tries, in turn, until one breaks a
             Task the healthy Agent passed.
     """
@@ -108,7 +108,6 @@ class Fault:
     terms: tuple[str, ...]
     agent: Callable[[dict[str, Any], Any], None] | None = None
     project: Callable[[Path], None] | None = None
-    step_known: bool = True
     levels: tuple[Any, ...] = (None,)
 
 
@@ -268,7 +267,6 @@ QUOTING_FAULTS = (
         ("simple", "rush"),
         ("list price", "price_book", "verifier"),
         project=_list_price_grader,
-        step_known=False,
     ),
     Fault(
         "doubled-answer-key",
@@ -277,7 +275,6 @@ QUOTING_FAULTS = (
         ("simple",),
         ("answer key", "expected", "tons"),
         project=_doubled_answer_key,
-        step_known=False,
     ),
     Fault(
         "missing-quantity",
@@ -402,6 +399,7 @@ def run_bench(
     *,
     environ: Mapping[str, str],
     model: str | None = None,
+    fork_models: Sequence[str] = (),
     concurrency: int = 4,
     studio: Studio | None = None,
 ) -> dict[str, Any]:
@@ -409,6 +407,7 @@ def run_bench(
 
     The cases are grouped by the Job they came from, and each group runs with a
     fork key minted for that Job alone; without ``studio`` the forks are off.
+    ``fork_models`` limits the models a fork may switch to; empty allows any.
 
     Returns:
         Accuracy overall and per fault, and each check's rate.
@@ -422,6 +421,10 @@ def run_bench(
         path = root / "agents" / "inspector" / "agent.yaml"
         payload = yaml.safe_load(path.read_text("utf-8"))
         payload["model"] = model
+        path.write_text(yaml.safe_dump(payload, sort_keys=False), "utf-8")
+    for path in sorted((root / "tasks").glob("*/task.yaml")):
+        payload = yaml.safe_load(path.read_text("utf-8"))
+        payload["initial_state"]["fork_models"] = list(fork_models)
         path.write_text(yaml.safe_dump(payload, sort_keys=False), "utf-8")
     bench = json.loads((out / BENCH_FILE).read_text("utf-8"))
     by_task = {f"case-{n:02d}": case for n, case in enumerate(bench["cases"], start=1)}
@@ -468,6 +471,7 @@ def run_bench(
             or yaml.safe_load((root / "agents" / "inspector" / "agent.yaml").read_text("utf-8"))[
                 "model"
             ],
+            "fork_models": list(fork_models),
             "ineffective": bench.get("ineffective", []),
             "causes_without_cases": bench.get("causes_without_cases", []),
             "rows": sorted(rows, key=lambda row: row["task"]),
@@ -540,7 +544,7 @@ def _case(
     fault: Fault, root: Path, evidence: JobEvidence, trial: TrialEvidence, healthy: TrialEvidence
 ) -> Case:
     expected: dict[str, Any] = {"cause": fault.cause, "terms": list(fault.terms)}
-    if fault.step_known:
+    if fault.cause not in STEPLESS_CAUSES:
         steps = [int(item["step"]) for item in trial.steps if item.get("source") == "agent"]
         if steps:
             expected["critical_steps"] = sorted({max(steps), max(max(steps) - 1, 1)})
@@ -689,6 +693,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     run = commands.add_parser("run", help="Run the Inspector on a built bench.")
     run.add_argument("out", type=Path)
     run.add_argument("--model")
+    run.add_argument(
+        "--fork-model",
+        action="append",
+        default=[],
+        help="A model forks may switch the Agent to; repeat for several. Any if unset.",
+    )
     run.add_argument("--concurrency", type=int, default=4)
     run.add_argument(
         "--project", default=os.environ.get("PLURAL_PROJECT"), help="Hosted project for fork keys."
@@ -713,6 +723,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.out,
         environ=environ,
         model=args.model,
+        fork_models=args.fork_model,
         concurrency=args.concurrency,
         studio=_studio(args.project),
     )

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `--heldout` runs only a Benchmark's held-out Tasks. A held-out run in which every Trial errored before a verdict still counts as a peek, and is flagged as having revealed nothing. A Task a local run already used can't be newly held out.
 - The Inspector runs on `openai/gpt-5.6-luna` by default.
+- Inspector rule: a `model` Finding needs a fork that switched only the model and beat its controls on the Finding's gates. `record_finding` refuses one without it, and the Inspector keeps looking, so a `model` Finding is always `confirmed`. `plural job inspect --fork-model` limits the models a fork may switch to.
+- inspector-bench rule: the critical step isn't scored when the cause is `task` or `grader`, since no step of the Agent's brought it about. The per-fault `step_known` flag is gone.
 
 ### Fixed
 
@@ -18,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A call Claude Code or Codex makes to a tool that doesn't exist is recorded as an `unknown_action` step. Neither fires a hook for one, so Plural reads it from their output.
 - inspector-bench never runs a held-out Task. `--max-tasks` caps the Tasks each fault runs on, and `--padding-lines` picks the context fault's lengths.
 - `plural job report` rounds every percent the same way, so 29 of 40 and 11 of 40 read 73% and 28%.
+- Claude Code's prompt is cached on Claude models. Its cache breakpoints pass through the Messages bridge and the gateway to Anthropic, which used to receive none, and the bridge reports cache reads and writes back. A text part in a chat completions request may carry `cache_control`; hosts that cache on their own never receive it.
 
 ## [0.25.1] - 2026-11-17
 

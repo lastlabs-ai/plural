@@ -1189,8 +1189,21 @@
       "type": "string"
     },
     "TextContent": {
-      "description": "A text content part.\n\nAttributes:\n    type: Discriminator; always ``\"text\"``.\n    text: The text content.",
+      "description": "A text content part.\n\nAttributes:\n    type: Discriminator; always ``\"text\"``.\n    text: The text content.\n    cache_control: A prompt-cache breakpoint, such as ``{\"type\": \"ephemeral\"}``:\n        the prompt up to and including this part may be cached. Anthropic\n        honours it; hosts that cache on their own never receive it.",
       "properties": {
+        "cache_control": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Control"
+        },
         "text": {
           "title": "Text",
           "type": "string"

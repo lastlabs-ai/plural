@@ -99,6 +99,13 @@ they had too few Trials to decide; and `inferred` when nothing was forked. A for
 changes the Agent, so it can't confirm a cause outside the Agent: a `grader` or `task`
 Finding is always `inferred`, and its evidence is what supports it.
 
+A `model` Finding needs more than an inference. It is recorded only when a fork that
+switched the Agent to another model, and changed nothing else, beat its controls on the
+gates the Finding explains: that fork is what shows a stronger model passes where this
+one failed. Without one, `record_finding` refuses it and the Inspector keeps looking at
+the instructions, tools, and context. So a `model` Finding is always `confirmed`, and
+with forks off, or at `--depth quick`, the Inspector never records one.
+
 `plural job inspect` saves the Findings beside the Job as `findings.json`, and, for a
 Job you recorded, on the hosted Job, where the **Why it failed** tab shows the
 breakdown and each Finding.
@@ -114,7 +121,8 @@ breakdown and each Finding.
 `--budget-usd` caps what forks may spend across the Job, split evenly over the failed
 Trials; the Inspector is refused a fork it can't afford. `--trial` inspects only the
 Trials named, `--model` picks the Inspector's model (by default `openai/gpt-5.6-luna`, a
-small, low-cost model), and `--json` prints everything.
+small, low-cost model), `--fork-model` limits the models a fork may switch the Agent to
+(repeat it for several; by default any gateway model), and `--json` prints everything.
 
 The forks never run with your own key. Each inspection mints a key of its own: it can
 only call models through the gateway, is tagged with the Job it inspects for audit, is
@@ -244,7 +252,9 @@ instructions with about 40k, 200k, then 800k tokens (`--padding-lines` picks the
 lengths). `--max-tasks` caps the Tasks each fault runs on, to bound what building the
 bench costs. The bench is diagnosis, so it never runs a held-out Task. The Inspector
 passes a bench Task when its Finding names the planted cause, a critical step the
-answer key accepts, and words that name the fault.
+answer key accepts, and words that name the fault. The critical step isn't scored when
+the cause is `task` or `grader`: no step of the Agent's brought those about, so any
+step, or none, is right. `run --fork-model` limits the models forks may switch to.
 
 ```bash
 python -m plural.inspector.faults build examples/quoting /tmp/inspector-bench
@@ -257,33 +267,41 @@ fork key minted for the Job its Trials came from, so `run` needs hosted access
 
 Measured on November 19, 2026, with the Inspector on `openai/gpt-5.6-luna` at
 standard depth and a $0.25 fork budget per case, against quote-bot's model
-`openai/gpt-5.6-luna`, on dev Tasks only, at most 12 per fault (`--max-tasks 12`).
-The Inspector's own model calls cost $0.11 for all 35 cases. The full result is
+`openai/gpt-5.6-luna`, on dev Tasks only, at most 12 per fault (`--max-tasks 12`), with
+forks limited to `openai/gpt-5.6-luna`, `anthropic/claude-haiku-4-5`, and
+`google/gemini-3.7-flash`. The Inspector's own model calls cost $0.11 for all 35
+cases. The full result is
 [`examples/quoting/inspector-bench.json`](https://github.com/lastlabs-ai/plural/blob/main/examples/quoting/inspector-bench.json).
-"Before" is the November 18 measurement, with the Inspector on `openai/gpt-5.6`, the
-doubled answer key counted as `grader`, and no model fault.
+"Before" is the same 35 cases earlier that day, before the two rules above: a `model`
+Finding backed by a stronger model's fork, and no critical step scored for `task` or
+`grader`.
 
 | Fault | Cause | Right | Before |
 | --- | --- | --- | --- |
 | A tool hidden | tools | 3 of 4 | 3 of 4 |
-| A tool described as optional | tools | 2 of 3 | no cases |
-| Round the price | instructions | 4 of 4 | 4 of 4 |
-| Always promise the requested date | instructions | 0 of 4 | 2 of 4 |
-| Never hand off | instructions | 3 of 4 | 4 of 4 |
-| A weaker model (Claude Haiku 4.5) | model | 2 of 4 | no cases |
-| The Verifier checks the list price | grader | 4 of 4 | 4 of 4 |
-| The answer key doubles the tons | task | 3 of 4 | 4 of 4 |
-| The request leaves out the quantity | task | 0 of 4 | 0 of 4 |
-| **All** | | **21 of 35 (60%)** | **21 of 28 (75%)** |
+| A tool described as optional | tools | 2 of 3 | 2 of 3 |
+| Round the price | instructions | 3 of 4 | 4 of 4 |
+| Always promise the requested date | instructions | 0 of 4 | 0 of 4 |
+| Never hand off | instructions | 3 of 4 | 3 of 4 |
+| A weaker model (Claude Haiku 4.5) | model | 2 of 4 | 2 of 4 |
+| The Verifier checks the list price | grader | 2 of 4 | 4 of 4 |
+| The answer key doubles the tons | task | 3 of 4 | 3 of 4 |
+| The request leaves out the quantity | task | 4 of 4 | 0 of 4 |
+| **All** | | **22 of 35 (63%)** | **21 of 35 (60%)** |
 
 It named the planted cause in 27 of 35 cases, a step the answer key accepts in 13
-of 25 cases that have one, and the fault in its own words in 31 of 35. Claude Haiku
+of 21 cases that have one, and the fault in its own words in 32 of 35. Claude Haiku
 4.5 was enough for the model fault. Padding broke nothing at 1,200 or 6,000 lines
 (about 40k and 200k tokens), so the context fault has no cases; the 24,000-line level
 was not run.
 
-On the small model, most misses recorded `model` at step 1: all four on the
-requested date, the misses on both tool faults, and the one on the doubled answer
-key. All four misses on the missing quantity named the right cause, `task`, and no
-critical step, since the Agent rightly handed off; the bench's answer key still asks
-for step 1.
+The missing quantity went from 0 to 4 of 4 by the bench rule alone: the Inspector
+named `task` with no critical step both times. The model rule changed what the
+Inspector concludes more than how often it is right. Before, it recorded 10 `model`
+Findings, every one refuted by its own forks and 7 of them on faults that weren't the
+model; now it recorded 3, each confirmed by a fork to another model, all on the weaker
+model. Most of the cases it used to call `model` it now calls `instructions` at step
+1, which is still a miss on the tool faults, the requested date, and the doubled answer
+key. The two list-price
+misses named `environment`, and the rounding miss `grader`; with four cases a fault,
+one run moves a fault by a case or two either way.

@@ -193,7 +193,7 @@ def test_record_finding_checks_its_cause_evidence_and_forks(failed_job: dict[str
     with pytest.raises(ValueError, match="didn't fail"):
         app.record_finding(cause="model", summary="s", evidence=["e"], gates=["solved"])
     app.record_finding(
-        cause="model",
+        cause="instructions",
         summary="It never guessed nymph.",
         evidence=["six guesses, none nymph"],
         critical_step=6,
@@ -201,7 +201,7 @@ def test_record_finding_checks_its_cause_evidence_and_forks(failed_job: dict[str
     )
     assert not app.terminated()
     with pytest.raises(ValueError, match="already recorded"):
-        app.record_finding(cause="model", summary="s", evidence=["e"], critical_step=6)
+        app.record_finding(cause="instructions", summary="s", evidence=["e"], critical_step=6)
     app.record_finding(
         cause="grader",
         summary="The answer key wanted a word not in the list.",
@@ -209,6 +209,56 @@ def test_record_finding_checks_its_cause_evidence_and_forks(failed_job: dict[str
     )
     assert [item["status"] for item in app.state.findings] == ["inferred", "inferred"]
     assert app.terminated()
+
+
+def test_a_model_finding_needs_a_stronger_model_that_beat_the_controls(
+    failed_job: dict[str, Any],
+) -> None:
+    app = _app(failed_job)
+    own = app._trial().agent.model
+
+    def fork(test_id: str, **remedy: Any) -> None:
+        app.state.tests.append(
+            {
+                "test_id": test_id,
+                "job_id": "job_fork",
+                "step": 0,
+                "remedy": remedy,
+                "verdict": "likely_matters",
+                "candidate": 1.0,
+                "control": 0.0,
+                "candidates": 4,
+                "controls": 4,
+            }
+        )
+
+    fork("X1", model=own)
+    fork("X2", model="openai/gpt-5.6-luna", instructions="Guess nymph.")
+    fork("X3", instructions="Use each clue.")
+    for tests in ([], ["X1"], ["X2"], ["X3"]):
+        with pytest.raises(ValueError, match="stronger model beat the controls"):
+            app.record_finding(cause="model", summary="s", evidence=["e"], tests=tests)
+    fork("X4", model="openai/gpt-5.6-luna" if own != "openai/gpt-5.6-luna" else "x/y")
+    app.state.tests[-1]["verdict"] = "no_clear_effect"
+    with pytest.raises(ValueError, match="keep looking"):
+        app.record_finding(cause="model", summary="s", evidence=["e"], tests=["X4"])
+    app.state.tests[-1]["verdict"] = "likely_matters"
+    assert app.record_finding(cause="model", summary="s", evidence=["e"], tests=["X4"]) == (
+        "Recorded: model, confirmed."
+    )
+
+
+def test_forks_may_switch_only_to_the_allowed_models(
+    failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from plural.inspector.app import CREDENTIAL
+
+    app = _app(failed_job, depth="standard", fork_models=["openai/gpt-5.6-luna"])
+    assert app.overview()["fork_models"] == ["openai/gpt-5.6-luna"]
+    monkeypatch.setenv(CREDENTIAL, "test")
+    with pytest.raises(ValueError, match="Forks may run openai/gpt-5.6-luna, not openai/gpt"):
+        app.fork(step=0, model="openai/gpt-5.6")
+    assert _app(failed_job).overview()["fork_models"] == "any"
 
 
 def test_every_failed_gate_needs_a_finding(
@@ -292,6 +342,10 @@ def test_finding_check_grades_against_the_answer_key() -> None:
     wrong = module.check(Episode(state={"mode": "inspect", "findings": [other]}, expected=expected))
     assert wrong.score == 0.0 and wrong.metrics["cause_correct"] == 0.0
     assert module.check(Episode(state={"mode": "inspect"}, expected=expected)).score == 0.0
+    task = {**finding, "cause": "task", "critical_step": None}
+    keyed = {"cause": "task", "critical_steps": [1], "terms": ["schedule"]}
+    unstepped = module.check(Episode(state={"mode": "inspect", "findings": [task]}, expected=keyed))
+    assert unstepped.score == 1.0 and unstepped.metrics["step_correct"] is None
 
 
 def _save(job: dict[str, Any], **finding: Any) -> None:

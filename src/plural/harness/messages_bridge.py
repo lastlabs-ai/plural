@@ -85,8 +85,11 @@ def _to_openai(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(system, str) and system.strip():
         messages.append({"role": "system", "content": system})
     elif isinstance(system, list):
+        parts = _cached_parts(system)
         text = _text(system)
-        if text:
+        if parts:
+            messages.append({"role": "system", "content": parts})
+        elif text:
             messages.append({"role": "system", "content": text})
     for item in payload.get("messages") or []:
         if isinstance(item, dict):
@@ -125,6 +128,26 @@ def _text(blocks: list[Any]) -> str:
     )
 
 
+def _cached_parts(blocks: list[Any]) -> list[dict[str, Any]]:
+    """Text blocks as text parts that keep their cache breakpoints, when any has one.
+
+    Returns:
+        The parts, or an empty list when no block marks a breakpoint.
+    """
+    texts = [
+        block
+        for block in blocks
+        if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
+    ]
+    if not any(block.get("cache_control") for block in texts):
+        return []
+    return [
+        {"type": "text", "text": str(block["text"])}
+        | ({"cache_control": block["cache_control"]} if block.get("cache_control") else {})
+        for block in texts
+    ]
+
+
 def _message(item: dict[str, Any]) -> list[dict[str, Any]]:
     """One Messages turn as OpenAI messages: tool results become ``tool`` messages."""
     role = str(item.get("role") or "user")
@@ -156,14 +179,30 @@ def _message(item: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "role": "tool",
             "tool_call_id": str(block.get("tool_use_id") or ""),
-            "content": _result_text(block),
+            "content": _result_content(block),
         }
         for block in blocks
         if block.get("type") == "tool_result"
     ]
-    if text:
+    parts = _cached_parts(blocks)
+    if parts:
+        out.append({"role": role, "content": parts})
+    elif text:
         out.append({"role": role, "content": text})
     return out
+
+
+def _result_content(block: dict[str, Any]) -> str | list[dict[str, Any]]:
+    """A tool result's text, as one text part with its cache breakpoint when it has one."""
+    text = _result_text(block)
+    inner = block.get("content")
+    marks = [block.get("cache_control")]
+    if isinstance(inner, list):
+        marks += [item.get("cache_control") for item in inner if isinstance(item, dict)]
+    mark = next((item for item in reversed(marks) if item), None)
+    if mark is None or not text:
+        return text
+    return [{"type": "text", "text": text, "cache_control": mark}]
 
 
 def _result_text(block: dict[str, Any]) -> str:
@@ -219,6 +258,10 @@ def _from_openai(payload: dict[str, Any], *, model: str) -> dict[str, Any]:
         stop_reason = "max_tokens"
     raw_usage = payload.get("usage")
     usage = raw_usage if isinstance(raw_usage, dict) else {}
+    details = usage.get("prompt_tokens_details")
+    details = details if isinstance(details, dict) else {}
+    read = int(details.get("cached_tokens") or 0)
+    written = int(details.get("cache_write_tokens") or 0)
     return {
         "id": payload.get("id") or "msg_plural",
         "type": "message",
@@ -227,8 +270,10 @@ def _from_openai(payload: dict[str, Any], *, model: str) -> dict[str, Any]:
         "content": content,
         "stop_reason": stop_reason,
         "usage": {
-            "input_tokens": usage.get("prompt_tokens") or 0,
+            "input_tokens": max(int(usage.get("prompt_tokens") or 0) - read - written, 0),
             "output_tokens": usage.get("completion_tokens") or 0,
+            "cache_read_input_tokens": read,
+            "cache_creation_input_tokens": written,
         },
     }
 

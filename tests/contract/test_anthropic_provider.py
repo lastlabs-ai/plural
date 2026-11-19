@@ -37,6 +37,47 @@ def test_anthropic_chat() -> None:
     assert resp.usage.prompt_tokens == 3
 
 
+def test_anthropic_sends_cache_breakpoints_and_nothing_else_changes() -> None:
+    from plural.providers.openai_compatible import OpenAIProvider
+    from plural.types import TextContent
+
+    mark = {"type": "ephemeral"}
+    request = ChatRequest(
+        model="anthropic/claude-haiku-4-5",
+        messages=[
+            Message(
+                role="system",
+                content=[
+                    TextContent(text="Intro."),
+                    TextContent(text="Rules.", cache_control=mark),
+                ],
+            ),
+            Message(role="user", content=[TextContent(text="Quote it.", cache_control=mark)]),
+            Message(
+                role="tool",
+                tool_call_id="t1",
+                content=[TextContent(text="$1,225", cache_control=mark)],
+            ),
+        ],
+    )
+    payload = _provider()._encode_request(request, stream=False)
+    assert payload["system"] == [
+        {"type": "text", "text": "Intro."},
+        {"type": "text", "text": "Rules.", "cache_control": mark},
+    ]
+    assert payload["messages"][0]["content"] == [
+        {"type": "text", "text": "Quote it.", "cache_control": mark}
+    ]
+    assert payload["messages"][1]["content"][0]["cache_control"] == mark
+    plain = ChatRequest(
+        model="anthropic/claude-haiku-4-5",
+        messages=[Message(role="system", content="Be brief"), Message(role="user", content="Hi")],
+    )
+    assert _provider()._encode_request(plain, stream=False)["system"] == "Be brief"
+    openai = OpenAIProvider("sk-test")._encode_request(request, stream=False)
+    assert "cache_control" not in str(openai["messages"])
+
+
 @respx.mock
 def test_anthropic_stream_is_openai_shaped_and_bills_input_tokens() -> None:
     sse = (

@@ -181,7 +181,9 @@ Runtime. Setup happens in the fresh Runtime, not on your laptop.
    `CODEX_HOME`, Claude Code with its own configuration folder, and Hermes with its
    own `HERMES_HOME` and without its rules files, so none uses a login, provider key,
    or settings from the machine it runs on. Hermes's own usage report, its model
-   calls and tokens, is kept in the Trial's `trajectory.jsonl`.
+   calls and tokens, is kept in the Trial's `trajectory.jsonl`. Claude Code's prompt
+   cache breakpoints reach Anthropic, so its system prompt and tools are read from the
+   cache after the first call and billed at the cache rate.
 7. Claude Code asks before it edits a file, and Codex runs read-only, unless the Agent
    says otherwise. An Agent whose work is writing files sets
    `permission_mode: acceptEdits` or `sandbox: workspace-write`.

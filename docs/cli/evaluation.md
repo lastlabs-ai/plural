@@ -1718,6 +1718,8 @@ This section is generated from the Typer application. Run `uv run python scripts
 │                                            [default: standard]                                   │
 │ --budget-usd         <float range> [x>=0]  What forks may spend in all, in USD. [default: 2.0]   │
 │ --model              <str>                 The Inspector's model.                                │
+│ --fork-model         <str>                 A model forks may switch the Agent to. Repeatable;    │
+│                                            any if unset.                                         │
 │ --trial              <str>                 Inspect only this failed Trial. Repeatable.           │
 │ --concurrency        <int range> [x>=1]    Trials inspected at once. [default: 4]                │
 │ --json                                     Print machine-readable JSON.                          │

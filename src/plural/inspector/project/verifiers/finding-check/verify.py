@@ -5,13 +5,16 @@ from typing import Any
 from plural import Episode, VerifierOutput
 
 CHECKS = ("cause_correct", "step_correct", "cause_named")
+STEPLESS_CAUSES = ("grader", "task")
+"""No Agent step brings these about, so no critical step is scored for them."""
 
 
 def check(episode: Episode) -> VerifierOutput:
     """Score 1 when a Finding was recorded and every check the answer key allows passes.
 
     The answer key (inspector-bench only) holds the cause dimension, the critical
-    steps it accepts, and words, any one of which names the cause. With several
+    steps it accepts, and words, any one of which names the cause. The step isn't
+    scored when the cause is grader or task. With several
     Findings, the one naming the expected cause is checked, else the first.
     """
     state = episode.state
@@ -37,7 +40,7 @@ def check(episode: Episode) -> VerifierOutput:
         metrics["cause_correct"] = float(
             finding is not None and finding["cause"] == expected["cause"]
         )
-    if "critical_steps" in expected:
+    if "critical_steps" in expected and expected.get("cause") not in STEPLESS_CAUSES:
         metrics["step_correct"] = float(
             finding is not None and finding["critical_step"] in expected["critical_steps"]
         )

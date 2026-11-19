@@ -108,6 +108,23 @@ def _reasoning_text(raw: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _without_cache_control(message: dict[str, Any]) -> dict[str, Any]:
+    """A message without Anthropic cache breakpoints, which OpenAI rejects as unknown keys.
+
+    Returns:
+        The message, its content parts stripped of ``cache_control``.
+    """
+    content = message.get("content")
+    if isinstance(content, list):
+        message["content"] = [
+            {key: value for key, value in part.items() if key != "cache_control"}
+            if isinstance(part, dict)
+            else part
+            for part in content
+        ]
+    return message
+
+
 def _strip_author_prefix(model: str) -> str:
     """Strip ``author/`` prefix for providers that expect bare model ids.
 
@@ -218,13 +235,15 @@ class OpenAICompatible:
             # reasoning output replayed as input. A tool call's extra_content
             # belongs to the provider that made it, such as a Gemini signature.
             "messages": [
-                m.model_dump(
-                    exclude_none=True,
-                    exclude={
-                        "reasoning": True,
-                        "reasoning_signature": True,
-                        "tool_calls": {"__all__": {"extra_content"}},
-                    },
+                _without_cache_control(
+                    m.model_dump(
+                        exclude_none=True,
+                        exclude={
+                            "reasoning": True,
+                            "reasoning_signature": True,
+                            "tool_calls": {"__all__": {"extra_content"}},
+                        },
+                    )
                 )
                 for m in request.messages
             ],

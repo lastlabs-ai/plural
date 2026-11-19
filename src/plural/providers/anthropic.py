@@ -42,6 +42,7 @@ from plural.types import (
     Message,
     StreamChunk,
     StreamDelta,
+    TextContent,
     ToolCall,
     Usage,
     reasoning_tokens_of,
@@ -70,6 +71,44 @@ def _cache_counts(usage: dict[str, Any]) -> tuple[int, int, int]:
         int(creation.get("ephemeral_1h_input_tokens") or 0) if isinstance(creation, dict) else 0
     )
     return read, write, long_write
+
+
+def _cache_breakpoint(message: Message) -> dict[str, Any] | None:
+    """The last cache breakpoint among a message's text parts, if it has one.
+
+    Returns:
+        The ``cache_control`` object, or ``None``.
+    """
+    if not isinstance(message.content, list):
+        return None
+    marks = [
+        part.cache_control
+        for part in message.content
+        if isinstance(part, TextContent) and part.cache_control
+    ]
+    return marks[-1] if marks else None
+
+
+def _text_blocks(message: Message) -> list[dict[str, Any]]:
+    """A message's text as Anthropic text blocks, keeping each part's cache breakpoint.
+
+    A message without breakpoints is one block, its parts' text joined as before.
+
+    Returns:
+        The blocks; empty text parts are left out when the message has breakpoints.
+    """
+    if _cache_breakpoint(message) is None:
+        return [{"type": "text", "text": text_content(message)}]
+    assert isinstance(message.content, list)
+    blocks: list[dict[str, Any]] = []
+    for part in message.content:
+        if not isinstance(part, TextContent) or not part.text:
+            continue
+        block: dict[str, Any] = {"type": "text", "text": part.text}
+        if part.cache_control:
+            block["cache_control"] = part.cache_control
+        blocks.append(block)
+    return blocks
 
 
 @dataclass
@@ -159,25 +198,22 @@ class AnthropicProvider:
         return model
 
     def _encode_request(self, request: ChatRequest, *, stream: bool) -> dict[str, Any]:
-        system_parts: list[str] = []
+        system_blocks: list[dict[str, Any]] = []
         messages: list[dict[str, Any]] = []
         for msg in request.messages:
             if msg.role == "system":
-                system_parts.append(text_content(msg))
+                system_blocks.extend(_text_blocks(msg))
                 continue
             if msg.role == "tool":
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": msg.tool_call_id,
-                                "content": text_content(msg),
-                            }
-                        ],
-                    }
-                )
+                result: dict[str, Any] = {
+                    "type": "tool_result",
+                    "tool_use_id": msg.tool_call_id,
+                    "content": text_content(msg),
+                }
+                breakpoint_ = _cache_breakpoint(msg)
+                if breakpoint_ is not None:
+                    result["cache_control"] = breakpoint_
+                messages.append({"role": "user", "content": [result]})
                 continue
             if msg.role == "assistant" and (msg.tool_calls or msg.reasoning):
                 content: list[dict[str, Any]] = []
@@ -209,6 +245,9 @@ class AnthropicProvider:
                     )
                 messages.append({"role": "assistant", "content": content})
                 continue
+            if _cache_breakpoint(msg) is not None:
+                messages.append({"role": msg.role, "content": _text_blocks(msg)})
+                continue
             messages.append({"role": msg.role, "content": text_content(msg)})
 
         payload: dict[str, Any] = {
@@ -218,9 +257,11 @@ class AnthropicProvider:
             "stream": stream,
         }
         if wants_json_object(request):
-            system_parts.append(JSON_ONLY_INSTRUCTION)
-        if system_parts:
-            payload["system"] = "\n\n".join(system_parts)
+            system_blocks.append({"type": "text", "text": JSON_ONLY_INSTRUCTION})
+        if any("cache_control" in block for block in system_blocks):
+            payload["system"] = [block for block in system_blocks if block["text"]]
+        elif system_blocks:
+            payload["system"] = "\n\n".join(block["text"] for block in system_blocks)
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         if request.top_p is not None:

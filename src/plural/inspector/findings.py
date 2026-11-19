@@ -228,6 +228,31 @@ def finding_status(
     return "inconclusive"
 
 
+def stronger_model_won(fork: ForkTest, model: str, gates: Sequence[str] = ()) -> bool:
+    """Whether a fork shows the Trial failed for want of a stronger model.
+
+    The candidates must have run another model and changed nothing else, beaten
+    their controls, and been judged on the gates the Finding explains (or on the
+    whole Trial). Beating the controls is what shows the model is stronger here.
+
+    Returns:
+        Whether it backs a ``model`` Finding.
+
+    Examples:
+        >>> fork = ForkTest(test_id="X1", job_id="j", step=0, verdict="too_few")
+        >>> stronger_model_won(fork, "openai/gpt-5.6-luna")
+        False
+    """
+    remedy = fork.remedy
+    if remedy is None or remedy.model is None or remedy.model == model or fork.change:
+        return False
+    if remedy.instructions is not None or remedy.tool_overrides or remedy.harness_config:
+        return False
+    if gates and fork.gates and not set(fork.gates) & set(gates):
+        return False
+    return fork.beat_controls
+
+
 class CauseRow(FrozenModel):
     """One cause dimension's share of a Job's failed Trials.
 
@@ -363,4 +388,5 @@ __all__ = [
     "number_findings",
     "restatus",
     "save_findings",
+    "stronger_model_won",
 ]
