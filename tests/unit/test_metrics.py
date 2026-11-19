@@ -91,6 +91,7 @@ def test_a_verifier_with_only_number_metrics_needs_no_score() -> None:
     verifier = DeterministicVerifier(
         name="books",
         check=check,
+        evidence_required=False,
         metrics=[
             {"name": "margin_usd", "kind": "number", "unit": "USD"},
             {"name": "turns_taken", "kind": "number", "direction": "lower"},

@@ -10,6 +10,7 @@ from plural.cli.auth_commands import auth_app
 from plural.cli.common import deprecated
 from plural.cli.credential_commands import credential_app
 from plural.cli.external_commands import external_app
+from plural.cli.inspector_commands import agent_revise, job_inspect, job_report, trial_ask
 from plural.cli.models_commands import models_app
 from plural.cli.project_commands import project_app
 from plural.cli.resource_commands import resource_app
@@ -75,8 +76,13 @@ for _kind in KINDS:
     if _kind.name == "verifier":
         _group.command("try")(verifier_try)
         _group.command("apply")(verifier_apply)
+    if _kind.name == "agent":
+        _group.command("revise")(agent_revise)
     app.add_typer(_group, name=_kind.cli)
 app.command("run")(run)
+job_app.command("inspect")(job_inspect)
+job_app.command("report")(job_report)
+trial_app.command("ask")(trial_ask)
 app.add_typer(job_app, name="job")
 app.add_typer(trial_app, name="trial")
 app.add_typer(review_app, name="review")

@@ -419,10 +419,16 @@ def _handle(
         if not host.started:
             host.start(**_task_inputs(private))
         arguments = request.get("arguments")
+        unknown = bool(request.get("unknown"))
         if not isinstance(arguments, dict):
-            return {"ok": True, "result": host.agent_argument_error(request.get("action"))}, False
+            if not unknown:
+                return {
+                    "ok": True,
+                    "result": host.agent_argument_error(request.get("action")),
+                }, False
+            arguments = {}
         seat = control.seat(request) if host.seats else None
-        envelope = host.step(str(request.get("action")), arguments, seat=seat)
+        envelope = host.step(str(request.get("action")), arguments, seat=seat, unknown=unknown)
         return {"ok": True, "result": host.agent_view(envelope)}, False
     if operation == "tool":
         arguments = request.get("arguments")
@@ -885,23 +891,46 @@ def _report_tool(root: Path, rest: list[str], timeout: float | None) -> Any:
         return None
 
 
+_ENVIRONMENT_TOOL = "mcp__plural-environment__"
+_NO_SUCH_TOOL = "No such tool available"
+
+
 def claude_hook_fields(payload: Mapping[str, Any]) -> dict[str, Any] | None:
-    """The tool call a Claude Code PostToolUse hook describes.
+    """The tool call a Claude Code PostToolUse or PostToolUseFailure hook describes.
 
     Calls of the Environment's own MCP tools are left out: the host recorded
-    those as actions already.
+    those as actions already. So is a call to a tool that doesn't exist: Claude
+    Code fires no hook for one, and the vendor adapter reports it from Claude
+    Code's event stream as an ``unknown_action`` step.
 
     Returns:
         Fields for the ``tool`` operation, or ``None`` to skip this call.
+
+    Examples:
+        >>> claude_hook_fields(
+        ...     {
+        ...         "hook_event_name": "PostToolUseFailure",
+        ...         "tool_name": "mcp__plural-environment__quote",
+        ...         "tool_input": {"tons": 3},
+        ...         "error": "Error: No such tool available: quote",
+        ...     }
+        ... ) is None
+        True
     """
     name = str(payload.get("tool_name") or "")
-    if not name or name.startswith("mcp__plural-environment__"):
+    if not name:
         return None
     arguments = payload.get("tool_input")
     response = payload.get("tool_response")
     error = None
     if isinstance(response, dict) and response.get("is_error"):
         error = str(response.get("error") or response.get("content") or "tool failed")
+    elif isinstance(response, str) and _NO_SUCH_TOOL in response:
+        error = response
+    if payload.get("hook_event_name") == "PostToolUseFailure":
+        error = str(payload.get("error") or error or "tool failed")
+    if (error is not None and _NO_SUCH_TOOL in error) or name.startswith(_ENVIRONMENT_TOOL):
+        return None
     return {
         "name": name,
         "arguments": arguments if isinstance(arguments, dict) else {"input": arguments},
@@ -967,6 +996,17 @@ def main(argv: list[str] | None = None) -> None:
         except json.JSONDecodeError:
             arguments = None
         result = call("step", root=root, timeout=timeout, action=rest[0], arguments=arguments)
+    elif operation == "unknown":
+        if len(rest) != 1:
+            raise SystemExit("usage: python -m plural.apps.daemon unknown <tool>")
+        raw = sys.stdin.read().strip()
+        try:
+            arguments = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            arguments = None
+        result = call(
+            "step", root=root, timeout=timeout, action=rest[0], arguments=arguments, unknown=True
+        )
     elif operation == "query":
         if len(rest) != 2:
             raise SystemExit("usage: python -m plural.apps.daemon query <app> <action>")

@@ -33,7 +33,7 @@ PINNED = "sha256:" + "a" * 64
 
 
 def _scored(episode: Episode) -> VerifierOutput:
-    return VerifierOutput(score=1)
+    return VerifierOutput(score=1, evidence=("scored",))
 
 
 def _task(**runtime: Any) -> TaskDefinition:

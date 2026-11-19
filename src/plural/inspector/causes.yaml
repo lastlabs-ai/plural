@@ -1,0 +1,48 @@
+# The cause dimensions a Finding names. A project adds its own, or rewords one of
+# these, in inspector/causes.yaml. agent: true means a change to the Agent can fix
+# the cause, so a fork that makes that change can confirm it.
+- name: model
+  agent: true
+  description: >-
+    The model couldn't do the work with what it was given, and a stronger or
+    different model would.
+- name: context
+  agent: true
+  description: >-
+    What the model needed was missing from its context, buried in it, or crowded
+    out of it.
+- name: tools
+  agent: true
+  description: >-
+    The tools as the Agent saw them misled it: a tool it needed was missing, or a
+    description was vague or wrong.
+- name: instructions
+  agent: true
+  description: >-
+    The Agent's instructions told it to do the wrong thing, contradicted the Task,
+    or left out something it needed.
+- name: harness
+  agent: true
+  description: >-
+    The Harness's loop, limits, or parsing broke the episode, not the model's
+    choices.
+- name: environment
+  agent: false
+  description: >-
+    An App misbehaved: an error, wrong data, or an outage the Agent couldn't work
+    around.
+- name: grader
+  agent: false
+  description: >-
+    The answer key is right, but the Verifier's code judges a correct answer
+    wrong, or a wrong one right.
+- name: task
+  agent: false
+  description: >-
+    The Task's answer key (expected) is wrong, or its request and files leave out
+    something needed to reach it, so no Agent could have known what counted.
+- name: integrity
+  agent: false
+  description: >-
+    The result can't be trusted: a leaked answer, a shortcut, or tampering with
+    what was graded.

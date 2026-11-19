@@ -163,7 +163,7 @@ def run(
     heldout: bool = typer.Option(
         False,
         "--heldout",
-        help="Run the Benchmark's held-out Tasks too. Each such run is a peek, and is counted.",
+        help="Run only the Benchmark's held-out Tasks. Each such run is a peek, and is counted.",
     ),
     concurrency: str = typer.Option(
         "auto",
@@ -339,13 +339,13 @@ def _heldout_notice(space: Workspace, plan: RunPlan, *, err: bool) -> None:
         typer.echo(
             f"Running the {len(source.benchmark.dev_tasks)} dev Tasks; "
             f"{counted(len(held), 'held-out Task')} stay hidden. "
-            "--heldout runs them too, as a counted peek.",
+            "--heldout runs them alone, as a counted peek.",
             err=err,
         )
         return
     count = len(peeks(space.project.state_dir, source.benchmark.name)) + 1
     typer.echo(
-        f"PEEK: this run includes {counted(len(held), 'held-out Task')} of "
+        f"PEEK: this run is the {counted(len(held), 'held-out Task')} of "
         f"{source.benchmark.name}. It is peek {count}; every peek makes the held-out "
         "result a little less of a test.",
         err=err,
@@ -785,6 +785,11 @@ def trial_fork(
         None, "--change", help="Change one thing at the fork point: a diagnostic fork."
     ),
     payload: str | None = typer.Option(None, "--payload", help="The change's JSON payload."),
+    gate: list[str] = typer.Option(
+        [],
+        "--gate",
+        help="Judge forks and controls on this gate, not the whole Trial. Repeat for several.",
+    ),
     record: bool = typer.Option(
         False, "--record", help="Record the fork Job in the hosted project as it runs."
     ),
@@ -816,6 +821,13 @@ def trial_fork(
         raise ProjectError(f"--payload is not JSON: {exc}") from None
     if payload is not None and change is None:
         raise ProjectError("--payload goes with --change.")
+    if gate and source.result is not None:
+        unknown = sorted(set(gate) - set(source.result.gates))
+        if unknown:
+            known = ", ".join(sorted(source.result.gates)) or "none"
+            raise ProjectError(
+                f"--gate: Trial {trial_id} has no gate {', '.join(unknown)}. Its gates: {known}."
+            )
     request = ForkRequest(
         trial_id=trial_id,
         step=step,
@@ -841,14 +853,15 @@ def trial_fork(
             credential_source=_stored_credentials(as_json),
             source=source,
         )
-    outcome = fork_results(spec, result, source.passed)
-    view = {"job_id": job_id, "of_trial_id": trial_id, **outcome}
+    outcome = fork_results(spec, result, source.passed, gates=tuple(gate))
+    view = {"job_id": job_id, "of_trial_id": trial_id, "gates": list(gate), **outcome}
 
     def text() -> None:
         for warning in outcome["warnings"]:
             typer.echo(f"! {warning}", err=True)
         kind = "Diagnostic fork" if outcome["diagnostic"] else "Fork"
-        typer.echo(f"{kind} {job_id} of Trial {trial_id} after step {outcome['step']}:")
+        judged = f", judged on {', '.join(gate)}" if gate else ""
+        typer.echo(f"{kind} {job_id} of Trial {trial_id} after step {outcome['step']}{judged}:")
         for name, summary in outcome["summaries"].items():
             typer.echo(f"  {name}: {summary}")
         reproduced = outcome["controls_reproduced"]
@@ -1241,6 +1254,9 @@ def _finish_local(
     as_json: bool,
 ) -> None:
     payload = {"location": "local", **local_job(space, job_id)}
+    peek = next((item for item in peeks(space.project.state_dir) if item["job_id"] == job_id), None)
+    if peek is not None:
+        payload["peek_revealed_nothing"] = peek["revealed_nothing"]
     if tracking is not None:
         payload["hosted_job_id"] = tracking.hosted_job_id
         payload["recording_errors"] = tracking.errors
@@ -1248,6 +1264,12 @@ def _finish_local(
 
     def text() -> None:
         _print_result(job_id, result, payload.get("summaries") or ())
+        if payload.get("peek_revealed_nothing"):
+            typer.echo(
+                "This held-out run revealed nothing: every Trial errored before a verdict. "
+                "It still counts as a peek.",
+                err=True,
+            )
         if result.stopped:
             typer.echo(result.stopped, err=True)
             typer.echo(

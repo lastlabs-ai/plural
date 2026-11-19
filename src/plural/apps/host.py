@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from plural.apps.base import App, observation_payload
 from plural.apps.workspace import BUNDLE_FILE, WorkspaceSnapshots
 from plural.common import described
+from plural.snapshots import Snapshotter
 from plural.verifiers import Step, StepTask
 
 if TYPE_CHECKING:
@@ -252,7 +253,8 @@ class AppHost:
         self.restored_from: int | None = None
         self.oracles: dict[str, dict[str, str]] = {}
         """Diagnostic tools a fork added, by name, with the answer each returns."""
-        self.snapshots = (
+        self._snapshot_store = Path(snapshot_store or ".")
+        self.snapshots: Snapshotter | None = (
             WorkspaceSnapshots(
                 Path(agent_workspace),
                 Path(snapshot_store),
@@ -427,11 +429,11 @@ class AppHost:
         report = self.report()
         if self.snapshots is not None and self.snapshots.available:
             # What the Harness left behind, for Verifiers that read the workspace.
-            final = self.snapshots.take_final()
+            final = self.snapshots.snapshot_final()
             bundle = None
             if final is not None:
                 with contextlib.suppress(OSError, RuntimeError):
-                    bundle = self.snapshots.bundle(self.snapshots.git_dir.parent / BUNDLE_FILE)
+                    bundle = self.snapshots.export(self._snapshot_store / BUNDLE_FILE)
             report["workspace"] = {
                 **self.snapshots.report(),
                 "final": final,
@@ -501,7 +503,12 @@ class AppHost:
         return envelope
 
     def step(
-        self, name: str, arguments: Mapping[str, Any], *, seat: str | None = None
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        seat: str | None = None,
+        unknown: bool = False,
     ) -> dict[str, Any]:
         """Run one exposed action and return its envelope.
 
@@ -512,6 +519,11 @@ class AppHost:
 
         With seats, ``seat`` is the one acting. An action from a seat that may
         not act now is refused before it runs, and is not a step.
+
+        A call to a tool that doesn't exist is recorded as an ``unknown_action``
+        step, never dropped. ``unknown`` says the Harness didn't offer the tool,
+        so the call is recorded that way even when an App has an action by that
+        name, such as one the Agent's ``tool_overrides`` hid.
 
         Returns:
             A ``step`` envelope.
@@ -529,20 +541,25 @@ class AppHost:
         for item in self.apps.values():
             item.seat = seat
         try:
-            return self._run(name, arguments)
+            return self._run(name, arguments, unknown=unknown)
         finally:
             self._acting = None
             for item in self.apps.values():
                 item.seat = None
 
-    def _run(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+    def _run(
+        self, name: str, arguments: Mapping[str, Any], *, unknown: bool = False
+    ) -> dict[str, Any]:
         from plural.environments.env import ActionCall
 
         self.steps += 1
         arguments = dict(arguments)
-        route = self.routes.get(name)
+        route = None if unknown else self.routes.get(name)
         if route is None:
-            available = ", ".join(self.routes) or "none"
+            # A Harness that offered its own tools tells the model which; listing the
+            # Apps' actions here could name one the Agent's overrides hid.
+            names = ", ".join(self.routes) or "none"
+            available = "" if unknown else f"; available actions: {names}"
             self._record_states(self.steps, action=name, error="unknown action")
             self._snapshot_workspace(self.steps)
             return self._logged(
@@ -553,7 +570,8 @@ class AppHost:
                     rendered="",
                     info={
                         "step": self.steps,
-                        "error": f"unknown action {name!r}; available actions: {available}",
+                        "error": f"unknown action {name!r}{available}",
+                        "unknown_action": True,
                     },
                 ),
                 arguments,
@@ -1191,7 +1209,7 @@ class AppHost:
 
     def _snapshot_workspace(self, step: int) -> None:
         if self.snapshots is not None:
-            self.snapshots.take(step)
+            self.snapshots.snapshot(step)
 
     def _snapshot(self, app: App[Any]) -> Any:
         if not app.has_snapshot():

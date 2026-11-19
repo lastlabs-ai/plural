@@ -57,7 +57,9 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [RuntimeVariable](#runtimevariable)
 - [SandboxCapability](#sandboxcapability)
 - [Secret](#secret)
+- [ToolOverride](#tooloverride)
 - [VerifierRuntime](#verifierruntime)
+- [VolumeVersion](#volumeversion)
 
 ## Environment
 
@@ -181,6 +183,7 @@ A catalog-backed model and its optional execution harness.
 - **`endpoint_key`** — `string | null`; optional. Default: `null`.
 - **`external`** — `ExternalAgent | null`; optional. Default: `null`.
 - **`credentials`** — `object`; optional.
+- **`tool_overrides`** — `object`; optional. How the Environment's tools are described to the model, by tool name: a new description, or hidden: true. The Environment itself is unchanged.
 - **`metadata`** — `object`; optional.
 
 ## Benchmark
@@ -299,6 +302,7 @@ Everything needed to continue a Trial from after step ``step``.
 - **`observation`** — `JSON value`; optional. Default: `null`.
 - **`rendered`** — `string`; optional. Default: `""`.
 - **`workspace`** — `CheckpointWorkspace`; optional.
+- **`volume`** — `VolumeVersion | null`; optional. Default: `null`.
 - **`contexts`** — `object`; optional.
 - **`warnings`** — `array of string`; optional.
 - **`heldout`** — `boolean`; optional. Default: `false`.
@@ -558,6 +562,13 @@ A named value an App needs, which it never stores itself.
 - **`description`** — `string`; optional. Default: `""`.
 - **`scopes`** — `array of string`; optional. Default: `[]`.
 
+## ToolOverride
+
+How one tool is described to the model.
+
+- **`description`** — `string | null`; optional. Default: `null`.
+- **`hidden`** — `boolean`; optional. Default: `false`.
+
 ## VerifierRuntime
 
 Machine for a verifier that needs its own sandbox.
@@ -568,3 +579,11 @@ Machine for a verifier that needs its own sandbox.
 - **`allowed_hosts`** — `array of string`; optional. Default: `[]`.
 - **`compute`** — `ResourceRequirements`; optional.
 - **`timeout_seconds`** — `number`; optional. Default: `60`. Constraints: `{"exclusiveMinimum": 0}`.
+
+## VolumeVersion
+
+One immutable version of one Volume, as a memory provider names it.
+
+- **`provider`** — `string`; required. Constraints: `{"minLength": 1}`. The memory provider, such as plural.
+- **`volume_id`** — `string`; required. Constraints: `{"minLength": 1}`. The Volume, as the provider names it.
+- **`version`** — `string`; required. Constraints: `{"minLength": 1}`. The version, as the provider names it.

@@ -269,9 +269,9 @@ class EpisodeWorkspace(FrozenModel):
             elif self._bundle is None or self._commit is None:
                 self._files = {}
             else:
-                from plural.apps.workspace import snapshot_files
+                from plural.snapshots import GitBundle
 
-                self._files = snapshot_files(self._bundle, self._commit)
+                self._files = GitBundle(self._bundle).files(self._commit)
         return self._files
 
     def files(self) -> dict[str, bytes]:
@@ -1142,6 +1142,10 @@ class DeterministicVerifier(Verifier):
 
         Returns:
             A validated VerifierOutput.
+
+        Raises:
+            EvidenceMissing: When the result gives no evidence and the Verifier
+                requires it, as a hosted project would refuse it.
         """
         fn = self.check_fn
         if fn is None:
@@ -1153,7 +1157,19 @@ class DeterministicVerifier(Verifier):
             output = fn(episode)
         except Exception as exc:
             raise ValueError(f"Verifier {self.name!r} check raised {described(exc)}") from exc
-        return coerce_verifier_output(output, verifier_name=self.name, metrics=self.metric_specs)
+        result = coerce_verifier_output(output, verifier_name=self.name, metrics=self.metric_specs)
+        if self.evidence_required and not result.evidence:
+            raise EvidenceMissing(
+                f"Verifier {self.name!r} returned no evidence, and it requires some.\n"
+                "Say what the score rests on, such as:\n"
+                "  return VerifierOutput(score=1.0, evidence=('total matches: 1140.00',))\n"
+                "or set evidence_required: false on the Verifier."
+            )
+        return result
+
+
+class EvidenceMissing(ValueError):
+    """A Verifier result that gives no evidence, from a Verifier that requires it."""
 
 
 def hindsight_hooks(verifiers: Iterable[Any]) -> list[HindsightVerifier]:
@@ -1320,6 +1336,7 @@ __all__ = [
     "DeterministicVerifier",
     "Episode",
     "EpisodeUsage",
+    "EvidenceMissing",
     "HumanVerifier",
     "RubricCriterion",
     "Step",

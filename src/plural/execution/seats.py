@@ -23,7 +23,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
-from plural.apps.workspace import SnapshotEntry
 from plural.harness.episode import EPISODE_FILE
 from plural.jobs import SeatResult, VerifierResult
 from plural.rewards import RewardRecord
@@ -34,6 +33,7 @@ from plural.sandbox import (
     SandboxHandle,
     SandboxProvider,
 )
+from plural.snapshots import SnapshotEntry
 from plural.tasks import TaskDefinition
 
 WORKSPACE = "/workspace"

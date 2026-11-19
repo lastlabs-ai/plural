@@ -413,6 +413,7 @@ def trial_checkpoint(
             task_digest=source.task.content_hash,
             agent_digest=source.agent.content_hash,
             heldout=source.heldout,
+            volume=source.result.volume_in if source.result is not None else None,
         )
     except ValueError as exc:
         raise ProjectError(str(exc)) from None
@@ -503,6 +504,11 @@ class ForkRequest:
     payload: Any = None
     hosted_trial_id: str | None = None
     """The original Trial's hosted id, so a recorded fork links to it."""
+    candidates: tuple[AgentBinding, ...] = ()
+    """Agents to fork into that aren't saved in the project, such as the Inspector's
+    proposed fix: the original Agent with one thing changed."""
+    concurrency: int | None = None
+    """How many forks run at once; by default, as many as the original Job ran."""
 
 
 def hosted_trial_id(workspace: Workspace, studio: Studio, trial_id: str) -> str | None:
@@ -568,6 +574,7 @@ def plan_fork(
         )
         candidates.append(AgentBinding(agent=agent._definition()))
         refs += [ref for ref in (agent_ref, harness_ref) if ref is not None]
+    candidates.extend(request.candidates)
     change = (
         ForkChange(name=request.change, payload=request.payload)
         if request.change is not None
@@ -618,6 +625,14 @@ def plan_fork(
                 "run_id": uuid.uuid4().hex,
                 "purpose": "fork",
                 "fork": fork,
+                **(
+                    {
+                        "concurrency": request.concurrency,
+                        "per_runtime_concurrency": request.concurrency,
+                    }
+                    if request.concurrency is not None
+                    else {}
+                ),
             }
         )
         # From the field values, so the Tasks keep the Verifier code they were loaded with.
@@ -685,10 +700,17 @@ def fork_local_trial(
     return job_id, result, spec
 
 
-def fork_results(spec: JobSpec, result: JobResult, original_passed: bool | None) -> dict[str, Any]:
+def fork_results(
+    spec: JobSpec,
+    result: JobResult,
+    original_passed: bool | None,
+    gates: Sequence[str] = (),
+) -> dict[str, Any]:
     """Each candidate against the controls, and how often the controls repeated the original.
 
     A Trial passes when its gates pass, or, with no gates, when its score is 1.
+    With ``gates`` named, a Trial passes when each of those passed, so a change
+    that fixes one of two failures can show its effect; the original failed them.
 
     Returns:
         ``candidates``: one :class:`~plural.stats.ForkComparison` per candidate
@@ -709,7 +731,9 @@ def fork_results(spec: JobSpec, result: JobResult, original_passed: bool | None)
             continue
         histories[record.history] = histories.get(record.history, 0) + 1
         warnings.extend(item for item in record.warnings if item not in warnings)
-        outcome = float(_passed(trial))
+        outcome = float(
+            all(trial.gates.get(name) is True for name in gates) if gates else _passed(trial)
+        )
         if record.role == "control":
             controls.append(outcome)
         else:
@@ -717,11 +741,16 @@ def fork_results(spec: JobSpec, result: JobResult, original_passed: bool | None)
             passed.setdefault(agent_id, []).append(outcome)
     comparisons: dict[str, ForkComparison] = {
         names.get(agent_id, agent_id): compare_fork(
-            values, controls, seed=seed_for(result.job_id, agent_id)
+            values,
+            controls,
+            seed=seed_for(result.job_id, agent_id),
+            metric="gates: " + ", ".join(gates) if gates else "pass",
         )
         for agent_id, values in passed.items()
     }
     reproduced = None
+    if gates:
+        original_passed = False
     if original_passed is not None and controls:
         before = float(original_passed)
         reproduced = sum(1 for item in controls if item == before) / len(controls)

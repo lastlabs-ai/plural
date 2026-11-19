@@ -11,14 +11,10 @@ from typing import Any
 
 import pytest
 
-from plural.apps.workspace import (
-    WorkspaceSnapshots,
-    git_available,
-    snapshot_entries,
-    snapshot_files,
-)
+from plural.apps.workspace import WorkspaceSnapshots, git_available
 from plural.execution.seats import restore_workspace
 from plural.sandbox import ExecRequest, ExecResult, FileUpload
+from plural.snapshots import GitBundle, SnapshotArchive, Snapshotter, version_at
 
 pytestmark = pytest.mark.skipif(not git_available(), reason="git is not installed")
 
@@ -62,20 +58,20 @@ def _snapshot(tmp_path: Path) -> tuple[Path, str]:
     (workspace / "seats" / "north" / "plan.md").write_text("north's plan\n")
     (workspace / "seats" / "north" / "current").symlink_to("plan.md")
     snapshots = WorkspaceSnapshots(workspace, tmp_path / "store")
-    commit = snapshots.take(1)
+    commit = snapshots.snapshot(1)
     assert commit is not None
-    bundle = snapshots.bundle(tmp_path / "workspace.bundle")
+    bundle = snapshots.export(tmp_path / "workspace.bundle")
     assert bundle is not None
     return bundle, commit
 
 
 def test_symbolic_links_are_restored_and_never_followed_on_the_host(tmp_path: Path) -> None:
     bundle, commit = _snapshot(tmp_path)
-    entries = {item.path: item for item in snapshot_entries(bundle, commit)}
+    entries = {item.path: item for item in GitBundle(bundle).entries(commit)}
     assert entries["latest"].link == "notes.txt" and entries["latest"].data == b""
     assert entries["run.sh"].mode == 0o755 and entries["notes.txt"].mode == 0o644
     # A Verifier's view of the workspace holds the files, never what a link points to.
-    files = snapshot_files(bundle, commit)
+    files = GitBundle(bundle).files(commit)
     assert files["notes.txt"] == b"shared\n"
     assert "host-secret" not in files and "latest" not in files
 
@@ -93,7 +89,7 @@ def test_a_seats_files_are_restored_by_the_seats_own_user(tmp_path: Path) -> Non
     bundle, commit = _snapshot(tmp_path)
     runtime = _Runtime(tmp_path / "runtime")
     (runtime.root / "workspace" / "seats" / "north").mkdir(parents=True)
-    entries = snapshot_entries(bundle, commit)
+    entries = GitBundle(bundle).entries(commit)
     asyncio.run(
         restore_workspace(runtime, None, entries, {"north": "plural-seat-north"})  # type: ignore[arg-type]
     )
@@ -114,10 +110,44 @@ def test_the_snapshot_report_says_whether_the_files_changed(tmp_path: Path) -> N
     workspace.mkdir()
     (workspace / "notes.txt").write_text("before\n")
     snapshots = WorkspaceSnapshots(workspace, tmp_path / "store")
-    snapshots.take(0)
-    snapshots.take(1)
-    snapshots.take_final()
+    snapshots.snapshot(0)
+    snapshots.snapshot(1)
+    snapshots.snapshot_final()
     assert snapshots.report()["changed"] is False
     (workspace / "notes.txt").write_text("after\n")
-    snapshots.take_final()
+    snapshots.snapshot_final()
     assert snapshots.report()["changed"] is True
+
+
+def test_workspace_snapshots_sit_behind_the_snapshot_interface(tmp_path: Path) -> None:
+    """The git store is one Snapshotter; a Volume's memory can be another."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "notes.txt").write_text("first\n")
+    snapshots = WorkspaceSnapshots(workspace, tmp_path / "store")
+    assert isinstance(snapshots, Snapshotter)
+    first = snapshots.snapshot(1)
+    (workspace / "notes.txt").write_text("second\n")
+    second = snapshots.snapshot(2)
+    archive = GitBundle(snapshots.export(tmp_path / "workspace.bundle") or tmp_path)
+    assert isinstance(archive, SnapshotArchive)
+    assert first is not None and second is not None
+    assert version_at(snapshots.report(), 1) == first
+    assert version_at(snapshots.report(), 9) == second
+    assert archive.files(first) == {"notes.txt": b"first\n"}
+    restored = tmp_path / "restored"
+    assert archive.restore(second, restored) == ["notes.txt"]
+    assert (restored / "notes.txt").read_text() == "second\n"
+
+
+def test_episode_code_reads_snapshots_only_through_the_interface() -> None:
+    """Nothing outside the git store calls git snapshot code directly."""
+    import plural
+
+    root = Path(plural.__file__).parent
+    for path in root.rglob("*.py"):
+        if path.name in {"workspace.py", "snapshots.py"}:
+            continue
+        text = path.read_text()
+        for name in ("checkout(", "_git(", "snapshot_files", "snapshot_entries", "commit_for"):
+            assert f"workspace import {name.rstrip('(')}" not in text, (path, name)

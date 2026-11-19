@@ -27,9 +27,17 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
 
-from plural.apps.workspace import BUNDLE_FILE, commit_for
+from plural.apps.workspace import BUNDLE_FILE
+from plural.snapshots import version_at
+from plural.volumes import VolumeVersion
 
 CHECKPOINTS_FOLDER = "checkpoints"
 """The folder in a Trial's directory that holds its named checkpoints."""
@@ -104,6 +112,8 @@ class Checkpoint(BaseModel):
     observation: Any = None
     rendered: str = ""
     workspace: CheckpointWorkspace = Field(default_factory=CheckpointWorkspace)
+    volume: VolumeVersion | None = None
+    """The Agent's Volume version as it stood after step ``step``, for a fork to restore."""
     contexts: dict[str, AgentContext] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     heldout: bool = False
@@ -111,6 +121,14 @@ class Checkpoint(BaseModel):
     """The original's steps 1 to ``step``, as its host recorded them, with rewards."""
     prefix_states: list[dict[str, Any]] = Field(default_factory=list)
     prefix_metrics: list[dict[str, Any]] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _omit_no_volume(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        # Without a Volume, a checkpoint and a Task built from one hash as before.
+        if isinstance(data, dict) and self.volume is None:
+            data.pop("volume", None)
+        return data
 
     @property
     def digest(self) -> str:
@@ -451,8 +469,11 @@ def build_checkpoint(
     task_digest: str = "",
     agent_digest: str = "",
     heldout: bool = False,
+    volume: VolumeVersion | None = None,
 ) -> Checkpoint:
     """Rebuild the checkpoint after ``step`` from a finished Trial's artifacts.
+
+    ``volume`` is the Volume version the Trial held at ``step``.
 
     Returns:
         The checkpoint.
@@ -524,6 +545,7 @@ def build_checkpoint(
         observation=observation,
         rendered=rendered,
         workspace=workspace,
+        volume=volume,
         contexts=contexts,
         warnings=warnings,
         heldout=heldout,
@@ -542,7 +564,7 @@ def _workspace(artifacts: Path, step: int) -> CheckpointWorkspace:
         return CheckpointWorkspace(problem="the Trial recorded no workspace snapshots")
     if not (artifacts / BUNDLE_FILE).is_file():
         return CheckpointWorkspace(problem=str(report.get("problem") or "no workspace.bundle"))
-    commit = commit_for(report, step)
+    commit = version_at(report, step)
     skipped = sorted(
         {
             str(item.get("path"))

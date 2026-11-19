@@ -44,6 +44,7 @@ def _project(tmp_path: Path, traps: tuple[str, ...]) -> Path:
     path = project / "benchmarks/quoting/benchmark.yaml"
     benchmark = yaml.safe_load(path.read_text())
     benchmark["tasks"] = [name for name in benchmark["tasks"] if name in SUBSET]
+    benchmark["heldout"] = [name for name in benchmark.get("heldout", ()) if name in SUBSET]
     for category in benchmark["categories"]:
         category["tasks"] = [name for name in category["tasks"] if name in SUBSET]
     path.write_text(yaml.safe_dump(benchmark, sort_keys=False), encoding="utf-8")

@@ -65,7 +65,7 @@ def smoke(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict[str, str
     }
     env["PLURAL_CONFIG_HOME"] = str(base / "config")
     # Each night's copy is a new folder pushing to the same hosted project.
-    _plural(root, env, "project", "push", "--connect", "--name", hosted, "--force", "--yes")
+    _plural(root, env, "project", "push", "--connect", "--name", hosted, "--yes")
     return root, env
 
 

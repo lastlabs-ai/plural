@@ -25,9 +25,10 @@ from urllib.parse import urlsplit
 
 from plural._deprecation import module_getattr
 from plural.agents import AgentBinding
+from plural.agents.tool_overrides import apply_tool_overrides
 from plural.apps.daemon import MANAGED
 from plural.apps.host import STATES_FILE
-from plural.apps.workspace import BUNDLE_FILE, snapshot_entries
+from plural.apps.workspace import BUNDLE_FILE
 from plural.atif import ATIF_FILE, episode_to_atif
 from plural.auth import AuthHTTPError, check_gateway_key
 from plural.benchmarks.results import AttemptEvidence, aggregate_configuration
@@ -184,6 +185,7 @@ from plural.sandbox import (
 )
 from plural.sandbox.conformance import conformance_status
 from plural.sandbox.sweep import trial_labels
+from plural.snapshots import GitBundle
 from plural.tasks import TaskDefinition, validate_task_state
 from plural.trajectory import normalize_trajectory
 from plural.transcript import TRAJECTORY_FILE, episode_to_messages
@@ -198,6 +200,7 @@ from plural.verifiers import (
     EpisodeOutcome,
     EpisodeUsage,
     EpisodeWorkspace,
+    EvidenceMissing,
     HumanVerifier,
     VerifierDefinition,
     VerifierOutput,
@@ -1055,6 +1058,7 @@ class TrialRunner:
             of_hosted_trial_id=self.job_spec.fork.hosted_trial_id
             if self.job_spec.fork is not None
             else None,
+            volume=checkpoint.volume,
         )
         return resume, record
 
@@ -1065,7 +1069,11 @@ class TrialRunner:
         seat = self.spec.fork.seat if self.spec.fork is not None else None
         player = next((item for item in players if item.seat == seat), players[0])
         _, record = self._history(player)
-        return {"tools_offered": self._tools_offered(player), "fork": record}
+        fields: dict[str, Any] = {"tools_offered": self._tools_offered(player), "fork": record}
+        if record is not None and record.volume is not None:
+            # A fork starts from the Volume version its checkpoint held.
+            fields["volume_in"] = record.volume
+        return fields
 
     async def _restore_workspace(
         self,
@@ -1093,7 +1101,9 @@ class TrialRunner:
                 "the workspace can't be restored. Run it from the project that holds the Trial.",
             )
         try:
-            entries = await asyncio.to_thread(snapshot_entries, bundle, checkpoint.workspace.commit)
+            entries = await asyncio.to_thread(
+                GitBundle(bundle).entries, checkpoint.workspace.commit
+            )
         except (OSError, RuntimeError) as exc:
             raise ExecutionFailure(
                 ErrorCode.ENVIRONMENT_FAILED,
@@ -2098,12 +2108,25 @@ class TrialRunner:
         party = task.environment.party
         return party is None or party.isolation == "isolated"
 
-    def _environment_payload(self, task: TaskDefinition) -> dict[str, Any]:
-        """The Environment as a Harness is told it, with a diagnostic change's edits."""
+    def _environment_payload(
+        self, task: TaskDefinition, binding: AgentBinding | None = None
+    ) -> dict[str, Any]:
+        """The Environment as a Harness is told it.
+
+        A diagnostic change's edits come first, then the Agent's own tool
+        overrides, so a candidate Agent's descriptions hold in a fork too.
+        """
         point = self._fork_point()
-        if point is not None:
-            return copy.deepcopy(point.environment)
-        return environment_payload(task, hosted=self._hosted)
+        payload = (
+            copy.deepcopy(point.environment)
+            if point is not None
+            else environment_payload(task, hosted=self._hosted)
+        )
+        if binding is not None and binding.agent.tool_overrides:
+            payload["actions"] = apply_tool_overrides(
+                payload.get("actions") or [], binding.agent.tool_overrides
+            )
+        return payload
 
     def _run_request(self, task: TaskDefinition, player: _Player) -> HarnessRunRequest:
         """What one Harness is told: the Task as its seat sees it, and its own Agent."""
@@ -2128,7 +2151,7 @@ class TrialRunner:
                 "harness_config": binding.harness_config,
             },
             model_resolution=model.model_dump(mode="json"),
-            environment=self._environment_payload(task),
+            environment=self._environment_payload(task, binding),
             mode=self.job_spec.mode.value,
             resume=self._history(player)[0],
             capture_tito=self.job_spec.mode is JobMode.TRAIN,
@@ -2535,6 +2558,8 @@ class TrialRunner:
                 try:
                     scored = await asyncio.to_thread(verifier.invoke, episode)
                     parsed = scored.validated_finite()
+                except EvidenceMissing as exc:
+                    raise ExecutionFailure(ErrorCode.EVIDENCE_MISSING, str(exc)) from exc
                 except ValueError as exc:
                     raise ExecutionFailure(ErrorCode.VERIFIER_FAILED, str(exc)) from exc
                 self._check_seats(verifier.name, parsed.seats)

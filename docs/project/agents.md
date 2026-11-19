@@ -296,6 +296,33 @@ To have the calls observed instead, an organization admin can add the server und
 are recorded on the Trial with `billing="organization"` and a reference cost, and never
 draw on credits.
 
+## Change what a tool says
+
+An Environment's actions describe themselves, and every Agent reads the same
+descriptions. Agents differ in how they read them, so an Agent can rewrite a tool's
+description, or hide a tool, for itself alone, with `tool_overrides`:
+
+```yaml
+name: quote-bot
+version: 1.1.0
+model: openai/gpt-5.6-luna
+tool_overrides:
+  check_schedule: >-
+    The earliest delivery date the mill can meet. Check it before every quote.
+  reveal_answer:
+    hidden: true
+```
+
+A string replaces the description; `hidden: true` leaves the tool out of what the
+model is offered. Either is part of the Agent, and of its content hash, so two Agents
+that differ only here are two Agents. The Environment and its other Agents are
+untouched. If the model calls a hidden tool anyway, the call is recorded as a step
+with `unknown_action`, never run, and the model is told the action doesn't exist.
+
+Only a model and Harness Agent has these; an [External Agent](external-agents.md)
+describes its own tools. `plural agent revise` writes them when a confirmed Finding
+blames a tool; see [Find out why an Agent fails](../running/inspector.md).
+
 ## Bring an agent that runs elsewhere
 
 An agent you already run as a web service can be evaluated as it is, without moving

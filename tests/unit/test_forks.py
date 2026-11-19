@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ from plural import Agent, Job
 from plural.agents import AgentBinding
 from plural.checkpoints import AgentContext, build_checkpoint, history_rule
 from plural.jobs import ForkChange, ForkSpec, JobResult, TaskJobSource
+from plural.volumes import VolumeVersion
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(sys.executable).with_name("plural")
@@ -72,12 +74,17 @@ def _submit(episode: Any) -> None:
 
 
 def _fork(
-    tmp_path: Path, first: JobResult, task: Any, original: Agent, candidate: Agent
+    tmp_path: Path,
+    first: JobResult,
+    task: Any,
+    original: Agent,
+    candidate: Agent,
+    volume: VolumeVersion | None = None,
 ) -> JobResult:
     trial = first.trials[0]
     artifacts = next((tmp_path / ".plural" / "jobs").glob(f"*/trials/{trial.receipt.trial_id}"))
     artifacts = artifacts / "executions" / "0" / "artifacts"
-    checkpoint = build_checkpoint(artifacts, 1, trial_id=trial.receipt.trial_id)
+    checkpoint = build_checkpoint(artifacts, 1, trial_id=trial.receipt.trial_id, volume=volume)
     job = Job(task, agents=[candidate])
     control = AgentBinding(agent=original._definition())
     binding = AgentBinding(agent=candidate._definition())
@@ -148,6 +155,36 @@ def test_a_fork_into_an_external_agent_follows_its_resume_support(
     ]
     assert steps[0]["inherited"] is True and steps[0]["action"] == "submit"
     assert KEY not in json.dumps(steps)
+
+
+def test_a_fork_restores_the_volume_version_its_checkpoint_held(
+    service: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    task = _task(tmp_path)
+    original = _external(service, version="1")
+    _Service.work = _submit
+    first = Job(task, agents=[original]).run()
+    assert first.trials[0].volume_in is None and first.trials[0].volume_out is None
+
+    trial = first.trials[0]
+    artifacts = next((tmp_path / ".plural" / "jobs").glob(f"*/trials/{trial.receipt.trial_id}"))
+    artifacts = artifacts / "executions" / "0" / "artifacts"
+    plain = build_checkpoint(artifacts, 1, trial_id=trial.receipt.trial_id)
+    memory = VolumeVersion(provider="plural", volume_id="vol_acme", version="7")
+    held = build_checkpoint(artifacts, 1, trial_id=trial.receipt.trial_id, volume=memory)
+    # An empty slot changes no digest; a filled one names what a fork restores.
+    payload = plain.model_dump(mode="json", exclude={"name", "warnings", "heldout", "volume"})
+    payload["workspace"] = {"commit": plain.workspace.commit}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    assert plain.digest == "sha256:" + hashlib.sha256(encoded.encode()).hexdigest()
+    assert held.digest != plain.digest
+
+    _Service.work = _finish_only
+    result = _fork(tmp_path, first, task, original, _external(service, version="2"), memory)
+    for item in result.trials:
+        assert item.fork is not None and item.fork.volume == memory
+        assert item.volume_in == memory and item.volume_out is None
 
 
 class _WordleModel(BaseHTTPRequestHandler):
@@ -293,6 +330,16 @@ def test_a_fork_continues_from_the_restored_world_with_its_own_history(
     saved = _plural(project, env, "trial", "checkpoint", original, "--step", "2", "--name", "two")
     assert saved["reference"] == f"{original}/two" and saved["digest"].startswith("sha256:")
 
+    # --gate names gates the Trial has; Wordle declares none, so it is refused before any run.
+    refused = subprocess.run(
+        [str(CLI), "trial", "fork", original, "--step", "2", "--agent", "careful", "--gate", "x"],
+        cwd=project,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    assert refused.returncode != 0 and "has no gate x" in refused.stdout + refused.stderr
+
     _WordleModel.seen = []
     fork = _plural(
         project,
@@ -307,7 +354,7 @@ def test_a_fork_continues_from_the_restored_world_with_its_own_history(
         "--attempts",
         "1",
     )
-    assert fork["history"] == {"native": 2}
+    assert fork["history"] == {"native": 2} and fork["gates"] == []
     assert fork["controls_reproduced"] == 1.0
     assert fork["candidates"]["careful"]["verdict"] == "too_few"
     trials = _plural(project, env, "job", "show", fork["job_id"])["trials"]
@@ -680,3 +727,38 @@ def test_a_diagnostic_fork_naming_other_agents_records_only_their_own_attempts()
     )
     assert sent[0]["attempts"] == 6
     assert sent[0]["agent_attempts"] == {"rev-other": 3}
+
+
+def test_fork_results_can_judge_each_side_on_named_gates() -> None:
+    from types import SimpleNamespace
+
+    from plural.project import forks
+
+    def trial(role: str, gates: dict[str, bool | None]) -> Any:
+        return SimpleNamespace(
+            fork=SimpleNamespace(role=role, history="native", warnings=()),
+            status="succeeded",
+            gates=gates,
+            passed=all(value is not False for value in gates.values()),
+            score=None,
+            receipt=SimpleNamespace(agent_digest="sha256:candidate"),
+        )
+
+    both = {"price_correct": False, "delivery_feasible": False}
+    fixed = {"price_correct": False, "delivery_feasible": True}
+    spec: Any = SimpleNamespace(
+        fork=SimpleNamespace(seat=None, step=4, diagnostic=False),
+        agents=[SimpleNamespace(agent_id="a1", name="bot-x1", content_hash="sha256:candidate")],
+    )
+    result: Any = SimpleNamespace(
+        job_id="job_f",
+        trials=[trial("candidate", fixed) for _ in range(4)]
+        + [trial("control", both) for _ in range(4)],
+    )
+    whole = forks.fork_results(spec, result, False)["candidates"]["bot-x1"]
+    assert whole["verdict"] == "no_clear_effect"
+    outcome = forks.fork_results(spec, result, False, ("delivery_feasible",))
+    judged = outcome["candidates"]["bot-x1"]
+    assert judged["verdict"] == "likely_matters"
+    assert judged["metric"] == "gates: delivery_feasible"
+    assert outcome["controls_reproduced"] == 1.0

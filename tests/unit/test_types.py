@@ -63,3 +63,9 @@ def test_stream_chunk_to_openai_hides_the_native_event() -> None:
     assert payload["region"] == "us"
     assert "type" not in payload
     assert "raw" not in payload
+
+
+def test_the_developer_role_is_read_as_system() -> None:
+    message = Message.model_validate({"role": "developer", "content": "Be brief."})
+    assert message.role == "system"
+    assert message.model_dump(exclude_none=True) == {"role": "system", "content": "Be brief."}

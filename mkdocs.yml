@@ -54,6 +54,7 @@ plugins:
           - running/trials.md
           - running/forks.md
           - running/artifacts.md
+          - running/inspector.md
           - running/reviews.md
           - running/training.md
         Platform:
@@ -126,6 +127,7 @@ nav:
       - Checkpoints and forks: running/forks.md
       - Sessions: running/sessions.md
       - Artifacts and evidence: running/artifacts.md
+      - Find out why an Agent fails: running/inspector.md
       - Reviews: running/reviews.md
       - Training and RL: running/training.md
   - Platform:

@@ -152,8 +152,7 @@ For the bigger picture, read [Core concepts](../getting-started/concepts.md).
 ## Evaluating and improving an Agent
 
 These words name how Plural measures an Agent, and how it finds out why one fails.
-Score and reward keep the meanings above. The Inspector is being built now: its
-entries say what each word will mean, so that it means one thing from the start.
+Score and reward keep the meanings above.
 
 - **Metric:** one thing you measure about an attempt, such as "price correct" or
   "margin in dollars". *Precisely:* a named measurement a Verifier declares, with a
@@ -176,7 +175,8 @@ entries say what each word will mean, so that it means one thing from the start.
   such as the final or the lowest value.
 - **Held-out set:** Tasks kept back to confirm an improvement on work the Agent was
   never tuned on. *Precisely:* the Tasks under a Benchmark's `heldout:`, which diagnosis
-  never looks at. Each run against them, and each reveal of their results, is a
+  never looks at. Held out means untouched: a Task that any Trial has run can't be
+  newly held out. Each run against them, and each reveal of their results, is a
   **peek**, and is counted.
 - **Checkpoint:** a saved moment of an attempt that it can be restarted from.
   *Precisely:* everything needed to restart a Trial exactly as it stood after step *k*:
@@ -201,12 +201,18 @@ entries say what each word will mean, so that it means one thing from the start.
   never shipped.
 - **Inspector:** Plural's agent for finding out why an Agent fails. *Precisely:* an
   Agent built on Plural, with read-only evidence tools over a Job, that runs Forks as
-  experiments.
+  experiments. Run with `plural job inspect` and `plural trial ask`. See
+  [Find out why an Agent fails](../running/inspector.md).
 - **Finding:** the Inspector's explanation of one failed attempt. *Precisely:* the
   critical step, a cause dimension (model, context, tools, instructions, Harness,
   environment, grader, task, integrity, or one a project adds), the cause, the evidence
   and the Forks that tested it, and a status (`confirmed`, `inferred`, `refuted`, or
-  `inconclusive`).
+  `inconclusive`). A `grader` cause is Verifier code judging wrongly against a right
+  answer key; a `task` cause is a wrong answer key, or a request missing what the key
+  needs. `plural agent revise` turns a confirmed one into a new Agent version.
+- **Signal:** a check over a failed Trial that points the Inspector at what looks wrong,
+  such as a call to a tool that doesn't exist. *Precisely:* a function registered with
+  `@signal("name")`, built in or in a project's `inspector/signals.py`.
 
 ## Versions and sharing
 

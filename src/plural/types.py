@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Role(str, Enum):
@@ -176,14 +176,25 @@ class Message(BaseModel):
             Anthropic and Bedrock reject a thinking block replayed without it,
             so it has to survive a round trip.
 
+    OpenAI's ``developer`` role is read as ``system``: it is the same
+    instruction slot, and other providers know only ``system``.
+
     Examples:
         >>> Message(role="user", content="Hello").role
         'user'
+        >>> Message(role="developer", content="Be brief.").role
+        'system'
     """
 
     model_config = ConfigDict(use_enum_values=True)
 
     role: Role | Literal["system", "user", "assistant", "tool"]
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _developer_is_system(cls, value: Any) -> Any:
+        return "system" if value == "developer" else value
+
     content: str | list[ContentPart] | None = None
     name: str | None = None
     tool_calls: list[ToolCall] | None = None

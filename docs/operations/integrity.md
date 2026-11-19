@@ -88,6 +88,24 @@ files, including their document properties, comments, tracked changes, and hidde
 sheets. A file that can't be read, such as an image or a CAD drawing, is reported as
 `not_scanned`, never as clean.
 
+The same scan reads any folder or workspace snapshot, against the answer keys of as
+many Tasks as you give it. Use it to check something that outlives one Task, such as
+notes an Agent keeps, before it is used in a Benchmark run:
+
+```python
+from plural.integrity.leaks import scan_directory
+
+findings = scan_directory(
+    "notes",
+    answers={"quote-051": {"total": "22800.00"}},
+    canary="3f6b2a9e-1c4d-4e8f-9a7b-5d2c8e1f0a6b",
+)
+```
+
+`scan_snapshot(archive, version, ...)` does the same for one version of a snapshot,
+such as a Trial's `workspace.bundle` read with `plural.snapshots.GitBundle`. Each
+`answer_key` finding names the Task whose key it found.
+
 ## Flag suspicious Trials
 
 Every recorded Trial is checked from what Plural already recorded: the App host's

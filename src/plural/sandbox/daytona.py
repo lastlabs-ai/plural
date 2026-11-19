@@ -37,6 +37,7 @@ from plural.sandbox.models import (
     SandboxSummary,
     safe_relative_path,
 )
+from plural.sandbox.sweep import EXECUTION_LABEL, OWNER_LABEL, TRIAL_LABEL
 
 APP_USER = "plural-apps"
 AGENT_USER = "plural-agent"
@@ -50,6 +51,8 @@ if sudo -n -u {AGENT_USER} -- sudo -n true >/dev/null 2>&1; then
     exit 1
 fi
 """
+FAILED_STATES = ("build_failed", "error")
+"""Daytona states of a sandbox that never started and so never runs out of time."""
 _MAKE_WORKSPACE = (
     "mkdir -p /workspace 2>/dev/null; [ -w /workspace ] || "
     '{ sudo -n mkdir -p /workspace && sudo -n chown "$(id -u):$(id -g)" /workspace; } || true'
@@ -324,22 +327,34 @@ class OfficialDaytonaAdapter:
         return _OfficialSandbox(await self._client.get(sandbox_id))
 
     async def list(self, labels: Mapping[str, str]) -> tuple[SandboxSummary, ...]:
-        """This account's sandboxes that carry every label given."""
-        from daytona import ListSandboxesQuery
+        """This account's sandboxes that carry every label given, failed builds included.
 
-        found = []
-        async for value in self._client.list(ListSandboxesQuery(labels=dict(labels))):
-            state = getattr(value, "state", "") or ""
-            found.append(
-                SandboxSummary(
-                    sandbox_id=str(value.id),
-                    provider="daytona",
-                    labels=dict(getattr(value, "labels", None) or {}),
-                    state=str(getattr(state, "value", state)),
-                    created_at=getattr(value, "created_at", None),
+        A sandbox whose image failed to build never starts, so its lifetime never
+        runs out; it is asked for by state as well, so a sweep always finds it.
+        """
+        from daytona import ListSandboxesQuery, SandboxState
+
+        found: dict[str, SandboxSummary] = {}
+        queries = (
+            ListSandboxesQuery(labels=dict(labels)),
+            ListSandboxesQuery(
+                labels=dict(labels), states=[SandboxState(item) for item in FAILED_STATES]
+            ),
+        )
+        for query in queries:
+            async for value in self._client.list(query):
+                state = getattr(value, "state", "") or ""
+                found.setdefault(
+                    str(value.id),
+                    SandboxSummary(
+                        sandbox_id=str(value.id),
+                        provider="daytona",
+                        labels=dict(getattr(value, "labels", None) or {}),
+                        state=str(getattr(state, "value", state)),
+                        created_at=getattr(value, "created_at", None),
+                    ),
                 )
-            )
-        return tuple(found)
+        return tuple(found.values())
 
     async def delete_by_id(self, sandbox_id: str) -> None:
         """Delete a sandbox by id; one that is already gone is not an error."""
@@ -449,9 +464,17 @@ class DaytonaProvider(SandboxProvider):
         return self._adapter
 
     async def create(self, requirements: SandboxRequirements) -> SandboxHandle:
-        """Create a Daytona sandbox from image, snapshot, or defaults."""
+        """Create a Daytona sandbox from image, snapshot, or defaults.
+
+        A create that fails can still leave a sandbox behind, such as one whose
+        image failed to build; it is found by its execution's labels and deleted.
+        """
         await self.preflight(requirements)
-        remote = await self._client().create(requirements)
+        try:
+            remote = await self._client().create(requirements)
+        except Exception:
+            await self._delete_leftovers(requirements.labels)
+            raise
         sandbox_id = remote.sandbox_id
         if not sandbox_id or sandbox_id == "None":
             sandbox_id = f"daytona-{uuid4().hex}"
@@ -475,15 +498,29 @@ class DaytonaProvider(SandboxProvider):
             metadata={"snapshot": snapshot} if snapshot else {},
         )
         # Daytona's default image runs as a user that cannot create /workspace.
-        await self.exec(
-            handle,
-            ExecRequest(
-                command=("sh", "-c", _MAKE_WORKSPACE),
-                cwd="/",
-                timeout_seconds=60,
-            ),
-        )
+        try:
+            await self.exec(
+                handle,
+                ExecRequest(
+                    command=("sh", "-c", _MAKE_WORKSPACE),
+                    cwd="/",
+                    timeout_seconds=60,
+                ),
+            )
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await self.destroy(handle)
+            raise
         return handle
+
+    async def _delete_leftovers(self, labels: Mapping[str, str]) -> None:
+        # Only an execution's own labels name its sandboxes and nobody else's.
+        if not {OWNER_LABEL, TRIAL_LABEL, EXECUTION_LABEL} <= set(labels):
+            return
+        with contextlib.suppress(Exception):
+            for item in await self.list_sandboxes(labels):
+                with contextlib.suppress(Exception):
+                    await self.delete_sandbox(item.sandbox_id)
 
     def _remote(self, handle: SandboxHandle) -> DaytonaSandboxAdapter:
         if handle.provider != self.name or handle.sandbox_id not in self._sandboxes:

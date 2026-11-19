@@ -29,10 +29,13 @@ import re
 import zipfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import PurePosixPath
-from typing import Any, Literal
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Any, Literal
 
 from plural.common import FrozenModel
+
+if TYPE_CHECKING:
+    from plural.snapshots import SnapshotArchive
 
 LeakKind = Literal[
     "answer_key", "git_history", "solution_file", "verifier_copy", "canary", "not_scanned"
@@ -149,6 +152,110 @@ def scan_task(
                 where, text, needles, canary, expected=expected, skip_answer=where == "instructions"
             )
         )
+    findings.extend(_file_findings(files, needles, canary, expected, verifier_sources))
+    findings.extend(_workspace_findings(workspace_scan or {}))
+    order = {"critical": 0, "warning": 1, "info": 2}
+    return tuple(sorted(findings, key=lambda item: (order[item.severity], item.path, item.kind)))
+
+
+def scan_files(
+    files: Iterable[AgentFile],
+    *,
+    answers: Mapping[str, Any] | None = None,
+    questions: Mapping[str, str] | None = None,
+    canary: str | None = None,
+    verifier_sources: Mapping[str, bytes] | None = None,
+) -> tuple[LeakFinding, ...]:
+    """Scan any set of files for the answer keys of many Tasks at once.
+
+    This is how a folder or a snapshot that outlives one Task, such as an
+    Agent's memory, is checked for held-out answers before it is used.
+
+    Args:
+        files: The files, as the Agent would see them.
+        answers: Each Task's answer key, by Task name.
+        questions: Each Task's instructions, by Task name. A part of a key
+            that is also in the question is not flagged.
+        canary: The Benchmark's canary.
+        verifier_sources: Each Verifier source file's bytes, by name.
+
+    Returns:
+        Findings, most severe first. An answer key's finding names its Task.
+
+    Examples:
+        >>> found = scan_files(
+        ...     [AgentFile("notes.md", b"quote-051 came to 22800.00")],
+        ...     answers={"quote-051": {"total": "22800.00"}},
+        ... )
+        >>> [(item.kind, item.path) for item in found]
+        [('answer_key', 'notes.md')]
+        >>> found[0].message
+        'The answer key "22800.00" of Task quote-051 appears in notes.md.'
+    """
+    files = list(files)
+    findings = _file_findings(files, (), canary, None, verifier_sources)
+    texts = [(item.path, extract_text(item.path, item.data)[0]) for item in files]
+    for task, expected in sorted((answers or {}).items()):
+        needles = answer_needles(expected, (questions or {}).get(task, ""))
+        for path, content in texts:
+            if content is None:
+                continue
+            for found in _text_findings(path, content, needles, None, expected=expected):
+                message = found.message.replace("appears in", f"of Task {task} appears in", 1)
+                findings.append(found.model_copy(update={"message": message}))
+    order = {"critical": 0, "warning": 1, "info": 2}
+    unique = dict.fromkeys(findings)
+    return tuple(sorted(unique, key=lambda item: (order[item.severity], item.path, item.kind)))
+
+
+def directory_files(root: Path) -> list[AgentFile]:
+    """Every regular file under ``root``, by its path relative to it.
+
+    A symbolic link is never followed, and a ``.git`` folder is left out.
+
+    Returns:
+        The files, sorted by path.
+    """
+    found = []
+    for path in sorted(Path(root).rglob("*")):
+        relative = path.relative_to(root)
+        if ".git" in relative.parts or path.is_symlink() or not path.is_file():
+            continue
+        found.append(AgentFile(relative.as_posix(), path.read_bytes()))
+    return found
+
+
+def scan_directory(root: Path, **options: Any) -> tuple[LeakFinding, ...]:
+    """:func:`scan_files` over every file in a folder.
+
+    Returns:
+        Findings, most severe first.
+    """
+    return scan_files(directory_files(root), **options)
+
+
+def scan_snapshot(
+    archive: SnapshotArchive, version: str, **options: Any
+) -> tuple[LeakFinding, ...]:
+    """:func:`scan_files` over one version of a snapshot, such as a workspace step.
+
+    Returns:
+        Findings, most severe first.
+    """
+    entries = archive.entries(version)
+    return scan_files(
+        [AgentFile(item.path, item.data) for item in entries if item.link is None], **options
+    )
+
+
+def _file_findings(
+    files: Iterable[AgentFile],
+    needles: Sequence[str],
+    canary: str | None,
+    expected: Any,
+    verifier_sources: Mapping[str, bytes] | None,
+) -> list[LeakFinding]:
+    findings: list[LeakFinding] = []
     sources = {
         hashlib.sha256(data).hexdigest(): name for name, data in (verifier_sources or {}).items()
     }
@@ -184,9 +291,7 @@ def scan_task(
             )
             continue
         findings.extend(_text_findings(item.path, content, needles, canary, expected=expected))
-    findings.extend(_workspace_findings(workspace_scan or {}))
-    order = {"critical": 0, "warning": 1, "info": 2}
-    return tuple(sorted(findings, key=lambda item: (order[item.severity], item.path, item.kind)))
+    return findings
 
 
 def answer_needles(expected: Any, instructions: str = "") -> tuple[str, ...]:
@@ -446,6 +551,10 @@ __all__ = [
     "LeakKind",
     "LeakSeverity",
     "answer_needles",
+    "directory_files",
     "extract_text",
+    "scan_directory",
+    "scan_files",
+    "scan_snapshot",
     "scan_task",
 ]

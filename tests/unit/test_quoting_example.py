@@ -155,13 +155,15 @@ def model() -> Iterator[str]:
 def _run(project: Path, model: str, tasks: tuple[str, ...] | None) -> dict[str, dict[str, Any]]:
     """Run the Benchmark once per policy, and return each Trial's scores by policy and Task."""
     shutil.copytree(EXAMPLE, project, ignore=shutil.ignore_patterns(".plural", "__pycache__"))
+    # The grading is under test, not the split, so every Task runs as a dev Task.
+    path = project / "benchmarks/quoting/benchmark.yaml"
+    benchmark = yaml.safe_load(path.read_text())
+    benchmark.pop("heldout", None)
     if tasks is not None:
-        path = project / "benchmarks/quoting/benchmark.yaml"
-        benchmark = yaml.safe_load(path.read_text())
         benchmark["tasks"] = [name for name in benchmark["tasks"] if name in tasks]
         for category in benchmark["categories"]:
             category["tasks"] = [name for name in category["tasks"] if name in tasks]
-        path.write_text(yaml.safe_dump(benchmark, sort_keys=False), encoding="utf-8")
+    path.write_text(yaml.safe_dump(benchmark, sort_keys=False), encoding="utf-8")
     env = {
         key: value
         for key, value in os.environ.items()
@@ -301,6 +303,6 @@ def test_quote_checks_gates_decide_which_trials_pass(
 @pytest.mark.slow
 def test_the_whole_benchmark_holds(full_results: dict[str, dict[str, Any]]) -> None:
     trials = full_results["reference"]
-    assert len(trials) == 60
+    assert len(trials) == 80
     assert {name: trial["score"] for name, trial in trials.items() if trial["score"] != 1.0} == {}
-    assert _assert_weaknesses(full_results) == 40
+    assert _assert_weaknesses(full_results) == 54

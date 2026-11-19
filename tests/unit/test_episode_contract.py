@@ -161,6 +161,32 @@ def test_mcp_bridge_hides_reward_from_the_agent(tmp_path: Path) -> None:
     assert visible == {"text": "closer"}
 
 
+def test_mcp_bridge_sends_an_unknown_tool_to_the_app_host(tmp_path: Path) -> None:
+    """A vendor's call to a tool the Environment lacks reaches the host as unknown_action."""
+    from plural.harness import mcp_bridge
+
+    script = tmp_path / "host.py"
+    script.write_text(
+        "import json, sys\n"
+        "arguments = json.loads(sys.stdin.read() or '{}')\n"
+        "print(json.dumps({'protocol': 'plural-step-v1', 'kind': 'step', 'observation': None,\n"
+        "    'info': {'error': f'unknown action {sys.argv[2]!r}', 'unknown_action': True,\n"
+        "             'operation': sys.argv[1], 'arguments': arguments}}))\n",
+        encoding="utf-8",
+    )
+    environment = {
+        "workspace": str(tmp_path),
+        "actions": [],
+        "reset_command": ["python", str(script), "reset"],
+    }
+
+    visible = mcp_bridge._call_action(environment, "quote", {"tons": 3})
+
+    assert visible == {"observation": None, "error": "unknown action 'quote'"}
+    with pytest.raises(ValueError, match="unknown Environment action"):
+        mcp_bridge._call_action({"workspace": str(tmp_path), "actions": []}, "quote", {})
+
+
 def test_environment_termination_ends_the_episode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -533,6 +533,27 @@ def test_project_push_uploads_every_resource_and_repeats_as_unchanged(hosted: Ho
     assert len(hosted.fake.writes) == writes
 
 
+def test_a_fresh_checkout_pushes_without_force_by_content_hash(hosted: Hosted) -> None:
+    assert hosted.cli("project", "push", "--yes")[0] == 0
+    revisions = hosted.fake.revision_count()
+    lock = hosted.project.root / "plural.lock"
+
+    lock.unlink()
+    writes = len(hosted.fake.writes)
+    code, output = hosted.cli("project", "push", "--yes", "--json")
+    assert code == 0, output
+    assert {step["action"] for step in json.loads(output)["steps"]} == {"unchanged"}
+    assert len(hosted.fake.writes) == writes
+
+    lock.unlink(missing_ok=True)
+    (hosted.project.root / "tasks/refund/instruction.md").write_text("A newer copy.\n")
+    code, output = hosted.cli("project", "push", "--yes", "--json")
+    assert code == 0, output
+    steps = json.loads(output)["steps"]
+    assert "task/refund" in [step["resource"] for step in steps if step["status"] == "pushed"]
+    assert hosted.fake.revision_count() > revisions
+
+
 def test_project_push_adds_a_revision_for_a_change_without_touching_files(
     hosted: Hosted,
 ) -> None:

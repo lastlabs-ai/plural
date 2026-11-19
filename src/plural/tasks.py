@@ -911,6 +911,12 @@ class BenchmarkDefinition(BenchmarkRelease):
         return tuple(task for task in self.tasks if task.task_id not in kept)
 
     @property
+    def heldout_definitions(self) -> tuple[TaskDefinition, ...]:
+        """The held-out Tasks, which only a ``--heldout`` run uses."""
+        kept = set(self.heldout)
+        return tuple(task for task in self.tasks if task.task_id in kept)
+
+    @property
     def reproducible(self) -> bool:
         """Whether every Task starts from state Plural controls; false with a live App."""
         return all(task.environment.reproducible for task in self.tasks)
