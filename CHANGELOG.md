@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-20
+
+### Added
+
+- The Inspector, an Agent built on Plural that explains failed Trials. `plural job inspect` records one Finding per cause of each failed dev Trial: the critical step, a cause dimension, the evidence, and the forks that tested it, with a status computed from those forks. Forks run with a gateway key minted for one inspection of one Job and revoked when it ends. `plural trial ask` answers a question about one Trial. A project teaches it with `inspector/signals.py`, `causes.yaml`, and `patterns.yaml`.
+- `plural agent revise --from-finding` applies a confirmed Finding's remedy as a new Agent version, with a `CHANGELOG.md` entry beside it; for an External Agent it writes `fixes/F1.md` instead. An Agent's `tool_overrides` change how a tool is described to the model, or hide it.
+- `plural job report`: how the Agent performs, why it fails, what changed against another Job (paired, on dev and held-out Tasks), and why the numbers can be trusted. Code computes every number; a model-written summary may only cite them.
+- `plural trial fork --gate` judges forks and controls on named gates.
+- inspector-bench (`python -m plural.inspector.faults`) plants known faults and measures the Inspector. Its result is in `examples/quoting/inspector-bench.json`.
+- A call to a tool the Agent wasn't offered is recorded as an `unknown_action` step and never run, in every Harness.
+- Volume groundwork: Trials record `volume_in` and `volume_out`, a Checkpoint and a fork record the Volume version they hold, Jobs may have purpose `learn` (refused on held-out Tasks), the leak scanner reads any folder or snapshot, and workspace snapshots sit behind the `Snapshotter` and `SnapshotArchive` interfaces.
+- The quoting example has 80 Tasks, 20 of them held out.
+
 ### Changed
 
 - `--heldout` runs only a Benchmark's held-out Tasks. A held-out run in which every Trial errored before a verdict still counts as a peek, and is flagged as having revealed nothing. A Task a local run already used can't be newly held out.
@@ -20,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A call Claude Code or Codex makes to a tool that doesn't exist is recorded as an `unknown_action` step. Neither fires a hook for one, so Plural reads it from their output.
 - inspector-bench never runs a held-out Task. `--max-tasks` caps the Tasks each fault runs on, and `--padding-lines` picks the context fault's lengths.
 - `plural job report` rounds every percent the same way, so 29 of 40 and 11 of 40 read 73% and 28%.
+- A `developer`-role message is sent as `system`. A deterministic Verifier result with no evidence is refused locally.
+- A Daytona sandbox whose creation failed is deleted, and `plural runtime sweep` finds sandboxes left in `build_failed`.
+- `plural push` is idempotent by content hash: a fresh checkout pushes without `--force`, and only a stale lock pin is refused.
+- Rerunning a Benchmark's checks no longer drops `include_heldout`.
 - Claude Code's prompt is cached on Claude models. Its cache breakpoints pass through the Messages bridge and the gateway to Anthropic, which used to receive none, and the bridge reports cache reads and writes back. A text part in a chat completions request may carry `cache_control`; hosts that cache on their own never receive it.
 
 ## [0.25.1] - 2026-11-17
