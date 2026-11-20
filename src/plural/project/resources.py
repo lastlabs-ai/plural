@@ -495,6 +495,14 @@ def _build_verifier(
     prepared = dict(payload)
     prepared.setdefault("kind", "deterministic")
     bound = False
+    measure = prepared.get("measure")
+    if isinstance(measure, dict) and isinstance(measure.get("python"), str):
+        if "every" in measure:
+            if prepared.get("measure_every") is not None:
+                problems.append("measure: give its period once, as measure.every or measure_every")
+                return None
+            prepared["measure_every"] = measure["every"]
+        prepared["measure"] = measure["python"]
     for hook in ("check", "reward", "hindsight", "measure"):
         reference = prepared.get(hook)
         if not (isinstance(reference, str) and _looks_like_reference(reference)):

@@ -557,6 +557,24 @@ class TrialFork(FrozenModel):
     change: str | None = None
 
 
+class ResumeRecord(FrozenModel):
+    """What a resumed execution records: the run checkpoint it continued from.
+
+    A resumed execution is the same Trial, not a fork: its steps, States, and
+    metric points before ``step`` are the interrupted execution's, and its
+    cost and turns include what that execution spent.
+    """
+
+    from_execution_id: int = Field(ge=0)
+    step: int = Field(ge=0)
+    sim_time: float | None = None
+    checkpoint_digest: str
+    history: Literal["native", "transcript", "none"] = "native"
+    carried_cost_usd: float | None = Field(default=None, ge=0)
+    carried_turns: int = Field(default=0, ge=0)
+    carried_seconds: float = Field(default=0.0, ge=0)
+
+
 class ForkRecord(FrozenModel):
     """What a fork Trial records: where it started and how the history reached its Agent."""
 
@@ -1274,6 +1292,12 @@ class TrialResult(FrozenModel):
     fork: ForkRecord | None = None
     """For a Trial that started from a checkpoint: where, and how the history
     reached its Agent."""
+    environment_cost_usd: float | None = Field(default=None, ge=0)
+    """What the Environment's simulated people (``plural.sim.Persona``) cost.
+    Never part of the Agent's cost. ``None`` when no persona called a model."""
+    resumed: ResumeRecord | None = None
+    """For an execution that continued an interrupted one from its latest run
+    checkpoint: where, and what it carried over."""
     volume_in: VolumeVersion | None = None
     """The Volume version the Agent started from. ``None`` until Volumes exist."""
     volume_out: VolumeVersion | None = None
@@ -1624,6 +1648,7 @@ __all__ = [
     "ExecutionStatus",
     "ForkChange",
     "ForkRecord",
+    "ResumeRecord",
     "ForkRole",
     "ForkSpec",
     "IntegrityFinding",

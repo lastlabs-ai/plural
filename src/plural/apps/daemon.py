@@ -81,7 +81,7 @@ SEAT_TOKEN = "PLURAL_SEAT_TOKEN"
 SOCKET_NAME = "host.sock"
 _MAX_MESSAGE = 64 * 1024 * 1024
 _BOOTSTRAP_STDIN = "PLURAL_APPS_BOOTSTRAP_STDIN"
-_CONTROLLED = frozenset({"hello", "query", "finish", "stop"})
+_CONTROLLED = frozenset({"hello", "query", "progress", "finish", "stop"})
 _PR_SET_DUMPABLE = 4
 
 
@@ -313,6 +313,7 @@ def _restore_inputs(inputs: Mapping[str, Any] | None) -> dict[str, Any] | None:
         "info": inputs.get("info") if inputs is not None else None,
         "seed": seed if isinstance(seed, int) else None,
         "clock": given.get("clock") if isinstance(given.get("clock"), dict) else None,
+        "personas": [dict(item) for item in given.get("personas") or () if isinstance(item, dict)],
     }
 
 
@@ -479,6 +480,10 @@ def _handle(
             str(request.get("app")), str(request.get("action")), request.get("arguments") or {}
         )
         return {"ok": True, "result": result}, False
+    if operation == "progress":
+        since = request.get("since")
+        given = since if isinstance(since, dict) else None
+        return {"ok": True, "result": host.progress(given)}, False
     if operation == "finish":
         # Outside a Job, a laptop's host keeps serving after a look at its report.
         report = host.finish() if control.token else host.report()

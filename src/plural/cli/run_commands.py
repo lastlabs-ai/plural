@@ -209,6 +209,15 @@ def run(
         "-y",
         help="Use an endpoint Agent's model without asking, even one you have not accepted.",
     ),
+    budget_usd: float | None = typer.Option(
+        None,
+        "--budget-usd",
+        min=0,
+        help=(
+            "At most what the Agents may spend on models. Each Trial gets an even share as "
+            "its cost limit, and no Trial starts once it is spent."
+        ),
+    ),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
@@ -325,6 +334,7 @@ def run(
             credential_source=_stored_credentials(as_json),
             episode_server=episode_server,
             model_identities=identities,
+            budget_usd=budget_usd,
         )
     _finish_local(space, job_id, result, tracking, as_json=as_json)
 
@@ -718,6 +728,69 @@ def _fork_source(
         shadow, source = hosted_trial_source(space, studio, binding, given, carry=carry)
         return shadow, given, source, given
     return space, trial_id, trial_source(space, trial_id), given if given != trial_id else None
+
+
+@trial_app.command("resume")
+@handled
+def trial_resume(
+    trial_id: str = typer.Argument(help="Interrupted local Trial to continue."),
+    budget_usd: float | None = typer.Option(
+        None,
+        "--budget-usd",
+        min=0,
+        help="At most what the resumed execution may spend on models, on top of what it had.",
+    ),
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Continue a Trial whose runner died from its latest run checkpoint.
+
+    An Environment with checkpoint_every marks run checkpoints as the episode
+    runs. The world, the clock, and the Agent's context are restored as they
+    stood there, and the cost, turns, and time spent before carry over.
+    """
+    from plural.project.runs import resume_local_trial
+
+    space = workspace()
+    job_id, _ = find_local_trial(space, trial_id)
+    environ = _project_secrets(
+        space, local_job_spec(space, job_id), _run_environ(session()), err=as_json
+    )
+    with _credit_watch(session(), environ, err=as_json):
+        job_id, result, resumed = resume_local_trial(
+            space,
+            trial_id,
+            environ=environ,
+            progress=_progress(as_json),
+            credential_source=_stored_credentials(as_json),
+            budget_usd=budget_usd,
+        )
+    trial = next(item for item in result.trials if item.receipt.trial_id == trial_id)
+    payload = {
+        "job_id": job_id,
+        "trial_id": trial_id,
+        "status": trial.status,
+        "resumed": resumed.model_dump(mode="json"),
+        "score": trial.score,
+        "metrics": trial.metrics,
+        "cost_usd": trial.receipt.cost_usd,
+        "stop_reason": trial.stop_reason,
+    }
+
+    def text() -> None:
+        at = f" (time {resumed.sim_time:g})" if resumed.sim_time is not None else ""
+        typer.echo(
+            f"Resumed Trial {trial_id} after step {resumed.step}{at} as execution "
+            f"{trial.receipt.execution_id}: {trial.status}, stop reason {trial.stop_reason}."
+        )
+        if trial.score is not None:
+            typer.echo(f"  score {trial.score:g}")
+        if resumed.carried_cost_usd:
+            carried = resumed.carried_cost_usd
+            typer.echo(f"  carried over ${carried:.4f} spent before the checkpoint")
+
+    emit(payload, as_json=as_json, text=text)
+    if trial.status in {"failed", "cancelled"}:
+        raise typer.Exit(1)
 
 
 @trial_app.command("checkpoint")
@@ -1478,7 +1551,12 @@ def _print_job(payload: dict[str, Any]) -> None:
             f"  Progress: {progress['finished']}/{progress['planned']} finished, "
             f"{progress['running']} running, {progress['succeeded']} succeeded, "
             f"{progress['failed']} failed"
+            + (f", {progress['interrupted']} interrupted" if progress.get("interrupted") else "")
         )
+    for item in payload.get("interrupted") or []:
+        typer.echo(f"  Interrupted: {item['trial_id']}{_run_position(item.get('run'))}")
+        if ((item.get("run") or {}).get("checkpoint") or {}).get("step") is not None:
+            typer.echo(f"    Next: plural trial resume {item['trial_id']}")
     texts = {
         item["agent_name"]: item["text"]
         for item in payload.get("summaries") or []
@@ -1519,6 +1597,25 @@ def _print_job(payload: dict[str, Any]) -> None:
         typer.echo(f"Details: plural trial show {failed[0]['trial_id']}")
 
 
+def _run_position(run: Any) -> str:
+    """Where an unfinished Trial's journal stood: its clock, and the checkpoint to resume from."""
+    if not isinstance(run, dict):
+        return ""
+    parts = []
+    clock = run.get("clock") or {}
+    if clock.get("now") is not None:
+        parts.append(f"at sim time {clock['now']:g}")
+    checkpoint = run.get("checkpoint") or {}
+    if checkpoint.get("step") is not None:
+        where = f"step {checkpoint['step']}"
+        if checkpoint.get("sim_time") is not None:
+            where += f", sim time {checkpoint['sim_time']:g}"
+        parts.append(f"resumable from {where}")
+    else:
+        parts.append("no run checkpoint yet, so it can't be resumed")
+    return " (" + "; ".join(parts) + ")"
+
+
 def _print_trial(payload: dict[str, Any]) -> None:
     typer.echo(f"Trial {payload['trial_id']} ({payload['location']}) {payload.get('status')}")
     for label, key in (
@@ -1536,6 +1633,10 @@ def _print_trial(payload: dict[str, Any]) -> None:
     ):
         if payload.get(key) is not None:
             typer.echo(f"  {label + ':':<15} {payload[key]}")
+    if payload.get("status") == "interrupted":
+        typer.echo(f"  {'Interrupted:':<15} the runner stopped{_run_position(payload.get('run'))}")
+        if ((payload.get("run") or {}).get("checkpoint") or {}).get("step") is not None:
+            typer.echo(f"  Next: plural trial resume {payload['trial_id']}")
     trust = payload.get("trust") or {}
     if trust.get("tier"):
         reasons = "; ".join(trust.get("reasons") or [])

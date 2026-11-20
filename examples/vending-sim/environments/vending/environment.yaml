@@ -1,0 +1,36 @@
+# Environment: four Python Apps that share a clock counting days.
+name: vending
+version: 1.0.0
+description: A vending machine run for up to a year, a day at a time.
+overview: >-
+  The Agent keeps a vending machine stocked and priced. Every day closes on its own:
+  customers buy what is in the machine, the location fee is paid, and deliveries that
+  are due arrive in storage. Stock only comes from orders the Agent places.
+readme: README.md
+apps:
+  - python: apps.py:Machine
+  - python: apps.py:Storage
+  - python: apps.py:Bank
+  - python: apps.py:Suppliers
+
+# Simulated time. A wait runs the world to the next event, usually the day's close.
+# The episode ends after 365 days, or at the end of a Task's shorter run. autonomous
+# means the Agent can't call finish, and a reply with no action waits.
+clock:
+  unit: day
+  start: 1
+horizon:
+  sim_time: 365
+autonomous: true
+# A durable run marks a checkpoint every simulated week; plural trial resume restarts
+# an interrupted Trial from the latest one.
+checkpoint_every:
+  sim_time: 7
+
+runtime:
+  provider: local
+
+# A year is about 1,500 actions for a careful Agent: status, restock, order, and wait.
+limits:
+  max_turns: 4000
+  max_seconds: 21600

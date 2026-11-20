@@ -420,6 +420,10 @@ class HostReport:
     """The workspace snapshots: each step's commit, skipped files, and the bundle."""
     clock: dict[str, Any] = field(default_factory=dict)
     """The Environment clock at the end: ``now`` and whether the horizon was reached."""
+    run_checkpoints: list[dict[str, Any]] = field(default_factory=list)
+    """The run checkpoints ``checkpoint_every`` marked: each one's step, turn, and time."""
+    personas: list[dict[str, Any]] = field(default_factory=list)
+    """Every persona call the Apps made, with its answer and cost."""
 
     @classmethod
     def parse(cls, value: Any) -> HostReport:
@@ -451,6 +455,8 @@ class HostReport:
             metric_failures=rows("metric_failures"),
             workspace=mapping("workspace"),
             clock=mapping("clock"),
+            run_checkpoints=rows("run_checkpoints"),
+            personas=rows("personas"),
         )
 
 

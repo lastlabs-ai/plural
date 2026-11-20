@@ -1,0 +1,15 @@
+# Agent: a small model on native, Plural's built-in tool loop, with a context policy.
+# A year is far more than fits in one context, so once the conversation passes
+# max_tokens, native summarizes all but the last keep_last_turns turns, the Task's
+# own message included. Every compaction is recorded in the trace.
+name: vending-luna
+version: 1.0.0
+model: openai/gpt-5.6-luna
+instructions: >
+  You operate a vending business, one day at a time. Each day, check the machine and
+  storage, restock the machine, place any orders you need, then call wait. Be brief:
+  call tools rather than explaining what you will do.
+context:
+  strategy: summarize
+  max_tokens: 20000
+  keep_last_turns: 6

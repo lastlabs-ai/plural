@@ -25,8 +25,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from plural.execution.apps import HOST_COMMAND
-
 ChangeFunction = Callable[["ForkPoint"], None]
 
 
@@ -46,6 +44,8 @@ class ForkPoint:
         oracles: Added tools, by name, with the App and the path in its State
             each one answers from.
         fresh: Whether the Agent starts with no history at all.
+        compactions: Each compaction of the Agent's context before step *k*,
+            with the instructions and Task it started from.
     """
 
     payload: dict[str, Any]
@@ -57,6 +57,7 @@ class ForkPoint:
     forced: list[dict[str, Any]] = field(default_factory=list)
     oracles: dict[str, dict[str, str]] = field(default_factory=dict)
     fresh: bool = False
+    compactions: list[dict[str, Any]] = field(default_factory=list)
 
     def text(self, key: str) -> str:
         """A required, non-empty string from the payload.
@@ -180,13 +181,31 @@ def _tool_description(point: ForkPoint) -> None:
 
 @change("context")
 def _context(point: ForkPoint) -> None:
-    """Cut the history: ``trim``, ``summarize``, or ``fresh``.
+    """Cut the history: ``trim``, ``summarize``, or ``fresh``; or ``restore`` it.
 
     ``{"mode": "trim", "keep": 4}`` keeps the last messages; ``summarize`` needs a
-    ``"summary"`` you write.
+    ``"summary"`` you write. ``restore`` puts back the Task's own messages, which
+    a compaction of the Agent's context dropped before the fork point, so a fork
+    shows whether losing them caused the failure.
     """
     mode = point.payload.get("mode")
-    if mode == "fresh":
+    if mode == "restore":
+        if not point.compactions:
+            raise ValueError("found no compaction before the fork point to undo")
+        opening = [dict(item) for item in point.compactions[0].get("opening") or ()]
+        missing = [item for item in opening if item not in point.messages]
+        if not missing:
+            raise ValueError("found the Task's messages still in the context; nothing to restore")
+        system = [item for item in missing if item.get("role") == "system"]
+        rest = [item for item in missing if item.get("role") != "system"]
+        head = 1 if point.messages and point.messages[0].get("role") == "system" else 0
+        point.messages = [
+            *system,
+            *point.messages[:head],
+            *rest,
+            *point.messages[head:],
+        ]
+    elif mode == "fresh":
         point.messages = []
         point.fresh = True
     elif mode == "trim":
@@ -203,7 +222,7 @@ def _context(point: ForkPoint) -> None:
             {"role": "user", "content": f"What happened so far:\n{point.text('summary')}"}
         ]
     else:
-        raise ValueError("needs 'mode' to be trim, summarize, or fresh")
+        raise ValueError("needs 'mode' to be trim, summarize, fresh, or restore")
 
 
 @change("oracle_tool")
@@ -231,6 +250,8 @@ def _oracle_tool(point: ForkPoint) -> None:
         raise ValueError(f"needs 'app' to be one of the Environment's Apps: {', '.join(apps)}")
     if any(item.get("name") == name for item in point.environment.get("actions") or ()):
         raise ValueError(f"can't add {name!r}: the Environment already has an action by that name")
+    from plural.execution.apps import HOST_COMMAND
+
     point.environment.setdefault("actions", []).append(
         {
             "name": name,

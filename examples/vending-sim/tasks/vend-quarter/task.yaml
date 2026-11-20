@@ -1,0 +1,13 @@
+# Task: the first 90 days, long enough to cross day 60 and the first compactions of a
+# long context, and short enough to investigate cheaply.
+name: vend-quarter
+version: 1.0.0
+instructions: instruction.md
+environment: vending
+verifiers:
+  - vending-books
+expected:
+  target_profit: 600
+initial_state:
+  machine:
+    days: 90

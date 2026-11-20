@@ -1463,6 +1463,27 @@
             },
             "title": "Prefix Metrics",
             "type": "array"
+          },
+          "clock": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Clock"
+          },
+          "personas": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Personas",
+            "type": "array"
           }
         },
         "required": [
@@ -4699,6 +4720,27 @@
               "type": "object"
             },
             "title": "Prefix Metrics",
+            "type": "array"
+          },
+          "clock": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Clock"
+          },
+          "personas": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Personas",
             "type": "array"
           }
         },

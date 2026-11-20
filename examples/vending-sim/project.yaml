@@ -1,0 +1,4 @@
+# Plural project identity. Resources live in the directories beside this file.
+schema_version: 1
+name: vending-sim
+description: A vending machine run for a year on a simulated clock, the sample for long-running Agents.

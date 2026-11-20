@@ -90,6 +90,7 @@ class App(Generic[StateT]):
     _init_config: dict[str, Any]
     _now: float | None
     _scheduled: list[dict[str, Any]]
+    _sim: Any = None
     _source_file: ClassVar[Path | None] = None
     state: StateT
     task_info: Any = None
@@ -300,6 +301,27 @@ class App(Generic[StateT]):
             True
         """
         return getattr(self, "_now", None)
+
+    def peer(self, name: str) -> App[Any]:
+        """Another App of the same Environment, such as the bank an order is paid from.
+
+        What an action changes in a peer's State is recorded with the step, as
+        the acting App's own changes are.
+
+        Returns:
+            The App.
+
+        Raises:
+            RuntimeError: Outside an App host.
+            KeyError: When the Environment has no such App.
+        """
+        host = getattr(self, "_sim", None)
+        if host is None:
+            raise RuntimeError(f"App {self.name!r} reached for {name!r} outside an App host")
+        apps: Mapping[str, App[Any]] = host.apps
+        if name not in apps:
+            raise KeyError(f"the Environment has no App {name!r} (it has {', '.join(apps)})")
+        return apps[name]
 
     # Simulated time, in an Environment with a clock.
 

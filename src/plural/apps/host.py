@@ -235,6 +235,7 @@ class AppHost:
             raise ValueError("seats must have different names")
         for app in self.apps.values():
             app.seats = self.seats
+            app._sim = self
         self.verifiers = tuple(verifiers)
         self.task = task or StepTask()
         self.initial: dict[str, Any] = {}
@@ -253,9 +254,13 @@ class AppHost:
         self._acting: str | None = None
         self._metrics: list[dict[str, Any]] = []
         self._metric_failures: list[dict[str, Any]] = []
+        self._run_checkpoints: list[dict[str, Any]] = []
+        self._persona_calls: list[dict[str, Any]] = []
+        self._persona_replay: dict[str, dict[str, Any]] = {}
         self._clock = time.monotonic()
         self._rng_recorded: dict[str, Any] = {}
         self._base_step = 0
+        self._restored_now: float | None = None
         self.restored_from: int | None = None
         self.oracles: dict[str, dict[str, str]] = {}
         """Diagnostic tools a fork added, by name, with the answer each returns."""
@@ -429,6 +434,8 @@ class AppHost:
             "clock": None
             if self.clock is None
             else {"now": self.now, "horizon_reached": self.horizon_reached},
+            "run_checkpoints": list(self._run_checkpoints),
+            "personas": list(self._persona_calls),
         }
 
     def finish(self) -> dict[str, Any]:
@@ -496,6 +503,8 @@ class AppHost:
         self._log = []
         self._metrics = []
         self._metric_failures = []
+        self._run_checkpoints = []
+        self._persona_calls = []
         self._clock = time.monotonic()
         self._rng_recorded = {}
         self._base_step = 0
@@ -605,6 +614,112 @@ class AppHost:
             if hook.hook == "measure" and steps and self.steps % int(steps) == 0:
                 self._measure_now(hook)
         self._check_horizon()
+        self._mark_run_checkpoint()
+
+    def _mark_run_checkpoint(self) -> None:
+        """Mark a run checkpoint when this step crossed a ``checkpoint_every`` boundary.
+
+        The marker names the step; the Job rebuilds the checkpoint from the
+        steps, States, and episode it has journaled through that step.
+        """
+        every = self.definition.checkpoint_every
+        if every is None:
+            return
+        last = self._run_checkpoints[-1] if self._run_checkpoints else None
+        last_step = int(last["step"]) if last else self._base_step
+        due = False
+        if every.steps is not None:
+            due = self.steps // every.steps > last_step // every.steps
+        if every.sim_time is not None and self.clock is not None and self.now is not None:
+            origin = self.clock.origin
+            since = float(last["sim_time"]) if last and last.get("sim_time") is not None else None
+            if since is None:
+                since = self._restored_now if self._restored_now is not None else origin
+            period = float(every.sim_time)
+            due = due or math.floor((self.now - origin) / period + 1e-9) > math.floor(
+                (since - origin) / period + 1e-9
+            )
+        if due:
+            self._run_checkpoints.append(
+                {
+                    "step": self.steps,
+                    "turn": self.turns,
+                    "sim_time": self.now,
+                    "t": round(time.monotonic() - self._clock, 3),
+                }
+            )
+
+    def persona_call(self, persona: Any, messages: list[dict[str, str]], seed: int) -> str:
+        """Answer one persona call, replaying a recorded answer when there is one.
+
+        Every call is recorded with its cost, which is the Environment's, never
+        the Agent's. A call that fails is recorded too, then raised to the App.
+
+        Returns:
+            The persona's answer.
+        """
+        from plural.sim import answer, call_key
+
+        key = call_key(persona, messages, seed)
+        entry: dict[str, Any] = {
+            "step": self.steps,
+            "sim_time": self.now,
+            "persona": persona.name,
+            "model": persona.model,
+            "key": key,
+            "seed": seed,
+        }
+        replay = self._persona_replay.get(key)
+        if replay is not None:
+            text = str(replay.get("output") or "")
+            self._persona_calls.append(
+                {**entry, "mode": "replayed", "output": text, "cost_usd": 0.0}
+            )
+            return text
+        try:
+            text, made = answer(persona, messages, seed)
+        except Exception as exc:
+            self._persona_calls.append(
+                {**entry, "mode": "failed", "error": self._redact(described(exc))}
+            )
+            raise
+        self._persona_calls.append(
+            {
+                **entry,
+                **made,
+                "input": messages[-1]["content"][:2000],
+                "output": text,
+                "cost_usd": made.get("cost_usd") or 0.0,
+            }
+        )
+        return text
+
+    def progress(self, since: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """What the host recorded since the Job last asked, for a long run's journal.
+
+        Args:
+            since: How many steps, States, metric points, and run checkpoints the
+                Job already has.
+
+        Returns:
+            The new ones of each, and the clock.
+        """
+        given = dict(since or {})
+
+        def after(key: str, items: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+            start = max(0, int(given.get(key) or 0))
+            return [dict(item) for item in items[start:]]
+
+        return {
+            "steps": after("steps", self._log),
+            "states": after("states", self._states),
+            "metrics": after("metrics", self._metrics),
+            "checkpoints": after("checkpoints", self._run_checkpoints),
+            "personas": after("personas", self._persona_calls),
+            "clock": None
+            if self.clock is None
+            else {"now": self.now, "horizon_reached": self.horizon_reached},
+        }
 
     def _check_horizon(self) -> None:
         if self.horizon is None or self.horizon_reached:
@@ -1069,8 +1184,12 @@ class AppHost:
         seed: int | None = None,
         forced: Sequence[Mapping[str, Any]] = (),
         clock: Mapping[str, Any] | None = None,
+        personas: Sequence[Mapping[str, Any]] = (),
     ) -> dict[str, Any]:
         """Put every App back as it stood after step ``step``, without a reset.
+
+        ``personas`` are the original Trial's recorded persona calls: a call
+        asked again the same way gets its recorded answer.
 
         Sets the step and turn counters, each App's random number generator,
         and the clock; calls each App's :meth:`~plural.App.restore` with its
@@ -1102,6 +1221,7 @@ class AppHost:
         if self.clock is not None:
             given = dict(clock or {})
             self._set_now(float(given.get("now", self.clock.origin)))
+            self._restored_now = self.now
             measured = given.get("measured_at")
             self._measured_at = self.now if measured is None else float(measured)
             raw = given.get("scheduled")
@@ -1126,6 +1246,13 @@ class AppHost:
         self._log = []
         self._metrics = []
         self._metric_failures = []
+        self._run_checkpoints = []
+        self._persona_calls = []
+        self._persona_replay = {
+            str(item["key"]): dict(item)
+            for item in personas
+            if isinstance(item, Mapping) and item.get("key") and item.get("mode") != "failed"
+        }
         self._clock = time.monotonic() - max(0.0, float(elapsed))
         self._recorded = {
             name: self._snapshot(app) for name, app in self.apps.items() if app.snapshot_on_step

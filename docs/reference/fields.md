@@ -320,6 +320,8 @@ Everything needed to continue a Trial from after step ``step``.
 - **`prefix_steps`** — `array of object`; optional.
 - **`prefix_states`** — `array of object`; optional.
 - **`prefix_metrics`** — `array of object`; optional.
+- **`clock`** — `object | null`; optional. Default: `null`.
+- **`personas`** — `array of object`; optional.
 
 ## CheckpointWorkspace
 

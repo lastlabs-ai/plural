@@ -344,10 +344,12 @@ def run_local(
     credential_source: CredentialSource | None = None,
     episode_server: EpisodeServerOptions | None = None,
     model_identities: Mapping[str, LocalModelIdentity] | None = None,
+    budget_usd: float | None = None,
 ) -> tuple[str, JobResult]:
     """Execute a plan on this machine and record it under ``.plural/jobs``.
 
     With ``tracking``, the Job is also recorded in the hosted project as it runs.
+    ``budget_usd`` caps what its Agents spend on models.
 
     Returns:
         The Job id and its result.
@@ -373,6 +375,7 @@ def run_local(
         credential_source=credential_source,
         episode_server=episode_server,
         model_identities=model_identities,
+        budget_usd=budget_usd,
     )
 
 
@@ -463,6 +466,99 @@ def rerun_local_trial(
         tracking=tracking,
         credential_source=credential_source,
     )
+
+
+def resume_local_trial(
+    workspace: Workspace,
+    trial_id: str,
+    *,
+    environ: Mapping[str, str],
+    progress: Any = None,
+    credential_source: CredentialSource | None = None,
+    budget_usd: float | None = None,
+) -> tuple[str, JobResult, Any]:
+    """Continue an interrupted local Trial from its latest run checkpoint, in its own Job.
+
+    The world is restored as the checkpoint holds it (App State, RNG, clock,
+    and scheduled events), the Agent gets its context back, and the new
+    execution carries over the cost, turns, and time spent before it.
+
+    Returns:
+        The Job id, its result, and the resumed execution's resume record.
+
+    Raises:
+        ProjectError: When the Trial isn't interrupted, or has no run checkpoint.
+    """
+    from plural.checkpoints import build_checkpoint
+    from plural.execution.engine import ResumePoint
+    from plural.execution.journal import RunJournal, interrupted
+    from plural.jobs import ResumeRecord
+
+    job_id, directory = find_local_trial(workspace, trial_id)
+    spec, record = _load_local(workspace, job_id)
+    trial = next(item for item in spec.plan(workspace.catalog).trials if item.trial_id == trial_id)
+    journal = RunJournal.of(directory)
+    if not journal.exists:
+        raise ProjectError(
+            f"Trial {trial_id} has no run checkpoints: only an Environment with "
+            "checkpoint_every writes them. Run it again with plural trial rerun."
+        )
+    state = journal.state()
+    if not interrupted(directory):
+        execution = state.get("execution_id")
+        if (directory / "executions" / str(execution) / "result.json").is_file():
+            raise ProjectError(f"Trial {trial_id} finished; there is nothing to resume.")
+        raise ProjectError(
+            f"Trial {trial_id} is still running: its runner wrote its journal at "
+            f"{state.get('updated_at')}. Resume it once that runner has stopped."
+        )
+    marker = journal.latest()
+    if marker is None:
+        raise ProjectError(
+            f"Trial {trial_id} was interrupted before its first run checkpoint. "
+            "Run it again with plural trial rerun."
+        )
+    step = int(marker["step"])
+    task = next(item for item in spec.tasks if item.content_hash == trial.task_digest)
+    agent = next(item for item in spec.agents if item.agent_id == trial.agent_id)
+    try:
+        checkpoint = build_checkpoint(
+            journal.root,
+            step,
+            trial_id=trial_id,
+            job_id=job_id,
+            instructions=agent.agent.instructions,
+            seats=tuple(item.seat for item in trial.seats),
+            task_digest=task.content_hash,
+            agent_digest=agent.content_hash,
+        )
+    except ValueError as exc:
+        raise ProjectError(str(exc)) from None
+    resumed = ResumeRecord(
+        from_execution_id=int(state["execution_id"]),
+        step=step,
+        sim_time=marker.get("sim_time"),
+        checkpoint_digest=checkpoint.digest,
+        carried_cost_usd=journal.spent_through(step),
+        carried_turns=int(marker.get("turn") or checkpoint.turns),
+        carried_seconds=float(marker.get("t") or checkpoint.elapsed),
+    )
+    point = ResumePoint(
+        checkpoint=checkpoint,
+        record=resumed,
+        markers=tuple(item for item in journal.checkpoints() if int(item["step"]) <= step),
+    )
+    job_id, result = _execute(
+        workspace,
+        spec,
+        record,
+        environ=environ,
+        progress=progress,
+        credential_source=credential_source,
+        budget_usd=budget_usd,
+        resume_from={trial_id: point},
+    )
+    return job_id, result, resumed
 
 
 def run_roots(plan: RunPlan) -> list[ResourceRef]:
@@ -833,7 +929,7 @@ def local_jobs(workspace: Workspace) -> list[dict[str, Any]]:
             continue
         record = json.loads(record_path.read_text(encoding="utf-8"))
         result_path = directory / "result.json"
-        status = "running"
+        status = "interrupted" if _interrupted_trials(directory) else "running"
         score = None
         if result_path.is_file():
             result = JobResult.model_validate_json(result_path.read_text("utf-8"))
@@ -880,13 +976,16 @@ def local_job(workspace: Workspace, job_id: str) -> dict[str, Any]:
     from plural.execution.store import JobStore
 
     progress = job_progress(JobStore(workspace.project.jobs_dir), job_id)
+    stopped = _interrupted_trials(directory)
     return {
         **record,
-        "status": "running",
+        "status": "interrupted" if stopped else "running",
+        "interrupted": stopped,
         "progress": {
             "planned": progress.planned,
             "finished": progress.finished,
-            "running": progress.running,
+            "running": max(0, progress.running - len(stopped)),
+            "interrupted": len(stopped),
             "succeeded": progress.succeeded,
             "failed": progress.failed,
         },
@@ -1001,6 +1100,42 @@ def pinned_inputs(workspace: Workspace, inputs: Sequence[ResourceRef]) -> dict[s
     return pins
 
 
+def _interrupted_trials(job_directory: Path) -> list[dict[str, Any]]:
+    """The Trials of a local Job whose runner died mid-execution.
+
+    Returns:
+        Each one's id, with where it stood.
+    """
+    from plural.execution.journal import interrupted
+
+    found = []
+    for trial in sorted((job_directory / "trials").glob("trl_*")):
+        if trial.is_dir() and interrupted(trial):
+            found.append({"trial_id": trial.name, **_unfinished(trial)})
+    return found
+
+
+def _unfinished(trial_directory: Path) -> dict[str, Any]:
+    """A Trial with no result yet: running, or interrupted.
+
+    Returns:
+        Its status, with its journal's clock and latest run checkpoint.
+    """
+    from plural.execution.journal import RunJournal, interrupted
+
+    journal = RunJournal.of(trial_directory)
+    if not journal.exists:
+        return {"status": "running"}
+    return {
+        "status": "interrupted" if interrupted(trial_directory) else "running",
+        "run": {
+            "clock": journal.state().get("clock"),
+            "updated_at": journal.state().get("updated_at"),
+            "checkpoint": journal.latest(),
+        },
+    }
+
+
 def find_local_trial(workspace: Workspace, trial_id: str) -> tuple[str, Path]:
     """Locate a Trial among local Jobs.
 
@@ -1045,7 +1180,7 @@ def local_trial(workspace: Workspace, trial_id: str) -> dict[str, Any]:
         "source": record.get("source"),
         "rerun_of_job_id": record.get("rerun_of_job_id"),
         "rerun_of_trial_id": record.get("rerun_of_trial_id"),
-        **(_trial_summary(result) if result else {"status": "running"}),
+        **(_trial_summary(result) if result else _unfinished(directory)),
         "verifiers": (
             [item.model_dump(mode="json") for item in result.verifier_results] if result else []
         ),
@@ -1146,6 +1281,8 @@ def _execute(
     credential_source: CredentialSource | None = None,
     episode_server: EpisodeServerOptions | None = None,
     model_identities: Mapping[str, LocalModelIdentity] | None = None,
+    budget_usd: float | None = None,
+    resume_from: Mapping[str, Any] | None = None,
 ) -> tuple[str, JobResult]:
     from plural.credentials import CredentialError
     from plural.credentials import resolve as resolve_credentials
@@ -1216,6 +1353,8 @@ def _execute(
         environ = {**environ, "PLURAL_PROJECT_ID": environ.get("PLURAL_PROJECT_ID") or project_id}
     tracker = None
     store = JobStore(workspace.project.jobs_dir)
+    if tracking is not None and resume_from:
+        raise ProjectError("A resumed Trial runs locally; record its Job afterwards.")
     if tracking is not None:
         client = submit_client_job(workspace, tracking.studio, spec, record)
         tracking.hosted_job_id = client.job_id
@@ -1241,6 +1380,7 @@ def _execute(
         "credentials": credentials,
         "episode_server": episode_server,
         "model_identities": model_identities,
+        "budget_usd": budget_usd,
     }
     if tracker is not None:
         options["gateway_keys"] = tracker.gateway_key
@@ -1248,7 +1388,9 @@ def _execute(
     if progress is not None:
         options["progress"] = progress
     try:
-        result = asyncio.run(JobRunner(spec, **options).run())
+        result = asyncio.run(
+            JobRunner(spec, **options).run(resume=bool(resume_from), resume_from=resume_from)
+        )
     except BaseException as exc:
         if tracker is not None and tracking is not None:
             tracking.errors = tracker.close(cancelled=True)

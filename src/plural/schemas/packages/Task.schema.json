@@ -183,6 +183,19 @@
           "title": "Apps",
           "type": "object"
         },
+        "clock": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clock"
+        },
         "contexts": {
           "additionalProperties": {
             "$ref": "#/$defs/AgentContext"
@@ -225,6 +238,14 @@
         "observation": {
           "default": null,
           "title": "Observation"
+        },
+        "personas": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Personas",
+          "type": "array"
         },
         "prefix_metrics": {
           "items": {
