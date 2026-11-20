@@ -488,6 +488,9 @@ A text content part.
 Attributes:
     type: Discriminator; always ``"text"``.
     text: The text content.
+    cache_control: A prompt-cache breakpoint, such as ``{"type": "ephemeral"}``:
+        the prompt up to and including this part may be cached. Anthropic
+        honours it; hosts that cache on their own never receive it.
 ```
 
 ## plural.types.Tool

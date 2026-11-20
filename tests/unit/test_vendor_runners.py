@@ -198,6 +198,67 @@ def test_messages_bridge_translates_to_openai_gateway(monkeypatch: pytest.Monkey
     assert translated["usage"]["output_tokens"] == 3
 
 
+def test_messages_bridge_keeps_cache_breakpoints_and_reports_cache_use() -> None:
+    mark = {"type": "ephemeral"}
+    request = messages_bridge._to_openai(
+        {
+            "model": "anthropic/claude-haiku-4-5",
+            "system": [
+                {"type": "text", "text": "You are Claude Code."},
+                {"type": "text", "text": "Long instructions.", "cache_control": mark},
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "Hi", "cache_control": mark}],
+                },
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "t1", "name": "Read", "input": {}}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": [{"type": "text", "text": "file", "cache_control": mark}],
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+    system, user, _assistant, result = request["messages"]
+    assert system["content"] == [
+        {"type": "text", "text": "You are Claude Code."},
+        {"type": "text", "text": "Long instructions.", "cache_control": mark},
+    ]
+    assert user["content"] == [{"type": "text", "text": "Hi", "cache_control": mark}]
+    assert result["content"] == [{"type": "text", "text": "file", "cache_control": mark}]
+    plain = messages_bridge._to_openai(
+        {"system": [{"type": "text", "text": "Be brief."}], "messages": []}
+    )
+    assert plain["messages"] == [{"role": "system", "content": "Be brief."}]
+    response = messages_bridge._from_openai(
+        {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 5,
+                "prompt_tokens_details": {"cached_tokens": 900, "cache_write_tokens": 60},
+            },
+        },
+        model="anthropic/claude-haiku-4-5",
+    )
+    assert response["usage"] == {
+        "input_tokens": 40,
+        "output_tokens": 5,
+        "cache_read_input_tokens": 900,
+        "cache_creation_input_tokens": 60,
+    }
+
+
 def test_messages_bridge_carries_tools_both_ways() -> None:
     request = messages_bridge._to_openai(
         {

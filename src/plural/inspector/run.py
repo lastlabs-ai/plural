@@ -228,6 +228,7 @@ def run_inspector(
     budget_usd: float,
     environ: Mapping[str, str],
     model: str | None = None,
+    fork_models: Sequence[str] = (),
     question: str = "",
     concurrency: int = 4,
     progress: Any = None,
@@ -262,6 +263,7 @@ def run_inspector(
                 "budget_usd": round(each, 6),
                 "gateway_url": environ.get("PLURAL_GATEWAY_URL", ""),
                 "api_url": environ.get("PLURAL_API_URL", ""),
+                "fork_models": list(fork_models),
             },
             instructions=instructions_for(trial, depth, mode, question),
         )
@@ -322,6 +324,7 @@ def inspect_job(
     budget_usd: float = DEFAULT_BUDGET_USD,
     environ: Mapping[str, str],
     model: str | None = None,
+    fork_models: Sequence[str] = (),
     trial_ids: Sequence[str] = (),
     concurrency: int = 4,
     progress: Any = None,
@@ -347,6 +350,7 @@ def inspect_job(
             budget_usd=budget_usd,
             environ=fork_environ(environ, key),
             model=model,
+            fork_models=fork_models,
             concurrency=concurrency,
             progress=progress,
         )

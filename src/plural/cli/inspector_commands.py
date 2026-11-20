@@ -44,6 +44,9 @@ def job_inspect(
         DEFAULT_BUDGET_USD, "--budget-usd", min=0, help="What forks may spend in all, in USD."
     ),
     model: str | None = typer.Option(None, "--model", help="The Inspector's model."),
+    fork_model: list[str] = typer.Option(
+        [], "--fork-model", help="A model forks may switch the Agent to. Repeatable; any if unset."
+    ),
     trial: list[str] = typer.Option(
         [], "--trial", help="Inspect only this failed Trial. Repeatable."
     ),
@@ -76,6 +79,7 @@ def job_inspect(
         budget_usd=budget_usd,
         environ=environ,
         model=model,
+        fork_models=fork_model,
         trial_ids=trial,
         concurrency=concurrency,
         progress=_progress(as_json),

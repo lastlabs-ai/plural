@@ -4,8 +4,8 @@
 - name: model
   agent: true
   description: >-
-    The model couldn't do the work with what it was given, and a stronger or
-    different model would.
+    The model couldn't do the work with what it was given, and a stronger model
+    would: a fork that changed only the model beat its controls.
 - name: context
   agent: true
   description: >-

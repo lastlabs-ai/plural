@@ -51,7 +51,10 @@ instructions: |
      - context: what it needed was missing from, or lost in, what it read
        (context_at shows each message and its size).
      - model: the instructions, tools, and context were adequate, and the model still
-       got it wrong; a stronger model would get it right.
+       got it wrong; a stronger model would get it right. Show it: fork with only the
+       model changed, to one of overview's fork_models. record_finding refuses a model
+       Finding unless such a fork beat its controls. If none did, the cause is
+       something else: look again at the instructions, tools, and context.
      - harness, environment, integrity: as causes() describes.
   4. When forks_allowed is true and the cause is one an Agent change can fix, test
      it: fork at the step just before the critical step with the one change you

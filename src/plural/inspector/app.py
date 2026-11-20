@@ -24,7 +24,7 @@ from plural.environments.action_registry import action
 from plural.environments.types import State, initial
 from plural.inspector.causes import load_causes
 from plural.inspector.evidence import JobEvidence, TrialEvidence
-from plural.inspector.findings import ForkTest, Remedy, finding_status
+from plural.inspector.findings import ForkTest, Remedy, finding_status, stronger_model_won
 from plural.inspector.signals import load_project_signals, run_signals
 
 PATTERNS_FILE = "patterns.yaml"
@@ -59,6 +59,9 @@ class InspectorState(State):
     budget_usd: float = initial(1.0, minimum=0, description="What forks may spend, in USD.")
     gateway_url: str = initial("", description="Where forks call models.")
     api_url: str = initial("", description="The Plural API forks report to.")
+    fork_models: list[str] = initial(
+        default_factory=list, description="The models a fork may switch to; empty allows any."
+    )
     spent_usd: float = 0.0
     tests: list[dict[str, Any]] = Field(default_factory=list)
     findings: list[dict[str, Any]] = Field(default_factory=list)
@@ -128,6 +131,7 @@ class InspectorApp(App[InspectorState]):
             "known_patterns": _patterns(self._root),
             "fork_budget_usd": round(self.state.budget_usd - self.state.spent_usd, 4),
             "forks_allowed": ATTEMPTS[self.state.depth] > 0 and bool(os.environ.get(CREDENTIAL)),
+            "fork_models": list(self.state.fork_models) or "any",
         }
 
     @_tool()
@@ -306,6 +310,11 @@ class InspectorApp(App[InspectorState]):
         )
         if remedy.empty and change is None:
             raise ValueError("Change the Agent or name a diagnostic change to test.")
+        if model is not None and self.state.fork_models and model not in self.state.fork_models:
+            raise ValueError(
+                f"Forks may run {', '.join(self.state.fork_models)}, not {model}. Pick one of "
+                "those."
+            )
         trial = self._trial()
         failed = set(trial.row()["failed_gates"])
         unknown = sorted(set(gates or ()) - failed)
@@ -379,7 +388,9 @@ class InspectorApp(App[InspectorState]):
         record; critical_step is where it went wrong (None when the Agent's work was right
         and the grading was wrong); tests names the forks (X1, ...) that tested it. For a
         cause the Agent can fix, give the remedy you would ship: instructions,
-        tool_descriptions, or model, and a note. Set more to true when another cause
+        tool_descriptions, or model, and a note. A model Finding is refused unless tests
+        names a fork that changed only the model and beat its controls. Set more to true
+        when another cause
         explains other failed gates and you will record it next; otherwise this ends the
         episode, and every failed gate must be explained by then.
         """
@@ -411,6 +422,15 @@ class InspectorApp(App[InspectorState]):
                 "explains it, or set more to true and record its own cause next. A gate a "
                 "fork's candidates failed after the fix worked counts: something else stops "
                 "this Trial from passing."
+            )
+        if cause == "model" and not any(
+            stronger_model_won(item, self._trial().agent.model, gates or ()) for item in forks
+        ):
+            raise ValueError(
+                "A model Finding needs a fork in which a stronger model beat the controls: "
+                "fork with model set to another model and nothing else changed, on the gates "
+                "this cause explains, and list it in tests. Without one, the cause isn't "
+                "shown to be the model: keep looking at the instructions, tools, and context."
             )
         remedy = Remedy(
             instructions=instructions,
