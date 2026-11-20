@@ -1123,6 +1123,8 @@ class SeatResult(FrozenModel):
     score weighs theirs; a Verifier that scores no seats gives every seat
     its episode score. ``artifact_root`` is where the seat's Harness output,
     its trace from its own side of the table, sits among the Trial's artifacts.
+    ``metrics`` holds the running metrics a ``measure`` hook gave per seat, and
+    ``passed`` the seat's own gates on them.
     """
 
     seat: str
@@ -1136,6 +1138,12 @@ class SeatResult(FrozenModel):
     artifact_root: str = ""
     cost_usd: float | None = Field(default=None, ge=0)
     error_message: str | None = None
+    metrics: dict[str, float | None] = Field(default_factory=dict)
+    """This seat's value of each running metric measured per seat."""
+    gates: dict[str, bool] = Field(default_factory=dict)
+    """Each per-seat gate's verdict for this seat."""
+    passed: bool | None = None
+    """Whether this seat passed every applicable per-seat gate; ``None`` when none applied."""
 
 
 def _stored_api_key() -> str | None:

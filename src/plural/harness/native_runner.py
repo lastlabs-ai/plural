@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import json
 import math
@@ -193,6 +194,9 @@ class _Episode:
     transitions: list[dict[str, Any]] = field(default_factory=list)
     records: list[dict[str, Any]] = field(default_factory=list)
     _recorded_messages: int = 0
+    stream: Path | None = None
+    """Where each record is appended as it happens, so a run checkpoint can read
+    the Agent's context while the episode is still going."""
 
     def document(self) -> dict[str, Any]:
         """Return the messages and transitions of the episode."""
@@ -205,19 +209,54 @@ class _Episode:
         self, kind: str, started: tuple[str, float], *, turn: int | None, **fields: Any
     ) -> None:
         """Append one ``episode.jsonl`` record."""
-        self.records.append(
-            {
-                "schema": EPISODE_SCHEMA,
-                "sequence": len(self.records) + 1,
-                "event_id": f"e{len(self.records) + 1}",
-                "kind": kind,
-                "turn": turn,
-                "started_at": started[0],
-                "ended_at": _now(),
-                "duration_ms": round((time.monotonic() - started[1]) * 1000, 3),
-                **fields,
-            }
+        record = {
+            "schema": EPISODE_SCHEMA,
+            "sequence": len(self.records) + 1,
+            "event_id": f"e{len(self.records) + 1}",
+            "kind": kind,
+            "turn": turn,
+            "started_at": started[0],
+            "ended_at": _now(),
+            "duration_ms": round((time.monotonic() - started[1]) * 1000, 3),
+            **fields,
+        }
+        self.records.append(record)
+        if self.stream is not None:
+            with self.stream.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+    def compacted(
+        self,
+        started: tuple[str, float],
+        *,
+        turn: int,
+        policy: dict[str, Any],
+        before: int,
+        dropped: int,
+        summary: str | None,
+        usage: dict[str, Any] | None,
+        model: str | None,
+    ) -> None:
+        """Record one compaction of the Agent's context, with the context it left.
+
+        The next model call is recorded from offset 0, so anything that rebuilds
+        the context from the records gets the compacted one.
+        """
+        self.record(
+            "context.compaction",
+            started,
+            turn=turn,
+            strategy=str(policy.get("strategy") or ""),
+            tokens_before=before,
+            tokens_after=_context_tokens(self.messages),
+            dropped_messages=dropped,
+            summary=summary,
+            messages=list(self.messages),
+            message_count=len(self.messages),
+            usage=usage or {},
+            model=model,
         )
+        self._recorded_messages = 0
 
     def model_call(
         self,
@@ -265,7 +304,9 @@ def main() -> None:
     """Run one model-backed native profile without evaluating its own answer."""
     profile = sys.argv[1] if len(sys.argv) > 1 else "native.chat.v1"
     request = json.loads(sys.stdin.readline())
-    episode = _Episode()
+    episode = _Episode(stream=Path(EPISODE_FILE))
+    with contextlib.suppress(OSError):
+        Path(EPISODE_FILE).unlink()
     try:
         result, episode, trace_id = _run(profile, request, episode)
     except Exception as exc:  # noqa: BLE001
@@ -368,8 +409,11 @@ def _run(
         }
         for name, action in actions.items()
     ]
-    if profile in _ACTION_PROFILES and _FINISH not in actions:
+    finish_allowed = bool(environment.get("allow_finish", True))
+    autonomous = bool(environment.get("autonomous")) and "wait" in actions
+    if profile in _ACTION_PROFILES and _FINISH not in actions and finish_allowed:
         tools.append(_FINISH_TOOL)
+    policy = agent.get("context") if isinstance(agent.get("context"), dict) else {}
     workspace = _WorkspaceTools(environment, denials) if profile in _WORKSPACE_PROFILES else None
     if workspace is not None:
         tools = workspace.declarations()
@@ -414,6 +458,18 @@ def _run(
             stop_reason = "max_seconds"
             break
         offered = tools if profile not in _CHAT_PROFILES else []
+        if policy:
+            compaction_cost, paused = _compact(
+                episode,
+                policy,
+                model=execution_model,
+                routing=_mapping(agent.get("routing") or {}, "agent.routing"),
+                timeout=remaining,
+                turn=turn,
+            )
+            deadline += paused
+            if compaction_cost is not None:
+                total_cost = (total_cost or 0.0) + compaction_cost
         started = _started()
         try:
             response, paused = _model_call(
@@ -452,6 +508,25 @@ def _run(
             stop_reason = "max_cost"
             break
         calls = message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
+        if autonomous and not calls and profile not in _CHAT_PROFILES:
+            # In an autonomous Environment the Agent can't end the episode by replying:
+            # a reply without a tool call lets time pass until something happens.
+            call = {"id": "", "function": {"name": "wait", "arguments": "{}"}}
+            started = _started()
+            outcome = _run_action(call, "wait", actions, environment, deadline, turn)
+            _record_outcome(episode, started, turn, call, outcome, implicit=True)
+            if outcome.transition is not None:
+                episode.transitions.append(outcome.transition)
+            messages.append(
+                {"role": "user", "content": f"(You waited.)\n{outcome.message.get('content')}"}
+            )
+            terminated = terminated or outcome.terminated
+            truncated = truncated or outcome.truncated
+            if outcome.terminated:
+                stop_reason = "environment_terminated"
+            elif outcome.truncated:
+                stop_reason = "environment_truncated"
+            continue
         if profile in _CHAT_PROFILES or not calls:
             final_message = message
             stop_reason = "agent_response"
@@ -464,7 +539,9 @@ def _run(
                     _record_outcome(episode, started, turn, call, outcome)
                 messages.append(outcome.message)
                 continue
-            outcome = _dispatch_tool(call, actions, environment, denials, deadline, turn)
+            outcome = _dispatch_tool(
+                call, actions, environment, denials, deadline, turn, finish=finish_allowed
+            )
             _record_outcome(episode, started, turn, call, outcome)
             messages.append(outcome.message)
             if outcome.transition is not None:
@@ -509,8 +586,14 @@ def _record_outcome(
     turn: int,
     call: Any,
     outcome: _ToolOutcome,
+    *,
+    implicit: bool = False,
 ) -> None:
-    """Record one dispatched tool call as an Environment step or the Agent finishing."""
+    """Record one dispatched tool call as an Environment step or the Agent finishing.
+
+    An ``implicit`` step is one the loop took for the Agent, such as waiting after
+    a reply with no tool call; the Agent sees its result as a user message.
+    """
     call_id = str(call.get("id") or "") if isinstance(call, dict) else ""
     function = call.get("function") if isinstance(call, dict) else None
     name = str(function.get("name") or "") if isinstance(function, dict) else ""
@@ -556,6 +639,7 @@ def _record_outcome(
         info=info,
         view=step.get("view") or None,
         error=str(error) if error else None,
+        **({"implicit": True} if implicit else {}),
     )
 
 
@@ -1038,13 +1122,15 @@ def _dispatch_tool(
     denials: list[dict[str, str]],
     deadline: float,
     turn: int,
+    *,
+    finish: bool = True,
 ) -> _ToolOutcome:
     if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
         raise ValueError("model emitted an invalid action call")
     function = call["function"]
     name = str(function.get("name") or "")
     denied = {item["capability"]: item["reason"] for item in denials}
-    if name == _FINISH and _FINISH not in actions:
+    if name == _FINISH and _FINISH not in actions and finish:
         return _finish(call, function, turn)
     if name.startswith("harness."):
         tool = name.removeprefix("harness.")
@@ -1348,6 +1434,113 @@ def _action_environment(environment: dict[str, Any]) -> dict[str, str]:
     values = {key: value for key, value in os.environ.items() if key in names}
     values["PLURAL_RESOURCES_DIR"] = _workspace_path("/workspace/resources")
     return values
+
+
+def _context_tokens(messages: list[dict[str, Any]]) -> int:
+    """A rough size of a context in tokens: four characters each."""
+    return len(json.dumps(messages, default=str)) // 4
+
+
+def _turn_starts(messages: list[dict[str, Any]]) -> list[int]:
+    """Where each turn starts: each assistant message, with what answers it after."""
+    return [index for index, item in enumerate(messages) if item.get("role") == "assistant"]
+
+
+def _compact(
+    episode: _Episode,
+    policy: dict[str, Any],
+    *,
+    model: str,
+    routing: dict[str, Any],
+    timeout: float,
+    turn: int,
+) -> tuple[float | None, float]:
+    """Apply the Agent's context policy before a model call, and record what it did.
+
+    ``window`` drops the oldest turns, keeping the instructions, the Task, and the
+    last ``keep_last_turns`` turns. ``summarize`` replaces everything but the
+    instructions and the last turns with a summary the Agent's own model writes.
+    ``none`` does nothing. Either runs only once the context is over ``max_tokens``.
+
+    Returns:
+        What a summary cost, if one was written, and the seconds spent waiting for credits.
+    """
+    strategy = str(policy.get("strategy") or "none")
+    limit = policy.get("max_tokens")
+    messages = episode.messages
+    if strategy == "none" or not limit:
+        return None, 0.0
+    before = _context_tokens(messages)
+    if before <= int(limit):
+        return None, 0.0
+    keep = max(1, int(policy.get("keep_last_turns") or 4))
+    starts = _turn_starts(messages)
+    if len(starts) <= keep:
+        return None, 0.0
+    cut = starts[-keep]
+    head = [item for item in messages[:1] if item.get("role") == "system"]
+    started = _started()
+    if strategy == "window":
+        # The Task's own message stays; the oldest turns after it go.
+        opening = messages[len(head) : len(head) + 1]
+        dropped = cut - len(head) - len(opening)
+        if dropped <= 0:
+            return None, 0.0
+        messages[:] = [*head, *opening, *messages[cut:]]
+        episode.compacted(
+            started,
+            turn=turn,
+            policy=policy,
+            before=before,
+            dropped=dropped,
+            summary=None,
+            usage=None,
+            model=None,
+        )
+        return None, 0.0
+    older = messages[len(head) : cut]
+    transcript = "\n\n".join(
+        f"{item.get('role')}: {item.get('content') or ''}"
+        + (
+            "\n" + json.dumps(item.get("tool_calls"), default=str)[:2000]
+            if item.get("tool_calls")
+            else ""
+        )
+        for item in older
+    )[-60_000:]
+    response, paused = _model_call(
+        model=model,
+        routing=routing,
+        messages=[
+            {
+                "role": "system",
+                "content": "Summarize this conversation so the assistant can carry on with "
+                "its work. Keep what it was asked to do, decisions made, and anything still "
+                "pending.",
+            },
+            {"role": "user", "content": transcript},
+        ],
+        tools=[],
+        timeout=timeout,
+    )
+    summary = str(_response_message(response).get("content") or "").strip()
+    usage = _usage(response.get("usage"))
+    messages[:] = [
+        *head,
+        {"role": "user", "content": f"Summary of the conversation so far:\n{summary}"},
+        *messages[cut:],
+    ]
+    episode.compacted(
+        started,
+        turn=turn,
+        policy=policy,
+        before=before,
+        dropped=len(older),
+        summary=summary,
+        usage=usage,
+        model=str(response.get("model") or model),
+    )
+    return usage.get("cost_usd"), paused
 
 
 if __name__ == "__main__":

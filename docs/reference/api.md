@@ -1516,7 +1516,7 @@ from the state of several Apps.
 ```
 
 ```python
-plural.Environment(*, apps: 'Iterable[App[Any]]' = (), runtime: 'EnvironmentRuntime | Mapping[str, Any] | None' = None, name: 'str | None' = None, version: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'Iterable[EnvironmentResource]' = (), guardrails: 'Iterable[Guardrail]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, party: 'Party | int | Mapping[str, int] | None' = None, metadata: 'dict[str, Any] | None' = None, source: 'str | Path | None' = None) -> 'None'
+plural.Environment(*, apps: 'Iterable[App[Any]]' = (), runtime: 'EnvironmentRuntime | Mapping[str, Any] | None' = None, name: 'str | None' = None, version: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'Iterable[EnvironmentResource]' = (), guardrails: 'Iterable[Guardrail]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, party: 'Party | int | Mapping[str, int] | None' = None, clock: 'Clock | Mapping[str, Any] | None' = None, horizon: 'Horizon | Mapping[str, Any] | None' = None, autonomous: 'bool | None' = None, allow_finish: 'bool | None' = None, checkpoint_every: 'Every | Mapping[str, Any] | None' = None, metadata: 'dict[str, Any] | None' = None, source: 'str | Path | None' = None) -> 'None'
 ```
 
 ### plural.Environment.on_step
@@ -1713,7 +1713,7 @@ zero-sum game.
 ```
 
 ```python
-plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = (), source: "Literal['agent', 'environment']" = 'agent') -> None
+plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = (), source: "Literal['agent', 'environment']" = 'agent', now: 'float | None' = None) -> None
 ```
 
 ## plural.environments.types.Observation

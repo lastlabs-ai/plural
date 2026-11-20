@@ -154,6 +154,46 @@
         "title": "AppDefinition",
         "type": "object"
       },
+      "Clock": {
+        "additionalProperties": false,
+        "description": "Simulated time, for a world that changes on its own.\n\nTime is a number of ``unit`` s. It starts at ``start``, or at 0 when\n``start`` is an ISO-8601 timestamp, which only labels it. With\n``agent_paced`` time each action takes the time its App's\n``action_duration`` says; with ``event_driven`` time, the default, actions\ntake none and time moves only when the Agent waits.",
+        "properties": {
+          "start": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": 0.0,
+            "title": "Start"
+          },
+          "unit": {
+            "default": "day",
+            "enum": [
+              "second",
+              "minute",
+              "hour",
+              "day"
+            ],
+            "title": "Unit",
+            "type": "string"
+          },
+          "pacing": {
+            "default": "event_driven",
+            "enum": [
+              "agent_paced",
+              "event_driven"
+            ],
+            "title": "Pacing",
+            "type": "string"
+          }
+        },
+        "title": "Clock",
+        "type": "object"
+      },
       "DeclarativeImage": {
         "additionalProperties": false,
         "description": "Portable subset of Daytona's declarative image builder.",
@@ -508,6 +548,40 @@
         "title": "EnvironmentRuntime",
         "type": "object"
       },
+      "Every": {
+        "additionalProperties": false,
+        "description": "A period: every ``sim_time`` clock units, or every ``steps`` steps.",
+        "properties": {
+          "sim_time": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sim Time"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Steps"
+          }
+        },
+        "title": "Every",
+        "type": "object"
+      },
       "ExecutionLimits": {
         "additionalProperties": false,
         "description": "How long one episode may run.\n\nThe defaults apply when ``limits`` is left out of an Environment: no turn\ncap, and 600 seconds. Set ``max_turns`` to any positive number to cap turns.\n``max_seconds`` always stops the run.",
@@ -654,6 +728,40 @@
           }
         },
         "title": "HarnessPolicy",
+        "type": "object"
+      },
+      "Horizon": {
+        "additionalProperties": false,
+        "description": "When an autonomous episode ends: after ``sim_time`` clock units, or ``max_steps`` steps.",
+        "properties": {
+          "sim_time": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sim Time"
+          },
+          "max_steps": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Steps"
+          }
+        },
+        "title": "Horizon",
         "type": "object"
       },
       "NetworkMode": {
@@ -973,6 +1081,61 @@
         ],
         "default": null,
         "description": "How many Agents share each episode, for a game such as poker. Leave it unset for an Environment one Agent works in alone."
+      },
+      "clock": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Clock"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Simulated time. With a clock the Environment offers a wait action, its Apps' scheduled events happen as time passes, and each observation starts with the time."
+      },
+      "horizon": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Horizon"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "When the episode ends on its own: after sim_time clock units or max_steps steps, with stop reason horizon_reached."
+      },
+      "autonomous": {
+        "default": false,
+        "description": "The Agent runs until the horizon: a reply with no tool call waits rather than ending the episode. Needs a clock.",
+        "title": "Autonomous",
+        "type": "boolean"
+      },
+      "allow_finish": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Whether the Agent may end the episode itself. Unset, it may unless the Environment is autonomous.",
+        "title": "Allow Finish"
+      },
+      "checkpoint_every": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Every"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "How often the Job saves a run checkpoint, every sim_time clock units or steps steps, so a Trial whose runner dies can be resumed."
       },
       "metadata": {
         "additionalProperties": true,
@@ -1450,6 +1613,17 @@
             "default": null,
             "title": "Measure"
           },
+          "measure_every": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Every"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "runtime": {
             "$ref": "#/$defs/VerifierRuntime"
           },
@@ -1584,6 +1758,40 @@
         "title": "EnvironmentResource",
         "type": "object"
       },
+      "Every": {
+        "additionalProperties": false,
+        "description": "A period: every ``sim_time`` clock units, or every ``steps`` steps.",
+        "properties": {
+          "sim_time": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sim Time"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Steps"
+          }
+        },
+        "title": "Every",
+        "type": "object"
+      },
       "HumanVerifier": {
         "additionalProperties": false,
         "description": "Human review verifier.",
@@ -1658,7 +1866,7 @@
       },
       "MetricSpec": {
         "additionalProperties": false,
-        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nA running metric a ``measure`` hook gives per seat has a series per seat,\neach aggregated on its own and judged as a gate on its own; the Trial's\nvalue combines the seats' by ``seat_aggregate`` (by default their mean).\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
         "properties": {
           "name": {
             "maxLength": 64,
@@ -1774,6 +1982,24 @@
             "default": "",
             "title": "Description",
             "type": "string"
+          },
+          "seat_aggregate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mean",
+                  "sum",
+                  "min",
+                  "max"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Seat Aggregate"
           }
         },
         "required": [
@@ -2168,9 +2394,43 @@
   },
   "DeterministicVerifier": {
     "$defs": {
+      "Every": {
+        "additionalProperties": false,
+        "description": "A period: every ``sim_time`` clock units, or every ``steps`` steps.",
+        "properties": {
+          "sim_time": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sim Time"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Steps"
+          }
+        },
+        "title": "Every",
+        "type": "object"
+      },
       "MetricSpec": {
         "additionalProperties": false,
-        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nA running metric a ``measure`` hook gives per seat has a series per seat,\neach aggregated on its own and judged as a gate on its own; the Trial's\nvalue combines the seats' by ``seat_aggregate`` (by default their mean).\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
         "properties": {
           "name": {
             "maxLength": 64,
@@ -2286,6 +2546,24 @@
             "default": "",
             "title": "Description",
             "type": "string"
+          },
+          "seat_aggregate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mean",
+                  "sum",
+                  "min",
+                  "max"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Seat Aggregate"
           }
         },
         "required": [
@@ -2596,6 +2874,17 @@
         "default": null,
         "title": "Measure"
       },
+      "measure_every": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Every"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "runtime": {
         "$ref": "#/$defs/VerifierRuntime"
       },
@@ -2620,7 +2909,7 @@
     "$defs": {
       "MetricSpec": {
         "additionalProperties": false,
-        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nA running metric a ``measure`` hook gives per seat has a series per seat,\neach aggregated on its own and judged as a gate on its own; the Trial's\nvalue combines the seats' by ``seat_aggregate`` (by default their mean).\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
         "properties": {
           "name": {
             "maxLength": 64,
@@ -2736,6 +3025,24 @@
             "default": "",
             "title": "Description",
             "type": "string"
+          },
+          "seat_aggregate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mean",
+                  "sum",
+                  "min",
+                  "max"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Seat Aggregate"
           }
         },
         "required": [
@@ -3055,7 +3362,7 @@
     "$defs": {
       "MetricSpec": {
         "additionalProperties": false,
-        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nA running metric a ``measure`` hook gives per seat has a series per seat,\neach aggregated on its own and judged as a gate on its own; the Trial's\nvalue combines the seats' by ``seat_aggregate`` (by default their mean).\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
         "properties": {
           "name": {
             "maxLength": 64,
@@ -3171,6 +3478,24 @@
             "default": "",
             "title": "Description",
             "type": "string"
+          },
+          "seat_aggregate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mean",
+                  "sum",
+                  "min",
+                  "max"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Seat Aggregate"
           }
         },
         "required": [
@@ -3344,6 +3669,44 @@
           }
         },
         "title": "AgentCredential",
+        "type": "object"
+      },
+      "ContextPolicy": {
+        "additionalProperties": false,
+        "description": "How an Agent's Harness keeps its context within bounds over a long episode.\n\n``window`` drops the oldest turns once the context is over ``max_tokens``,\nkeeping the instructions, the Task, and the last ``keep_last_turns``\nturns. ``summarize`` replaces all but the instructions and the last turns\nwith a summary the Agent's own model writes, billed to the Agent. ``none``\nkeeps everything. Each compaction is recorded in the episode, and a\ncheckpoint holds the context as it stood after it.",
+        "properties": {
+          "strategy": {
+            "default": "none",
+            "enum": [
+              "window",
+              "summarize",
+              "none"
+            ],
+            "title": "Strategy",
+            "type": "string"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1000,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Tokens"
+          },
+          "keep_last_turns": {
+            "default": 4,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Keep Last Turns",
+            "type": "integer"
+          }
+        },
+        "title": "ContextPolicy",
         "type": "object"
       },
       "ExternalAgent": {
@@ -3856,6 +4219,18 @@
         "description": "How the Environment's tools are described to the model, by tool name: a new description, or hidden: true. The Environment itself is unchanged.",
         "title": "Tool Overrides",
         "type": "object"
+      },
+      "context": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ContextPolicy"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "How the Harness keeps a long episode's context within bounds: {strategy: window | summarize | none, max_tokens, keep_last_turns}."
       },
       "metadata": {
         "additionalProperties": true,
@@ -4475,6 +4850,17 @@
             "default": null,
             "title": "Measure"
           },
+          "measure_every": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Every"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "runtime": {
             "$ref": "#/$defs/VerifierRuntime"
           },
@@ -4749,6 +5135,40 @@
         "title": "EvaluationTrack",
         "type": "object"
       },
+      "Every": {
+        "additionalProperties": false,
+        "description": "A period: every ``sim_time`` clock units, or every ``steps`` steps.",
+        "properties": {
+          "sim_time": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sim Time"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Steps"
+          }
+        },
+        "title": "Every",
+        "type": "object"
+      },
       "HumanVerifier": {
         "additionalProperties": false,
         "description": "Human review verifier.",
@@ -4823,7 +5243,7 @@
       },
       "MetricSpec": {
         "additionalProperties": false,
-        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+        "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nA running metric a ``measure`` hook gives per seat has a series per seat,\neach aggregated on its own and judged as a gate on its own; the Trial's\nvalue combines the seats' by ``seat_aggregate`` (by default their mean).\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
         "properties": {
           "name": {
             "maxLength": 64,
@@ -4939,6 +5359,24 @@
             "default": "",
             "title": "Description",
             "type": "string"
+          },
+          "seat_aggregate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mean",
+                  "sum",
+                  "min",
+                  "max"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Seat Aggregate"
           }
         },
         "required": [

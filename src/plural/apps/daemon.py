@@ -312,6 +312,7 @@ def _restore_inputs(inputs: Mapping[str, Any] | None) -> dict[str, Any] | None:
         "rendered": str(given.get("rendered") or ""),
         "info": inputs.get("info") if inputs is not None else None,
         "seed": seed if isinstance(seed, int) else None,
+        "clock": given.get("clock") if isinstance(given.get("clock"), dict) else None,
     }
 
 

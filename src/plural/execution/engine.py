@@ -94,7 +94,12 @@ from plural.execution.seats import (
 )
 from plural.execution.steps import STEPS_FILE, dump_jsonl, episode_terminated, merge_host_steps
 from plural.execution.store import JobStore
-from plural.execution.trial_metrics import metric_lines, task_metric_specs, trial_metrics
+from plural.execution.trial_metrics import (
+    metric_lines,
+    seat_metrics,
+    task_metric_specs,
+    trial_metrics,
+)
 from plural.external.protocol import EpisodeGateway, signing_key
 from plural.harness.builtins import package_tools
 from plural.harness.episode import EPISODE_FILE
@@ -1764,6 +1769,8 @@ class TrialRunner:
                 "awaiting_review" if awaiting else "succeeded"
             )
             totals = _episode_totals(artifacts, failed=False)
+            if host_report.clock.get("horizon_reached"):
+                totals["stop_reason"] = "horizon_reached"
             receipt = self._receipt(
                 execution_id=execution_id,
                 retry=retry,
@@ -2149,6 +2156,11 @@ class TrialRunner:
                 "routing": binding.routing.model_dump(mode="json", exclude_none=True),
                 "harness": player.package.definition.name,
                 "harness_config": binding.harness_config,
+                **(
+                    {"context": binding.agent.context.model_dump(mode="json")}
+                    if binding.agent.context is not None
+                    else {}
+                ),
             },
             model_resolution=model.model_dump(mode="json"),
             environment=self._environment_payload(task, binding),
@@ -2244,6 +2256,10 @@ class TrialRunner:
             },
             costs={str(item.seat): item.cost_usd for item in players},
             errors={str(item.seat): item.error for item in players if item.error},
+            metrics=seat_metrics(
+                self.task, artifacts, turns=len(report.steps), lines=report.metrics
+            ),
+            specs=task_metric_specs(self.task).values(),
         )
 
     async def _heartbeat(self, execution_id: int) -> None:

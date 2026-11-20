@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import dataclasses
 import importlib.util
 import json
 import math
@@ -33,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from plural.apps.base import App, observation_payload
 from plural.apps.workspace import BUNDLE_FILE, WorkspaceSnapshots
 from plural.common import described
+from plural.environments.definition import WAIT_ACTION
 from plural.snapshots import Snapshotter
 from plural.verifiers import Step, StepTask
 
@@ -145,6 +147,9 @@ class RewardHook:
     fn: Callable[[Step], Any]
     hook: Literal["reward", "measure"] = "reward"
     metrics: tuple[str, ...] = ()
+    every: Mapping[str, float] | None = None
+    """For ``measure``: run each period, ``{"sim_time": x}`` or ``{"steps": n}``,
+    instead of after every step."""
 
 
 def load_reward_hooks(root: Path, entries: Sequence[Mapping[str, Any]]) -> list[RewardHook]:
@@ -190,6 +195,7 @@ def load_reward_hooks(root: Path, entries: Sequence[Mapping[str, Any]]) -> list[
                 fn=function,
                 hook="measure" if entry.get("hook") == "measure" else "reward",
                 metrics=tuple(str(item) for item in entry.get("metrics") or ()),
+                every=dict(entry["every"]) if isinstance(entry.get("every"), Mapping) else None,
             )
         )
     return loaded
@@ -253,6 +259,12 @@ class AppHost:
         self.restored_from: int | None = None
         self.oracles: dict[str, dict[str, str]] = {}
         """Diagnostic tools a fork added, by name, with the answer each returns."""
+        self.clock = self.definition.clock
+        self.horizon = self.definition.horizon
+        self.now: float | None = None if self.clock is None else self.clock.origin
+        self.horizon_reached = False
+        self._measured_at: float | None = None
+        self._scheduled_recorded: dict[str, Any] = {}
         self._snapshot_store = Path(snapshot_store or ".")
         self.snapshots: Snapshotter | None = (
             WorkspaceSnapshots(
@@ -414,6 +426,9 @@ class AppHost:
             "metric_failures": list(self._metric_failures),
             "workspace": self.snapshots.report() if self.snapshots is not None else None,
             "restored_from": self.restored_from,
+            "clock": None
+            if self.clock is None
+            else {"now": self.now, "horizon_reached": self.horizon_reached},
         }
 
     def finish(self) -> dict[str, Any]:
@@ -455,6 +470,12 @@ class AppHost:
         """
         state = dict(initial_state or {})
         texts: list[tuple[str, Any, str]] = []
+        self.horizon_reached = False
+        self._scheduled_recorded = {}
+        self._set_now(None if self.clock is None else self.clock.origin)
+        self._measured_at = self.now
+        for app in self.apps.values():
+            app._scheduled = []
         for name, app in self.apps.items():
             app_state = dict(state.get(name) or {})
             if seed is not None and "seed" not in app_state and _accepts_seed(app):
@@ -480,6 +501,10 @@ class AppHost:
         self._base_step = 0
         self._record_states(0)
         self._snapshot_workspace(0)
+        for hook in self.verifiers:
+            # A periodic metric's first point is the world as the episode starts.
+            if hook.hook == "measure" and hook.every and hook.every.get("sim_time"):
+                self._measure_now(hook)
         if len(texts) == 1:
             observation, rendered = texts[0][1], texts[0][2]
         elif texts:
@@ -532,6 +557,8 @@ class AppHost:
             return self._ended("step", name)
         if not self.started:
             self.start()
+        if self.horizon_reached:
+            return {**self._ended("step", name), "terminated": False, "truncated": True}
         refusal = self._refuse(seat)
         if refusal is not None:
             return self._envelope(
@@ -541,11 +568,316 @@ class AppHost:
         for item in self.apps.values():
             item.seat = seat
         try:
-            return self._run(name, arguments, unknown=unknown)
+            route = None if unknown else self.routes.get(name)
+            if self.clock is not None and route == ("", WAIT_ACTION):
+                return self._wait(arguments)
+            envelope = self._run(name, arguments, unknown=unknown)
+            envelope = self._paced(route, arguments, envelope)
+            self._after_step()
+            return envelope
         finally:
             self._acting = None
             for item in self.apps.values():
                 item.seat = None
+
+    # Simulated time.
+
+    def _set_now(self, value: float | None) -> None:
+        self.now = value
+        for app in self.apps.values():
+            app._now = value
+
+    def _label(self, value: float | None = None) -> str:
+        if self.clock is None:
+            return ""
+        return self.clock.label(value if value is not None else (self.now or 0.0))
+
+    def _horizon_end(self) -> float | None:
+        if self.clock is None or self.horizon is None or self.horizon.sim_time is None:
+            return None
+        return self.clock.origin + self.horizon.sim_time
+
+    def _after_step(self) -> None:
+        """Run step-period ``measure`` hooks and check the horizon after any step."""
+        for hook in self.verifiers:
+            every = hook.every or {}
+            steps = every.get("steps")
+            if hook.hook == "measure" and steps and self.steps % int(steps) == 0:
+                self._measure_now(hook)
+        self._check_horizon()
+
+    def _check_horizon(self) -> None:
+        if self.horizon is None or self.horizon_reached:
+            return
+        end = self._horizon_end()
+        if end is not None and self.now is not None and self.now >= end - 1e-9:
+            self.horizon_reached = True
+        if self.horizon.max_steps is not None and self.steps >= self.horizon.max_steps:
+            self.horizon_reached = True
+
+    def _wait(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """The built-in ``wait``: let time pass to ``until`` or the next event.
+
+        The world's events happen first, each its own step; the wait is the step
+        after them, and its observation lists them with their times.
+
+        Returns:
+            The wait's envelope.
+        """
+        assert self.clock is not None and self.now is not None
+        problem: str | None = None
+        unknown = sorted(str(key) for key in arguments if key != "until")
+        until = arguments.get("until")
+        target: float | None = None
+        if unknown:
+            problem = f"wait takes only until, not {', '.join(unknown)}"
+        elif until is not None:
+            try:
+                target = float(until)
+            except (TypeError, ValueError):
+                problem = f"until must be a number of {self.clock.unit}s, not {until!r}"
+            else:
+                if not math.isfinite(target):
+                    problem = f"until must be a finite number of {self.clock.unit}s"
+                elif target < self.now:
+                    problem = f"It is already {self._label()}; until must not be earlier."
+        else:
+            target = self._next_event_time()
+            if target is None:
+                target = self._horizon_end()
+            if target is None:
+                problem = "Nothing is scheduled to happen. Give until, the time to wait until."
+        end = self._horizon_end()
+        if target is not None and end is not None:
+            target = min(target, end)
+        if problem is not None or target is None:
+            self.steps += 1
+            self.turns += 1
+            self._record_states(self.steps, action=WAIT_ACTION, error=problem)
+            self._snapshot_workspace(self.steps)
+            envelope = self._logged(
+                self._envelope(
+                    "step",
+                    action=WAIT_ACTION,
+                    observation=None,
+                    rendered="",
+                    info={"step": self.steps, "error": problem},
+                ),
+                arguments,
+            )
+            self._after_step()
+            return envelope
+        started = self.now
+        events = self._advance_to(target)
+        self.steps += 1
+        self.turns += 1
+        lines = [f"[{self._label(at)}] {text}" for at, text in events if text]
+        summary = (
+            f"Waited from {self._label(started)} to {self._label()}."
+            if lines
+            else f"Waited from {self._label(started)} to {self._label()}. Nothing happened."
+        )
+        rendered = "\n".join([*lines, summary])
+        observation = {
+            "text": rendered,
+            "now": self.now,
+            "events": [{"at": at, "text": text} for at, text in events],
+        }
+        self._record_states(self.steps, action=WAIT_ACTION)
+        self._snapshot_workspace(self.steps)
+        self._measure(
+            self._step_view("", WAIT_ACTION, arguments, observation, None, None, None), ""
+        )
+        envelope = self._logged(
+            self._envelope(
+                "step",
+                action=WAIT_ACTION,
+                observation=observation,
+                rendered=rendered,
+                info={"step": self.steps, "sim_time": self.now},
+                view=self._view(None),
+                timed=True,
+            ),
+            arguments,
+        )
+        self._after_step()
+        return envelope
+
+    def _paced(
+        self,
+        route: tuple[str, str] | None,
+        arguments: Mapping[str, Any],
+        envelope: dict[str, Any],
+    ) -> dict[str, Any]:
+        """With ``agent_paced`` time, let the action's duration pass, and add what happened.
+
+        Returns:
+            The action's envelope, with the events that followed it appended.
+        """
+        if self.clock is None or self.clock.pacing != "agent_paced" or route is None:
+            return envelope
+        app = self.apps.get(route[0])
+        if app is None or self.now is None:
+            return envelope
+        duration = float(app.action_duration(route[1], dict(arguments)) or 0.0)
+        if not math.isfinite(duration) or duration <= 0:
+            return envelope
+        target = self.now + duration
+        end = self._horizon_end()
+        events = self._advance_to(target if end is None else min(target, end))
+        lines = [f"[{self._label(at)}] {text}" for at, text in events if text]
+        if not lines:
+            return envelope
+        rendered = "\n".join(
+            part for part in (str(envelope.get("rendered") or ""), "Meanwhile:", *lines) if part
+        )
+        return {**envelope, "rendered": rendered}
+
+    def _next_event_time(self) -> float | None:
+        times: list[float] = []
+        for app in self.apps.values():
+            value = app.next_event_time()
+            if value is not None:
+                times.append(float(value))
+        return min(times) if times else None
+
+    def _next_measure_time(self) -> float | None:
+        """When the next sim-time ``measure`` period falls, after the last one measured.
+
+        Returns:
+            The time, or ``None`` when no hook measures on a sim-time period.
+        """
+        if self.clock is None or self._measured_at is None:
+            return None
+        periods = [
+            float(hook.every["sim_time"])
+            for hook in self.verifiers
+            if hook.hook == "measure" and hook.every and hook.every.get("sim_time")
+        ]
+        if not periods:
+            return None
+        origin = self.clock.origin
+        upcoming = []
+        for period in periods:
+            index = math.floor((self._measured_at - origin) / period + 1e-9) + 1
+            upcoming.append(origin + index * period)
+        return min(upcoming)
+
+    def _advance_to(self, target: float) -> list[tuple[float, str]]:
+        """Move the clock to ``target``, running every event and period on the way.
+
+        Returns:
+            Each event's time and the text the Agent sees.
+
+        Raises:
+            RuntimeError: When an App keeps an event it was already given.
+        """
+        assert self.now is not None
+        happened: list[tuple[float, str]] = []
+        last: float | None = None
+        repeats = 0
+        while True:
+            upcoming = [
+                value
+                for value in (self._next_event_time(), self._next_measure_time())
+                if value is not None and value <= target
+            ]
+            if not upcoming:
+                break
+            moment = max(self.now, min(upcoming))
+            repeats = repeats + 1 if moment == last else 0
+            last = moment
+            if repeats > 100:
+                raise RuntimeError(
+                    f"An App keeps an event at {moment:g} after advance({moment:g}). "
+                    "Take due events with due_events() in advance()."
+                )
+            self._set_now(moment)
+            happened.extend(self._advance_apps(moment))
+            measure_at = self._next_measure_time()
+            if measure_at is not None and measure_at <= moment + 1e-9:
+                self._measured_at = moment
+                for hook in self.verifiers:
+                    if hook.hook == "measure" and hook.every and hook.every.get("sim_time"):
+                        self._measure_now(hook)
+        if target > self.now:
+            self._set_now(target)
+            happened.extend(self._advance_apps(target))
+        return happened
+
+    def _advance_apps(self, moment: float) -> list[tuple[float, str]]:
+        """Call each App's ``advance``; record each event it reports as a step.
+
+        Returns:
+            Each event's time and text.
+        """
+        happened: list[tuple[float, str]] = []
+        for name, app in self.apps.items():
+            for item in app.advance(moment) or ():
+                payload, rendered = observation_payload(item)
+                if payload is None:
+                    continue
+                self._event(name, payload, rendered)
+                happened.append((moment, rendered))
+        return happened
+
+    def _event(self, app_name: str, payload: Any, rendered: str) -> None:
+        """Record one thing the world did on its own as a step with ``source: environment``."""
+        self.steps += 1
+        app = self.apps[app_name]
+        step = self._step_view(app_name, "event", {}, payload, None, None, self._snapshot(app))
+        if step is not None:
+            step = dataclasses.replace(step, source="environment", seat=None)
+        self._record_states(self.steps, app=app_name, action="event", source="environment")
+        self._snapshot_workspace(self.steps)
+        self._measure(step, app_name)
+        self._log.append(
+            self._redact(
+                {
+                    "protocol": STEP_PROTOCOL,
+                    "kind": "event",
+                    "app": app_name,
+                    "action": "event",
+                    "arguments": {},
+                    "observation": json.loads(json.dumps(payload, default=str)),
+                    "rendered": f"[{self._label()}] {rendered}",
+                    "reward": 0.0,
+                    "rewards": [],
+                    "terminated": False,
+                    "truncated": False,
+                    "info": {"step": self.steps, "sim_time": self.now},
+                    "view": None,
+                    "step": self.steps,
+                    "turn": self.turns,
+                    "at": time.time(),
+                    "t": round(time.monotonic() - self._clock, 3),
+                    "source": "environment",
+                    "sim_time": self.now,
+                }
+            )
+        )
+        for hook in self.verifiers:
+            every = hook.every or {}
+            steps = every.get("steps")
+            if hook.hook == "measure" and steps and self.steps % int(steps) == 0:
+                self._measure_now(hook)
+
+    def _measure_now(self, hook: RewardHook) -> None:
+        """Run one periodic ``measure`` hook on the Apps as they stand now."""
+        if not self.verifiers:
+            return
+        step = Step(
+            task=self.task,
+            turn=self.turns,
+            app="",
+            action="",
+            arguments={},
+            apps={name: AppView(self, item) for name, item in self.apps.items()},
+            seats=self.seats,
+            source="environment",
+            now=self.now,
+        )
+        self._measure_hook(hook, step, "")
 
     def _run(
         self, name: str, arguments: Mapping[str, Any], *, unknown: bool = False
@@ -736,6 +1068,7 @@ class AppHost:
         info: Any = None,
         seed: int | None = None,
         forced: Sequence[Mapping[str, Any]] = (),
+        clock: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Put every App back as it stood after step ``step``, without a reset.
 
@@ -766,6 +1099,19 @@ class AppHost:
             saved = (rng or {}).get(name)
             if saved is not None:
                 app.rng.setstate(_rng_state(saved))
+        if self.clock is not None:
+            given = dict(clock or {})
+            self._set_now(float(given.get("now", self.clock.origin)))
+            measured = given.get("measured_at")
+            self._measured_at = self.now if measured is None else float(measured)
+            raw = given.get("scheduled")
+            scheduled = raw if isinstance(raw, Mapping) else {}
+            for name, app in self.apps.items():
+                app._scheduled = [dict(item) for item in scheduled.get(name) or ()]
+            self.horizon_reached = False
+            self._scheduled_recorded = {
+                name: copy.deepcopy(app._scheduled) for name, app in self.apps.items()
+            }
         self.initial = (
             {key: copy.deepcopy(value) for key, value in initial.items()}
             if initial is not None
@@ -1028,43 +1374,47 @@ class AppHost:
         return total, signals
 
     def _measure(self, step: Step | None, acting: str) -> None:
-        """Call every ``measure`` hook on one action and keep its running metric values.
+        """Call every per-step ``measure`` hook on one step and keep its running metric values.
 
         A hook that raises or returns something invalid is recorded in
         ``metric_failures`` and never fails the action. Points stay in memory
         and go to the Job in the signed report, never to a file the Harness
-        can read.
+        can read. Hooks with ``every`` run on their period instead.
         """
         if step is None:
             return
-        elapsed = round(time.monotonic() - self._clock, 3)
-        clock = self._sim_time(acting)
+        if self.now is not None and step.now is None:
+            step = dataclasses.replace(step, now=self.now)
         for hook in self.verifiers:
-            if hook.hook != "measure":
-                continue
-            try:
-                values = _measured(hook, hook.fn(step))
-            except Exception as exc:  # noqa: BLE001 - a metric never fails the action
-                self._metric_failures.append(
-                    self._redact(
-                        {"step": self.steps, "verifier": hook.name, "error": described(exc)}
-                    )
-                )
-                continue
-            if not values:
-                continue
-            point: dict[str, Any] = {
-                "step": self.steps,
-                "t": elapsed,
-                "verifier": hook.name,
-                "values": values,
-                "source": step.source,
-            }
-            if clock is not None:
-                point["sim_time"] = clock
-            if step.seat is not None:
-                point["seat"] = step.seat
-            self._metrics.append(point)
+            if hook.hook == "measure" and not hook.every:
+                self._measure_hook(hook, step, acting)
+
+    def _measure_hook(self, hook: RewardHook, step: Step, acting: str) -> None:
+        elapsed = round(time.monotonic() - self._clock, 3)
+        try:
+            values, seats = _measured(hook, hook.fn(step), self.seats)
+        except Exception as exc:  # noqa: BLE001 - a metric never fails the action
+            self._metric_failures.append(
+                self._redact({"step": self.steps, "verifier": hook.name, "error": described(exc)})
+            )
+            return
+        if not values and not seats:
+            return
+        point: dict[str, Any] = {
+            "step": self.steps,
+            "t": elapsed,
+            "verifier": hook.name,
+            "values": values,
+            "source": step.source,
+        }
+        if seats:
+            point["seats"] = seats
+        clock = self._sim_time(acting)
+        if clock is not None:
+            point["sim_time"] = clock
+        if step.seat is not None:
+            point["seat"] = step.seat
+        self._metrics.append(point)
 
     def _sim_time(self, acting: str) -> float | str | None:
         """The simulated time: the acting App's clock, else the first App with one.
@@ -1073,7 +1423,10 @@ class AppHost:
             A number of simulated seconds (or the App's own unit, such as days), an
             ISO-8601 timestamp, or ``None`` when no App keeps a clock.
         """
+        if self.now is not None:
+            return self.now
         order = [acting, *(name for name in self.apps if name != acting)]
+        order = [name for name in order if name in self.apps]
         for name in order:
             try:
                 value = self.apps[name].sim_time()
@@ -1157,6 +1510,7 @@ class AppHost:
         app: str | None = None,
         action: str | None = None,
         error: str | None = None,
+        source: str | None = None,
     ) -> None:
         """Append the State of each App that changed to ``states.jsonl``, beside the Apps.
 
@@ -1183,10 +1537,23 @@ class AppHost:
         line: dict[str, Any] = {
             "step": step,
             "state": changed,
-            "source": "environment" if step == 0 else "agent",
+            "source": source or ("environment" if step == 0 else "agent"),
         }
         if generators:
             line["rng"] = generators
+        if self.clock is not None:
+            # The clock, and each App's scheduled events where they changed, so a
+            # checkpoint at this step puts the world's future back too.
+            clock: dict[str, Any] = {"now": self.now, "measured_at": self._measured_at}
+            scheduled: dict[str, Any] = {}
+            for name, item in self.apps.items():
+                pending = copy.deepcopy(item._scheduled)
+                if step == 0 or pending != self._scheduled_recorded.get(name):
+                    scheduled[name] = pending
+                    self._scheduled_recorded[name] = pending
+            if scheduled:
+                clock["scheduled"] = scheduled
+            line["clock"] = clock
         if app is not None:
             line.update(app=app, action=action)
         if error is not None:
@@ -1244,7 +1611,17 @@ class AppHost:
         rewards: list[dict[str, Any]] | None = None,
         info: dict[str, Any] | None = None,
         view: dict[str, Any] | None = None,
+        timed: bool = False,
     ) -> dict[str, Any]:
+        if (
+            self.clock is not None
+            and kind in {"reset", "step"}
+            and self.now is not None
+            and not timed
+        ):
+            # The Agent always knows what time it is; the observation itself is unchanged.
+            rendered = f"[{self._label()}] {rendered}".rstrip()
+        self._check_horizon()
         envelope = {
             "protocol": STEP_PROTOCOL,
             "kind": kind,
@@ -1255,7 +1632,7 @@ class AppHost:
             "reward": reward,
             "rewards": rewards or [],
             "terminated": bool(self.environment.terminated()),
-            "truncated": bool(self.environment.truncated()),
+            "truncated": bool(self.environment.truncated()) or self.horizon_reached,
             "info": info or {},
             "view": view,
         }
@@ -1308,18 +1685,24 @@ def _finite(value: Any) -> float:
     return number
 
 
-def _measured(hook: RewardHook, value: Any) -> dict[str, float | None]:
+def _measured(
+    hook: RewardHook, value: Any, seats: Sequence[str] = ()
+) -> tuple[dict[str, float | None], dict[str, dict[str, float | None]]]:
     """Check what a ``measure`` hook returned: its declared running metrics, as numbers.
 
+    A metric's value may be one number, or with seats a mapping of seat to
+    number, which gives each seat its own series.
+
     Returns:
-        Each metric's value, ``None`` where it does not apply.
+        Each metric's value, ``None`` where it does not apply, and each seat's
+        values for the metrics measured per seat.
 
     Raises:
-        ValueError: When it is not a mapping, names an undeclared metric, or a
-            value is not a finite number.
+        ValueError: When it is not a mapping, names an undeclared metric or an
+            unknown seat, or a value is not a finite number.
     """
     if value is None:
-        return {}
+        return {}, {}
     if not isinstance(value, Mapping):
         raise ValueError(
             f"measure must return a mapping of running metric to value, not {type(value).__name__}"
@@ -1331,9 +1714,21 @@ def _measured(hook: RewardHook, value: Any) -> dict[str, float | None]:
             f"running metrics ({', '.join(hook.metrics) or 'none'})"
         )
     measured: dict[str, float | None] = {}
+    by_seat: dict[str, dict[str, float | None]] = {}
     for key, item in value.items():
+        if isinstance(item, Mapping):
+            if not seats:
+                raise ValueError(f"{key}: a mapping of seat to value needs seats")
+            strangers = sorted(str(seat) for seat in item if seat not in seats)
+            if strangers:
+                raise ValueError(f"{key} names no seat of the episode: {', '.join(strangers)}")
+            for seat, number in item.items():
+                by_seat.setdefault(str(seat), {})[str(key)] = (
+                    None if number is None else _finite(number)
+                )
+            continue
         measured[str(key)] = None if item is None else _finite(item)
-    return measured
+    return measured, by_seat
 
 
 def _rng_payload(generator: random.Random) -> list[Any]:

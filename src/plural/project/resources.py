@@ -379,6 +379,11 @@ def _build_environment(
             harness_policy=manifest.harness_policy,
             limits=manifest.limits,
             party=manifest.party,
+            clock=manifest.clock,
+            horizon=manifest.horizon,
+            autonomous=manifest.autonomous,
+            allow_finish=manifest.allow_finish,
+            checkpoint_every=manifest.checkpoint_every,
             metadata=manifest.metadata,
             source=directory,
         )

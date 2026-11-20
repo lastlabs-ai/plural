@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
 from plural.harness.episode import EPISODE_FILE
 from plural.jobs import SeatResult, VerifierResult
+from plural.metrics import MetricSpec, judge
 from plural.rewards import RewardRecord
 from plural.sandbox import (
     DownloadedFile,
@@ -311,6 +312,8 @@ def seat_results(
     traces: Mapping[str, str | None],
     costs: Mapping[str, float | None],
     errors: Mapping[str, str],
+    metrics: Mapping[str, Mapping[str, float | None]] | None = None,
+    specs: Iterable[MetricSpec] = (),
 ) -> tuple[SeatResult, ...]:
     """How each seat did.
 
@@ -323,10 +326,15 @@ def seat_results(
         traces: Seat to its Harness's trace id.
         costs: Seat to its Harness's model cost.
         errors: Seat to how its Harness failed, for one that did.
+        metrics: Seat to its per-seat running metric values.
+        specs: The Task's metrics, whose gates judge each seat's values.
 
     Returns:
         One result per seat, in order.
     """
+    metrics = metrics or {}
+    specs = list(specs)
+    verdicts = {seat: judge(specs, metrics.get(seat) or {}) for seat in seats}
     return tuple(
         SeatResult(
             seat=seat,
@@ -344,6 +352,9 @@ def seat_results(
             artifact_root=f"{SEAT_ARTIFACTS}/{seat}",
             cost_usd=costs.get(seat),
             error_message=errors.get(seat),
+            metrics=dict(metrics.get(seat) or {}),
+            gates=verdicts[seat].gates,
+            passed=verdicts[seat].passed,
         )
         for seat in seats
     )

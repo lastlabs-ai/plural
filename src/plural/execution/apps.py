@@ -117,6 +117,15 @@ def environment_payload(task: TaskDefinition, *, hosted: bool | None = None) -> 
         ],
         "reset_command": list((*HOST_COMMAND, "reset")) if environment.apps else [],
         **(
+            {
+                "clock": environment.clock.model_dump(mode="json"),
+                "autonomous": environment.autonomous,
+            }
+            if environment.clock is not None
+            else {}
+        ),
+        **({} if environment.finish_allowed else {"allow_finish": False}),
+        **(
             {"turn_command": list((*HOST_COMMAND, "turn"))}
             if task.party is not None and environment.apps
             else {}
@@ -258,6 +267,8 @@ def reward_hook_files(task: TaskDefinition) -> tuple[list[dict[str, Any]], list[
                 entry["metrics"] = [
                     spec.name for spec in verifier.metrics if spec.kind == "running"
                 ]
+                if verifier.measure_every is not None:
+                    entry["every"] = verifier.measure_every.model_dump(exclude_none=True)
             entries.append(entry)
     return entries, uploads
 
@@ -407,6 +418,8 @@ class HostReport:
     metric_failures: list[dict[str, Any]] = field(default_factory=list)
     workspace: dict[str, Any] = field(default_factory=dict)
     """The workspace snapshots: each step's commit, skipped files, and the bundle."""
+    clock: dict[str, Any] = field(default_factory=dict)
+    """The Environment clock at the end: ``now`` and whether the horizon was reached."""
 
     @classmethod
     def parse(cls, value: Any) -> HostReport:
@@ -437,6 +450,7 @@ class HostReport:
             metrics=rows("metrics"),
             metric_failures=rows("metric_failures"),
             workspace=mapping("workspace"),
+            clock=mapping("clock"),
         )
 
 

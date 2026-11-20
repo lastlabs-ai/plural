@@ -153,6 +153,46 @@
       "title": "AppDefinition",
       "type": "object"
     },
+    "Clock": {
+      "additionalProperties": false,
+      "description": "Simulated time, for a world that changes on its own.\n\nTime is a number of ``unit`` s. It starts at ``start``, or at 0 when\n``start`` is an ISO-8601 timestamp, which only labels it. With\n``agent_paced`` time each action takes the time its App's\n``action_duration`` says; with ``event_driven`` time, the default, actions\ntake none and time moves only when the Agent waits.",
+      "properties": {
+        "pacing": {
+          "default": "event_driven",
+          "enum": [
+            "agent_paced",
+            "event_driven"
+          ],
+          "title": "Pacing",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": 0.0,
+          "title": "Start"
+        },
+        "unit": {
+          "default": "day",
+          "enum": [
+            "second",
+            "minute",
+            "hour",
+            "day"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "title": "Clock",
+      "type": "object"
+    },
     "DeclarativeImage": {
       "additionalProperties": false,
       "description": "Portable subset of Daytona's declarative image builder.",
@@ -507,6 +547,40 @@
       "title": "EnvironmentRuntime",
       "type": "object"
     },
+    "Every": {
+      "additionalProperties": false,
+      "description": "A period: every ``sim_time`` clock units, or every ``steps`` steps.",
+      "properties": {
+        "sim_time": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sim Time"
+        },
+        "steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Steps"
+        }
+      },
+      "title": "Every",
+      "type": "object"
+    },
     "ExecutionLimits": {
       "additionalProperties": false,
       "description": "How long one episode may run.\n\nThe defaults apply when ``limits`` is left out of an Environment: no turn\ncap, and 600 seconds. Set ``max_turns`` to any positive number to cap turns.\n``max_seconds`` always stops the run.",
@@ -653,6 +727,40 @@
         }
       },
       "title": "HarnessPolicy",
+      "type": "object"
+    },
+    "Horizon": {
+      "additionalProperties": false,
+      "description": "When an autonomous episode ends: after ``sim_time`` clock units, or ``max_steps`` steps.",
+      "properties": {
+        "max_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Steps"
+        },
+        "sim_time": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sim Time"
+        }
+      },
+      "title": "Horizon",
       "type": "object"
     },
     "NetworkMode": {
@@ -891,6 +999,19 @@
   "additionalProperties": false,
   "description": "Schema-v2 Environment: Apps composed with one Runtime and one set of limits.\n\nTasks, Verifiers, and mode are intentionally absent. Every action belongs\nto exactly one App; ``python`` optionally names an Environment subclass\nwhose ``on_step``, ``terminated``, or ``truncated`` span several Apps.",
   "properties": {
+    "allow_finish": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Whether the Agent may end the episode itself. Unset, it may unless the Environment is autonomous.",
+      "title": "Allow Finish"
+    },
     "apps": {
       "default": [],
       "items": {
@@ -898,6 +1019,36 @@
       },
       "title": "Apps",
       "type": "array"
+    },
+    "autonomous": {
+      "default": false,
+      "description": "The Agent runs until the horizon: a reply with no tool call waits rather than ending the episode. Needs a clock.",
+      "title": "Autonomous",
+      "type": "boolean"
+    },
+    "checkpoint_every": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Every"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "How often the Job saves a run checkpoint, every sim_time clock units or steps steps, so a Trial whose runner dies can be resumed."
+    },
+    "clock": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Clock"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Simulated time. With a clock the Environment offers a wait action, its Apps' scheduled events happen as time passes, and each observation starts with the time."
     },
     "description": {
       "default": "",
@@ -914,6 +1065,18 @@
     },
     "harness_policy": {
       "$ref": "#/$defs/HarnessPolicy"
+    },
+    "horizon": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Horizon"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "When the episode ends on its own: after sim_time clock units or max_steps steps, with stop reason horizon_reached."
     },
     "limits": {
       "$ref": "#/$defs/ExecutionLimits"

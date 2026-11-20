@@ -28,6 +28,7 @@ from plural._deprecation import renamed_attribute, renamed_keys
 from plural.apps.definition import SecretReference
 from plural.catalog import ModelCatalog
 from plural.common import FrozenModel, RoutingSpec, described
+from plural.environments.definition import Every
 from plural.identity import revision_hash
 from plural.metrics import MetricSpec, default_score
 from plural.rewards import HindsightVerifier
@@ -128,6 +129,8 @@ StopReason = Literal[
     "error",
     # The Harness ran past its time and was killed.
     "harness_timeout",
+    # The Environment's horizon came: its simulated time or step count ran out.
+    "horizon_reached",
 ]
 STOP_REASONS: tuple[str, ...] = get_args(StopReason)
 
@@ -494,6 +497,10 @@ class Step:
     seats: tuple[str, ...] = ()
     source: Literal["agent", "environment"] = "agent"
     """What changed the State: the Agent's action, or the Environment itself."""
+    now: float | None = None
+    """The Environment clock's time, in its units, or ``None`` without a clock. A
+    ``measure`` hook with ``every: {sim_time: ...}`` is called at each period with
+    an empty ``app`` and ``action``; it reads the Apps through ``apps``."""
 
 
 class VerifierOutput(FrozenModel):
@@ -916,7 +923,12 @@ class DeterministicVerifier(Verifier):
     """Running metrics after each action: a function of one :class:`Step`
     returning ``{metric: value}`` for metrics declared ``running``, or a
     ``{"python": "verify.py:measure"}`` reference. It runs in the App host,
-    like ``reward``."""
+    like ``reward``. With seats a value may be ``{seat: value}``, one series
+    per seat."""
+    measure_every: Every | None = None
+    """Run ``measure`` once a period instead of after every step: every
+    ``sim_time`` clock units, or every ``steps`` steps. In YAML it is
+    ``measure: {python: verify.py:measure, every: {sim_time: 1}}``."""
     runtime: VerifierRuntime = Field(default_factory=VerifierRuntime)
     result_path: str = "verifier-result.json"
     evidence_required: bool = True
@@ -952,6 +964,14 @@ class DeterministicVerifier(Verifier):
         for hook in ("reward", "hindsight", "measure"):
             if isinstance(payload.get(hook), str):
                 payload[hook] = {"python": payload[hook]}
+        measure = payload.get("measure")
+        if isinstance(measure, dict) and "every" in measure:
+            measure = dict(measure)
+            every = measure.pop("every")
+            if payload.get("measure_every") is not None and every != payload["measure_every"]:
+                raise ValueError("give measure's period once: measure.every or measure_every")
+            payload["measure"] = measure
+            payload["measure_every"] = every
         payload.pop("required_artifacts", None)
         payload.pop("evidence", None)
         return payload
@@ -1014,6 +1034,11 @@ class DeterministicVerifier(Verifier):
                 "  def measure(step: Step) -> dict[str, float]: ...\n"
                 f"Got {type(measure).__name__}: {measure!r}."
             )
+        if self.measure_every is not None and measure is None:
+            raise ValueError(
+                f"Cannot create DeterministicVerifier {self.name!r}.\n"
+                "measure_every sets how often measure runs, so it needs a measure hook."
+            )
         if measure is not None and not any(spec.kind == "running" for spec in self.metrics):
             raise ValueError(
                 f"Cannot create DeterministicVerifier {self.name!r}.\n"
@@ -1047,7 +1072,7 @@ class DeterministicVerifier(Verifier):
     def _hash_payload(self) -> dict[str, Any]:
         payload = _legacy_runtime_keys(self.model_dump(mode="json"))
         # A Verifier without a hook hashes as it did before that hook existed.
-        for hook in ("reward", "hindsight", "measure"):
+        for hook in ("reward", "hindsight", "measure", "measure_every"):
             if payload.get(hook) is None:
                 payload.pop(hook, None)
         return _without_empty_metrics(payload)

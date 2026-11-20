@@ -13,6 +13,8 @@ from plural.metrics import (
     MetricSpec,
     aggregate_series,
     builtin_values,
+    combine_seats,
+    seat_series,
     series_by_metric,
 )
 from plural.sandbox.models import DownloadedFile
@@ -55,6 +57,31 @@ def task_metric_specs(task: TaskDefinition) -> dict[str, MetricSpec]:
         for spec in binding.verifier.metric_specs:
             specs.setdefault(spec.name, spec)
     return specs
+
+
+def seat_metrics(
+    task: TaskDefinition,
+    artifacts: Sequence[DownloadedFile],
+    *,
+    turns: int,
+    lines: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, dict[str, float | None]]:
+    """Each seat's value of every running metric its ``measure`` hook gave per seat.
+
+    Returns:
+        Seat to metric to value; empty when no metric was measured per seat.
+    """
+    specs = task_metric_specs(task)
+    grouped = seat_series(metric_lines(artifacts) if lines is None else lines)
+    steps = max(turns, 0) or None
+    return {
+        seat: {
+            name: aggregate_series(points, specs[name], steps=steps)
+            for name, points in metrics.items()
+            if name in specs and specs[name].kind == "running"
+        }
+        for seat, metrics in grouped.items()
+    }
 
 
 def _total_tokens(artifacts: Sequence[DownloadedFile]) -> int | None:
@@ -104,9 +131,19 @@ def trial_metrics(
     )
     specs = task_metric_specs(task)
     steps = max(turns, 0)
-    series = series_by_metric(metric_lines(artifacts))
+    lines = metric_lines(artifacts)
+    series = series_by_metric(lines)
+    by_seat = seat_metrics(task, artifacts, turns=turns, lines=lines)
     for name, spec in specs.items():
-        if spec.kind == "running":
+        if (
+            spec.kind == "running"
+            and name not in series
+            and any(name in seat for seat in by_seat.values())
+        ):
+            values[name] = combine_seats(
+                (seat.get(name) for seat in by_seat.values()), spec.seat_aggregate
+            )
+        elif spec.kind == "running":
             values[name] = aggregate_series(series.get(name, ()), spec, steps=steps or None)
         elif checked:
             values.setdefault(name, None)
@@ -116,4 +153,4 @@ def trial_metrics(
     return values
 
 
-__all__ = ["FINISHED", "metric_lines", "task_metric_specs", "trial_metrics"]
+__all__ = ["FINISHED", "metric_lines", "seat_metrics", "task_metric_specs", "trial_metrics"]
