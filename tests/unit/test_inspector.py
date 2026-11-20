@@ -551,6 +551,42 @@ def test_remedy_agents_merge_tool_overrides() -> None:
     assert changed.agent.tool_overrides["check_schedule"].description == "Required."
 
 
+def test_a_remedy_can_change_the_context_policy() -> None:
+    from plural.agents import Agent, AgentBinding
+    from plural.agents.models import ContextPolicy
+    from plural.inspector.experiments import remedy_agent
+    from plural.inspector.findings import ForkTest, Remedy, stronger_model_won
+
+    agent = Agent(
+        name="bot",
+        model="openai/gpt-5.6-luna",
+        context={"strategy": "summarize", "max_tokens": 20000},
+    )
+    policy = ContextPolicy(
+        strategy="summarize",
+        max_tokens=20000,
+        summary_instructions="Keep the supplier accounts and standing orders.",
+    )
+    remedy = Remedy(context=policy)
+    assert not remedy.empty
+    assert remedy.describe() == ["context: summarize, rewritten"]
+    changed = remedy_agent(AgentBinding(agent=agent._definition()), remedy, "X1")
+    assert changed.agent.context == policy
+    assert changed.agent.instructions == agent.instructions
+    fork = ForkTest(
+        test_id="X1",
+        job_id="j",
+        step=3,
+        remedy=Remedy(model="openai/gpt-5.6-sol", context=policy),
+        verdict="likely_matters",
+        candidate=1.0,
+        control=0.0,
+        candidates=4,
+        controls=4,
+    )
+    assert not stronger_model_won(fork, "openai/gpt-5.6-luna")
+
+
 def test_every_fault_applies_to_the_quoting_example(tmp_path: Path) -> None:
     from plural.agents import Agent
     from plural.inspector.faults import IGNORED, QUOTING_FAULTS, healthy_agent

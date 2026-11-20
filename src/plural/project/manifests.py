@@ -209,6 +209,18 @@ class TaskManifest(ManifestModel):
             "instructions, keyed seat_1, seat_2, and so on."
         ),
     )
+    party: int | None = Field(
+        default=None,
+        ge=2,
+        le=100,
+        description="For an Environment with a party: how many Agents play, pinned. A "
+        "Benchmark needs it, so every Agent is ranked on the same game.",
+    )
+    competitive: bool = Field(
+        default=False,
+        description="For an Environment with a party: whether the seats play against each "
+        "other. A Benchmark then fixes its opponents and refuses a shared party.",
+    )
     reference: str | None = Field(
         default=None,
         pattern=r"^[\w./-]+\.py:[A-Za-z_]\w*$",

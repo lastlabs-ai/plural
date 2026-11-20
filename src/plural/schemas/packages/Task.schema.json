@@ -1128,6 +1128,11 @@
       "default": null,
       "title": "Checkpoint Bundle"
     },
+    "competitive": {
+      "default": false,
+      "title": "Competitive",
+      "type": "boolean"
+    },
     "environment": {
       "title": "Environment"
     },
@@ -1178,6 +1183,20 @@
       "minLength": 1,
       "title": "Name",
       "type": "string"
+    },
+    "party_size": {
+      "anyOf": [
+        {
+          "maximum": 100,
+          "minimum": 2,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Party Size"
     },
     "resources": {
       "default": [],

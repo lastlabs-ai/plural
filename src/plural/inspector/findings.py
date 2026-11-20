@@ -24,6 +24,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from plural.agents.models import ContextPolicy
 from plural.agents.tool_overrides import ToolOverride
 from plural.common import FrozenModel
 from plural.stats import ForkVerdict
@@ -42,6 +43,8 @@ class Remedy(FrozenModel):
         tool_overrides: How tools are described to the model, by tool name.
         model: Another model.
         harness_config: Harness settings to set.
+        context: The Agent's whole new context policy, such as summary instructions
+            that keep what a summary lost.
         note: What to change, in words, for an External Agent's team.
     """
 
@@ -49,6 +52,7 @@ class Remedy(FrozenModel):
     tool_overrides: dict[str, ToolOverride] = Field(default_factory=dict)
     model: str | None = Field(default=None, min_length=1)
     harness_config: dict[str, Any] = Field(default_factory=dict)
+    context: ContextPolicy | None = None
     note: str = ""
 
     @property
@@ -59,6 +63,7 @@ class Remedy(FrozenModel):
             and not self.tool_overrides
             and self.model is None
             and not self.harness_config
+            and self.context is None
         )
 
     def describe(self) -> list[str]:
@@ -78,6 +83,8 @@ class Remedy(FrozenModel):
             )
         for key, value in sorted(self.harness_config.items()):
             lines.append(f"harness_config.{key}: {json.dumps(value)}")
+        if self.context is not None:
+            lines.append(f"context: {self.context.strategy}, rewritten")
         if self.note:
             lines.append(self.note)
         return lines
@@ -246,7 +253,12 @@ def stronger_model_won(fork: ForkTest, model: str, gates: Sequence[str] = ()) ->
     remedy = fork.remedy
     if remedy is None or remedy.model is None or remedy.model == model or fork.change:
         return False
-    if remedy.instructions is not None or remedy.tool_overrides or remedy.harness_config:
+    if (
+        remedy.instructions is not None
+        or remedy.tool_overrides
+        or remedy.harness_config
+        or remedy.context is not None
+    ):
         return False
     if gates and fork.gates and not set(fork.gates) & set(gates):
         return False

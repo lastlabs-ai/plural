@@ -54,6 +54,21 @@
           ],
           "title": "Strategy",
           "type": "string"
+        },
+        "summary_instructions": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For summarize: what the summary keeps, as the system prompt of the summarizing call. By default it keeps the task, decisions made, and anything still pending.",
+          "title": "Summary Instructions"
         }
       },
       "title": "ContextPolicy",

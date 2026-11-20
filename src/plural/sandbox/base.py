@@ -200,5 +200,13 @@ class SandboxProvider(ABC):
         """Delete a sandbox by id, including one this process did not create."""
         raise CapabilityError(f"{self.name} cannot delete sandboxes it did not create")
 
+    async def attach(self, sandbox_id: str) -> SandboxHandle:
+        """Reach a sandbox by id that another process created, such as a detached run's.
+
+        Returns:
+            A handle this provider can run commands and download files with.
+        """
+        raise CapabilityError(f"{self.name} cannot reach sandboxes it did not create")
+
 
 __all__ = ["SandboxProvider"]

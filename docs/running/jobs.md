@@ -151,6 +151,29 @@ hosted Job is marked failed, and `plural run` says whether `plural job record`
 can fill it in. See
 [Record runs and run in the cloud](../platform/runs.md).
 
+## Long runs: detach, interrupt, and resume
+
+A simulated year can take hours. `--detach` runs the Job in a Daytona sandbox instead
+of on your machine, and returns:
+
+```bash
+plural run -t vend-year -a vending-luna --budget-usd 5 --detach
+plural job show JOB_ID     # copies the Job back as it runs, and when it's done
+```
+
+The project is uploaded, Plural is installed in the sandbox, and the Job runs there as
+it would locally. Its Environments must use the `local` Runtime, which then runs inside
+the sandbox. When the Agents call models, the sandbox gets a gateway key minted for this
+Job alone: it calls chat completions only, expires within two days, and is revoked when
+the run finishes. Your own key never leaves your machine, and Plural never tunnels to it,
+so a detached run with models needs a hosted Plural, not one on `localhost`.
+
+A run that stops partway, because its machine slept or its process was killed, leaves
+its Trials `interrupted`. With the Environment's
+[`checkpoint_every`](../project/environments.md#checkpoints-and-resume),
+`plural trial resume TRIAL_ID` continues one from its latest run checkpoint. `--budget-usd`
+caps what a run spends on models, and a resumed Trial carries over what it had spent.
+
 ## Evaluate before routing or training
 
 Eval mode, the default, runs the Verifiers at the end of each episode and

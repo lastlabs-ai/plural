@@ -143,6 +143,7 @@ from plural.jobs import (
     PhaseName,
     PhaseTiming,
     ResumeRecord,
+    SeatAggregate,
     SeatResult,
     TITORecord,
     TrialReceipt,
@@ -385,6 +386,11 @@ def _requirements(task: TaskDefinition, package: HarnessPackage) -> SandboxRequi
         else f"{package.source.uri}@{package.source.digest}"
     )
     return requirements.model_copy(update={"image": reference})
+
+
+def _runtime_image(requirements: SandboxRequirements) -> SandboxRequirements:
+    """Requirements without the execution identity, which also names the Harness."""
+    return requirements.model_copy(update={"execution_identity": ""})
 
 
 def sandbox_lifetime(task: TaskDefinition) -> float:
@@ -1471,7 +1477,11 @@ class TrialRunner:
                     if player.binding.external is None:
                         player.source = materialize_package(player.package)
                 requirements = _requirements(task, package)
-                if any(_requirements(task, item.package) != requirements for item in players):
+                if any(
+                    _runtime_image(_requirements(task, item.package))
+                    != _runtime_image(requirements)
+                    for item in players
+                ):
                     raise ExecutionFailure(
                         ErrorCode.CONFIGURATION,
                         "The seats' Harnesses need different Runtime images, but every seat "
@@ -3262,7 +3272,7 @@ def _agent_aggregates(
             required_attempts=spec.attempts,
             declared=release is not None,
         )
-        metrics = _metric_aggregates(spec, selected)
+        metrics = _metric_aggregates(spec, selected, agent.content_hash)
         primary_metric = release.primary_metric if release is not None else "score"
         verdicts = [item.passed for item in selected if item.passed is not None]
         primary = (
@@ -3287,16 +3297,54 @@ def _agent_aggregates(
                 primary_metric=primary_metric,
                 primary=primary,
                 pass_rate=sum(verdicts) / len(verdicts) if verdicts else None,
+                seats=_seat_aggregates(selected, agent.content_hash),
+                opponent=agent.name in spec.opponents,
             )
         )
     return tuple(rows)
 
 
-def _metric_aggregates(spec: JobSpec, trials: Sequence[TrialResult]) -> dict[str, MetricAggregate]:
+def _seat_aggregates(trials: Sequence[TrialResult], digest: str) -> dict[str, SeatAggregate]:
+    """One Agent's results from each seat it played, in seat order.
+
+    Returns:
+        Each seat's count, mean score, and metric means; empty without seats.
+    """
+    scores: dict[str, list[float]] = {}
+    counts: dict[str, int] = {}
+    values: dict[str, dict[str, list[float]]] = {}
+    for trial in trials:
+        for seat in trial.seats:
+            if seat.agent_digest != digest:
+                continue
+            counts[seat.seat] = counts.get(seat.seat, 0) + 1
+            if seat.score is not None:
+                scores.setdefault(seat.seat, []).append(seat.score)
+            for name, value in seat.metrics.items():
+                if value is not None:
+                    values.setdefault(seat.seat, {}).setdefault(name, []).append(value)
+    return {
+        seat: SeatAggregate(
+            count=counts[seat],
+            mean_score=math.fsum(scores[seat]) / len(scores[seat]) if scores.get(seat) else None,
+            metrics={
+                name: math.fsum(items) / len(items)
+                for name, items in sorted(values.get(seat, {}).items())
+            },
+        )
+        for seat in sorted(counts, key=lambda name: int(name.rpartition("_")[2] or 0))
+    }
+
+
+def _metric_aggregates(
+    spec: JobSpec, trials: Sequence[TrialResult], digest: str | None = None
+) -> dict[str, MetricAggregate]:
     """Each metric across one Agent's Trials, grouped by Task for pass^k and pass@k.
 
     A Trial without a value, because the metric did not apply or the Trial
     failed before its checks, counts toward the total and not toward ``n``.
+    At a Task several Agents share, each seat the Agent ``digest`` played
+    counts once, with that seat's own value of a metric a Verifier declares.
 
     Returns:
         Each metric's aggregate, the built-ins first.
@@ -3309,7 +3357,11 @@ def _metric_aggregates(spec: JobSpec, trials: Sequence[TrialResult]) -> dict[str
     for name, item in specs.items():
         by_task: dict[str, list[float | None]] = {}
         for trial in trials:
-            by_task.setdefault(trial.receipt.task_pin.name, []).append(trial.metrics.get(name))
+            mine = [seat for seat in trial.seats if seat.agent_digest == digest]
+            found = trial.metrics.get(name)
+            by_task.setdefault(trial.receipt.task_pin.name, []).extend(
+                [seat.metrics.get(name, found) for seat in mine] if mine else [found]
+            )
         if any(value is not None for values in by_task.values() for value in values):
             rows[name] = aggregate_metric(item, by_task)
     return rows

@@ -211,6 +211,35 @@ def _stop_reason(trial: TrialEvidence) -> Iterable[Signal]:
         )
 
 
+@signal("context_compacted")
+def _context_compacted(trial: TrialEvidence) -> Iterable[Signal]:
+    for item in trial.compactions:
+        yield Signal(
+            "context_compacted",
+            item["before_step"],
+            f"the Agent's context was compacted ({item['strategy']}) before turn "
+            f"{item['turn']}: {item['dropped_messages']} messages, the Task's own included, "
+            "were replaced; what the model needed later may be gone (compare context_at "
+            "before and after)",
+        )
+    if not trial.compactions:
+        return
+    first = trial.compactions[0]["before_step"] or 0
+    errors = [
+        item.get("step") or 0
+        for item in trial.steps
+        if step_info(item).get("error") and item.get("source") == "agent"
+    ]
+    before = sum(1 for step in errors if step < first)
+    after = len(errors) - before
+    if after > before:
+        yield Signal(
+            "errors_after_compaction",
+            next(step for step in errors if step >= first),
+            f"{after} actions failed after the first compaction, {before} before it",
+        )
+
+
 @signal("large_context")
 def _large_context(trial: TrialEvidence) -> Iterable[Signal]:
     for call in trial.model_calls():

@@ -1,0 +1,22 @@
+# Environment: one App two partners share. They work together, so the party is shared:
+# both seats run as one user, which the local Runtime can give.
+name: vault
+version: 1.0.0
+description: Two partners each hold half of a vault code and must open it together.
+overview: >-
+  Each partner knows two of the four digits. They take turns posting on a shared board
+  or trying the code, and have three tries.
+python: vault.py:Vault
+readme: README.md
+
+party:
+  min: 2
+  max: 2
+  isolation: shared
+
+runtime:
+  provider: local
+
+limits:
+  max_turns: 24
+  max_seconds: 300

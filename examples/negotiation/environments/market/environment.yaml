@@ -1,0 +1,24 @@
+# Environment: one App two Agents share, a buyer in seat_1 and a seller in seat_2.
+name: market
+version: 1.0.0
+description: A buyer and a seller haggle over one item, taking turns to offer.
+overview: >-
+  Each side knows only its own number: what the item is worth to the buyer, or what it
+  cost the seller. They take turns offering a price until one accepts, one walks away,
+  or the offers run out.
+python: market.py:Market
+readme: README.md
+
+# Two seats that compete: each runs as its own OS user, so neither can read the other's
+# private number or act for it. That needs the docker or daytona Runtime.
+party:
+  min: 2
+  max: 2
+  isolation: isolated
+
+runtime:
+  provider: docker
+
+limits:
+  max_turns: 30
+  max_seconds: 600

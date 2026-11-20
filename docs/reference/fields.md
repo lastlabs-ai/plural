@@ -111,6 +111,8 @@ One versioned unit of work in a Python-authored Environment.
 - **`resources`** — `array of Resource`; optional. Default: `[]`.
 - **`initial_state`** — `object`; optional.
 - **`seat_instructions`** — `object`; optional.
+- **`party_size`** — `integer | null`; optional. Default: `null`.
+- **`competitive`** — `boolean`; optional. Default: `false`.
 - **`expected`** — `JSON value`; optional. Default: `null`.
 - **`from_checkpoint`** — `string | null`; optional. Default: `null`.
 - **`checkpoint`** — `Checkpoint | null`; optional. Default: `null`.
@@ -201,6 +203,8 @@ A catalog-backed model and its optional execution harness.
 
 A semantic version that pins an ordered set of Tasks.
 
+- **`seatings`** — `"rotate" | "fixed"`; optional. Default: `"rotate"`.
+- **`opponents`** — `array of string`; optional. Default: `[]`.
 - **`categories`** — `array of BenchmarkCategory`; optional. Default: `[]`.
 - **`scoring`** — `BenchmarkScoring`; optional.
 - **`tracks`** — `array of EvaluationTrack`; optional. Default: `[]`.
@@ -347,6 +351,7 @@ How an Agent's Harness keeps its context within bounds over a long episode.
 - **`strategy`** — `"window" | "summarize" | "none"`; optional. Default: `"none"`.
 - **`max_tokens`** — `integer | null`; optional. Default: `null`.
 - **`keep_last_turns`** — `integer`; optional. Default: `4`. Constraints: `{"maximum": 200, "minimum": 1}`.
+- **`summary_instructions`** — `string | null`; optional. Default: `null`. For summarize: what the summary keeps, as the system prompt of the summarizing call. By default it keeps the task, decisions made, and anything still pending.
 
 ## DeclarativeImage
 

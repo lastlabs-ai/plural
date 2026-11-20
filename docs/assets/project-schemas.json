@@ -2364,6 +2364,25 @@
         "title": "Seat Instructions",
         "type": "object"
       },
+      "party_size": {
+        "anyOf": [
+          {
+            "maximum": 100,
+            "minimum": 2,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Party Size"
+      },
+      "competitive": {
+        "default": false,
+        "title": "Competitive",
+        "type": "boolean"
+      },
       "expected": {
         "default": null,
         "title": "Expected"
@@ -3725,6 +3744,21 @@
             "minimum": 1,
             "title": "Keep Last Turns",
             "type": "integer"
+          },
+          "summary_instructions": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "For summarize: what the summary keeps, as the system prompt of the summarizing call. By default it keeps the task, decisions made, and anything still pending.",
+            "title": "Summary Instructions"
           }
         },
         "title": "ContextPolicy",
@@ -5684,6 +5718,25 @@
             "title": "Seat Instructions",
             "type": "object"
           },
+          "party_size": {
+            "anyOf": [
+              {
+                "maximum": 100,
+                "minimum": 2,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Party Size"
+          },
+          "competitive": {
+            "default": false,
+            "title": "Competitive",
+            "type": "boolean"
+          },
           "expected": {
             "default": null,
             "title": "Expected"
@@ -5815,6 +5868,23 @@
     "additionalProperties": false,
     "description": "A semantic version that pins an ordered set of Tasks.\n\nEach version is a release. Beyond its Tasks it may declare categories,\nscoring rules, and evaluation tracks; see :class:`BenchmarkRelease`.\n``title`` is only the display name in the hosted project.",
     "properties": {
+      "seatings": {
+        "default": "rotate",
+        "enum": [
+          "rotate",
+          "fixed"
+        ],
+        "title": "Seatings",
+        "type": "string"
+      },
+      "opponents": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Opponents",
+        "type": "array"
+      },
       "categories": {
         "default": [],
         "items": {

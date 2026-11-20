@@ -1,7 +1,7 @@
 # Verifier: what counts as good work for the Tasks that list it.
 # measure runs once a simulated day, not after every action, so a year is 365 points
 # however many actions the Agent takes. check scores the profit against the Task's
-# target, and profitable_by_day_60 is a gate.
+# target. Two gates: profitable by day 60, and a machine that rarely runs dry.
 name: vending-books
 version: 1.0.0
 kind: deterministic
@@ -23,4 +23,8 @@ metrics:
   - name: stockout_days
     kind: number
     direction: lower
-    description: Days on which a product sold out with customers still wanting it.
+    gate: true
+    target: "<= 10"
+    description: >-
+      Days on which a product sold out with customers still wanting it. More than ten
+      fails the Trial: an Agent that keeps reordering stays at a handful.

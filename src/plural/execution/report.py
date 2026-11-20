@@ -276,6 +276,7 @@ def _hosted_results(
                 "status": result.status,
                 "score": result.score,
                 "scores": dict(result.scores),
+                **({"seats": dict(result.seats)} if result.seats else {}),
                 "evidence": list(result.evidence),
                 "feedback": result.feedback,
                 "started_at": result.started_at.isoformat() if result.started_at else None,
@@ -374,11 +375,14 @@ def publish_execution(
     *,
     worker_id: str = "local",
     agent_definition: str | None = None,
+    seat_definitions: Mapping[str, str] | None = None,
 ) -> Published:
     """Report one local execution directory as an execution of hosted ``trial_id``.
 
     A receipt records the Agent binding's digest; the hosted pin is the Agent
-    definition's. Pass ``agent_definition`` so the two can be compared.
+    definition's. Pass ``agent_definition`` so the two can be compared, and for a
+    Trial several Agents share, ``seat_definitions``: each binding's digest to its
+    Agent definition's, which the hosted seats are planned with.
     """
     result = TrialResult.model_validate_json(
         (execution_root / "result.json").read_text(encoding="utf-8")
@@ -485,8 +489,19 @@ def publish_execution(
         report["fork"] = fork_report(result.fork)
     if result.model_identity is not None:
         report["model_identity"] = result.model_identity.model_dump(mode="json")
+    if result.environment_cost_usd is not None:
+        report["environment_cost_usd"] = result.environment_cost_usd
+    if result.resumed is not None:
+        report["resumed"] = result.resumed.model_dump(mode="json")
     if result.seats:
-        report["seats"] = [item.model_dump(mode="json") for item in result.seats]
+        hashes = seat_definitions or {}
+        report["seats"] = [
+            {
+                **item.model_dump(mode="json"),
+                "agent_digest": hashes.get(item.agent_digest, item.agent_digest),
+            }
+            for item in result.seats
+        ]
         report["seat_isolation"] = result.seat_isolation
     final = result.status
     if final in {"succeeded", "awaiting_review"}:
@@ -627,6 +642,7 @@ def publish_job(
                     execution_root,
                     worker_id=worker_id,
                     agent_definition=definition,
+                    seat_definitions={digest: pin[1] for digest, pin in pins.items()},
                 )
             )
     return published
@@ -794,6 +810,7 @@ class HostedTracker:
             for binding in spec.agents
             if binding.content_hash in agents
         }
+        self._seat_definitions = {digest: pin[1] for digest, pin in agents.items()}
         self._local = {trial.trial_id: trial for trial in plan.trials}
         self._heartbeat_seconds = heartbeat_seconds
         self._queue: queue.Queue[ProgressEvent | _KeyRequest | _CallsRequest | None] = queue.Queue()
@@ -946,6 +963,7 @@ class HostedTracker:
                 root,
                 worker_id=self.worker_id,
                 agent_definition=pin[1] if pin is not None else None,
+                seat_definitions=self._seat_definitions,
             )
             self._active.discard(published.execution_id)
 

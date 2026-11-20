@@ -807,14 +807,17 @@ class JobsAPI:
         name: str = "Job",
         description: str = "",
         evaluation_track: str | None = None,
+        opponent_revision_ids: Sequence[str] = (),
     ) -> JsonObject:
         """Record, from pushed revisions, a Job this client runs and reports.
 
         This is what ``plural run --record`` does. Plural never runs the Job
         itself. ``client_job_id`` names the client's own record of it, and
         ``evaluation_track`` the Benchmark evaluation track its results publish on.
+        ``opponent_revision_ids`` are a Benchmark's fixed opponents, which follow
+        the ranked Agents in ``spec.agents``.
         """
-        if len(agent_revision_ids) != len(spec.agents):
+        if len(agent_revision_ids) + len(opponent_revision_ids) != len(spec.agents):
             raise InvalidRequestError("agent_revision_ids must align with Job agents")
         extra: dict[str, Any] = {"executor": "client", "client_job_id": client_job_id}
         if evaluation_track is not None:
@@ -823,8 +826,14 @@ class JobsAPI:
             extra["heldout"] = True
         if spec.purpose != "eval":
             extra["purpose"] = spec.purpose
+        if opponent_revision_ids:
+            extra["opponent_revision_ids"] = list(opponent_revision_ids)
         revisions = dict(
-            zip((item.agent_id for item in spec.agents), agent_revision_ids, strict=True)
+            zip(
+                (item.agent_id for item in spec.agents),
+                [*agent_revision_ids, *opponent_revision_ids],
+                strict=True,
+            )
         )
         fewer = {revisions[key]: value for key, value in spec.agent_attempts.items()}
         if fewer:
@@ -914,6 +923,23 @@ class JobsAPI:
     def end_inspection_key(self, job_id: str) -> None:
         """Revoke the inspection's key, when it finishes or stops."""
         self._studio.request("DELETE", f"/inspection-keys/{quote(job_id)}")
+
+    def runner_key(self, job_id: str, *, ttl_seconds: int) -> JsonObject:
+        """Mint the gateway key a detached run of a Job calls models with.
+
+        ``job_id`` is the local Job's id, fixed before it starts. The key calls
+        chat completions only, and expires within two days.
+        """
+        return cast(
+            JsonObject,
+            self._studio.request(
+                "POST", "/runner-keys", json={"job_id": job_id, "ttl_seconds": ttl_seconds}
+            ),
+        )
+
+    def end_runner_key(self, job_id: str) -> None:
+        """Revoke a detached run's key, once the run has finished."""
+        self._studio.request("DELETE", f"/runner-keys/{quote(job_id)}")
 
 
 class TrialsAPI:

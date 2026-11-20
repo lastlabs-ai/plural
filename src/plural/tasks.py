@@ -268,22 +268,67 @@ def live_app_problems(task_name: str, environment: EnvironmentDefinition) -> lis
     return problems
 
 
-def benchmark_problems(task_name: str, environment: EnvironmentDefinition) -> list[str]:
-    """Why a Benchmark cannot include this Task's Environment, if it cannot.
+def benchmark_problems(
+    task_name: str,
+    environment: EnvironmentDefinition,
+    *,
+    party_size: int | None = None,
+    competitive: bool = False,
+) -> list[str]:
+    """Why a Benchmark cannot include this Task, if it cannot.
 
-    Benchmarks for several Agents are coming soon, so a Task with a party is
-    refused until ranking a party, and its seats' policy, is designed.
+    A Task several Agents share pins its party size, so every Agent is ranked
+    on the same game. A competitive one refuses a shared party, whose seats
+    could read each other's files and act for each other.
 
     Returns:
         One message per reason, ``live`` Apps first.
     """
     problems = live_app_problems(task_name, environment)
-    if environment.party is not None:
+    party = environment.party
+    if party is None:
+        return problems
+    if party_size is None:
+        size = str(party.min) if party.min == party.max else f"{party.min} to {party.max}"
         problems.append(
-            f"Task {task_name!r} is played by several Agents at once. Benchmarks for "
-            "several Agents are coming soon; run the Task in a Job without a Benchmark."
+            f"Task {task_name!r} is played by several Agents, and a Benchmark ranks every "
+            f"Agent on the same game, so the Task must pin its party size: give it party: N "
+            f"({size} for its Environment)."
+        )
+    if competitive and party.isolation == "shared":
+        problems.append(
+            f"Task {task_name!r} is competitive, but its Environment's party is shared, so "
+            "each seat could read the others' files and act for them. Use isolation: "
+            "isolated for a competitive Benchmark Task."
         )
     return problems
+
+
+_OPPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(@[A-Za-z0-9.+_-]+)?$")
+
+
+def _party_problems(tasks: Sequence[tuple[str, bool, bool]], opponents: Sequence[str]) -> list[str]:
+    """What a Benchmark's opponents leave unplayable: ``tasks`` is (name, party, competitive).
+
+    Returns:
+        One message per problem.
+    """
+    problems = [
+        f"opponents entry {item!r} is not AGENT or AGENT@VERSION"
+        for item in opponents
+        if not _OPPONENT.match(item)
+    ]
+    if opponents and not any(party for _, party, _ in tasks):
+        problems.append(
+            "opponents fill seats at Tasks several Agents share, and this Benchmark has none"
+        )
+    lonely = [task for task, party, competitive in tasks if party and competitive]
+    if lonely and not opponents:
+        problems.append(
+            f"Task {lonely[0]!r} is competitive, so its scores are comparable only against "
+            "the same opponents every run. Fix them with opponents: [AGENT@VERSION]."
+        )
+    return [f"{item[0].upper()}{item[1:]}." for item in problems]
 
 
 def _task_bind_errors(task: Task) -> list[str]:
@@ -355,6 +400,36 @@ def _seat_instruction_errors(
     return errors
 
 
+def _party_short_form(payload: dict[str, Any]) -> None:
+    """Accept ``party: N`` for :attr:`Task.party_size`, as ``task.yaml`` writes it."""
+    if "party" in payload and "party_size" not in payload:
+        payload["party_size"] = payload.pop("party")
+
+
+def _omit_party_defaults(data: dict[str, Any]) -> None:
+    """Leave out an unpinned party and a non-competitive flag, so older Tasks keep their hash."""
+    if data.get("party_size") is None:
+        data.pop("party_size", None)
+    if not data.get("competitive"):
+        data.pop("competitive", None)
+
+
+def _party_size_errors(
+    task_id: str, size: int | None, competitive: bool, environment: EnvironmentDefinition
+) -> list[str]:
+    party = environment.party
+    if party is None:
+        if size is not None or competitive:
+            field = "party" if size is not None else "competitive"
+            return [
+                f"Task {task_id!r} sets {field}, but its Environment has no party. Give the "
+                "Environment a party, such as party: {min: 2, max: 2}."
+            ]
+        return []
+    reason = None if size is None else party.check(size)
+    return [] if reason is None else [f"Task {task_id!r} sets party: {size}, but {reason}."]
+
+
 def without_reset_options(payload: dict[str, Any], name: object) -> dict[str, Any]:
     """Drop ``reset_options``, which never reached ``reset``, refusing any values set in it.
 
@@ -424,6 +499,12 @@ class Task(FrozenModel):
     resources: tuple[EnvironmentResource, ...] = ()
     initial_state: dict[str, Any] = Field(default_factory=dict)
     seat_instructions: dict[str, str] = Field(default_factory=dict)
+    party_size: int | None = Field(default=None, ge=2, le=100)
+    """How many Agents play, pinned, for a Task several Agents share. A Benchmark
+    needs it; ``party: N`` in ``task.yaml``."""
+    competitive: bool = False
+    """Whether the seats play against each other. A Benchmark then needs fixed
+    ``opponents`` and an isolated party."""
     expected: Any = None
     from_checkpoint: str | None = None
     checkpoint: Checkpoint | None = Field(default=None, exclude=True)
@@ -432,8 +513,10 @@ class Task(FrozenModel):
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
         data = _serialized_as_before(handler(self), self.seat_instructions, self.expected)
-        if isinstance(data, dict) and self.from_checkpoint is None:
-            data.pop("from_checkpoint", None)
+        if isinstance(data, dict):
+            if self.from_checkpoint is None:
+                data.pop("from_checkpoint", None)
+            _omit_party_defaults(data)
         return data
 
     @model_validator(mode="before")
@@ -448,6 +531,7 @@ class Task(FrozenModel):
             payload["version"] = payload.pop("revision")
         if "initial_state" not in payload and "state" in payload:
             payload["initial_state"] = payload.pop("state")
+        _party_short_form(payload)
         return without_reset_options(payload, payload.get("name"))
 
     @model_validator(mode="after")
@@ -455,9 +539,9 @@ class Task(FrozenModel):
         semantic_version(self.version)
         errors = _task_bind_errors(self)
         if not errors:
-            errors = _seat_instruction_errors(
-                self.name, self.seat_instructions, self._environment_definition()
-            )
+            environment = self._environment_definition()
+            errors = _seat_instruction_errors(self.name, self.seat_instructions, environment)
+            errors += _party_size_errors(self.name, self.party_size, self.competitive, environment)
         if errors:
             raise ValueError("\n".join(errors))
         return self
@@ -521,6 +605,8 @@ class Task(FrozenModel):
                 # Only a Task with seat instructions hashes them, so every other Task
                 # keeps its hash.
                 **({"seat_instructions": self.seat_instructions} if self.seat_instructions else {}),
+                **({"party_size": self.party_size} if self.party_size is not None else {}),
+                **({"competitive": True} if self.competitive else {}),
                 **({"expected": self.expected} if self.expected is not None else {}),
                 **(
                     {
@@ -566,6 +652,8 @@ class Task(FrozenModel):
             resources=self.resources,
             state=self.initial_state,
             seat_instructions=self.seat_instructions,
+            party_size=self.party_size,
+            competitive=self.competitive,
             expected=self.expected,
             from_checkpoint=self.from_checkpoint,
             checkpoint=self.checkpoint,
@@ -597,6 +685,10 @@ class TaskDefinition(FrozenModel):
     resources: tuple[EnvironmentResource, ...] = ()
     state: dict[str, Any] = Field(default_factory=dict)
     seat_instructions: dict[str, str] = Field(default_factory=dict)
+    party_size: int | None = Field(default=None, ge=2, le=100)
+    """How many Agents play, pinned, for a Task several Agents share."""
+    competitive: bool = False
+    """Whether the seats play against each other."""
     expected: Any = None
     """The answer key, for Verifiers only; never in :attr:`public_payload`."""
     from_checkpoint: str | None = None
@@ -615,6 +707,7 @@ class TaskDefinition(FrozenModel):
                 data.pop("from_checkpoint", None)
             if self.checkpoint is None:
                 data.pop("checkpoint", None)
+            _omit_party_defaults(data)
         return data
 
     @model_validator(mode="before")
@@ -622,8 +715,9 @@ class TaskDefinition(FrozenModel):
     def _drop_reset_options(cls, value: Any) -> Any:
         # A stored revision may hold reset_options from before they were removed;
         # they never reached reset, so dropping them changes no run.
-        if isinstance(value, dict) and "reset_options" in value:
-            return {key: item for key, item in value.items() if key != "reset_options"}
+        if isinstance(value, dict):
+            value = {key: item for key, item in value.items() if key != "reset_options"}
+            _party_short_form(value)
         return value
 
     @model_validator(mode="after")
@@ -631,7 +725,7 @@ class TaskDefinition(FrozenModel):
         validate_task_state(task_id=self.task_id, environment=self.environment, state=self.state)
         seat_errors = _seat_instruction_errors(
             self.task_id, self.seat_instructions, self.environment
-        )
+        ) + _party_size_errors(self.task_id, self.party_size, self.competitive, self.environment)
         if seat_errors:
             raise ValueError("\n".join(seat_errors))
         names = [binding.verifier.name for binding in self.verifiers]
@@ -724,6 +818,8 @@ class TaskDefinition(FrozenModel):
 
 
 RELEASE_FIELDS = (
+    "seatings",
+    "opponents",
     "categories",
     "scoring",
     "tracks",
@@ -762,8 +858,17 @@ class BenchmarkRelease(FrozenModel):
         canary: A GUID kept out of every agent-visible file and placed beside
             the Verifiers and answer keys. An Agent that writes it saw a grader
             file, or its model was trained on this Benchmark.
+        seatings: At a Task several Agents share, ``rotate`` plays each
+            evaluated Agent once from every seat, so position doesn't decide
+            the result; ``fixed`` seats it only in ``seat_1``.
+        opponents: Agents, as ``AGENT@VERSION``, that fill the other seats at
+            a Task several Agents share, the same every run. They are not
+            ranked. A cooperative Task without them seats the evaluated Agent
+            in every seat.
     """
 
+    seatings: Literal["rotate", "fixed"] = "rotate"
+    opponents: tuple[str, ...] = ()
     categories: tuple[BenchmarkCategory, ...] = ()
     scoring: BenchmarkScoring = Field(default_factory=BenchmarkScoring)
     tracks: tuple[EvaluationTrack, ...] = ()
@@ -886,8 +991,17 @@ class BenchmarkDefinition(BenchmarkRelease):
         problems = [
             problem
             for task in self.tasks
-            for problem in benchmark_problems(task.task_id, task.environment)
+            for problem in benchmark_problems(
+                task.task_id,
+                task.environment,
+                party_size=task.party_size,
+                competitive=task.competitive,
+            )
         ]
+        problems += _party_problems(
+            [(task.task_id, task.party is not None, task.competitive) for task in self.tasks],
+            self.opponents,
+        )
         if problems:
             raise ValueError(f"Cannot create Benchmark {self.name!r}.\n" + "\n".join(problems))
         self._validate_release(
@@ -1012,8 +1126,20 @@ class Benchmark(BenchmarkRelease):
         problems = [
             problem
             for task in self.tasks
-            for problem in benchmark_problems(task.name, task._environment_definition())
+            for problem in benchmark_problems(
+                task.name,
+                task._environment_definition(),
+                party_size=task.party_size,
+                competitive=task.competitive,
+            )
         ]
+        problems += _party_problems(
+            [
+                (task.name, task._environment_definition().party is not None, task.competitive)
+                for task in self.tasks
+            ],
+            self.opponents,
+        )
         if problems:
             raise ValueError(f"Cannot create Benchmark {self.name!r}.\n" + "\n".join(problems))
         self._validate_release(

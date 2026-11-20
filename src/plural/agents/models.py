@@ -163,11 +163,22 @@ class ContextPolicy(FrozenModel):
     strategy: Literal["window", "summarize", "none"] = "none"
     max_tokens: int | None = Field(default=None, ge=1000)
     keep_last_turns: int = Field(default=4, ge=1, le=200)
+    summary_instructions: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4000,
+        description="For summarize: what the summary keeps, as the system prompt of the "
+        "summarizing call. By default it keeps the task, decisions made, and anything still "
+        "pending.",
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def _limit(self) -> ContextPolicy:
         if self.strategy != "none" and self.max_tokens is None:
             raise ValueError(f"context strategy {self.strategy!r} needs max_tokens")
+        if self.summary_instructions is not None and self.strategy != "summarize":
+            raise ValueError("summary_instructions applies only to strategy summarize")
         return self
 
 

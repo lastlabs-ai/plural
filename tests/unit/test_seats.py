@@ -566,12 +566,13 @@ def test_a_party_refuses_the_local_runtime() -> None:
 
 
 @pytest.mark.parametrize("isolation", ["isolated", "shared"])
-def test_a_benchmark_refuses_a_party_until_benchmarks_for_several_agents_ship(
-    isolation: str,
-) -> None:
+def test_a_benchmark_takes_a_party_task_once_it_pins_its_size(isolation: str) -> None:
     task = _seated_task(_scored_one, Party(min=2, max=2, isolation=isolation))
-    with pytest.raises(ValueError, match="coming soon"):
+    with pytest.raises(ValueError, match="must pin its party size"):
         BenchmarkDefinition(name="poker", tasks=(task,))
+    pinned = task.model_copy(update={"party_size": 2})
+    benchmark = BenchmarkDefinition(name="poker", tasks=(pinned,))
+    assert benchmark.seatings == "rotate"
 
 
 async def test_a_shared_party_plays_as_one_user_and_says_so(tmp_path: Path) -> None:

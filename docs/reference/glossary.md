@@ -213,6 +213,24 @@ Score and reward keep the meanings above.
 - **Signal:** a check over a failed Trial that points the Inspector at what looks wrong,
   such as a call to a tool that doesn't exist. *Precisely:* a function registered with
   `@signal("name")`, built in or in a project's `inspector/signals.py`.
+- **Clock:** simulated time for a world that changes on its own. *Precisely:* an
+  Environment's `clock`, which its Apps share; a `wait` action moves it, and an
+  episode with a `horizon` ends at it with `stop_reason: horizon_reached`. See
+  [Simulated time](../project/environments.md#simulated-time).
+- **Interrupted:** a Trial whose runner stopped before it finished. *Precisely:* a Trial
+  with a run journal and no result; with `checkpoint_every`, `plural trial resume`
+  continues it from its latest run checkpoint as the same Trial, not a fork.
+- **Context policy:** how an Agent's Harness keeps a long episode within its context.
+  *Precisely:* the Agent's `context` (`window`, `summarize`, or `none`); each
+  compaction is recorded in the episode.
+- **Persona:** a simulated person inside the world, such as a supplier. *Precisely:* a
+  `plural.sim.Persona` an App asks for answers; seeded, recorded and replayed in forks,
+  never ranked, and billed as the Environment's cost, apart from the Agent's.
+- **Party, seat, opponent:** the Agents that share one episode, their places in it, and
+  the ones a Benchmark keeps fixed. *Precisely:* an Environment's `party`; a Task's
+  `party` pins its size and `competitive` marks the seats as rivals; a Benchmark's
+  `opponents` fill the other seats and are never ranked, and `seatings: rotate` plays
+  each ranked Agent from every seat. See [Several agents](../project/multi-agent.md).
 
 ## Versions and sharing
 

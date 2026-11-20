@@ -2132,6 +2132,10 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --budget-usd                <float range> [x>=0]  At most what the Agents may spend on models.   │
 │                                                   Each Trial gets an even share as its cost      │
 │                                                   limit, and no Trial starts once it is spent.   │
+│ --detach                                          Run the Job in a Daytona sandbox instead of on │
+│                                                   this machine, and return. Its Environments     │
+│                                                   must use the local Runtime, which runs inside  │
+│                                                   the sandbox. Follow it with plural job show.   │
 │ --json                                            Print machine-readable JSON.                   │
 │ --help                                            Show this message and exit.                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

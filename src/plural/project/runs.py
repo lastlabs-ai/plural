@@ -26,7 +26,7 @@ import shutil
 import sys
 import tempfile
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -107,6 +107,8 @@ class RunRequest:
     """The Benchmark evaluation track the hosted Job is bound to, by id."""
     heldout: bool = False
     """Run the Benchmark's held-out Tasks too. Each such run is a counted peek."""
+    run_id: str | None = None
+    """The Job's run id; a detached run reuses the one its Job was planned with."""
 
 
 @dataclass
@@ -250,11 +252,17 @@ def plan_run(
                 f"{harness_name!r}. Allowed: {allowed}. Pass --harness <name>."
             )
     shared = [task.name for task in tasks if task._environment_definition().party is not None]
-    if shared:
+    if shared and source.kind == TASK.name:
         raise ProjectError(
             f"{', '.join(shared)} {'is' if len(shared) == 1 else 'are'} played by a party of "
-            "Agents, and plural run runs one. Run it from Python with "
-            "Job(task, agents=[...]), or create a hosted Job that names the party."
+            "Agents, and plural run -t runs one. Put the Task in a Benchmark, which seats your "
+            "Agent against its opponents, or run it from Python with Job(task, agents=[...])."
+        )
+    opponents, opponent_refs = _opponents(workspace, loaded.value if shared else None)
+    if agent.name and agent.name in {opponent.name for opponent in opponents}:
+        raise ProjectError(
+            f"{agent.name} is one of Benchmark {source.name}'s fixed opponents, so it can't "
+            "also be ranked on it. Run another Agent against it."
         )
     attempts = _track_attempts(loaded.value, request) or request.attempts or 1
     auto = request.concurrency == "auto"
@@ -270,12 +278,13 @@ def plan_run(
     job = Job(
         loaded.value,
         agents=[agent],
+        opponents=opponents,
         attempts=attempts,
         concurrency=1 if auto else request.concurrency,
         catalog=workspace.catalog,
         heldout=request.heldout,
     )
-    update: dict[str, Any] = {"run_id": uuid.uuid4().hex}
+    update: dict[str, Any] = {"run_id": request.run_id or uuid.uuid4().hex}
     reason = None
     if auto:
         advice = recommend_concurrency(
@@ -289,7 +298,12 @@ def plan_run(
     job.spec = job.spec.model_copy(update=update)
     job.plan = job.spec.plan(workspace.catalog)
     inputs = workspace.dependency_order(
-        [source, *([agent_ref] if agent_ref else []), *([harness_ref] if harness_ref else [])]
+        [
+            source,
+            *([agent_ref] if agent_ref else []),
+            *([harness_ref] if harness_ref else []),
+            *opponent_refs,
+        ]
     )
     pins = pinned_inputs(workspace, inputs)
     return RunPlan(
@@ -303,6 +317,32 @@ def plan_run(
         evaluation_track=request.evaluation_track,
         peek=tuple(loaded.value.heldout) if request.heldout else (),
     )
+
+
+def _opponents(workspace: Workspace, benchmark: Any) -> tuple[list[Agent], list[ResourceRef]]:
+    """A Benchmark's fixed opponents, loaded from the project.
+
+    Returns:
+        The Agents, and their references.
+
+    Raises:
+        ProjectError: When an opponent is not in the project, or not at its version.
+    """
+    agents: list[Agent] = []
+    refs: list[ResourceRef] = []
+    for item in getattr(benchmark, "opponents", ()) or ():
+        name, _, version = str(item).partition("@")
+        ref = ResourceRef(AGENT.name, name)
+        agent = workspace.load(ref).value
+        if version and agent.version != version:
+            raise ProjectError(
+                f"Benchmark opponent {item} is at version {agent.version} in this project. "
+                "Opponents are fixed so scores stay comparable; restore that version, or "
+                "release a new Benchmark version that names this one."
+            )
+        agents.append(agent)
+        refs.append(ref)
+    return agents, refs
 
 
 def _track_attempts(source: object, request: RunRequest) -> int | None:
@@ -883,16 +923,25 @@ def _submit(
         hosted = (renamed.name, renamed.content_hash)
         agent_revision_id = str(pushed["id"])
     _stamp_harness(studio, spec, resolved)
+    agents = {binding.content_hash: hosted}
+    opponent_ids = []
+    for opponent in spec.agents[len(spec.agents) - len(spec.opponents) :]:
+        ref = ResourceRef(AGENT.name, opponent.name)
+        if ref not in resolved:
+            raise ProjectError(f"Job {client_job_id} does not pin its opponent {ref}.")
+        opponent_ids.append(resolved[ref].revision_id)
+        agents[opponent.content_hash] = (opponent.name, opponent.agent.content_hash)
     record = studio.jobs.submit(
         spec,
         source_revision_id=resolved[source].revision_id,
         agent_revision_ids=[agent_revision_id],
+        opponent_revision_ids=opponent_ids,
         idempotency_key=idempotency_key,
         name=f"{source.name} · {binding.name}",
         client_job_id=client_job_id,
         evaluation_track=evaluation_track,
     )
-    return ClientJob(record=record, agents={binding.content_hash: hosted})
+    return ClientJob(record=record, agents=agents)
 
 
 def refuse_used_heldout(workspace: Workspace, benchmark: str, heldout: Sequence[str]) -> None:
@@ -962,13 +1011,19 @@ def local_job(workspace: Workspace, job_id: str) -> dict[str, Any]:
     )
     threshold = _success_threshold(workspace, record.get("source"))
     if result is not None:
+        away = _detached_record(directory)
         return {
             **record,
+            **({"detached": away} if away is not None else {}),
             "status": result.status,
             "trials": [_trial_summary(item) for item in result.trials],
             "aggregates": [item.model_dump(mode="json") for item in result.aggregates],
             "summaries": job_summaries(
-                result.trials, job_id, threshold=threshold, names=_names(result.aggregates)
+                result.trials,
+                job_id,
+                threshold=threshold,
+                names=_names(result.aggregates),
+                opponents=_opponent_digests(result.aggregates),
             ),
             "directory": str(directory),
         }
@@ -976,11 +1031,15 @@ def local_job(workspace: Workspace, job_id: str) -> dict[str, Any]:
     from plural.execution.store import JobStore
 
     progress = job_progress(JobStore(workspace.project.jobs_dir), job_id)
-    stopped = _interrupted_trials(directory)
+    away = _detached_record(directory)
+    # A detached Job's copy is only as fresh as its last sync; its runner is alive.
+    stopped = [] if away is not None else _interrupted_trials(directory)
     return {
         **record,
+        **({"detached": away} if away is not None else {}),
         "status": "interrupted" if stopped else "running",
         "interrupted": stopped,
+        "unfinished": [] if away is None else _running_trials(directory),
         "progress": {
             "planned": progress.planned,
             "finished": progress.finished,
@@ -992,7 +1051,11 @@ def local_job(workspace: Workspace, job_id: str) -> dict[str, Any]:
         "trials": [_trial_summary(item) for item in progress.trials],
         "aggregates": [item.model_dump(mode="json") for item in progress.aggregates],
         "summaries": job_summaries(
-            progress.trials, job_id, threshold=threshold, names=_names(progress.aggregates)
+            progress.trials,
+            job_id,
+            threshold=threshold,
+            names=_names(progress.aggregates),
+            opponents=_opponent_digests(progress.aggregates),
         ),
         "directory": str(directory),
     }
@@ -1004,19 +1067,24 @@ def job_summaries(
     *,
     threshold: float = 1.0,
     names: Mapping[str, str] | None = None,
+    opponents: Collection[str] = (),
 ) -> list[dict[str, Any]]:
     """Each Agent's headline score with its interval, pass^k, and trust tiers.
+
+    At a Task several Agents share, an Agent is scored by each seat it played.
 
     Args:
         trials: The Job's Trials.
         job_id: The Job, which seeds the interval.
         threshold: The score that counts as passing.
         names: Agent names by Agent digest, from the Job's aggregates.
+        opponents: The digests of a Benchmark's fixed opponents, listed last.
 
     Returns:
-        One summary per Agent, in the order its first Trial appears: its name,
-        the :class:`~plural.stats.ScoreSummary` as JSON (``None`` before any
-        score), a one-line ``text``, and how many Trials reached each tier.
+        One summary per Agent, ranked Agents first, each in the order its first
+        Trial appears: its name, the :class:`~plural.stats.ScoreSummary` as JSON
+        (``None`` before any score), a one-line ``text``, whether it is an
+        ``opponent``, and how many Trials reached each tier.
     """
     from plural.stats import score_summary, seed_for
 
@@ -1024,17 +1092,21 @@ def job_summaries(
     seen: dict[str, str] = {}
     tiers: dict[str, dict[str, int]] = {}
     for trial in trials:
-        digest = trial.receipt.agent_digest
-        seen.setdefault(digest, (names or {}).get(digest) or trial.receipt.model.catalog_model_id)
-        if trial.status == "succeeded":
-            by_agent.setdefault(digest, {}).setdefault(trial.receipt.task_pin.name, []).append(
-                trial.score
-            )
+        played = [(seat.agent_digest, seat.agent_name, seat.score) for seat in trial.seats] or [
+            (trial.receipt.agent_digest, trial.receipt.model.catalog_model_id, trial.score)
+        ]
+        for digest, fallback, score in played:
+            seen.setdefault(digest, (names or {}).get(digest) or fallback)
+            if trial.status == "succeeded":
+                by_agent.setdefault(digest, {}).setdefault(trial.receipt.task_pin.name, []).append(
+                    score
+                )
         tier = trial.trust.tier if trial.trust is not None else "unknown"
-        counts = tiers.setdefault(digest, {})
-        counts[tier] = counts.get(tier, 0) + 1
+        for digest in dict.fromkeys(item[0] for item in played):
+            counts = tiers.setdefault(digest, {})
+            counts[tier] = counts.get(tier, 0) + 1
     output = []
-    for digest, name in seen.items():
+    for digest, name in sorted(seen.items(), key=lambda item: item[0] in opponents):
         summary = score_summary(
             by_agent.get(digest, {}), threshold=threshold, seed=seed_for(job_id, digest)
         )
@@ -1044,8 +1116,10 @@ def job_summaries(
             {
                 "agent_name": name,
                 "summary": summary.model_dump(mode="json") if summary is not None else None,
-                "text": (summary.summary if summary is not None else "no score yet")
+                "text": ("fixed opponent: " if digest in opponents else "")
+                + (summary.summary if summary is not None else "no score yet")
                 + (f"; trust: {trust}" if trust else ""),
+                "opponent": digest in opponents,
                 "trust": mix,
             }
         )
@@ -1054,6 +1128,10 @@ def job_summaries(
 
 def _names(aggregates: Sequence[AgentAggregate]) -> dict[str, str]:
     return {item.agent_digest: item.agent_name for item in aggregates}
+
+
+def _opponent_digests(aggregates: Sequence[AgentAggregate]) -> frozenset[str]:
+    return frozenset(item.agent_digest for item in aggregates if item.opponent)
 
 
 def _success_threshold(workspace: Workspace, source: Any) -> float:
@@ -1100,6 +1178,11 @@ def pinned_inputs(workspace: Workspace, inputs: Sequence[ResourceRef]) -> dict[s
     return pins
 
 
+def _detached_record(job_directory: Path) -> dict[str, Any] | None:
+    path = job_directory / "detached.json"
+    return json.loads(path.read_text("utf-8")) if path.is_file() else None
+
+
 def _interrupted_trials(job_directory: Path) -> list[dict[str, Any]]:
     """The Trials of a local Job whose runner died mid-execution.
 
@@ -1113,6 +1196,19 @@ def _interrupted_trials(job_directory: Path) -> list[dict[str, Any]]:
         if trial.is_dir() and interrupted(trial):
             found.append({"trial_id": trial.name, **_unfinished(trial)})
     return found
+
+
+def _running_trials(job_directory: Path) -> list[dict[str, Any]]:
+    """The Trials of a local Job that have started and not finished, with where each stands.
+
+    Returns:
+        Each one's id, with its journal's clock and latest run checkpoint.
+    """
+    return [
+        {"trial_id": trial.name, **_unfinished(trial)}
+        for trial in sorted((job_directory / "trials").glob("trl_*"))
+        if trial.is_dir() and not (trial / "result.json").is_file()
+    ]
 
 
 def _unfinished(trial_directory: Path) -> dict[str, Any]:
@@ -1238,36 +1334,40 @@ def _harness_name(agent: Agent) -> str:
 def _stamp_harness(
     studio: Studio, spec: JobSpec, resolved: Mapping[ResourceRef, HostedRevision]
 ) -> None:
-    """Record that each Environment admits the Agent's custom Harness.
+    """Record that each Environment admits each Agent's custom Harness.
 
     The server refuses to schedule a custom Harness in an Environment that has
     no compatibility stamp; the grant is computed from both definitions here.
+    A Benchmark's opponents play too, so their Harnesses are stamped as well.
     """
     from plural.harness.builtins import BUILTIN_HARNESS_NAMES
     from plural.jobs import resolve_trial_harness_grant
 
-    binding = spec.agents[0]
-    package = binding.harness_package
-    if package is None or package.definition.name in BUILTIN_HARNESS_NAMES:
-        return
-    harness = next((value for ref, value in resolved.items() if ref.kind == HARNESS.name), None)
-    if harness is None:
-        return
-    seen: set[str] = set()
-    for task in spec.tasks:
-        environment = ResourceRef(ENVIRONMENT.name, task.environment.name)
-        revision = resolved.get(environment)
-        if revision is None or revision.revision_id in seen:
+    harnesses = {ref.name: value for ref, value in resolved.items() if ref.kind == HARNESS.name}
+    seen: set[tuple[str, str]] = set()
+    for binding in spec.agents:
+        package = binding.harness_package
+        if package is None or package.definition.name in BUILTIN_HARNESS_NAMES:
             continue
-        seen.add(revision.revision_id)
-        grant = resolve_trial_harness_grant(task.environment, binding.agent)
-        studio.environments.stamp_harness(
-            environment_id=revision.resource_id,
-            revision_id=revision.revision_id,
-            harness_revision_id=harness.revision_id,
-            compatible=True,
-            evidence=grant.model_dump(mode="json") if grant is not None else {"kind": "native"},
-        )
+        harness = harnesses.get(package.definition.name)
+        if harness is None and len(harnesses) == 1 and binding is spec.agents[0]:
+            harness = next(iter(harnesses.values()))
+        if harness is None:
+            continue
+        for task in spec.tasks:
+            environment = ResourceRef(ENVIRONMENT.name, task.environment.name)
+            revision = resolved.get(environment)
+            if revision is None or (revision.revision_id, harness.revision_id) in seen:
+                continue
+            seen.add((revision.revision_id, harness.revision_id))
+            grant = resolve_trial_harness_grant(task.environment, binding.agent)
+            studio.environments.stamp_harness(
+                environment_id=revision.resource_id,
+                revision_id=revision.revision_id,
+                harness_revision_id=harness.revision_id,
+                compatible=True,
+                evidence=grant.model_dump(mode="json") if grant is not None else {"kind": "native"},
+            )
 
 
 def _execute(
@@ -1461,6 +1561,15 @@ def _write_record(directory: Path, record: RunRecord) -> None:
 def _snapshot_path(workspace: Workspace, kind: str, name: str, digest: str) -> Path:
     hex_digest = digest.rpartition(":")[2]
     return workspace.project.state_dir / "packages" / f"{kind}-{name}-{hex_digest[:16]}"
+
+
+def planned_job_id(workspace: Workspace, plan: RunPlan) -> str:
+    """The id :func:`run_local` gives the planned Job, once its sources are snapshotted.
+
+    Returns:
+        The Job id.
+    """
+    return _snapshot_sources(workspace, plan.spec).job_id
 
 
 def _snapshot_sources(workspace: Workspace, spec: JobSpec) -> JobSpec:

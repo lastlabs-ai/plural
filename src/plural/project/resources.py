@@ -264,6 +264,11 @@ def declared_dependencies(kind: str, payload: Mapping[str, Any]) -> tuple[Resour
             for name in payload.get("tasks") or ()
             if isinstance(name, str)
         )
+        refs.extend(
+            ResourceRef(AGENT.name, str(item).partition("@")[0])
+            for item in payload.get("opponents") or ()
+            if isinstance(item, str) and item
+        )
     return tuple(dict.fromkeys(refs))
 
 
@@ -643,6 +648,8 @@ def _load_task(workspace: Workspace, ref: ResourceRef, directory: Path) -> Local
                         "initial_state": manifest.initial_state,
                         "expected": manifest.expected,
                         "seat_instructions": manifest.seat_instructions,
+                        "party_size": manifest.party,
+                        "competitive": manifest.competitive,
                         "from_checkpoint": manifest.from_checkpoint,
                         "checkpoint": checkpoint,
                         "checkpoint_bundle": str(bundle) if bundle is not None else None,
@@ -788,6 +795,15 @@ def _load_benchmark(workspace: Workspace, ref: ResourceRef, directory: Path) -> 
         problems.extend(item for item in tasks if isinstance(item, str))
         loaded = [item for item in tasks if isinstance(item, LocalResource)]
         problems.extend(_score_compatibility(manifest, loaded))
+        for item in manifest.opponents:
+            name, _, version = item.partition("@")
+            opponent = _dependency(workspace, ResourceRef(AGENT.name, name))
+            if isinstance(opponent, str):
+                problems.append(f"opponents: {opponent}")
+            elif version and opponent.value.version != version:
+                problems.append(
+                    f"opponents: {item} is at version {opponent.value.version} in this project"
+                )
         if not problems:
             try:
                 benchmark = Benchmark.model_validate(

@@ -65,6 +65,8 @@ PACKAGE_NAV = [
     ("Tutorials", "/docs/tutorials/support-queue", "tutorials/support-queue.md"),
     ("Tutorials", "/docs/tutorials/wordle", "tutorials/wordle.md"),
     ("Tutorials", "/docs/tutorials/shopkeeper", "tutorials/shopkeeper.md"),
+    ("Tutorials", "/docs/tutorials/vending-sim", "tutorials/vending-sim.md"),
+    ("Tutorials", "/docs/tutorials/negotiation", "tutorials/negotiation.md"),
     ("Operations", "/docs/reference/integrations", "reference/integrations.md"),
 ]
 FENCE = re.compile(r"^```(?P<language>[^\n]*)\n(?P<body>.*?)^```\s*$", re.MULTILINE | re.DOTALL)

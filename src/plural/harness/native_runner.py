@@ -430,6 +430,7 @@ def _run(
     seen_view: Any = None
     # Limits count the whole episode, so a fork continues the original's turn count.
     turn = int(resume.get("turn") or 0) if resume is not None else 0
+    compacted_turns = 0
     while stop_reason is None:
         turn += 1
         if max_turns is not None and turn > max_turns:
@@ -459,6 +460,7 @@ def _run(
             break
         offered = tools if profile not in _CHAT_PROFILES else []
         if policy:
+            held = _assistant_turns(episode.messages)
             compaction_cost, paused = _compact(
                 episode,
                 policy,
@@ -467,6 +469,7 @@ def _run(
                 timeout=remaining,
                 turn=turn,
             )
+            compacted_turns += held - _assistant_turns(episode.messages)
             deadline += paused
             if compaction_cost is not None:
                 total_cost = (total_cost or 0.0) + compaction_cost
@@ -568,7 +571,7 @@ def _run(
             "response": response_text,
             "model": execution_model,
             "catalog_model": catalog_model,
-            "turns": len([item for item in messages if item.get("role") == "assistant"]),
+            "turns": compacted_turns + _assistant_turns(messages),
             "cost_usd": total_cost,
             "stop_reason": stop_reason,
             "terminated": terminated,
@@ -1446,6 +1449,16 @@ def _turn_starts(messages: list[dict[str, Any]]) -> list[int]:
     return [index for index, item in enumerate(messages) if item.get("role") == "assistant"]
 
 
+_SUMMARY_INSTRUCTIONS = (
+    "Summarize this conversation so the assistant can carry on with its work. Keep what it "
+    "was asked to do, decisions made, and anything still pending."
+)
+
+
+def _assistant_turns(messages: list[dict[str, Any]]) -> int:
+    return sum(item.get("role") == "assistant" for item in messages)
+
+
 def _compact(
     episode: _Episode,
     policy: dict[str, Any],
@@ -1514,9 +1527,7 @@ def _compact(
         messages=[
             {
                 "role": "system",
-                "content": "Summarize this conversation so the assistant can carry on with "
-                "its work. Keep what it was asked to do, decisions made, and anything still "
-                "pending.",
+                "content": policy.get("summary_instructions") or _SUMMARY_INSTRUCTIONS,
             },
             {"role": "user", "content": transcript},
         ],

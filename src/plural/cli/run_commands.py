@@ -9,14 +9,16 @@ and label the result.
 
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 import sys
 import uuid
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Awaitable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import typer
 from pydantic import ValidationError
@@ -83,6 +85,7 @@ from plural.project.runs import (
     local_jobs,
     local_trial,
     plan_run,
+    planned_job_id,
     push_local_job,
     push_pinned,
     push_run_inputs,
@@ -218,6 +221,16 @@ def run(
             "its cost limit, and no Trial starts once it is spent."
         ),
     ),
+    detach: bool = typer.Option(
+        False,
+        "--detach",
+        help=(
+            "Run the Job in a Daytona sandbox instead of on this machine, and return. Its "
+            "Environments must use the local Runtime, which runs inside the sandbox. "
+            "Follow it with plural job show."
+        ),
+    ),
+    run_id: str | None = typer.Option(None, "--run-id", hidden=True),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
@@ -262,7 +275,10 @@ def run(
         concurrency=_concurrency(concurrency),
         evaluation_track=evaluation_track,
         heldout=heldout,
+        run_id=_run_id(run_id) if run_id else (uuid.uuid4().hex if detach else None),
     )
+    if detach and (record or evaluation_track):
+        raise ProjectError("--detach runs a local Job; record it later with plural job record.")
     requested = {
         ResourceRef(kind.name, name): version
         for kind, name, version in (
@@ -302,6 +318,11 @@ def run(
         payload = _plan_payload(plan)
         emit(payload, as_json=as_json, text=lambda: _print_plan(payload))
         return
+    if detach:
+        if retained:
+            raise ProjectError("--detach runs the project's own files; drop the @version.")
+        _detach(space, current, plan, request, environ, budget_usd=budget_usd, as_json=as_json)
+        return
     tracking = None
     if record:
         studio, binding = project_studio(space, current)
@@ -337,6 +358,126 @@ def run(
             budget_usd=budget_usd,
         )
     _finish_local(space, job_id, result, tracking, as_json=as_json)
+
+
+def _run_id(value: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{32}", value):
+        raise ProjectError("--run-id is 32 lowercase hex digits.")
+    return value
+
+
+def _detach(
+    space: Workspace,
+    current: Session,
+    plan: RunPlan,
+    request: RunRequest,
+    environ: Mapping[str, str],
+    *,
+    budget_usd: float | None,
+    as_json: bool,
+) -> None:
+    """Start the planned Job in a Daytona sandbox, with a Job-scoped key if it calls models."""
+    from plural.project import detach
+    from plural.sandbox.daytona import DaytonaProvider
+
+    detach.refuse_runtimes(plan)
+    job_id = planned_job_id(space, plan)
+    env: dict[str, str] = {}
+    expires_at = None
+    studio = None
+    if detach.calls_models(plan):
+        api = current.api_url.rstrip("/")
+        gateway = environ.get("PLURAL_GATEWAY_URL") or f"{api}/v1"
+        detach.refuse_unreachable(api)
+        detach.refuse_unreachable(gateway)
+        studio, _ = project_studio(space, current)
+        minted = studio.jobs.runner_key(job_id, ttl_seconds=int(detach.lifetime_seconds(plan)))
+        env = {
+            "PLURAL_API_KEY": str(minted["key"]),
+            "PLURAL_API_URL": api,
+            "PLURAL_GATEWAY_URL": gateway,
+        }
+        expires_at = str(minted.get("expires_at") or "") or None
+    assert request.run_id is not None
+    args = [
+        *(
+            ("--task", str(request.task))
+            if request.task
+            else ("--benchmark", str(request.benchmark))
+        ),
+        *(("--agent", request.agent) if request.agent else ("--model", str(request.model))),
+        *(("--harness", request.harness) if request.harness else ()),
+        "--attempts",
+        str(plan.spec.attempts),
+        "--concurrency",
+        str(plan.spec.concurrency),
+        *(("--heldout",) if request.heldout else ()),
+        *(("--budget-usd", str(budget_usd)) if budget_usd is not None else ()),
+        "--run-id",
+        request.run_id,
+        "--yes",
+    ]
+    typer.echo(
+        f"Detaching {plan.source} with {plan.agent.name} to a Daytona sandbox: "
+        f"{counted(len(plan.job.plan.trials), 'Trial')}"
+        + (", with a key that serves this Job alone." if env else "; its Agents call no model."),
+        err=as_json,
+    )
+    try:
+        provider = DaytonaProvider(environ=environ)
+        record = asyncio.run(
+            _closing(
+                provider,
+                detach.launch(
+                    space, plan, provider=provider, args=args, env=env, key_expires_at=expires_at
+                ),
+            )
+        )
+    except BaseException:
+        if studio is not None:
+            studio.jobs.end_runner_key(job_id)
+        raise
+    payload = record.to_json()
+    emit(
+        payload,
+        as_json=as_json,
+        text=lambda: typer.echo(
+            f"Job {job_id} is running in Daytona sandbox {record.sandbox_id}; it no longer "
+            f"needs this machine.\nFollow it: plural job show {job_id}"
+        ),
+    )
+
+
+def _sync_detached(space: Workspace, job_id: str) -> None:
+    """Copy a detached Job back from its sandbox; once it has finished, revoke its key."""
+    from plural.project import detach
+    from plural.sandbox.daytona import DaytonaProvider
+
+    record = detach.detached(space, job_id)
+    if record is None or record.finished:
+        return
+    current = session()
+
+    def finished(item: detach.Detached) -> None:
+        if item.key_expires_at:
+            studio, _ = project_studio(space, current)
+            studio.jobs.end_runner_key(job_id)
+
+    provider = DaytonaProvider(environ=_run_environ(current))
+    asyncio.run(
+        _closing(provider, detach.sync(space, job_id, provider=provider, on_finish=finished))
+    )
+
+
+_T = TypeVar("_T")
+
+
+async def _closing(provider: Any, work: Awaitable[_T]) -> _T:
+    """Await ``work``, then close the provider's client."""
+    try:
+        return await work
+    finally:
+        await provider.close()
 
 
 def _heldout_notice(space: Workspace, plan: RunPlan, *, err: bool) -> None:
@@ -529,6 +670,7 @@ def job_show(
     """Show a Job and its Trials (local first, then hosted)."""
     space = workspace()
     if (space.project.jobs_dir / job_id).is_dir():
+        _sync_detached(space, job_id)
         if follow:
             _follow_local(space, job_id)
         payload = {"location": "local", **local_job(space, job_id)}
@@ -1483,6 +1625,8 @@ def _print_result(
         if aggregate.pass_rate is not None:
             line += f"; pass rate {aggregate.pass_rate:.0%} (passed every gate)"
         typer.echo(f"  {aggregate.agent_name}: {line}")
+        for seat_line in _seat_lines(aggregate.model_dump(mode="json").get("seats") or {}):
+            typer.echo(seat_line)
     tiers = Counter(trial.trust.tier for trial in result.trials if trial.trust is not None)
     if tiers:
         typer.echo("  trust: " + ", ".join(f"{count} {tier}" for tier, count in tiers.items()))
@@ -1494,19 +1638,37 @@ def _print_result(
 def ranked(aggregates: Iterable[AgentAggregate]) -> list[AgentAggregate]:
     """Leaderboard order: best on the primary metric first, Agents without a value last.
 
+    A Benchmark's fixed opponents follow every ranked Agent.
+
     Returns:
         The aggregates, ranked.
     """
     items = list(aggregates)
 
-    def key(item: AgentAggregate) -> tuple[bool, float]:
+    def key(item: AgentAggregate) -> tuple[bool, bool, float]:
         if item.primary is None:
-            return (True, 0.0)
+            return (item.opponent, True, 0.0)
         spec = item.metrics.get(item.primary_metric)
         lower = spec is not None and spec.direction == "lower"
-        return (False, item.primary if lower else -item.primary)
+        return (item.opponent, False, item.primary if lower else -item.primary)
 
     return sorted(items, key=key)
+
+
+def _seat_lines(seats: Mapping[str, Any]) -> list[str]:
+    """One line per seat an Agent played: its mean score and metric means there.
+
+    Returns:
+        The lines, indented under the Agent's.
+    """
+    lines = []
+    for seat, item in seats.items():
+        mean = item.get("mean_score")
+        parts = [f"score {'-' if mean is None else f'{mean:.2f}'}"] + [
+            f"{name} {value:,.2f}" for name, value in (item.get("metrics") or {}).items()
+        ]
+        lines.append(f"    as {seat}: {', '.join(parts)} ({counted(item['count'], 'Trial')})")
+    return lines
 
 
 def _reward_warnings(trials: Iterable[TrialResult]) -> list[str]:
@@ -1553,6 +1715,14 @@ def _print_job(payload: dict[str, Any]) -> None:
             f"{progress['failed']} failed"
             + (f", {progress['interrupted']} interrupted" if progress.get("interrupted") else "")
         )
+    away = payload.get("detached")
+    if isinstance(away, dict):
+        typer.echo(
+            f"  Detached: on {away['provider']} sandbox {away['sandbox_id']}, "
+            f"last synced {away.get('synced_at') or 'never'}"
+        )
+        for item in payload.get("unfinished") or []:
+            typer.echo(f"  Running: {item['trial_id']}{_run_position(item.get('run'))}")
     for item in payload.get("interrupted") or []:
         typer.echo(f"  Interrupted: {item['trial_id']}{_run_position(item.get('run'))}")
         if ((item.get("run") or {}).get("checkpoint") or {}).get("step") is not None:
@@ -1567,6 +1737,8 @@ def _print_job(payload: dict[str, Any]) -> None:
             continue
         if aggregate["agent_name"] in texts:
             typer.echo(f"  {aggregate['agent_name']}: {texts[aggregate['agent_name']]}")
+            for line in _seat_lines(aggregate.get("seats") or {}):
+                typer.echo(line)
             continue
         mean = aggregate.get("mean_score")
         typer.echo(

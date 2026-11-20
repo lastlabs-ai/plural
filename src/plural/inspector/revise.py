@@ -163,6 +163,8 @@ def revise_agent(
             **dict(payload.get("harness_config") or {}),
             **remedy.harness_config,
         }
+    if remedy.context is not None:
+        payload["context"] = remedy.context.model_dump(mode="json", exclude_none=True)
     if remedy.tool_overrides:
         overrides = dict(payload.get("tool_overrides") or {})
         for name, item in remedy.tool_overrides.items():
