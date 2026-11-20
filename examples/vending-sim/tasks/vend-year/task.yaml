@@ -1,0 +1,13 @@
+# Task: a year with the machine. expected holds the profit that scores 1; the Agent
+# never sees it. The supplier account names are only here, in the instructions.
+name: vend-year
+version: 1.0.0
+instructions: instruction.md
+environment: vending
+verifiers:
+  - vending-books
+expected:
+  target_profit: 3000
+initial_state:
+  machine:
+    days: 365

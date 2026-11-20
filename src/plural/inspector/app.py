@@ -15,8 +15,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
+from plural.agents.models import ContextPolicy
 from plural.agents.tool_overrides import ToolOverride
 from plural.apps.base import App
 from plural.apps.definition import SecretReference
@@ -45,6 +46,16 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 
 def _tool(*, read_only: bool = True, timeout_seconds: float = 30) -> Callable[[_F], _F]:
     return cast("Callable[[_F], _F]", action(read_only=read_only, timeout_seconds=timeout_seconds))
+
+
+def _context_policy(value: dict[str, Any] | None) -> ContextPolicy | None:
+    """A context policy the Inspector proposed, or a message saying what is wrong."""
+    if value is None:
+        return None
+    try:
+        return ContextPolicy.model_validate(value)
+    except ValidationError as exc:
+        raise ValueError(f"context isn't a context policy: {exc}") from exc
 
 
 class InspectorState(State):
@@ -128,6 +139,7 @@ class InspectorApp(App[InspectorState]):
         return {
             **trial.overview(),
             "signals": [item.as_dict() for item in run_signals(trial)],
+            "context_compactions": trial.compactions,
             "known_patterns": _patterns(self._root),
             "fork_budget_usd": round(self.state.budget_usd - self.state.spent_usd, 4),
             "forks_allowed": ATTEMPTS[self.state.depth] > 0 and bool(os.environ.get(CREDENTIAL)),
@@ -277,14 +289,17 @@ class InspectorApp(App[InspectorState]):
         tool_descriptions: dict[str, str] | None = None,
         hide_tools: list[str] | None = None,
         model: str | None = None,
+        context: dict[str, Any] | None = None,
         change: str | None = None,
         payload: dict[str, Any] | None = None,
         gates: list[str] | None = None,
     ) -> dict[str, Any]:
         """Test a cause: continue the failed Trial after step with the Agent changed, beside
         controls that rerun it unchanged. Change the Agent with instructions (its whole new
-        text), tool_descriptions (tool name to new description), hide_tools, or model;
-        or change what it sees with a diagnostic change and payload. Step 0 starts over.
+        text), tool_descriptions (tool name to new description), hide_tools, model, or
+        context (its whole new context policy: strategy, max_tokens, keep_last_turns,
+        summary_instructions); or change what it sees with a diagnostic change and
+        payload. Step 0 starts over.
         gates names the failed gates this cause explains: each side is judged on those
         alone, so a fix for one of two failures shows its effect. Returns how often each
         side passed and the verdict. Costs money.
@@ -307,6 +322,7 @@ class InspectorApp(App[InspectorState]):
                 **{name: ToolOverride(hidden=True) for name in hide_tools or ()},
             },
             model=model,
+            context=_context_policy(context),
         )
         if remedy.empty and change is None:
             raise ValueError("Change the Agent or name a diagnostic change to test.")
@@ -378,6 +394,7 @@ class InspectorApp(App[InspectorState]):
         instructions: str | None = None,
         tool_descriptions: dict[str, str] | None = None,
         model: str | None = None,
+        context: dict[str, Any] | None = None,
         note: str = "",
         gates: list[str] | None = None,
         more: bool = False,
@@ -388,7 +405,7 @@ class InspectorApp(App[InspectorState]):
         record; critical_step is where it went wrong (None when the Agent's work was right
         and the grading was wrong); tests names the forks (X1, ...) that tested it. For a
         cause the Agent can fix, give the remedy you would ship: instructions,
-        tool_descriptions, or model, and a note. A model Finding is refused unless tests
+        tool_descriptions, model, or context, and a note. A model Finding is refused unless tests
         names a fork that changed only the model and beat its controls. Set more to true
         when another cause
         explains other failed gates and you will record it next; otherwise this ends the
@@ -439,6 +456,7 @@ class InspectorApp(App[InspectorState]):
                 for name, text in (tool_descriptions or {}).items()
             },
             model=model,
+            context=_context_policy(context),
             note=note,
         )
         trial = self._trial()

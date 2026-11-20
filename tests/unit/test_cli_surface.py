@@ -78,7 +78,7 @@ def test_resource_groups_share_one_verb_set_and_nothing_publishes() -> None:
         ("project", {"init", "push", "show"}),
         ("app", {"add", "list", "remove"}),
         ("job", {"show", "list", "rerun", "record", "inspect", "report"}),
-        ("trial", {"show", "rerun", "checkpoint", "fork", "ask"}),
+        ("trial", {"show", "rerun", "resume", "checkpoint", "fork", "ask"}),
         ("reward", {"show", "export"}),
         ("model", {"list"}),
         ("secret", {"list", "set", "delete"}),

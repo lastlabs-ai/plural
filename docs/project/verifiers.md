@@ -475,8 +475,8 @@ never a metric, and the Agent never sees either.
 ### Measure while the episode runs
 
 Some work has no single finished answer to check. A shop is open all season, and what
-matters is how its cash moves. A **running metric** is sampled after every action by
-the Verifier's `measure` hook:
+matters is how its cash moves. A **running metric** is sampled by the Verifier's
+`measure` hook, after every action by default:
 
 ```yaml
 measure: verify.py:measure
@@ -512,10 +512,27 @@ pairs per metric, so the score can depend on the path, not only the end. The Tri
 page charts each running metric over the episode.
 
 Each point records whether an Agent action or the Environment itself produced it,
-and, when an App runs its own clock, the simulated time. An App reports its clock
-by overriding `sim_time()` to return a number or an ISO-8601 timestamp. The chart can
-then use simulated time instead of steps. The
+and the simulated time when the Environment has a
+[clock](environments.md#simulated-time). Without one, an App can report its own by
+overriding `sim_time()` to return a number or an ISO-8601 timestamp. The chart then
+plots the metric against simulated time. The
 [shopkeeper tutorial](../tutorials/shopkeeper.md) builds this end to end.
+
+A year of actions is a lot of points. `every` samples on a period instead, in clock
+units or in steps, so a simulated year is 365 points however many actions the Agent
+takes:
+
+```yaml
+measure:
+  python: verify.py:measure
+  every:
+    sim_time: 1
+```
+
+At a Task [several Agents share](multi-agent.md), `measure` can return each seat's own
+value, as `{"surplus_usd": {"seat_1": 40.0, "seat_2": 25.0}}`. The Trial page then
+charts one series per seat, each seat's Agent is credited its own, and the metric's
+`seat_aggregate` (`sum`, `mean`, `min`, or `max`) gives the episode's value.
 
 ## AgentVerifier
 

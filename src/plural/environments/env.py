@@ -16,12 +16,15 @@ from plural.apps.base import App
 from plural.common import PackageSource
 from plural.environments.action_registry import action
 from plural.environments.definition import (
+    Clock,
     EnvironmentDefinition,
     EnvironmentResource,
     EnvironmentRuntime,
+    Every,
     ExecutionLimits,
     Guardrail,
     HarnessPolicy,
+    Horizon,
     Party,
 )
 
@@ -81,6 +84,11 @@ class Environment:
     _source_file: ClassVar[Path | None] = None
     metadata: dict[str, Any] = {}
     party: Party | int | Mapping[str, int] | None = None
+    clock: Clock | Mapping[str, Any] | None = None
+    horizon: Horizon | Mapping[str, Any] | None = None
+    autonomous: bool = False
+    allow_finish: bool | None = None
+    checkpoint_every: Every | Mapping[str, Any] | None = None
 
     def __init__(
         self,
@@ -97,6 +105,11 @@ class Environment:
         harness_policy: HarnessPolicy | None = None,
         limits: ExecutionLimits | None = None,
         party: Party | int | Mapping[str, int] | None = None,
+        clock: Clock | Mapping[str, Any] | None = None,
+        horizon: Horizon | Mapping[str, Any] | None = None,
+        autonomous: bool | None = None,
+        allow_finish: bool | None = None,
+        checkpoint_every: Every | Mapping[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
         source: str | Path | None = None,
     ) -> None:
@@ -131,6 +144,14 @@ class Environment:
         self.limits = limits or ExecutionLimits()
         chosen = type(self).party if party is None else party
         self.party = None if chosen is None else Party.model_validate(chosen)
+        given_clock = type(self).clock if clock is None else clock
+        self.clock = None if given_clock is None else Clock.model_validate(given_clock)
+        given_horizon = type(self).horizon if horizon is None else horizon
+        self.horizon = None if given_horizon is None else Horizon.model_validate(given_horizon)
+        self.autonomous = type(self).autonomous if autonomous is None else autonomous
+        self.allow_finish = type(self).allow_finish if allow_finish is None else allow_finish
+        given_every = type(self).checkpoint_every if checkpoint_every is None else checkpoint_every
+        self.checkpoint_every = None if given_every is None else Every.model_validate(given_every)
         self.metadata = deepcopy(type(self).metadata) if metadata is None else deepcopy(metadata)
         self._source: PackageSource | None = None
         self._source_bound = False
@@ -251,6 +272,13 @@ class Environment:
             harness_policy=self.harness_policy,
             limits=self.limits,
             party=None if self.party is None else Party.model_validate(self.party),
+            clock=None if self.clock is None else Clock.model_validate(self.clock),
+            horizon=None if self.horizon is None else Horizon.model_validate(self.horizon),
+            autonomous=self.autonomous,
+            allow_finish=self.allow_finish,
+            checkpoint_every=None
+            if self.checkpoint_every is None
+            else Every.model_validate(self.checkpoint_every),
             metadata=deepcopy(self.metadata),
             source=self.source,
         )
@@ -294,6 +322,11 @@ class Environment:
             harness_policy=definition.harness_policy,
             limits=definition.limits,
             party=definition.party,
+            clock=definition.clock,
+            horizon=definition.horizon,
+            autonomous=definition.autonomous,
+            allow_finish=definition.allow_finish,
+            checkpoint_every=definition.checkpoint_every,
             metadata=definition.metadata,
             source=base,
         )
@@ -331,8 +364,16 @@ class Environment:
                     hooks.append(RewardHook(item.name, item.version, item.reward_fn))
                 if item.measure_fn is not None:
                     running = tuple(spec.name for spec in item.metrics if spec.kind == "running")
+                    every = item.measure_every
                     hooks.append(
-                        RewardHook(item.name, item.version, item.measure_fn, "measure", running)
+                        RewardHook(
+                            item.name,
+                            item.version,
+                            item.measure_fn,
+                            "measure",
+                            running,
+                            every=None if every is None else every.model_dump(exclude_none=True),
+                        )
                     )
             elif callable(item):
                 hooks.append(RewardHook(getattr(item, "__name__", "step"), "", item))

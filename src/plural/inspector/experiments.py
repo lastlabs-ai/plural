@@ -44,6 +44,8 @@ def remedy_agent(binding: AgentBinding, remedy: Remedy, label: str) -> AgentBind
         update["model"] = remedy.model
     if remedy.harness_config:
         update["harness_config"] = {**agent.harness_config, **remedy.harness_config}
+    if remedy.context is not None:
+        update["context"] = remedy.context
     changed = type(agent).model_validate({**agent.model_dump(), **update})
     return AgentBinding(agent=changed)
 

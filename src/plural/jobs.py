@@ -557,6 +557,24 @@ class TrialFork(FrozenModel):
     change: str | None = None
 
 
+class ResumeRecord(FrozenModel):
+    """What a resumed execution records: the run checkpoint it continued from.
+
+    A resumed execution is the same Trial, not a fork: its steps, States, and
+    metric points before ``step`` are the interrupted execution's, and its
+    cost and turns include what that execution spent.
+    """
+
+    from_execution_id: int = Field(ge=0)
+    step: int = Field(ge=0)
+    sim_time: float | None = None
+    checkpoint_digest: str
+    history: Literal["native", "transcript", "none"] = "native"
+    carried_cost_usd: float | None = Field(default=None, ge=0)
+    carried_turns: int = Field(default=0, ge=0)
+    carried_seconds: float = Field(default=0.0, ge=0)
+
+
 class ForkRecord(FrozenModel):
     """What a fork Trial records: where it started and how the history reached its Agent."""
 
@@ -603,6 +621,14 @@ class JobSpec(FrozenModel):
             "Empty, every Agent of the Job plays, once each."
         ),
     )
+    opponents: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "For a Benchmark Job: the Agents, by name, that fill the other seats at a Task "
+            "several Agents share, the Benchmark's fixed opponents. They play and are not "
+            "ranked, and run no other Task."
+        ),
+    )
     purpose: JobPurpose = Field(
         default="eval",
         description=(
@@ -623,6 +649,8 @@ class JobSpec(FrozenModel):
         if isinstance(data, dict):
             if not self.party:
                 data.pop("party", None)
+            if not self.opponents:
+                data.pop("opponents", None)
             if self.purpose == "eval":
                 data.pop("purpose", None)
             if self.fork is None:
@@ -655,10 +683,19 @@ class JobSpec(FrozenModel):
                 f"party names {', '.join(map(repr, unknown))}, which are not Agents of the "
                 f"Job; its Agents are {', '.join(sorted(names))}"
             )
+        unknown = sorted(set(self.opponents) - names)
+        if unknown:
+            raise ValueError(
+                f"opponents names {', '.join(map(repr, unknown))}, which are not Agents of the "
+                "Job; add each opponent to agents"
+            )
+        if self.opponents and not self.evaluated_agents:
+            raise ValueError("every Agent of the Job is an opponent, so none would be ranked")
         for task in self.tasks:
             if task.party is None:
                 continue
-            reason = task.party.check(len(self.party_agents))
+            size = task.party_size if self.rotates else None
+            reason = task.party.check(size or len(self.party_agents))
             if reason is not None:
                 raise ValueError(f"Task {task.task_id!r}: {reason}.")
         for task in self.tasks:
@@ -712,6 +749,50 @@ class JobSpec(FrozenModel):
         return self.source.tasks
 
     @property
+    def rotates(self) -> bool:
+        """Whether Tasks several Agents share are seated by the Benchmark's rules.
+
+        A Benchmark Job seats each evaluated Agent in turn, against its
+        opponents; a Job that names its ``party`` plays exactly that party.
+        """
+        return isinstance(self.source, BenchmarkJobSource) and not self.party
+
+    @property
+    def evaluated_agents(self) -> tuple[AgentBinding, ...]:
+        """The Agents being ranked: every Agent but the opponents."""
+        return tuple(agent for agent in self.agents if agent.name not in set(self.opponents))
+
+    def seatings(self, task: TaskDefinition) -> tuple[tuple[AgentBinding, ...], ...]:
+        """The parties that play a Task several Agents share, each in seat order.
+
+        In a Benchmark Job, each evaluated Agent plays with the opponents in
+        the other seats, in their order and repeated if there are too few,
+        once from every seat with ``seatings: rotate``, or from ``seat_1``.
+        Without opponents, a cooperative Task seats the Agent in every seat.
+        Any other Job plays its :attr:`party_agents`.
+
+        Returns:
+            The parties, without repeats.
+        """
+        if not self.rotates:
+            return (self.party_agents,)
+        assert isinstance(self.source, BenchmarkJobSource)
+        size = task.party_size or len(self.party_agents)
+        by_name = {agent.name: agent for agent in self.agents}
+        opponents = [by_name[name] for name in self.opponents]
+        rotate = self.source.benchmark.seatings == "rotate"
+        parties: list[tuple[AgentBinding, ...]] = []
+        for agent in self.evaluated_agents:
+            if not opponents:
+                parties.append((agent,) * size)
+                continue
+            others = [opponents[index % len(opponents)] for index in range(size - 1)]
+            for position in range(size if rotate else 1):
+                parties.append(tuple(others[:position] + [agent] + others[position:]))
+        unique = {tuple(agent.name for agent in party): party for party in parties}
+        return tuple(unique.values())
+
+    @property
     def party_agents(self) -> tuple[AgentBinding, ...]:
         """The Agents that share each episode of a Task with a party, in seat order."""
         if not self.party:
@@ -739,6 +820,8 @@ class JobSpec(FrozenModel):
             identity["run_id"] = self.run_id
         if self.party:
             identity["party"] = self.party
+        if self.opponents:
+            identity["opponents"] = self.opponents
         if self.purpose != "eval":
             identity["purpose"] = self.purpose
         if self.fork is not None:
@@ -850,12 +933,13 @@ class JobSpec(FrozenModel):
         else:
             trials = tuple(
                 trial(task, attempt, (agent,))
-                for agent in self.agents
+                for agent in self.evaluated_agents
                 for task in solo
                 for attempt in range(1, self.attempts + 1)
             ) + tuple(
-                trial(task, attempt, self.party_agents)
+                trial(task, attempt, party)
                 for task in shared
+                for party in self.seatings(task)
                 for attempt in range(1, self.attempts + 1)
             )
         lock = JobLock(
@@ -1123,6 +1207,8 @@ class SeatResult(FrozenModel):
     score weighs theirs; a Verifier that scores no seats gives every seat
     its episode score. ``artifact_root`` is where the seat's Harness output,
     its trace from its own side of the table, sits among the Trial's artifacts.
+    ``metrics`` holds the running metrics a ``measure`` hook gave per seat, and
+    ``passed`` the seat's own gates on them.
     """
 
     seat: str
@@ -1136,6 +1222,12 @@ class SeatResult(FrozenModel):
     artifact_root: str = ""
     cost_usd: float | None = Field(default=None, ge=0)
     error_message: str | None = None
+    metrics: dict[str, float | None] = Field(default_factory=dict)
+    """This seat's value of each running metric measured per seat."""
+    gates: dict[str, bool] = Field(default_factory=dict)
+    """Each per-seat gate's verdict for this seat."""
+    passed: bool | None = None
+    """Whether this seat passed every applicable per-seat gate; ``None`` when none applied."""
 
 
 def _stored_api_key() -> str | None:
@@ -1266,6 +1358,12 @@ class TrialResult(FrozenModel):
     fork: ForkRecord | None = None
     """For a Trial that started from a checkpoint: where, and how the history
     reached its Agent."""
+    environment_cost_usd: float | None = Field(default=None, ge=0)
+    """What the Environment's simulated people (``plural.sim.Persona``) cost.
+    Never part of the Agent's cost. ``None`` when no persona called a model."""
+    resumed: ResumeRecord | None = None
+    """For an execution that continued an interrupted one from its latest run
+    checkpoint: where, and what it carried over."""
     volume_in: VolumeVersion | None = None
     """The Volume version the Agent started from. ``None`` until Volumes exist."""
     volume_out: VolumeVersion | None = None
@@ -1282,6 +1380,15 @@ class TrialResult(FrozenModel):
         if self.stop_reason and self.stop_reason not in STOP_REASONS:
             raise ValueError(f"unknown stop_reason {self.stop_reason!r}")
         return self
+
+
+class SeatAggregate(FrozenModel):
+    """One Agent's results from one seat, across the Trials it sat there."""
+
+    count: int = Field(ge=0)
+    mean_score: float | None = None
+    metrics: dict[str, float] = Field(default_factory=dict)
+    """Each metric's mean over the Trials it applied to, from this seat's own values."""
 
 
 class AgentAggregate(FrozenModel):
@@ -1313,6 +1420,20 @@ class AgentAggregate(FrozenModel):
     """The pass rate: the share of this Agent's judged Trials that passed every
     applicable gate. ``None`` when no Trial was judged. The success rate, which
     counts scores at the success threshold, is separate."""
+    seats: dict[str, SeatAggregate] = Field(default_factory=dict)
+    """At Tasks several Agents share: this Agent's results from each seat it played."""
+    opponent: bool = False
+    """A Benchmark's fixed opponent: it played, and is not ranked."""
+
+    @model_serializer(mode="wrap")
+    def _omit_solo(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        if isinstance(data, dict):
+            if not self.seats:
+                data.pop("seats", None)
+            if not self.opponent:
+                data.pop("opponent", None)
+        return data
 
 
 class JobResult(FrozenModel):
@@ -1341,6 +1462,10 @@ class Job:
     share each episode, in seat order; list one Agent more than once for
     self-play. Left out, every Agent in ``agents`` plays, once each.
 
+    A Benchmark Job seats its party Tasks by the Benchmark's ``seatings``:
+    each Agent in ``agents`` plays from every seat, with ``opponents``, the
+    Benchmark's fixed opponents, in the others. Opponents are not ranked.
+
     ``episode_server`` says where the Job serves an external Agent's episodes;
     by default it listens on a free loopback port.
 
@@ -1365,6 +1490,7 @@ class Job:
         agents: Sequence[Agent],
         *,
         party: Sequence[Agent] | None = None,
+        opponents: Sequence[Agent] | None = None,
         mode: JobMode = JobMode.EVAL,
         attempts: int = 1,
         concurrency: int | Literal["auto"] = 1,
@@ -1409,8 +1535,22 @@ class Job:
                 "Pass client=Client() or api_key=..., not both.\n"
                 "Both select the Plural gateway; api_key is a Plural API key."
             )
+        if opponents and not isinstance(source, Benchmark):
+            raise ValueError(
+                "Cannot create Job.\nopponents are a Benchmark's; a Job of one Task names "
+                "its party instead."
+            )
+        if any(
+            member is agent or (member.name and member.name == agent.name)
+            for member in opponents or ()
+            for agent in agents
+        ):
+            raise ValueError(
+                "Cannot create Job.\nAn Agent can't be both ranked and an opponent; name it "
+                "in agents or in opponents."
+            )
         self.source = source
-        self.agents = tuple(agents)
+        self.agents = tuple(agents) + tuple(opponents or ())
         self.allow_local_models = allow_local_models
         self.client = client
         self.api_key = api_key
@@ -1432,6 +1572,7 @@ class Job:
             source=job_source,
             agents=bindings,
             party=tuple(members),
+            opponents=tuple(binding.name for binding in bindings[len(agents) :]),
             mode=mode,
             attempts=attempts,
             priority=priority,
@@ -1616,6 +1757,7 @@ __all__ = [
     "ExecutionStatus",
     "ForkChange",
     "ForkRecord",
+    "ResumeRecord",
     "ForkRole",
     "ForkSpec",
     "IntegrityFinding",
@@ -1633,6 +1775,7 @@ __all__ = [
     "ProgressEvent",
     "REFUSE_HELDOUT",
     "RetryPolicy",
+    "SeatAggregate",
     "SeatAssignment",
     "SeatResult",
     "TITORecord",

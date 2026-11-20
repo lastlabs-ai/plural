@@ -338,6 +338,19 @@
           "title": "Apps",
           "type": "object"
         },
+        "clock": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clock"
+        },
         "contexts": {
           "additionalProperties": {
             "$ref": "#/$defs/AgentContext"
@@ -380,6 +393,14 @@
         "observation": {
           "default": null,
           "title": "Observation"
+        },
+        "personas": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Personas",
+          "type": "array"
         },
         "prefix_metrics": {
           "items": {
@@ -567,6 +588,17 @@
         "measure": {
           "default": null,
           "title": "Measure"
+        },
+        "measure_every": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Every"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "metadata": {
           "additionalProperties": true,
@@ -878,6 +910,40 @@
       "title": "EvaluationTrack",
       "type": "object"
     },
+    "Every": {
+      "additionalProperties": false,
+      "description": "A period: every ``sim_time`` clock units, or every ``steps`` steps.",
+      "properties": {
+        "sim_time": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sim Time"
+        },
+        "steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Steps"
+        }
+      },
+      "title": "Every",
+      "type": "object"
+    },
     "HumanVerifier": {
       "additionalProperties": false,
       "description": "Human review verifier.",
@@ -952,7 +1018,7 @@
     },
     "MetricSpec": {
       "additionalProperties": false,
-      "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
+      "description": "One metric a Verifier declares: what it measures and which way is better.\n\n``range`` bounds a ``score`` (by default 0 to 1) or a ``rating`` (required).\nA ``running`` metric is sampled after every step and needs an\n``aggregate`` to become one number per Trial; ``time_to`` also needs a\n``threshold``, and counts the steps until the value first crosses it in the\ngood direction.\n\n``gate: true`` makes the metric one a Trial must pass: a binary gate passes\nat 1, any other gate when it meets its ``target`` (``>= 150``, ``<= 0.5``,\n``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``\non a metric that is not a gate is reported, never judged.\n\nA running metric a ``measure`` hook gives per seat has a series per seat,\neach aggregated on its own and judged as a gate on its own; the Trial's\nvalue combines the seats' by ``seat_aggregate`` (by default their mean).\n\nExamples:\n    >>> MetricSpec(name=\"price_correct\", kind=\"binary\").range\n    (0.0, 1.0)\n    >>> MetricSpec(name=\"tone\", kind=\"rating\", range=(1, 5)).direction\n    'higher'",
       "properties": {
         "aggregate": {
           "anyOf": [
@@ -1032,6 +1098,24 @@
           ],
           "default": null,
           "title": "Range"
+        },
+        "seat_aggregate": {
+          "anyOf": [
+            {
+              "enum": [
+                "mean",
+                "sum",
+                "min",
+                "max"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seat Aggregate"
         },
         "target": {
           "anyOf": [
@@ -1261,6 +1345,11 @@
           "default": null,
           "title": "Checkpoint Bundle"
         },
+        "competitive": {
+          "default": false,
+          "title": "Competitive",
+          "type": "boolean"
+        },
         "environment": {
           "title": "Environment"
         },
@@ -1311,6 +1400,20 @@
           "minLength": 1,
           "title": "Name",
           "type": "string"
+        },
+        "party_size": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Party Size"
         },
         "resources": {
           "default": [],
@@ -1542,6 +1645,14 @@
       "title": "Name",
       "type": "string"
     },
+    "opponents": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Opponents",
+      "type": "array"
+    },
     "primary_metric": {
       "default": "score",
       "title": "Primary Metric",
@@ -1554,6 +1665,15 @@
     },
     "scoring": {
       "$ref": "#/$defs/BenchmarkScoring"
+    },
+    "seatings": {
+      "default": "rotate",
+      "enum": [
+        "rotate",
+        "fixed"
+      ],
+      "title": "Seatings",
+      "type": "string"
     },
     "success": {
       "default": "",

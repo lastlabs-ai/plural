@@ -1,0 +1,17 @@
+# Verifier: the partners share one score. check scores no seat, so each seat gets the
+# episode's score. measure counts each seat's posts, one series per seat.
+name: vault-check
+version: 1.0.0
+kind: deterministic
+check: verify.py:check
+measure: verify.py:measure
+metrics:
+  - name: posts
+    kind: running
+    aggregate: final
+    seat_aggregate: sum
+    description: How many messages each partner has posted; the episode's value is both together.
+  - name: opened
+    kind: binary
+    gate: true
+    description: 1 when the vault opened.

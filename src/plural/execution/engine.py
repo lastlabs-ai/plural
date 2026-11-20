@@ -8,6 +8,7 @@ import copy
 import fnmatch
 import functools
 import json
+import logging
 import math
 import os
 import secrets as token_source
@@ -71,6 +72,7 @@ from plural.execution.episode_server import EpisodeServer, EpisodeServerOptions
 from plural.execution.external import ExternalAgentRunner, ExternalRun
 from plural.execution.inputs import ResourceResolver, resource_uploads, runtime_values
 from plural.execution.integrity import audit_external
+from plural.execution.journal import RunJournal
 from plural.execution.policy import (
     ProjectPolicy,
     resolve_effective_policy,
@@ -94,7 +96,12 @@ from plural.execution.seats import (
 )
 from plural.execution.steps import STEPS_FILE, dump_jsonl, episode_terminated, merge_host_steps
 from plural.execution.store import JobStore
-from plural.execution.trial_metrics import metric_lines, task_metric_specs, trial_metrics
+from plural.execution.trial_metrics import (
+    metric_lines,
+    seat_metrics,
+    task_metric_specs,
+    trial_metrics,
+)
 from plural.external.protocol import EpisodeGateway, signing_key
 from plural.harness.builtins import package_tools
 from plural.harness.episode import EPISODE_FILE
@@ -135,6 +142,8 @@ from plural.jobs import (
     JobSpec,
     PhaseName,
     PhaseTiming,
+    ResumeRecord,
+    SeatAggregate,
     SeatResult,
     TITORecord,
     TrialReceipt,
@@ -185,6 +194,9 @@ from plural.sandbox import (
 )
 from plural.sandbox.conformance import conformance_status
 from plural.sandbox.sweep import trial_labels
+from plural.sim import GATEWAY_VARIABLE as PERSONA_GATEWAY_VARIABLE
+from plural.sim import KEY_VARIABLE as PERSONA_KEY_VARIABLE
+from plural.sim import PERSONAS_FILE
 from plural.snapshots import GitBundle
 from plural.tasks import TaskDefinition, validate_task_state
 from plural.trajectory import normalize_trajectory
@@ -210,6 +222,8 @@ from plural.verifiers import (
     resolve_metrics,
     rubric_score,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionFailure(RuntimeError):
@@ -374,6 +388,11 @@ def _requirements(task: TaskDefinition, package: HarnessPackage) -> SandboxRequi
     return requirements.model_copy(update={"image": reference})
 
 
+def _runtime_image(requirements: SandboxRequirements) -> SandboxRequirements:
+    """Requirements without the execution identity, which also names the Harness."""
+    return requirements.model_copy(update={"execution_identity": ""})
+
+
 def sandbox_lifetime(task: TaskDefinition) -> float:
     """The longest a Trial's sandbox may live: its budgets plus a margin.
 
@@ -524,6 +543,10 @@ def _with_host_steps(
     if report.metrics:
         result = _with_artifact(
             result, DownloadedFile(path=METRICS_FILE, data=dump_jsonl(report.metrics))
+        )
+    if report.personas:
+        result = _with_artifact(
+            result, DownloadedFile(path=PERSONAS_FILE, data=dump_jsonl(report.personas))
         )
     # Even empty: without it, readers fall back to the Harness's own result.json.
     result = _with_artifact(result, DownloadedFile(path=STEPS_FILE, data=dump_jsonl(report.steps)))
@@ -768,6 +791,32 @@ def _episode_totals(artifacts: Sequence[DownloadedFile], *, failed: bool) -> dic
     }
 
 
+def _environment_cost(calls: Sequence[Mapping[str, Any]]) -> float | None:
+    """What the personas' model calls cost, replayed calls costing nothing.
+
+    Returns:
+        The total, or ``None`` when no persona called a model.
+    """
+    live = [item for item in calls if item.get("mode") == "live"]
+    if not live:
+        return None
+    return math.fsum(float(item.get("cost_usd") or 0.0) for item in live)
+
+
+def _carried_limits(limits: Mapping[str, Any], record: ResumeRecord) -> dict[str, Any]:
+    """An interrupted execution's limits less what it used before its checkpoint.
+
+    Returns:
+        The limits the resumed execution runs under.
+    """
+    carried = dict(limits)
+    if carried.get("max_cost_usd") is not None and record.carried_cost_usd:
+        carried["max_cost_usd"] = max(0.0, float(carried["max_cost_usd"]) - record.carried_cost_usd)
+    if carried.get("max_seconds") is not None and record.carried_seconds:
+        carried["max_seconds"] = max(1.0, float(carried["max_seconds"]) - record.carried_seconds)
+    return carried
+
+
 def _trajectory_cost(artifacts: Sequence[DownloadedFile]) -> float | None:
     source = _trajectory_source(artifacts)
     if source is None:
@@ -856,6 +905,17 @@ def _joined(players: Sequence[_Player], stream: Literal["stdout", "stderr"]) -> 
     )
 
 
+@dataclass(frozen=True)
+class ResumePoint:
+    """Where an interrupted Trial continues: its latest run checkpoint, and what it spent."""
+
+    checkpoint: Checkpoint
+    record: ResumeRecord
+    markers: tuple[dict[str, Any], ...] = ()
+    """The run checkpoints through this one, kept in the resumed execution's journal."""
+    bundle: Path | None = None
+
+
 class TrialRunner:
     """Runs one immutable Trial, recording append-only TrialExecutions.
 
@@ -877,9 +937,17 @@ class TrialRunner:
         gateway_keys: GatewayKeys | None = None,
         gateway_calls: GatewayCalls | None = None,
         model_identity: LocalModelIdentity | None = None,
+        resume_from: ResumePoint | None = None,
+        budget_usd: float | None = None,
     ) -> None:
         self.spec = spec
         self.job_spec = job_spec
+        self.resume_from = resume_from
+        self.budget_usd = budget_usd
+        """At most what this execution may spend on models, on top of its Environment's limit."""
+        self._journal: RunJournal | None = None
+        self._journal_lock = asyncio.Lock()
+        self._live: tuple[SandboxProvider, SandboxHandle, AppHostSession, _Player] | None = None
         self.model_identity = model_identity
         self.identity_findings: list[IntegrityFinding] = []
         self.credentials = dict(credentials or {})
@@ -919,14 +987,21 @@ class TrialRunner:
 
     @property
     def checkpoint(self) -> Checkpoint | None:
-        """The checkpoint this Trial starts from: its fork's, or its Task's, or none."""
+        """The checkpoint this Trial starts from: its fork's, or its Task's, or none.
+
+        A resumed execution starts from its own latest run checkpoint.
+        """
+        if self.resume_from is not None:
+            return self.resume_from.checkpoint
         if self.job_spec.fork is not None:
             return self.job_spec.fork.checkpoint
         return self.task.checkpoint
 
     def _checkpoint_bundle(self) -> Path | None:
         """Where the starting checkpoint's workspace snapshots are, on the Job's side."""
-        if self.job_spec.fork is not None:
+        if self.resume_from is not None:
+            path = str(self.resume_from.bundle) if self.resume_from.bundle else None
+        elif self.job_spec.fork is not None:
             path = self.job_spec.fork.bundle
         else:
             path = self.task.checkpoint_bundle
@@ -961,6 +1036,9 @@ class TrialRunner:
                 observation=checkpoint.observation,
                 rendered=checkpoint.rendered,
                 environment=environment_payload(self.task, hosted=self._hosted),
+                compactions=[
+                    dict(item) for item in context.compaction or () if isinstance(item, dict)
+                ],
             )
             try:
                 self._point = apply_change(job_fork.change.name, point)
@@ -1068,7 +1146,13 @@ class TrialRunner:
             return {}
         seat = self.spec.fork.seat if self.spec.fork is not None else None
         player = next((item for item in players if item.seat == seat), players[0])
-        _, record = self._history(player)
+        resume, record = self._history(player)
+        if self.resume_from is not None:
+            history = resume.history if resume is not None else "none"
+            return {
+                "tools_offered": self._tools_offered(player),
+                "resumed": self.resume_from.record.model_copy(update={"history": history}),
+            }
         fields: dict[str, Any] = {"tools_offered": self._tools_offered(player), "fork": record}
         if record is not None and record.volume is not None:
             # A fork starts from the Volume version its checkpoint held.
@@ -1208,6 +1292,20 @@ class TrialRunner:
             metrics=[*metrics, *report.metrics],
             metric_failures=report.metric_failures,
             workspace=report.workspace,
+            clock=report.clock,
+            personas=[
+                *(
+                    {**item, "inherited": True}
+                    for item in checkpoint.personas
+                    if self.resume_from is not None
+                    and int(item.get("step") or 0) <= checkpoint.step
+                ),
+                *report.personas,
+            ],
+            run_checkpoints=[
+                *(self.resume_from.markers if self.resume_from is not None else ()),
+                *report.run_checkpoints,
+            ],
         )
 
     async def _check_model_identity(self, agent: AgentBinding) -> None:
@@ -1325,6 +1423,10 @@ class TrialRunner:
         self.harness_killed = False
         self._cost_usd = None
         self.identity_findings = []
+        self._live = None
+        self._journal = None
+        with contextlib.suppress(OSError):
+            self._start_journal(task, execution_id)
         heartbeat = asyncio.create_task(self._heartbeat(execution_id))
         self.store.emit(
             self.spec.job_id,
@@ -1361,6 +1463,13 @@ class TrialRunner:
             for player in players:
                 player.env["PLURAL_RESOURCES_DIR"] = "/workspace/resources"
             host_env["PLURAL_RESOURCES_DIR"] = "/workspace/resources"
+            persona_key = self._persona_key(provider)
+            if persona_key is not None:
+                secrets["PLURAL_PERSONA_KEY"] = persona_key
+                host_env[PERSONA_KEY_VARIABLE] = persona_key
+                host_env[PERSONA_GATEWAY_VARIABLE] = resolve_gateway_url(None, self._job_environ)
+                if self.environ.get("PLURAL_PROJECT_ID"):
+                    host_env["PLURAL_PROJECT_ID"] = self.environ["PLURAL_PROJECT_ID"]
             async with phase("agent_setup"):
                 for player in players:
                     if player is players[0] or player.package is not players[0].package:
@@ -1368,7 +1477,11 @@ class TrialRunner:
                     if player.binding.external is None:
                         player.source = materialize_package(player.package)
                 requirements = _requirements(task, package)
-                if any(_requirements(task, item.package) != requirements for item in players):
+                if any(
+                    _runtime_image(_requirements(task, item.package))
+                    != _runtime_image(requirements)
+                    for item in players
+                ):
                     raise ExecutionFailure(
                         ErrorCode.CONFIGURATION,
                         "The seats' Harnesses need different Runtime images, but every seat "
@@ -1511,6 +1624,7 @@ class TrialRunner:
                             },
                         )
                         app_isolation = "os_user" if host.isolated else "none"
+                        self._live = (provider, handle, host, players[0])
                         if not host.isolated and requirements.isolation == "required":
                             raise ExecutionFailure(ErrorCode.ENVIRONMENT_FAILED, ISOLATION_REQUIRED)
                         if not self.seat_names:
@@ -1614,6 +1728,10 @@ class TrialRunner:
                     )
                 artifacts = () if self.seat_names else players[0].artifacts
                 if host is not None:
+                    if self._journal is not None:
+                        with contextlib.suppress(Exception):
+                            await self._write_journal()
+                    self._live = None
                     try:
                         host_report = await host.finish()
                     except AppHostTampered as exc:
@@ -1764,6 +1882,10 @@ class TrialRunner:
                 "awaiting_review" if awaiting else "succeeded"
             )
             totals = _episode_totals(artifacts, failed=False)
+            totals["turns"] = self._carried_turns(totals["turns"])
+            if host_report.clock.get("horizon_reached"):
+                totals["stop_reason"] = "horizon_reached"
+            cost_usd = self._carried_cost(cost_usd)
             receipt = self._receipt(
                 execution_id=execution_id,
                 retry=retry,
@@ -1809,6 +1931,7 @@ class TrialRunner:
                 model_identity=self.model_identity,
                 metrics=metrics,
                 metric_failures=metric_failures(host_report.metric_failures),
+                environment_cost_usd=_environment_cost(host_report.personas),
                 **self._gates(metrics, awaiting=awaiting),
                 **self._fork_fields(players),
                 **totals,
@@ -1841,6 +1964,8 @@ class TrialRunner:
                 cost_usd=cost_usd,
             )
             totals = _episode_totals(artifacts, failed=code is not ErrorCode.CANCELLED)
+            totals["turns"] = self._carried_turns(totals["turns"])
+            cost_usd = self._carried_cost(cost_usd)
             if self.harness_killed and code is ErrorCode.TIMEOUT:
                 totals["stop_reason"] = "harness_timeout"
             result = TrialResult(
@@ -1876,6 +2001,7 @@ class TrialRunner:
                     checked=False,
                 ),
                 metric_failures=metric_failures(host_report.metric_failures),
+                environment_cost_usd=_environment_cost(host_report.personas),
                 passed=False
                 if any(spec.gate for spec in task_metric_specs(self.task).values())
                 else None,
@@ -2059,6 +2185,88 @@ class TrialRunner:
         )
         return run.execution
 
+    def _persona_key(self, provider: SandboxProvider) -> str | None:
+        """The key the App host's personas call models with, if any.
+
+        This execution's own gateway key when the Job minted one; otherwise the
+        Job's key, but only in a local Runtime, so the user's own key never
+        leaves this machine. Personas without a key answer from their scripts.
+
+        Returns:
+            The key, or ``None``.
+        """
+        if not any(item.kind == "python" for item in self.task.environment.apps):
+            return None
+        if self._gateway_key is not None:
+            return self._gateway_key
+        if provider.name == "local":
+            return self._job_environ.get("PLURAL_API_KEY") or None
+        return None
+
+    def _carried_turns(self, turns: int) -> int:
+        """This execution's turns, plus the interrupted one's before its checkpoint."""
+        return turns + (self.resume_from.record.carried_turns if self.resume_from else 0)
+
+    def _carried_cost(self, cost_usd: float | None) -> float | None:
+        """This execution's cost, plus what the interrupted one spent before its checkpoint."""
+        carried = self.resume_from.record.carried_cost_usd if self.resume_from else None
+        if carried is None:
+            return cost_usd
+        return carried + (cost_usd or 0.0)
+
+    def _start_journal(self, task: TaskDefinition, execution_id: int) -> None:
+        """Begin the run journal of an execution whose Environment checkpoints as it runs."""
+        if task.environment.checkpoint_every is None:
+            return
+        journal = RunJournal.of(self.store.trial_path(self.spec))
+        resume = self.resume_from
+        if resume is None:
+            journal.start(execution_id)
+        else:
+            checkpoint = resume.checkpoint
+            journal.start(
+                execution_id,
+                prefix={
+                    "steps": checkpoint.prefix_steps,
+                    "states": checkpoint.prefix_states,
+                    "metrics": checkpoint.prefix_metrics,
+                    "personas": [
+                        item
+                        for item in checkpoint.personas
+                        if int(item.get("step") or 0) <= checkpoint.step
+                    ],
+                    "checkpoints": resume.markers,
+                },
+                resumed_from=resume.record.from_execution_id,
+            )
+        self._journal = journal
+
+    async def _write_journal(self) -> None:
+        """Append what the host recorded since the last poll; at a run checkpoint,
+        keep the Agent's episode record too, for its context."""
+        journal = self._journal
+        live = self._live
+        if journal is None:
+            return
+        if live is None:
+            journal.touch()
+            return
+        provider, handle, host, player = live
+        # The heartbeat and the final write both poll; one at a time, so no point is kept twice.
+        async with self._journal_lock:
+            progress = await host.request("progress", timeout=60, since=journal.cursors())
+            if not isinstance(progress, Mapping):
+                journal.touch()
+                return
+            added = journal.append(progress)
+        if added:
+            with contextlib.suppress(Exception):
+                files = await provider.download_files(
+                    handle, (EPISODE_FILE,), root=player.workspace
+                )
+                if files:
+                    journal.episode(files[0].data)
+
     def _episode_gateway(self) -> EpisodeGateway | None:
         """Where an External Agent may call models: only with this execution's own key."""
         if self._gateway_key is None:
@@ -2126,6 +2334,17 @@ class TrialRunner:
             payload["actions"] = apply_tool_overrides(
                 payload.get("actions") or [], binding.agent.tool_overrides
             )
+        if self.resume_from is not None:
+            payload["limits"] = _carried_limits(
+                payload.get("limits") or {}, self.resume_from.record
+            )
+        if self.budget_usd is not None:
+            limits = dict(payload.get("limits") or {})
+            given = limits.get("max_cost_usd")
+            limits["max_cost_usd"] = (
+                self.budget_usd if given is None else min(float(given), self.budget_usd)
+            )
+            payload["limits"] = limits
         return payload
 
     def _run_request(self, task: TaskDefinition, player: _Player) -> HarnessRunRequest:
@@ -2149,6 +2368,11 @@ class TrialRunner:
                 "routing": binding.routing.model_dump(mode="json", exclude_none=True),
                 "harness": player.package.definition.name,
                 "harness_config": binding.harness_config,
+                **(
+                    {"context": binding.agent.context.model_dump(mode="json")}
+                    if binding.agent.context is not None
+                    else {}
+                ),
             },
             model_resolution=model.model_dump(mode="json"),
             environment=self._environment_payload(task, binding),
@@ -2244,11 +2468,20 @@ class TrialRunner:
             },
             costs={str(item.seat): item.cost_usd for item in players},
             errors={str(item.seat): item.error for item in players if item.error},
+            metrics=seat_metrics(
+                self.task, artifacts, turns=len(report.steps), lines=report.metrics
+            ),
+            specs=task_metric_specs(self.task).values(),
         )
 
     async def _heartbeat(self, execution_id: int) -> None:
         while True:
             await asyncio.sleep(5)
+            if self._journal is not None:
+                try:
+                    await self._write_journal()
+                except Exception as exc:  # noqa: BLE001 - the journal never fails the Trial
+                    logger.warning("Trial %s journal: %s", self.spec.trial_id, exc)
             self.store.emit(
                 self.spec.job_id,
                 "heartbeat",
@@ -3039,7 +3272,7 @@ def _agent_aggregates(
             required_attempts=spec.attempts,
             declared=release is not None,
         )
-        metrics = _metric_aggregates(spec, selected)
+        metrics = _metric_aggregates(spec, selected, agent.content_hash)
         primary_metric = release.primary_metric if release is not None else "score"
         verdicts = [item.passed for item in selected if item.passed is not None]
         primary = (
@@ -3064,16 +3297,54 @@ def _agent_aggregates(
                 primary_metric=primary_metric,
                 primary=primary,
                 pass_rate=sum(verdicts) / len(verdicts) if verdicts else None,
+                seats=_seat_aggregates(selected, agent.content_hash),
+                opponent=agent.name in spec.opponents,
             )
         )
     return tuple(rows)
 
 
-def _metric_aggregates(spec: JobSpec, trials: Sequence[TrialResult]) -> dict[str, MetricAggregate]:
+def _seat_aggregates(trials: Sequence[TrialResult], digest: str) -> dict[str, SeatAggregate]:
+    """One Agent's results from each seat it played, in seat order.
+
+    Returns:
+        Each seat's count, mean score, and metric means; empty without seats.
+    """
+    scores: dict[str, list[float]] = {}
+    counts: dict[str, int] = {}
+    values: dict[str, dict[str, list[float]]] = {}
+    for trial in trials:
+        for seat in trial.seats:
+            if seat.agent_digest != digest:
+                continue
+            counts[seat.seat] = counts.get(seat.seat, 0) + 1
+            if seat.score is not None:
+                scores.setdefault(seat.seat, []).append(seat.score)
+            for name, value in seat.metrics.items():
+                if value is not None:
+                    values.setdefault(seat.seat, {}).setdefault(name, []).append(value)
+    return {
+        seat: SeatAggregate(
+            count=counts[seat],
+            mean_score=math.fsum(scores[seat]) / len(scores[seat]) if scores.get(seat) else None,
+            metrics={
+                name: math.fsum(items) / len(items)
+                for name, items in sorted(values.get(seat, {}).items())
+            },
+        )
+        for seat in sorted(counts, key=lambda name: int(name.rpartition("_")[2] or 0))
+    }
+
+
+def _metric_aggregates(
+    spec: JobSpec, trials: Sequence[TrialResult], digest: str | None = None
+) -> dict[str, MetricAggregate]:
     """Each metric across one Agent's Trials, grouped by Task for pass^k and pass@k.
 
     A Trial without a value, because the metric did not apply or the Trial
     failed before its checks, counts toward the total and not toward ``n``.
+    At a Task several Agents share, each seat the Agent ``digest`` played
+    counts once, with that seat's own value of a metric a Verifier declares.
 
     Returns:
         Each metric's aggregate, the built-ins first.
@@ -3086,7 +3357,11 @@ def _metric_aggregates(spec: JobSpec, trials: Sequence[TrialResult]) -> dict[str
     for name, item in specs.items():
         by_task: dict[str, list[float | None]] = {}
         for trial in trials:
-            by_task.setdefault(trial.receipt.task_pin.name, []).append(trial.metrics.get(name))
+            mine = [seat for seat in trial.seats if seat.agent_digest == digest]
+            found = trial.metrics.get(name)
+            by_task.setdefault(trial.receipt.task_pin.name, []).extend(
+                [seat.metrics.get(name, found) for seat in mine] if mine else [found]
+            )
         if any(value is not None for values in by_task.values() for value in values):
             rows[name] = aggregate_metric(item, by_task)
     return rows
@@ -3267,9 +3542,15 @@ class JobRunner:
         gateway_calls: GatewayCalls | None = None,
         model_identities: Mapping[str, LocalModelIdentity] | None = None,
         key_check: Callable[[str, str], None] | None = check_gateway_key,
+        budget_usd: float | None = None,
     ) -> None:
         self.spec = spec
         self.key_check = key_check
+        self.budget_usd = budget_usd
+        """At most what the Job's Agents may spend on models. Each Trial gets an
+        even share as its cost limit, and no Trial starts once it is spent."""
+        self._spent = 0.0
+        self._budget_trials = 0
         self.model_identities = dict(model_identities or {})
         self.credentials = dict(credentials or {})
         self.gateway_keys = gateway_keys
@@ -3412,8 +3693,19 @@ class JobRunner:
         except AuthHTTPError as exc:
             raise ExecutionFailure(ErrorCode.AUTHENTICATION, str(exc)) from None
 
-    async def run(self, *, resume: bool = False) -> JobResult:
-        """Execute all ready Trials with global and per-runtime bounds."""
+    async def run(
+        self,
+        *,
+        resume: bool = False,
+        resume_from: Mapping[str, ResumePoint] | None = None,
+    ) -> JobResult:
+        """Execute all ready Trials with global and per-runtime bounds.
+
+        With ``resume_from``, only those Trials run, each continuing from its
+        run checkpoint as a new execution; every other Trial keeps its result.
+        """
+        resume_from = dict(resume_from or {})
+        self._budget_trials = len(resume_from) or self.plan.trial_count
         self.store.initialize(self.spec, self.plan)
         if resume:
             self.store.clear_cancel(self.plan.job_id)
@@ -3435,6 +3727,11 @@ class JobRunner:
         results: dict[str, TrialResult] = {}
 
         async def execute(trial_spec: TrialSpec) -> None:
+            if resume_from and trial_spec.trial_id not in resume_from:
+                kept = self._kept_result(trial_spec)
+                if kept is not None:
+                    results[trial_spec.trial_id] = kept
+                    return
             existing = self.store.successful_result(trial_spec)
             if existing is not None:
                 results[trial_spec.trial_id] = existing
@@ -3450,7 +3747,9 @@ class JobRunner:
                 data={"runtime": task.environment.runtime.provider},
             )
             async with global_limit, runtime_limits[content_hash(task.environment.runtime)]:
-                if self.store.cancel_requested(self.plan.job_id):
+                if self.store.cancel_requested(self.plan.job_id) or (
+                    self.budget_usd is not None and self._spent >= self.budget_usd
+                ):
                     result = self._cancelled_result(trial_spec)
                 else:
                     trial = TrialRunner(
@@ -3466,12 +3765,15 @@ class JobRunner:
                         gateway_keys=self.gateway_keys,
                         gateway_calls=self.gateway_calls,
                         model_identity=self._model_identity(trial_spec),
+                        resume_from=resume_from.get(trial_spec.trial_id),
+                        budget_usd=self._trial_budget(),
                     )
                     self._trials.add(trial)
                     try:
                         result = await self._run_with_retries(trial)
                     finally:
                         self._trials.discard(trial)
+                    self._spent += result.receipt.cost_usd or 0.0
                 results[trial_spec.trial_id] = result
                 if self.progress:
                     self.progress(trial_spec, result)
@@ -3530,6 +3832,29 @@ class JobRunner:
             },
         )
         return result
+
+    def _trial_budget(self) -> float | None:
+        """One Trial's share of the Job's budget, and never more than is left of it.
+
+        Returns:
+            The cap in dollars, or ``None`` without a budget.
+        """
+        if self.budget_usd is None:
+            return None
+        budget = float(self.budget_usd)
+        share = budget / max(1, self._budget_trials or self.plan.trial_count)
+        return max(0.0, min(share, budget - self._spent))
+
+    def _kept_result(self, trial: TrialSpec) -> TrialResult | None:
+        """The result a Trial already has, whatever its status, for a Job that resumes others.
+
+        Returns:
+            The Trial's latest result, or ``None`` when it has none.
+        """
+        path = self.store.trial_path(trial) / "result.json"
+        if not path.is_file():
+            return None
+        return TrialResult.model_validate_json(path.read_text(encoding="utf-8"))
 
     def submit_review(
         self,

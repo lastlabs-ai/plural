@@ -1,0 +1,12 @@
+# Harness: fixed restocking rules, with no model. Each day it reads the machine and
+# storage, tops up any slot below restock_below, orders order_units of a product from
+# supplier when storage plus what is on order falls under reorder_point, and waits.
+name: restock-rules
+version: 1.0.0
+description: Rule-based restocking without a model, for long offline runs.
+python: harness.py:RestockRules
+config:
+  supplier: pinecrest-supply
+  restock_below: 25
+  reorder_point: 70
+  order_units: 120

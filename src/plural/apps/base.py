@@ -24,7 +24,20 @@ from plural.apps.definition import (
 from plural.environments.action_registry import action_options, function_schema, iter_env_actions
 from plural.environments.types import Observation, State, StateT
 
-_LIFECYCLE = frozenset({"reset", "snapshot", "call", "close", "view", "terminated", "truncated"})
+_LIFECYCLE = frozenset(
+    {
+        "reset",
+        "snapshot",
+        "call",
+        "close",
+        "view",
+        "terminated",
+        "truncated",
+        "advance",
+        "next_event_time",
+        "action_duration",
+    }
+)
 
 
 def _snake(name: str) -> str:
@@ -75,6 +88,9 @@ class App(Generic[StateT]):
     and a fork from one of its Trials is refused."""
 
     _init_config: dict[str, Any]
+    _now: float | None
+    _scheduled: list[dict[str, Any]]
+    _sim: Any = None
     _source_file: ClassVar[Path | None] = None
     state: StateT
     task_info: Any = None
@@ -112,6 +128,8 @@ class App(Generic[StateT]):
         instance._init_config = dict(kwargs)
         instance.workspace = Path.cwd()
         instance.rng = random.Random()
+        instance._now = None
+        instance._scheduled = []
         return instance
 
     def __init__(
@@ -267,21 +285,121 @@ class App(Generic[StateT]):
     def sim_time(self) -> float | str | None:
         """The simulated time now, for an App that runs its own clock.
 
-        A shop that advances a day per ``wait`` returns the day number, so
-        running metrics can be charted against simulated time as well as
-        steps. Return a number (simulated seconds, or the App's own unit) or
-        an ISO-8601 timestamp, the same kind every time. It is recorded beside
-        each metric point and never shown to the Agent.
+        In an Environment with a ``clock`` it is the clock's time, :attr:`now`.
+        Without one, a shop that advances a day per action may return the day
+        number, so running metrics can be charted against simulated time as
+        well as steps. Return a number or an ISO-8601 timestamp, the same kind
+        every time. It is recorded beside each metric point and never shown to
+        the Agent.
 
         Returns:
-            The simulated time, or ``None``, the default, for an App without a clock.
+            The simulated time, or ``None`` for an App without a clock.
 
         Examples:
             >>> from plural import App
-            >>> App.sim_time(object()) is None
+            >>> App().sim_time() is None
             True
         """
-        return None
+        return getattr(self, "_now", None)
+
+    def peer(self, name: str) -> App[Any]:
+        """Another App of the same Environment, such as the bank an order is paid from.
+
+        What an action changes in a peer's State is recorded with the step, as
+        the acting App's own changes are.
+
+        Returns:
+            The App.
+
+        Raises:
+            RuntimeError: Outside an App host.
+            KeyError: When the Environment has no such App.
+        """
+        host = getattr(self, "_sim", None)
+        if host is None:
+            raise RuntimeError(f"App {self.name!r} reached for {name!r} outside an App host")
+        apps: Mapping[str, App[Any]] = host.apps
+        if name not in apps:
+            raise KeyError(f"the Environment has no App {name!r} (it has {', '.join(apps)})")
+        return apps[name]
+
+    # Simulated time, in an Environment with a clock.
+
+    @property
+    def now(self) -> float:
+        """The Environment clock's time, in its units. Set by the App host.
+
+        Raises:
+            RuntimeError: When the Environment has no clock.
+        """
+        if self._now is None:
+            raise RuntimeError(
+                f"App {self.name!r} read now, but its Environment has no clock. "
+                "Give the Environment one, such as clock: {unit: day}."
+            )
+        return self._now
+
+    def schedule(self, at: float, kind: str, /, **data: Any) -> None:
+        """Have something happen at simulated time ``at``, such as a delivery.
+
+        :meth:`advance` receives it from :meth:`due_events` once the clock
+        reaches ``at``. Scheduled events are part of a checkpoint, so keep
+        ``data`` JSON-safe.
+
+        Raises:
+            ValueError: When ``at`` is not a finite number.
+        """
+        moment = float(at)
+        if moment != moment or moment in (float("inf"), float("-inf")):
+            raise ValueError(f"schedule needs a finite time, not {at!r}")
+        self._scheduled.append({"at": moment, "kind": str(kind), "data": _json_safe(data)})
+        self._scheduled.sort(key=lambda item: item["at"])
+
+    def due_events(self) -> list[dict[str, Any]]:
+        """Remove and return every scheduled event whose time has come, oldest first.
+
+        Returns:
+            Each event as ``{"at", "kind", "data"}``.
+        """
+        now = self.now
+        due = [item for item in self._scheduled if item["at"] <= now]
+        self._scheduled = [item for item in self._scheduled if item["at"] > now]
+        return due
+
+    def next_event_time(self) -> float | None:
+        """When this App next has something happen on its own, or ``None``.
+
+        The default is the earliest :meth:`schedule` d event. A ``wait`` with
+        no time waits until the earliest of every App's.
+
+        Returns:
+            A clock time, or ``None``.
+        """
+        return self._scheduled[0]["at"] if self._scheduled else None
+
+    def advance(self, until: float) -> Sequence[Any]:
+        """Bring the world up to ``until``, the clock's new time, and say what happened.
+
+        The App host calls it as time passes, at each scheduled event's time
+        and at the end of every wait, with :attr:`now` already set to
+        ``until``. Each item returned is one event, recorded as a step with
+        ``source: environment`` and shown to the Agent with its time. The
+        default handles :meth:`due_events`, using each event's ``text``.
+
+        Returns:
+            The events, each a string or a JSON-safe value.
+        """
+        del until
+        return [str(item["data"].get("text") or item["kind"]) for item in self.due_events()]
+
+    def action_duration(self, action: str, arguments: Mapping[str, Any]) -> float:
+        """How long one action takes, in clock units, when the clock is ``agent_paced``.
+
+        Returns:
+            The duration; 0, the default, takes no time.
+        """
+        del action, arguments
+        return 0.0
 
     def view(self) -> dict[str, Any]:
         """Return an optional render document for the run viewer.

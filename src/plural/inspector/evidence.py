@@ -361,6 +361,31 @@ class TrialEvidence:
         }
 
     @cached_property
+    def compactions(self) -> list[dict[str, Any]]:
+        """Each time the Harness compacted the Agent's context, under its context policy.
+
+        Each has the model turn it ran before, ``before_step``: the first step the
+        model chose afterwards, the strategy, how many messages it dropped, and the
+        summary that replaced them.
+        """
+        chosen = sorted(self.model_turns.items())
+        rows = []
+        for item in _jsonl(self.artifacts / EPISODE_FILE):
+            if item.get("kind") != "context.compaction":
+                continue
+            turn = int(item.get("turn") or 0)
+            rows.append(
+                {
+                    "turn": turn,
+                    "before_step": next((step for step, at in chosen if at >= turn), None),
+                    "strategy": item.get("strategy"),
+                    "dropped_messages": item.get("dropped_messages"),
+                    "summary": clip(str(item.get("summary") or ""), 1200),
+                }
+            )
+        return rows
+
+    @cached_property
     def states(self) -> list[dict[str, Any]]:
         """The App State after each step, as the App host recorded it."""
         return list(_jsonl(self.artifacts / STATES_FILE))
@@ -750,6 +775,7 @@ class TrialEvidence:
             "instructions": agent.instructions,
             "harness": agent.harness.name if agent.harness else "native",
             "harness_config": dict(agent.harness_config),
+            "context": agent.context.model_dump(mode="json") if agent.context else None,
             "tool_overrides": {
                 name: item.model_dump(mode="json", exclude_defaults=True)
                 for name, item in getattr(agent, "tool_overrides", {}).items()

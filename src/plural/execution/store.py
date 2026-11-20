@@ -248,6 +248,12 @@ class JobStore:
             for path in root.iterdir()
             if path.is_dir() and path.name.isdigit()
         ]
+        # An interrupted execution never wrote its folder; its journal still names it.
+        from plural.execution.journal import RunJournal
+
+        journaled = RunJournal.of(trial_root).state().get("execution_id")
+        if isinstance(journaled, int):
+            identifiers.append(journaled)
         return max(identifiers, default=-1) + 1
 
     def trial_results(self, job_id: str) -> tuple[TrialResult, ...]:

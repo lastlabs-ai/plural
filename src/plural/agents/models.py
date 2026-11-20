@@ -149,6 +149,39 @@ class ExternalAgent(FrozenModel):
         return SecretReference(name=value).name
 
 
+class ContextPolicy(FrozenModel):
+    """How an Agent's Harness keeps its context within bounds over a long episode.
+
+    ``window`` drops the oldest turns once the context is over ``max_tokens``,
+    keeping the instructions, the Task, and the last ``keep_last_turns``
+    turns. ``summarize`` replaces all but the instructions and the last turns
+    with a summary the Agent's own model writes, billed to the Agent. ``none``
+    keeps everything. Each compaction is recorded in the episode, and a
+    checkpoint holds the context as it stood after it.
+    """
+
+    strategy: Literal["window", "summarize", "none"] = "none"
+    max_tokens: int | None = Field(default=None, ge=1000)
+    keep_last_turns: int = Field(default=4, ge=1, le=200)
+    summary_instructions: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4000,
+        description="For summarize: what the summary keeps, as the system prompt of the "
+        "summarizing call. By default it keeps the task, decisions made, and anything still "
+        "pending.",
+        exclude_if=lambda value: value is None,
+    )
+
+    @model_validator(mode="after")
+    def _limit(self) -> ContextPolicy:
+        if self.strategy != "none" and self.max_tokens is None:
+            raise ValueError(f"context strategy {self.strategy!r} needs max_tokens")
+        if self.summary_instructions is not None and self.strategy != "summarize":
+            raise ValueError("summary_instructions applies only to strategy summarize")
+        return self
+
+
 class Agent(FrozenModel):
     """A catalog-backed model and its optional execution harness.
 
@@ -209,6 +242,13 @@ class Agent(FrozenModel):
             "description, or hidden: true. The Environment itself is unchanged."
         ),
     )
+    context: ContextPolicy | None = Field(
+        default=None,
+        description=(
+            "How the Harness keeps a long episode's context within bounds: "
+            "{strategy: window | summarize | none, max_tokens, keep_last_turns}."
+        ),
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     _credential_map = field_validator("credentials", mode="before")(_credential_map)
@@ -224,6 +264,8 @@ class Agent(FrozenModel):
         data = without_unset_title(handler(self))
         if isinstance(data, dict) and not self.tool_overrides:
             data.pop("tool_overrides", None)
+        if isinstance(data, dict) and self.context is None:
+            data.pop("context", None)
         return data
 
     @model_validator(mode="before")
@@ -289,6 +331,12 @@ class Agent(FrozenModel):
             )
 
             spec = get_builtin(self.harness)
+            if self.context is not None and self.harness != "native":
+                raise ValueError(
+                    f"Cannot set context on Agent {self.name or self.model!r}: Harness "
+                    f"{self.harness!r} manages its own context. The native Harness and "
+                    "custom Harnesses follow a context policy."
+                )
             if not model_supported(self.model, spec.supported_models):
                 allowed = ", ".join(spec.supported_models)
                 raise ValueError(
@@ -338,6 +386,7 @@ class Agent(FrozenModel):
                 ("max_tokens", self.max_tokens is not None),
                 ("secrets", bool(self.secrets)),
                 ("tool_overrides", bool(self.tool_overrides)),
+                ("context", self.context is not None),
             )
             if given
         ]
@@ -454,6 +503,7 @@ class Agent(FrozenModel):
             external=self.external,
             credentials=self.credentials,
             tool_overrides=self.tool_overrides,
+            context=self.context,
             metadata=self.metadata,
         )
 
@@ -489,6 +539,8 @@ class AgentDefinition(FrozenModel):
     """The credentials this Agent supplies to Apps, by name. Never their values."""
     tool_overrides: dict[str, ToolOverride] = Field(default_factory=dict)
     """How the Environment's tools are described to the model, by tool name."""
+    context: ContextPolicy | None = None
+    """How the Harness keeps a long episode's context within bounds."""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     _credential_map = field_validator("credentials", mode="before")(_credential_map)
@@ -501,6 +553,8 @@ class AgentDefinition(FrozenModel):
         # Agents with no overrides keep the identity and wire form they had before them.
         if isinstance(data, dict) and not self.tool_overrides:
             data.pop("tool_overrides", None)
+        if isinstance(data, dict) and self.context is None:
+            data.pop("context", None)
         return data
 
     harness_kwargs = renamed_attribute("harness_kwargs", "harness_config")

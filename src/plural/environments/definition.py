@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Iterable, Mapping
+from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
@@ -626,6 +627,119 @@ class ExecutionLimits(FrozenModel):
     )
 
 
+ClockUnit = Literal["second", "minute", "hour", "day"]
+UNIT_SECONDS: dict[str, float] = {"second": 1.0, "minute": 60.0, "hour": 3600.0, "day": 86400.0}
+WAIT_ACTION = "wait"
+"""The built-in action an Environment with a clock offers: let simulated time pass."""
+
+
+class Clock(FrozenModel):
+    """Simulated time, for a world that changes on its own.
+
+    Time is a number of ``unit`` s. It starts at ``start``, or at 0 when
+    ``start`` is an ISO-8601 timestamp, which only labels it. With
+    ``agent_paced`` time each action takes the time its App's
+    ``action_duration`` says; with ``event_driven`` time, the default, actions
+    take none and time moves only when the Agent waits.
+    """
+
+    start: float | str = 0.0
+    unit: ClockUnit = "day"
+    pacing: Literal["agent_paced", "event_driven"] = "event_driven"
+
+    @field_validator("start")
+    @classmethod
+    def _start(cls, value: float | str) -> float | str:
+        if isinstance(value, str):
+            try:
+                datetime.fromisoformat(value)
+            except ValueError:
+                raise ValueError(
+                    f"clock start {value!r} must be a number or an ISO-8601 timestamp"
+                ) from None
+        return value
+
+    @property
+    def origin(self) -> float:
+        """The clock's reading when the episode starts."""
+        return 0.0 if isinstance(self.start, str) else float(self.start)
+
+    def label(self, now: float) -> str:
+        """The time as the Agent reads it, such as ``Day 12`` or ``2026-03-01 09:30``.
+
+        Returns:
+            The label.
+
+        Examples:
+            >>> Clock(start=1).label(12.0)
+            'Day 12'
+            >>> Clock(start="2026-03-01T09:00", unit="minute").label(30)
+            '2026-03-01 09:30'
+        """
+        if isinstance(self.start, str):
+            moment = datetime.fromisoformat(self.start) + timedelta(
+                seconds=now * UNIT_SECONDS[self.unit]
+            )
+            return moment.strftime("%Y-%m-%d %H:%M")
+        return f"{self.unit.capitalize()} {now:g}"
+
+
+class Horizon(FrozenModel):
+    """When an autonomous episode ends: after ``sim_time`` clock units, or ``max_steps`` steps."""
+
+    sim_time: float | None = Field(default=None, gt=0)
+    max_steps: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _some(self) -> Horizon:
+        if self.sim_time is None and self.max_steps is None:
+            raise ValueError("horizon needs sim_time, max_steps, or both")
+        return self
+
+
+class Every(FrozenModel):
+    """A period: every ``sim_time`` clock units, or every ``steps`` steps."""
+
+    sim_time: float | None = Field(default=None, gt=0)
+    steps: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _one(self) -> Every:
+        if (self.sim_time is None) == (self.steps is None):
+            raise ValueError("give exactly one of sim_time or steps")
+        return self
+
+
+def wait_action(clock: Clock) -> ExposedAction:
+    """The built-in ``wait`` an Environment with a clock offers.
+
+    Returns:
+        The action, owned by no App.
+    """
+    return ExposedAction(
+        name=WAIT_ACTION,
+        app="",
+        action=WAIT_ACTION,
+        description=(
+            f"Let time pass. Give until, a time in {clock.unit}s, to wait until then; "
+            "leave it out to wait until the next thing happens. Returns what happened "
+            "meanwhile."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "until": {
+                    "type": "number",
+                    "description": f"The time to wait until, in {clock.unit}s.",
+                }
+            },
+            "additionalProperties": False,
+        },
+        mutates_state=True,
+        timeout_seconds=120,
+    )
+
+
 MAX_PARTY = 100
 
 
@@ -724,6 +838,32 @@ class EnvironmentDefinition(FrozenModel):
         description="How many Agents share each episode, for a game such as poker. "
         "Leave it unset for an Environment one Agent works in alone.",
     )
+    clock: Clock | None = Field(
+        default=None,
+        description="Simulated time. With a clock the Environment offers a wait action, "
+        "its Apps' scheduled events happen as time passes, and each observation starts "
+        "with the time.",
+    )
+    horizon: Horizon | None = Field(
+        default=None,
+        description="When the episode ends on its own: after sim_time clock units or "
+        "max_steps steps, with stop reason horizon_reached.",
+    )
+    autonomous: bool = Field(
+        default=False,
+        description="The Agent runs until the horizon: a reply with no tool call waits "
+        "rather than ending the episode. Needs a clock.",
+    )
+    allow_finish: bool | None = Field(
+        default=None,
+        description="Whether the Agent may end the episode itself. Unset, it may unless "
+        "the Environment is autonomous.",
+    )
+    checkpoint_every: Every | None = Field(
+        default=None,
+        description="How often the Job saves a run checkpoint, every sim_time clock units "
+        "or steps steps, so a Trial whose runner dies can be resumed.",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
     source: PackageSource | None = Field(
         default=None,
@@ -731,11 +871,15 @@ class EnvironmentDefinition(FrozenModel):
     )
 
     @model_serializer(mode="wrap")
-    def _omit_no_party(self, handler: SerializerFunctionWrapHandler) -> Any:
+    def _omit_unset(self, handler: SerializerFunctionWrapHandler) -> Any:
         data = handler(self)
-        # An Environment one Agent works in serializes as it did before parties.
-        if isinstance(data, dict) and self.party is None:
-            data.pop("party", None)
+        # An Environment without these serializes, and hashes, as it did before them.
+        if isinstance(data, dict):
+            for key in ("party", "clock", "horizon", "allow_finish", "checkpoint_every"):
+                if getattr(self, key) is None:
+                    data.pop(key, None)
+            if not self.autonomous:
+                data.pop("autonomous", None)
         return data
 
     @model_validator(mode="before")
@@ -810,7 +954,36 @@ class EnvironmentDefinition(FrozenModel):
         exposed = [item.name for item in self.actions]
         clashes = sorted({name for name in exposed if exposed.count(name) > 1})
         if clashes:
+            if self.clock is not None and WAIT_ACTION in clashes:
+                raise ValueError(
+                    f"Environment {self.name!r} has a clock, which offers the wait action, "
+                    "and an App offers its own wait. Rename the App's action, or let the "
+                    "clock's wait move time and the App's advance() run the day."
+                )
             raise ValueError(f"Environment exposes duplicate action names: {clashes}")
+        if self.clock is None:
+            needs = [
+                name
+                for name, value in (
+                    ("autonomous", self.autonomous),
+                    ("horizon.sim_time", self.horizon is not None and self.horizon.sim_time),
+                    (
+                        "checkpoint_every.sim_time",
+                        self.checkpoint_every is not None and self.checkpoint_every.sim_time,
+                    ),
+                )
+                if value
+            ]
+            if needs:
+                raise ValueError(
+                    f"Environment {self.name!r} sets {', '.join(needs)}, which needs a clock, "
+                    "such as clock: {unit: day}."
+                )
+        if self.clock is not None and self.party is not None:
+            raise ValueError(
+                f"Environment {self.name!r} has a clock and a party. A clock is for one "
+                "Agent for now; several Agents share an episode without one."
+            )
         if self.party is not None:
             if not self.apps:
                 raise ValueError(
@@ -843,9 +1016,18 @@ class EnvironmentDefinition(FrozenModel):
         Each keeps its own name, made safe for every model provider, and is
         prefixed ``<app>__`` only when another App offers the same name. With
         several Apps, each description starts with the App's name, so the
-        model knows which system a tool acts on.
+        model knows which system a tool acts on. With a clock, the last is the
+        built-in ``wait``, which belongs to no App.
         """
-        return exposed_actions(self.apps)
+        actions = exposed_actions(self.apps)
+        if self.clock is None:
+            return actions
+        return (*actions, wait_action(self.clock))
+
+    @property
+    def finish_allowed(self) -> bool:
+        """Whether the Agent may end the episode itself."""
+        return (not self.autonomous) if self.allow_finish is None else self.allow_finish
 
     @property
     def secrets(self) -> tuple[SecretReference, ...]:
@@ -930,6 +1112,11 @@ Secret = SecretReference
 
 
 __all__ = [
+    "UNIT_SECONDS",
+    "WAIT_ACTION",
+    "Clock",
+    "Every",
+    "Horizon",
     "EnvironmentIdentity",
     "EnvironmentDefinition",
     "EnvironmentResource",
@@ -945,4 +1132,5 @@ __all__ = [
     "Secret",
     "SecretReference",
     "party_seats",
+    "wait_action",
 ]

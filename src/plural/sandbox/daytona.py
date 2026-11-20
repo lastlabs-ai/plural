@@ -781,6 +781,24 @@ class DaytonaProvider(SandboxProvider):
         lister = getattr(self._client(), "list", None)
         return await lister(labels) if lister is not None else ()
 
+    async def attach(self, sandbox_id: str) -> SandboxHandle:
+        """Reattach to a sandbox this account owns, such as a detached run's.
+
+        Returns:
+            A handle for it.
+
+        Raises:
+            CapabilityError: When this client cannot reach a sandbox by id.
+        """
+        getter = getattr(self._client(), "get", None)
+        if getter is None:
+            raise CapabilityError("this Daytona client cannot reach sandboxes by id")
+        remote = await getter(sandbox_id)
+        self._sandboxes[sandbox_id] = remote
+        return SandboxHandle(
+            sandbox_id=sandbox_id, provider=self.name, image_identity=remote.image_identity
+        )
+
     async def delete_sandbox(self, sandbox_id: str) -> None:
         """Delete a Daytona sandbox by id, even one another process created.
 

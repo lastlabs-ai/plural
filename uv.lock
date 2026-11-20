@@ -2943,6 +2943,7 @@ wheels = [
 name = "plural"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -3002,6 +3003,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
+    { name = "click", specifier = ">=8.1,<9" },
     { name = "daytona", marker = "extra == 'all'", specifier = ">=0.207,<1" },
     { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.207,<1" },
     { name = "fastmcp", marker = "extra == 'all'", specifier = ">=4.1,<5" },
