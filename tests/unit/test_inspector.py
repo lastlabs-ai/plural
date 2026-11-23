@@ -217,6 +217,7 @@ def test_entity_names_come_from_collections_named_fields_and_identifiers() -> No
 
     state = {
         "storage": {"units": {"soda": 30, "water": 30}, "status": "open"},
+        "machine": {"last_day": {"revenue": 28.5, "sold": {"soda": 6}}},
         "suppliers": {
             "open_orders": [{"supplier": "harbor-wholesale", "product": "soda", "units": 60}],
             "threads": {"Dana Reyes": ["Can you deliver Monday?"]},
@@ -225,8 +226,10 @@ def test_entity_names_come_from_collections_named_fields_and_identifiers() -> No
     }
     names = entity_names(state)
     assert names >= {"soda", "water", "harbor-wholesale", "Dana Reyes", "acct-1042"}
-    # Fields are never entities, nor is free text in a field that names nothing.
+    # Fields are never entities, nor a record's keys, nor free text in a field that
+    # names nothing.
     assert not names & {"storage", "units", "open_orders", "supplier", "status", "open", "note"}
+    assert not names & {"last_day", "revenue", "sold"}
     assert entity_names({"secret": "nymph"}) == set()
     assert entity_names({"secret": "nymph"}, authored=True) == {"nymph"}
 

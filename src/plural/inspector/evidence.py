@@ -171,11 +171,13 @@ class JobEvidence:
         return found
 
     def task_entities(self, trial: TrialEvidence) -> frozenset[str]:
-        """The things only the Trial's Task names, lowercased, that a remedy must not.
+        """The things the Trial's Task and its world name, lowercased, that a remedy must not.
 
-        A name counts when no other dev Task of the Job names it too (with one Task,
-        every name counts), and neither the Agent as it ran nor the Environment's
-        actions mention it already.
+        Every account, customer, or item the episode's App State held counts: that is
+        the world's data, which another deployment of the Agent won't share. A value the
+        Task's author wrote counts unless every other dev Task of the Job has it too, as
+        a shared setting does. A name the Agent as it ran or the Environment's actions
+        mention already is part of the Agent's interface, and never counts.
 
         Returns:
             The names.
@@ -184,8 +186,12 @@ class JobEvidence:
         for item in self.trials.values():
             if item.task.task_id != trial.task.task_id:
                 others.setdefault(item.task.task_id, item)
-        shared = frozenset.intersection(*(item.entities for item in others.values()))
-        specific = trial.entities - shared if others else trial.entities
+        authored = trial.authored_entities
+        if others:
+            authored -= frozenset.intersection(
+                *(item.authored_entities for item in others.values())
+            )
+        specific = trial.world_entities | authored
         config = trial.agent_config()
         known = " ".join(
             [
@@ -420,19 +426,27 @@ class TrialEvidence:
         return list(_jsonl(self.artifacts / STATES_FILE))
 
     @cached_property
-    def entities(self) -> frozenset[str]:
-        """The specific things this Trial's Task and episode name, lowercased.
+    def authored_entities(self) -> frozenset[str]:
+        """Every name the Task's author wrote, lowercased.
 
-        They come from the Task's initial State, info, and answer key, the App State
-        after each step, and the arguments of the Agent's actions.
+        That is each string in its initial State, info, and answer key.
         """
         found: set[str] = set()
-        for authored in (self.task.state, self.task.info, self.task.expected):
-            found |= entity_names(authored, authored=True)
+        for value in (self.task.state, self.task.info, self.task.expected):
+            found |= entity_names(value, authored=True)
+        return frozenset(name.lower() for name in found)
+
+    @cached_property
+    def world_entities(self) -> frozenset[str]:
+        """The specific things the episode's world held, lowercased.
+
+        That is members of the App State's collections, values of its fields that name
+        something, and identifiers, after each step. The Agent's own arguments are left
+        out: what it made up is not the world's.
+        """
+        found: set[str] = set()
         for item in self.states:
             found |= entity_names(item.get("state") or {})
-        for item in self.action_list():
-            found |= entity_names(item.get("arguments") or {}, record=True)
         return frozenset(name.lower() for name in found)
 
     @property
@@ -957,6 +971,14 @@ _IDENTIFIER = re.compile(r"^(?=.*[A-Za-z])(?=.*[\d@_-])[\w.@+-]{3,64}$")
 _NAME = re.compile(r"^(?=.*[A-Za-z])[\w .@'+-]{3,64}$")
 
 
+def _kind(value: Any) -> str:
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return "number"
+    return type(value).__name__
+
+
 def entity_names(
     value: Any,
     *,
@@ -968,8 +990,10 @@ def entity_names(
     """Names of specific things in a Task's data or App State.
 
     A value of App State is App, then field, then the field's value, so the keys of a
-    mapping below the field (``units: {soda: 30}``) are members of a collection. The keys of
-    a record in a list are its fields, never members. A string counts when a field that
+    mapping below the field whose values are all alike (``units: {soda: 30, water: 30}``)
+    are members of a collection. A mapping with mixed values (``{revenue: 28.5, sold:
+    {...}}``) is a record, and so is one in a list: its keys are fields, never members.
+    A string counts when a field that
     names something holds it (``customer``, ``sku``, ``*_id``), when it is shaped like an
     identifier (``acct-1042``, ``harbor-wholesale``), or, in what the Task's author wrote
     (``authored``), always: a Task's own data is what makes it that Task.
@@ -979,9 +1003,11 @@ def entity_names(
     """
     found: set[str] = set()
     if isinstance(value, Mapping):
+        kinds = {_kind(item) for item in value.values()}
+        collection = depth >= 2 and not record and len(kinds) == 1
         for key, item in value.items():
             name = str(key).strip()
-            if depth >= 2 and not record and _NAME.match(name):
+            if collection and _NAME.match(name):
                 found.add(name)
             found |= entity_names(item, authored=authored, depth=depth + 1, field=name)
     elif isinstance(value, list):

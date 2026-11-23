@@ -201,12 +201,15 @@ comments at the top of `agent.yaml` are kept. `--job` picks the inspected Job wh
 several hold an `F1`.
 
 A remedy changes the Agent for every Task, so the Inspector can't propose one that
-names what only the failed Task holds: an account, a customer, an item, or a value
-from its answer key. A name counts as the Task's own when its initial State, info,
-answer key, App State, or the Agent's action arguments hold it, no other development
-Task in the Job does, and neither the Agent nor the Environment's tools already
-mention it. Both a fork's remedy and a Finding's are checked, so a fix that only
-works because it names the answer is never tested or shipped.
+names the Task's own world: an account, a customer, a supplier, an item, or a value
+from its answer key. Those are the members of the App State's collections, the values
+of its fields that name something (a customer, a SKU, an id), and identifier-shaped
+strings, plus whatever the Task's author wrote into its initial State, info, and
+answer key unless every other development Task in the Job has it too. A name the
+Agent or the Environment's tools already mention is part of the Agent's interface
+and is allowed. Both a fork's remedy and a Finding's are checked, so a fix that only
+works because it names this world is never tested or shipped: describe the kind of
+thing instead, such as "every supplier account in the instructions".
 
 It refuses a Finding that isn't confirmed, and one whose cause a change to the Agent
 can't fix, such as `grader`. An [External Agent](../project/external-agents.md) runs as
