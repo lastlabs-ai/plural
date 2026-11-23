@@ -166,10 +166,10 @@ plural run -t vend-year -a vending-rules --budget-usd 1 --detach
 plural job show JOB_ID
 ```
 
-`vending-rules` calls no model, so it plays a year in minutes at no cost. A detached
-Agent that calls models gets a gateway key minted for that Job alone; see
-[Long runs](../running/jobs.md#long-runs-detach-interrupt-and-resume). `plural job show`
-copies the Job back as it goes and says how far it has got.
+`vending-rules` calls no model, so it plays a year in minutes at no cost. The detached
+run records the Job in your hosted project as it goes, with a key minted for that Job
+alone; see [Long runs](../running/jobs.md#long-runs-detach-interrupt-and-resume).
+`plural job show` copies the Job back as it goes and says how far it has got.
 
 ## Kill it, and resume
 

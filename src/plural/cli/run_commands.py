@@ -74,6 +74,7 @@ from plural.project.layout import (
 )
 from plural.project.runs import (
     DEFAULT_HARNESS,
+    ClientJob,
     CredentialSource,
     RunPlan,
     RunRequest,
@@ -85,7 +86,7 @@ from plural.project.runs import (
     local_jobs,
     local_trial,
     plan_run,
-    planned_job_id,
+    planned_record,
     push_local_job,
     push_pinned,
     push_run_inputs,
@@ -93,6 +94,7 @@ from plural.project.runs import (
     rerun_local_trial,
     run_local,
     run_roots,
+    submit_client_job,
 )
 from plural.project.sync import REBUILT_NOTE, PullStep, PushStep, dropped_versions, pull_missing
 from plural.project.versions import holds_version, version_workspace, versioned
@@ -226,11 +228,12 @@ def run(
         "--detach",
         help=(
             "Run the Job in a Daytona sandbox instead of on this machine, and return. Its "
-            "Environments must use the local Runtime, which runs inside the sandbox. "
-            "Follow it with plural job show."
+            "Environments must use the local Runtime, which runs inside the sandbox. It "
+            "records the Job in the hosted project as it runs. Follow it with plural job show."
         ),
     ),
     run_id: str | None = typer.Option(None, "--run-id", hidden=True),
+    recorded_as: str | None = typer.Option(None, "--recorded-as", hidden=True),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
@@ -277,8 +280,6 @@ def run(
         heldout=heldout,
         run_id=_run_id(run_id) if run_id else (uuid.uuid4().hex if detach else None),
     )
-    if detach and (record or evaluation_track):
-        raise ProjectError("--detach runs a local Job; record it later with plural job record.")
     requested = {
         ResourceRef(kind.name, name): version
         for kind, name, version in (
@@ -324,7 +325,18 @@ def run(
         _detach(space, current, plan, request, environ, budget_usd=budget_usd, as_json=as_json)
         return
     tracking = None
-    if record:
+    if recorded_as:
+        # A detached run's sandbox: the hosted Job exists, and its inputs were pushed.
+        from plural.project import detach as detaching
+
+        studio, _ = project_studio(space, current)
+        hosted_job_id, hosted_agents = detaching.read_recording(root)
+        if hosted_job_id != recorded_as:
+            raise ProjectError(f"This project was packaged to record Job {hosted_job_id}.")
+        tracking = Tracking(
+            studio, client=ClientJob(record={"id": hosted_job_id}, agents=hosted_agents)
+        )
+    elif record:
         studio, binding = project_studio(space, current)
         pushed = push_run_inputs(space, studio, binding, plan)
         if pushed:
@@ -376,28 +388,40 @@ def _detach(
     budget_usd: float | None,
     as_json: bool,
 ) -> None:
-    """Start the planned Job in a Daytona sandbox, with a Job-scoped key if it calls models."""
+    """Start the planned Job in a Daytona sandbox, recorded in the hosted project.
+
+    The hosted Job is created here, after the inputs are pushed, and the
+    sandbox gets the project's binding and a key that records that Job and
+    calls models for it, and nothing else.
+    """
     from plural.project import detach
     from plural.sandbox.daytona import DaytonaProvider
 
     detach.refuse_runtimes(plan)
-    job_id = planned_job_id(space, plan)
-    env: dict[str, str] = {}
-    expires_at = None
-    studio = None
+    api = current.api_url.rstrip("/")
+    gateway = environ.get("PLURAL_GATEWAY_URL") or f"{api}/v1"
+    detach.refuse_unreachable(api)
     if detach.calls_models(plan):
-        api = current.api_url.rstrip("/")
-        gateway = environ.get("PLURAL_GATEWAY_URL") or f"{api}/v1"
-        detach.refuse_unreachable(api)
         detach.refuse_unreachable(gateway)
-        studio, _ = project_studio(space, current)
-        minted = studio.jobs.runner_key(job_id, ttl_seconds=int(detach.lifetime_seconds(plan)))
-        env = {
-            "PLURAL_API_KEY": str(minted["key"]),
-            "PLURAL_API_URL": api,
-            "PLURAL_GATEWAY_URL": gateway,
-        }
-        expires_at = str(minted.get("expires_at") or "") or None
+    studio, binding = project_studio(space, current)
+    pushed = push_run_inputs(space, studio, binding, plan)
+    if pushed:
+        _print_pushed(pushed, err=as_json)
+        space = Workspace(Project.at(space.project.root))
+        plan = plan_run(space, request, environ=environ)
+    spec, record = planned_record(space, plan)
+    job_id = spec.job_id
+    client = submit_client_job(space, studio, spec, record)
+    minted = studio.jobs.runner_key(job_id, ttl_seconds=int(detach.lifetime_seconds(plan)))
+    env = {
+        "PLURAL_API_KEY": str(minted["key"]),
+        "PLURAL_API_URL": api,
+        "PLURAL_GATEWAY_URL": gateway,
+    }
+    expires_at = str(minted.get("expires_at") or "") or None
+    extra = detach.recording_files(
+        space.project.binding_path.read_bytes(), client.job_id, client.agents
+    )
     assert request.run_id is not None
     args = [
         *(
@@ -415,35 +439,43 @@ def _detach(
         *(("--budget-usd", str(budget_usd)) if budget_usd is not None else ()),
         "--run-id",
         request.run_id,
+        "--recorded-as",
+        client.job_id,
         "--yes",
     ]
     typer.echo(
         f"Detaching {plan.source} with {plan.agent.name} to a Daytona sandbox: "
         f"{counted(len(plan.job.plan.trials), 'Trial')}"
-        + (", with a key that serves this Job alone." if env else "; its Agents call no model."),
+        + ", with a key that records this Job alone.",
         err=as_json,
     )
     try:
         provider = DaytonaProvider(environ=environ)
-        record = asyncio.run(
+        launched = asyncio.run(
             _closing(
                 provider,
                 detach.launch(
-                    space, plan, provider=provider, args=args, env=env, key_expires_at=expires_at
+                    space,
+                    plan,
+                    provider=provider,
+                    args=args,
+                    env=env,
+                    key_expires_at=expires_at,
+                    extra=extra,
                 ),
             )
         )
     except BaseException:
-        if studio is not None:
-            studio.jobs.end_runner_key(job_id)
+        studio.jobs.end_runner_key(job_id)
         raise
-    payload = record.to_json()
+    payload = {**launched.to_json(), "hosted_job_id": client.job_id}
     emit(
         payload,
         as_json=as_json,
         text=lambda: typer.echo(
-            f"Job {job_id} is running in Daytona sandbox {record.sandbox_id}; it no longer "
-            f"needs this machine.\nFollow it: plural job show {job_id}"
+            f"Job {job_id} is running in Daytona sandbox {launched.sandbox_id}, recorded as "
+            f"hosted Job {client.job_id}; it no longer needs this machine.\n"
+            f"Follow it: plural job show {job_id}"
         ),
     )
 

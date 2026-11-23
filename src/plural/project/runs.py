@@ -186,6 +186,8 @@ class Tracking:
     hosted_job_id: str | None = None
     errors: list[str] = field(default_factory=list)
     retryable: bool = True
+    client: ClientJob | None = None
+    """The hosted Job, when it was created before the run, as for a detached run."""
 
 
 @dataclass(frozen=True)
@@ -394,17 +396,7 @@ def run_local(
     Returns:
         The Job id and its result.
     """
-    spec = _snapshot_sources(workspace, plan.spec)
-    record = RunRecord(
-        job_id=spec.job_id,
-        created_at=_now(),
-        source=str(plan.source),
-        agent=str(plan.agent_ref) if plan.agent_ref else plan.agent.name,
-        model=plan.agent.model,
-        harness=plan.harness,
-        inputs=plan.pins,
-        evaluation_track=plan.evaluation_track,
-    )
+    spec, record = planned_record(workspace, plan)
     return _execute(
         workspace,
         spec,
@@ -417,6 +409,26 @@ def run_local(
         model_identities=model_identities,
         budget_usd=budget_usd,
     )
+
+
+def planned_record(workspace: Workspace, plan: RunPlan) -> tuple[JobSpec, RunRecord]:
+    """The Job a plan runs, with its sources snapshotted, and the record it is kept with.
+
+    Returns:
+        The spec and its run record.
+    """
+    spec = _snapshot_sources(workspace, plan.spec)
+    record = RunRecord(
+        job_id=spec.job_id,
+        created_at=_now(),
+        source=str(plan.source),
+        agent=str(plan.agent_ref) if plan.agent_ref else plan.agent.name,
+        model=plan.agent.model,
+        harness=plan.harness,
+        inputs=plan.pins,
+        evaluation_track=plan.evaluation_track,
+    )
+    return spec, record
 
 
 def rerun_local_job(
@@ -1467,7 +1479,7 @@ def _execute(
     if tracking is not None and resume_from:
         raise ProjectError("A resumed Trial runs locally; record its Job afterwards.")
     if tracking is not None:
-        client = submit_client_job(workspace, tracking.studio, spec, record)
+        client = tracking.client or submit_client_job(workspace, tracking.studio, spec, record)
         tracking.hosted_job_id = client.job_id
         record = replace(
             record, hosted_job_id=client.job_id, hosted_project_id=tracking.studio.project

@@ -33,13 +33,15 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import plural
-from plural.project.layout import ProjectError
+from plural.project.layout import BINDING_FILE, ProjectError
 from plural.project.resources import Workspace
 from plural.project.runs import RunPlan, planned_job_id
 from plural.sandbox import ExecRequest, FileUpload, SandboxHandle, SandboxProvider
 from plural.sandbox.models import SandboxRequirements
 
 DETACHED_FILE = "detached.json"
+RECORDING_FILE = ".plural/detached-recording.json"
+"""In the sandbox's project: the hosted Job its run records to."""
 REMOTE = "/workspace/detached"
 LABEL = "plural.dev/detached-job"
 _SKIPPED = {".git", ".venv", "venv", "__pycache__", "node_modules", ".pytest_cache"}
@@ -151,8 +153,10 @@ def lifetime_seconds(plan: RunPlan) -> float:
     return min(total / concurrency + 3600, 2 * 86400)
 
 
-def project_archive(root: Path) -> bytes:
+def project_archive(root: Path, extra: Mapping[str, bytes] | None = None) -> bytes:
     """The project's files as a gzipped tar, without local Jobs, caches, or history.
+
+    ``extra`` adds files by their path in the project, such as its hosted binding.
 
     Returns:
         The archive.
@@ -166,7 +170,44 @@ def project_archive(root: Path) -> bytes:
                 continue
             if path.is_file() and not path.is_symlink():
                 archive.add(path, arcname=str(relative), recursive=False)
+        for name, data in sorted((extra or {}).items()):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mode = 0o600
+            archive.addfile(info, io.BytesIO(data))
     return buffer.getvalue()
+
+
+def recording_files(
+    binding: bytes, hosted_job_id: str, agents: Mapping[str, Any]
+) -> dict[str, bytes]:
+    """What a detached run needs to record its Job: the binding, and the hosted Job.
+
+    Returns:
+        The files, by their path in the project.
+    """
+    recording = {"hosted_job_id": hosted_job_id, "agents": {k: list(v) for k, v in agents.items()}}
+    return {
+        f".plural/{BINDING_FILE}": binding,
+        RECORDING_FILE: (json.dumps(recording, sort_keys=True) + "\n").encode(),
+    }
+
+
+def read_recording(root: Path) -> tuple[str, dict[str, tuple[str, str]]]:
+    """The hosted Job a detached run records to, and the hosted Agent each binding ran as.
+
+    Returns:
+        The hosted Job id and the Agents.
+
+    Raises:
+        ProjectError: When the run was not packaged to record.
+    """
+    path = root / RECORDING_FILE
+    if not path.is_file():
+        raise ProjectError(f"This project was not packaged to record a detached run: no {path}.")
+    value = json.loads(path.read_text("utf-8"))
+    agents = {str(k): (str(v[0]), str(v[1])) for k, v in dict(value.get("agents") or {}).items()}
+    return str(value["hosted_job_id"]), agents
 
 
 def sdk_wheel(directory: Path) -> Path | None:
@@ -225,12 +266,14 @@ async def launch(
     env: Mapping[str, str],
     key_expires_at: str | None = None,
     wait_seconds: float = 180,
+    extra: Mapping[str, bytes] | None = None,
 ) -> Detached:
     """Start the Job in a new sandbox and record where it runs.
 
     ``args`` are the ``plural run`` arguments, ``--run-id`` included, and ``env``
-    is the runner's environment there: the Job-scoped key, when the Agents call
-    models, and the platform's URLs. Neither is written to a file.
+    is the runner's environment there: the Job-scoped key and the platform's
+    URLs. Neither is written to a file. ``extra`` adds files to the project,
+    such as its binding, so the runner there records the Job.
 
     Returns:
         The record, also written as the local Job's ``detached.json``.
@@ -246,7 +289,9 @@ async def launch(
         with tempfile.TemporaryDirectory() as scratch:
             wheel = sdk_wheel(Path(scratch))
             files = [
-                FileUpload(path="detached/project.tgz", data=project_archive(_root(workspace)))
+                FileUpload(
+                    path="detached/project.tgz", data=project_archive(_root(workspace), extra)
+                )
             ]
             if wheel is not None:
                 files.append(FileUpload(path=f"detached/{wheel.name}", data=wheel.read_bytes()))

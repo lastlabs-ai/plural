@@ -2135,7 +2135,9 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --detach                                          Run the Job in a Daytona sandbox instead of on │
 │                                                   this machine, and return. Its Environments     │
 │                                                   must use the local Runtime, which runs inside  │
-│                                                   the sandbox. Follow it with plural job show.   │
+│                                                   the sandbox. It records the Job in the hosted  │
+│                                                   project as it runs. Follow it with plural job  │
+│                                                   show.                                          │
 │ --json                                            Print machine-readable JSON.                   │
 │ --help                                            Show this message and exit.                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
