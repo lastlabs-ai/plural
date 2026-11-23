@@ -1,11 +1,13 @@
 """Run a Job's runner in a Runtime sandbox, so a long run doesn't depend on this machine.
 
-``plural run --detach`` uploads the project and this Plural to a sandbox, starts
-``plural run`` there, and returns. The Job keeps its id: this machine plans it
-with a run id the sandbox reuses, and the project sits at the same path there,
-since a Job's identity names its sources by path. The Job-scoped key minted for
-it serves that Job alone. ``plural job show`` copies the Job's files back while it runs, and once
-it has finished, revokes the key and deletes the sandbox.
+``plural run --detach`` packages the project, uploads it with this Plural to a
+sandbox, starts ``plural run`` there, and returns. The sandbox unpacks the
+project into its own folder and never depends on this machine's paths or folder
+layout. The Job keeps its id: this machine plans it with a run id the sandbox
+reuses, and a Job's identity names its sources by content, not by path. The
+Job-scoped key minted for it serves that Job alone. ``plural job show`` copies
+the Job's files back while it runs, and once it has finished, revokes the key
+and deletes the sandbox.
 
 Every Environment must use the local Runtime, which then runs inside the sandbox.
 A sandbox never reaches back into this machine: a platform URL on it, or on its
@@ -41,10 +43,10 @@ DETACHED_FILE = "detached.json"
 REMOTE = "/workspace/detached"
 LABEL = "plural.dev/detached-job"
 _SKIPPED = {".git", ".venv", "venv", "__pycache__", "node_modules", ".pytest_cache"}
+PROJECT_FOLDER = "plural-project"
+"""The project's folder in the sandbox user's home; the same for every Job and machine."""
 _SETUP = (
-    "set -e; cd {remote}; mkdir -p config; "
-    "{{ mkdir -p {project} 2>/dev/null || sudo -n mkdir -p {project}; }}; "
-    '[ -w {project} ] || sudo -n chown "$(id -u):$(id -g)" {project}; '
+    "set -e; cd {remote}; mkdir -p config; mkdir -p {project}; "
     "tar xzf project.tgz -C {project}; "
     "uv venv -q {venv}; uv pip install -q --python {venv}/bin/python {wheel}"
 )
@@ -250,7 +252,11 @@ async def launch(
                 files.append(FileUpload(path=f"detached/{wheel.name}", data=wheel.read_bytes()))
         await provider.upload_files(handle, files, root="/workspace")
         package = shlex.quote(wheel.name) if wheel is not None else f"plural=={plural.__version__}"
-        project = shlex.quote(str(_root(workspace)))
+        home = await _run(provider, handle, 'printf %s "$HOME"')
+        if not home.startswith("/"):
+            raise ProjectError("The detached run's sandbox has no home folder for the project.")
+        folder = f"{home.rstrip('/')}/{PROJECT_FOLDER}"
+        project = shlex.quote(folder)
         await _run(
             provider,
             handle,
@@ -293,7 +299,7 @@ async def launch(
         provider=provider.name,
         sandbox_id=handle.sandbox_id,
         pid=pid,
-        project=str(_root(workspace)),
+        project=folder,
         started_at=_now(),
         key_expires_at=key_expires_at,
     )

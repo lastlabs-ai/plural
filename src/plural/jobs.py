@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import os
 from collections.abc import Mapping, Sequence
@@ -30,6 +31,7 @@ from plural.common import (
     FrozenModel,
     HarnessBinding,
     HarnessCapability,
+    canonical_json,
     content_hash,
     stable_id,
 )
@@ -117,6 +119,21 @@ class BenchmarkJobSource(FrozenModel):
 
 
 JobSource = Annotated[TaskJobSource | BenchmarkJobSource, Field(discriminator="kind")]
+
+
+def _without_local_paths(value: Any) -> Any:
+    """Name every local source that has a digest by that digest alone.
+
+    Returns:
+        The value, without those sources' paths.
+    """
+    if isinstance(value, dict):
+        if value.get("kind") == "local" and value.get("digest") and "uri" in value:
+            value = {key: item for key, item in value.items() if key != "uri"}
+        return {key: _without_local_paths(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_without_local_paths(item) for item in value]
+    return value
 
 
 def _task_pin(task: TaskDefinition) -> TaskPin:
@@ -640,6 +657,13 @@ class JobSpec(FrozenModel):
         default=None,
         description="For a fork Job: the checkpoint, the candidates, and the control.",
     )
+    portable: bool = Field(
+        default=False,
+        description=(
+            "The Job's identity names its local sources by content, not by path, so the "
+            "same project plans the same Job and Trial ids in any folder on any machine."
+        ),
+    )
 
     @model_serializer(mode="wrap")
     def _omit_no_party(self, handler: SerializerFunctionWrapHandler) -> Any:
@@ -655,6 +679,8 @@ class JobSpec(FrozenModel):
                 data.pop("purpose", None)
             if self.fork is None:
                 data.pop("fork", None)
+            if not self.portable:
+                data.pop("portable", None)
         return data
 
     @model_validator(mode="after")
@@ -832,6 +858,8 @@ class JobSpec(FrozenModel):
                 "seat": self.fork.seat,
                 "change": self.fork.change,
             }
+        if self.portable:
+            return stable_id("job", _without_local_paths(json.loads(canonical_json(identity))))
         return stable_id("job", identity)
 
     @property
@@ -1578,6 +1606,7 @@ class Job:
             priority=priority,
             retry=retry or RetryPolicy(),
             purpose=purpose,
+            portable=True,
         )
         self.catalog = catalog or ModelCatalog()
         self.plan = self.spec.plan(self.catalog)

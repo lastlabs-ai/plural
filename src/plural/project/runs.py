@@ -1682,7 +1682,60 @@ def _load_local(workspace: Workspace, job_id: str) -> tuple[JobSpec, RunRecord]:
         raise ProjectError(f"No local Job {job_id!r} in {workspace.project.jobs_dir}.")
     spec = JobSpec.model_validate_json(config.read_text("utf-8"))
     record = RunRecord(**json.loads(record_path.read_text("utf-8")))
-    return _rebind_checks(workspace, spec), record
+    return _rebind_checks(workspace, _relocate_sources(workspace, spec)), record
+
+
+def _relocate_sources(workspace: Workspace, spec: JobSpec) -> JobSpec:
+    """Point a portable Job's local sources at this project's snapshots of them.
+
+    A Job that ran in another folder, such as a detached run's sandbox, names
+    its snapshots by that folder's path. Its identity names them by content,
+    so the same snapshot here serves, and the Job keeps its id.
+
+    Returns:
+        The spec, with each source that is missing here found by its digest.
+    """
+    if not spec.portable:
+        return spec
+
+    def here(kind: str, name: str, source: PackageSource) -> PackageSource:
+        if source.kind != "local" or source.digest is None or Path(source.uri).exists():
+            return source
+        target = _snapshot_path(workspace, kind, name, source.digest)
+        return source.model_copy(update={"uri": str(target)}) if target.is_dir() else source
+
+    def task(definition: TaskDefinition) -> TaskDefinition:
+        environment = definition.environment
+        if environment.source is None:
+            return definition
+        source = here("environment", environment.name, environment.source)
+        return definition.model_copy(
+            update={"environment": environment.model_copy(update={"source": source})}
+        )
+
+    agents = []
+    for binding in spec.agents:
+        package = binding.harness_package
+        if package is not None:
+            moved = package.model_copy(
+                update={"source": here("harness", package.definition.name, package.source)}
+            )
+            binding = binding.model_copy(
+                update={"agent": binding.agent.model_copy(update={"harness_package": moved})}
+            )
+        agents.append(binding)
+    if isinstance(spec.source, TaskJobSource):
+        source: TaskJobSource | BenchmarkJobSource = TaskJobSource(task=task(spec.source.task))
+    else:
+        benchmark = spec.source.benchmark
+        source = spec.source.model_copy(
+            update={
+                "benchmark": benchmark.model_copy(
+                    update={"tasks": tuple(task(item) for item in benchmark.tasks)}
+                )
+            }
+        )
+    return spec.model_copy(update={"source": source, "agents": tuple(agents)})
 
 
 def _rebind_checks(workspace: Workspace, spec: JobSpec) -> JobSpec:
