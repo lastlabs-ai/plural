@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-23
+
+### Added
+
+- Long runs. An Environment may declare a `clock`, a `horizon`, autonomous play, and `checkpoint_every`. Apps get time hooks (`advance`, `next_event_time`, `action_duration`, `schedule`), the host adds a built-in `wait` that runs the world's events as their own steps, and a horizon ends the episode as `horizon_reached`. `measure` takes `every: {sim_time | steps}`.
+- Durable runs. A run journal keeps the Agent's episode record at each `checkpoint_every` marker, with the workspace. A Trial whose runner died is shown as interrupted, and `plural trial resume` continues it from its latest run checkpoint as a new execution; cost, turns, and seconds carry over. `plural run --budget-usd` splits a budget across Trials.
+- `plural run --detach` runs a Job in a Daytona sandbox with a `runner` key scoped to that Job: chat completions, and recording that Job alone, revoked when the run ends. The project is packaged with its hosted binding and never depends on the launching machine's paths, and the sandbox records the Job in the hosted project as it runs, with no `plural job record`.
+- Personas (`plural.sim.Persona`): seeded, recorded simulated people in App code, asked in a stay-in-character frame, billed to the Environment (`environment_cost_usd`) and replayed in forks and resumes. `App.peer` reaches another App of the same Environment.
+- Context policies (`window`, `summarize`, `none`) are a Harness setting. A Harness declares the strategies its loop carries out with `Harness.context_strategies()` or `context_strategies` in `harness.yaml`; the native loop carries out all three, the vendor built-ins `none`. An Agent chooses one in `harness_config.context`, and validation refuses one its Harness doesn't declare. Every compaction is recorded in the trace.
+- Benchmarks for several Agents: a party Task pins its size (`party_size`) and may be competitive; a Benchmark seats ranked Agents against fixed opponents and can rotate seats. Each seat reports its own score, running metrics, gates, pass rate, and cost, and each Agent is judged by the seats it played.
+- Two integrity detectors that never change a score: `sim_leak`, a persona reply that broke character on its way to the Agent, and `eval_awareness`, the Agent saying it thinks it is being tested. Nothing Plural adds to what an Agent sees names Plural, evaluation, or simulation.
+- The Inspector reads context compactions, can propose a context policy as a remedy, and tests a context cause with a fork from before the compaction.
+- The vending-sim example (four Apps on a day clock, ranked on `net_worth_usd` over seven seeds, three held out) and the negotiation example (competitive and cooperative party Tasks), each with a tutorial.
+
+### Changed
+
+- `primary_metric` may name any declared metric, including an unbounded one. The run summary, `job report`, and paired comparisons show it in its unit and direction.
+- `plural job record` of a Job already recorded republishes its Trials, so a hosted Job matches a local one recorded again.
+- A Finding is `refuted` only when its forks rule out any improvement; one whose interval still allows an improvement is `inconclusive`. A confirmed Finding ships the remedy its winning fork tested, and a remedy that names the failed Task's own entities is refused.
+- Agent-level `context` and `Remedy.context` move to `harness_config.context` when loaded, so old Agent revisions and saved Findings keep their hashes.
+
+### Fixed
+
+- A caution is printed on stderr, so `--json` output stays parseable.
+- `plural run` refuses a second `--task` instead of running only the last one.
+- The resume test kills its whole process group however it ends.
+
 ## [0.26.0] - 2026-11-20
 
 ### Added
@@ -947,7 +974,10 @@ command and API and how to move a project.
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/lastlabs-ai/plural/compare/v0.26.0...v0.27.0
+[0.26.0]: https://github.com/lastlabs-ai/plural/compare/v0.25.1...v0.26.0
+[0.25.1]: https://github.com/lastlabs-ai/plural/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/lastlabs-ai/plural/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/lastlabs-ai/plural/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/lastlabs-ai/plural/compare/v0.23.1...v0.24.0
