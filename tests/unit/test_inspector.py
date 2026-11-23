@@ -519,6 +519,44 @@ def test_the_report_computes_every_number_with_its_trials(failed_job: dict[str, 
     assert validate_summary("It passed 1 of 2.", report.facts)
 
 
+def test_the_report_compares_a_dollar_metric_in_its_unit_and_direction() -> None:
+    from types import SimpleNamespace
+
+    from plural.inspector.report import _Facts, _metric_change
+    from plural.metrics import MetricSpec
+
+    def job(job_id: str, worth: dict[str, list[float]]) -> Any:
+        trials = [
+            SimpleNamespace(
+                task=task,
+                metrics={"net_worth_usd": value},
+                receipt=SimpleNamespace(trial_id=f"{job_id}-{task}-{index}"),
+            )
+            for task, values in worth.items()
+            for index, value in enumerate(values)
+        ]
+        return SimpleNamespace(
+            job_id=job_id,
+            heldout=set(),
+            finished=lambda: trials,
+            task=lambda trial: trial.task,
+        )
+
+    tasks = [f"seed-{index}" for index in range(12)]
+    new = job("job-2", {task: [1500.0 + index] for index, task in enumerate(tasks)})
+    old = job("job-1", {task: [1000.0 + index] for index, task in enumerate(tasks)})
+    spec = MetricSpec(name="net_worth_usd", kind="number", unit="USD")
+    facts = _Facts()
+    change = _metric_change(new, old, spec, "dev", facts)
+    shown = {item.fact_id: item.display for item in facts.items}
+    assert change is not None and change["verdict"] == "better"
+    assert (change["unit"], change["direction"]) == ("USD", "higher")
+    assert shown[change["new"]] == "$1,506" and shown[change["delta"]] == "+$500"
+    # Lower is better for a cost: the same rise is then worse.
+    costly = MetricSpec(name="net_worth_usd", kind="number", unit="USD", direction="lower")
+    assert _metric_change(new, old, costly, "dev", _Facts())["verdict"] == "worse"  # type: ignore[index]
+
+
 def test_a_summary_that_writes_its_own_numbers_is_rejected(
     failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:

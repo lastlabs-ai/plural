@@ -89,6 +89,13 @@ class MachineState(State):
     elasticity: float = initial(
         1.8, description="How sharply demand falls as a price rises above the list price."
     )
+    start_weekday: int = initial(
+        0,
+        minimum=0,
+        maximum=6,
+        description="The weekday of day 1, 0 for Monday. Weekends are quieter, so each "
+        "start is a different run of customers.",
+    )
     prices: dict[str, float] = Field(default_factory=lambda: dict(LIST_PRICE))
     day: int = 1
     revenue_total: float = 0.0
@@ -156,7 +163,7 @@ class Machine(App[MachineState]):
     def _close(self) -> str:
         state = self.state
         bank = self.peer("bank")
-        weekday = (state.day - 1) % 7
+        weekday = (state.day - 1 + state.start_weekday) % 7
         season = 1 + 0.25 * math.sin(2 * math.pi * (state.day - 80) / 365)
         traffic = (0.6 if weekday >= 5 else 1.0) * season
         sold: dict[str, int] = {}

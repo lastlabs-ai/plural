@@ -25,7 +25,7 @@ from plural.common import FrozenModel
 from plural.inspector.evidence import JobEvidence
 from plural.inspector.findings import breakdown, load_findings
 from plural.jobs import BenchmarkJobSource, JobResult, JobSpec, TrialResult
-from plural.metrics import MetricSpec
+from plural.metrics import MetricSpec, in_unit
 from plural.project.checks import saved_checks
 from plural.project.layout import ProjectError
 from plural.project.resources import Workspace
@@ -105,6 +105,7 @@ class MetricRow(FrozenModel):
     name: str
     kind: str
     unit: str | None = None
+    direction: str = "higher"
     gate: bool = False
     applicable: FactId
     mean: FactInterval | None = None
@@ -183,6 +184,8 @@ class MeasureChange(FrozenModel):
         old: The measure in the old Job.
         delta: The change, when there is one.
         interval: The change's 95% interval, when there is one.
+        unit: A metric's unit; rates have none.
+        direction: Whether higher or lower is better.
     """
 
     verdict: str
@@ -191,6 +194,8 @@ class MeasureChange(FrozenModel):
     old: FactId
     delta: FactId | None = None
     interval: FactId | None = None
+    unit: str | None = None
+    direction: str = "higher"
 
 
 class ChangesSection(FrozenModel):
@@ -254,6 +259,7 @@ class JobReport(FrozenModel):
     Attributes:
         job_id: The Job reported on.
         compare_job_id: The Job it was compared with, if any.
+        primary_metric: What the Benchmark ranks on: ``score`` or a metric's name.
         generated_at: When.
         performance: Per Agent: pass and success rates, score, every metric.
         failures: The breakdown by cause and the Findings, when inspected.
@@ -266,6 +272,7 @@ class JobReport(FrozenModel):
 
     job_id: str
     compare_job_id: str | None = None
+    primary_metric: str = "score"
     generated_at: datetime
     performance: list[PerformanceRow]
     failures: FailuresSection | None = None
@@ -315,6 +322,7 @@ class _Loaded:
         source = self.spec.source
         benchmark = source.benchmark if isinstance(source, BenchmarkJobSource) else None
         self.heldout = set(benchmark.heldout) if benchmark is not None else set()
+        self.primary_metric = benchmark.primary_metric if benchmark is not None else "score"
         self.threshold = _success_threshold(workspace, record.source)
         self.tasks = {item.content_hash: item for item in self.spec.tasks}
         names = {item.content_hash: item.name for item in self.spec.agents}
@@ -366,6 +374,7 @@ def build_report(
     return JobReport(
         job_id=job_id,
         compare_job_id=compare,
+        primary_metric=job.primary_metric,
         generated_at=datetime.now(timezone.utc),
         performance=performance,
         failures=failures,
@@ -433,6 +442,7 @@ def _performance(
             "name": name,
             "kind": spec.kind,
             "unit": spec.unit,
+            "direction": spec.direction,
             "gate": bool(spec.gate),
             "applicable": facts.add(
                 f"{agent}: Trials where {name} applies",
@@ -441,7 +451,12 @@ def _performance(
                 contributing,
             ),
             "mean": _interval(
-                facts, f"{agent}: {name}", values, contributing, seed_for(job.job_id, agent, name)
+                facts,
+                f"{agent}: {name}",
+                values,
+                contributing,
+                seed_for(job.job_id, agent, name),
+                unit=spec.unit,
             ),
         }
         if spec.gate:
@@ -461,17 +476,23 @@ def _grouped(job: _Loaded, trials: Iterable[TrialResult], read: Any) -> dict[str
 
 
 def _interval(
-    facts: _Facts, label: str, values: Mapping[str, list[float]], trials: Sequence[str], seed: int
+    facts: _Facts,
+    label: str,
+    values: Mapping[str, list[float]],
+    trials: Sequence[str],
+    seed: int,
+    *,
+    unit: str | None = None,
 ) -> dict[str, str] | None:
     interval = clustered_bootstrap([(1.0, items) for items in values.values()], seed=seed)
     if interval is None:
         return None
     return {
-        "estimate": facts.add(label, interval.estimate, _number(interval.estimate), trials),
+        "estimate": facts.add(label, interval.estimate, in_unit(interval.estimate, unit), trials),
         "interval": facts.add(
             f"{label}, 95% interval",
             None,
-            f"{_number(interval.low)} to {_number(interval.high)}",
+            f"{in_unit(interval.low, unit)} to {in_unit(interval.high, unit)}",
             trials,
         ),
     }
@@ -577,6 +598,11 @@ def _changes(job: _Loaded, other: _Loaded, facts: _Facts) -> ChangesSection:
                     trials,
                 )
             measures[measure] = entry
+        primary = job.metrics().get(job.primary_metric)
+        if primary is not None:
+            change = _metric_change(job, other, primary, name, facts)
+            if change is not None:
+                measures[primary.name] = change
         if measures:
             splits[name] = measures
     return ChangesSection.model_validate(
@@ -588,6 +614,89 @@ def _changes(job: _Loaded, other: _Loaded, facts: _Facts) -> ChangesSection:
             "splits": splits,
         }
     )
+
+
+def _metric_change(
+    job: _Loaded, other: _Loaded, spec: MetricSpec, split: str, facts: _Facts
+) -> dict[str, Any] | None:
+    """The paired change in the metric a Benchmark ranks on, in its unit and direction.
+
+    Returns:
+        The change, or ``None`` when either Job has no value on the split.
+    """
+    new = _values(job, split, spec.name)
+    old = _values(other, split, spec.name)
+    if not new or not old:
+        return None
+    trials = [trial for grouped in (new, old) for _, ids in grouped.values() for trial in ids]
+    comparison = paired_bootstrap(
+        {key: values for key, (values, _) in new.items()},
+        {key: values for key, (values, _) in old.items()},
+        metric=spec.name,
+        higher_is_better=spec.direction == "higher",
+        seed=seed_for(job.job_id, other.job_id, split, spec.name),
+    )
+    label = f"{spec.name} ({split})"
+    entry: dict[str, Any] = {
+        "verdict": comparison.verdict,
+        "shared_tasks": facts.add(
+            f"Tasks both Jobs ran ({split}, {spec.name})",
+            comparison.shared_tasks,
+            str(comparison.shared_tasks),
+            trials,
+        ),
+        "new": _mean_of(facts, f"mean {label} of {job.job_id}", new, spec.unit),
+        "old": _mean_of(facts, f"mean {label} of {other.job_id}", old, spec.unit),
+        "unit": spec.unit,
+        "direction": spec.direction,
+    }
+    if comparison.delta is not None:
+        entry["delta"] = facts.add(
+            f"change in {label}",
+            comparison.delta,
+            in_unit(comparison.delta, spec.unit, signed=True),
+            trials,
+        )
+    if comparison.low is not None and comparison.high is not None:
+        entry["interval"] = facts.add(
+            f"change in {label}, 95% interval",
+            None,
+            " to ".join(
+                in_unit(end, spec.unit, signed=True) for end in (comparison.low, comparison.high)
+            ),
+            trials,
+        )
+    return entry
+
+
+def _values(job: _Loaded, split: str, name: str) -> dict[str, tuple[list[float], list[str]]]:
+    """Each Task's values of one metric on a split, from the Trials it applied to.
+
+    Returns:
+        Values and Trial ids, by Task.
+    """
+    grouped: dict[str, tuple[list[float], list[str]]] = {}
+    for item in job.finished():
+        task = job.task(item)
+        value = item.metrics.get(name)
+        if value is None or (task in job.heldout) != (split == "heldout"):
+            continue
+        values, ids = grouped.setdefault(task, ([], []))
+        values.append(float(value))
+        ids.append(item.receipt.trial_id)
+    return grouped
+
+
+def _mean_of(
+    facts: _Facts,
+    label: str,
+    grouped: Mapping[str, tuple[list[float], list[str]]],
+    unit: str | None,
+) -> str:
+    values = [value for items, _ in grouped.values() for value in items]
+    ids = [trial for _, trials in grouped.values() for trial in trials]
+    mean = sum(values) / len(values)
+    return facts.add(label, mean, in_unit(mean, unit), ids)
 
 
 def _outcomes(job: _Loaded, split: str, measure: str) -> dict[str, tuple[list[float], list[str]]]:
@@ -799,6 +908,19 @@ def render_markdown(report: JobReport) -> str:
     elif report.summary_problems:
         lines += ["## Summary", "", "No summary: " + "; ".join(report.summary_problems) + ".", ""]
     lines += ["## How the Agent performs", ""]
+    if report.primary_metric != "score":
+        ranked = next(
+            (
+                metric
+                for row in data["performance"]
+                for metric in row["metrics"]
+                if metric["name"] == report.primary_metric
+            ),
+            None,
+        )
+        better = "" if ranked is None else f", {ranked['direction']} is better"
+        unit = "" if ranked is None or not ranked["unit"] else f", in {ranked['unit']}"
+        lines += [f"Ranked on {report.primary_metric}{unit}{better}.", ""]
     for row in data["performance"]:
         score = row["score"] or {}
         lines += [
@@ -810,13 +932,14 @@ def render_markdown(report: JobReport) -> str:
             f"- Mean score: {v(score.get('estimate'))} (95% {v(score.get('interval'))})",
             *[f"- Pass rate on {name} Tasks: {v(fact)}" for name, fact in row["splits"].items()],
             "",
-            "| Metric | Kind | Applies | Mean | 95% interval | Gate passed |",
-            "| --- | --- | --- | --- | --- | --- |",
+            "| Metric | Kind | Better | Applies | Mean | 95% interval | Gate passed |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
         ]
         for metric in row["metrics"]:
             mean = metric["mean"] or {}
             lines.append(
-                f"| {metric['name']} | {metric['kind']} | {v(metric['applicable'])} | "
+                f"| {metric['name']} | {metric['kind']} | {metric['direction']} | "
+                f"{v(metric['applicable'])} | "
                 f"{v(mean.get('estimate'))} | {v(mean.get('interval'))} | "
                 f"{v(metric.get('gate_pass_rate')) if metric['gate'] else ''} |"
             )
@@ -864,7 +987,15 @@ def render_markdown(report: JobReport) -> str:
         for name, measures in changes["splits"].items():
             for measure, entry in measures.items():
                 lines.append(
-                    f"- {name} Tasks, {MEASURES[measure]}: "
+                    f"- {name} Tasks, {MEASURES.get(measure, measure)}"
+                    + (
+                        ""
+                        if measure in MEASURES
+                        else f" ({entry['direction']} is better"
+                        + (f", in {entry['unit']}" if entry["unit"] else "")
+                        + ")"
+                    )
+                    + ": "
                     f"**{entry['verdict'].replace('_', ' ')}**, "
                     f"{v(entry['new'])} against {v(entry['old'])}, "
                     f"change {v(entry.get('delta'))} (95% {v(entry.get('interval'))}), "

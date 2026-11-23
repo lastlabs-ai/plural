@@ -62,6 +62,7 @@ from plural.local_models import (
     Status,
     review_local_models,
 )
+from plural.metrics import in_unit
 from plural.project import ProjectError, Workspace
 from plural.project.layout import (
     AGENT,
@@ -1639,8 +1640,16 @@ def _print_result(
         primary = aggregate.metrics.get(aggregate.primary_metric)
         ranked_on = (
             f"{aggregate.primary_metric} "
-            + ("-" if primary is None or primary.mean is None else f"{primary.mean:,.3f}")
-            + ("" if primary is None else f" (over {primary.n} of {primary.total})")
+            + (
+                "-"
+                if primary is None or primary.mean is None
+                else in_unit(primary.mean, primary.unit)
+            )
+            + (
+                ""
+                if primary is None
+                else f" (over {primary.n} of {primary.total}, {primary.direction} is better)"
+            )
             if aggregate.primary_metric != "score"
             else ""
         )

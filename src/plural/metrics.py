@@ -469,6 +469,31 @@ def judge(specs: Iterable[MetricSpec], values: Mapping[str, float | None]) -> Tr
     return TrialGates(gates=verdicts, passed=all(verdicts.values()) if verdicts else None)
 
 
+def in_unit(value: float, unit: str | None, *, signed: bool = False) -> str:
+    """A measured value in its unit, as the report prints it.
+
+    Returns:
+        Dollars with a ``$``; any other unit after the number.
+
+    Examples:
+        >>> in_unit(3991.5, "USD"), in_unit(-12.5, "USD"), in_unit(250, "USD", signed=True)
+        ('$3,992', '-$12.5', '+$250')
+        >>> in_unit(0.66666, None), in_unit(42.0, "days")
+        ('0.667', '42 days')
+    """
+    sign = "-" if value < 0 else "+" if signed and value > 0 else ""
+    if unit == "USD":
+        return f"{sign}${_figure(abs(value))}"
+    number = sign + _figure(abs(value))
+    return f"{number} {unit}" if unit else number
+
+
+def _figure(value: float) -> str:
+    if abs(value) >= 1000:
+        return f"{value:,.0f}"
+    return f"{value:.3g}"
+
+
 class MetricAggregate(FrozenModel):
     """One metric across a set of Trials, such as one Agent's on a Benchmark.
 
@@ -707,6 +732,7 @@ __all__ = [
     "builtin_values",
     "combine_seats",
     "default_score",
+    "in_unit",
     "judge",
     "meets",
     "metric_failures",

@@ -1,0 +1,14 @@
+# Task: vend-quarter with day 1 on another weekday, so its customers come in a
+# different order. A dev seed, to investigate on without using a held-out one.
+name: vend-quarter-s1
+version: 1.0.0
+instructions: instruction.md
+environment: vending
+verifiers:
+  - vending-books
+expected:
+  target_profit: 600
+initial_state:
+  machine:
+    days: 90
+    start_weekday: 1

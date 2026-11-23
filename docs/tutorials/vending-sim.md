@@ -47,6 +47,9 @@ vending-sim/
   environments/vending/  four Apps on one clock: machine, storage, bank, suppliers
   tasks/vend-year/       365 days, with the supplier accounts in the instructions
   tasks/vend-quarter/    the first 90 days, to investigate cheaply
+  tasks/vend-quarter-s1/ .. -s3/  the quarter from other weekdays: dev seeds
+  tasks/vend-quarter-h1/ .. -h3/  three more, held out for confirmation
+  benchmarks/vending-quarter/     the seven quarters, ranked on net worth in dollars
   verifiers/vending-books/  net worth once a day, profit, and two gates
   agents/vending-luna/   a small model with a context policy
   agents/vending-rules/  a Harness that restocks by rule and calls no model
@@ -110,6 +113,7 @@ measure:
 metrics:
   - name: net_worth_usd
     kind: running
+    direction: higher
     unit: USD
     aggregate: final
   - name: profitable_by_day_60
@@ -158,6 +162,33 @@ plural run -t vend-quarter -a vending-luna --budget-usd 2
 Open the Trial with `plural trial show TRIAL_ID` or on the Trial page. The chart shows
 net worth by day; the episode lists each `context.compaction` where it happened.
 
+## Rank on dollars
+
+A score between 0 and 1 says whether the quarter reached its profit target; it can't
+say that one Agent made twice the money. The `vending-quarter` Benchmark ranks on the
+dollar metric instead:
+
+```yaml
+primary_metric: net_worth_usd
+heldout:
+  - vend-quarter-h1
+  - vend-quarter-h2
+  - vend-quarter-h3
+```
+
+Its Tasks are the quarter from seven starting weekdays. Day 1 falls on a different
+weekday in each, so the quiet weekends land elsewhere and the customers come in a
+different order. Run the four dev seeds, once per Agent:
+
+```bash
+plural run --benchmark vending-quarter -a vending-rules --budget-usd 1 --record
+plural run --benchmark vending-quarter -a vending-luna --budget-usd 4 --record
+```
+
+The run summary and `plural job report` give net worth in dollars, and the
+Benchmark's leaderboard ranks the two on it, higher first, with the score beside it. The three `-h` seeds are held
+out: a plain run leaves them alone.
+
 ## Run the year detached
 
 A whole year takes hours. `--detach` runs it in a Daytona sandbox and returns:
@@ -205,7 +236,23 @@ accounts and orders, against control Forks that change nothing. If the changed F
 pass more often than the controls, the Finding is `confirmed`.
 
 The fix is a new revision of the Agent with that policy: `plural agent revise` applies
-it. Run the quarter again to check it.
+it. Investigate on the dev seeds only. Run them again with the new revision, and
+compare the two Jobs:
+
+```bash
+plural run --benchmark vending-quarter -a vending-luna --budget-usd 4
+plural job report NEW_JOB_ID --compare OLD_JOB_ID
+```
+
+The comparison pairs the Jobs Task by Task, in pass rate, success rate, and net worth
+in dollars, higher better, each with a 95% interval. Then confirm the revision once on
+seeds it was never tuned against:
+
+```bash
+plural run --benchmark vending-quarter --heldout -a vending-luna --budget-usd 3
+```
+
+Running the held-out seeds is counted as a peek.
 
 ## Next
 

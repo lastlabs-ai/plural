@@ -34,8 +34,10 @@ def _counts(text: str, where: str) -> dict[str, int]:
     return {p: int(n) for p, n in re.findall(rf"(\w+): (\d+) {where}", text)}
 
 
-def _play(workspace: Workspace, *, order_until: int) -> tuple[AppHost, Episode]:
-    task = workspace.load(ResourceRef("task", "vend-quarter")).value
+def _play(
+    workspace: Workspace, *, order_until: int, task_name: str = "vend-quarter"
+) -> tuple[AppHost, Episode]:
+    task = workspace.load(ResourceRef("task", task_name)).value
     environment = workspace.load(ResourceRef("environment", "vending")).value
     verifier = task.verifiers[0]
     assert isinstance(verifier, DeterministicVerifier)
@@ -109,3 +111,30 @@ def test_a_supplier_answers_from_its_script_without_a_gateway(
     unknown = host.step("order", {"supplier": "acme", "product": "soda", "units": 5})
     # An unknown account names no real one, so the Task is the only place to learn them.
     assert "pinecrest" not in str(unknown) and "harbor" not in str(unknown)
+
+
+def test_each_seed_starts_on_another_weekday_and_sells_differently(
+    workspace: Workspace,
+) -> None:
+    base, _ = _play(workspace, order_until=90)
+    other, _ = _play(workspace, order_until=90, task_name="vend-quarter-s1")
+    assert other.apps["machine"].state.start_weekday == 1
+    # Day 5 is a busy Friday from a Monday start, and a quiet Saturday from a Tuesday.
+    worth = [
+        [point["values"]["net_worth_usd"] for point in host.report()["metrics"]]
+        for host in (base, other)
+    ]
+    assert worth[0] != worth[1]
+
+
+def test_the_benchmark_ranks_on_dollars_and_holds_three_seeds_out(
+    workspace: Workspace,
+) -> None:
+    benchmark = workspace.load(ResourceRef("benchmark", "vending-quarter")).value
+    assert benchmark.primary_metric == "net_worth_usd"
+    assert benchmark.heldout == ("vend-quarter-h1", "vend-quarter-h2", "vend-quarter-h3")
+    verifier = workspace.load(ResourceRef("verifier", "vending-books")).value
+    spec = {item.name: item for item in verifier.metrics}["net_worth_usd"]
+    assert (spec.direction, spec.unit) == ("higher", "USD")
+    hashes = {task.content_hash for task in benchmark.tasks}
+    assert len(hashes) == 7, "every seed is its own Task, so its Trials get their own seed"

@@ -13,6 +13,7 @@ measure:
 metrics:
   - name: net_worth_usd
     kind: running
+    direction: higher
     unit: USD
     aggregate: final
     description: Cash plus stock at book value, once a day. Its Trial value is the last day's.
