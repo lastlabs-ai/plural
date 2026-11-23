@@ -5,9 +5,10 @@ evidence, and the forks that tested it. Its status is computed here from those
 forks, never chosen by the model:
 
 - ``confirmed``: a fork that made the proposed change beat its controls;
-- ``refuted``: every fork with enough attempts showed the change made no
-  difference, or made things worse;
-- ``inconclusive``: forks ran, but too few to decide;
+- ``refuted``: every fork that decided ruled out any improvement: the top of its
+  interval is at or below zero;
+- ``inconclusive``: forks ran, but too few to decide, or their intervals still
+  allow an improvement;
 - ``inferred``: no fork tested it.
 
 A Job's Findings are saved beside it, in ``findings.json``.
@@ -199,6 +200,15 @@ class ForkTest(FrozenModel):
             and self.candidate > self.control
         )
 
+    @property
+    def ruled_out(self) -> bool:
+        """Whether the fork decided the change doesn't help: no improvement is in its interval."""
+        if self.verdict == "too_few":
+            return False
+        if self.high is None:
+            return not self.beat_controls
+        return self.high <= 0
+
 
 class Finding(FrozenModel):
     """The Inspector's conclusion about one failed Trial.
@@ -271,10 +281,13 @@ def finding_status(
     whatever its forks showed. A fork judged on other gates than the Finding's
     tested another cause, and doesn't count.
 
+    A fork with an interval that still allows an improvement hasn't decided, so
+    two out of four against none out of four is ``inconclusive``, not ``refuted``.
+
     Returns:
         ``confirmed`` when a fork beat its controls; ``refuted`` when every
-        fork with enough attempts did not; ``inconclusive`` when none had
-        enough; ``inferred`` with no forks, or for a cause outside the Agent.
+        fork that decided ruled out any improvement; ``inconclusive``
+        otherwise; ``inferred`` with no forks, or for a cause outside the Agent.
 
     Examples:
         >>> finding_status([])
@@ -286,7 +299,8 @@ def finding_status(
         return "inferred"
     if any(item.beat_controls for item in forks):
         return "confirmed"
-    if any(item.verdict != "too_few" for item in forks):
+    decided = [item for item in forks if item.verdict != "too_few"]
+    if decided and all(item.ruled_out for item in decided):
         return "refuted"
     return "inconclusive"
 

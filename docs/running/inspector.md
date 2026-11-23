@@ -93,9 +93,13 @@ for a second cause, often a wrong answer key, and must record it before it finis
 
 The **status** is computed, never chosen by the model. A Finding is `confirmed` when a
 fork with its remedy passed more often than the controls, with an interval that
-excludes zero; `refuted` when its forks decided and none did; a fork judged on other
-gates than the Finding's tested something else and doesn't count; `inconclusive` when
-they had too few Trials to decide; and `inferred` when nothing was forked. A fork
+excludes zero; `refuted` when its forks decided against it, with an interval that
+rules out any improvement; a fork judged on other gates than the Finding's tested
+something else and doesn't count; `inconclusive` when they had too few Trials to
+decide, or an interval that still allows an improvement (two passes in four against
+none in four is `inconclusive`, not `refuted`); and `inferred` when nothing was forked.
+A confirmed Finding's remedy is the one its winning fork tested: the Inspector can't
+record a different change under it, so `plural agent revise` ships what was proven. A fork
 changes the Agent, so it can't confirm a cause outside the Agent: a `grader` or `task`
 Finding is always `inferred`, and its evidence is what supports it.
 

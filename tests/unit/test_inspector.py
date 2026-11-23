@@ -136,7 +136,7 @@ def test_signals_built_in_and_from_the_project(failed_job: dict[str, Any]) -> No
 def test_finding_status_is_computed_from_the_forks() -> None:
     from plural.inspector.findings import ForkTest, finding_status
 
-    def test(verdict: str, candidate: float, control: float) -> ForkTest:
+    def test(verdict: str, candidate: float, control: float, high: float | None = None) -> ForkTest:
         return ForkTest(
             test_id="X1",
             job_id="job_1",
@@ -144,13 +144,16 @@ def test_finding_status_is_computed_from_the_forks() -> None:
             verdict=verdict,  # type: ignore[arg-type]
             candidate=candidate,
             control=control,
+            high=high,
             candidates=4,
             controls=4,
         )
 
     assert finding_status(()) == "inferred"
     assert finding_status((test("likely_matters", 1.0, 0.0),)) == "confirmed"
-    assert finding_status((test("likely_matters", 0.0, 1.0),)) == "refuted"
+    assert finding_status((test("likely_matters", 0.0, 1.0, high=-0.25),)) == "refuted"
+    assert finding_status((test("no_clear_effect", 0.0, 0.0, high=0.0),)) == "refuted"
+    assert finding_status((test("no_clear_effect", 0.5, 0.0, high=1.0),)) == "inconclusive"
     assert finding_status((test("no_clear_effect", 0.5, 0.5),)) == "refuted"
     assert finding_status((test("too_few", 1.0, 0.0),)) == "inconclusive"
     beaten = (test("likely_matters", 1.0, 0.0),)
@@ -329,6 +332,54 @@ def test_a_model_finding_needs_a_stronger_model_that_beat_the_controls(
     assert app.record_finding(cause="model", summary="s", evidence=["e"], tests=["X4"]) == (
         "Recorded: model, confirmed."
     )
+
+
+def test_a_confirmed_finding_ships_the_remedy_its_fork_tested(
+    failed_job: dict[str, Any],
+) -> None:
+    context = {"strategy": "summarize", "max_tokens": 8000, "summary_instructions": "Keep it."}
+    tested = {"harness_config": {"context": context}}
+
+    def inspector() -> Any:
+        app = _app(failed_job)
+        app.state.tests.append(
+            {
+                "test_id": "X1",
+                "job_id": "job_fork",
+                "step": 2,
+                "remedy": tested,
+                "verdict": "likely_matters",
+                "candidate": 0.75,
+                "control": 0.0,
+                "low": 0.25,
+                "high": 1.0,
+                "candidates": 4,
+                "controls": 4,
+            }
+        )
+        return app
+
+    app = inspector()
+    with pytest.raises(ValueError, match="This remedy wasn't tested: X1"):
+        app.record_finding(
+            cause="context",
+            summary="The summary lost the clues.",
+            evidence=["step 3"],
+            tests=["X1"],
+            instructions="Remember every clue.",
+        )
+    assert app.record_finding(
+        cause="context", summary="s", evidence=["e"], tests=["X1"], note="Keep the clues."
+    ) == ("Recorded: context, confirmed.")
+    recorded = app.state.findings[0]["remedy"]
+    assert recorded["harness_config"]["context"]["summary_instructions"] == "Keep it."
+    assert recorded["instructions"] is None and recorded["note"] == "Keep the clues."
+
+    again = inspector()
+    again.record_finding(
+        cause="context", summary="s", evidence=["e"], tests=["X1"], context=context
+    )
+    assert again.state.findings[0]["remedy"]["harness_config"] == recorded["harness_config"]
 
 
 def test_forks_may_switch_only_to_the_allowed_models(

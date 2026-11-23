@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 
@@ -61,6 +61,43 @@ def _context_config(value: dict[str, Any] | None) -> dict[str, Any]:
     except ValidationError as exc:
         raise ValueError(f"context isn't a context policy: {exc}") from exc
     return {"context": policy.model_dump(mode="json")}
+
+
+def _tested(remedy: Remedy, forks: list[ForkTest], gates: Sequence[str]) -> Remedy:
+    """The remedy a confirmed Finding ships: one a fork tested and that beat its controls.
+
+    With no remedy given, it is the winning fork's.
+
+    Returns:
+        The remedy, with the given note.
+
+    Raises:
+        ValueError: When the remedy given isn't one a winning fork tested.
+    """
+    winners = [
+        item
+        for item in forks
+        if item.beat_controls
+        and item.remedy is not None
+        and (not gates or not item.gates or set(item.gates) & set(gates))
+    ]
+    if not winners:
+        return remedy
+    if remedy.empty:
+        assert winners[0].remedy is not None
+        return winners[0].remedy.model_copy(update={"note": remedy.note})
+    given = remedy.model_dump(mode="json", exclude={"note"})
+    for item in winners:
+        assert item.remedy is not None
+        if item.remedy.model_dump(mode="json", exclude={"note"}) == given:
+            return remedy
+    names = ", ".join(item.test_id for item in winners)
+    raise ValueError(
+        f"This remedy wasn't tested: {names} beat the controls with a different one, and a "
+        "confirmed Finding ships what its fork tested. Leave instructions, "
+        "tool_descriptions, model, and context out to record that fork's remedy, or fork "
+        "this one first and list it in tests."
+    )
 
 
 class InspectorState(State):
@@ -411,13 +448,13 @@ class InspectorApp(App[InspectorState]):
         record; critical_step is where it went wrong (None when the Agent's work was right
         and the grading was wrong); tests names the forks (X1, ...) that tested it. For a
         cause the Agent can fix, give the remedy you would ship: instructions,
-        tool_descriptions, model, or context, and a note. A remedy ships to every Task, so
-        one that names this Task's own accounts, customers, or items is refused: describe
-        the kind of thing instead. A model Finding is refused unless tests
-        names a fork that changed only the model and beat its controls. Set more to true
-        when another cause
-        explains other failed gates and you will record it next; otherwise this ends the
-        episode, and every failed gate must be explained by then.
+        tool_descriptions, model, or context, and a note. When a fork in tests beat its
+        controls, the remedy is that fork's: leave them out to use it. A remedy ships to
+        every Task, so one that names this Task's own accounts, customers, or items is
+        refused: describe the kind of thing instead. A model Finding is refused unless
+        tests names a fork that changed only the model and beat its controls. Set more to
+        true when another cause explains other failed gates and you will record it next;
+        otherwise this ends the episode, and every failed gate must be explained by then.
         """
         if self.state.mode != "inspect":
             raise ValueError("This is a question; answer it with answer().")
@@ -470,6 +507,8 @@ class InspectorApp(App[InspectorState]):
         self._general(remedy)
         trial = self._trial()
         status = finding_status(forks, agent_cause=causes[cause].agent, gates=gates or ())
+        if status == "confirmed":
+            remedy = _tested(remedy, forks, gates or ())
         self.state.findings.append(
             {
                 "trial_id": trial.trial_id,
