@@ -16,6 +16,7 @@ A Job's Findings are saved beside it, in ``findings.json``.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timezone
@@ -33,6 +34,25 @@ FindingStatus = Literal["confirmed", "inferred", "refuted", "inconclusive"]
 
 FINDINGS_FILE = "findings.json"
 """Beside a Job's ``result.json``: the Findings ``plural job inspect`` recorded."""
+
+
+def mentions(text: str, name: str) -> bool:
+    """Whether lowercased ``text`` names ``name`` as a whole word or identifier.
+
+    Returns:
+        True when it does.
+    """
+    return re.search(rf"(?<![\w-]){re.escape(name.lower())}(?![\w-])", text) is not None
+
+
+def _strings(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in _strings(item)]
+    if isinstance(value, list):
+        return [text for item in value for text in _strings(item)]
+    return []
 
 
 class Remedy(FrozenModel):
@@ -79,6 +99,27 @@ class Remedy(FrozenModel):
             and self.model is None
             and not self.harness_config
         )
+
+    @property
+    def text(self) -> str:
+        """Every word the remedy would ship to the Agent, lowercased.
+
+        That is its instructions, tool descriptions, string Harness settings (such as
+        context summary instructions), and note.
+        """
+        parts = [self.instructions or "", self.note]
+        parts += [item.description or "" for item in self.tool_overrides.values()]
+        parts += _strings(self.harness_config)
+        return "\n".join(parts).lower()
+
+    def names(self, entities: Iterable[str]) -> list[str]:
+        """Which of ``entities`` the remedy names, as whole words.
+
+        Returns:
+            The names it mentions, sorted.
+        """
+        text = self.text
+        return sorted(name for name in entities if mentions(text, name))
 
     def describe(self) -> list[str]:
         """The remedy in short lines.
@@ -406,6 +447,7 @@ __all__ = [
     "breakdown",
     "finding_status",
     "load_findings",
+    "mentions",
     "now",
     "number_findings",
     "restatus",

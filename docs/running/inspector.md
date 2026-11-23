@@ -200,6 +200,14 @@ description in [`tool_overrides`](../project/agents.md#change-what-a-tool-says).
 comments at the top of `agent.yaml` are kept. `--job` picks the inspected Job when
 several hold an `F1`.
 
+A remedy changes the Agent for every Task, so the Inspector can't propose one that
+names what only the failed Task holds: an account, a customer, an item, or a value
+from its answer key. A name counts as the Task's own when its initial State, info,
+answer key, App State, or the Agent's action arguments hold it, no other development
+Task in the Job does, and neither the Agent nor the Environment's tools already
+mention it. Both a fork's remedy and a Finding's are checked, so a fix that only
+works because it names the answer is never tested or shipped.
+
 It refuses a Finding that isn't confirmed, and one whose cause a change to the Agent
 can't fix, such as `grader`. An [External Agent](../project/external-agents.md) runs as
 its own service, so Plural can't change it or fork it with a remedy; `revise` writes

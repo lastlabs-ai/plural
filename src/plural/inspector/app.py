@@ -331,6 +331,7 @@ class InspectorApp(App[InspectorState]):
         )
         if remedy.empty and change is None:
             raise ValueError("Change the Agent or name a diagnostic change to test.")
+        self._general(remedy)
         if model is not None and self.state.fork_models and model not in self.state.fork_models:
             raise ValueError(
                 f"Forks may run {', '.join(self.state.fork_models)}, not {model}. Pick one of "
@@ -410,7 +411,9 @@ class InspectorApp(App[InspectorState]):
         record; critical_step is where it went wrong (None when the Agent's work was right
         and the grading was wrong); tests names the forks (X1, ...) that tested it. For a
         cause the Agent can fix, give the remedy you would ship: instructions,
-        tool_descriptions, model, or context, and a note. A model Finding is refused unless tests
+        tool_descriptions, model, or context, and a note. A remedy ships to every Task, so
+        one that names this Task's own accounts, customers, or items is refused: describe
+        the kind of thing instead. A model Finding is refused unless tests
         names a fork that changed only the model and beat its controls. Set more to true
         when another cause
         explains other failed gates and you will record it next; otherwise this ends the
@@ -464,6 +467,7 @@ class InspectorApp(App[InspectorState]):
             harness_config=_context_config(context),
             note=note,
         )
+        self._general(remedy)
         trial = self._trial()
         status = finding_status(forks, agent_cause=causes[cause].agent, gates=gates or ())
         self.state.findings.append(
@@ -485,6 +489,23 @@ class InspectorApp(App[InspectorState]):
         )
         self.state.done = not more
         return f"Recorded: {cause}, {status}." + (" Record the next cause." if more else "")
+
+    def _general(self, remedy: Remedy) -> None:
+        """Refuse a remedy that names one Task's own accounts, customers, or items.
+
+        A remedy changes the Agent for every Task, so naming what only this Task holds
+        would fit the fix to this Trial rather than to the Agent's work.
+        """
+        trial = self._trial()
+        named = remedy.names(self._job.task_entities(trial))
+        if named:
+            raise ValueError(
+                f"The remedy names {', '.join(repr(item) for item in named[:5])}, which "
+                f"belong{'s' if len(named) == 1 else ''} to Task {trial.task.task_id} alone. "
+                "A remedy changes the Agent for every Task, so describe the kind of thing "
+                "(a customer, a supplier, an item) and how to recognize it, never one Task's "
+                "own."
+            )
 
     def _revealed(self) -> set[str]:
         """Gates that forks which beat their controls failed, beyond the ones they fixed."""

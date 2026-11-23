@@ -211,6 +211,86 @@ def test_record_finding_checks_its_cause_evidence_and_forks(failed_job: dict[str
     assert app.terminated()
 
 
+def test_entity_names_come_from_collections_named_fields_and_identifiers() -> None:
+    from plural.inspector.evidence import entity_names
+    from plural.inspector.findings import Remedy
+
+    state = {
+        "storage": {"units": {"soda": 30, "water": 30}, "status": "open"},
+        "suppliers": {
+            "open_orders": [{"supplier": "harbor-wholesale", "product": "soda", "units": 60}],
+            "threads": {"Dana Reyes": ["Can you deliver Monday?"]},
+        },
+        "bank": {"account_id": "acct-1042", "note": "settled"},
+    }
+    names = entity_names(state)
+    assert names >= {"soda", "water", "harbor-wholesale", "Dana Reyes", "acct-1042"}
+    # Fields are never entities, nor is free text in a field that names nothing.
+    assert not names & {"storage", "units", "open_orders", "supplier", "status", "open", "note"}
+    assert entity_names({"secret": "nymph"}) == set()
+    assert entity_names({"secret": "nymph"}, authored=True) == {"nymph"}
+
+    remedy = Remedy(
+        instructions="Reorder from Harbor-Wholesale before stock runs out.",
+        tool_overrides={"message": {"description": "Write to acct-1042."}},
+        harness_config={
+            "context": {
+                "strategy": "summarize",
+                "max_tokens": 8000,
+                "summary_instructions": "Keep soda.",
+            }
+        },
+    )
+    found = {"harbor-wholesale", "acct-1042", "soda", "water", "dana reyes"}
+    assert remedy.names(found) == ["acct-1042", "harbor-wholesale", "soda"]
+    assert Remedy(instructions="Keep sodas and watering cans.").names(found) == []
+
+
+def test_a_remedy_that_names_the_tasks_own_entities_is_refused(
+    failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from plural.inspector.app import CREDENTIAL
+
+    app = _app(failed_job)
+    trial = app._trial()
+    specific = app._job.task_entities(trial)
+    assert "nymph" in specific
+    # crane is the other Task's word; the Agent's own guesses are not the Task's.
+    assert "crane" not in specific and "wordle" not in specific
+    with pytest.raises(ValueError, match="names 'nymph'.*Task nymph alone"):
+        app.record_finding(
+            cause="instructions",
+            summary="It never guessed the word.",
+            evidence=["six guesses"],
+            critical_step=6,
+            instructions="Play Wordle. If the word ends in -ymph, guess NYMPH.",
+        )
+    with pytest.raises(ValueError, match="names 'nymph'"):
+        app.record_finding(
+            cause="instructions",
+            summary="s",
+            evidence=["e"],
+            critical_step=6,
+            note="Tell it the answer is nymph.",
+        )
+    assert not app.state.findings
+
+    forking = _app(failed_job, depth="standard")
+    monkeypatch.setenv(CREDENTIAL, "unused")
+    with pytest.raises(ValueError, match="names 'nymph'"):
+        forking.fork(step=2, instructions="Guess nymph.")
+    assert not forking.state.tests
+
+    app.record_finding(
+        cause="instructions",
+        summary="It never used the letters the feedback ruled in.",
+        evidence=["six guesses"],
+        critical_step=6,
+        instructions="Play Wordle. Each guess must keep every letter marked present.",
+    )
+    assert app.state.findings[0]["remedy"]["instructions"].startswith("Play Wordle.")
+
+
 def test_a_model_finding_needs_a_stronger_model_that_beat_the_controls(
     failed_job: dict[str, Any],
 ) -> None:

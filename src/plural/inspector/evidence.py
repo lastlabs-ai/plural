@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import statistics
 from collections.abc import Iterator, Mapping, Sequence
 from functools import cached_property
@@ -20,6 +21,7 @@ from plural.apps.host import STATES_FILE, STEPS_FILE
 from plural.execution.apps import environment_payload
 from plural.harness.builtins import NATIVE_CONTEXT_STRATEGIES, package_context_strategies
 from plural.harness.episode import EPISODE_FILE
+from plural.inspector.findings import mentions
 from plural.jobs import BenchmarkJobSource, JobResult, JobSpec, TrialResult
 from plural.project.layout import Project, ProjectError
 from plural.project.resources import Workspace
@@ -167,6 +169,32 @@ class JobEvidence:
                 "inspected."
             )
         return found
+
+    def task_entities(self, trial: TrialEvidence) -> frozenset[str]:
+        """The things only the Trial's Task names, lowercased, that a remedy must not.
+
+        A name counts when no other dev Task of the Job names it too (with one Task,
+        every name counts), and neither the Agent as it ran nor the Environment's
+        actions mention it already.
+
+        Returns:
+            The names.
+        """
+        others: dict[str, TrialEvidence] = {}
+        for item in self.trials.values():
+            if item.task.task_id != trial.task.task_id:
+                others.setdefault(item.task.task_id, item)
+        shared = frozenset.intersection(*(item.entities for item in others.values()))
+        specific = trial.entities - shared if others else trial.entities
+        config = trial.agent_config()
+        known = " ".join(
+            [
+                str(config.get("instructions") or ""),
+                json.dumps(config.get("tool_overrides") or {}),
+                json.dumps(trial.environment_actions()),
+            ]
+        ).lower()
+        return frozenset(name for name in specific if not mentions(known, name))
 
     def failed(self) -> list[TrialEvidence]:
         """The dev Trials that didn't pass, in the Job's order.
@@ -390,6 +418,22 @@ class TrialEvidence:
     def states(self) -> list[dict[str, Any]]:
         """The App State after each step, as the App host recorded it."""
         return list(_jsonl(self.artifacts / STATES_FILE))
+
+    @cached_property
+    def entities(self) -> frozenset[str]:
+        """The specific things this Trial's Task and episode name, lowercased.
+
+        They come from the Task's initial State, info, and answer key, the App State
+        after each step, and the arguments of the Agent's actions.
+        """
+        found: set[str] = set()
+        for authored in (self.task.state, self.task.info, self.task.expected):
+            found |= entity_names(authored, authored=True)
+        for item in self.states:
+            found |= entity_names(item.get("state") or {})
+        for item in self.action_list():
+            found |= entity_names(item.get("arguments") or {}, record=True)
+        return frozenset(name.lower() for name in found)
 
     @property
     def actions_used(self) -> set[str]:
@@ -902,6 +946,56 @@ def _call(item: Mapping[str, Any]) -> tuple[Any, str]:
 
 
 _EMPTY_KEY = "{}"
+
+
+_ENTITY_FIELD = re.compile(
+    r"(?:^|_)(?:id|name|sku|account|customer|client|supplier|vendor|item|product|email|"
+    r"user|company|contact|merchant|order)s?$",
+    re.IGNORECASE,
+)
+_IDENTIFIER = re.compile(r"^(?=.*[A-Za-z])(?=.*[\d@_-])[\w.@+-]{3,64}$")
+_NAME = re.compile(r"^(?=.*[A-Za-z])[\w .@'+-]{3,64}$")
+
+
+def entity_names(
+    value: Any,
+    *,
+    authored: bool = False,
+    depth: int = 0,
+    field: str = "",
+    record: bool = False,
+) -> set[str]:
+    """Names of specific things in a Task's data or App State.
+
+    A value of App State is App, then field, then the field's value, so the keys of a
+    mapping below the field (``units: {soda: 30}``) are members of a collection. The keys of
+    a record in a list are its fields, never members. A string counts when a field that
+    names something holds it (``customer``, ``sku``, ``*_id``), when it is shaped like an
+    identifier (``acct-1042``, ``harbor-wholesale``), or, in what the Task's author wrote
+    (``authored``), always: a Task's own data is what makes it that Task.
+
+    Returns:
+        The names, as written.
+    """
+    found: set[str] = set()
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            name = str(key).strip()
+            if depth >= 2 and not record and _NAME.match(name):
+                found.add(name)
+            found |= entity_names(item, authored=authored, depth=depth + 1, field=name)
+    elif isinstance(value, list):
+        for item in value:
+            found |= entity_names(
+                item, authored=authored, depth=depth + 1, field=field, record=True
+            )
+    elif isinstance(value, str):
+        text = value.strip()
+        if _NAME.match(text) and (
+            authored or _ENTITY_FIELD.search(field) or _IDENTIFIER.match(text)
+        ):
+            found.add(text)
+    return found
 
 
 def _flatten(value: Any, prefix: str = "") -> dict[str, Any]:
