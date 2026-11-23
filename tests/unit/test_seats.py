@@ -600,7 +600,7 @@ async def test_a_shared_party_plays_as_one_user_and_says_so(tmp_path: Path) -> N
     assert trial.status == "succeeded", trial.error_message
     assert trial.seat_isolation == "none"
     assert not provider.asked_for_users
-    assert set(provider.seat_user.values()) == {"plural-agent"}
+    assert set(provider.seat_user.values()) == {"agent"}
 
 
 def test_a_party_refuses_apps_that_need_agent_credentials() -> None:

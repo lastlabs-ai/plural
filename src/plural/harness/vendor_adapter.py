@@ -201,7 +201,7 @@ def _write_claude_settings(environment: HarnessEnvironment) -> None:
     ``--print`` denies an MCP tool nobody allowed, so the Environment's server is
     allowed by name. Failed calls are reported too.
     """
-    settings: dict[str, Any] = {"permissions": {"allow": ["mcp__plural-environment"]}}
+    settings: dict[str, Any] = {"permissions": {"allow": [f"mcp__{ENVIRONMENT_SERVER}"]}}
     if environment.raw.get("tool_command"):
         hook = (
             f"PLURAL_APPS_WORKSPACE={shlex.quote(_host_workspace(environment))} "
@@ -388,7 +388,10 @@ def _unknown(name: str, arguments: Any) -> Report:
     return (
         "step",
         {
-            "action": name.removeprefix(_ENVIRONMENT_TOOL),
+            "action": next(
+                (name.removeprefix(item) for item in _ENVIRONMENT_TOOLS if name.startswith(item)),
+                name,
+            ),
             "arguments": arguments if isinstance(arguments, dict) else {"input": arguments},
             "unknown": True,
         },
@@ -411,7 +414,7 @@ class ClaudeUnknownTools(StreamReports):
         ...                 {
         ...                     "type": "tool_use",
         ...                     "id": "t1",
-        ...                     "name": "mcp__plural-environment__quote",
+        ...                     "name": "mcp__environment__quote",
         ...                     "input": {"tons": 3},
         ...                 }
         ...             ]
@@ -654,7 +657,10 @@ def _hermes_usage() -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-_ENVIRONMENT_TOOL = "mcp__plural-environment__"
+ENVIRONMENT_SERVER = "environment"
+"""The MCP server that offers a vendor CLI the Environment's actions. Its name is
+part of every tool name the model sees, so it says nothing about Plural."""
+_ENVIRONMENT_TOOLS = (f"mcp__{ENVIRONMENT_SERVER}__", "mcp__plural-environment__")
 _NO_SUCH_TOOL = "No such tool available"
 
 
@@ -729,7 +735,7 @@ def _write_environment(environment: dict[str, Any]) -> None:
         env["PLURAL_SANDBOX_ROOT"] = os.environ["PLURAL_SANDBOX_ROOT"]
     mcp = {
         "mcpServers": {
-            "plural-environment": {
+            ENVIRONMENT_SERVER: {
                 "command": "python" if shutil.which("python") else sys.executable,
                 "args": [str(Path(__file__).with_name("mcp_bridge.py"))],
                 "env": env,

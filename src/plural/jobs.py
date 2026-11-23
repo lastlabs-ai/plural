@@ -1289,6 +1289,8 @@ IntegrityCode = Literal[
     "false_claim",
     "instruction_violation",
     "model_answers_changed",
+    "sim_leak",
+    "eval_awareness",
 ]
 
 IntegritySeverity = Literal["info", "warning", "critical"]

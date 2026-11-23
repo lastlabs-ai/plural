@@ -365,6 +365,17 @@ A persona needs no clock: it can answer at once, as above, or later, when an App
 clock schedules its reply as an event. Give it a `script` to answer without a model,
 such as in a Runtime with no gateway key.
 
+The Agent must not be able to tell it is dealing with a simulation. Plural wraps every
+persona's instructions in a stay-in-character frame before its model is asked: it
+writes only what that person would, and never says it is an AI, a model, a simulation,
+or a test, or mentions its instructions. Return its words as an ordinary observation,
+such as an email, with no persona name, role, or model details. Nothing Plural adds to
+what the Agent sees (tool names and descriptions, observations, the native loop's
+messages, and the variables and user name a command the Agent runs can read) mentions
+Plural, an evaluation, a benchmark, or a simulation, so only words you write can. When
+a reply breaks character anyway, the Trial shows a
+[`sim_leak`](../operations/integrity.md#flag-suspicious-trials) finding.
+
 ## Rewards
 
 A **reward** is a small bit of credit for one move. It answers "which action deserved

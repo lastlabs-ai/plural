@@ -553,7 +553,7 @@ def test_claude_code_reports_a_call_to_a_missing_tool_as_unknown_action(
     settings = json.loads((tmp_path / ".plural/claude-settings.json").read_text())
     hooks = settings["hooks"]
     assert hooks["PostToolUse"] == hooks["PostToolUseFailure"]
-    assert settings["permissions"]["allow"] == ["mcp__plural-environment"]
+    assert settings["permissions"]["allow"] == ["mcp__environment"]
 
     calls: list[tuple[str, dict[str, Any]]] = []
     monkeypatch.setattr(daemon, "call", lambda op, **fields: calls.append((op, fields)) or {})
@@ -565,7 +565,7 @@ def test_claude_code_reports_a_call_to_a_missing_tool_as_unknown_action(
     }
     environment_call = {
         "hook_event_name": "PostToolUse",
-        "tool_name": "mcp__plural-environment__quote",
+        "tool_name": "mcp__environment__quote",
         "tool_input": {},
         "tool_response": {"content": "ok"},
     }
@@ -613,7 +613,7 @@ def test_the_environment_bridge_starts_where_no_bare_python_is_on_path(
     monkeypatch.setattr(vendor_adapter.shutil, "which", lambda _name: None)
     vendor_adapter._write_environment({"workspace": str(tmp_path)})
     config = json.loads((tmp_path / ".plural/mcp.json").read_text())
-    server = config["mcpServers"]["plural-environment"]
+    server = config["mcpServers"]["environment"]
     assert server["command"] == vendor_adapter.sys.executable
 
 
@@ -635,7 +635,7 @@ def test_codex_is_given_the_environments_mcp_server(tmp_path: Path) -> None:
         json.dumps(
             {
                 "mcpServers": {
-                    "plural-environment": {
+                    "environment": {
                         "command": "/venv/bin/python",
                         "args": ["/p/mcp_bridge.py"],
                         "env": {"PLURAL_ENVIRONMENT_FILE": "/w/environment.json"},
@@ -646,12 +646,11 @@ def test_codex_is_given_the_environments_mcp_server(tmp_path: Path) -> None:
     )
     command = vendor_adapter._command("codex", "openai/gpt-5.6-luna", "go", {}, config)
     overrides = [command[i + 1] for i, item in enumerate(command) if item == "-c"]
-    assert 'mcp_servers.plural-environment.command="/venv/bin/python"' in overrides
-    assert 'mcp_servers.plural-environment.args=["/p/mcp_bridge.py"]' in overrides
+    assert 'mcp_servers.environment.command="/venv/bin/python"' in overrides
+    assert 'mcp_servers.environment.args=["/p/mcp_bridge.py"]' in overrides
     assert (
-        'mcp_servers.plural-environment.env={PLURAL_ENVIRONMENT_FILE="/w/environment.json"}'
-        in overrides
+        'mcp_servers.environment.env={PLURAL_ENVIRONMENT_FILE="/w/environment.json"}' in overrides
     )
-    assert 'mcp_servers.plural-environment.default_tools_approval_mode="approve"' in overrides
+    assert 'mcp_servers.environment.default_tools_approval_mode="approve"' in overrides
     assert command[-1] == "go"
     assert vendor_adapter._codex_mcp_args(tmp_path / "missing.json") == []

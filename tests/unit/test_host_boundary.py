@@ -209,7 +209,7 @@ async def test_the_job_kills_harness_processes_before_reading_files_or_finishing
     after = provider.order[provider.order.index("stop") :]
     assert after[:2] == ["stop", "download"]
     assert "host" in after
-    assert provider.stopped == [("plural-agent",)]
+    assert provider.stopped == [("agent",)]
 
 
 class _Docker(DockerProvider):
@@ -288,7 +288,7 @@ async def test_daytona_runs_as_another_user_through_sudo_keeping_the_requested_e
     await provider.exec(handle, ExecRequest(command=("id", "-u"), user="root"))
     await provider.exec(
         handle,
-        ExecRequest(command=("python",), env={"PYTHONPATH": "/x", "A": "b"}, user="plural-apps"),
+        ExecRequest(command=("python",), env={"PYTHONPATH": "/x", "A": "b"}, user="apphost"),
     )
 
     assert remote.calls == [
@@ -299,7 +299,7 @@ async def test_daytona_runs_as_another_user_through_sudo_keeping_the_requested_e
             "-E",
             "--preserve-env=A,PYTHONPATH",
             "-u",
-            "plural-apps",
+            "apphost",
             "--",
             "python",
         ),
@@ -312,11 +312,11 @@ async def test_daytona_kills_the_harness_users_processes_as_root() -> None:
 
     await provider.stop_user_processes(handle, [None])
     assert remote.calls == []
-    await provider.stop_user_processes(handle, ["plural-seat-0", "plural-seat-1"])
+    await provider.stop_user_processes(handle, ["seat-0", "seat-1"])
 
     (command,) = remote.calls
     assert command[:4] == ("sudo", "-n", "sh", "-c")
-    assert command[-2:] == ("plural-seat-0", "plural-seat-1")
+    assert command[-2:] == ("seat-0", "seat-1")
 
 
 # Harness-declared files on Daytona.
@@ -327,17 +327,17 @@ async def test_daytona_checks_an_artifact_as_the_harness_user_and_reads_what_it_
     provider, handle = await _daytona(remote)
 
     (file,) = await provider.download_artifacts(
-        handle, ["out/result.json"], root="/workspace/harness", user="plural-agent"
+        handle, ["out/result.json"], root="/workspace/harness", user="agent"
     )
 
     assert file.path == "out/result.json"
-    assert remote.calls[0][:6] == ("sudo", "-n", "-E", "-u", "plural-agent", "--")
+    assert remote.calls[0][:6] == ("sudo", "-n", "-E", "-u", "agent", "--")
     assert remote.downloads == ["/workspace/harness/out/result.json"]
 
 
 @pytest.mark.parametrize(
     "answer",
-    [(3, "", ""), (0, "/workspace/.plural-apps-x/bootstrap.json", ""), (0, "", "")],
+    [(3, "", ""), (0, "/workspace/.apphost-x/bootstrap.json", ""), (0, "", "")],
 )
 async def test_daytona_refuses_an_artifact_that_is_a_link_or_leaves_its_folder(
     answer: tuple[int, str, str],

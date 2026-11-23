@@ -124,7 +124,7 @@ def runtime_path(path: str | Path) -> str:
     """The inverse of :func:`sandbox_path`: this machine's path as the Runtime names it.
 
     Returns:
-        A path such as ``/workspace/.plural-apps-x/workspace.bundle``.
+        A path such as ``/workspace/.apphost-x/workspace.bundle``.
     """
     resolved = Path(path).resolve()
     root = os.environ.get("PLURAL_SANDBOX_ROOT")
@@ -152,7 +152,7 @@ def socket_dir(root: Path) -> Path:
     digest = hashlib.sha256(str(root).encode()).hexdigest()[:16]
     # Not TMPDIR: the host and the Harness's action processes can see different values.
     folder = "/tmp" if os.name == "posix" and os.path.isdir("/tmp") else tempfile.gettempdir()
-    return Path(folder) / f"plural-apps-{digest}"
+    return Path(folder) / f"apphost-{digest}"
 
 
 def socket_path(root: Path) -> str:
@@ -718,10 +718,10 @@ def _private_root(public: Path) -> Path:
         The private folder.
     """
     try:
-        folder = tempfile.mkdtemp(prefix=".plural-apps-", dir=str(public.parent))
+        folder = tempfile.mkdtemp(prefix=".apphost-", dir=str(public.parent))
     except OSError:
         # The App user may not write beside the workspace; its own temp folder will do.
-        folder = tempfile.mkdtemp(prefix="plural-apps-private-", dir=str(socket_dir(public).parent))
+        folder = tempfile.mkdtemp(prefix="apphost-private-", dir=str(socket_dir(public).parent))
     private = Path(folder).resolve()
     shutil.copytree(public, private, dirs_exist_ok=True, symlinks=True)
     # copytree copies the public folder's mode onto this one.
@@ -901,7 +901,8 @@ def _report_tool(root: Path, rest: list[str], timeout: float | None) -> Any:
         return None
 
 
-_ENVIRONMENT_TOOL = "mcp__plural-environment__"
+_ENVIRONMENT_TOOLS = ("mcp__environment__", "mcp__plural-environment__")
+"""The Environment's MCP tools, as Claude Code names them now and in older Trials."""
 _NO_SUCH_TOOL = "No such tool available"
 
 
@@ -920,7 +921,7 @@ def claude_hook_fields(payload: Mapping[str, Any]) -> dict[str, Any] | None:
         >>> claude_hook_fields(
         ...     {
         ...         "hook_event_name": "PostToolUseFailure",
-        ...         "tool_name": "mcp__plural-environment__quote",
+        ...         "tool_name": "mcp__environment__quote",
         ...         "tool_input": {"tons": 3},
         ...         "error": "Error: No such tool available: quote",
         ...     }
@@ -939,7 +940,7 @@ def claude_hook_fields(payload: Mapping[str, Any]) -> dict[str, Any] | None:
         error = response
     if payload.get("hook_event_name") == "PostToolUseFailure":
         error = str(payload.get("error") or error or "tool failed")
-    if (error is not None and _NO_SUCH_TOOL in error) or name.startswith(_ENVIRONMENT_TOOL):
+    if (error is not None and _NO_SUCH_TOOL in error) or name.startswith(_ENVIRONMENT_TOOLS):
         return None
     return {
         "name": name,

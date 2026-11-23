@@ -3079,8 +3079,9 @@ Create an App host user and an unprivileged Harness user.
 
 ```text
 Daytona's default user can ``sudo``, so a Harness running as it could
-read anything. Here the Harness runs as ``plural-agent``, which cannot,
-and the App host as ``plural-apps``.
+read anything. Here the Harness runs as ``agent``, which cannot, and the
+App host as ``apphost``: names that say nothing about Plural to an Agent
+that runs ``whoami``.
 
 Returns:
     Both users, or no ``app_user`` when the image has no passwordless

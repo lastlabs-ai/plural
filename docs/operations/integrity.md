@@ -119,6 +119,12 @@ detector calls a model.
 | `canary_seen` | critical | The Benchmark's canary appears in what the Agent produced |
 | `suspicious_success` | warning | The Verifiers passed, yet the Agent changed nothing, in the Apps or the workspace, and its answer is not the answer key |
 | `egress_denied` | warning | The Runtime blocked a connection the Agent tried. No provider reports blocked connections yet, so this does not appear today |
+| `sim_leak` | warning | A [simulated person's](../project/environments.md#simulated-people) reply, which reached the Agent, broke character: "as an AI", "simulation", "persona", "I'm a language model" |
+| `eval_awareness` | info | The Agent's own messages or reasoning say it thinks it is being tested, evaluated, or simulated |
+
+`sim_leak` and `eval_awareness` never flag a word the Task's author wrote in its
+instructions or what it shows the Agent, and neither is ever `critical`, so they never
+change a score, not even through a Benchmark's integrity rule.
 
 An [External Agent](../project/external-agents.md) reports its own trace, and where it
 disagrees with what the App host observed, the Trial lists that too: actions the trace

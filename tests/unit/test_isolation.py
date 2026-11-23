@@ -414,9 +414,9 @@ async def test_daytona_runs_the_app_host_and_harness_as_separate_users() -> None
     isolation = await provider.isolate_apps(handle)
     await provider.exec(handle, ExecRequest(command=("python", "-V"), user=isolation.app_user))
 
-    assert (isolation.app_user, isolation.agent_user) == ("plural-apps", "plural-agent")
+    assert (isolation.app_user, isolation.agent_user) == ("apphost", "agent")
     command, user = remote.calls[-1]
-    assert command[:6] == ("sudo", "-n", "-E", "-u", "plural-apps", "--")
+    assert command[:6] == ("sudo", "-n", "-E", "-u", "apphost", "--")
     assert user is None
 
 

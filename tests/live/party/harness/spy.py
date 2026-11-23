@@ -58,7 +58,7 @@ class Spy(Harness):
             ),
             "other_drop": any(_readable(lambda o=o: _read(f"/tmp/drop-{o}")) for o in others),
             "app_host": any(
-                _readable(lambda p=p: os.listdir(p)) for p in glob.glob("/workspace/.plural-apps-*")
+                _readable(lambda p=p: os.listdir(p)) for p in glob.glob("/workspace/.apphost-*")
             ),
             "environment_writable": _readable(lambda: _write("/workspace/environment/note")),
             "other_seat_token": bool(tokens),

@@ -98,7 +98,7 @@ class FakeProvider(SandboxProvider):
     async def isolate_apps(self, handle: SandboxHandle) -> AppIsolation:
         if not self.isolates:
             return AppIsolation()
-        return AppIsolation(app_user="plural-apps", agent_user="plural-agent")
+        return AppIsolation(app_user="apphost", agent_user="agent")
 
     async def upload_files(
         self,
@@ -205,7 +205,7 @@ class FakeProvider(SandboxProvider):
         op = sent["op"]
         result: object = None
         if op == "hello":
-            result = {"pid": 7, "uid": 65533, "private": "/workspace/.plural-apps-x"}
+            result = {"pid": 7, "uid": 65533, "private": "/workspace/.apphost-x"}
         elif op == "finish":
             declared = self.environments.get(handle.sandbox_id) or {}
             apps = {

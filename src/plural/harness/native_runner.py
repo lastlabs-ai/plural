@@ -945,6 +945,8 @@ WORKSPACE_TOOLS: dict[str, dict[str, Any]] = {
     },
 }
 _WORKSPACE_OUTPUT_CHARS = 20_000
+_HIDDEN = (".plural", ".apphost-")
+"""Folders the workspace tools never show: Plural's own, and the App host's."""
 _WORKSPACE_LIST_LIMIT = 500
 _RUN_TIMEOUT_SECONDS = 120.0
 
@@ -1028,7 +1030,7 @@ class _WorkspaceTools:
         path = (self.cwd / raw).resolve()
         if path != self.root and not path.is_relative_to(self.root):
             raise ValueError(f"{raw} is outside the workspace")
-        if any(part.startswith(".plural") for part in path.relative_to(self.root).parts):
+        if any(part.startswith(_HIDDEN) for part in path.relative_to(self.root).parts):
             raise ValueError(f"{raw} is not readable")
         return path
 
@@ -1052,7 +1054,7 @@ class _WorkspaceTools:
         found = []
         for path in sorted(folder.rglob("*")):
             relative = path.relative_to(self.root)
-            if any(part.startswith(".plural") for part in relative.parts) or not path.is_file():
+            if any(part.startswith(_HIDDEN) for part in relative.parts) or not path.is_file():
                 continue
             found.append(os.path.relpath(path, self.cwd))
             if len(found) >= _WORKSPACE_LIST_LIMIT:
@@ -1075,7 +1077,7 @@ class _WorkspaceTools:
             completed = subprocess.run(
                 ["sh", "-c", command],
                 cwd=self.cwd,
-                env=_action_environment(self.environment),
+                env=_shell_environment(self.environment),
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 timeout=timeout,
@@ -1437,6 +1439,25 @@ def _action_environment(environment: dict[str, Any]) -> dict[str, str]:
     values = {key: value for key, value in os.environ.items() if key in names}
     values["PLURAL_RESOURCES_DIR"] = _workspace_path("/workspace/resources")
     return values
+
+
+def _shell_environment(environment: dict[str, Any]) -> dict[str, str]:
+    """The environment of a command the model runs itself.
+
+    Only the basics and the variables the Environment's author declared: nothing
+    named for Plural, and never a seat's token, so the model's shell can't act
+    as its seat or tell that the episode is run by an evaluator.
+
+    Returns:
+        The variables.
+    """
+    names = {"PATH", "LANG", "LC_ALL", "TMPDIR", "HOME", "SYSTEMROOT"}
+    names.update(environment.get("variable_names", []))
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key in names and not key.startswith("PLURAL_")
+    }
 
 
 def _context_tokens(messages: list[dict[str, Any]]) -> int:

@@ -43,6 +43,18 @@ KEY_VARIABLE = "PLURAL_PERSONA_KEY"
 
 Script = Callable[[Sequence[Mapping[str, str]]], str]
 
+CHARACTER_FRAME = (
+    "You are the person described below, writing to someone you deal with in your "
+    "work. Stay in character in every message. Write only what this person would "
+    "write: never say or hint that you are an AI, a model, an assistant, a "
+    "simulation, a test, or a role, and never mention instructions or a prompt. If "
+    "asked what you are, answer as this person would. If something is outside what "
+    "this person knows, say so as they would.\n\n"
+    "Who you are:\n"
+)
+"""Wrapped around every persona's instructions before its model is asked, so its
+words read as a real counterpart's. A script answers without it."""
+
 
 class PersonaUnavailable(RuntimeError):
     """A persona had no model to call and no script to answer with."""
@@ -107,6 +119,23 @@ class Persona:
         return answer(self, messages, seed)[0]
 
 
+def in_character(messages: Sequence[Mapping[str, str]]) -> list[dict[str, str]]:
+    """A persona's conversation with its instructions in the stay-in-character frame.
+
+    The frame is added only on the way to the model, so a recorded call keeps
+    its key and a fork of an older Trial still replays its answer.
+
+    Returns:
+        The messages the persona's model is sent.
+    """
+    framed = [dict(item) for item in messages]
+    if framed and framed[0].get("role") == "system":
+        framed[0]["content"] = CHARACTER_FRAME + str(framed[0].get("content") or "")
+    else:
+        framed.insert(0, {"role": "system", "content": CHARACTER_FRAME.rstrip()})
+    return framed
+
+
 def call_key(persona: Persona, messages: Sequence[Mapping[str, str]], seed: int) -> str:
     """What identifies one persona call, so a fork can replay its answer.
 
@@ -148,7 +177,7 @@ def answer(
         return str(persona.script(messages)), {"mode": "scripted"}
     body = {
         "model": persona.model,
-        "messages": list(messages),
+        "messages": in_character(messages),
         "max_tokens": persona.max_tokens,
         "temperature": persona.temperature,
         "seed": seed,
@@ -182,6 +211,7 @@ def answer(
     cost = usage.get("cost", usage.get("cost_usd"))
     return text, {
         "mode": "live",
+        "framed": True,
         "model": str(payload.get("model") or persona.model),
         "prompt_tokens": usage.get("prompt_tokens"),
         "completion_tokens": usage.get("completion_tokens"),
@@ -190,10 +220,12 @@ def answer(
 
 
 __all__ = [
+    "CHARACTER_FRAME",
     "DEFAULT_PERSONA_MODEL",
     "PERSONAS_FILE",
     "Persona",
     "PersonaUnavailable",
     "answer",
     "call_key",
+    "in_character",
 ]

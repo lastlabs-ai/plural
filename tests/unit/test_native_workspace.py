@@ -236,8 +236,8 @@ def test_a_fork_resumes_the_native_loop_after_its_workspace_tools(
 def _tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setenv("PLURAL_SANDBOX_ROOT", str(tmp_path))
     (tmp_path / "workspace/environment").mkdir(parents=True)
-    (tmp_path / "workspace/.plural-apps-x").mkdir()
-    (tmp_path / "workspace/.plural-apps-x/secret.json").write_text("{}")
+    (tmp_path / "workspace/.apphost-x").mkdir()
+    (tmp_path / "workspace/.apphost-x/secret.json").write_text("{}")
     environment = {"workspace": "/workspace/environment"}
     return native_runner._WorkspaceTools(environment, [{"capability": "shell", "reason": "no"}])
 
@@ -255,7 +255,7 @@ def test_workspace_tools_stay_in_the_workspace(
     assert _dispatch(tools, "read_file", path="out/a.txt") == "hi"
     assert _dispatch(tools, "list_files", path="..") == "out/a.txt"
     assert "outside the workspace" in _dispatch(tools, "read_file", path="../../../etc/hosts")
-    assert "not readable" in _dispatch(tools, "read_file", path="../.plural-apps-x/secret.json")
+    assert "not readable" in _dispatch(tools, "read_file", path="../.apphost-x/secret.json")
     # A denied capability is never offered.
     assert "run" not in {item["function"]["name"] for item in tools.declarations()}
     assert "unknown tool" in _dispatch(tools, "run", command="true")
