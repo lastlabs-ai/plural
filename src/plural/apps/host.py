@@ -59,6 +59,10 @@ _AGENT_INFO = ("step", "error")
 EPISODE_OVER = "The episode is over; the App host takes no more actions."
 
 
+RUN_BUNDLE_FILE = "run-workspace.bundle"
+"""In the host's private folder: the workspace snapshots as of the latest run checkpoint."""
+
+
 class AppHandle:
     """What ``Environment.on_step`` may do with one App."""
 
@@ -702,7 +706,9 @@ class AppHost:
                 Job already has.
 
         Returns:
-            The new ones of each, and the clock.
+            The new ones of each, and the clock. When it adds a run checkpoint,
+            ``workspace`` reports the workspace snapshots so far, with the path of
+            a bundle of them, so the checkpoint restores the files too.
         """
         given = dict(since or {})
 
@@ -710,15 +716,26 @@ class AppHost:
             start = max(0, int(given.get(key) or 0))
             return [dict(item) for item in items[start:]]
 
+        checkpoints = after("checkpoints", self._run_checkpoints)
+        workspace: dict[str, Any] | None = None
+        if checkpoints and self.snapshots is not None and self.snapshots.available:
+            bundle = None
+            with contextlib.suppress(OSError, RuntimeError):
+                bundle = self.snapshots.export(self._snapshot_store / RUN_BUNDLE_FILE)
+            workspace = {
+                **self.snapshots.report(),
+                "bundle": str(bundle) if bundle is not None else None,
+            }
         return {
             "steps": after("steps", self._log),
             "states": after("states", self._states),
             "metrics": after("metrics", self._metrics),
-            "checkpoints": after("checkpoints", self._run_checkpoints),
+            "checkpoints": checkpoints,
             "personas": after("personas", self._persona_calls),
             "clock": None
             if self.clock is None
             else {"now": self.now, "horizon_reached": self.horizon_reached},
+            **({"workspace": workspace} if workspace is not None else {}),
         }
 
     def _check_horizon(self) -> None:
@@ -1120,7 +1137,8 @@ class AppHost:
         The Harness reports it, since the host did not run it, so the step is
         marked ``reported``. It takes the next step number, so actions and
         Harness tools share one timeline, and the workspace is snapshotted
-        after it. No ``reward`` or ``measure`` hook runs on it.
+        after it. No ``reward`` or ``measure`` hook runs on it, but it can be a
+        run checkpoint.
 
         Returns:
             The step number given to the call, or an error.
@@ -1165,6 +1183,7 @@ class AppHost:
                     }
                 )
             )
+            self._mark_run_checkpoint()
         finally:
             self._acting = None
         return {"step": self.steps}

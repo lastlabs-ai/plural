@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from plural.apps.host import STATES_FILE, STEPS_FILE
+from plural.apps.workspace import BUNDLE_FILE
 from plural.harness.episode import EPISODE_FILE
 from plural.metrics import METRICS_FILE
 from plural.sim import PERSONAS_FILE
@@ -30,6 +31,8 @@ RUN_FOLDER = "run"
 """Under a Trial's folder: the journal of its latest long execution."""
 CHECKPOINTS_FILE = "run-checkpoints.jsonl"
 JOURNAL_FILE = "journal.json"
+WORKSPACE_REPORT = "workspace.json"
+"""The workspace snapshots' report as of the latest run checkpoint, beside their bundle."""
 STALE_SECONDS = 60.0
 """How long a journal goes unwritten before its runner is taken to have died.
 The Job writes it at least every heartbeat, five seconds apart."""
@@ -100,11 +103,13 @@ class RunJournal:
         *,
         prefix: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
         resumed_from: int | None = None,
+        workspace: tuple[Mapping[str, Any], bytes] | None = None,
     ) -> None:
         """Begin the journal of a new execution.
 
         A resumed execution starts from the interrupted one's records through
-        its checkpoint, so a second interruption still has the whole run.
+        its checkpoint, and its workspace snapshots, so a second interruption
+        still has the whole run.
         """
         if self.root.exists():
             shutil.rmtree(self.root)
@@ -112,6 +117,8 @@ class RunJournal:
         for key, rows in (prefix or {}).items():
             if key in _STREAMS:
                 _append(self.root / _STREAMS[key], rows)
+        if workspace is not None:
+            self.workspace(*workspace)
         self._write_state(
             {
                 "execution_id": execution_id,
@@ -155,6 +162,29 @@ class RunJournal:
         temporary = self.root / f".{EPISODE_FILE}.tmp"
         temporary.write_bytes(data)
         temporary.replace(self.root / EPISODE_FILE)
+
+    def workspace(self, report: Mapping[str, Any], bundle: bytes) -> None:
+        """Keep the workspace snapshots as of the latest run checkpoint, and their report."""
+        temporary = self.root / f".{BUNDLE_FILE}.tmp"
+        temporary.write_bytes(bundle)
+        temporary.replace(self.root / BUNDLE_FILE)
+        path = self.root / WORKSPACE_REPORT
+        staged = path.with_name(f".{path.name}.tmp")
+        staged.write_text(json.dumps(dict(report), sort_keys=True), encoding="utf-8")
+        staged.replace(path)
+
+    def workspace_files(self) -> tuple[dict[str, Any], bytes] | None:
+        """The workspace snapshots the journal holds, and their report.
+
+        Returns:
+            The report and the bundle's bytes, or ``None`` when it holds none.
+        """
+        bundle = self.root / BUNDLE_FILE
+        report = self.root / WORKSPACE_REPORT
+        if not bundle.is_file() or not report.is_file():
+            return None
+        value = json.loads(report.read_text("utf-8"))
+        return (value if isinstance(value, dict) else {}), bundle.read_bytes()
 
     def touch(self) -> None:
         """Say the runner is alive."""
@@ -264,4 +294,11 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-__all__ = ["CHECKPOINTS_FILE", "RUN_FOLDER", "STALE_SECONDS", "RunJournal", "interrupted"]
+__all__ = [
+    "CHECKPOINTS_FILE",
+    "RUN_FOLDER",
+    "STALE_SECONDS",
+    "WORKSPACE_REPORT",
+    "RunJournal",
+    "interrupted",
+]

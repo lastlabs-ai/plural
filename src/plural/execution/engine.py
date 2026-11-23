@@ -459,6 +459,19 @@ def _with_artifact(
     return (*tuple(item for item in artifacts if item.path != artifact.path), artifact)
 
 
+async def _host_file(provider: SandboxProvider, handle: SandboxHandle, path: str) -> bytes:
+    """Read a file from the App host's own folder.
+
+    A Runtime whose file API can't open that folder reads it as its privileged user.
+    """
+    private = getattr(provider, "read_private_file", None)
+    if private is not None:
+        return cast("bytes", await private(handle, path))
+    folder, _, name = path.rpartition("/")
+    downloaded = await provider.download_files(handle, [name], root=folder or "/")
+    return downloaded[0].data
+
+
 _JOB_ARTIFACTS = frozenset(
     {
         LEDGER_FILE,
@@ -914,6 +927,9 @@ class ResumePoint:
     markers: tuple[dict[str, Any], ...] = ()
     """The run checkpoints through this one, kept in the resumed execution's journal."""
     bundle: Path | None = None
+    """The workspace snapshots the checkpoint restores its files from."""
+    workspace: dict[str, Any] = field(default_factory=dict)
+    """Those snapshots' report, kept with the bundle in the resumed execution's journal."""
 
 
 class TrialRunner:
@@ -1240,16 +1256,8 @@ class TrialRunner:
         bundle_path = str(snapshots.pop("bundle", "") or "")
         self._workspace_report = snapshots
         if bundle_path:
-            folder, _, name = bundle_path.rpartition("/")
-            # The bundle is in the App host's own folder; a Runtime whose file API
-            # can't open it reads it as its privileged user instead.
-            private = getattr(provider, "read_private_file", None)
             try:
-                if private is not None:
-                    data = await private(handle, bundle_path)
-                else:
-                    downloaded = await provider.download_files(handle, [name], root=folder or "/")
-                    data = downloaded[0].data
+                data = await _host_file(provider, handle, bundle_path)
             except Exception as exc:  # noqa: BLE001 - a Runtime's SDK raises its own errors
                 snapshots["available"] = False
                 snapshots["problem"] = f"the workspace bundle could not be collected: {exc}"
@@ -2224,6 +2232,7 @@ class TrialRunner:
             journal.start(execution_id)
         else:
             checkpoint = resume.checkpoint
+            bundle = resume.bundle
             journal.start(
                 execution_id,
                 prefix={
@@ -2238,6 +2247,9 @@ class TrialRunner:
                     "checkpoints": resume.markers,
                 },
                 resumed_from=resume.record.from_execution_id,
+                workspace=(resume.workspace, bundle.read_bytes())
+                if bundle is not None and bundle.is_file()
+                else None,
             )
         self._journal = journal
 
@@ -2259,6 +2271,14 @@ class TrialRunner:
                 journal.touch()
                 return
             added = journal.append(progress)
+            snapshots = progress.get("workspace")
+            if added and isinstance(snapshots, Mapping) and snapshots.get("bundle"):
+                report = {key: value for key, value in snapshots.items() if key != "bundle"}
+                # Without its files a checkpoint would restore the Apps but not the workspace.
+                with contextlib.suppress(Exception):
+                    journal.workspace(
+                        report, await _host_file(provider, handle, str(snapshots["bundle"]))
+                    )
         if added:
             with contextlib.suppress(Exception):
                 files = await provider.download_files(

@@ -320,3 +320,105 @@ def test_command_and_judge_verifiers_read_the_same_workspace(tmp_path: Path, mod
     (prompt,) = JUDGED
     shown = {item["name"]: item for item in prompt["evidence"]["workspace"]}
     assert shown["environment/march-total.txt"]["content"] == "5740.00"
+
+
+_RESUME_HISTORIES: list[list[dict[str, Any]]] = []
+_WRITTEN = threading.Event()
+_RELEASE = threading.Event()
+
+
+class _ResumeModel(BaseHTTPRequestHandler):
+    """Writes a note, then hangs until its runner is killed; once resumed, reads the note."""
+
+    def do_POST(self) -> None:
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        _RESUME_HISTORIES.append(body["messages"])
+        done = sum(message["role"] == "tool" for message in body["messages"])
+        if done == 1 and not _WRITTEN.is_set():
+            _WRITTEN.set()
+            _RELEASE.wait(120)
+            return
+        script = [
+            _call("write_file", path="note.txt", content="remember-42"),
+            _call("read_file", path="note.txt"),
+            {"role": "assistant", "content": "Done."},
+        ]
+        payload = json.dumps(
+            {
+                "choices": [{"message": script[min(done, len(script) - 1)]}],
+                "usage": {"prompt_tokens": 9, "completion_tokens": 3},
+            }
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+def test_a_resumed_trial_reads_the_file_it_wrote_before_its_run_checkpoint(
+    tmp_path: Path,
+) -> None:
+    import signal
+    import time
+
+    _RESUME_HISTORIES.clear()
+    _WRITTEN.clear()
+    _RELEASE.clear()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _ResumeModel)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        project, env = _project(tmp_path, f"http://127.0.0.1:{server.server_address[1]}")
+        environment = project / "environments/files/environment.yaml"
+        environment.write_text(
+            environment.read_text() + "\ncheckpoint_every:\n  steps: 1\n", encoding="utf-8"
+        )
+        runner = subprocess.Popen(
+            [str(CLI), "run", "-t", "march-total", "-a", "files-native", "--yes", "--json"],
+            cwd=project,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            assert _WRITTEN.wait(120), "the Agent never wrote its note"
+            deadline = time.monotonic() + 60
+            run: Path | None = None
+            while time.monotonic() < deadline:
+                run = next((project / ".plural/jobs").glob("*/trials/*/run"), None)
+                if run is not None and (run / "workspace.bundle").is_file():
+                    break
+                time.sleep(0.5)
+            assert run is not None and (run / "workspace.bundle").is_file()
+        finally:
+            os.killpg(runner.pid, signal.SIGKILL)
+            runner.wait(30)
+            _RELEASE.set()
+        # As if the runner had been gone long enough to count as interrupted.
+        state = json.loads((run / "journal.json").read_text())
+        (run / "journal.json").write_text(json.dumps({**state, "updated": 0}))
+        trial_id = run.parent.name
+
+        resumed = subprocess.run(
+            [str(CLI), "trial", "resume", trial_id, "--json"],
+            cwd=project,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+        assert json.loads(resumed.stdout)["resumed"]["step"] == 1
+        answers = [
+            message["content"]
+            for message in _RESUME_HISTORIES[-1]
+            if message["role"] == "tool" and message.get("tool_call_id") == "call_read_file"
+        ]
+        assert answers == ["remember-42"]
+    finally:
+        _RELEASE.set()
+        server.shutdown()

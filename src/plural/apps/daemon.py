@@ -483,7 +483,11 @@ def _handle(
     if operation == "progress":
         since = request.get("since")
         given = since if isinstance(since, dict) else None
-        return {"ok": True, "result": host.progress(given)}, False
+        progress = host.progress(given)
+        snapshots = progress.get("workspace")
+        if isinstance(snapshots, dict) and snapshots.get("bundle"):
+            progress["workspace"] = {**snapshots, "bundle": runtime_path(snapshots["bundle"])}
+        return {"ok": True, "result": progress}, False
     if operation == "finish":
         # Outside a Job, a laptop's host keeps serving after a look at its report.
         report = host.finish() if control.token else host.report()

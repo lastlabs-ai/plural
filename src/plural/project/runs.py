@@ -520,7 +520,7 @@ def resume_local_trial(
     """Continue an interrupted local Trial from its latest run checkpoint, in its own Job.
 
     The world is restored as the checkpoint holds it (App State, RNG, clock,
-    and scheduled events), the Agent gets its context back, and the new
+    scheduled events, and the workspace's files), the Agent gets its context back, and the new
     execution carries over the cost, turns, and time spent before it.
 
     Returns:
@@ -529,6 +529,7 @@ def resume_local_trial(
     Raises:
         ProjectError: When the Trial isn't interrupted, or has no run checkpoint.
     """
+    from plural.apps.workspace import BUNDLE_FILE
     from plural.checkpoints import build_checkpoint
     from plural.execution.engine import ResumePoint
     from plural.execution.journal import RunJournal, interrupted
@@ -583,10 +584,20 @@ def resume_local_trial(
         carried_turns=int(marker.get("turn") or checkpoint.turns),
         carried_seconds=float(marker.get("t") or checkpoint.elapsed),
     )
+    bundle: Path | None = None
+    report: dict[str, Any] = {}
+    held = journal.workspace_files()
+    if held is not None and checkpoint.workspace.available:
+        # The resumed execution starts its journal afresh, so the bundle moves out of it first.
+        report, data = held
+        bundle = Path(tempfile.mkdtemp(prefix="plural-resume-")) / BUNDLE_FILE
+        bundle.write_bytes(data)
     point = ResumePoint(
         checkpoint=checkpoint,
         record=resumed,
         markers=tuple(item for item in journal.checkpoints() if int(item["step"]) <= step),
+        bundle=bundle,
+        workspace=report,
     )
     job_id, result = _execute(
         workspace,

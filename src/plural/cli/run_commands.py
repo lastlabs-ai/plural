@@ -887,8 +887,8 @@ def trial_resume(
     """Continue a Trial whose runner died from its latest run checkpoint.
 
     An Environment with checkpoint_every marks run checkpoints as the episode
-    runs. The world, the clock, and the Agent's context are restored as they
-    stood there, and the cost, turns, and time spent before carry over.
+    runs. The world, the workspace, the clock, and the Agent's context are
+    restored as they stood there, and the cost, turns, and time spent before carry over.
     """
     from plural.project.runs import resume_local_trial
 
