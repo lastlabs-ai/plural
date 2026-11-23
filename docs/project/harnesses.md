@@ -114,6 +114,7 @@ Every built-in accepts:
 
 | Key | Type | Allowed values |
 | --- | --- | --- |
+| `context` | mapping | `{strategy: none}` only: the tool manages its own context. See [Keep a long episode in context](agents.md#keep-a-long-episode-in-context). |
 | `version` | string | A release number of the tool, such as `2.1.236`, in place of the pinned one. npm aliases, URLs, and paths are refused. |
 | `config` | mapping, JSON text, or file path | The tool's own settings. A path to a JSON or YAML file holding a mapping is loaded first. Plural stores the mapping and includes it in the Agent hash. |
 
@@ -287,6 +288,10 @@ The `run` arguments are the same for every custom Harness:
 - `task` exposes `id`, `name`, `instructions`, `info`, and `metadata`.
 - `agent` exposes the selected model and instructions. Call
   `agent.complete(messages, tools=...)` to use the Job's model gateway.
+  `agent.context` is the [context policy](agents.md#keep-a-long-episode-in-context)
+  the Agent chose, such as `{"strategy": "window", "max_tokens": 20000}`, or `None`.
+  Override the classmethod `context_strategies()` to return the strategies your loop
+  carries out; an Agent can choose only one of those.
 - `environment` exposes `observation`, `reset()`, `step(action, **arguments)`, and
   `tools()`. These methods run the real Environment commands; the Harness never needs
   to parse command metadata. `step` returns the transition's `observation`, `reward`,
@@ -396,6 +401,7 @@ ignored.
 | `readme` | No | string or `null` | `README.md` | A Markdown file inside the folder. Left at the default, a missing file is skipped; named explicitly, a missing file is an error. `null` turns it off. |
 | `tools` | No | list | `[]` | The tools the loop brings itself, such as `bash`: each a name or `{name, description}`. Replaces the class's `tools()`. See [One timeline for both](#one-timeline-for-both). |
 | `supports_resume` | No | boolean | `false` | `true` when the class reads `environment.resume` and continues a history as its own conversation. |
+| `context_strategies` | No | list | the class's `context_strategies()` | The [context policies](agents.md#keep-a-long-episode-in-context) the loop carries out: `window`, `summarize`, `none`. An Agent chooses one in `harness_config.context`, and validation refuses any other. |
 
 `config` has no fixed keys: its keys are whatever your class reads. Document each one
 in the README, with its type and default, and read it with a fallback so a missing

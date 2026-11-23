@@ -50,7 +50,8 @@ instructions: |
        when the instructions told it to skip the tool.
      - context: what it needed was missing from, or lost in, what it read
        (context_at shows each message and its size). Over a long episode the Harness
-       compacts the context under the Agent's context policy (agent_config's context):
+       compacts the context under the Agent's context policy (agent_config's context,
+       one of its Harness's context_strategies, the only ones a fork may use):
        overview's context_compactions lists each compaction, the step after it, and the
        summary that replaced the dropped messages, the Task's own included. When the
        Agent's work went wrong after a compaction, and what it needed was in what the

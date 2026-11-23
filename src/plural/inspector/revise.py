@@ -17,6 +17,7 @@ from typing import Any
 
 import yaml
 
+from plural.agents.models import context_into_harness_config
 from plural.inspector.causes import load_causes
 from plural.inspector.evidence import JobEvidence
 from plural.inspector.findings import Finding, ForkTest, InspectionRecord, load_findings
@@ -159,12 +160,12 @@ def revise_agent(
     if remedy.instructions is not None:
         payload["instructions"] = remedy.instructions
     if remedy.harness_config:
-        payload["harness_config"] = {
-            **dict(payload.get("harness_config") or {}),
-            **remedy.harness_config,
-        }
-    if remedy.context is not None:
-        payload["context"] = remedy.context.model_dump(mode="json", exclude_none=True)
+        current = context_into_harness_config(payload)
+        payload.pop("context", None)
+        config = {**dict(current.get("harness_config") or {}), **remedy.harness_config}
+        if remedy.context is not None:
+            config["context"] = remedy.context.model_dump(mode="json", exclude_none=True)
+        payload["harness_config"] = config
     if remedy.tool_overrides:
         overrides = dict(payload.get("tool_overrides") or {})
         for name, item in remedy.tool_overrides.items():

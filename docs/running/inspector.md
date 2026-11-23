@@ -194,7 +194,7 @@ plural agent revise quote-bot --from-finding F1
 `revise` applies a **confirmed** Finding's remedy to `agents/quote-bot/agent.yaml`,
 raises its minor version, and adds an entry to `CHANGELOG.md` beside it: the Finding,
 what changed, its evidence, and the forks that confirmed it, with their counts. A
-remedy can change the instructions, the model, the Harness config, the
+remedy can change the instructions, the model, the Harness config, including its
 [context policy](../project/agents.md#keep-a-long-episode-in-context), or a tool's
 description in [`tool_overrides`](../project/agents.md#change-what-a-tool-says). The
 comments at the top of `agent.yaml` are kept. `--job` picks the inspected Job when

@@ -18,6 +18,7 @@ from typing import Any
 from plural.agents import AgentBinding
 from plural.apps.host import STATES_FILE, STEPS_FILE
 from plural.execution.apps import environment_payload
+from plural.harness.builtins import NATIVE_CONTEXT_STRATEGIES, package_context_strategies
 from plural.harness.episode import EPISODE_FILE
 from plural.jobs import BenchmarkJobSource, JobResult, JobSpec, TrialResult
 from plural.project.layout import Project, ProjectError
@@ -776,6 +777,11 @@ class TrialEvidence:
             "harness": agent.harness.name if agent.harness else "native",
             "harness_config": dict(agent.harness_config),
             "context": agent.context.model_dump(mode="json") if agent.context else None,
+            "context_strategies": list(
+                package_context_strategies(agent.harness_package)
+                if agent.harness_package is not None
+                else NATIVE_CONTEXT_STRATEGIES
+            ),
             "tool_overrides": {
                 name: item.model_dump(mode="json", exclude_defaults=True)
                 for name, item in getattr(agent, "tool_overrides", {}).items()

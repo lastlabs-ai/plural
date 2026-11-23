@@ -113,6 +113,11 @@ def semantic_version(value: str) -> str:
     return value
 
 
+ContextStrategy = Literal["window", "summarize", "none"]
+"""How a Harness keeps a long episode's context within bounds."""
+CONTEXT_STRATEGIES: tuple[ContextStrategy, ...] = ("window", "summarize", "none")
+
+
 class FrozenModel(BaseModel):
     """Strict immutable base for public domain objects."""
 
@@ -259,6 +264,8 @@ class HarnessProtocol(FrozenModel):
     readme: str = ""
     tools: tuple[HarnessTool, ...] = ()
     supports_resume: bool = False
+    context_strategies: tuple[ContextStrategy, ...] = ()
+    """The context policies the Harness's loop carries out, which an Agent may choose."""
 
     @field_validator(
         "command",
@@ -326,6 +333,8 @@ class HarnessPackage(FrozenModel):
             del payload["tools"]
         if not self.definition.supports_resume:
             del payload["supports_resume"]
+        if not self.definition.context_strategies:
+            del payload["context_strategies"]
         if self.source.digest is None:
             payload["source"] = self.source.model_dump(mode="json")
         else:

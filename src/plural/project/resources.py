@@ -589,6 +589,9 @@ def _build_harness(
         cls.tools = classmethod(lambda _cls: declared)  # type: ignore[method-assign,assignment]
     if manifest.supports_resume:
         cls.supports_resume = True
+    if manifest.context_strategies is not None:
+        strategies = tuple(manifest.context_strategies)
+        cls.context_strategies = classmethod(lambda _cls: strategies)  # type: ignore[method-assign,assignment]
     cls._bound_python_source = source
     cls._bound_python_object = object_path
     try:

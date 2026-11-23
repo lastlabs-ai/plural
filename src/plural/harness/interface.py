@@ -87,6 +87,10 @@ class HarnessAgent:
         self.routing = dict(payload["routing"]) if isinstance(payload.get("routing"), dict) else {}
         config = payload.get("harness_config", payload.get("harness_kwargs"))
         self.harness_config = dict(config) if isinstance(config, dict) else {}
+        context = payload.get("context")
+        self.context: dict[str, Any] | None = dict(context) if isinstance(context, dict) else None
+        """The context policy the Agent chose, such as ``{"strategy": "window"}``, or
+        ``None``. It is one of the Harness's :meth:`~plural.Harness.context_strategies`."""
         self.model_resolution = dict(model_resolution or {})
 
     harness_kwargs = renamed_attribute("harness_kwargs", "harness_config")

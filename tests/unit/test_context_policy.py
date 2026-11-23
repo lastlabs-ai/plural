@@ -43,6 +43,99 @@ def test_the_policy_validates_and_leaves_old_agents_alone() -> None:
         Agent(model="openai/gpt-5.6-luna", name="vend", context={"strategy": "window"})
 
 
+def test_the_policy_is_a_harness_setting_and_old_agents_keep_their_hash() -> None:
+    policy = {"strategy": "summarize", "max_tokens": 4000}
+    old = Agent(model="openai/gpt-5.6-luna", name="vend", context=policy)
+    new = Agent(model="openai/gpt-5.6-luna", name="vend", harness_config={"context": policy})
+    assert old.content_hash == new.content_hash
+    assert old.harness_config["context"]["strategy"] == "summarize"
+    assert "context" not in old.model_dump(mode="json")
+    assert Agent.model_validate(old.model_dump(mode="json")).content_hash == old.content_hash
+    definition = new._definition()
+    assert definition.harness_config == {}
+    assert definition.context is not None and definition.context.max_tokens == 4000
+    with pytest.raises(ValueError, match="context twice"):
+        Agent(
+            model="openai/gpt-5.6-luna",
+            context=policy,
+            harness_config={"context": {"strategy": "window", "max_tokens": 4000}},
+        )
+    with pytest.raises(ValueError, match="takes only context"):
+        Agent(model="openai/gpt-5.6-luna", harness_config={"context": policy, "x": 1})
+
+
+def test_a_harness_refuses_a_strategy_it_does_not_carry_out() -> None:
+    from plural import Harness, HarnessResult
+    from plural.harness.builtins import BUILTIN_HARNESSES, package_context_strategies
+    from plural.harness.packages import native_workspace_v1
+
+    window = {"strategy": "window", "max_tokens": 4000}
+    assert package_context_strategies(native_workspace_v1()) == ("window", "summarize", "none")
+    for name, spec in BUILTIN_HARNESSES.items():
+        assert spec.context_strategies == ("none",), name
+    claude = "anthropic/claude-haiku-4-5"
+    with pytest.raises(ValueError, match="'claude-code' supports none"):
+        Agent(model=claude, harness="claude-code", harness_config={"context": window})
+    vendor = Agent(
+        model=claude,
+        harness="claude-code",
+        harness_config={"context": {"strategy": "none"}, "reasoning_effort": "low"},
+    )
+    assert "context" not in vendor._definition().harness_config
+    assert vendor._definition().context is not None
+
+    class Plain(Harness):
+        def run(self, task: Any, agent: Any, environment: Any) -> HarnessResult:
+            return HarnessResult(response="")
+
+    class Windowed(Plain):
+        @classmethod
+        def context_strategies(cls) -> tuple[Any, ...]:
+            return ("window",)
+
+    with pytest.raises(ValueError, match="supports no context policy"):
+        Agent(model="openai/gpt-5.6-luna", harness=Plain(), context=window)
+    assert Plain()._package().content_hash == Plain()._package().content_hash
+    assert "context_strategies" not in Plain()._package().definition.model_dump(
+        exclude_defaults=True
+    )
+    windowed = Agent(model="openai/gpt-5.6-luna", harness=Windowed(), context=window)
+    assert windowed.context is not None and windowed.context.strategy == "window"
+    assert Windowed()._package().definition.context_strategies == ("window",)
+    with pytest.raises(ValueError, match="supports window"):
+        Agent(
+            model="openai/gpt-5.6-luna",
+            harness=Windowed(),
+            harness_config={"context": {"strategy": "summarize", "max_tokens": 4000}},
+        )
+
+
+def test_harness_yaml_declares_the_strategies(tmp_path: Path) -> None:
+    from plural.project.resources import load_harness_directory
+
+    source = tmp_path / "loop"
+    source.mkdir()
+    (source / "harness.yaml").write_text(
+        "name: loop\npython: harness.py:Loop\ncontext_strategies: [window, none]\n",
+        encoding="utf-8",
+    )
+    (source / "harness.py").write_text(
+        "from plural import Harness\n\n"
+        "class Loop(Harness):\n"
+        "    def run(self, task, agent, environment):\n"
+        "        return ''\n",
+        encoding="utf-8",
+    )
+    harness = load_harness_directory(source, name="loop")
+    assert type(harness).context_strategies() == ("window", "none")
+    assert harness._package().definition.context_strategies == ("window", "none")
+    Agent(
+        model="openai/gpt-5.6-luna",
+        harness=harness,
+        harness_config={"context": {"strategy": "window", "max_tokens": 4000}},
+    )
+
+
 def test_window_keeps_the_task_and_the_last_turns(tmp_path: Path) -> None:
     episode = native_runner._Episode(stream=tmp_path / "episode.jsonl")
     episode.messages = _turns(20)

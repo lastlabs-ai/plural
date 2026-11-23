@@ -153,9 +153,11 @@ def test_harness_without_readme_keeps_its_hash(tmp_path: Path) -> None:
     assert package.definition.readme == ""
     payload = package.definition.model_dump(mode="json")
     del payload["readme"]
-    # Tool declarations and resume support, at their defaults, are left out too.
+    # Tool declarations, resume support, and context strategies, at their defaults,
+    # are left out too.
     del payload["tools"]
     del payload["supports_resume"]
+    del payload["context_strategies"]
     payload["source_digest"] = package.source.digest
     assert package.content_hash == revision_hash("harness", payload)
 

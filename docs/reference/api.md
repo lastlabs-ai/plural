@@ -1877,6 +1877,24 @@ Returns:
     The tools; none by default.
 ```
 
+### plural.Harness.context_strategies
+
+```python
+context_strategies() -> 'tuple[ContextStrategy, ...]'
+```
+
+The context policies this Harness's loop carries out.
+
+```text
+Override to declare the ones :meth:`run` honors, reading the Agent's choice
+from ``agent.context``: ``window``, ``summarize``, or ``none``. An Agent
+chooses one in ``harness_config.context``, and validation refuses one the
+Harness doesn't declare, rather than let it be ignored.
+
+Returns:
+    The strategies; none by default, so an Agent may set no context policy.
+```
+
 ### plural.Harness.run
 
 ```python

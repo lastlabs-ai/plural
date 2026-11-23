@@ -48,14 +48,19 @@ def _tool(*, read_only: bool = True, timeout_seconds: float = 30) -> Callable[[_
     return cast("Callable[[_F], _F]", action(read_only=read_only, timeout_seconds=timeout_seconds))
 
 
-def _context_policy(value: dict[str, Any] | None) -> ContextPolicy | None:
-    """A context policy the Inspector proposed, or a message saying what is wrong."""
+def _context_config(value: dict[str, Any] | None) -> dict[str, Any]:
+    """The ``harness_config`` of a context policy the Inspector proposed.
+
+    Raises:
+        ValueError: Saying what is wrong with the policy.
+    """
     if value is None:
-        return None
+        return {}
     try:
-        return ContextPolicy.model_validate(value)
+        policy = ContextPolicy.model_validate(value)
     except ValidationError as exc:
         raise ValueError(f"context isn't a context policy: {exc}") from exc
+    return {"context": policy.model_dump(mode="json")}
 
 
 class InspectorState(State):
@@ -322,7 +327,7 @@ class InspectorApp(App[InspectorState]):
                 **{name: ToolOverride(hidden=True) for name in hide_tools or ()},
             },
             model=model,
-            context=_context_policy(context),
+            harness_config=_context_config(context),
         )
         if remedy.empty and change is None:
             raise ValueError("Change the Agent or name a diagnostic change to test.")
@@ -456,7 +461,7 @@ class InspectorApp(App[InspectorState]):
                 for name, text in (tool_descriptions or {}).items()
             },
             model=model,
-            context=_context_policy(context),
+            harness_config=_context_config(context),
             note=note,
         )
         trial = self._trial()

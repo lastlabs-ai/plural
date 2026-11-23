@@ -456,6 +456,14 @@ def test_revise_applies_a_confirmed_finding_as_a_new_version(
         revise_agent(space, "scripted", "F1")
     _save(job, remedy={"tool_overrides": {"guess": {"description": "Guess a word."}}})
     assert revise_agent(space, "scripted", "F1").version == "1.2.0"
+    # A Finding saved before the context policy moved to the Harness still applies.
+    _save(job, remedy={"context": {"strategy": "window", "max_tokens": 8000}})
+    assert revise_agent(space, "scripted", "F1").version == "1.3.0"
+    written = yaml.safe_load((project / "agents/scripted/agent.yaml").read_text())
+    assert "context" not in written
+    assert written["harness_config"]["context"]["strategy"] == "window"
+    loaded = Workspace(Project.at(project)).get("agent", "scripted")
+    assert loaded.context is not None and loaded.context.max_tokens == 8000
 
 
 def test_revise_writes_a_fix_note_for_an_external_agent(
@@ -568,8 +576,9 @@ def test_a_remedy_can_change_the_context_policy() -> None:
         summary_instructions="Keep the supplier accounts and standing orders.",
     )
     remedy = Remedy(context=policy)
+    assert remedy == Remedy(harness_config={"context": policy.model_dump(mode="json")})
     assert not remedy.empty
-    assert remedy.describe() == ["context: summarize, rewritten"]
+    assert remedy.describe() == ["harness_config.context: summarize, rewritten"]
     changed = remedy_agent(AgentBinding(agent=agent._definition()), remedy, "X1")
     assert changed.agent.context == policy
     assert changed.agent.instructions == agent.instructions

@@ -36,7 +36,6 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [Checkpoint](#checkpoint)
 - [CheckpointWorkspace](#checkpointworkspace)
 - [Clock](#clock)
-- [ContextPolicy](#contextpolicy)
 - [DeclarativeImage](#declarativeimage)
 - [Resource](#resource)
 - [Runtime](#runtime)
@@ -188,7 +187,7 @@ A catalog-backed model and its optional execution harness.
 - **`temperature`** — `number | null`; optional. Default: `null`.
 - **`max_tokens`** — `integer | null`; optional. Default: `null`.
 - **`harness`** — `HarnessDefinition | Harness | string | null`; optional. Default: `null`.
-- **`harness_config`** — `object`; optional. Options for the Agent's Harness. A built-in Harness validates them; a custom one reads them in self.config, over its own config.
+- **`harness_config`** — `object`; optional. Options for the Agent's Harness. A built-in Harness validates them; a custom one reads them in self.config, over its own config. context chooses one of the Harness's context strategies: {strategy: window | summarize | none, max_tokens, keep_last_turns}.
 - **`auth`** — `"environment" | "api_key" | "oauth" | "none"`; optional. Default: `"environment"`. How the Harness authenticates to the model; none when it calls no model.
 - **`secrets`** — `array of string`; optional. Default: `[]`. Names of the Harness's declared secrets this Agent grants it.
 - **`endpoint`** — `string | null`; optional. Default: `null`.
@@ -196,7 +195,6 @@ A catalog-backed model and its optional execution harness.
 - **`external`** — `ExternalAgent | null`; optional. Default: `null`.
 - **`credentials`** — `object`; optional.
 - **`tool_overrides`** — `object`; optional. How the Environment's tools are described to the model, by tool name: a new description, or hidden: true. The Environment itself is unchanged.
-- **`context`** — `ContextPolicy | null`; optional. Default: `null`. How the Harness keeps a long episode's context within bounds: {strategy: window | summarize | none, max_tokens, keep_last_turns}.
 - **`metadata`** — `object`; optional.
 
 ## Benchmark
@@ -343,15 +341,6 @@ Simulated time, for a world that changes on its own.
 - **`start`** — `number | string`; optional. Default: `0.0`.
 - **`unit`** — `"second" | "minute" | "hour" | "day"`; optional. Default: `"day"`.
 - **`pacing`** — `"agent_paced" | "event_driven"`; optional. Default: `"event_driven"`.
-
-## ContextPolicy
-
-How an Agent's Harness keeps its context within bounds over a long episode.
-
-- **`strategy`** — `"window" | "summarize" | "none"`; optional. Default: `"none"`.
-- **`max_tokens`** — `integer | null`; optional. Default: `null`.
-- **`keep_last_turns`** — `integer`; optional. Default: `4`. Constraints: `{"maximum": 200, "minimum": 1}`.
-- **`summary_instructions`** — `string | null`; optional. Default: `null`. For summarize: what the summary keeps, as the system prompt of the summarizing call. By default it keeps the task, decisions made, and anything still pending.
 
 ## DeclarativeImage
 
@@ -504,6 +493,7 @@ A declared executable Agent interaction strategy.
 - **`readme`** — `string`; optional. Default: `""`. Markdown overview shown on the Harness page.
 - **`tools`** — `array of HarnessTool`; optional. Default: `[]`. The tools the Harness brings itself, such as bash or edit, by name or {name, description}. A fork compares them with the tools a history used.
 - **`supports_resume`** — `boolean`; optional. Default: `false`. Whether the Harness reads HarnessEnvironment.resume and continues a history as its own conversation.
+- **`context_strategies`** — `array of "window" | "summarize" | "none"`; optional. Default: `[]`. The context policies the Harness's loop carries out: window, summarize, none. An Agent chooses one in harness_config.context; empty, it may set none.
 
 ## HarnessPolicy
 

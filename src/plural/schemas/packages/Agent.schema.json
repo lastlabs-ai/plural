@@ -21,59 +21,6 @@
       "title": "AgentCredential",
       "type": "object"
     },
-    "ContextPolicy": {
-      "additionalProperties": false,
-      "description": "How an Agent's Harness keeps its context within bounds over a long episode.\n\n``window`` drops the oldest turns once the context is over ``max_tokens``,\nkeeping the instructions, the Task, and the last ``keep_last_turns``\nturns. ``summarize`` replaces all but the instructions and the last turns\nwith a summary the Agent's own model writes, billed to the Agent. ``none``\nkeeps everything. Each compaction is recorded in the episode, and a\ncheckpoint holds the context as it stood after it.",
-      "properties": {
-        "keep_last_turns": {
-          "default": 4,
-          "maximum": 200,
-          "minimum": 1,
-          "title": "Keep Last Turns",
-          "type": "integer"
-        },
-        "max_tokens": {
-          "anyOf": [
-            {
-              "minimum": 1000,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Max Tokens"
-        },
-        "strategy": {
-          "default": "none",
-          "enum": [
-            "window",
-            "summarize",
-            "none"
-          ],
-          "title": "Strategy",
-          "type": "string"
-        },
-        "summary_instructions": {
-          "anyOf": [
-            {
-              "maxLength": 4000,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "For summarize: what the summary keeps, as the system prompt of the summarizing call. By default it keeps the task, decisions made, and anything still pending.",
-          "title": "Summary Instructions"
-        }
-      },
-      "title": "ContextPolicy",
-      "type": "object"
-    },
     "ExternalAgent": {
       "additionalProperties": false,
       "description": "An agent that already runs as a service of its own.\n\nA Job calls ``url`` with a signed request for each episode. The agent acts\nonly through that episode's actions and files, and its code is not part of\nany content hash: ``version`` is the label you give each release.",
@@ -215,6 +162,20 @@
           },
           "minItems": 1,
           "title": "Command",
+          "type": "array"
+        },
+        "context_strategies": {
+          "default": [],
+          "description": "The context policies the Harness's loop carries out: window, summarize, none. An Agent chooses one in harness_config.context; empty, it may set none.",
+          "items": {
+            "enum": [
+              "window",
+              "summarize",
+              "none"
+            ],
+            "type": "string"
+          },
+          "title": "Context Strategies",
           "type": "array"
         },
         "description": {
@@ -423,18 +384,6 @@
       "title": "Auth",
       "type": "string"
     },
-    "context": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/ContextPolicy"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "How the Harness keeps a long episode's context within bounds: {strategy: window | summarize | none, max_tokens, keep_last_turns}."
-    },
     "credentials": {
       "additionalProperties": {
         "$ref": "#/$defs/AgentCredential"
@@ -505,7 +454,7 @@
     },
     "harness_config": {
       "additionalProperties": true,
-      "description": "Options for the Agent's Harness. A built-in Harness validates them; a custom one reads them in self.config, over its own config.",
+      "description": "Options for the Agent's Harness. A built-in Harness validates them; a custom one reads them in self.config, over its own config. context chooses one of the Harness's context strategies: {strategy: window | summarize | none, max_tokens, keep_last_turns}.",
       "title": "Harness Config",
       "type": "object"
     },

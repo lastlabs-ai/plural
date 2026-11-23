@@ -131,14 +131,15 @@ on no more than ten days.
 `vending-luna` runs on a small model with a context policy:
 
 ```yaml
-context:
-  strategy: summarize
-  max_tokens: 20000
-  keep_last_turns: 6
-  summary_instructions: >
-    Reply with exactly three lines and nothing else. "Machine:" and the units of each
-    product in the machine. "Storage:" and the units of each product in storage and on
-    order. "Bank:" and the cash in the bank.
+harness_config:
+  context:
+    strategy: summarize
+    max_tokens: 20000
+    keep_last_turns: 6
+    summary_instructions: >
+      Reply with exactly three lines and nothing else. "Machine:" and the units of each
+      product in the machine. "Storage:" and the units of each product in storage and on
+      order. "Bank:" and the cash in the bank.
 ```
 
 Once the conversation passes 20,000 tokens, all but the last six turns are replaced by a

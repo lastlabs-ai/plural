@@ -298,17 +298,30 @@ draw on credits.
 
 ## Keep a long episode in context
 
-A long episode outgrows any context window. A **context policy** says how Plural's
-native Harness keeps it within bounds:
+A long episode outgrows any context window. A **context policy** says how the Agent's
+Harness keeps it within bounds. It is a Harness setting, so the Agent chooses one in
+`harness_config.context`:
 
 ```yaml
-context:
-  strategy: summarize     # window, summarize, or none (the default)
-  max_tokens: 20000       # compact once the context is over this
-  keep_last_turns: 6      # the latest turns stay as they are
-  summary_instructions: >
-    Keep the standing orders, the supplier accounts, and what is still pending.
+harness_config:
+  context:
+    strategy: summarize     # window, summarize, or none
+    max_tokens: 20000       # compact once the context is over this
+    keep_last_turns: 6      # the latest turns stay as they are
+    summary_instructions: >
+      Keep the standing orders, the supplier accounts, and what is still pending.
 ```
+
+Each Harness lists the strategies it carries out, and validation refuses one it
+doesn't. Plural's native loop carries out `window`, `summarize`, and `none`. A
+built-in vendor Harness, such as `claude-code`, manages its own context, so it accepts
+only `none`. A custom Harness declares its own with `context_strategies()` or
+`context_strategies` in `harness.yaml`, and accepts none until it does. With no
+policy, the Harness keeps everything.
+
+An Agent written before the policy moved to the Harness, with `context:` at the top
+level, still loads: Plural reads it as `harness_config.context`, and the Agent keeps
+its hash.
 
 `window` drops the oldest turns; `summarize` replaces them with a summary the Agent's
 own model writes, billed to the Agent. Either way the instructions and the latest turns

@@ -20,7 +20,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from plural.common import HarnessTool
+from plural.common import ContextStrategy, HarnessTool
 from plural.environments.definition import (
     Clock,
     EnvironmentResource,
@@ -272,6 +272,12 @@ class HarnessManifest(ManifestModel):
         default=False,
         description="Whether the loop reads environment.resume and continues a history "
         "as its own conversation, when a fork starts it mid-episode.",
+    )
+    context_strategies: list[ContextStrategy] | None = Field(
+        default=None,
+        description="The context policies the loop carries out, which an Agent chooses "
+        "in harness_config.context: window, summarize, none. Overrides the class's "
+        "context_strategies().",
     )
 
 
