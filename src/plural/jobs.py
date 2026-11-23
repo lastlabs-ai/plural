@@ -1419,6 +1419,11 @@ class SeatAggregate(FrozenModel):
     mean_score: float | None = None
     metrics: dict[str, float] = Field(default_factory=dict)
     """Each metric's mean over the Trials it applied to, from this seat's own values."""
+    pass_rate: float | None = None
+    """The share of this seat's judged Trials that passed: by the seat's own gates where
+    one applied to it, else by the Trial's. ``None`` when none was judged."""
+    gates: dict[str, float] = Field(default_factory=dict)
+    """Each per-seat gate's pass rate over the seats it judged."""
 
 
 class AgentAggregate(FrozenModel):
@@ -1448,8 +1453,10 @@ class AgentAggregate(FrozenModel):
     the metric's mean (the share of 1s, for a binary metric)."""
     pass_rate: float | None = None
     """The pass rate: the share of this Agent's judged Trials that passed every
-    applicable gate. ``None`` when no Trial was judged. The success rate, which
-    counts scores at the success threshold, is separate."""
+    applicable gate. ``None`` when no Trial was judged. At a Task several Agents
+    share, each seat it played counts once, judged by the seat's own gates where one
+    applied to it. The success rate, which counts scores at the success threshold, is
+    separate."""
     seats: dict[str, SeatAggregate] = Field(default_factory=dict)
     """At Tasks several Agents share: this Agent's results from each seat it played."""
     opponent: bool = False

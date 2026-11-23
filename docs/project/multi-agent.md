@@ -308,8 +308,10 @@ steady-haggler: fixed opponent: score 0.85 (95% 0.67 to 0.96), ...
 A running metric a Verifier's `measure` gives per seat, as a mapping of seat to value,
 has a series for each seat. Each seat's series is aggregated, and judged as a gate, on
 its own; `seat_aggregate` (`mean`, `sum`, `min`, or `max`) combines them into the
-Trial's value. The `negotiation` example has a competitive Benchmark and a cooperative
-one.
+Trial's value. An Agent's pass rate counts each seat it played once: by that seat's
+own gates when one applied to it, and otherwise by the Trial's. Each seat's line shows
+its pass rate when it was judged, and the hosted Job page keeps each seat's gates. The
+`negotiation` example has a competitive Benchmark and a cooperative one.
 
 ## What each seat sees, and what it cannot
 

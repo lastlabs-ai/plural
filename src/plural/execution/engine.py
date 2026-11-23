@@ -3294,7 +3294,12 @@ def _agent_aggregates(
         )
         metrics = _metric_aggregates(spec, selected, agent.content_hash)
         primary_metric = release.primary_metric if release is not None else "score"
-        verdicts = [item.passed for item in selected if item.passed is not None]
+        verdicts = [
+            passed
+            for item in selected
+            for passed in _verdicts(item, agent.content_hash)
+            if passed is not None
+        ]
         primary = (
             combined.score
             if primary_metric == "score"
@@ -3324,15 +3329,30 @@ def _agent_aggregates(
     return tuple(rows)
 
 
+def _verdicts(trial: TrialResult, digest: str) -> list[bool | None]:
+    """Whether the Agent ``digest`` passed: once per seat it played, by the seat's own
+    gates where one applied to it, else by the Trial's; once for a Trial without seats."""
+    if not trial.seats:
+        return [trial.passed] if trial.receipt.agent_digest == digest else []
+    return [
+        trial.passed if seat.passed is None else seat.passed
+        for seat in trial.seats
+        if seat.agent_digest == digest
+    ]
+
+
 def _seat_aggregates(trials: Sequence[TrialResult], digest: str) -> dict[str, SeatAggregate]:
     """One Agent's results from each seat it played, in seat order.
 
     Returns:
-        Each seat's count, mean score, and metric means; empty without seats.
+        Each seat's count, mean score, metric means, pass rate, and per-seat gate pass
+        rates; empty without seats.
     """
     scores: dict[str, list[float]] = {}
     counts: dict[str, int] = {}
     values: dict[str, dict[str, list[float]]] = {}
+    judged: dict[str, list[bool]] = {}
+    gates: dict[str, dict[str, list[bool]]] = {}
     for trial in trials:
         for seat in trial.seats:
             if seat.agent_digest != digest:
@@ -3343,6 +3363,11 @@ def _seat_aggregates(trials: Sequence[TrialResult], digest: str) -> dict[str, Se
             for name, value in seat.metrics.items():
                 if value is not None:
                     values.setdefault(seat.seat, {}).setdefault(name, []).append(value)
+            verdict = trial.passed if seat.passed is None else seat.passed
+            if verdict is not None:
+                judged.setdefault(seat.seat, []).append(verdict)
+            for name, passed in seat.gates.items():
+                gates.setdefault(seat.seat, {}).setdefault(name, []).append(passed)
     return {
         seat: SeatAggregate(
             count=counts[seat],
@@ -3350,6 +3375,10 @@ def _seat_aggregates(trials: Sequence[TrialResult], digest: str) -> dict[str, Se
             metrics={
                 name: math.fsum(items) / len(items)
                 for name, items in sorted(values.get(seat, {}).items())
+            },
+            pass_rate=sum(judged[seat]) / len(judged[seat]) if judged.get(seat) else None,
+            gates={
+                name: sum(items) / len(items) for name, items in sorted(gates.get(seat, {}).items())
             },
         )
         for seat in sorted(counts, key=lambda name: int(name.rpartition("_")[2] or 0))

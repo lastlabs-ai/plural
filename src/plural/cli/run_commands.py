@@ -1697,7 +1697,7 @@ def ranked(aggregates: Iterable[AgentAggregate]) -> list[AgentAggregate]:
 
 
 def _seat_lines(seats: Mapping[str, Any]) -> list[str]:
-    """One line per seat an Agent played: its mean score and metric means there.
+    """One line per seat an Agent played: its mean score, metric means, and pass rate there.
 
     Returns:
         The lines, indented under the Agent's.
@@ -1708,6 +1708,8 @@ def _seat_lines(seats: Mapping[str, Any]) -> list[str]:
         parts = [f"score {'-' if mean is None else f'{mean:.2f}'}"] + [
             f"{name} {value:,.2f}" for name, value in (item.get("metrics") or {}).items()
         ]
+        if item.get("pass_rate") is not None:
+            parts.append(f"pass rate {item['pass_rate']:.0%}")
         lines.append(f"    as {seat}: {', '.join(parts)} ({counted(item['count'], 'Trial')})")
     return lines
 
