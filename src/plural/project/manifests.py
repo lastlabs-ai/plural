@@ -209,7 +209,7 @@ class TaskManifest(ManifestModel):
             "instructions, keyed seat_1, seat_2, and so on."
         ),
     )
-    party: int | None = Field(
+    party_size: int | None = Field(
         default=None,
         ge=2,
         le=100,
@@ -237,7 +237,14 @@ class TaskManifest(ManifestModel):
     def _removed_fields(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
-        return without_reset_options(dict(value), value.get("name"))
+        value = dict(value)
+        if "party" in value:
+            if "party_size" in value:
+                raise ValueError(
+                    f"Task {value.get('name')!r} sets party and party_size. Keep party_size."
+                )
+            value["party_size"] = value.pop("party")
+        return without_reset_options(value, value.get("name"))
 
 
 class HarnessManifest(ManifestModel):

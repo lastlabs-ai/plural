@@ -1,12 +1,13 @@
-# Task: two Agents haggle over a used road bike. party pins two players, and competitive says
-# they play against each other, so a Benchmark seats them against fixed opponents.
+# Task: two Agents haggle over a used road bike. party_size pins two players, and
+# competitive says they play against each other, so a Benchmark seats them against
+# fixed opponents.
 name: bike-deal
 version: 1.0.0
 instructions: instruction.md
 environment: market
 verifiers:
   - deal-books
-party: 2
+party_size: 2
 competitive: true
 initial_state:
   market:

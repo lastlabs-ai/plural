@@ -69,7 +69,7 @@ name: bike-deal
 environment: market
 verifiers:
   - deal-books
-party: 2
+party_size: 2
 competitive: true
 ```
 

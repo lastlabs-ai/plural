@@ -260,11 +260,12 @@ play and whether they play against each other:
 ```yaml
 # tasks/bike-deal/task.yaml
 environment: market
-party: 2          # pinned: every Agent is ranked at a table of two
+party_size: 2     # pinned: every Agent is ranked at a table of two
 competitive: true # the seats play against each other
 ```
 
-A Benchmark refuses a party Task without `party`. Run alone with `plural run -t`, it
+`party_size` is the same name in `task.yaml`, the API, and the hosted Task page. A
+Benchmark refuses a party Task without it. Run alone with `plural run -t`, it
 refuses one too; run it through the Benchmark.
 
 The Benchmark decides who fills the other seats:

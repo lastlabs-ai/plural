@@ -83,7 +83,7 @@ def test_the_ranked_agent_cannot_also_be_an_opponent(root: Path) -> None:
     [
         (
             "tasks/bike-deal/task.yaml",
-            "party: 2\n",
+            "party_size: 2\n",
             "",
             "must pin its party size",
         ),
@@ -114,3 +114,16 @@ def test_a_benchmark_refuses_an_unrankable_party(
     with pytest.raises(ProjectError) as caught:
         Workspace(Project.at(root)).load(ResourceRef("benchmark", "negotiation"))
     assert message in "\n".join(caught.value.problems or [caught.value.message])
+
+
+def test_party_size_is_one_name_and_older_task_files_still_load(root: Path) -> None:
+    task = root / "tasks/bike-deal/task.yaml"
+    pinned = Workspace(Project.at(root)).load(ResourceRef("task", "bike-deal")).value
+    assert pinned.party_size == 2
+    _edit(task, "party_size: 2\n", "party: 2\n")
+    older = Workspace(Project.at(root)).load(ResourceRef("task", "bike-deal")).value
+    assert older.party_size == 2
+    assert older._definition().content_hash == pinned._definition().content_hash
+    _edit(task, "party: 2\n", "party: 2\nparty_size: 2\n")
+    with pytest.raises(ProjectError, match="sets party and party_size"):
+        Workspace(Project.at(root)).load(ResourceRef("task", "bike-deal"))

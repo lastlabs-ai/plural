@@ -651,7 +651,7 @@ def _load_task(workspace: Workspace, ref: ResourceRef, directory: Path) -> Local
                         "initial_state": manifest.initial_state,
                         "expected": manifest.expected,
                         "seat_instructions": manifest.seat_instructions,
-                        "party_size": manifest.party,
+                        "party_size": manifest.party_size,
                         "competitive": manifest.competitive,
                         "from_checkpoint": manifest.from_checkpoint,
                         "checkpoint": checkpoint,

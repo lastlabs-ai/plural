@@ -1,4 +1,4 @@
-# Task: two partners open the vault together. party pins two players; it isn't
+# Task: two partners open the vault together. party_size pins two players; it isn't
 # competitive, so a Benchmark seats the evaluated Agent in both seats.
 name: two-keys
 version: 1.0.0
@@ -6,4 +6,4 @@ instructions: instruction.md
 environment: vault
 verifiers:
   - vault-check
-party: 2
+party_size: 2

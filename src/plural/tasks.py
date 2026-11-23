@@ -292,7 +292,7 @@ def benchmark_problems(
         size = str(party.min) if party.min == party.max else f"{party.min} to {party.max}"
         problems.append(
             f"Task {task_name!r} is played by several Agents, and a Benchmark ranks every "
-            f"Agent on the same game, so the Task must pin its party size: give it party: N "
+            f"Agent on the same game, so the Task must pin its party size: give it party_size: N "
             f"({size} for its Environment)."
         )
     if competitive and party.isolation == "shared":
@@ -401,7 +401,7 @@ def _seat_instruction_errors(
 
 
 def _party_short_form(payload: dict[str, Any]) -> None:
-    """Accept ``party: N`` for :attr:`Task.party_size`, as ``task.yaml`` writes it."""
+    """Accept ``party: N`` for :attr:`Task.party_size`, as older ``task.yaml`` files wrote it."""
     if "party" in payload and "party_size" not in payload:
         payload["party_size"] = payload.pop("party")
 
@@ -420,14 +420,14 @@ def _party_size_errors(
     party = environment.party
     if party is None:
         if size is not None or competitive:
-            field = "party" if size is not None else "competitive"
+            field = "party_size" if size is not None else "competitive"
             return [
                 f"Task {task_id!r} sets {field}, but its Environment has no party. Give the "
                 "Environment a party, such as party: {min: 2, max: 2}."
             ]
         return []
     reason = None if size is None else party.check(size)
-    return [] if reason is None else [f"Task {task_id!r} sets party: {size}, but {reason}."]
+    return [] if reason is None else [f"Task {task_id!r} sets party_size: {size}, but {reason}."]
 
 
 def without_reset_options(payload: dict[str, Any], name: object) -> dict[str, Any]:
@@ -501,7 +501,7 @@ class Task(FrozenModel):
     seat_instructions: dict[str, str] = Field(default_factory=dict)
     party_size: int | None = Field(default=None, ge=2, le=100)
     """How many Agents play, pinned, for a Task several Agents share. A Benchmark
-    needs it; ``party: N`` in ``task.yaml``."""
+    needs it; ``party_size: N`` in ``task.yaml`` too."""
     competitive: bool = False
     """Whether the seats play against each other. A Benchmark then needs fixed
     ``opponents`` and an isolated party."""
