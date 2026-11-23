@@ -220,6 +220,33 @@ def test_a_second_model_is_refused_rather_than_dropped(
     assert "Pass --model once" in result.output
 
 
+def test_a_second_task_is_refused_rather_than_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    project = write_project(tmp_path / "support-desk")
+    monkeypatch.chdir(project.root)
+    result = CliRunner().invoke(app, ["run", "-t", "a", "-t", "b", "--dry-run"])
+    assert result.exit_code == 1
+    assert "Pass --task once" in result.output
+
+
+def test_a_caution_goes_to_stderr_so_json_output_stays_parseable() -> None:
+    import typer
+
+    from plural.cli.common import note
+
+    probe = typer.Typer()
+
+    @probe.command()
+    def emit() -> None:
+        note("Forks are off.")
+        typer.echo(json.dumps({"ok": True}))
+
+    result = CliRunner().invoke(probe, [])
+    assert json.loads(result.stdout) == {"ok": True}
+    assert "Forks are off." in result.stderr
+
+
 @pytest.mark.parametrize(("status", "code"), [("succeeded", 0), ("failed", 1), ("cancelled", 1)])
 def test_a_run_exits_nonzero_when_its_job_did_not_succeed(
     monkeypatch: pytest.MonkeyPatch, status: str, code: int

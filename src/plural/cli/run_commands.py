@@ -129,7 +129,7 @@ TRACK_OPTION = typer.Option(False, "--track", hidden=True)
 
 @handled
 def run(
-    task: str | None = typer.Option(None, "--task", "-t", help=f"Task to run: {REF_HELP}."),
+    tasks: list[str] | None = typer.Option(None, "--task", "-t", help=f"Task to run: {REF_HELP}."),
     benchmark: str | None = typer.Option(
         None,
         "--benchmark",
@@ -254,6 +254,12 @@ def run(
     if hosted or follow:
         raise ProjectError(HOSTED_RUNS)
     model, agent = _one(models, "--model"), _one(agents, "--agent")
+    if tasks and len(tasks) > 1:
+        raise ProjectError(
+            "Pass --task once. To run several Tasks in one Job, list them in a Benchmark "
+            "and pass --benchmark."
+        )
+    task = tasks[0] if tasks else None
     try:
         episode_server = EpisodeServerOptions(
             listen=listen, public_url=public_url, tls_cert=tls_cert, tls_key=tls_key
