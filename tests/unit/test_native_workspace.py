@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -359,12 +362,52 @@ class _ResumeModel(BaseHTTPRequestHandler):
         return
 
 
+def _tree(pid: int) -> list[int]:
+    """The process and every one below it, including those in sessions of their own."""
+    listing = subprocess.run(
+        ["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, check=False
+    ).stdout
+    children: dict[int, list[int]] = {}
+    for line in listing.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            children.setdefault(int(parts[1]), []).append(int(parts[0]))
+    found, queue = [], [pid]
+    while queue:
+        item = queue.pop()
+        found.append(item)
+        queue.extend(children.get(item, ()))
+    return found
+
+
+@contextlib.contextmanager
+def _plural_process(project: Path, env: dict[str, str], *args: str) -> Iterator[Any]:
+    """Start the CLI and, however the test ends, kill it and everything it started.
+
+    The local Runtime starts the App host and the Harness in sessions of their own, so
+    killing the CLI's process group alone would leave them running.
+    """
+    process = subprocess.Popen(
+        [str(CLI), *args],
+        cwd=project,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        yield process
+    finally:
+        for pid in reversed(_tree(process.pid)):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGKILL)
+        process.communicate(timeout=30)
+
+
 def test_a_resumed_trial_reads_the_file_it_wrote_before_its_run_checkpoint(
     tmp_path: Path,
 ) -> None:
-    import signal
-    import time
-
     _RESUME_HISTORIES.clear()
     _WRITTEN.clear()
     _RELEASE.clear()
@@ -376,43 +419,28 @@ def test_a_resumed_trial_reads_the_file_it_wrote_before_its_run_checkpoint(
         environment.write_text(
             environment.read_text() + "\ncheckpoint_every:\n  steps: 1\n", encoding="utf-8"
         )
-        runner = subprocess.Popen(
-            [str(CLI), "run", "-t", "march-total", "-a", "files-native", "--yes", "--json"],
-            cwd=project,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        try:
+        run: Path | None = None
+        with _plural_process(
+            project, env, "run", "-t", "march-total", "-a", "files-native", "--yes", "--json"
+        ):
             assert _WRITTEN.wait(120), "the Agent never wrote its note"
             deadline = time.monotonic() + 60
-            run: Path | None = None
             while time.monotonic() < deadline:
                 run = next((project / ".plural/jobs").glob("*/trials/*/run"), None)
                 if run is not None and (run / "workspace.bundle").is_file():
                     break
                 time.sleep(0.5)
             assert run is not None and (run / "workspace.bundle").is_file()
-        finally:
-            os.killpg(runner.pid, signal.SIGKILL)
-            runner.wait(30)
-            _RELEASE.set()
+        _RELEASE.set()
         # As if the runner had been gone long enough to count as interrupted.
         state = json.loads((run / "journal.json").read_text())
         (run / "journal.json").write_text(json.dumps({**state, "updated": 0}))
         trial_id = run.parent.name
 
-        resumed = subprocess.run(
-            [str(CLI), "trial", "resume", trial_id, "--json"],
-            cwd=project,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        assert resumed.returncode == 0, resumed.stdout + resumed.stderr
-        assert json.loads(resumed.stdout)["resumed"]["step"] == 1
+        with _plural_process(project, env, "trial", "resume", trial_id, "--json") as resumed:
+            stdout, stderr = resumed.communicate(timeout=300)
+        assert resumed.returncode == 0, stdout + stderr
+        assert json.loads(stdout)["resumed"]["step"] == 1
         answers = [
             message["content"]
             for message in _RESUME_HISTORIES[-1]
