@@ -749,8 +749,9 @@ def job_record(
 
     The hosted Job pins the pushed revisions the local Job ran, so push those
     first, or pass --push-pinned when your files changed since the run.
-    Recording again, or recording a Job that ran with --record, uploads only
-    what the hosted Job does not hold yet.
+    Recording again, or recording a Job that ran with --record, uploads what
+    the hosted Job does not hold yet and republishes each Trial it already
+    holds, so its outcome, score, seats, and gates match the local Job now.
     """
     space = workspace()
     finished_local_job(space, job_id)
@@ -763,6 +764,7 @@ def job_record(
         "hosted_job_id": pushed.job.job_id,
         "project": binding.project_slug,
         "executions": pushed.executions,
+        "republished": pushed.republished,
         "status": hosted.get("status"),
         "pushed": [{"resource": str(step.ref), "revision": step.label} for step in pinned],
     }
@@ -774,8 +776,9 @@ def job_record(
                 typer.echo(f"  {step.ref} {step.label}")
         typer.echo(
             f"Recorded local Job {job_id} as hosted Job {pushed.job.job_id} in project "
-            f"{binding.project_slug}: {counted(pushed.executions, 'execution')}, "
-            f"{hosted.get('status')}."
+            f"{binding.project_slug}: {counted(pushed.executions, 'execution')}"
+            + (f" ({pushed.republished} republished)" if pushed.republished else "")
+            + f", {hosted.get('status')}."
         )
 
     emit(payload, as_json=as_json, text=text)

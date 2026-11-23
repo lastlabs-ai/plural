@@ -262,8 +262,11 @@ run that the hosted project does not hold yet, as a new numbered revision of any
 whose files changed; an input someone else changed in the hosted project since you
 last synced stops the push before anything is uploaded. `job record` records a local Job
 that already finished; it pins the
-revisions that Job ran, so push those first. Both produce the same hosted Job, so
-recording a Job again uploads only what the hosted Job does not hold yet. The
+revisions that Job ran, so push those first. Both produce the same hosted Job.
+Recording a Job again uploads what the hosted Job does not hold yet and republishes
+each Trial it already holds, so the hosted outcome, score, seats, and gates match the
+local Job as it is now; each republish is an event on the Trial. Only a Job its client
+ran can be republished: a Job the hosted platform ran keeps its outcome. The
 Environment's Runtime still decides where Trials execute, so a recorded run against a
 Daytona Environment runs remotely. See
 [Record runs and run in the cloud](../platform/runs.md).
@@ -1753,8 +1756,9 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  The hosted Job pins the pushed revisions the local Job ran, so push those
  first, or pass --push-pinned when your files changed since the run.
- Recording again, or recording a Job that ran with --record, uploads only
- what the hosted Job does not hold yet.
+ Recording again, or recording a Job that ran with --record, uploads what
+ the hosted Job does not hold yet and republishes each Trial it already
+ holds, so its outcome, score, seats, and gates match the local Job now.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    job_id      <str>  Finished local Job to record in the hosted project. [required]           │

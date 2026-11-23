@@ -211,6 +211,8 @@ class PushedJob:
     job: ClientJob
     executions: int
     """Local executions the hosted Job now records."""
+    republished: int = 0
+    """Of those, the ones it already held and were reported again."""
 
 
 def plan_run(
@@ -711,7 +713,9 @@ def push_local_job(workspace: Workspace, studio: Studio, job_id: str) -> PushedJ
     """Record a finished local Job, and every execution it ran, in the hosted project.
 
     Pushing again, or pushing a Job that was tracked, reuses the same hosted
-    Job and uploads only what it does not hold yet.
+    Job: it uploads what the hosted Job does not hold yet, and republishes
+    each execution it already holds, so every hosted Trial reflects the local
+    one as it is now.
 
     Returns:
         The hosted Job and how many executions it records.
@@ -729,7 +733,13 @@ def push_local_job(workspace: Workspace, studio: Studio, job_id: str) -> PushedJ
     client = submit_client_job(workspace, studio, store.load_spec(job_id), record)
     try:
         published = publish_job(
-            studio, store, job_id, client.job_id, worker_id="plural-cli", agents=client.agents
+            studio,
+            store,
+            job_id,
+            client.job_id,
+            worker_id="plural-cli",
+            agents=client.agents,
+            republish=True,
         )
     except PublishError as exc:
         raise ProjectError(f"Could not record Job {job_id}: {exc}") from None
@@ -737,7 +747,11 @@ def push_local_job(workspace: Workspace, studio: Studio, job_id: str) -> PushedJ
         directory,
         replace(record, hosted_job_id=client.job_id, hosted_project_id=studio.project),
     )
-    return PushedJob(job=client, executions=len(published))
+    return PushedJob(
+        job=client,
+        executions=len(published),
+        republished=sum(item.republished for item in published),
+    )
 
 
 _COPY_IGNORED = (".plural", ".git", ".venv", "node_modules", "__pycache__", ".DS_Store")

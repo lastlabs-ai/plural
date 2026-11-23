@@ -111,6 +111,7 @@ class Published:
     status: str
     events: int
     artifacts: int
+    republished: bool = False
 
 
 def _records(path: Path) -> list[dict[str, Any]]:
@@ -376,6 +377,7 @@ def publish_execution(
     worker_id: str = "local",
     agent_definition: str | None = None,
     seat_definitions: Mapping[str, str] | None = None,
+    republish: bool = False,
 ) -> Published:
     """Report one local execution directory as an execution of hosted ``trial_id``.
 
@@ -383,6 +385,11 @@ def publish_execution(
     definition's. Pass ``agent_definition`` so the two can be compared, and for a
     Trial several Agents share, ``seat_definitions``: each binding's digest to its
     Agent definition's, which the hosted seats are planned with.
+
+    An execution the hosted Trial already finished is left as it is, unless
+    ``republish``: then its report is sent again, so the hosted Trial's outcome,
+    seats, score, and gates are derived from what the local execution holds now.
+    Its events and files are not sent again.
     """
     result = TrialResult.model_validate_json(
         (execution_root / "result.json").read_text(encoding="utf-8")
@@ -406,12 +413,20 @@ def publish_execution(
     execution_id = str(execution["id"])
     path = f"/trial-executions/{quote(execution_id)}"
     status = str(execution.get("status") or "queued")
-    if status in {"succeeded", "failed", "cancelled", "awaiting_review"}:
-        return Published(execution_id, status, 0, 0)
-    status = _advance(studio, execution_id, status, worker_id, "running")
-
     artifacts_root = execution_root / "artifacts"
     records = _records(artifacts_root / EPISODE_FILE)
+    if status in {"succeeded", "failed", "cancelled", "awaiting_review"}:
+        if not republish:
+            return Published(execution_id, status, 0, 0)
+        body = _final_body(
+            result,
+            _report(result, artifacts_root, records, worker_id, seat_definitions),
+            verifier_results,
+        )
+        done = studio.request("POST", f"{path}/transition", json={**body, "republish": True})
+        return Published(execution_id, str(done.get("status") or status), 0, 0, True)
+    status = _advance(studio, execution_id, status, worker_id, "running")
+
     events = episode_events(records, stream_id=trial_id, execution_id=execution_id)
     started = receipt.started_at or receipt.completed_at
     if started is not None:
@@ -448,6 +463,24 @@ def publish_execution(
         )
         uploaded += 1
 
+    report = _report(result, artifacts_root, records, worker_id, seat_definitions)
+    if result.status in {"succeeded", "awaiting_review"}:
+        studio.request("POST", f"{path}/transition", json={"status": "verifying"})
+    done = studio.request(
+        "POST", f"{path}/transition", json=_final_body(result, report, verifier_results)
+    )
+    return Published(execution_id, str(done.get("status") or result.status), len(events), uploaded)
+
+
+def _report(
+    result: TrialResult,
+    artifacts_root: Path,
+    records: list[dict[str, Any]],
+    worker_id: str,
+    seat_definitions: Mapping[str, str] | None,
+) -> dict[str, Any]:
+    """What a finished execution reports: its outcome, usage, seats, and metrics."""
+    receipt = result.receipt
     usage: dict[str, Any] = {}
     agent = agent_usage(records)
     if agent is not None:
@@ -503,23 +536,21 @@ def publish_execution(
             for item in result.seats
         ]
         report["seat_isolation"] = result.seat_isolation
-    final = result.status
-    if final in {"succeeded", "awaiting_review"}:
-        studio.request("POST", f"{path}/transition", json={"status": "verifying"})
-        body: dict[str, Any] = {
-            "status": "succeeded",
-            "result": report,
-            "verifier_results": verifier_results,
-        }
-    else:
-        body = {
-            "status": final,
-            "result": report,
-            "error_code": result.error_code,
-            "error_message": result.error_message,
-        }
-    done = studio.request("POST", f"{path}/transition", json=body)
-    return Published(execution_id, str(done.get("status") or final), len(events), uploaded)
+    return report
+
+
+def _final_body(
+    result: TrialResult, report: dict[str, Any], verifier_results: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """The transition that finishes a hosted execution with ``report``."""
+    if result.status in {"succeeded", "awaiting_review"}:
+        return {"status": "succeeded", "result": report, "verifier_results": verifier_results}
+    return {
+        "status": result.status,
+        "result": report,
+        "error_code": result.error_code,
+        "error_message": result.error_message,
+    }
 
 
 def fork_report(fork: ForkRecord) -> dict[str, Any]:
@@ -605,6 +636,7 @@ def publish_job(
     *,
     worker_id: str = "local",
     agents: Mapping[str, AgentPin] | None = None,
+    republish: bool = False,
 ) -> list[Published]:
     """Publish every execution of a local Job to the hosted Job with the same plan.
 
@@ -612,7 +644,8 @@ def publish_job(
     execution, including failed ones, becomes a hosted execution in order, so
     retries and their cost are kept. ``agents`` maps each local Agent binding
     to the hosted Agent it ran as; by default, the Agent of the same name and
-    definition.
+    definition. With ``republish``, executions already published are reported
+    again (see ``publish_execution``).
     """
     pins = dict(agents) if agents is not None else agent_pins(store.load_spec(local_job_id))
     hosted = _hosted_trials(studio, hosted_job_id)
@@ -643,6 +676,7 @@ def publish_job(
                     worker_id=worker_id,
                     agent_definition=definition,
                     seat_definitions={digest: pin[1] for digest, pin in pins.items()},
+                    republish=republish,
                 )
             )
     return published
